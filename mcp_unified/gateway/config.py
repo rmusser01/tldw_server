@@ -21,14 +21,15 @@ from mcp_unified.interfaces.storage import (
     ProfileAssignmentStore,
     ProfileStore,
 )
+from mcp_unified.policy_grants import PolicyGrantStore, create_policy_grant_store
 from mcp_unified.profiles.models import MCPProfile
 from mcp_unified.profiles.store import (
     InMemoryProfileAssignmentStore,
     InMemoryProfileStore,
 )
 
-from .bootstrap import GatewayProfileBootstrap, bootstrap_profile_gateway
 from .admin_auth import GatewayAdminAuthConfig
+from .bootstrap import GatewayProfileBootstrap, bootstrap_profile_gateway
 from .credential_grants import GatewayCredentialGrantManager
 from .external_registry import GatewayExternalRegistryManager, GatewayStoreMetadata
 from .lifecycle import GatewayExternalRuntimeLifecycleConfig
@@ -118,6 +119,29 @@ class GatewayProfileStoreConfig:
         if normalized_kind == "sqlite":
             if self.sqlite_path is None:
                 raise ValueError("sqlite_path is required for sqlite profile store")
+            if not str(self.sqlite_path).strip():
+                raise ValueError("sqlite_path cannot be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayPolicyGrantStoreConfig:
+    """Policy grant store selection for TTL-bound approval leases."""
+
+    kind: str = "memory"
+    sqlite_path: str | Path | None = None
+
+    def __post_init__(self) -> None:
+        """Validate and normalize the configured policy grant store kind."""
+
+        normalized_kind = str(self.kind).strip().lower()
+        if normalized_kind not in {"memory", "sqlite"}:
+            raise ValueError(
+                f"Unsupported gateway policy grant store kind: {self.kind!r}"
+            )
+        object.__setattr__(self, "kind", normalized_kind)
+        if normalized_kind == "sqlite":
+            if self.sqlite_path is None:
+                raise ValueError("sqlite_path is required for sqlite policy grant store")
             if not str(self.sqlite_path).strip():
                 raise ValueError("sqlite_path cannot be empty")
 
@@ -303,6 +327,7 @@ class GatewayProfileBootstrapConfig:
     tool_use_reporting: GatewayToolUseReportingConfig | Mapping[str, Any] = field(
         default_factory=GatewayToolUseReportingConfig
     )
+    policy_grants: GatewayPolicyGrantStoreConfig | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         """Normalize nested config values into copy-isolated profile data."""
@@ -312,6 +337,17 @@ class GatewayProfileBootstrapConfig:
             store = GatewayProfileStoreConfig(**store)
         elif not isinstance(store, GatewayProfileStoreConfig):
             raise TypeError("store must be a GatewayProfileStoreConfig or mapping")
+
+        policy_grants = self.policy_grants
+        if isinstance(policy_grants, Mapping):
+            policy_grants = GatewayPolicyGrantStoreConfig(**policy_grants)
+        elif policy_grants is not None and not isinstance(
+            policy_grants, GatewayPolicyGrantStoreConfig
+        ):
+            raise TypeError(
+                "policy_grants must be a GatewayPolicyGrantStoreConfig, mapping, or None"
+            )
+        object.__setattr__(self, "policy_grants", policy_grants)
 
         external_runtime = self.external_runtime
         if isinstance(external_runtime, Mapping):
@@ -463,11 +499,25 @@ async def bootstrap_profile_gateway_from_config(
         external_runtime_lifecycle=resolved_config.external_runtime.lifecycle_config(),
         credential_grant_manager=credential_grant_manager,
         admin_auth=resolved_config.admin_auth.runtime_config(),
+        policy_grant_store=build_gateway_policy_grant_store(resolved_config.policy_grants),
     )
     return _wrap_bootstrap_tool_use_reporting(
         bootstrap,
         resolved_config.tool_use_reporting,
     )
+
+
+def build_gateway_policy_grant_store(
+    config: GatewayPolicyGrantStoreConfig | None,
+) -> PolicyGrantStore | None:
+    """Build the configured policy grant store, or None when not configured."""
+
+    if config is None:
+        return None
+    settings: dict[str, Any] = {"grant_store_backend": config.kind}
+    if config.sqlite_path is not None:
+        settings["grant_store_sqlite_path"] = str(config.sqlite_path)
+    return create_policy_grant_store(settings)
 
 
 def build_gateway_profile_storage(
@@ -1022,6 +1072,7 @@ __all__ = [
     "GatewayExternalRuntimeBootstrapConfig",
     "GatewayExternalRuntimeFactoryKind",
     "GatewayExternalRegistryStorageBundle",
+    "GatewayPolicyGrantStoreConfig",
     "GatewayProfileBootstrapConfig",
     "GatewayProfileStoreConfig",
     "GatewayProfileStoreKind",
@@ -1031,6 +1082,7 @@ __all__ = [
     "GatewayToolUseReportingStoreKind",
     "bootstrap_profile_gateway_from_config",
     "build_gateway_external_registry_storage",
+    "build_gateway_policy_grant_store",
     "build_gateway_profile_storage",
     "build_gateway_tool_use_event_store",
     "build_gateway_tool_use_recorder",

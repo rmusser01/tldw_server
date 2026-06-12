@@ -33,6 +33,7 @@ from .config import (
     GatewayProfileStorageBundle,
     GatewayToolUseReportingConfig,
     build_gateway_external_registry_storage,
+    build_gateway_policy_grant_store,
     build_gateway_profile_storage,
     build_gateway_tool_use_event_store,
     credential_grant_manager_from_storage,
@@ -47,6 +48,11 @@ from .credential_grants import (
 from .external_registry import (
     GatewayExternalRegistryManagementError,
     GatewayExternalRegistryManager,
+)
+from .policy_grants import (
+    APPROVAL_GRANT_DEFAULT_TTL_SECONDS,
+    GatewayPolicyGrantManagementError,
+    GatewayPolicyGrantManager,
 )
 from .profiles import GatewayProfileManagementError, GatewayProfileManager
 from .remote_admin import (
@@ -396,6 +402,69 @@ def _build_parser() -> _JsonArgumentParser:
     )
     _add_profile_config_argument(delete_credential_grant)
     delete_credential_grant.set_defaults(handler=_handle_delete_credential_grant)
+
+    create_approval_grant = subparsers.add_parser(
+        "create-approval-grant",
+        help="Create a TTL-bound approval lease for one ask permission subject.",
+    )
+    create_approval_grant.add_argument(
+        "--profile",
+        required=True,
+        help="Profile id the approval lease applies to.",
+    )
+    create_approval_grant.add_argument(
+        "--subject-type",
+        required=True,
+        choices=("tool", "path", "domain", "command", "mcp"),
+        help="Permission subject family the lease approves.",
+    )
+    create_approval_grant.add_argument(
+        "--value",
+        required=True,
+        help="Subject value to approve (normalized before storage).",
+    )
+    create_approval_grant.add_argument(
+        "--ttl-seconds",
+        type=int,
+        default=None,
+        help="Lease lifetime in seconds (clamped to safe bounds).",
+    )
+    create_approval_grant.add_argument(
+        "--session-id",
+        help="Optional session id restricting where the lease applies.",
+    )
+    create_approval_grant.add_argument(
+        "--granted-by",
+        help="Optional operator identity recorded with the lease.",
+    )
+    create_approval_grant.add_argument(
+        "--reason",
+        help="Optional human-readable reason recorded with the lease.",
+    )
+    _add_profile_config_argument(create_approval_grant)
+    create_approval_grant.set_defaults(handler=_handle_create_approval_grant)
+
+    list_approval_grants = subparsers.add_parser(
+        "list-approval-grants",
+        help="List active policy grants from a configured grant store.",
+    )
+    list_approval_grants.add_argument(
+        "--profile",
+        help="Optional profile id filter.",
+    )
+    _add_profile_config_argument(list_approval_grants)
+    list_approval_grants.set_defaults(handler=_handle_list_approval_grants)
+
+    revoke_approval_grant = subparsers.add_parser(
+        "revoke-approval-grant",
+        help="Revoke one active policy grant by id.",
+    )
+    revoke_approval_grant.add_argument(
+        "grant_id",
+        help="Policy grant id to revoke.",
+    )
+    _add_profile_config_argument(revoke_approval_grant)
+    revoke_approval_grant.set_defaults(handler=_handle_revoke_approval_grant)
 
     export_config = subparsers.add_parser(
         "export-config",
@@ -892,6 +961,118 @@ def _handle_delete_credential_grant(args: argparse.Namespace) -> int:
         args,
         lambda manager: manager.delete_grant(grant_id),
     )
+
+
+def _handle_create_approval_grant(args: argparse.Namespace) -> int:
+    """Create one TTL-bound approval lease in a configured grant store."""
+
+    profile_id = _require_cli_text(args.profile, field="profile")
+    value = _require_cli_text(args.value, field="value")
+    ttl_seconds = (
+        args.ttl_seconds
+        if args.ttl_seconds is not None
+        else APPROVAL_GRANT_DEFAULT_TTL_SECONDS
+    )
+    session_id = _optional_cli_text(args.session_id, field="session_id")
+    granted_by = _optional_cli_text(args.granted_by, field="granted_by")
+    reason = _optional_cli_text(args.reason, field="reason")
+    return _handle_policy_grant_command(
+        args,
+        lambda manager: manager.grant_approval(
+            profile_id=profile_id,
+            subject_type=args.subject_type,
+            value=value,
+            ttl_seconds=ttl_seconds,
+            session_id=session_id,
+            granted_by=granted_by,
+            reason=reason,
+        ),
+    )
+
+
+def _handle_list_approval_grants(args: argparse.Namespace) -> int:
+    """List active policy grants from a configured grant store."""
+
+    profile_id = _optional_cli_text(args.profile, field="profile")
+    return _handle_policy_grant_command(
+        args,
+        lambda manager: manager.list_grants(profile_id=profile_id),
+    )
+
+
+def _handle_revoke_approval_grant(args: argparse.Namespace) -> int:
+    """Revoke one active policy grant by id."""
+
+    grant_id = _require_cli_text(args.grant_id, field="grant_id")
+    return _handle_policy_grant_command(
+        args,
+        lambda manager: manager.revoke_grant(grant_id),
+    )
+
+
+def _handle_policy_grant_command(
+    args: argparse.Namespace,
+    operation: Callable[[GatewayPolicyGrantManager], Coroutine[Any, Any, Any]],
+) -> int:
+    """Run a policy-grant command against the configured grant store."""
+
+    config_path = _config_path_from_args(args)
+    profile_bundle: GatewayProfileStorageBundle | None = None
+    grant_store: Any = None
+    try:
+        try:
+            config = load_gateway_profile_bootstrap_config(config_path)
+            if config.policy_grants is None or config.policy_grants.kind != "sqlite":
+                raise GatewayPolicyGrantManagementError(
+                    "Policy grant management requires a persistent (sqlite) "
+                    "policy_grants store in the gateway config",
+                    reason_code="policy_grant_store_unavailable",
+                )
+            grant_store = build_gateway_policy_grant_store(config.policy_grants)
+            profile_bundle = build_gateway_profile_storage(config.store)
+            manager = GatewayPolicyGrantManager(
+                policy_grant_store=grant_store,
+                audit_store=profile_bundle.audit_store,
+            )
+        except _CliArgumentError:
+            raise
+        except GatewayPolicyGrantManagementError as exc:
+            _emit_json(exc.to_payload(), sys.stderr)
+            return 1
+        except Exception as exc:  # noqa: BLE001
+            _emit_json(
+                {
+                    "error": str(exc),
+                    "ok": False,
+                    "path": str(config_path),
+                },
+                sys.stderr,
+            )
+            return 1
+
+        try:
+            payload = _run_async(operation(manager))
+        except _CliArgumentError:
+            raise
+        except GatewayPolicyGrantManagementError as exc:
+            _emit_json(exc.to_payload(), sys.stderr)
+            return 1
+        except Exception:  # noqa: BLE001
+            unavailable_error = GatewayPolicyGrantManagementError(
+                "Policy grant store unavailable",
+                reason_code="policy_grant_store_unavailable",
+            )
+            _emit_json(unavailable_error.to_payload(), sys.stderr)
+            return 1
+
+        _emit_json(_cli_payload(payload), sys.stdout)
+        return 0
+    finally:
+        if profile_bundle is not None:
+            _run_async(_close_storage_bundle(profile_bundle))
+        close_grant_store = getattr(grant_store, "close", None)
+        if callable(close_grant_store):
+            close_grant_store()
 
 
 def _handle_export_config(args: argparse.Namespace) -> int:

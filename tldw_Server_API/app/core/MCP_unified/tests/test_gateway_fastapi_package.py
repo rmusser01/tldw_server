@@ -3017,6 +3017,203 @@ def test_gateway_profile_runtime_allows_oversized_arguments_without_permission_r
     assert len(backend.call_requests) == 1
 
 
+def _web_fetch_tool_descriptor() -> dict[str, Any]:
+    return {
+        "name": "web.fetch",
+        "description": "Fetch a URL.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"url": {"type": "string"}},
+            "required": ["url"],
+        },
+        "metadata": {"category": "web", "capability": "network.fetch"},
+    }
+
+
+def _ask_rule_runtime_with_grant_store() -> tuple[Any, Any, Any]:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.policy_grants import InMemoryPolicyGrantStore
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime([_web_fetch_tool_descriptor()])
+    profile = _profile_with_allowed_tools_and_permission_rules(
+        "researcher",
+        allowed_tools=["web.fetch"],
+        permission_rules=[{"pattern": "WebFetch(example.com)", "outcome": "ask"}],
+    )
+    grant_store = InMemoryPolicyGrantStore()
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="researcher",
+        policy_grant_store=grant_store,
+    )
+    return runtime, backend, grant_store
+
+
+def test_gateway_profile_runtime_ask_denial_reports_approval_availability() -> None:
+    runtime, backend, _grant_store = _ask_rule_runtime_with_grant_store()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        denied = _post_tool_call(
+            client,
+            "web.fetch",
+            {"url": "https://example.com/private", "query": "private"},
+            "ask-no-lease",
+        )
+
+    body = denied.json()
+    _assert_jsonrpc_error(body, code=-32001, request_id="ask-no-lease")
+    error_data = body["error"]["data"]
+    assert error_data["status"] == "approval_required"
+    approval = error_data["provenance"]["approval"]
+    assert approval["available"] is True
+    assert approval["subject_type"] == "domain"
+    assert "example.com/private" not in json.dumps(error_data)
+    assert backend.call_requests == []
+
+
+def test_gateway_profile_runtime_active_approval_lease_allows_ask_decision() -> None:
+    runtime, backend, grant_store = _ask_rule_runtime_with_grant_store()
+    grant = grant_store.create_grant(
+        profile_id="researcher",
+        grant_type="approval",
+        subject_type="domain",
+        value="example.com",
+        ttl_seconds=900,
+        granted_by="operator",
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        allowed = _post_tool_call(
+            client,
+            "web.fetch",
+            {"url": "https://example.com/private", "query": "private"},
+            "ask-with-lease",
+        )
+
+    assert allowed.json().get("error") is None
+    assert len(backend.call_requests) == 1
+    delegated_context = backend.call_requests[-1][2]
+    markers = delegated_context.metadata.get("mcp_policy_approval_grants")
+    assert markers
+    assert grant.grant_id not in json.dumps(markers)
+
+
+def test_gateway_profile_runtime_expired_approval_lease_blocks_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import mcp_unified.policy_grants.memory as memory_grants
+
+    runtime, backend, grant_store = _ask_rule_runtime_with_grant_store()
+    monkeypatch.setattr(memory_grants.time, "time", lambda: 1_000.0)
+    grant_store.create_grant(
+        profile_id="researcher",
+        grant_type="approval",
+        subject_type="domain",
+        value="example.com",
+        ttl_seconds=10,
+    )
+    monkeypatch.setattr(memory_grants.time, "time", lambda: 1_011.0)
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        denied = _post_tool_call(
+            client,
+            "web.fetch",
+            {"url": "https://example.com/private", "query": "private"},
+            "ask-expired-lease",
+        )
+
+    body = denied.json()
+    _assert_jsonrpc_error(body, code=-32001, request_id="ask-expired-lease")
+    assert body["error"]["data"]["status"] == "approval_required"
+    assert backend.call_requests == []
+
+
+def test_gateway_profile_runtime_approval_lease_never_overrides_deny_rule() -> None:
+    from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
+    from mcp_unified.policy_grants import InMemoryPolicyGrantStore
+    from mcp_unified.profiles.store import InMemoryProfileStore
+
+    backend = _CustomToolListGatewayRuntime([_read_text_tool_descriptor()])
+    profile = _profile_with_allowed_tools_and_permission_rules(
+        "reviewer",
+        allowed_tools=["fs.read_text"],
+        permission_rules=[
+            {
+                "pattern": "Read(docs/private/**)",
+                "outcome": "deny",
+                "reason_code": "private_docs_denied",
+            }
+        ],
+    )
+    grant_store = InMemoryPolicyGrantStore()
+    grant_store.create_grant(
+        profile_id="reviewer",
+        grant_type="approval",
+        subject_type="path",
+        value="docs/private/secret.txt",
+        ttl_seconds=900,
+    )
+    runtime = ProfileAwareGatewayRuntime(
+        backend,
+        profile_store=InMemoryProfileStore([profile]),
+        default_profile_id="reviewer",
+        policy_grant_store=grant_store,
+    )
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        denied = _post_tool_call(
+            client,
+            "fs.read_text",
+            {"path": "docs/private/secret.txt", "query": "secret"},
+            "deny-with-lease",
+        )
+
+    body = denied.json()
+    _assert_jsonrpc_error(body, code=-32001, request_id="deny-with-lease")
+    assert body["error"]["data"]["reason_code"] == "private_docs_denied"
+    assert body["error"]["data"]["status"] == "denied"
+    assert backend.call_requests == []
+
+
+def test_gateway_profile_runtime_session_scoped_lease_only_matches_its_session() -> None:
+    import asyncio
+
+    from mcp_unified.gateway.runtime import GatewayPolicyDenied, GatewayRequestContext
+
+    runtime, backend, grant_store = _ask_rule_runtime_with_grant_store()
+    grant_store.create_grant(
+        profile_id="researcher",
+        grant_type="approval",
+        subject_type="domain",
+        value="example.com",
+        ttl_seconds=900,
+        session_id="session-1",
+    )
+    arguments = {"url": "https://example.com/private", "query": "private"}
+
+    matching_context = GatewayRequestContext(
+        request_id="session-match",
+        metadata={"session_id": "session-1"},
+    )
+    result = asyncio.run(runtime.call_tool("web.fetch", arguments, matching_context))
+    assert result is not None
+    assert len(backend.call_requests) == 1
+
+    mismatched_context = GatewayRequestContext(
+        request_id="session-mismatch",
+        metadata={"session_id": "session-2"},
+    )
+    with pytest.raises(GatewayPolicyDenied):
+        asyncio.run(runtime.call_tool("web.fetch", arguments, mismatched_context))
+    assert len(backend.call_requests) == 1
+
+
 def test_gateway_profile_runtime_denies_explicit_tool_before_backend_discovery() -> None:
     from mcp_unified.gateway.profile_runtime import ProfileAwareGatewayRuntime
     from mcp_unified.profiles.store import InMemoryProfileStore
