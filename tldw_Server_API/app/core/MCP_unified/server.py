@@ -587,6 +587,20 @@ class MCPServer:
                     })
                     logger.info("MCP_ENABLE_GIT_MODULE=true; queuing GitModule for registration")
 
+            # 6b) Optional: Web fetch module - disabled by default (external network).
+            if self._env_flag_enabled("MCP_ENABLE_WEB_FETCH_MODULE"):
+                if not any(m.get("id") == "web_fetch" for m in modules_to_load if isinstance(m, dict)):
+                    modules_to_load.append({
+                        "id": "web_fetch",
+                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.web_fetch_module:WebFetchModule",
+                        "enabled": True,
+                        "name": "WebFetch",
+                        "version": "1.0.0",
+                        "department": "research",
+                        "settings": {},
+                    })
+                    logger.info("MCP_ENABLE_WEB_FETCH_MODULE=true; queuing WebFetchModule for registration")
+
             # 7) Optional: Sandbox module (code interpreter) - disabled by default
             if self._env_flag_enabled("MCP_ENABLE_SANDBOX_MODULE"):
                 modules_to_load.append({
