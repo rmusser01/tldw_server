@@ -16,7 +16,10 @@ def test_omnivoice_installer_prefers_local_checkout(tmp_path):
 
 @pytest.mark.unit
 def test_omnivoice_installer_builds_dedicated_runtime_layout():
-    from Helper_Scripts.TTS_Installers.install_tts_omnivoice_sidecar import build_runtime_layout
+    from Helper_Scripts.TTS_Installers.install_tts_omnivoice_sidecar import (
+        build_runtime_layout,
+        resolve_sidecar_python_path,
+    )
 
     repo_root = Path(__file__).resolve().parents[4]
     layout = build_runtime_layout(Path("models") / "omnivoice_sidecar", repo_root=repo_root)
@@ -25,7 +28,8 @@ def test_omnivoice_installer_builds_dedicated_runtime_layout():
     assert layout.venv_dir.relative_to(repo_root).as_posix() == "models/omnivoice_sidecar/.venv"
     assert layout.runtime_dir.relative_to(repo_root).as_posix() == "models/omnivoice_sidecar/runtime"
     assert layout.logs_dir.relative_to(repo_root).as_posix() == "models/omnivoice_sidecar/logs"
-    assert layout.interpreter_path.relative_to(repo_root).as_posix() == "models/omnivoice_sidecar/.venv/bin/python"
+    expected_interpreter = resolve_sidecar_python_path(layout.venv_dir).relative_to(repo_root).as_posix()
+    assert layout.interpreter_path.relative_to(repo_root).as_posix() == expected_interpreter
 
 
 @pytest.mark.unit
@@ -109,7 +113,8 @@ providers:
     assert 'kitten_tts:\n    enabled: false' in content
     assert 'omnivoice:\n    enabled: true' in content
     assert 'runtime: "sidecar"' in content
-    assert 'python_path: "models/omnivoice_sidecar/.venv/bin/python"' in content
+    expected_python_path = layout.interpreter_path.relative_to(tmp_path).as_posix()
+    assert f'python_path: "{expected_python_path}"' in content
     assert 'runtime_path: "models/omnivoice_sidecar/runtime"' in content
     assert 'scratch_dir: "models/omnivoice_sidecar/runtime/scratch"' in content
     assert 'logs_path: "models/omnivoice_sidecar/logs"' in content

@@ -120,6 +120,25 @@ def _wait_for_run_terminal(client: TestClient, run_id: str, timeout: float = 10.
     return str(_wait_for_run_terminal_data(client, run_id, timeout=timeout).get("status"))
 
 
+def _wait_for_run_id_in_list(
+    client: TestClient,
+    params,
+    run_id: str,
+    timeout: float = 5.0,
+) -> list[str]:
+    deadline = time.time() + timeout
+    last_payload = None
+    while time.time() < deadline:
+        response = client.get("/api/v1/workflows/runs", params=params)
+        assert response.status_code == 200, response.text
+        last_payload = response.json()
+        run_ids = [str(r["run_id"]) for r in last_payload.get("runs", [])]
+        if run_id in run_ids:
+            return run_ids
+        time.sleep(0.05)
+    pytest.fail(f"workflow run {run_id} was not returned by list filter; last_payload={last_payload}")
+
+
 def test_create_and_run_saved_workflow(client_with_workflows_db: TestClient):
     client = client_with_workflows_db
 
@@ -407,6 +426,8 @@ def test_runs_list_created_after_before(client_with_workflows_db: TestClient):
     db: WorkflowsDatabase = client.app.dependency_overrides[wf_mod._get_db]()
     _wait_for_run_row(db, r1)
     _wait_for_run_row(db, r2)
+    assert _wait_for_run_terminal(client, r1, timeout=15.0) == "succeeded"
+    assert _wait_for_run_terminal(client, r2, timeout=15.0) == "succeeded"
 
     c1 = "2026-01-01T00:00:00+00:00"
     c2 = "2026-01-01T00:00:01+00:00"
@@ -421,18 +442,16 @@ def test_runs_list_created_after_before(client_with_workflows_db: TestClient):
     except Exception:
         dt1 = datetime.strptime(c1.split('.') [0], "%Y-%m-%dT%H:%M:%S")
     ca = (dt1 + timedelta(milliseconds=1)).isoformat()
-    lst_after = client.get("/api/v1/workflows/runs", params={"created_after": ca}).json()
-    after_ids = [r["run_id"] for r in lst_after.get("runs", [])]
-    assert r2 in after_ids
+    after_ids = _wait_for_run_id_in_list(client, {"created_after": ca}, r2)
+    assert r1 not in after_ids
     # created_before just before c2 should include r1 only (if ordering tight)
     try:
         dt2 = datetime.fromisoformat(c2)
     except Exception:
         dt2 = datetime.strptime(c2.split('.') [0], "%Y-%m-%dT%H:%M:%S")
     cb = (dt2 - timedelta(milliseconds=1)).isoformat()
-    lst_before = client.get("/api/v1/workflows/runs", params={"created_before": cb}).json()
-    before_ids = [r["run_id"] for r in lst_before.get("runs", [])]
-    assert r1 in before_ids
+    before_ids = _wait_for_run_id_in_list(client, {"created_before": cb}, r1)
+    assert r2 not in before_ids
 
 
 def test_runs_multi_status_and_ordering(client_with_workflows_db: TestClient):

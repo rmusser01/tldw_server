@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -23,6 +24,20 @@ class MessageStore:
 
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
+        self._last_message_order_timestamp: str | None = None
+
+    def _next_message_order_timestamp(self) -> str:
+        """Return a millisecond ISO timestamp that is monotonic for message inserts."""
+        now = self._db._get_current_utc_timestamp_iso()
+        last = self._last_message_order_timestamp
+        if last is not None and now <= last:
+            try:
+                bumped = datetime.fromisoformat(last.replace("Z", "+00:00")) + timedelta(milliseconds=1)
+                now = bumped.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+            except ValueError:
+                logger.warning("Could not parse last message timestamp {}; using current timestamp.", last)
+        self._last_message_order_timestamp = now
+        return now
 
     # ------------------------------------------------------------------
     # Message creation
@@ -121,7 +136,7 @@ class MessageStore:
         if not client_id:
             raise InputError("Client ID is required for message.")  # noqa: TRY003
 
-        now = self._db._get_current_utc_timestamp_iso()
+        now = self._next_message_order_timestamp()
         timestamp = msg_data.get('timestamp') or now
 
         query = """

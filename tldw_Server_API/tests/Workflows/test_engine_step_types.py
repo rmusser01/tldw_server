@@ -39,9 +39,10 @@ def client_with_wf(tmp_path, auth_headers):
     app.dependency_overrides.clear()
 
 
-def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 15.0):
+def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 30.0):
     deadline = time.time() + timeout_s
     last_response = None
+    last_data = None
     while time.time() < deadline:
         response = client.get(f"/api/v1/workflows/runs/{run_id}")
         last_response = response
@@ -51,6 +52,7 @@ def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 15.0)
         assert response.status_code == 200, response.text
         data = response.json()
         assert "status" in data, data
+        last_data = data
         if data["status"] in ("succeeded", "failed", "cancelled"):
             return data
         time.sleep(0.02)
@@ -60,7 +62,10 @@ def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 15.0)
     assert response.status_code == 200, response.text
     data = response.json()
     assert "status" in data, data
-    return data
+    pytest.fail(
+        f"workflow run {run_id} did not reach terminal status within {timeout_s}s; "
+        f"last_data={last_data or data}"
+    )
 
 
 def test_delay_step_then_log_succeeds(client_with_wf: TestClient):

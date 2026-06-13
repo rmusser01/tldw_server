@@ -399,6 +399,48 @@ def test_message_store_orders_equal_timestamps_by_last_modified(db):
     assert [row["id"] for row in descending] == [assistant_id, user_id, system_id]
 
 
+def test_message_store_preserves_append_order_when_insert_clock_ties(db, monkeypatch):
+    store = db["store"]
+    raw_db = db["db"]
+    conversation_id = db["conversation_id"]
+    same_timestamp = "2026-01-01T00:00:00.000Z"
+
+    monkeypatch.setattr(raw_db, "_get_current_utc_timestamp_iso", lambda: same_timestamp)
+
+    first_id = store.add_message(
+        {
+            "id": "order-b",
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "First",
+        }
+    )
+    second_id = store.add_message(
+        {
+            "id": "order-a",
+            "conversation_id": conversation_id,
+            "sender": "assistant",
+            "content": "Second",
+        }
+    )
+    third_id = store.add_message(
+        {
+            "id": "order-c",
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "Third",
+        }
+    )
+
+    messages = store.get_messages_for_conversation(conversation_id, limit=10, offset=0)
+    assert [row["id"] for row in messages] == [first_id, second_id, third_id]
+    assert [row["last_modified"] for row in messages] == [
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.001Z",
+        "2026-01-01T00:00:00.002Z",
+    ]
+
+
 def test_message_store_counts_and_soft_delete_roundtrip(db):
     store = db["store"]
     conversation_id = db["conversation_id"]
