@@ -241,12 +241,13 @@ def test_web_search_is_recommended_unavailable_not_enabled() -> None:
     assert all(item["required"] is False for item in web_search_recommendations)
 
 
-def test_deep_researcher_enables_web_fetch() -> None:
+def test_deep_researcher_enables_web_tools() -> None:
     deep_researcher = presets.get_builtin_preset("deep-researcher")
     assert deep_researcher is not None  # nosec B101
 
     tooling = deep_researcher.profile.metadata["tooling"]
     assert "web.fetch" in tooling["enabled_tools"]  # nosec B101
+    assert "web.search" in tooling["enabled_tools"]  # nosec B101
     assert "research.web" in tooling["enabled_capabilities"]  # nosec B101
     assert "web" in tooling["progressive_disclosure"]["direct_categories"]  # nosec B101
 
