@@ -188,12 +188,8 @@ def test_webhook_step_noop(client_with_wf: TestClient, monkeypatch):
     }
     wid = client.post("/api/v1/workflows", json=definition).json()["id"]
     run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {"user_id": "1"}}).json()["run_id"]
-    for _ in range(50):
-        data = client.get(f"/api/v1/workflows/runs/{run_id}").json()
-        if data["status"] in ("succeeded", "failed"):
-            break
-        time.sleep(0.05)
-    assert data["status"] == "succeeded"
+    data = _wait_for_status(client, run_id, {"succeeded", "failed"})
+    assert data["status"] == "succeeded", data
 
 
 def _wait_for_status(client: TestClient, run_id: str, allowed: set[str], timeout_seconds: float = 8.0) -> dict:

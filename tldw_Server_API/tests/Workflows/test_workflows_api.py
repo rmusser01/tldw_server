@@ -58,7 +58,8 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture()
-def client_with_workflows_db(tmp_path, auth_headers):
+def client_with_workflows_db(tmp_path, auth_headers, monkeypatch):
+    monkeypatch.setenv("WORKFLOWS_SQLITE_POOL_SIZE", "4")
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))
 
     async def override_user():
@@ -82,6 +83,7 @@ def client_with_workflows_db(tmp_path, auth_headers):
         yield client
 
     app.dependency_overrides.clear()
+    db.close()
 
 
 def _wait_for_run_row(db: WorkflowsDatabase, run_id: str, timeout: float = 5.0):
@@ -160,15 +162,8 @@ def test_create_and_run_saved_workflow(client_with_workflows_db: TestClient):
     assert run_resp.status_code == 200, run_resp.text
     run_id = run_resp.json()["run_id"]
 
-    # Poll until complete
-    for _ in range(50):
-        r = client.get(f"/api/v1/workflows/runs/{run_id}")
-        assert r.status_code == 200
-        data = r.json()
-        if data["status"] in ("succeeded", "failed"):
-            break
-        time.sleep(0.05)
-    assert data["status"] == "succeeded"
+    data = _wait_for_run_terminal_data(client, run_id)
+    assert data["status"] == "succeeded", data
     assert (data.get("outputs") or {}).get("text") == "Hello Alice"
 
     # Events include run_completed
@@ -1750,15 +1745,8 @@ def test_run_workflow_launches_waits_selects_research_bundle_fields_and_uses_the
         json={"inputs": {"topic": "evidence-backed forecasting"}},
     ).json()["run_id"]
 
-    deadline = time.time() + 5
-    data = {}
-    while time.time() < deadline:
-        data = client.get(f"/api/v1/workflows/runs/{run_id}").json()
-        if data["status"] in ("succeeded", "failed", "cancelled"):
-            break
-        time.sleep(0.05)
-
-    assert data["status"] == "succeeded"
+    data = _wait_for_run_terminal_data(client, run_id)
+    assert data["status"] == "succeeded", data
     assert (data.get("outputs") or {}) == {
         "text": "Investigate evidence-backed forecasting :: 2"
     }

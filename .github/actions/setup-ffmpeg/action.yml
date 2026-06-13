@@ -12,7 +12,10 @@ runs:
       if: runner.os == 'Linux'
       shell: bash
       run: |
-        sudo apt-get update
+        if [ -d /etc/apt/sources.list.d ]; then
+          grep -rl 'packages.microsoft.com' /etc/apt/sources.list.d | xargs -r sudo rm -f
+        fi
+        sudo apt-get update -o Acquire::Retries=3
         if [ "${{ inputs.install-portaudio }}" = "true" ]; then
           sudo apt-get install -y ffmpeg portaudio19-dev python3-all-dev
         else

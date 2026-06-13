@@ -87,9 +87,9 @@ async def test_supervisor_spawn_exports_omnivoice_runtime_config_and_creates_dir
     assert len(spawn_envs) == 1  # nosec B101
     env = spawn_envs[0]
     assert env["OMNIVOICE_MODEL"] == "omnivoice"  # nosec B101
-    assert env["OMNIVOICE_MODEL_PATH"].endswith("models/omnivoice")  # nosec B101
-    assert env["OMNIVOICE_RUNTIME_PATH"].endswith("runtime")  # nosec B101
-    assert env["OMNIVOICE_SCRATCH_DIR"].endswith("scratch")  # nosec B101
+    assert env["OMNIVOICE_MODEL_PATH"].replace("\\", "/").endswith("models/omnivoice")  # nosec B101
+    assert env["OMNIVOICE_RUNTIME_PATH"].replace("\\", "/").endswith("runtime")  # nosec B101
+    assert env["OMNIVOICE_SCRATCH_DIR"].replace("\\", "/").endswith("scratch")  # nosec B101
     assert env["OMNIVOICE_DEVICE_MAP"] == "cpu"  # nosec B101
     assert env["OMNIVOICE_DTYPE"] == "float32"  # nosec B101
 
