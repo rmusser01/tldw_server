@@ -47,4 +47,10 @@ TDD evidence:
 - ruff (new/touched files) clean; `compileall` rc=0; `bandit -r web_search_module.py` no findings; `git diff --check` clean.
 
 Deferred: query sub-generation/aggregation (the heavier `generate_and_search`/`aggregate_results` pipeline), result re-ranking, and per-result fetch+extract chaining with `web.fetch`.
+
+Review fixes (PR #2349, rebased onto dev after #2348 merged):
+- Qodo "Action required" — search inputs over-sanitized: overrode `sanitize_input` in `WebSearchModule` to strip only NUL/control chars (no SQL denylist). The MCP protocol calls `module.sanitize_input` before execution, so without this a query like `pip install --no-cache-dir` or a punycode `xn--` domain filter was rejected with a protocol InvalidParams. The SAME override was added to `WebFetchModule` (the merged #2348 fix only removed the internal call but the protocol-level sanitize still rejected `--` URLs — incomplete; now corrected here).
+- Qodo — truncation not reported: `_normalize` now computes a `truncated` flag (list exceeded `result_count` OR any content clipped) and threads it into both the result payload and `eval.truncated`.
+- Gemini — normalize `title`/`url`/`content` to strings via `_coerce_str`; empty/whitespace site filter lists → None; blank optional string args (content_country/search_lang/output_lang/safesearch/date_range) stripped → None so backend defaults apply.
+- +11 web.search tests (sanitize override, control-char strip, sql-like query executes, truncation list/content/none, string coercion, empty site list, blank optional strings) and +2 web.fetch sanitize override tests. 86 web/preset tests green; ruff/compileall/bandit clean.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

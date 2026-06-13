@@ -212,3 +212,105 @@ async def test_eval_metadata_records_profile_from_context() -> None:
     result = await module.execute_tool("web.search", {"query": "q"}, context)
     assert result["ok"] is True  # nosec B101
     assert result["eval"]["profile_id"] == "deep-researcher"  # nosec B101
+
+
+async def test_sanitize_input_allows_sql_like_query_and_punycode() -> None:
+    # The protocol layer runs module.sanitize_input before execution; it must not
+    # reject queries with '--' (CLI flags) or punycode 'xn--' domain filters.
+    module = _module(_FakeBackend())
+    cleaned = module.sanitize_input(
+        {
+            "query": "pip install --no-cache-dir",
+            "site_whitelist": ["xn--80ak6aa92e.com"],
+        }
+    )
+    assert cleaned["query"] == "pip install --no-cache-dir"  # nosec B101
+    assert cleaned["site_whitelist"] == ["xn--80ak6aa92e.com"]  # nosec B101
+
+
+async def test_sanitize_input_strips_control_characters() -> None:
+    module = _module(_FakeBackend())
+    cleaned = module.sanitize_input({"query": "a\x00b\x07c"})
+    assert cleaned["query"] == "abc"  # nosec B101
+
+
+async def test_sql_like_query_executes_successfully() -> None:
+    backend = _FakeBackend(_ok_payload(query="pip install --no-cache-dir"))
+    module = _module(backend)
+    result = await module.execute_tool(
+        "web.search", {"query": "pip install --no-cache-dir"}
+    )
+    assert result["ok"] is True  # nosec B101
+    assert backend.calls[0]["query"] == "pip install --no-cache-dir"  # nosec B101
+
+
+async def test_truncated_reported_when_results_exceed_count() -> None:
+    many = [
+        {"title": f"T{i}", "url": f"https://example.com/{i}", "content": "c", "metadata": {}}
+        for i in range(5)
+    ]
+    backend = _FakeBackend(_ok_payload(results=many))
+    module = _module(backend)
+    result = await module.execute_tool("web.search", {"query": "q", "result_count": 2})
+    assert result["truncated"] is True  # nosec B101
+    assert result["eval"]["truncated"] is True  # nosec B101
+
+
+async def test_truncated_reported_when_content_clipped() -> None:
+    backend = _FakeBackend(
+        _ok_payload(
+            results=[
+                {"title": "T", "url": "https://example.com", "content": "x" * 9000, "metadata": {}}
+            ]
+        )
+    )
+    module = _module(backend)
+    result = await module.execute_tool("web.search", {"query": "q"})
+    assert result["truncated"] is True  # nosec B101
+    assert result["eval"]["truncated"] is True  # nosec B101
+
+
+async def test_not_truncated_when_within_bounds() -> None:
+    backend = _FakeBackend(_ok_payload())
+    module = _module(backend)
+    result = await module.execute_tool("web.search", {"query": "q"})
+    assert result["truncated"] is False  # nosec B101
+    assert result["eval"]["truncated"] is False  # nosec B101
+
+
+async def test_result_fields_coerced_to_strings() -> None:
+    backend = _FakeBackend(
+        _ok_payload(
+            results=[
+                {"title": None, "url": 12345, "content": None, "metadata": "not-a-dict"}
+            ]
+        )
+    )
+    module = _module(backend)
+    result = await module.execute_tool("web.search", {"query": "q"})
+    entry = result["results"][0]
+    assert entry["title"] == ""  # nosec B101
+    assert entry["url"] == "12345"  # nosec B101
+    assert entry["content"] == ""  # nosec B101
+    assert entry["metadata"] == {}  # nosec B101
+
+
+async def test_empty_site_list_normalized_to_none() -> None:
+    backend = _FakeBackend(_ok_payload())
+    module = _module(backend)
+    result = await module.execute_tool(
+        "web.search", {"query": "q", "site_whitelist": []}
+    )
+    assert result["ok"] is True  # nosec B101
+    assert backend.calls[0]["site_whitelist"] is None  # nosec B101
+
+
+async def test_blank_optional_strings_normalized_to_none() -> None:
+    backend = _FakeBackend(_ok_payload())
+    module = _module(backend)
+    result = await module.execute_tool(
+        "web.search", {"query": "q", "content_country": "   ", "safesearch": ""}
+    )
+    assert result["ok"] is True  # nosec B101
+    assert backend.calls[0]["content_country"] is None  # nosec B101
+    assert backend.calls[0]["safesearch"] is None  # nosec B101

@@ -46,6 +46,7 @@ _DEFAULT_USER_AGENT = "tldw-mcp-web-fetch/1.0"
 _REDIRECT_STATUS = {301, 302, 303, 307, 308}
 _MAX_REDIRECTS = 5
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_MAX_SANITIZE_DEPTH = 20
 
 # Content types we will surface as text. Anything else is rejected so the tool
 # never returns binary blobs through the JSON tool contract.
@@ -271,6 +272,27 @@ class WebFetchModule(BaseModule):
         )
         tool["inputSchema"]["additionalProperties"] = False
         return [tool]
+
+    def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
+        """Permissive sanitizer for web fetch inputs.
+
+        The MCP protocol layer runs ``module.sanitize_input`` on every tool call
+        before execution. The base implementation rejects strings containing
+        SQL-injection substrings such as ``--``, ``/*`` and ``*/`` — which appear
+        constantly in legitimate URLs and query strings — and would turn them
+        into a protocol ``InvalidParams`` error before this tool's own validation
+        can run. We therefore strip only NUL/control characters and keep a depth
+        guard.
+        """
+        if _depth > _MAX_SANITIZE_DEPTH:
+            raise ValueError("Input too deeply nested")
+        if isinstance(input_data, str):
+            return _CONTROL_CHARS_RE.sub("", input_data)
+        if isinstance(input_data, dict):
+            return {key: self.sanitize_input(value, _depth + 1) for key, value in input_data.items()}
+        if isinstance(input_data, list):
+            return [self.sanitize_input(value, _depth + 1) for value in input_data]
+        return input_data
 
     async def execute_tool(
         self,

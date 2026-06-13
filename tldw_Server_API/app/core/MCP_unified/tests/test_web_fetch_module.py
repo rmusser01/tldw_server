@@ -378,6 +378,20 @@ async def test_url_with_sql_like_substrings_is_accepted(monkeypatch: pytest.Monk
     assert result["ok"] is True  # nosec B101
 
 
+async def test_sanitize_input_allows_sql_like_url() -> None:
+    # The MCP protocol layer runs module.sanitize_input before execution; the
+    # override must not reject URLs containing '--' or '/*'.
+    module = _module(_FakeClient())
+    cleaned = module.sanitize_input({"url": "https://example.com/a--b?x=/*y*/"})
+    assert cleaned["url"] == "https://example.com/a--b?x=/*y*/"  # nosec B101
+
+
+async def test_sanitize_input_strips_control_characters() -> None:
+    module = _module(_FakeClient())
+    cleaned = module.sanitize_input({"url": "https://example.com/a\x00b"})
+    assert cleaned["url"] == "https://example.com/ab"  # nosec B101
+
+
 async def test_non_utf8_charset_is_decoded(monkeypatch: pytest.MonkeyPatch) -> None:
     _allow_policy(monkeypatch)
     body = "café déjà vu".encode("latin-1")
