@@ -601,6 +601,20 @@ class MCPServer:
                     })
                     logger.info("MCP_ENABLE_WEB_FETCH_MODULE=true; queuing WebFetchModule for registration")
 
+            # 6c) Optional: Web search module - disabled by default (external network).
+            if self._env_flag_enabled("MCP_ENABLE_WEB_SEARCH_MODULE"):
+                if not any(m.get("id") == "web_search" for m in modules_to_load if isinstance(m, dict)):
+                    modules_to_load.append({
+                        "id": "web_search",
+                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.web_search_module:WebSearchModule",
+                        "enabled": True,
+                        "name": "WebSearch",
+                        "version": "1.0.0",
+                        "department": "research",
+                        "settings": {},
+                    })
+                    logger.info("MCP_ENABLE_WEB_SEARCH_MODULE=true; queuing WebSearchModule for registration")
+
             # 7) Optional: Sandbox module (code interpreter) - disabled by default
             if self._env_flag_enabled("MCP_ENABLE_SANDBOX_MODULE"):
                 modules_to_load.append({
