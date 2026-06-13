@@ -220,6 +220,21 @@ def build_smoke_config(args: argparse.Namespace) -> OmniVoiceSmokeConfig:
     )
 
 
+def _is_executable_file(path: Path, *, platform_name: str | None = None) -> bool:
+    """Return whether a resolved file path can be launched as an executable."""
+
+    platform_key = (platform_name or os.name).lower()
+    if platform_key == "nt":
+        pathext = os.environ.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD"
+        executable_suffixes = {
+            suffix.lower() if suffix.startswith(".") else f".{suffix.lower()}"
+            for suffix in pathext.split(";")
+            if suffix
+        }
+        return path.suffix.lower() in executable_suffixes
+    return os.access(path, os.X_OK)
+
+
 def validate_smoke_config(config: OmniVoiceSmokeConfig) -> None:
     """Validate operator-provided paths before starting the sidecar."""
 
@@ -229,7 +244,7 @@ def validate_smoke_config(config: OmniVoiceSmokeConfig) -> None:
         raise ValueError(
             f"OmniVoice sidecar Python interpreter does not exist: {config.sidecar_python}",
         )
-    if not os.access(config.sidecar_python, os.X_OK):
+    if not _is_executable_file(config.sidecar_python):
         raise ValueError(
             f"OmniVoice sidecar Python interpreter is not executable: {config.sidecar_python}",
         )

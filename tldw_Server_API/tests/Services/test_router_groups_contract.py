@@ -10,6 +10,7 @@ from typing import Callable
 
 import pytest
 from fastapi import APIRouter, FastAPI
+from loguru import logger as loguru_logger
 
 from tldw_Server_API.app.api.v1.router_groups.admin import iter_admin_router_specs
 from tldw_Server_API.app.api.v1.router_groups.conditional import (
@@ -687,7 +688,7 @@ def test_append_imported_router_spec_skips_optional_import_error_at_registration
         ),
     )
 
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert len(specs) == 1
     assert register_router_specs(FastAPI(), specs) == 0
@@ -724,7 +725,7 @@ def test_append_imported_router_spec_raises_nested_module_not_found_at_registrat
         ),
     )
 
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert len(specs) == 1
     with pytest.raises(ModuleNotFoundError, match="internal dependency is unavailable"):
@@ -759,7 +760,7 @@ def test_append_imported_router_spec_raises_import_time_attribute_error_at_regis
         ),
     )
 
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert len(specs) == 1
     with pytest.raises(AttributeError, match="module initialization bug"):
@@ -794,7 +795,7 @@ def test_append_imported_router_spec_raises_unexpected_import_error_at_registrat
         ),
     )
 
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert len(specs) == 1
     with pytest.raises(RuntimeError, match="router module crashed during import"):
@@ -826,7 +827,7 @@ def test_append_imported_router_spec_skips_static_missing_attr_at_registration(
         ),
     )
 
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert len(specs) == 1
     assert register_router_specs(FastAPI(), specs) == 0
@@ -865,7 +866,7 @@ def test_append_imported_router_spec_logs_missing_lazy_attr_once(
         ),
     )
 
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert len(specs) == 1
     assert register_router_specs(FastAPI(), specs) == 0
@@ -1398,10 +1399,7 @@ def test_iter_core_router_specs_raises_crashing_chat_import(
         "tldw_Server_API.app.core.config.route_enabled",
         lambda *_args, **_kwargs: True,
     )
-    monkeypatch.setattr(
-        "loguru.logger.debug",
-        debug_messages.append,
-    )
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     specs = list(iter_core_router_specs())
     chat_specs = [
@@ -1498,7 +1496,7 @@ def test_register_router_specs_raises_unexpected_resolution_failures(
         "tldw_Server_API.app.core.config.route_enabled",
         lambda *_args, **_kwargs: True,
     )
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     with pytest.raises(RuntimeError, match="lazy router failed"):
         register_router_specs(
@@ -1531,7 +1529,7 @@ def test_register_router_specs_skips_configured_resolution_failures(
         "tldw_Server_API.app.core.config.route_enabled",
         lambda *_args, **_kwargs: True,
     )
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     count = register_router_specs(
         app,
@@ -2154,7 +2152,7 @@ def test_iter_content_router_specs_skips_ocr_missing_import_failures(
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), (selected_spec,)) == 0
     skip_debug_messages = [
@@ -2178,7 +2176,7 @@ def test_iter_content_router_specs_skips_ocr_missing_attribute_failures(
     selected_spec = next(spec for spec in specs if spec.name == "ocr")
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), (selected_spec,)) == 0
     skip_debug_messages = [
@@ -5775,7 +5773,7 @@ def test_iter_minimal_optional_router_specs_skips_workflow_missing_import_failur
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -5913,7 +5911,7 @@ def test_iter_minimal_optional_router_specs_skips_monitoring_missing_import_fail
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), (selected_spec,)) == 0
     skip_debug_messages = [
@@ -6061,7 +6059,7 @@ def test_iter_minimal_optional_router_specs_skips_media_missing_import_failures(
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), (selected_spec,)) == 0
     skip_debug_messages = [
@@ -6089,7 +6087,7 @@ def test_iter_minimal_optional_router_specs_skips_media_missing_attribute_failur
     selected_spec = next(spec for spec in specs if spec.name == "media")
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), (selected_spec,)) == 0
     skip_debug_messages = [
@@ -6354,7 +6352,7 @@ def test_iter_minimal_optional_router_specs_skips_utility_missing_import_failure
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert len(debug_messages) == len(utility_modules)
@@ -6601,7 +6599,7 @@ def test_iter_minimal_optional_router_specs_skips_kanban_missing_import_failures
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     skip_debug_messages = [
@@ -6852,7 +6850,7 @@ def test_iter_minimal_optional_router_specs_skips_study_missing_import_failures(
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     skip_debug_messages = [
@@ -7102,7 +7100,7 @@ def test_iter_minimal_optional_router_specs_skips_writing_email_missing_import_f
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     skip_debug_messages = [
@@ -7346,7 +7344,7 @@ def test_iter_minimal_optional_router_specs_skips_ops_missing_import_failures(
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -7575,7 +7573,7 @@ def test_iter_minimal_optional_router_specs_skips_org_missing_import_failures(
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -7804,7 +7802,7 @@ def test_iter_minimal_optional_router_specs_skips_access_resource_missing_import
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -8033,7 +8031,7 @@ def test_iter_minimal_optional_router_specs_skips_byok_shared_keys_missing_impor
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -8262,7 +8260,7 @@ def test_iter_minimal_optional_router_specs_skips_mcp_missing_import_failures(
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -8491,7 +8489,7 @@ def test_iter_minimal_optional_router_specs_skips_privileges_tools_missing_impor
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -8720,7 +8718,7 @@ def test_iter_minimal_optional_router_specs_skips_tail_missing_import_failures(
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -8961,7 +8959,7 @@ def test_iter_minimal_optional_router_specs_skips_experience_missing_import_fail
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert len(debug_messages) == len(experience_modules)
@@ -9211,7 +9209,7 @@ def test_iter_minimal_optional_router_specs_skips_guardian_safety_missing_import
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert len(debug_messages) == len(guardian_modules)
@@ -9452,7 +9450,7 @@ def test_iter_minimal_optional_router_specs_skips_persona_notes_missing_import_f
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -10447,7 +10445,7 @@ def test_iter_minimal_optional_router_specs_skips_audio_jobs_missing_import_fail
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), (selected_spec,)) == 0
     skip_debug_messages = [
@@ -10477,7 +10475,7 @@ def test_iter_minimal_optional_router_specs_skips_audio_jobs_missing_attribute_f
     selected_spec = next(spec for spec in specs if spec.route_key == "audio-jobs")
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), (selected_spec,)) == 0
     skip_debug_messages = [
@@ -10707,7 +10705,7 @@ def test_iter_minimal_optional_router_specs_skips_audio_router_missing_import_fa
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs) == 0
     skip_debug_messages = [
@@ -10748,7 +10746,7 @@ def test_iter_minimal_optional_router_specs_skips_audio_router_missing_attribute
     assert {spec.route_key for spec in selected_specs} == {"audio", "audio-websocket"}
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs) == 0
     skip_debug_messages = [

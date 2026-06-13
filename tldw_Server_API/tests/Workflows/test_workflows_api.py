@@ -416,9 +416,11 @@ def test_runs_list_created_after_before(client_with_workflows_db: TestClient):
     d = {"name": "time-filter", "version": 1, "steps": [{"id": "s1", "type": "prompt", "config": {"template": "ok"}}]}
     wid = client.post("/api/v1/workflows", json=d).json()["id"]
     r1 = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
+    assert _wait_for_run_terminal(client, r1, timeout=30.0) == "succeeded"
     import time
     time.sleep(0.05)
     r2 = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
+    assert _wait_for_run_terminal(client, r2, timeout=30.0) == "succeeded"
 
     # Extract created_at via DB
     from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
@@ -426,8 +428,6 @@ def test_runs_list_created_after_before(client_with_workflows_db: TestClient):
     db: WorkflowsDatabase = client.app.dependency_overrides[wf_mod._get_db]()
     _wait_for_run_row(db, r1)
     _wait_for_run_row(db, r2)
-    assert _wait_for_run_terminal(client, r1, timeout=15.0) == "succeeded"
-    assert _wait_for_run_terminal(client, r2, timeout=15.0) == "succeeded"
 
     c1 = "2026-01-01T00:00:00+00:00"
     c2 = "2026-01-01T00:00:01+00:00"

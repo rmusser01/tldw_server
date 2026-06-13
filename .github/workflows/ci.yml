@@ -923,6 +923,10 @@ jobs:
               tldw_Server_API/tests/Media
               tldw_Server_API/tests/MediaIngestion_NEW
               tldw_Server_API/tests/Media_Ingestion_Modification
+          - name: media-legacy-free
+            paths: >-
+              tldw_Server_API/tests/Media
+              tldw_Server_API/tests/MediaIngestion_NEW
           - name: chat-character-legacy-core
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
@@ -1153,9 +1157,56 @@ jobs:
           - name: product-watchlists
             paths: >-
               tldw_Server_API/tests/Watchlists
-          - name: product-workflows
+          - name: product-workflows-adapters
             paths: >-
-              tldw_Server_API/tests/Workflows
+              tldw_Server_API/tests/Workflows/adapters/test_*.py
+              tldw_Server_API/tests/Workflows/test_new_step_adapters.py
+              tldw_Server_API/tests/Workflows/test_step_registry_runtime_coverage.py
+              tldw_Server_API/tests/Workflows/test_workflow_step_capabilities.py
+          - name: product-workflows-engine
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_engine_*.py
+              tldw_Server_API/tests/Workflows/test_dual_backend_engine.py
+              tldw_Server_API/tests/Workflows/test_orphan_requeue_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_map_substeps_*.py
+              tldw_Server_API/tests/Workflows/test_workflow_attempt_failures.py
+              tldw_Server_API/tests/Workflows/test_workflow_stress.py
+              tldw_Server_API/tests/Workflows/test_workflows_scheduler.py
+          - name: product-workflows-api
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_artifact_*.py
+              tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_runs_*.py
+              tldw_Server_API/tests/Workflows/test_webhook_*.py
+              tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
+              tldw_Server_API/tests/Workflows/test_workflow_investigation_api.py
+              tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
+              tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
+              tldw_Server_API/tests/Workflows/test_workflows_api.py
+          - name: product-workflows-storage
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
+              tldw_Server_API/tests/Workflows/test_egress_policy.py
+              tldw_Server_API/tests/Workflows/test_mcp_tool_*.py
+              tldw_Server_API/tests/Workflows/test_media_ingest_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_db*.py
+              tldw_Server_API/tests/Workflows/test_workflows_pg_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_postgres_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_tokens_cost_*.py
+          - name: product-workflows-runtime
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_adapter_path_security.py
+              tldw_Server_API/tests/Workflows/test_llm_adapter.py
+              tldw_Server_API/tests/Workflows/test_stage3_chunkers_rag.py
+              tldw_Server_API/tests/Workflows/test_tts_workflow_normalization.py
+              tldw_Server_API/tests/Workflows/test_versions_idempotency.py
+              tldw_Server_API/tests/Workflows/test_workflows_artifact_gc_service.py
+              tldw_Server_API/tests/Workflows/test_workflows_dag_validation.py
+              tldw_Server_API/tests/Workflows/test_workflows_extras.py
+              tldw_Server_API/tests/Workflows/test_workflows_fuzz.py
+              tldw_Server_API/tests/Workflows/test_workflows_idempotency_ttl.py
+              tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
+              tldw_Server_API/tests/Workflows/test_workflows_truthiness_flags.py
           - name: product-prompt-studio
             paths: >-
               tldw_Server_API/tests/prompt_studio
@@ -1493,6 +1544,7 @@ jobs:
           echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
 
       - name: Run shard tests
+        if: matrix.shard.name != 'media-legacy-free'
         shell: bash
         run: |
           mkdir -p "$RESULTS_DIR"
@@ -1505,9 +1557,10 @@ jobs:
             --junit-xml="$RESULTS_DIR/${SHARD_NAME}.xml"
 
       - name: Run legacy-free media checks
-        if: matrix.shard.name == 'media-ingestion'
+        if: matrix.shard.name == 'media-legacy-free'
         shell: bash
         run: |
+          mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
           TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
@@ -2010,6 +2063,10 @@ jobs:
               tldw_Server_API/tests/Media
               tldw_Server_API/tests/MediaIngestion_NEW
               tldw_Server_API/tests/Media_Ingestion_Modification
+          - name: media-legacy-free
+            paths: >-
+              tldw_Server_API/tests/Media
+              tldw_Server_API/tests/MediaIngestion_NEW
           - name: chat-character-legacy-core
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
@@ -2240,9 +2297,56 @@ jobs:
           - name: product-watchlists
             paths: >-
               tldw_Server_API/tests/Watchlists
-          - name: product-workflows
+          - name: product-workflows-adapters
             paths: >-
-              tldw_Server_API/tests/Workflows
+              tldw_Server_API/tests/Workflows/adapters/test_*.py
+              tldw_Server_API/tests/Workflows/test_new_step_adapters.py
+              tldw_Server_API/tests/Workflows/test_step_registry_runtime_coverage.py
+              tldw_Server_API/tests/Workflows/test_workflow_step_capabilities.py
+          - name: product-workflows-engine
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_engine_*.py
+              tldw_Server_API/tests/Workflows/test_dual_backend_engine.py
+              tldw_Server_API/tests/Workflows/test_orphan_requeue_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_map_substeps_*.py
+              tldw_Server_API/tests/Workflows/test_workflow_attempt_failures.py
+              tldw_Server_API/tests/Workflows/test_workflow_stress.py
+              tldw_Server_API/tests/Workflows/test_workflows_scheduler.py
+          - name: product-workflows-api
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_artifact_*.py
+              tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_runs_*.py
+              tldw_Server_API/tests/Workflows/test_webhook_*.py
+              tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
+              tldw_Server_API/tests/Workflows/test_workflow_investigation_api.py
+              tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
+              tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
+              tldw_Server_API/tests/Workflows/test_workflows_api.py
+          - name: product-workflows-storage
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
+              tldw_Server_API/tests/Workflows/test_egress_policy.py
+              tldw_Server_API/tests/Workflows/test_mcp_tool_*.py
+              tldw_Server_API/tests/Workflows/test_media_ingest_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_db*.py
+              tldw_Server_API/tests/Workflows/test_workflows_pg_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_postgres_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_tokens_cost_*.py
+          - name: product-workflows-runtime
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_adapter_path_security.py
+              tldw_Server_API/tests/Workflows/test_llm_adapter.py
+              tldw_Server_API/tests/Workflows/test_stage3_chunkers_rag.py
+              tldw_Server_API/tests/Workflows/test_tts_workflow_normalization.py
+              tldw_Server_API/tests/Workflows/test_versions_idempotency.py
+              tldw_Server_API/tests/Workflows/test_workflows_artifact_gc_service.py
+              tldw_Server_API/tests/Workflows/test_workflows_dag_validation.py
+              tldw_Server_API/tests/Workflows/test_workflows_extras.py
+              tldw_Server_API/tests/Workflows/test_workflows_fuzz.py
+              tldw_Server_API/tests/Workflows/test_workflows_idempotency_ttl.py
+              tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
+              tldw_Server_API/tests/Workflows/test_workflows_truthiness_flags.py
           - name: product-prompt-studio
             paths: >-
               tldw_Server_API/tests/prompt_studio
@@ -2524,6 +2628,7 @@ jobs:
           echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
 
       - name: Run shard tests
+        if: matrix.shard.name != 'media-legacy-free'
         shell: bash
         run: |
           mkdir -p "$RESULTS_DIR"
@@ -2536,9 +2641,10 @@ jobs:
             --junit-xml="$RESULTS_DIR/${SHARD_NAME}.xml"
 
       - name: Run legacy-free media checks
-        if: matrix.shard.name == 'media-ingestion'
+        if: matrix.shard.name == 'media-legacy-free'
         shell: bash
         run: |
+          mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
           TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
@@ -3042,6 +3148,10 @@ jobs:
               tldw_Server_API/tests/Media
               tldw_Server_API/tests/MediaIngestion_NEW
               tldw_Server_API/tests/Media_Ingestion_Modification
+          - name: media-legacy-free
+            paths: >-
+              tldw_Server_API/tests/Media
+              tldw_Server_API/tests/MediaIngestion_NEW
           - name: chat-character-legacy-core
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
@@ -3272,9 +3382,56 @@ jobs:
           - name: product-watchlists
             paths: >-
               tldw_Server_API/tests/Watchlists
-          - name: product-workflows
+          - name: product-workflows-adapters
             paths: >-
-              tldw_Server_API/tests/Workflows
+              tldw_Server_API/tests/Workflows/adapters/test_*.py
+              tldw_Server_API/tests/Workflows/test_new_step_adapters.py
+              tldw_Server_API/tests/Workflows/test_step_registry_runtime_coverage.py
+              tldw_Server_API/tests/Workflows/test_workflow_step_capabilities.py
+          - name: product-workflows-engine
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_engine_*.py
+              tldw_Server_API/tests/Workflows/test_dual_backend_engine.py
+              tldw_Server_API/tests/Workflows/test_orphan_requeue_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_map_substeps_*.py
+              tldw_Server_API/tests/Workflows/test_workflow_attempt_failures.py
+              tldw_Server_API/tests/Workflows/test_workflow_stress.py
+              tldw_Server_API/tests/Workflows/test_workflows_scheduler.py
+          - name: product-workflows-api
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_artifact_*.py
+              tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_runs_*.py
+              tldw_Server_API/tests/Workflows/test_webhook_*.py
+              tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
+              tldw_Server_API/tests/Workflows/test_workflow_investigation_api.py
+              tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
+              tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
+              tldw_Server_API/tests/Workflows/test_workflows_api.py
+          - name: product-workflows-storage
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
+              tldw_Server_API/tests/Workflows/test_egress_policy.py
+              tldw_Server_API/tests/Workflows/test_mcp_tool_*.py
+              tldw_Server_API/tests/Workflows/test_media_ingest_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_db*.py
+              tldw_Server_API/tests/Workflows/test_workflows_pg_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_postgres_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_tokens_cost_*.py
+          - name: product-workflows-runtime
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_adapter_path_security.py
+              tldw_Server_API/tests/Workflows/test_llm_adapter.py
+              tldw_Server_API/tests/Workflows/test_stage3_chunkers_rag.py
+              tldw_Server_API/tests/Workflows/test_tts_workflow_normalization.py
+              tldw_Server_API/tests/Workflows/test_versions_idempotency.py
+              tldw_Server_API/tests/Workflows/test_workflows_artifact_gc_service.py
+              tldw_Server_API/tests/Workflows/test_workflows_dag_validation.py
+              tldw_Server_API/tests/Workflows/test_workflows_extras.py
+              tldw_Server_API/tests/Workflows/test_workflows_fuzz.py
+              tldw_Server_API/tests/Workflows/test_workflows_idempotency_ttl.py
+              tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
+              tldw_Server_API/tests/Workflows/test_workflows_truthiness_flags.py
           - name: product-prompt-studio
             paths: >-
               tldw_Server_API/tests/prompt_studio
@@ -3483,6 +3640,7 @@ jobs:
           echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
 
       - name: Run OS shard tests
+        if: matrix.shard.name != 'media-legacy-free'
         shell: bash
         run: |
           mkdir -p "$RESULTS_DIR"
@@ -3495,9 +3653,10 @@ jobs:
             --junit-xml="$RESULTS_DIR/${{ env.SHARD_NAME }}.xml"
 
       - name: Run legacy-free media checks
-        if: matrix.shard.name == 'media-ingestion'
+        if: matrix.shard.name == 'media-legacy-free'
         shell: bash
         run: |
+          mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
           TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
@@ -4000,6 +4159,10 @@ jobs:
               tldw_Server_API/tests/Media
               tldw_Server_API/tests/MediaIngestion_NEW
               tldw_Server_API/tests/Media_Ingestion_Modification
+          - name: media-legacy-free
+            paths: >-
+              tldw_Server_API/tests/Media
+              tldw_Server_API/tests/MediaIngestion_NEW
           - name: chat-character-legacy-core
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
@@ -4230,9 +4393,56 @@ jobs:
           - name: product-watchlists
             paths: >-
               tldw_Server_API/tests/Watchlists
-          - name: product-workflows
+          - name: product-workflows-adapters
             paths: >-
-              tldw_Server_API/tests/Workflows
+              tldw_Server_API/tests/Workflows/adapters/test_*.py
+              tldw_Server_API/tests/Workflows/test_new_step_adapters.py
+              tldw_Server_API/tests/Workflows/test_step_registry_runtime_coverage.py
+              tldw_Server_API/tests/Workflows/test_workflow_step_capabilities.py
+          - name: product-workflows-engine
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_engine_*.py
+              tldw_Server_API/tests/Workflows/test_dual_backend_engine.py
+              tldw_Server_API/tests/Workflows/test_orphan_requeue_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_map_substeps_*.py
+              tldw_Server_API/tests/Workflows/test_workflow_attempt_failures.py
+              tldw_Server_API/tests/Workflows/test_workflow_stress.py
+              tldw_Server_API/tests/Workflows/test_workflows_scheduler.py
+          - name: product-workflows-api
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_artifact_*.py
+              tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_runs_*.py
+              tldw_Server_API/tests/Workflows/test_webhook_*.py
+              tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
+              tldw_Server_API/tests/Workflows/test_workflow_investigation_api.py
+              tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
+              tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
+              tldw_Server_API/tests/Workflows/test_workflows_api.py
+          - name: product-workflows-storage
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
+              tldw_Server_API/tests/Workflows/test_egress_policy.py
+              tldw_Server_API/tests/Workflows/test_mcp_tool_*.py
+              tldw_Server_API/tests/Workflows/test_media_ingest_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_db*.py
+              tldw_Server_API/tests/Workflows/test_workflows_pg_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_postgres_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_tokens_cost_*.py
+          - name: product-workflows-runtime
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_adapter_path_security.py
+              tldw_Server_API/tests/Workflows/test_llm_adapter.py
+              tldw_Server_API/tests/Workflows/test_stage3_chunkers_rag.py
+              tldw_Server_API/tests/Workflows/test_tts_workflow_normalization.py
+              tldw_Server_API/tests/Workflows/test_versions_idempotency.py
+              tldw_Server_API/tests/Workflows/test_workflows_artifact_gc_service.py
+              tldw_Server_API/tests/Workflows/test_workflows_dag_validation.py
+              tldw_Server_API/tests/Workflows/test_workflows_extras.py
+              tldw_Server_API/tests/Workflows/test_workflows_fuzz.py
+              tldw_Server_API/tests/Workflows/test_workflows_idempotency_ttl.py
+              tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
+              tldw_Server_API/tests/Workflows/test_workflows_truthiness_flags.py
           - name: product-prompt-studio
             paths: >-
               tldw_Server_API/tests/prompt_studio
@@ -4441,6 +4651,7 @@ jobs:
           echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
 
       - name: Run OS shard tests
+        if: matrix.shard.name != 'media-legacy-free'
         shell: bash
         run: |
           mkdir -p "$RESULTS_DIR"
@@ -4453,9 +4664,10 @@ jobs:
             --junit-xml="$RESULTS_DIR/${{ env.SHARD_NAME }}.xml"
 
       - name: Run legacy-free media checks
-        if: matrix.shard.name == 'media-ingestion'
+        if: matrix.shard.name == 'media-legacy-free'
         shell: bash
         run: |
+          mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
           TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
@@ -4960,6 +5172,10 @@ jobs:
               tldw_Server_API/tests/Media
               tldw_Server_API/tests/MediaIngestion_NEW
               tldw_Server_API/tests/Media_Ingestion_Modification
+          - name: media-legacy-free
+            paths: >-
+              tldw_Server_API/tests/Media
+              tldw_Server_API/tests/MediaIngestion_NEW
           - name: chat-character-legacy-core
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_character_chat_endpoints.py
@@ -5190,9 +5406,56 @@ jobs:
           - name: product-watchlists
             paths: >-
               tldw_Server_API/tests/Watchlists
-          - name: product-workflows
+          - name: product-workflows-adapters
             paths: >-
-              tldw_Server_API/tests/Workflows
+              tldw_Server_API/tests/Workflows/adapters/test_*.py
+              tldw_Server_API/tests/Workflows/test_new_step_adapters.py
+              tldw_Server_API/tests/Workflows/test_step_registry_runtime_coverage.py
+              tldw_Server_API/tests/Workflows/test_workflow_step_capabilities.py
+          - name: product-workflows-engine
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_engine_*.py
+              tldw_Server_API/tests/Workflows/test_dual_backend_engine.py
+              tldw_Server_API/tests/Workflows/test_orphan_requeue_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_map_substeps_*.py
+              tldw_Server_API/tests/Workflows/test_workflow_attempt_failures.py
+              tldw_Server_API/tests/Workflows/test_workflow_stress.py
+              tldw_Server_API/tests/Workflows/test_workflows_scheduler.py
+          - name: product-workflows-api
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_artifact_*.py
+              tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_runs_*.py
+              tldw_Server_API/tests/Workflows/test_webhook_*.py
+              tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
+              tldw_Server_API/tests/Workflows/test_workflow_investigation_api.py
+              tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
+              tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
+              tldw_Server_API/tests/Workflows/test_workflows_api.py
+          - name: product-workflows-storage
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_dual_backend_workflows.py
+              tldw_Server_API/tests/Workflows/test_egress_policy.py
+              tldw_Server_API/tests/Workflows/test_mcp_tool_*.py
+              tldw_Server_API/tests/Workflows/test_media_ingest_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_db*.py
+              tldw_Server_API/tests/Workflows/test_workflows_pg_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_postgres_*.py
+              tldw_Server_API/tests/Workflows/test_workflows_tokens_cost_*.py
+          - name: product-workflows-runtime
+            paths: >-
+              tldw_Server_API/tests/Workflows/test_adapter_path_security.py
+              tldw_Server_API/tests/Workflows/test_llm_adapter.py
+              tldw_Server_API/tests/Workflows/test_stage3_chunkers_rag.py
+              tldw_Server_API/tests/Workflows/test_tts_workflow_normalization.py
+              tldw_Server_API/tests/Workflows/test_versions_idempotency.py
+              tldw_Server_API/tests/Workflows/test_workflows_artifact_gc_service.py
+              tldw_Server_API/tests/Workflows/test_workflows_dag_validation.py
+              tldw_Server_API/tests/Workflows/test_workflows_extras.py
+              tldw_Server_API/tests/Workflows/test_workflows_fuzz.py
+              tldw_Server_API/tests/Workflows/test_workflows_idempotency_ttl.py
+              tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
+              tldw_Server_API/tests/Workflows/test_workflows_truthiness_flags.py
           - name: product-prompt-studio
             paths: >-
               tldw_Server_API/tests/prompt_studio
@@ -5401,6 +5664,7 @@ jobs:
           echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
 
       - name: Run release OS shard tests
+        if: matrix.shard.name != 'media-legacy-free'
         shell: bash
         run: |
           mkdir -p "$RESULTS_DIR"
@@ -5413,9 +5677,10 @@ jobs:
             --junit-xml="$RESULTS_DIR/${{ env.SHARD_NAME }}.xml"
 
       - name: Run legacy-free media checks
-        if: matrix.shard.name == 'media-ingestion'
+        if: matrix.shard.name == 'media-legacy-free'
         shell: bash
         run: |
+          mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
           TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \

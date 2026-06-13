@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import struct
 import wave
 from io import BytesIO
@@ -18,10 +19,14 @@ if TYPE_CHECKING:
 
 def _valid_smoke_config(tmp_path: Path) -> OmniVoiceSmokeConfig:
     from Helper_Scripts.TTS_Installers import smoke_test_omnivoice_sidecar as smoke
+    from Helper_Scripts.TTS_Installers.install_tts_omnivoice_sidecar import (
+        resolve_sidecar_python_path,
+    )
 
     model_path = tmp_path / "models" / "OmniVoice"
     model_path.mkdir(parents=True)
-    sidecar_python = tmp_path / "models" / "omnivoice_sidecar" / ".venv" / "bin" / "python"
+    sidecar_venv = tmp_path / "models" / "omnivoice_sidecar" / ".venv"
+    sidecar_python = resolve_sidecar_python_path(sidecar_venv)
     sidecar_python.parent.mkdir(parents=True)
     sidecar_python.write_text("#!/usr/bin/env python\n", encoding="utf-8")
     sidecar_python.chmod(0o755)
@@ -188,10 +193,28 @@ def test_smoke_helper_rejects_non_executable_sidecar_python(tmp_path):
     from Helper_Scripts.TTS_Installers.smoke_test_omnivoice_sidecar import validate_smoke_config
 
     config = _valid_smoke_config(tmp_path)
-    config.sidecar_python.chmod(0o644)
+    sidecar_python = config.sidecar_python
+    if os.name == "nt":
+        sidecar_python = config.sidecar_python.with_suffix(".txt")
+        sidecar_python.write_text("# fake non-executable sidecar python\n", encoding="utf-8")
+    else:
+        sidecar_python.chmod(0o644)
 
     with pytest.raises(ValueError, match="executable"):
-        validate_smoke_config(replace(config, sidecar_python=config.sidecar_python))
+        validate_smoke_config(replace(config, sidecar_python=sidecar_python))
+
+
+@pytest.mark.unit
+def test_smoke_helper_windows_executable_detection_uses_pathext(tmp_path):
+    from Helper_Scripts.TTS_Installers.smoke_test_omnivoice_sidecar import _is_executable_file
+
+    script_without_suffix = tmp_path / "python"
+    script_without_suffix.write_text("# fake python\n", encoding="utf-8")
+    exe_path = tmp_path / "python.exe"
+    exe_path.write_text("# fake python exe\n", encoding="utf-8")
+
+    assert _is_executable_file(script_without_suffix, platform_name="nt") is False
+    assert _is_executable_file(exe_path, platform_name="nt") is True
 
 
 @pytest.mark.unit

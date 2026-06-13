@@ -524,7 +524,14 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "llm-local-runtime",
             "llm-local-backends",
         }.issubset(shard_names)
-        assert {
+        workflow_shards = {
+            "product-workflows-adapters",
+            "product-workflows-api",
+            "product-workflows-engine",
+            "product-workflows-runtime",
+            "product-workflows-storage",
+        }
+        product_shards = {
             "product-claims-core",
             "product-claims-engine",
             "product-claims-monitoring",
@@ -541,8 +548,9 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "product-prompts-legacy",
             "product-prompts-new",
             "product-watchlists",
-            "product-workflows",
-        }.issubset(shard_names)
+        } | workflow_shards
+        assert product_shards.issubset(shard_names)
+        assert "product-workflows" not in shard_names
         platform_shards = {
             "platform-infrastructure-metrics",
             "platform-mcp-core",
@@ -560,7 +568,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         shard_path_sets = {
             name: set(str(paths).split()) for name, paths in shard_paths.items()
         }
-        assert {"media-audio", "media-ingestion"}.issubset(shard_names)
+        assert {"media-audio", "media-ingestion", "media-legacy-free"}.issubset(shard_names)
         assert shard_path_sets["media-audio"] == {
             "tldw_Server_API/tests/Audio",
             "tldw_Server_API/tests/AudioJobs",
@@ -573,6 +581,10 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/Media",
             "tldw_Server_API/tests/MediaIngestion_NEW",
             "tldw_Server_API/tests/Media_Ingestion_Modification",
+        }
+        assert shard_path_sets["media-legacy-free"] == {
+            "tldw_Server_API/tests/Media",
+            "tldw_Server_API/tests/MediaIngestion_NEW",
         }
         assert "tldw_Server_API/tests/VectorStores" not in shard_path_sets["ai-embeddings-core"]
         assert "vector-stores" not in shard_names
@@ -1123,8 +1135,32 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
 
         assert covered_flashcard_files == flashcard_files
 
+        workflow_files = {
+            str(path)
+            for path in Path("tldw_Server_API/tests/Workflows").glob("**/test*.py")
+        }
+        covered_workflow_files: dict[str, str] = {}
+        for shard_name in workflow_shards:
+            assert "tldw_Server_API/tests/Workflows" not in shard_path_sets[shard_name]
+            for pattern in shard_path_sets[shard_name]:
+                assert pattern.startswith("tldw_Server_API/tests/Workflows/")
+                matches = {
+                    filename
+                    for filename in workflow_files
+                    if fnmatch.fnmatch(filename, pattern)
+                }
+                assert matches, f"{shard_name} pattern matched no files: {pattern}"
+                for filename in matches:
+                    assert filename not in covered_workflow_files, (
+                        f"{filename} matched both "
+                        f"{covered_workflow_files[filename]} and {shard_name}"
+                    )
+                    covered_workflow_files[filename] = shard_name
 
-def test_legacy_free_media_checks_run_on_media_ingestion_shard() -> None:
+        assert set(covered_workflow_files) == workflow_files
+
+
+def test_legacy_free_media_checks_run_on_dedicated_shard() -> None:
     workflow = _load(".github/workflows/ci.yml")
     legacy_free_steps = [
         step
@@ -1135,4 +1171,24 @@ def test_legacy_free_media_checks_run_on_media_ingestion_shard() -> None:
 
     assert len(legacy_free_steps) == 5
     for step in legacy_free_steps:
-        assert step.get("if") == "matrix.shard.name == 'media-ingestion'"
+        assert step.get("if") == "matrix.shard.name == 'media-legacy-free'"
+        assert 'mkdir -p "$RESULTS_DIR"' in step["run"]
+
+
+def test_regular_full_suite_steps_skip_dedicated_media_legacy_free_shard() -> None:
+    workflow = _load(".github/workflows/ci.yml")
+    regular_shard_steps = [
+        step
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if step.get("name")
+        in {
+            "Run shard tests",
+            "Run OS shard tests",
+            "Run release OS shard tests",
+        }
+    ]
+
+    assert len(regular_shard_steps) == 5
+    for step in regular_shard_steps:
+        assert step.get("if") == "matrix.shard.name != 'media-legacy-free'"
