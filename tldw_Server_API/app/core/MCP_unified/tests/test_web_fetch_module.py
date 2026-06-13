@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations import (
     web_fetch_module as wfm,
 )
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.web_fetch_module import (
+    HttpxWebFetchClient,
     WebFetchModule,
     WebFetchResponse,
 )
@@ -99,6 +100,60 @@ def _html_response(
         body=body,
         truncated=truncated,
     )
+
+
+def _redirect_response(*, location: str | None, final_url: str = "https://example.com/start") -> WebFetchResponse:
+    return WebFetchResponse(
+        final_url=final_url,
+        status_code=302,
+        content_type="text/html",
+        body=b"",
+        truncated=False,
+        location=location,
+    )
+
+
+class _SequenceClient:
+    """Fake client that returns one response per call, recording fetched URLs."""
+
+    def __init__(self, responses: list[WebFetchResponse]) -> None:
+        self._responses = list(responses)
+        self.calls: list[str] = []
+
+    async def fetch(
+        self,
+        url: str,
+        *,
+        timeout_seconds: float,
+        max_bytes: int,
+        user_agent: str,
+    ) -> WebFetchResponse:
+        self.calls.append(url)
+        if not self._responses:
+            raise AssertionError(f"unexpected extra fetch: {url}")
+        return self._responses.pop(0)
+
+
+def _policy_allowing(monkeypatch: pytest.MonkeyPatch, allowed_hosts: set[str]) -> list[str]:
+    """Policy mock that allows only the given hosts; records every checked URL."""
+    from urllib.parse import urlsplit
+
+    checked: list[str] = []
+
+    async def _decide(url: str, **kwargs: Any) -> Any:
+        checked.append(url)
+        host = urlsplit(url).hostname or ""
+        return SimpleNamespace(
+            allowed=host in allowed_hosts,
+            reason="allowed" if host in allowed_hosts else "ssrf_private_ip",
+            mode="strict",
+            stage=kwargs.get("stage", ""),
+            source=kwargs.get("source", ""),
+            details=None,
+        )
+
+    monkeypatch.setattr(wfm, "decide_web_outbound_policy", _decide)
+    return checked
 
 
 _RICH_HTML = (
@@ -261,3 +316,143 @@ async def test_eval_metadata_records_profile_from_context(monkeypatch: pytest.Mo
     )
     assert result["ok"] is True  # nosec B101
     assert result["eval"]["profile_id"] == "deep-researcher"  # nosec B101
+
+
+async def test_redirect_into_denied_host_is_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    checked = _policy_allowing(monkeypatch, {"example.com"})
+    client = _SequenceClient(
+        [_redirect_response(location="https://169.254.169.254/latest/meta-data")]
+    )
+    module = _module(client)
+    result = await module.execute_tool("web.fetch", {"url": "https://example.com/start"})
+    assert result["ok"] is False  # nosec B101
+    assert result["reason_code"] == "outbound_policy_denied"  # nosec B101
+    # Only the first hop was fetched; the denied redirect target was never requested.
+    assert client.calls == ["https://example.com/start"]  # nosec B101
+    assert "https://169.254.169.254/latest/meta-data" in checked  # nosec B101
+
+
+async def test_redirect_to_allowed_host_is_followed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _policy_allowing(monkeypatch, {"example.com", "example.org"})
+    client = _SequenceClient(
+        [
+            _redirect_response(location="https://example.org/final"),
+            _html_response(_RICH_HTML, final_url="https://example.org/final"),
+        ]
+    )
+    module = _module(client)
+    result = await module.execute_tool("web.fetch", {"url": "https://example.com/start"})
+    assert result["ok"] is True  # nosec B101
+    assert result["final_url"] == "https://example.org/final"  # nosec B101
+    assert client.calls == ["https://example.com/start", "https://example.org/final"]  # nosec B101
+
+
+async def test_redirect_without_location_is_fetch_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _policy_allowing(monkeypatch, {"example.com"})
+    client = _SequenceClient([_redirect_response(location=None)])
+    module = _module(client)
+    result = await module.execute_tool("web.fetch", {"url": "https://example.com/start"})
+    assert result["ok"] is False  # nosec B101
+    assert result["reason_code"] == "fetch_failed"  # nosec B101
+
+
+async def test_redirect_limit_is_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
+    _policy_allowing(monkeypatch, {"example.com"})
+    client = _SequenceClient(
+        [_redirect_response(location=f"https://example.com/hop{i}") for i in range(10)]
+    )
+    module = _module(client)
+    result = await module.execute_tool("web.fetch", {"url": "https://example.com/start"})
+    assert result["ok"] is False  # nosec B101
+    assert result["reason_code"] == "fetch_failed"  # nosec B101
+
+
+async def test_url_with_sql_like_substrings_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    _allow_policy(monkeypatch)
+    client = _FakeClient(_html_response(_RICH_HTML))
+    module = _module(client)
+    # URLs commonly contain '--' and '/*'; sanitize_input must not reject them.
+    result = await module.execute_tool(
+        "web.fetch", {"url": "https://example.com/a--b/c?x=1/*y*/&z=--q"}
+    )
+    assert result["ok"] is True  # nosec B101
+
+
+async def test_non_utf8_charset_is_decoded(monkeypatch: pytest.MonkeyPatch) -> None:
+    _allow_policy(monkeypatch)
+    body = "café déjà vu".encode("latin-1")
+    client = _FakeClient(
+        _html_response(body, content_type="text/plain; charset=ISO-8859-1")
+    )
+    module = _module(client)
+    result = await module.execute_tool("web.fetch", {"url": "https://example.com/raw"})
+    assert result["ok"] is True  # nosec B101
+    assert "café" in result["content"]  # nosec B101
+
+
+async def test_missing_content_type_falls_back_to_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    _allow_policy(monkeypatch)
+    client = _FakeClient(_html_response(b"just some text", content_type=""))
+    module = _module(client)
+    result = await module.execute_tool("web.fetch", {"url": "https://example.com/raw"})
+    assert result["ok"] is True  # nosec B101
+    assert result["content"] == "just some text"  # nosec B101
+
+
+async def test_html_entities_are_unescaped(monkeypatch: pytest.MonkeyPatch) -> None:
+    _allow_policy(monkeypatch)
+    body = (
+        b"<html><head><title>Tom &amp; Jerry</title></head>"
+        b"<body><p>Cats &amp; dogs &lt;3 &gt; rocks</p></body></html>"
+    )
+    client = _FakeClient(_html_response(body))
+    module = _module(client)
+    result = await module.execute_tool(
+        "web.fetch", {"url": "https://example.com/post", "format": "text"}
+    )
+    assert result["ok"] is True  # nosec B101
+    assert result["title"] == "Tom & Jerry"  # nosec B101
+    assert "&amp;" not in result["content"]  # nosec B101
+
+
+async def test_httpx_client_does_not_auto_follow_redirects() -> None:
+    import httpx
+
+    requested: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        return httpx.Response(302, headers={"Location": "/next"})
+
+    client = HttpxWebFetchClient(transport=httpx.MockTransport(_handler))
+    response = await client.fetch(
+        "https://example.com/start",
+        timeout_seconds=5,
+        max_bytes=1000,
+        user_agent="test",
+    )
+    assert response.status_code == 302  # nosec B101
+    assert response.location == "https://example.com/next"  # nosec B101
+    # The redirect target was never requested by the client.
+    assert requested == ["https://example.com/start"]  # nosec B101
+
+
+async def test_httpx_client_skips_body_for_unsupported_content_type() -> None:
+    import httpx
+
+    body_chunks_sent = {"n": 0}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        body_chunks_sent["n"] += 1
+        return httpx.Response(200, headers={"Content-Type": "image/png"}, content=b"\x89PNG" * 100)
+
+    client = HttpxWebFetchClient(transport=httpx.MockTransport(_handler))
+    response = await client.fetch(
+        "https://example.com/logo.png",
+        timeout_seconds=5,
+        max_bytes=1000,
+        user_agent="test",
+    )
+    assert response.status_code == 200  # nosec B101
+    assert response.content_type == "image/png"  # nosec B101
+    assert response.body == b""  # nosec B101 - unsupported type not downloaded

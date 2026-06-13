@@ -9,9 +9,12 @@ allow/deny/ask rules) — this module does not re-implement domain policy.
 
 from __future__ import annotations
 
+import codecs
+import html as html_lib
 import re
 from dataclasses import dataclass
 from typing import Any, Protocol
+from urllib.parse import urljoin, urlsplit
 
 from loguru import logger
 
@@ -37,6 +40,13 @@ _DEFAULT_TIMEOUT_SECONDS = 15
 _MAX_TIMEOUT_SECONDS = 30
 _DEFAULT_USER_AGENT = "tldw-mcp-web-fetch/1.0"
 
+# Redirects are followed manually so the outbound policy is re-checked before
+# each hop (auto-following would let a permitted URL redirect into denied
+# address space and bypass SSRF/egress protection).
+_REDIRECT_STATUS = {301, 302, 303, 307, 308}
+_MAX_REDIRECTS = 5
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
 # Content types we will surface as text. Anything else is rejected so the tool
 # never returns binary blobs through the JSON tool contract.
 _HTML_TYPES = {"text/html", "application/xhtml+xml"}
@@ -58,13 +68,19 @@ _BLANKLINES_RE = re.compile(r"\n{3,}")
 
 @dataclass(frozen=True, slots=True)
 class WebFetchResponse:
-    """Normalized HTTP response consumed by :class:`WebFetchModule`."""
+    """Normalized HTTP response consumed by :class:`WebFetchModule`.
+
+    ``location`` carries the absolute redirect target when ``status_code`` is a
+    redirect; the module re-checks the outbound policy against it before
+    following, so the client never follows redirects on its own.
+    """
 
     final_url: str
     status_code: int
     content_type: str
     body: bytes
     truncated: bool
+    location: str | None = None
 
 
 class WebFetchHttpClient(Protocol):
@@ -80,8 +96,32 @@ class WebFetchHttpClient(Protocol):
     ) -> WebFetchResponse: ...
 
 
+def _is_supported_content_type(content_type: str) -> bool:
+    main_type = content_type.split(";", 1)[0].strip().lower()
+    return (not main_type) or main_type in _HTML_TYPES or main_type in _PLAIN_TYPES
+
+
+def _safe_host(url: str) -> str:
+    """Return just the host for log context, never the path/query (may hold secrets)."""
+    try:
+        return urlsplit(url).hostname or "unknown"
+    except ValueError:
+        return "unknown"
+
+
 class HttpxWebFetchClient:
-    """Default :class:`WebFetchHttpClient` backed by ``httpx`` with a byte cap."""
+    """Default :class:`WebFetchHttpClient` backed by ``httpx`` with a byte cap.
+
+    Redirects are NOT auto-followed: a redirect response is returned with its
+    resolved ``location`` so the caller can re-apply the outbound policy. The
+    body is only downloaded for terminal responses with a supported content
+    type, avoiding fetching binary payloads (images/video/PDF) just to reject
+    them later.
+    """
+
+    def __init__(self, *, transport: Any | None = None) -> None:
+        # ``transport`` is an injection seam for tests (e.g. httpx.MockTransport).
+        self._transport = transport
 
     async def fetch(
         self,
@@ -93,16 +133,40 @@ class HttpxWebFetchClient:
     ) -> WebFetchResponse:
         import httpx  # Local import: keeps module import cheap and httpx optional at import time.
 
-        chunks: list[bytes] = []
-        downloaded = 0
-        truncated = False
         async with httpx.AsyncClient(
-            follow_redirects=True,
+            follow_redirects=False,
             timeout=timeout_seconds,
             headers={"User-Agent": user_agent},
+            transport=self._transport,
         ) as client:
             async with client.stream("GET", url) as response:
                 content_type = response.headers.get("content-type", "")
+
+                if response.status_code in _REDIRECT_STATUS:
+                    location_header = response.headers.get("location")
+                    location = urljoin(url, location_header) if location_header else None
+                    return WebFetchResponse(
+                        final_url=str(response.url),
+                        status_code=response.status_code,
+                        content_type=content_type,
+                        body=b"",
+                        truncated=False,
+                        location=location,
+                    )
+
+                if not _is_supported_content_type(content_type):
+                    # Reject unsupported (binary) payloads without downloading them.
+                    return WebFetchResponse(
+                        final_url=str(response.url),
+                        status_code=response.status_code,
+                        content_type=content_type,
+                        body=b"",
+                        truncated=False,
+                    )
+
+                chunks: list[bytes] = []
+                downloaded = 0
+                truncated = False
                 async for chunk in response.aiter_bytes():
                     remaining = max_bytes - downloaded
                     if remaining <= 0:
@@ -217,39 +281,74 @@ class WebFetchModule(BaseModule):
         if tool_name != _TOOL_FETCH:
             return self._error(tool_name, "unknown_tool", "Unknown web tool.", context=context)
 
-        args = self.sanitize_input(arguments or {})
+        # Note: the inherited SQL-oriented sanitize_input() is intentionally NOT
+        # applied to the raw URL — legitimate URLs commonly contain substrings
+        # such as ``--`` or ``/*`` that it would reject. Inputs are validated
+        # explicitly below instead.
         try:
-            url, fmt, max_bytes, timeout_seconds, respect_robots = self._validate(args)
+            requested_url, fmt, max_bytes, timeout_seconds, respect_robots = self._validate(
+                arguments or {}
+            )
         except _WebFetchError as exc:
             return self._error(tool_name, exc.reason_code, exc.message, context=context)
 
-        decision = await decide_web_outbound_policy(
-            url,
-            respect_robots=respect_robots,
-            user_agent=_DEFAULT_USER_AGENT,
-            source="mcp.web_fetch",
-            stage="web.fetch",
-        )
-        if not getattr(decision, "allowed", False):
+        # Follow redirects manually, re-applying the outbound policy to every hop
+        # so a permitted URL cannot redirect into denied/private address space.
+        current_url = requested_url
+        for _hop in range(_MAX_REDIRECTS + 1):
+            decision = await decide_web_outbound_policy(
+                current_url,
+                respect_robots=respect_robots,
+                user_agent=_DEFAULT_USER_AGENT,
+                source="mcp.web_fetch",
+                stage="web.fetch",
+            )
+            if not getattr(decision, "allowed", False):
+                return self._error(
+                    tool_name,
+                    "outbound_policy_denied",
+                    f"Outbound policy denied the request ({getattr(decision, 'reason', 'denied')}).",
+                    context=context,
+                )
+
+            try:
+                response = await self._client.fetch(
+                    current_url,
+                    timeout_seconds=timeout_seconds,
+                    max_bytes=max_bytes,
+                    user_agent=_DEFAULT_USER_AGENT,
+                )
+            except Exception as exc:  # noqa: BLE001 - network/client errors are expected and mapped.
+                logger.bind(stage="web.fetch", host=_safe_host(current_url)).opt(exception=exc).warning(
+                    "web.fetch client error"
+                )
+                return self._error(tool_name, "fetch_failed", "Failed to fetch the URL.", context=context)
+
+            if response.status_code in _REDIRECT_STATUS:
+                if not response.location:
+                    logger.bind(stage="web.fetch", host=_safe_host(current_url)).warning(
+                        "web.fetch redirect without a Location header"
+                    )
+                    return self._error(
+                        tool_name,
+                        "fetch_failed",
+                        "Upstream returned a redirect without a Location header.",
+                        status_code=response.status_code,
+                        context=context,
+                    )
+                current_url = response.location
+                continue
+            break
+        else:
+            logger.bind(stage="web.fetch", host=_safe_host(requested_url)).warning(
+                "web.fetch exceeded the redirect limit"
+            )
             return self._error(
                 tool_name,
-                "outbound_policy_denied",
-                f"Outbound policy denied the request ({getattr(decision, 'reason', 'denied')}).",
+                "fetch_failed",
+                f"Exceeded the redirect limit ({_MAX_REDIRECTS}).",
                 context=context,
             )
-
-        try:
-            response = await self._client.fetch(
-                url,
-                timeout_seconds=timeout_seconds,
-                max_bytes=max_bytes,
-                user_agent=_DEFAULT_USER_AGENT,
-            )
-        except Exception as exc:  # noqa: BLE001 - network/client errors are expected and mapped.
-            logger.bind(stage="web.fetch", error_type=exc.__class__.__name__).debug(
-                "web.fetch client error"
-            )
-            return self._error(tool_name, "fetch_failed", "Failed to fetch the URL.", context=context)
 
         if response.status_code >= 400:
             return self._error(
@@ -263,6 +362,12 @@ class WebFetchModule(BaseModule):
         try:
             content, title = self._extract(response, fmt)
         except _WebFetchError as exc:
+            logger.bind(
+                stage="web.fetch",
+                host=_safe_host(response.final_url),
+                reason_code=exc.reason_code,
+                content_type=response.content_type,
+            ).debug("web.fetch extraction rejected the response")
             return self._error(
                 tool_name,
                 exc.reason_code,
@@ -273,7 +378,7 @@ class WebFetchModule(BaseModule):
 
         return {
             "ok": True,
-            "url": url,
+            "url": requested_url,
             "final_url": response.final_url,
             "status_code": response.status_code,
             "content_type": response.content_type,
@@ -301,6 +406,8 @@ class WebFetchModule(BaseModule):
         if not isinstance(url, str) or not url.strip():
             raise _WebFetchError("invalid_arguments", "url is required")
         url = url.strip()
+        if _CONTROL_CHARS_RE.search(url):
+            raise _WebFetchError("invalid_url", "url must not contain control characters")
         if not re.match(r"^https?://", url, re.IGNORECASE):
             raise _WebFetchError("invalid_url", "url must use the http or https scheme")
 
@@ -336,7 +443,7 @@ class WebFetchModule(BaseModule):
 
     def _extract(self, response: WebFetchResponse, fmt: str) -> tuple[str, str | None]:
         main_type = response.content_type.split(";", 1)[0].strip().lower()
-        text = response.body.decode("utf-8", errors="replace")
+        text = self._decode_body(response.body, response.content_type)
 
         if main_type in _HTML_TYPES or (not main_type and "<html" in text.lower()):
             if fmt == "html":
@@ -346,15 +453,30 @@ class WebFetchModule(BaseModule):
                 raise _WebFetchError("empty_content", "No readable content could be extracted.")
             return content, self._html_title(text)
 
-        if main_type in _PLAIN_TYPES:
+        # Plain text, or an absent/misconfigured content type that did not look
+        # like HTML: surface the decoded body directly.
+        if main_type in _PLAIN_TYPES or not main_type:
             cleaned = text.strip()
             if not cleaned:
                 raise _WebFetchError("empty_content", "Response body was empty.")
             return cleaned, None
 
         raise _WebFetchError(
-            "empty_content", f"Unsupported content type for extraction: {main_type or 'unknown'}"
+            "empty_content", f"Unsupported content type for extraction: {main_type}"
         )
+
+    @staticmethod
+    def _decode_body(body: bytes, content_type: str) -> str:
+        """Decode the response body using the charset advertised in the header."""
+        charset = "utf-8"
+        if "charset=" in content_type.lower():
+            candidate = content_type.lower().split("charset=", 1)[1].split(";", 1)[0].strip().strip('"')
+            try:
+                codecs.lookup(candidate)
+                charset = candidate
+            except (LookupError, ValueError):
+                charset = "utf-8"
+        return body.decode(charset, errors="replace")
 
     def _extract_html(self, html: str, fmt: str) -> str:
         output_format = "markdown" if fmt == "markdown" else "txt"
@@ -365,13 +487,16 @@ class WebFetchModule(BaseModule):
             if extracted and extracted.strip():
                 return extracted.strip()
         except Exception as exc:  # noqa: BLE001 - extractor failures fall back to tag strip.
-            logger.bind(error_type=exc.__class__.__name__).debug("trafilatura extraction failed")
+            logger.bind(stage="web.fetch").opt(exception=exc).debug(
+                "trafilatura extraction failed; falling back to tag strip"
+            )
         return self._strip_tags(html)
 
     @staticmethod
     def _strip_tags(html: str) -> str:
         without_scripts = _SCRIPT_STYLE_RE.sub(" ", html)
         text = _TAG_RE.sub(" ", without_scripts)
+        text = html_lib.unescape(text)
         text = _WS_RE.sub(" ", text)
         text = "\n".join(line.strip() for line in text.splitlines())
         text = _BLANKLINES_RE.sub("\n\n", text)
@@ -382,7 +507,7 @@ class WebFetchModule(BaseModule):
         match = _TITLE_RE.search(html)
         if not match:
             return None
-        title = _WS_RE.sub(" ", _TAG_RE.sub(" ", match.group(1))).strip()
+        title = html_lib.unescape(_WS_RE.sub(" ", _TAG_RE.sub(" ", match.group(1)))).strip()
         return title or None
 
     # ---- result helpers ------------------------------------------------
