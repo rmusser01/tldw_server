@@ -570,7 +570,7 @@ class MessageStore:
             "LEFT JOIN message_metadata mm ON mm.message_id = m.id "
             "JOIN conversations c ON c.id = m.conversation_id "
             f"WHERE 1 = 1 {deleted_clause} "  # nosec B608
-            "ORDER BY m.timestamp ASC, m.id ASC"
+            "ORDER BY m.timestamp ASC, m.last_modified ASC, m.id ASC"
         )
         cursor = self._db.execute_query(query)
         rows = cursor.fetchall()
@@ -682,6 +682,7 @@ class MessageStore:
         """
         if order_by_timestamp.upper() not in ["ASC", "DESC"]:
             raise InputError("order_by_timestamp must be 'ASC' or 'DESC'.")  # noqa: TRY003
+        order_direction = order_by_timestamp.upper()
 
         # The new query joins with conversations to check its 'deleted' status.
         delete_clause = "" if include_deleted else "AND m.deleted = FALSE"
@@ -695,7 +696,7 @@ class MessageStore:
             WHERE m.conversation_id = ?
               {delete_clause}
               AND c.deleted = FALSE
-            ORDER BY m.timestamp {order_by_timestamp}
+            ORDER BY m.timestamp {order_direction}, m.last_modified {order_direction}, m.id {order_direction}
             LIMIT ? OFFSET ?
         """.format_map(locals())  # nosec B608
         try:
@@ -747,6 +748,7 @@ class MessageStore:
         """Fetch root (parentless) messages with minimal columns for tree building."""
         if order_by_timestamp.upper() not in ["ASC", "DESC"]:
             raise InputError("order_by_timestamp must be 'ASC' or 'DESC'.")  # noqa: TRY003
+        order_direction = order_by_timestamp.upper()
         query = """
             SELECT m.id, m.parent_message_id, m.sender, m.content, m.timestamp
             FROM messages m
@@ -755,7 +757,7 @@ class MessageStore:
               AND m.parent_message_id IS NULL
               AND m.deleted = FALSE
               AND c.deleted = FALSE
-            ORDER BY m.timestamp {order_by_timestamp}
+            ORDER BY m.timestamp {order_direction}, m.last_modified {order_direction}, m.id {order_direction}
             LIMIT ? OFFSET ?
         """.format_map(locals())  # nosec B608
         try:
@@ -783,6 +785,7 @@ class MessageStore:
             return []
         if order_by_timestamp.upper() not in ["ASC", "DESC"]:
             raise InputError("order_by_timestamp must be 'ASC' or 'DESC'.")  # noqa: TRY003
+        order_direction = order_by_timestamp.upper()
         placeholders = ",".join(["?"] * len(parent_ids))
         query = """
             SELECT m.id, m.parent_message_id, m.sender, m.content, m.timestamp
@@ -792,7 +795,7 @@ class MessageStore:
               AND m.parent_message_id IN ({placeholders})
               AND m.deleted = FALSE
               AND c.deleted = FALSE
-            ORDER BY m.timestamp {order_by_timestamp}
+            ORDER BY m.timestamp {order_direction}, m.last_modified {order_direction}, m.id {order_direction}
         """.format_map(locals())  # nosec B608
         params = [conversation_id, *parent_ids]
         try:
@@ -1500,7 +1503,7 @@ class MessageStore:
             "SELECT m.id, m.timestamp, m.content, m.sender "
             "FROM messages m JOIN conversations c ON m.conversation_id = c.id "
             "WHERE m.conversation_id = ? AND m.deleted = FALSE AND c.deleted = FALSE "
-            "ORDER BY m.timestamp DESC LIMIT 1"
+            "ORDER BY m.timestamp DESC, m.last_modified DESC, m.id DESC LIMIT 1"
         )
         try:
             cursor = self._db.execute_query(query, (conversation_id,))
