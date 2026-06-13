@@ -275,6 +275,22 @@ def test_embedding_model_setup_skips_non_embedding_chunking_shard() -> None:
         assert "ai-chunking-code-json-xml" not in condition
 
 
+def test_embedding_model_predownload_skips_backpressure_shard() -> None:
+    workflow = _load(".github/workflows/ci.yml")
+    predownload_steps = [
+        step
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if step.get("name") == "Pre-download embedding models"
+    ]
+
+    assert len(predownload_steps) == 5
+    for step in predownload_steps:
+        condition = str(step.get("if"))
+        assert "matrix.shard.name != 'ai-embeddings-backpressure'" in condition
+        assert "matrix.shard.name != 'rag-new-unit-rag-contracts'" in condition
+
+
 def test_full_suite_test_result_uploads_are_non_blocking() -> None:
     workflow = _load(".github/workflows/ci.yml")
     upload_steps = [
@@ -543,6 +559,20 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         shard_paths = {shard["name"]: shard["paths"] for shard in shards}
         shard_path_sets = {
             name: set(str(paths).split()) for name, paths in shard_paths.items()
+        }
+        assert {"media-audio", "media-ingestion"}.issubset(shard_names)
+        assert shard_path_sets["media-audio"] == {
+            "tldw_Server_API/tests/Audio",
+            "tldw_Server_API/tests/AudioJobs",
+            "tldw_Server_API/tests/STT",
+            "tldw_Server_API/tests/TTS",
+            "tldw_Server_API/tests/TTS_NEW",
+            "tldw_Server_API/tests/VLM",
+        }
+        assert shard_path_sets["media-ingestion"] == {
+            "tldw_Server_API/tests/Media",
+            "tldw_Server_API/tests/MediaIngestion_NEW",
+            "tldw_Server_API/tests/Media_Ingestion_Modification",
         }
         assert "tldw_Server_API/tests/VectorStores" not in shard_path_sets["ai-embeddings-core"]
         assert "vector-stores" not in shard_names
@@ -1092,3 +1122,17 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         }
 
         assert covered_flashcard_files == flashcard_files
+
+
+def test_legacy_free_media_checks_run_on_media_ingestion_shard() -> None:
+    workflow = _load(".github/workflows/ci.yml")
+    legacy_free_steps = [
+        step
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if step.get("name") == "Run legacy-free media checks"
+    ]
+
+    assert len(legacy_free_steps) == 5
+    for step in legacy_free_steps:
+        assert step.get("if") == "matrix.shard.name == 'media-ingestion'"

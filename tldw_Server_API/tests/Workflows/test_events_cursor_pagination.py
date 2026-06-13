@@ -59,6 +59,9 @@ def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 5.0):
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         response = client.get(f"/api/v1/workflows/runs/{run_id}")
+        if response.status_code == 404:
+            time.sleep(0.02)
+            continue
         assert response.status_code == 200, response.text
         data = response.json()
         if data["status"] in ("succeeded", "failed", "cancelled"):
