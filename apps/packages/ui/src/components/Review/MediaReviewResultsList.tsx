@@ -121,7 +121,16 @@ export const MediaReviewResultsList: React.FC<MediaReviewResultsListProps> = ({ 
                   <div
                     key={item.id}
                     ref={(el: any) => {
-                      if (el) listVirtualizer.measureElement(el)
+                      if (!el) return
+
+                      const measure = () => {
+                        if (el.isConnected) listVirtualizer.measureElement(el)
+                      }
+                      if (typeof window.requestAnimationFrame === "function") {
+                        window.requestAnimationFrame(measure)
+                      } else {
+                        window.setTimeout(measure, 0)
+                      }
                     }}
                     data-testid="media-review-result-row"
                     data-media-id={String(item.id)}

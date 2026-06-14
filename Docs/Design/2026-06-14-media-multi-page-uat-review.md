@@ -33,7 +33,7 @@
 | # | Area | Issue | Severity | Status |
 |---|------|-------|----------|--------|
 | 1 | Testability | The result rows (`role="button"` + `data-media-id`, no `data-testid`) and the batch-action controls (Add tags / Export / Reprocess / Move to trash) had **no individual `data-testid`s**, so the core multi-select → batch flow had no stable selectors and no dedicated e2e coverage. | Low (maintainability) | **Fixed (this PR)** |
-| 2 | Console warning | A React **"flushSync was called from inside a lifecycle method"** warning fires on load, surfaced at `MediaReviewPage`. Source is `@tanstack/react-virtual` (`^3.13.18`): `listVirtualizer.measureElement(el)` (called in the row ref) triggers the library's internal `flushSync`. Dev-only, benign in production; not a clean in-our-code fix (it's the virtualizer). | Low (dev-only) | Open (library) |
+| 2 | Console warning | A React **"flushSync was called from inside a lifecycle method"** warning fired on load, surfaced at `MediaReviewPage`. Source was `@tanstack/react-virtual` (`^3.13.18`): `listVirtualizer.measureElement(el)` (called in the row ref) triggered the library's internal `flushSync`. | Low (dev-only) | **Fixed (this PR)** |
 
 ---
 
@@ -44,17 +44,21 @@
 
 Existing unit tests (`MediaReviewPage.stage5.batch-toolbar`, `…export-trash-handoff`) still pass — the testid additions are non-breaking.
 
+## Fix shipped (Finding #2)
+
+- `MediaReviewResultsList.tsx`: defers row measurement with `requestAnimationFrame` and skips disconnected nodes before calling `listVirtualizer.measureElement(el)`, moving virtualizer measurement out of the synchronous React ref/commit path.
+
 ---
 
 ## Coverage & limitations
 - **Covered live:** load + 3-pane layout, mouse & keyboard selection (and the consistency of the selection counters), batch toolbar + actions (tag input, export, reprocess), Compare/Focus/Stack view modes, selected-items drawer + Escape, keyboard focus, mobile (390px), console/page-error + `/api` request-count capture.
 - **Not deep-dived:** the actual download payload of Export, irreversible Reprocess/Move-to-trash side effects (exercised the controls, not destructive confirmations), and the full ContentViewer in Compare mode.
-- **Recommendation:** the only open item is the `@tanstack/react-virtual` `flushSync` dev-warning — track for a virtualizer upgrade/config; it does not affect production behavior.
+- **Recommendation:** keep the targeted multi-select and measurement regression coverage in place when upgrading the virtualizer.
 
 ## Reproduction
 ```bash
 cd apps/tldw-frontend
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run dev -- -p 8080
-node scripts/media-multi-uat-driver.mjs            # full walkthrough + screenshots
+TLDW_API_KEY="$SINGLE_USER_API_KEY" node scripts/media-multi-uat-driver.mjs  # full walkthrough + screenshots
 TLDW_WEB_AUTOSTART=false npx playwright test e2e/media-multi-bulk-select.spec.ts --project=chromium
 ```
