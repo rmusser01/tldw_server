@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Callable
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 from loguru import logger
 
@@ -56,6 +58,22 @@ class WebToolModule(Protocol):
     ) -> Any: ...
 
 
+# (url, context) -> "allow" | "ask" | "deny". When wired by the gateway, this lets
+# web.research honor the profile's WebFetch(<domain>) permission rules for each
+# sub-fetched URL — which the gateway cannot enforce itself because the top-level
+# web.research call carries no per-URL `url` subject. Absent a check, the
+# always-on outbound (SSRF/egress) policy inside web.fetch still applies.
+PermissionCheck = Callable[[str, Any], str]
+
+
+def _safe_host(url: str) -> str:
+    """Return just the host for log context, never the path/query (may hold secrets)."""
+    try:
+        return urlsplit(url).hostname or "unknown"
+    except ValueError:
+        return "unknown"
+
+
 class _WebResearchError(Exception):
     """Internal control-flow error carrying a structured reason code."""
 
@@ -74,10 +92,12 @@ class WebResearchModule(BaseModule):
         *,
         search_module: WebToolModule | None = None,
         fetch_module: WebToolModule | None = None,
+        permission_check: PermissionCheck | None = None,
     ) -> None:
         super().__init__(config)
         self._search = search_module or self._default_search_module()
         self._fetch = fetch_module or self._default_fetch_module()
+        self._permission_check = permission_check
 
     @staticmethod
     def _default_search_module() -> WebToolModule:
@@ -189,12 +209,19 @@ class WebResearchModule(BaseModule):
         if params["site_blacklist"] is not None:
             search_args["site_blacklist"] = params["site_blacklist"]
 
-        search_result = await self._search.execute_tool("web.search", search_args, context)
+        try:
+            search_result = await self._search.execute_tool("web.search", search_args, context)
+        except Exception as exc:  # noqa: BLE001 - a search crash maps to a structured error.
+            logger.bind(stage="web.research").opt(exception=exc).error("web.research search stage failed")
+            return self._error(tool_name, "search_failed", "Web search stage failed.", context=context)
+
         if not isinstance(search_result, dict) or not search_result.get("ok"):
             reason_code, message = self._delegated_error(search_result, "search_failed")
             return self._error(tool_name, reason_code, message, context=context)
 
-        results = search_result.get("results") or []
+        results = search_result.get("results")
+        if not isinstance(results, list):
+            results = []
         fetch_targets = self._fetch_targets(results, params["fetch_top_n"])
         fetched = await self._fetch_sources(fetch_targets, params, context)
 
@@ -234,6 +261,20 @@ class WebResearchModule(BaseModule):
     ) -> dict[str, dict[str, Any]]:
         if not urls:
             return {}
+        # Deduplicate so a repeated URL is fetched (and policy-checked) once.
+        unique_urls = list(dict.fromkeys(urls))
+
+        results: dict[str, dict[str, Any]] = {}
+        to_fetch: list[str] = []
+        for url in unique_urls:
+            decision = self._check_permission(url, context)
+            if decision == "deny":
+                results[url] = {"ok": False, "reason_code": "permission_denied"}
+            elif decision == "ask":
+                results[url] = {"ok": False, "reason_code": "permission_required"}
+            else:
+                to_fetch.append(url)
+
         semaphore = asyncio.Semaphore(_FETCH_CONCURRENCY)
 
         async def _fetch_one(url: str) -> tuple[str, Any]:
@@ -244,13 +285,27 @@ class WebResearchModule(BaseModule):
                 try:
                     return url, await self._fetch.execute_tool("web.fetch", fetch_args, context)
                 except Exception as exc:  # noqa: BLE001 - a fetch crash must not fail the bundle.
-                    logger.bind(stage="web.research").opt(exception=exc).warning(
+                    logger.bind(stage="web.research", host=_safe_host(url)).opt(exception=exc).warning(
                         "web.research sub-fetch raised"
                     )
                     return url, {"ok": False, "reason_code": "fetch_failed"}
 
-        pairs = await asyncio.gather(*(_fetch_one(url) for url in urls))
-        return dict(pairs)
+        pairs = await asyncio.gather(*(_fetch_one(url) for url in to_fetch))
+        results.update(dict(pairs))
+        return results
+
+    def _check_permission(self, url: str, context: Any | None) -> str:
+        """Evaluate the optional per-URL permission hook, failing closed on error."""
+        if self._permission_check is None:
+            return "allow"
+        try:
+            decision = self._permission_check(url, context)
+        except Exception as exc:  # noqa: BLE001 - a check error must not silently allow.
+            logger.bind(stage="web.research", host=_safe_host(url)).opt(exception=exc).warning(
+                "web.research permission check raised; denying"
+            )
+            return "deny"
+        return decision if decision in {"allow", "ask", "deny"} else "allow"
 
     def _assemble_sources(
         self, results: list[Any], fetched: dict[str, dict[str, Any]]
@@ -322,8 +377,9 @@ class WebResearchModule(BaseModule):
             raise _WebResearchError("invalid_arguments", "format must be one of markdown, text, html")
 
         max_bytes = args.get("max_bytes")
-        if max_bytes is not None and (not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes <= 0):
-            raise _WebResearchError("invalid_arguments", "max_bytes must be a positive integer")
+        if max_bytes is not None:
+            if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes <= 0:
+                raise _WebResearchError("invalid_arguments", "max_bytes must be a positive integer")
 
         site_whitelist = self._validate_domain_list(args, "site_whitelist")
         site_blacklist = self._validate_domain_list(args, "site_blacklist")

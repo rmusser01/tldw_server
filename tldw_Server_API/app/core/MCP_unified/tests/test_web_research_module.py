@@ -43,9 +43,17 @@ class _FakeFetchModule:
         raise AssertionError(f"unexpected fetch url: {url}")
 
 
-def _module(search: _FakeSearchModule, fetch: _FakeFetchModule) -> WebResearchModule:
+def _module(
+    search: _FakeSearchModule,
+    fetch: _FakeFetchModule,
+    *,
+    permission_check: Any | None = None,
+) -> WebResearchModule:
     return WebResearchModule(
-        ModuleConfig(name="WebResearch"), search_module=search, fetch_module=fetch
+        ModuleConfig(name="WebResearch"),
+        search_module=search,
+        fetch_module=fetch,
+        permission_check=permission_check,
     )
 
 
@@ -273,3 +281,86 @@ async def test_eval_metadata_records_profile_from_context() -> None:
     result = await module.execute_tool("web.research", {"query": "q", "fetch_top_n": 1}, context)
     assert result["ok"] is True  # nosec B101
     assert result["eval"]["profile_id"] == "deep-researcher"  # nosec B101
+
+
+async def test_search_exception_maps_to_search_failed() -> None:
+    class _RaisingSearch:
+        calls: list[Any] = []
+
+        async def execute_tool(self, name: str, args: dict[str, Any], context: Any | None = None) -> Any:
+            raise RuntimeError("boom")
+
+    fetch = _FakeFetchModule(default=_fetch_ok())
+    module = WebResearchModule(
+        ModuleConfig(name="WebResearch"), search_module=_RaisingSearch(), fetch_module=fetch
+    )
+    result = await module.execute_tool("web.research", {"query": "q"})
+    assert result["ok"] is False  # nosec B101
+    assert result["reason_code"] == "search_failed"  # nosec B101
+    assert fetch.calls == []  # nosec B101
+
+
+async def test_non_list_results_handled() -> None:
+    search = _FakeSearchModule(
+        {"ok": True, "engine": "duckduckgo", "query": "q", "results": "not-a-list", "truncated": False, "eval": {}}
+    )
+    fetch = _FakeFetchModule(default=_fetch_ok())
+    module = _module(search, fetch)
+    result = await module.execute_tool("web.research", {"query": "q"})
+    assert result["ok"] is True  # nosec B101
+    assert result["result_count"] == 0  # nosec B101
+    assert fetch.calls == []  # nosec B101
+
+
+async def test_duplicate_urls_fetched_once() -> None:
+    dup = [
+        {"title": "A", "url": "https://example.com/x", "content": "s", "metadata": {}},
+        {"title": "B", "url": "https://example.com/x", "content": "s", "metadata": {}},
+    ]
+    search = _FakeSearchModule(_search_ok(results=dup))
+    fetch = _FakeFetchModule(default=_fetch_ok())
+    module = _module(search, fetch)
+    result = await module.execute_tool("web.research", {"query": "q", "fetch_top_n": 2})
+    assert fetch.calls == ["https://example.com/x"]  # nosec B101 - fetched once
+    assert result["ok"] is True  # nosec B101
+
+
+async def test_permission_check_denies_source_before_fetch() -> None:
+    def _check(url: str, context: Any) -> str:
+        return "deny" if "example.com" in url else "allow"
+
+    search = _FakeSearchModule(_search_ok())  # example.com/1, example.org/2, example.net/3
+    fetch = _FakeFetchModule(default=_fetch_ok())
+    module = _module(search, fetch, permission_check=_check)
+    result = await module.execute_tool("web.research", {"query": "q", "fetch_top_n": 3})
+    denied = next(s for s in result["sources"] if s["url"] == "https://example.com/1")
+    assert denied["fetched"] is False  # nosec B101
+    assert denied["reason_code"] == "permission_denied"  # nosec B101
+    # The denied URL was never fetched; the allowed ones were.
+    assert "https://example.com/1" not in fetch.calls  # nosec B101
+    assert "https://example.org/2" in fetch.calls  # nosec B101
+
+
+async def test_permission_check_ask_marks_required() -> None:
+    def _check(url: str, context: Any) -> str:
+        return "ask"
+
+    search = _FakeSearchModule(_search_ok())
+    fetch = _FakeFetchModule(default=_fetch_ok())
+    module = _module(search, fetch, permission_check=_check)
+    result = await module.execute_tool("web.research", {"query": "q", "fetch_top_n": 2})
+    assert fetch.calls == []  # nosec B101
+    assert all(s["fetched"] is False for s in result["sources"])  # nosec B101
+    assert result["sources"][0]["reason_code"] == "permission_required"  # nosec B101
+
+
+async def test_permission_check_failure_denies() -> None:
+    def _check(url: str, context: Any) -> str:
+        raise RuntimeError("policy backend down")
+
+    search = _FakeSearchModule(_search_ok())
+    fetch = _FakeFetchModule(default=_fetch_ok())
+    module = _module(search, fetch, permission_check=_check)
+    result = await module.execute_tool("web.research", {"query": "q", "fetch_top_n": 1})
+    assert fetch.calls == []  # nosec B101 - fail closed
+    assert result["sources"][0]["reason_code"] == "permission_denied"  # nosec B101

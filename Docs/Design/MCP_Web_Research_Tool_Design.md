@@ -85,6 +85,24 @@ source with `fetched: false` and the fetch's `reason_code`.
 5. Assemble `sources` preserving search order; `fetched_count` = number of ok
    fetches; `truncated` = search truncated OR any fetched source truncated.
 
+## Per-URL permission enforcement
+
+`web.research` takes a `query` (no `url`), so the gateway runtime extracts no
+per-call domain subject for it, and its internal `web.fetch` calls do not pass
+through `_enforce_permission_rules_for_tool_call`. The always-on outbound
+(SSRF/egress) policy inside `web.fetch` still applies, but profile-authored
+`WebFetch(<domain>)` ask/deny rules would otherwise be bypassed for the fetched
+URLs.
+
+To close that gap, `WebResearchModule` accepts an optional injected
+`permission_check: (url, context) -> "allow" | "ask" | "deny"`. When wired by the
+gateway, it is consulted (fail-closed on error) before each sub-fetch: `deny` →
+the source is marked `fetched: false, reason_code: "permission_denied"`; `ask` →
+`"permission_required"`; only `allow` URLs are fetched. Absent a check (default /
+tests), behavior is unchanged and SSRF/egress remains enforced. The longer-term
+design is to compose `web.research` at the gateway layer so each `web.fetch(url=)`
+is a real, individually-enforced tool call.
+
 ## Testability
 
 `WebResearchModule(config, *, search_module=None, fetch_module=None)` — tests
