@@ -152,13 +152,18 @@ export function CommandPalette({
     allowInInput: true,
   })
 
-  // Also allow Escape to close
+  // Also allow Escape to close — but only while the palette is open. useShortcut
+  // registers a capture-phase keydown that calls stopPropagation() on a match, so
+  // an always-on Escape shortcut would swallow Escape app-wide and prevent antd
+  // Drawer/Modal/Select from closing on Escape. Gating on `open` keeps Escape
+  // working for every other overlay when the palette is closed.
   useShortcut({
     key: "Escape",
     modifiers: [],
     action: () => setOpen(false),
     description: "Close command palette",
     allowInInput: true,
+    enabled: open,
   })
 
   useIsomorphicLayoutEffect(() => {
