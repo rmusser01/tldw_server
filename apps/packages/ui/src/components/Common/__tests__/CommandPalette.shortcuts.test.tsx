@@ -1,6 +1,6 @@
 import React from "react"
 import { describe, it, expect, vi } from "vitest"
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { MemoryRouter, useLocation } from "react-router-dom"
 import { CommandPalette } from "../CommandPalette"
 import {
@@ -269,6 +269,52 @@ describe("CommandPalette shortcut hints", () => {
     fireEvent.click(goToChat)
 
     expect(screen.getByTestId("current-route")).toHaveTextContent("/chat")
+  })
+
+  it("closes on Escape while the palette is open", async () => {
+    render(
+      <MemoryRouter>
+        <CommandPalette
+          onNewChat={vi.fn()}
+          onToggleRag={vi.fn()}
+          onToggleWebSearch={vi.fn()}
+          onIngestPage={vi.fn()}
+          onSwitchModel={vi.fn()}
+          onToggleSidebar={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+
+    // While open, Escape is handled (default prevented) and closes the palette.
+    const defaultNotPrevented = fireEvent.keyDown(document, { key: "Escape" })
+    expect(defaultNotPrevented).toBe(false)
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    )
+  })
+
+  it("does not swallow Escape while the palette is closed", () => {
+    render(
+      <MemoryRouter>
+        <CommandPalette
+          onNewChat={vi.fn()}
+          onToggleRag={vi.fn()}
+          onToggleWebSearch={vi.fn()}
+          onIngestPage={vi.fn()}
+          onSwitchModel={vi.fn()}
+          onToggleSidebar={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    // Closed: the Escape shortcut must be inactive so Escape stays available for
+    // other overlays (antd Drawer/Modal). fireEvent returns true when no handler
+    // called preventDefault.
+    const defaultNotPrevented = fireEvent.keyDown(document, { key: "Escape" })
+    expect(defaultNotPrevented).toBe(true)
   })
 
   it("routes the Go to MCP Hub command to the product hub page", async () => {
