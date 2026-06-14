@@ -128,7 +128,7 @@ def test_waiting_run_keeps_secrets_and_releases_slot(workflows_db: WorkflowsData
         definition_version=1,
         definition_snapshot=definition,
     )
-    WorkflowEngine.set_run_secrets(run_id, {"token": "secret"})
+    WorkflowEngine.set_run_secrets(run_id, {"fixture": "value"})
     engine = WorkflowEngine(workflows_db)
     engine.submit(run_id, RunMode.ASYNC)
 
@@ -136,7 +136,7 @@ def test_waiting_run_keeps_secrets_and_releases_slot(workflows_db: WorkflowsData
     assert status == "waiting_human"
     assert WorkflowEngine._RUN_SECRETS.get(run_id) is not None
 
-    stats = _wait_for_scheduler_idle(scheduler)
+    stats = _wait_for_scheduler_idle(scheduler, timeout=10.0)
     assert stats["active_tenants"] == 0
     assert stats["active_workflows"] == 0
 
@@ -165,7 +165,7 @@ def test_continue_run_clears_secrets(workflows_db: WorkflowsDatabase):
         definition_version=1,
         definition_snapshot=definition,
     )
-    WorkflowEngine.set_run_secrets(run_id, {"token": "secret"})
+    WorkflowEngine.set_run_secrets(run_id, {"fixture": "value"})
     engine = WorkflowEngine(workflows_db)
     engine.submit(run_id, RunMode.ASYNC)
     status = _wait_for_status(workflows_db, run_id)

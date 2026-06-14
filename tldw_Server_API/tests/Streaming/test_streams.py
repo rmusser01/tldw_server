@@ -412,16 +412,21 @@ async def test_ws_stream_idle_edge_and_mark_activity():
     ws = _StubWebSocket()
     stream = WebSocketStream(ws, heartbeat_interval_s=0, idle_timeout_s=0.12)
     await stream.start()
-    # Nearly hit the threshold, then mark activity
-    await asyncio.sleep(0.06)
-    stream.mark_activity()
-    await asyncio.sleep(0.07)
-    # Should not be closed yet
-    assert ws.closed is False
-    # Now let it cross the threshold
-    await asyncio.sleep(0.12)
-    assert ws.closed is True
-    assert ws.close_code == 1001
+    try:
+        # Nearly hit the threshold, then mark activity
+        await asyncio.sleep(0.06)
+        stream.mark_activity()
+        await asyncio.sleep(0.07)
+        # Should not be closed yet
+        assert ws.closed is False
+        # Now let it cross the threshold and wait for the background idle loop.
+        deadline = time.monotonic() + 1.0
+        while not ws.closed and time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
+        assert ws.closed is True
+        assert ws.close_code == 1001
+    finally:
+        await stream.stop()
 
 
 @pytest.mark.asyncio

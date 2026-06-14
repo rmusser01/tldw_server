@@ -288,7 +288,9 @@ def test_embedding_model_predownload_skips_backpressure_shard() -> None:
     for step in predownload_steps:
         condition = str(step.get("if"))
         assert "matrix.shard.name != 'ai-embeddings-backpressure'" in condition
+        assert "matrix.shard.name != 'ai-embeddings-media-validation'" in condition
         assert "matrix.shard.name != 'rag-new-unit-rag-contracts'" in condition
+        assert "matrix.shard.name != 'rag-new-integration-research'" in condition
 
 
 def test_full_suite_test_result_uploads_are_non_blocking() -> None:

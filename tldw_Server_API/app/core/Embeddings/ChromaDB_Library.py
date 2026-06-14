@@ -83,6 +83,14 @@ from tldw_Server_API.app.core.Utils.Utils import logger  # Assuming this is 'log
 #######################################################################################################################
 #
 # Security Functions:
+def _audit_invalid_user_id(user_id: str | None, action: str, metadata: dict[str, Any] | None = None) -> None:
+    """Best-effort audit for rejected user IDs without masking validation errors."""
+    try:
+        log_security_violation(user_id=user_id, action=action, metadata=metadata)
+    except Exception as exc:
+        logger.warning(f"Unable to audit invalid user_id for action {action}: {exc}")
+
+
 def validate_user_id(user_id: str) -> str:
     """
     Validates and sanitizes user_id to prevent path traversal attacks.
@@ -105,7 +113,11 @@ def validate_user_id(user_id: str) -> str:
     if any(pattern in raw_user_id for pattern in ['..', '/', '\\', '\x00', '\n', '\r']):
         logger.error(f"Potential path traversal attempt detected in user_id: {user_id[:50]}")
         # Best-effort unified audit (non-blocking)
-        log_security_violation(user_id=raw_user_id[:50], action="path_traversal_attempt", metadata={"attempted_value": raw_user_id[:100]})
+        _audit_invalid_user_id(
+            user_id=raw_user_id[:50],
+            action="path_traversal_attempt",
+            metadata={"attempted_value": raw_user_id[:100]},
+        )
         raise ValueError("Invalid user_id: contains forbidden characters")
 
     # Now trim safe leading/trailing whitespace
@@ -114,7 +126,11 @@ def validate_user_id(user_id: str) -> str:
     # Only allow alphanumeric, underscore, and hyphen
     if not re.match(r'^[a-zA-Z0-9_-]+$', user_id):
         logger.error(f"Invalid user_id format: {user_id[:50]}")
-        log_security_violation(user_id=user_id[:50], action="invalid_user_id", metadata={"reason": "invalid_characters"})
+        _audit_invalid_user_id(
+            user_id=user_id[:50],
+            action="invalid_user_id",
+            metadata={"reason": "invalid_characters"},
+        )
         raise ValueError("Invalid user_id: must contain only alphanumeric characters, underscores, and hyphens")
 
     # Limit length to prevent DoS

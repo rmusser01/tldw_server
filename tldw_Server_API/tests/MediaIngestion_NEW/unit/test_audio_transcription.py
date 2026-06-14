@@ -72,6 +72,7 @@ def test_convert_to_wav_includes_duration(monkeypatch, tmp_path):
         "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib.subprocess.run",
         fake_run,
     )
+    monkeypatch.setattr(atlib, "_find_ffmpeg", lambda: "ffmpeg")
 
     output_path = convert_to_wav(str(input_file), offset=5, end_time=9, overwrite=True)
 
