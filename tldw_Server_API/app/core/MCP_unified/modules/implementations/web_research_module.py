@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -289,23 +290,35 @@ class WebResearchModule(WebToolBase):
         sources: list[dict[str, Any]] = []
         fetched_count = 0
         any_truncated = False
+        rank = 0
         for entry in results:
             if not isinstance(entry, dict):
                 continue
+            rank += 1
             url = entry.get("url")
             url = url.strip() if isinstance(url, str) else ""
+            metadata = entry.get("metadata")
             source: dict[str, Any] = {
+                # Citation-oriented fields: rank for ordering, domain for
+                # attribution, and the search provider's own metadata
+                # (author/date/source/...) carried through for the caller.
+                "rank": rank,
                 "title": entry.get("title"),
                 "url": url,
+                "domain": _safe_host(url) if url else None,
                 "snippet": entry.get("content"),
+                "search_metadata": metadata if isinstance(metadata, dict) else {},
                 "fetched": False,
             }
             fetch_result = fetched.get(url) if url else None
             if isinstance(fetch_result, dict):
                 if fetch_result.get("ok"):
                     source["fetched"] = True
+                    source["final_url"] = fetch_result.get("final_url") or url
                     source["status_code"] = fetch_result.get("status_code")
+                    source["content_type"] = fetch_result.get("content_type")
                     source["content"] = fetch_result.get("content")
+                    source["retrieved_at"] = datetime.now(UTC).isoformat()
                     if fetch_result.get("truncated"):
                         any_truncated = True
                     fetched_count += 1
