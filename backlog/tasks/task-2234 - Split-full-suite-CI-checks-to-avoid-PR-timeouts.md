@@ -31,6 +31,11 @@ modified_files:
 - tldw_Server_API/app/api/v1/endpoints/media/__init__.py
 - tldw_Server_API/app/api/v1/router_groups/content.py
 - tldw_Server_API/app/api/v1/router_groups/minimal.py
+- tldw_Server_API/tests/helpers/app_main_state.py
+- tldw_Server_API/tests/Admin/test_admin_integration_smoke.py
+- tldw_Server_API/tests/Admin/test_monitoring_alerts_overlay_integration.py
+- tldw_Server_API/tests/Embeddings/test_backpressure_and_quotas.py
+- tldw_Server_API/tests/MediaDB2/test_metadata_endpoints_more.py
 - tldw_Server_API/app/core/AuthNZ/email_service.py
 - tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
 - tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py
@@ -928,6 +933,8 @@ The same run exposed Windows/Python 3.12 `chat-character-db` canceling at the 35
 Further polling of run `27485278892` exposed Windows/Python 3.12 `media-audio` failing `test_pocket_tts_cpp_fallback_materializes_voice_for_fallback_adapter` because the test asserted a POSIX `/voices/providers/pocket_tts_cpp/` substring against a Windows path. The assertion now checks the provider path components and filename through `Path`, preserving the managed-voice path contract without platform separators. The same poll exposed Ubuntu/Python 3.12 `product-workflows-storage` failing `test_mcp_tool_allowlist_blocks` after the five-second async scheduler wait expired while full-app scheduler startup logged SQLite transaction contention; the allowlist block/allow tests now request `mode=sync` so they exercise the MCP allowlist contract without depending on background scheduler timing. Verification: the exact failed tests passed locally (`4 passed`), and the full touched PocketTTS service plus workflow allowlist files passed locally (`15 passed`).
 
 Final inspection of run `27485278892` found Windows/Python 3.12 `product-prompt-studio` marked cancelled after pytest completed successfully (`453 passed, 69 skipped`) and uploaded its result artifact; this row is classified as a non-actionable post-test GitHub cancellation. The final `Full Suite` failures were aggregate summary gates over the inspected shard failures.
+
+Post-push run `27502819810` on `15648b5e7d` exposed 11 completed failed checks while the matrix was still draining. The actionable failures shared a stale FastAPI app route-table pattern across admin, monitoring, embeddings, consent, and MediaDB2 metadata tests: CI route assertions saw only the minimal/control-plane app or a stale app object even though a clean app import registers the target routers. The test app-main helper now reloads by clearing and freshly importing `tldw_Server_API.app.main`, and the route-table tests that assert admin, monitoring, embeddings, and media metadata behavior now request a fresh app at assertion time instead of using collection-time app objects. Because the helper file entered the touched Bandit scope, two existing low-severity `except: pass` patterns were cleaned up. Nonlocal reproduction on Python 3.11 did not show the CI route misses, matching an import-order/pytest-version-sensitive failure; the CI logs from Python 3.12/3.13 are the red signal. Verification: admin `g-i` shard passed locally (`51 passed`), admin monitoring shard passed (`20 passed`), embeddings backpressure file passed (`5 passed`), consent plus metadata endpoint files passed (`24 passed`), the consent/helper contract pair passed (`2 passed`), compileall passed for touched Python files, `git diff --check` passed, and Bandit JSON `/tmp/bandit_ci2258_app_route_state.json` reported `errors=[]` and `results=[]`.
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 

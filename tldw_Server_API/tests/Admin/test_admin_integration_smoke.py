@@ -7,6 +7,7 @@ database -- they inspect the FastAPI app object directly.
 from __future__ import annotations
 
 import importlib
+from functools import lru_cache
 
 import pytest
 
@@ -14,10 +15,13 @@ import pytest
 # Helper: collect all route paths from the app
 # ---------------------------------------------------------------------------
 
-def _get_all_route_paths() -> set[str]:
+@lru_cache(maxsize=1)
+def _get_all_route_paths() -> frozenset[str]:
     """Import the FastAPI app and return the set of registered route paths."""
-    from tldw_Server_API.app.main import app
-    return {route.path for route in app.routes if hasattr(route, "path")}
+    from tldw_Server_API.tests.helpers.app_main_state import reload_app_main
+
+    app = reload_app_main().app
+    return frozenset(route.path for route in app.routes if hasattr(route, "path"))
 
 
 # ---------------------------------------------------------------------------
@@ -35,6 +39,7 @@ class TestAdminRouterRegistration:
 
         assert "admin" in minimal.MINIMAL_REQUIRED_ROUTER_NAMES  # nosec B101
         assert "admin" in specs  # nosec B101
+        assert specs["admin"].route_key == "admin"  # nosec B101
         assert specs["admin"].skip_exceptions == minimal.REQUIRED_ROUTER_SKIP_EXCEPTIONS  # nosec B101
 
     def test_admin_init_does_not_import_admin_billing_router(self) -> None:

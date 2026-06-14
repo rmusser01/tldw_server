@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from tldw_Server_API.tests.helpers.app_main_state import reload_app_main
 
 # Stub heavy modules before importing the full app
 torch_stub = types.ModuleType("torch")
@@ -133,7 +134,7 @@ def _restore_dependency_overrides(
 
 @pytest.mark.asyncio
 async def test_metadata_search_normalizes_doi(monkeypatch):
-    from tldw_Server_API.app.main import app
+    app = reload_app_main().app
 
     fake_db = _FakeDB()
     previous_overrides = _override_metadata_search_db(app, fake_db)
@@ -159,7 +160,7 @@ async def test_metadata_search_normalizes_doi(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_metadata_search_invalid_doi_returns_400(monkeypatch):
-    from tldw_Server_API.app.main import app
+    app = reload_app_main().app
 
     fake_db = _FakeDB()
     previous_overrides = _override_metadata_search_db(app, fake_db)
@@ -181,7 +182,7 @@ async def test_metadata_search_invalid_doi_returns_400(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_metadata_search_forwards_standard_constraints(monkeypatch):
-    from tldw_Server_API.app.main import app
+    app = reload_app_main().app
 
     fake_db = _FakeDB()
     previous_overrides = _override_metadata_search_db(app, fake_db)
@@ -226,7 +227,7 @@ async def test_metadata_search_forwards_standard_constraints(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_by_identifier_invalid_doi_returns_400(monkeypatch):
-    from tldw_Server_API.app.main import app
+    app = reload_app_main().app
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.get(
