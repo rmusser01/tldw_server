@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from collections.abc import Callable
 
 # Generous defaults: enough headroom for normal research/redirect flows, low
@@ -36,12 +36,19 @@ class DomainRateLimiter:
         max_requests: int | None = _DEFAULT_MAX_REQUESTS,
         window_seconds: float = _DEFAULT_WINDOW_SECONDS,
         clock: Callable[[], float] | None = None,
+        max_tracked_domains: int = _MAX_TRACKED_DOMAINS,
     ) -> None:
-        self._max_requests = max_requests if (max_requests is not None and max_requests > 0) else 0
+        if max_requests is not None and max_requests > 0:
+            self._max_requests = max_requests
+        else:
+            self._max_requests = 0
         self._window_seconds = max(0.0, window_seconds)
         self._clock = clock or time.monotonic
+        self._max_tracked_domains = max(1, max_tracked_domains)
         self._lock = threading.Lock()
-        self._hits: dict[str, deque[float]] = {}
+        # OrderedDict gives O(1) LRU eviction: accessed domains move to the end,
+        # and the least-recently-used (front) entry is dropped when over the cap.
+        self._hits: OrderedDict[str, deque[float]] = OrderedDict()
 
     @property
     def enabled(self) -> bool:
@@ -59,7 +66,10 @@ class DomainRateLimiter:
             if bucket is None:
                 bucket = deque()
                 self._hits[key] = bucket
-                self._evict_if_needed(key)
+                self._evict_if_needed()
+            else:
+                # Mark this domain as most-recently-used for LRU eviction.
+                self._hits.move_to_end(key)
             while bucket and bucket[0] <= cutoff:
                 bucket.popleft()
             if len(bucket) >= self._max_requests:
@@ -67,14 +77,10 @@ class DomainRateLimiter:
             bucket.append(now)
             return True
 
-    def _evict_if_needed(self, just_added: str) -> None:
-        """Drop the oldest-tracked domain when over the tracking cap (caller holds lock)."""
-        if len(self._hits) <= _MAX_TRACKED_DOMAINS:
-            return
-        for key in list(self._hits):
-            if key != just_added:
-                del self._hits[key]
-                return
+    def _evict_if_needed(self) -> None:
+        """Drop the least-recently-used domain when over the cap (caller holds lock)."""
+        if len(self._hits) > self._max_tracked_domains:
+            self._hits.popitem(last=False)
 
 
 __all__ = ["DomainRateLimiter"]

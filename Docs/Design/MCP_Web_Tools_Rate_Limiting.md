@@ -21,7 +21,7 @@ by destination host:
 - `max_requests <= 0` (or `None`) disables limiting (always allows) — the explicit
   opt-out.
 - Injectable `clock` for deterministic tests; bounded domain tracking
-  (`_MAX_TRACKED_DOMAINS`, oldest-evicted) so a long-lived limiter can't grow
+  (`_MAX_TRACKED_DOMAINS`, LRU-evicted (OrderedDict)) so a long-lived limiter can't grow
   without bound.
 - Defaults: 60 requests / 60 s per domain — enough headroom for normal
   research/redirect flows, low enough to curb a runaway loop.

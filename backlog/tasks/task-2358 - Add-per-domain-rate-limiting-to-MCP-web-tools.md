@@ -32,7 +32,7 @@ Add a soft per-domain request-rate control to the read-only web MCP tools so a s
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-New `tldw_Server_API/app/core/MCP_unified/modules/implementations/web_rate_limit.py`: `DomainRateLimiter` — `dict[host] -> deque[timestamps]`, `threading.Lock`, `time.monotonic` (injectable `clock`), trailing-window eviction on each `try_acquire`, `_MAX_TRACKED_DOMAINS=1024` oldest-evicted cap, `enabled` property. Defaults 60 req / 60 s.
+New `tldw_Server_API/app/core/MCP_unified/modules/implementations/web_rate_limit.py`: `DomainRateLimiter` — `dict[host] -> deque[timestamps]`, `threading.Lock`, `time.monotonic` (injectable `clock`), trailing-window eviction on each `try_acquire`, `_MAX_TRACKED_DOMAINS=1024` LRU-evicted (OrderedDict) cap, `enabled` property. Defaults 60 req / 60 s.
 
 `WebFetchModule.__init__` takes `rate_limiter=None` → default-constructs an enabled limiter (on by default). In the redirect loop, after `decide_web_outbound_policy` passes and before `self._client.fetch`, `_safe_host(current_url)` is checked via `try_acquire`; over-limit → `_structured_error(... "rate_limited" ...)` (logged with host). web.research is unchanged: its composed `WebFetchModule` carries the limiter so sub-fetches throttle per-domain across a bundle.
 
