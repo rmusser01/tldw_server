@@ -1420,4 +1420,28 @@ describe("background proxy GET coalescing", () => {
 
     expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
   })
+
+  it("does not coalesce GETs with different timeoutMs", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "/api/v1/config/providers", method: "GET", timeoutMs: 5000 }),
+      bgRequest({ path: "/api/v1/config/providers", method: "GET", timeoutMs: 30000 })
+    ])
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not coalesce absolute-URL GETs that differ only by noAuth omitted vs false", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "https://api.example.com/api/v1/health", method: "GET" }),
+      bgRequest({ path: "https://api.example.com/api/v1/health", method: "GET", noAuth: false })
+    ])
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+  })
 })

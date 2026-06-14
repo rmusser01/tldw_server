@@ -1,5 +1,6 @@
 import { chromium } from "@playwright/test"
-const WEB="http://localhost:8080", SERVER="http://127.0.0.1:8000", K="THIS-IS-A-SECURE-KEY-123-FAKE-KEY"
+// Override via env; the fake default matches the repo's e2e smoke fixture key.
+const WEB=process.env.WEB_URL||"http://localhost:8080", SERVER=process.env.SERVER_URL||"http://127.0.0.1:8000", K=process.env.TLDW_API_KEY||"THIS-IS-A-SECURE-KEY-123-FAKE-KEY"
 const b=await chromium.launch(); const c=await b.newContext()
 await c.addInitScript(({s,k})=>{localStorage.setItem("tldwConfig",JSON.stringify({serverUrl:s,authMode:"single-user",apiKey:k,accessToken:""}));for(const[a,v]of Object.entries({isMigrated:"true",serverUrl:s,tldwServerUrl:s,authMode:"single-user",apiKey:k,__tldw_first_run_complete:"true",__tldw_test_bypass:"true",__tldw_allow_offline:"true"}))localStorage.setItem(a,v)},{s:SERVER,k:K})
 const p=await c.newPage()

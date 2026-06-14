@@ -7,11 +7,9 @@ import { test, expect, seedAuth } from "./smoke/smoke.setup"
  *
  * Correct behavior: while models are loading, show a loading affordance and NOT the
  * connect-server error; once loaded, real models appear.
+ *
+ * Auth and base URL come from the env-driven smoke config (seedAuth + Playwright baseURL).
  */
-const WEB = "http://localhost:8080"
-const SERVER = "http://127.0.0.1:8000"
-const KEY = "THIS-IS-A-SECURE-KEY-123-FAKE-KEY"
-
 test("model picker shows a loading state (not a connect-server error) while models load", async ({ page }) => {
   test.setTimeout(120_000)
 
@@ -20,8 +18,8 @@ test("model picker shows a loading state (not a connect-server error) while mode
     if (r.url().includes("/llm/models/metadata")) metaFinished = true
   })
 
-  await seedAuth(page, { serverUrl: SERVER, apiKey: KEY })
-  await page.goto(`${WEB}/chat`, { waitUntil: "domcontentloaded" })
+  await seedAuth(page)
+  await page.goto("/chat", { waitUntil: "domcontentloaded" })
   await page.getByTestId("chat-input").first().waitFor({ state: "visible", timeout: 30_000 })
 
   let sawConnectErrorWhileLoading = false

@@ -2081,7 +2081,11 @@ export const Playground = () => {
     if (typeof window === "undefined") return;
     const handleEscapeCapture = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      // Closing the shortcuts panel is the intended action for Escape while it is
+      // open; stop propagation so the same keypress does not also dismiss a parent
+      // overlay/dialog.
       event.preventDefault();
+      event.stopPropagation();
       setShortcutsHelpOpen(false);
       requestAnimationFrame(() => {
         shortcutsTriggerRef.current?.focus();

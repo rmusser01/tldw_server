@@ -9,11 +9,9 @@ import { test, expect, seedAuth } from "./smoke/smoke.setup"
  *
  * Baseline before fix: /users/me/profile x5, /config/providers x3, /characters x2,
  * /persona/catalog x2.
+ *
+ * Auth and base URL come from the env-driven smoke config (seedAuth + Playwright baseURL).
  */
-const WEB = "http://localhost:8080"
-const SERVER = "http://127.0.0.1:8000"
-const KEY = "THIS-IS-A-SECURE-KEY-123-FAKE-KEY"
-
 const TARGETS = [
   "/users/me/profile",
   "/config/providers",
@@ -34,8 +32,8 @@ test("identical concurrent GETs are coalesced on /chat load", async ({ page }) =
     }
   })
 
-  await seedAuth(page, { serverUrl: SERVER, apiKey: KEY })
-  await page.goto(`${WEB}/chat`, { waitUntil: "domcontentloaded" })
+  await seedAuth(page)
+  await page.goto("/chat", { waitUntil: "domcontentloaded" })
   await page.getByTestId("chat-input").first().waitFor({ state: "visible", timeout: 30_000 })
   await page.waitForTimeout(6000)
 
@@ -43,6 +41,9 @@ test("identical concurrent GETs are coalesced on /chat load", async ({ page }) =
   console.log(`[dedupe] ${summary}`)
 
   for (const target of TARGETS) {
-    expect(counts.get(target) ?? 0, `${target} should be coalesced to one concurrent request`).toBeLessThanOrEqual(1)
+    const count = counts.get(target) ?? 0
+    // Must actually be fetched (guards against a vacuous pass) AND coalesced to one.
+    expect(count, `${target} should be requested on /chat load`).toBeGreaterThanOrEqual(1)
+    expect(count, `${target} should be coalesced to a single concurrent request`).toBeLessThanOrEqual(1)
   }
 })

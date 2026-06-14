@@ -3,9 +3,10 @@
 import { chromium } from "@playwright/test"
 import fs from "node:fs/promises"
 
-const WEB = "http://localhost:8080"
-const SERVER = "http://127.0.0.1:8000"
-const API_KEY = "THIS-IS-A-SECURE-KEY-123-FAKE-KEY"
+// Override via env; the fake default matches the repo's e2e smoke fixture key.
+const WEB = process.env.WEB_URL || "http://localhost:8080"
+const SERVER = process.env.SERVER_URL || "http://127.0.0.1:8000"
+const API_KEY = process.env.TLDW_API_KEY || "THIS-IS-A-SECURE-KEY-123-FAKE-KEY"
 const SHOTS = "/tmp/chat-uat-shots"
 const log = (...a) => console.log(...a)
 

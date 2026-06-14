@@ -411,17 +411,38 @@ export async function bgRequest<
   if (!coalescable) {
     return bgRequestImpl<T, P, M>(init)
   }
+  // Header keys are case-insensitive and object key order is not meaningful, so
+  // normalize (lowercase + sort) for a stable key. Keep timeoutMs in the key so
+  // GETs with different timeouts are not merged, and preserve the distinction
+  // between "noAuth omitted" and "noAuth: false" (bgRequestImpl uses
+  // hasOwnProperty(noAuth) to decide cross-origin auth suppression).
+  const initHeaders = init.headers as Record<string, string> | undefined
+  const normalizedHeaders = initHeaders
+    ? Object.keys(initHeaders)
+        .sort()
+        .reduce<Record<string, string>>((acc, headerKey) => {
+          acc[headerKey.toLowerCase()] = initHeaders[headerKey]
+          return acc
+        }, {})
+    : null
   const key = JSON.stringify({
     p: String(init.path),
-    h: init.headers || null,
-    noAuth: Boolean(init.noAuth)
+    h: normalizedHeaders,
+    noAuth: Object.prototype.hasOwnProperty.call(init, "noAuth")
+      ? Boolean(init.noAuth)
+      : "__unset__",
+    timeoutMs: typeof init.timeoutMs === "number" ? init.timeoutMs : null
   })
   const existing = inFlightGetRequests.get(key)
   if (existing) {
     return existing as Promise<T>
   }
   const promise = bgRequestImpl<T, P, M>(init).finally(() => {
-    inFlightGetRequests.delete(key)
+    // Only clear the entry if it is still the promise we created — defensive in
+    // case the map handling changes to allow overwrites in the future.
+    if (inFlightGetRequests.get(key) === promise) {
+      inFlightGetRequests.delete(key)
+    }
   })
   inFlightGetRequests.set(key, promise)
   return promise as Promise<T>
