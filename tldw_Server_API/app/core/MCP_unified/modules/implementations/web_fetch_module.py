@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
 )
 
 from ..base import ModuleConfig, create_tool_definition
+from .web_cache import ResponseCache, make_cache_key
 from .web_rate_limit import DomainRateLimiter
 from .web_tool_base import CONTROL_CHARS_RE, WebToolBase, WebToolError
 
@@ -201,12 +202,15 @@ class WebFetchModule(WebToolBase):
         *,
         client: WebFetchHttpClient | None = None,
         rate_limiter: DomainRateLimiter | None = None,
+        response_cache: ResponseCache | None = None,
     ) -> None:
         super().__init__(config)
         self._client: WebFetchHttpClient = client or HttpxWebFetchClient()
         # A default, generously-bounded per-domain limiter is on unless the caller
         # supplies one (pass DomainRateLimiter(max_requests=0) to disable).
         self._rate_limiter: DomainRateLimiter = rate_limiter or DomainRateLimiter()
+        # Response caching is opt-in (None = no caching) since it trades freshness.
+        self._response_cache: ResponseCache | None = response_cache
 
     async def on_initialize(self) -> None:
         return None
@@ -290,6 +294,14 @@ class WebFetchModule(WebToolBase):
             )
         except WebToolError as exc:
             return self._structured_error(tool_name, exc.reason_code, exc.message, context=context)
+
+        # Cache hit: return the stored result (the gateway already enforced the
+        # call's permission rules, and a cache hit performs no network request).
+        cache_key = make_cache_key(requested_url, fmt, max_bytes)
+        if self._response_cache is not None:
+            cached = self._response_cache.get(cache_key)
+            if cached is not None:
+                return {**cached, "cached": True}
 
         # Follow redirects manually, re-applying the outbound policy to every hop
         # so a permitted URL cannot redirect into denied/private address space.
@@ -385,7 +397,7 @@ class WebFetchModule(WebToolBase):
                 context=context,
             )
 
-        return {
+        result = {
             "ok": True,
             "url": requested_url,
             "final_url": response.final_url,
@@ -396,6 +408,7 @@ class WebFetchModule(WebToolBase):
             "content": content,
             "bytes_fetched": len(response.body),
             "truncated": bool(response.truncated),
+            "cached": False,
             "eval": self._eval_metadata(
                 _TOOL_FETCH,
                 reason_code=None,
@@ -403,6 +416,9 @@ class WebFetchModule(WebToolBase):
                 context=context,
             ),
         }
+        if self._response_cache is not None:
+            self._response_cache.put(cache_key, result)
+        return result
 
     # ---- validation ----------------------------------------------------
 

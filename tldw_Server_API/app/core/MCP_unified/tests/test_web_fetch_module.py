@@ -517,3 +517,62 @@ async def test_rate_limit_disabled_allows_many(monkeypatch: pytest.MonkeyPatch) 
     for _ in range(5):
         result = await module.execute_tool("web.fetch", {"url": "https://example.com/a"})
         assert result["ok"] is True  # nosec B101
+
+
+async def test_response_cache_serves_second_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations.web_cache import (
+        ResponseCache,
+    )
+
+    _allow_policy(monkeypatch)
+    client = _FakeClient(_html_response(_RICH_HTML))
+    module = WebFetchModule(
+        ModuleConfig(name="WebFetch"), client=client, response_cache=ResponseCache(ttl_seconds=300)
+    )
+
+    first = await module.execute_tool("web.fetch", {"url": "https://example.com/post"})
+    assert first["ok"] is True  # nosec B101
+    assert first["cached"] is False  # nosec B101
+    assert len(client.calls) == 1  # nosec B101
+
+    second = await module.execute_tool("web.fetch", {"url": "https://example.com/post"})
+    assert second["ok"] is True  # nosec B101
+    assert second["cached"] is True  # nosec B101
+    assert second["content"] == first["content"]  # nosec B101
+    # Served from cache: the client was not called again.
+    assert len(client.calls) == 1  # nosec B101
+
+
+async def test_response_cache_key_includes_format(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations.web_cache import (
+        ResponseCache,
+    )
+
+    _allow_policy(monkeypatch)
+    client = _FakeClient(_html_response(_RICH_HTML))
+    module = WebFetchModule(
+        ModuleConfig(name="WebFetch"), client=client, response_cache=ResponseCache(ttl_seconds=300)
+    )
+    await module.execute_tool("web.fetch", {"url": "https://example.com/post", "format": "markdown"})
+    # A different format is a cache miss -> the client is called again.
+    result = await module.execute_tool("web.fetch", {"url": "https://example.com/post", "format": "text"})
+    assert result["cached"] is False  # nosec B101
+    assert len(client.calls) == 2  # nosec B101
+
+
+async def test_response_cache_does_not_store_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations.web_cache import (
+        ResponseCache,
+    )
+
+    _allow_policy(monkeypatch)
+    client = _FakeClient(_html_response(b"missing", status_code=404, content_type="text/html"))
+    module = WebFetchModule(
+        ModuleConfig(name="WebFetch"), client=client, response_cache=ResponseCache(ttl_seconds=300)
+    )
+    first = await module.execute_tool("web.fetch", {"url": "https://example.com/missing"})
+    assert first["ok"] is False  # nosec B101
+    second = await module.execute_tool("web.fetch", {"url": "https://example.com/missing"})
+    # Errors are not cached -> the client is retried.
+    assert second["ok"] is False  # nosec B101
+    assert len(client.calls) == 2  # nosec B101
