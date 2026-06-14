@@ -2067,6 +2067,28 @@ export const Playground = () => {
     });
   }, [shortcutsHelpOpen]);
 
+  // Dismiss the shortcuts help panel on Escape. A global capture-phase listener
+  // elsewhere calls stopPropagation() on Escape, which prevents the window
+  // bubble-phase shortcut handler above from ever seeing it. Listening in the
+  // capture phase (a sibling listener that stopPropagation does not block) keeps
+  // Escape working regardless of registration order.
+  React.useEffect(() => {
+    if (!shortcutsHelpOpen) return;
+    if (typeof window === "undefined") return;
+    const handleEscapeCapture = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setShortcutsHelpOpen(false);
+      requestAnimationFrame(() => {
+        shortcutsTriggerRef.current?.focus();
+      });
+    };
+    window.addEventListener("keydown", handleEscapeCapture, true);
+    return () => {
+      window.removeEventListener("keydown", handleEscapeCapture, true);
+    };
+  }, [shortcutsHelpOpen]);
+
   React.useEffect(() => {
     if (!threadSearchOpen) return;
     if (threadSearchMatches.length === 0) {
