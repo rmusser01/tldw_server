@@ -40,7 +40,13 @@ async function shot(page, name) {
 }
 
 async function main() {
-  await fs.mkdir(SHOTS, { recursive: true })
+  // Screenshots/observations are best-effort; don't abort the walkthrough if the
+  // output dir can't be created (read-only FS, permissions, etc.).
+  try {
+    await fs.mkdir(SHOTS, { recursive: true })
+  } catch (e) {
+    console.warn(`[chars-uat-driver] could not create ${SHOTS}: ${e.message} — screenshots/observations may be skipped`)
+  }
   const browser = await chromium.launch()
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   await ctx.addInitScript(({ s, k }) => {
@@ -142,9 +148,9 @@ async function main() {
     note("mobile snapshot", "ok")
   } catch (e) { note("mobile", "warn", e.message) }
 
-  await browser.close()
+  await browser.close().catch(() => {})
   obs.apiDuplicates = Object.fromEntries(Object.entries(obs.apiCalls).filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]))
-  await fs.writeFile(`${SHOTS}/observations.json`, JSON.stringify(obs, null, 2))
+  await fs.writeFile(`${SHOTS}/observations.json`, JSON.stringify(obs, null, 2)).catch((e) => console.warn(`[chars-uat-driver] could not write observations.json: ${e.message}`))
   console.log("\n==== SUMMARY ====")
   console.log("console errors:", obs.consoleErrors.length, "| page errors:", obs.pageErrors.length)
   console.log("duplicate GET endpoints:", JSON.stringify(obs.apiDuplicates))
