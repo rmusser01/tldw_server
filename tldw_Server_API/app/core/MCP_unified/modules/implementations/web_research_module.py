@@ -11,7 +11,6 @@ inherited. Individual fetch failures are tolerated and recorded per source.
 from __future__ import annotations
 
 import asyncio
-import re
 from collections.abc import Callable
 from typing import Any, Protocol
 from urllib.parse import urlsplit
@@ -19,11 +18,11 @@ from urllib.parse import urlsplit
 from loguru import logger
 
 from tldw_Server_API.app.core.MCP_unified.tool_observability import (
-    build_execution_eval_metadata,
     build_tool_eval_metadata,
 )
 
-from ..base import BaseModule, ModuleConfig, create_tool_definition
+from ..base import ModuleConfig, create_tool_definition
+from .web_tool_base import WebToolBase, WebToolError
 
 _TOOL_RESEARCH = "web.research"
 _TOOL_PROMPT_VERSION = "2026.06.14"
@@ -45,9 +44,6 @@ _MAX_MAX_RESULTS = 25
 _DEFAULT_FETCH_TOP_N = 3
 _MAX_FETCH_TOP_N = 10
 _FETCH_CONCURRENCY = 3
-
-_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
-_MAX_SANITIZE_DEPTH = 20
 
 
 class WebToolModule(Protocol):
@@ -74,17 +70,12 @@ def _safe_host(url: str) -> str:
         return "unknown"
 
 
-class _WebResearchError(Exception):
-    """Internal control-flow error carrying a structured reason code."""
-
-    def __init__(self, reason_code: str, message: str) -> None:
-        super().__init__(message)
-        self.reason_code = reason_code
-        self.message = message
-
-
-class WebResearchModule(BaseModule):
+class WebResearchModule(WebToolBase):
     """Single read-only ``web.research`` tool composing search + fetch."""
+
+    _ACTION_FAMILY = "web_research"
+    _RESULT_KIND = "bounded_web_research_bundle"
+    _TOOL_PROMPT_VERSION = _TOOL_PROMPT_VERSION
 
     def __init__(
         self,
@@ -167,23 +158,6 @@ class WebResearchModule(BaseModule):
         tool["inputSchema"]["additionalProperties"] = False
         return [tool]
 
-    def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
-        """Permissive sanitizer (strip only NUL/control chars).
-
-        See ``WebSearchModule.sanitize_input`` — the MCP protocol sanitizes every
-        tool call before execution, and the base SQL denylist would reject
-        legitimate research queries containing ``--``/``/*``.
-        """
-        if _depth > _MAX_SANITIZE_DEPTH:
-            raise ValueError("Input too deeply nested")
-        if isinstance(input_data, str):
-            return _CONTROL_CHARS_RE.sub("", input_data)
-        if isinstance(input_data, dict):
-            return {key: self.sanitize_input(value, _depth + 1) for key, value in input_data.items()}
-        if isinstance(input_data, list):
-            return [self.sanitize_input(value, _depth + 1) for value in input_data]
-        return input_data
-
     async def execute_tool(
         self,
         tool_name: str,
@@ -191,12 +165,12 @@ class WebResearchModule(BaseModule):
         context: Any | None = None,
     ) -> Any:
         if tool_name != _TOOL_RESEARCH:
-            return self._error(tool_name, "unknown_tool", "Unknown web tool.", context=context)
+            return self._structured_error(tool_name, "unknown_tool", "Unknown web tool.", context=context)
 
         try:
-            params = self._validate(arguments or {})
-        except _WebResearchError as exc:
-            return self._error(tool_name, exc.reason_code, exc.message, context=context)
+            params = self._validate(self.sanitize_input(arguments or {}))
+        except WebToolError as exc:
+            return self._structured_error(tool_name, exc.reason_code, exc.message, context=context)
 
         search_args: dict[str, Any] = {
             "query": params["query"],
@@ -213,11 +187,11 @@ class WebResearchModule(BaseModule):
             search_result = await self._search.execute_tool("web.search", search_args, context)
         except Exception as exc:  # noqa: BLE001 - a search crash maps to a structured error.
             logger.bind(stage="web.research").opt(exception=exc).error("web.research search stage failed")
-            return self._error(tool_name, "search_failed", "Web search stage failed.", context=context)
+            return self._structured_error(tool_name, "search_failed", "Web search stage failed.", context=context)
 
         if not isinstance(search_result, dict) or not search_result.get("ok"):
             reason_code, message = self._delegated_error(search_result, "search_failed")
-            return self._error(tool_name, reason_code, message, context=context)
+            return self._structured_error(tool_name, reason_code, message, context=context)
 
         results = search_result.get("results")
         if not isinstance(results, list):
@@ -352,16 +326,16 @@ class WebResearchModule(BaseModule):
     def _validate(self, args: dict[str, Any]) -> dict[str, Any]:
         unknown = sorted(set(args) - _ALLOWED_ARGS)
         if unknown:
-            raise _WebResearchError("invalid_arguments", f"unknown arguments: {', '.join(unknown)}")
+            raise WebToolError("invalid_arguments", f"unknown arguments: {', '.join(unknown)}")
 
         query = args.get("query")
         if not isinstance(query, str) or not query.strip():
-            raise _WebResearchError("invalid_arguments", "query is required")
+            raise WebToolError("invalid_arguments", "query is required")
         query = query.strip()
 
         engine = args.get("engine")
         if engine is not None and (not isinstance(engine, str) or not engine.strip()):
-            raise _WebResearchError("invalid_arguments", "engine must be a non-empty string")
+            raise WebToolError("invalid_arguments", "engine must be a non-empty string")
 
         max_results = self._bounded_int(
             args, "max_results", default=_DEFAULT_MAX_RESULTS, minimum=1, maximum=_MAX_MAX_RESULTS
@@ -374,12 +348,12 @@ class WebResearchModule(BaseModule):
 
         fmt = args.get("format", "markdown")
         if fmt not in _FORMATS:
-            raise _WebResearchError("invalid_arguments", "format must be one of markdown, text, html")
+            raise WebToolError("invalid_arguments", "format must be one of markdown, text, html")
 
         max_bytes = args.get("max_bytes")
         if max_bytes is not None:
             if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes <= 0:
-                raise _WebResearchError("invalid_arguments", "max_bytes must be a positive integer")
+                raise WebToolError("invalid_arguments", "max_bytes must be a positive integer")
 
         site_whitelist = self._validate_domain_list(args, "site_whitelist")
         site_blacklist = self._validate_domain_list(args, "site_blacklist")
@@ -401,65 +375,7 @@ class WebResearchModule(BaseModule):
         if value is None:
             return default
         if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
-            raise _WebResearchError("invalid_arguments", f"{name} must be an integer >= {minimum}")
+            raise WebToolError("invalid_arguments", f"{name} must be an integer >= {minimum}")
         if value > maximum:
-            raise _WebResearchError("invalid_arguments", f"{name} exceeds maximum ({maximum})")
+            raise WebToolError("invalid_arguments", f"{name} exceeds maximum ({maximum})")
         return value
-
-    @staticmethod
-    def _validate_domain_list(args: dict[str, Any], name: str) -> list[str] | None:
-        value = args.get(name)
-        if value is None:
-            return None
-        if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
-            raise _WebResearchError("invalid_arguments", f"{name} must be a list of non-empty strings")
-        stripped = [item.strip() for item in value]
-        return stripped or None
-
-    # ---- result helpers ------------------------------------------------
-
-    def _error(
-        self,
-        tool_name: str,
-        reason_code: str,
-        message: str,
-        *,
-        context: Any | None = None,
-    ) -> dict[str, Any]:
-        return {
-            "ok": False,
-            "reason_code": reason_code,
-            "message": message,
-            "eval": self._eval_metadata(tool_name, reason_code=reason_code, context=context),
-        }
-
-    def _eval_metadata(
-        self,
-        tool_name: str,
-        *,
-        reason_code: str | None,
-        truncated: bool = False,
-        context: Any | None,
-    ) -> dict[str, Any]:
-        return build_execution_eval_metadata(
-            tool_name=tool_name,
-            tool_prompt_id=f"mcp.{tool_name}.v1",
-            tool_prompt_version=_TOOL_PROMPT_VERSION,
-            action_family="web_research",
-            result_kind="bounded_web_research_bundle",
-            profile_id=self._profile_id_from_context_metadata(context),
-            path_filter_used=False,
-            truncated=truncated,
-            reason_code=reason_code,
-        )
-
-    @staticmethod
-    def _profile_id_from_context_metadata(context: Any | None) -> str | None:
-        metadata = getattr(context, "metadata", None)
-        if not isinstance(metadata, dict):
-            return None
-        for key in ("profile_id", "selected_profile_id"):
-            value = metadata.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-        return None

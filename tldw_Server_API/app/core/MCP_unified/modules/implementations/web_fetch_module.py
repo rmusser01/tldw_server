@@ -19,14 +19,14 @@ from urllib.parse import urljoin, urlsplit
 from loguru import logger
 
 from tldw_Server_API.app.core.MCP_unified.tool_observability import (
-    build_execution_eval_metadata,
     build_tool_eval_metadata,
 )
 from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
     decide_web_outbound_policy,
 )
 
-from ..base import BaseModule, ModuleConfig, create_tool_definition
+from ..base import ModuleConfig, create_tool_definition
+from .web_tool_base import CONTROL_CHARS_RE, WebToolBase, WebToolError
 
 _TOOL_FETCH = "web.fetch"
 _TOOL_PROMPT_VERSION = "2026.06.12"
@@ -45,8 +45,6 @@ _DEFAULT_USER_AGENT = "tldw-mcp-web-fetch/1.0"
 # address space and bypass SSRF/egress protection).
 _REDIRECT_STATUS = {301, 302, 303, 307, 308}
 _MAX_REDIRECTS = 5
-_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
-_MAX_SANITIZE_DEPTH = 20
 
 # Content types we will surface as text. Anything else is rejected so the tool
 # never returns binary blobs through the JSON tool contract.
@@ -189,17 +187,12 @@ class HttpxWebFetchClient:
                 )
 
 
-class _WebFetchError(Exception):
-    """Internal control-flow error carrying a structured reason code."""
-
-    def __init__(self, reason_code: str, message: str) -> None:
-        super().__init__(message)
-        self.reason_code = reason_code
-        self.message = message
-
-
-class WebFetchModule(BaseModule):
+class WebFetchModule(WebToolBase):
     """Single read-only ``web.fetch`` tool governed by outbound + domain policy."""
+
+    _ACTION_FAMILY = "web_fetch"
+    _RESULT_KIND = "bounded_web_document"
+    _TOOL_PROMPT_VERSION = _TOOL_PROMPT_VERSION
 
     def __init__(
         self,
@@ -273,27 +266,6 @@ class WebFetchModule(BaseModule):
         tool["inputSchema"]["additionalProperties"] = False
         return [tool]
 
-    def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
-        """Permissive sanitizer for web fetch inputs.
-
-        The MCP protocol layer runs ``module.sanitize_input`` on every tool call
-        before execution. The base implementation rejects strings containing
-        SQL-injection substrings such as ``--``, ``/*`` and ``*/`` — which appear
-        constantly in legitimate URLs and query strings — and would turn them
-        into a protocol ``InvalidParams`` error before this tool's own validation
-        can run. We therefore strip only NUL/control characters and keep a depth
-        guard.
-        """
-        if _depth > _MAX_SANITIZE_DEPTH:
-            raise ValueError("Input too deeply nested")
-        if isinstance(input_data, str):
-            return _CONTROL_CHARS_RE.sub("", input_data)
-        if isinstance(input_data, dict):
-            return {key: self.sanitize_input(value, _depth + 1) for key, value in input_data.items()}
-        if isinstance(input_data, list):
-            return [self.sanitize_input(value, _depth + 1) for value in input_data]
-        return input_data
-
     async def execute_tool(
         self,
         tool_name: str,
@@ -301,7 +273,7 @@ class WebFetchModule(BaseModule):
         context: Any | None = None,
     ) -> Any:
         if tool_name != _TOOL_FETCH:
-            return self._error(tool_name, "unknown_tool", "Unknown web tool.", context=context)
+            return self._structured_error(tool_name, "unknown_tool", "Unknown web tool.", context=context)
 
         # Note: the inherited SQL-oriented sanitize_input() is intentionally NOT
         # applied to the raw URL — legitimate URLs commonly contain substrings
@@ -311,8 +283,8 @@ class WebFetchModule(BaseModule):
             requested_url, fmt, max_bytes, timeout_seconds, respect_robots = self._validate(
                 arguments or {}
             )
-        except _WebFetchError as exc:
-            return self._error(tool_name, exc.reason_code, exc.message, context=context)
+        except WebToolError as exc:
+            return self._structured_error(tool_name, exc.reason_code, exc.message, context=context)
 
         # Follow redirects manually, re-applying the outbound policy to every hop
         # so a permitted URL cannot redirect into denied/private address space.
@@ -326,7 +298,7 @@ class WebFetchModule(BaseModule):
                 stage="web.fetch",
             )
             if not getattr(decision, "allowed", False):
-                return self._error(
+                return self._structured_error(
                     tool_name,
                     "outbound_policy_denied",
                     f"Outbound policy denied the request ({getattr(decision, 'reason', 'denied')}).",
@@ -344,14 +316,14 @@ class WebFetchModule(BaseModule):
                 logger.bind(stage="web.fetch", host=_safe_host(current_url)).opt(exception=exc).warning(
                     "web.fetch client error"
                 )
-                return self._error(tool_name, "fetch_failed", "Failed to fetch the URL.", context=context)
+                return self._structured_error(tool_name, "fetch_failed", "Failed to fetch the URL.", context=context)
 
             if response.status_code in _REDIRECT_STATUS:
                 if not response.location:
                     logger.bind(stage="web.fetch", host=_safe_host(current_url)).warning(
                         "web.fetch redirect without a Location header"
                     )
-                    return self._error(
+                    return self._structured_error(
                         tool_name,
                         "fetch_failed",
                         "Upstream returned a redirect without a Location header.",
@@ -365,7 +337,7 @@ class WebFetchModule(BaseModule):
             logger.bind(stage="web.fetch", host=_safe_host(requested_url)).warning(
                 "web.fetch exceeded the redirect limit"
             )
-            return self._error(
+            return self._structured_error(
                 tool_name,
                 "fetch_failed",
                 f"Exceeded the redirect limit ({_MAX_REDIRECTS}).",
@@ -373,7 +345,7 @@ class WebFetchModule(BaseModule):
             )
 
         if response.status_code >= 400:
-            return self._error(
+            return self._structured_error(
                 tool_name,
                 "fetch_failed",
                 f"Upstream returned status {response.status_code}.",
@@ -383,14 +355,14 @@ class WebFetchModule(BaseModule):
 
         try:
             content, title = self._extract(response, fmt)
-        except _WebFetchError as exc:
+        except WebToolError as exc:
             logger.bind(
                 stage="web.fetch",
                 host=_safe_host(response.final_url),
                 reason_code=exc.reason_code,
                 content_type=response.content_type,
             ).debug("web.fetch extraction rejected the response")
-            return self._error(
+            return self._structured_error(
                 tool_name,
                 exc.reason_code,
                 exc.message,
@@ -422,20 +394,20 @@ class WebFetchModule(BaseModule):
     def _validate(self, args: dict[str, Any]) -> tuple[str, str, int, int, bool]:
         unknown = sorted(set(args) - _ALLOWED_ARGS)
         if unknown:
-            raise _WebFetchError("invalid_arguments", f"unknown arguments: {', '.join(unknown)}")
+            raise WebToolError("invalid_arguments", f"unknown arguments: {', '.join(unknown)}")
 
         url = args.get("url")
         if not isinstance(url, str) or not url.strip():
-            raise _WebFetchError("invalid_arguments", "url is required")
+            raise WebToolError("invalid_arguments", "url is required")
         url = url.strip()
-        if _CONTROL_CHARS_RE.search(url):
-            raise _WebFetchError("invalid_url", "url must not contain control characters")
+        if CONTROL_CHARS_RE.search(url):
+            raise WebToolError("invalid_url", "url must not contain control characters")
         if not re.match(r"^https?://", url, re.IGNORECASE):
-            raise _WebFetchError("invalid_url", "url must use the http or https scheme")
+            raise WebToolError("invalid_url", "url must use the http or https scheme")
 
         fmt = args.get("format", "markdown")
         if fmt not in _FORMATS:
-            raise _WebFetchError("invalid_arguments", "format must be one of markdown, text, html")
+            raise WebToolError("invalid_arguments", "format must be one of markdown, text, html")
 
         max_bytes = self._bounded_int(
             args, "max_bytes", default=_DEFAULT_MAX_BYTES, maximum=_MAX_MAX_BYTES
@@ -446,7 +418,7 @@ class WebFetchModule(BaseModule):
 
         respect_robots = args.get("respect_robots", False)
         if not isinstance(respect_robots, bool):
-            raise _WebFetchError("invalid_arguments", "respect_robots must be a boolean")
+            raise WebToolError("invalid_arguments", "respect_robots must be a boolean")
 
         return url, fmt, max_bytes, timeout_seconds, respect_robots
 
@@ -456,9 +428,9 @@ class WebFetchModule(BaseModule):
         if value is None:
             return default
         if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-            raise _WebFetchError("invalid_arguments", f"{name} must be a positive integer")
+            raise WebToolError("invalid_arguments", f"{name} must be a positive integer")
         if value > maximum:
-            raise _WebFetchError("invalid_arguments", f"{name} exceeds maximum ({maximum})")
+            raise WebToolError("invalid_arguments", f"{name} exceeds maximum ({maximum})")
         return value
 
     # ---- extraction ----------------------------------------------------
@@ -472,7 +444,7 @@ class WebFetchModule(BaseModule):
                 return text, self._html_title(text)
             content = self._extract_html(text, fmt)
             if not content:
-                raise _WebFetchError("empty_content", "No readable content could be extracted.")
+                raise WebToolError("empty_content", "No readable content could be extracted.")
             return content, self._html_title(text)
 
         # Plain text, or an absent/misconfigured content type that did not look
@@ -480,10 +452,10 @@ class WebFetchModule(BaseModule):
         if main_type in _PLAIN_TYPES or not main_type:
             cleaned = text.strip()
             if not cleaned:
-                raise _WebFetchError("empty_content", "Response body was empty.")
+                raise WebToolError("empty_content", "Response body was empty.")
             return cleaned, None
 
-        raise _WebFetchError(
+        raise WebToolError(
             "empty_content", f"Unsupported content type for extraction: {main_type}"
         )
 
@@ -531,57 +503,3 @@ class WebFetchModule(BaseModule):
             return None
         title = html_lib.unescape(_WS_RE.sub(" ", _TAG_RE.sub(" ", match.group(1)))).strip()
         return title or None
-
-    # ---- result helpers ------------------------------------------------
-
-    def _error(
-        self,
-        tool_name: str,
-        reason_code: str,
-        message: str,
-        *,
-        status_code: int | None = None,
-        context: Any | None = None,
-    ) -> dict[str, Any]:
-        result: dict[str, Any] = {
-            "ok": False,
-            "reason_code": reason_code,
-            "message": message,
-            "eval": self._eval_metadata(
-                tool_name, reason_code=reason_code, truncated=False, context=context
-            ),
-        }
-        if status_code is not None:
-            result["status_code"] = status_code
-        return result
-
-    def _eval_metadata(
-        self,
-        tool_name: str,
-        *,
-        reason_code: str | None,
-        truncated: bool,
-        context: Any | None,
-    ) -> dict[str, Any]:
-        return build_execution_eval_metadata(
-            tool_name=tool_name,
-            tool_prompt_id=f"mcp.{tool_name}.v1",
-            tool_prompt_version=_TOOL_PROMPT_VERSION,
-            action_family="web_fetch",
-            result_kind="bounded_web_document",
-            profile_id=self._profile_id_from_context_metadata(context),
-            path_filter_used=False,
-            truncated=truncated,
-            reason_code=reason_code,
-        )
-
-    @staticmethod
-    def _profile_id_from_context_metadata(context: Any | None) -> str | None:
-        metadata = getattr(context, "metadata", None)
-        if not isinstance(metadata, dict):
-            return None
-        for key in ("profile_id", "selected_profile_id"):
-            value = metadata.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-        return None
