@@ -12,7 +12,9 @@ import {
   Modal,
   Switch
 } from "antd"
+import type { MenuProps } from "antd"
 import type { ColumnsType, TableProps } from "antd/es/table"
+import type { SortOrder } from "antd/es/table/interface"
 import React from "react"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import {
@@ -25,7 +27,9 @@ import {
   FileDown,
   FileText,
   Database,
-  Copy
+  Copy,
+  Columns3,
+  Rows3
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
@@ -44,6 +48,8 @@ import type {
 const DEFAULT_PAGE_SIZE = 10
 const SKILLS_SEARCH_DEBOUNCE_MS = 300
 const SKILL_NAME_REGEX = /^[a-z][a-z0-9-]{0,63}$/
+const SKILLS_TABLE_PREFERENCES_STORAGE_KEY = "tldw:skills-manager:table-preferences:v1"
+const SKILL_TABLE_SORT_DIRECTIONS: SortOrder[] = ["ascend", "descend"]
 
 interface ImportTextFormValues {
   name?: string
@@ -67,11 +73,36 @@ interface SeedSkillsResult {
 type SkillContextFilter = "all" | SkillContext
 type SkillVisibilityFilter = "visible" | "hidden" | "all"
 type SkillToolsFilter = "any" | "with-tools" | "without-tools"
+type SkillTableDensity = "comfortable" | "compact"
+type SkillOptionalColumnKey =
+  | "description"
+  | "context"
+  | "argument_hint"
+  | "user_invocable"
+  | "model_invocation"
 
 interface SkillSortState {
   field?: SkillListSort
   order?: SkillListOrder
 }
+
+interface SkillsTablePreferences {
+  density: SkillTableDensity
+  visibleColumns: SkillOptionalColumnKey[]
+}
+
+const DEFAULT_SKILLS_TABLE_PREFERENCES: SkillsTablePreferences = {
+  density: "comfortable",
+  visibleColumns: ["description", "context"]
+}
+
+const SKILL_OPTIONAL_COLUMN_KEYS: SkillOptionalColumnKey[] = [
+  "description",
+  "context",
+  "argument_hint",
+  "user_invocable",
+  "model_invocation"
+]
 
 const getResponseSkillName = (result: unknown): string | undefined => {
   if (!result || typeof result !== "object") return undefined
@@ -92,6 +123,69 @@ const buildSkillInvocation = (skillName: string) => `/skill ${skillName}`
 const isSkillTableSortField = (value: React.Key | undefined): value is SkillListSort =>
   value === "name" || value === "context"
 
+const getSkillTableSortOrder = (
+  sortState: SkillSortState,
+  field: SkillListSort
+): SortOrder => {
+  if (sortState.field !== field) return null
+  return sortState.order === "asc" ? "ascend" : "descend"
+}
+
+const isSkillTableDensity = (value: unknown): value is SkillTableDensity =>
+  value === "comfortable" || value === "compact"
+
+const isSkillOptionalColumnKey = (value: unknown): value is SkillOptionalColumnKey =>
+  typeof value === "string"
+  && SKILL_OPTIONAL_COLUMN_KEYS.includes(value as SkillOptionalColumnKey)
+
+const normalizeSkillsTablePreferences = (value: unknown): SkillsTablePreferences => {
+  if (!value || typeof value !== "object") return DEFAULT_SKILLS_TABLE_PREFERENCES
+
+  const raw = value as {
+    density?: unknown
+    visibleColumns?: unknown
+  }
+  const density = isSkillTableDensity(raw.density)
+    ? raw.density
+    : DEFAULT_SKILLS_TABLE_PREFERENCES.density
+  const visibleColumnValues = Array.isArray(raw.visibleColumns)
+    ? raw.visibleColumns
+    : undefined
+  const visibleColumns = visibleColumnValues
+    ? SKILL_OPTIONAL_COLUMN_KEYS.filter((key) => visibleColumnValues.includes(key))
+    : DEFAULT_SKILLS_TABLE_PREFERENCES.visibleColumns
+
+  return {
+    density,
+    visibleColumns
+  }
+}
+
+const loadSkillsTablePreferences = (): SkillsTablePreferences => {
+  if (typeof window === "undefined") return DEFAULT_SKILLS_TABLE_PREFERENCES
+
+  try {
+    const raw = window.localStorage.getItem(SKILLS_TABLE_PREFERENCES_STORAGE_KEY)
+    if (!raw) return DEFAULT_SKILLS_TABLE_PREFERENCES
+    return normalizeSkillsTablePreferences(JSON.parse(raw))
+  } catch {
+    return DEFAULT_SKILLS_TABLE_PREFERENCES
+  }
+}
+
+const saveSkillsTablePreferences = (preferences: SkillsTablePreferences) => {
+  if (typeof window === "undefined") return
+
+  try {
+    window.localStorage.setItem(
+      SKILLS_TABLE_PREFERENCES_STORAGE_KEY,
+      JSON.stringify(preferences)
+    )
+  } catch {
+    // Preference persistence is best-effort; rendering must not depend on storage.
+  }
+}
+
 export const SkillsManager: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
   const queryClient = useQueryClient()
@@ -108,6 +202,11 @@ export const SkillsManager: React.FC = () => {
   const [toolsFilter, setToolsFilter] = React.useState<SkillToolsFilter>("any")
   const [modelFilter, setModelFilter] = React.useState("")
   const [debouncedModelFilter, setDebouncedModelFilter] = React.useState("")
+  const [tableDensity, setTableDensity] =
+    React.useState<SkillTableDensity>(() => loadSkillsTablePreferences().density)
+  const [visibleOptionalColumns, setVisibleOptionalColumns] = React.useState<
+    SkillOptionalColumnKey[]
+  >(() => loadSkillsTablePreferences().visibleColumns)
   const [sortState, setSortState] = React.useState<SkillSortState>({})
   const [drawerOpen, setDrawerOpen] = React.useState(false)
   const [importTextOpen, setImportTextOpen] = React.useState(false)
@@ -157,6 +256,13 @@ export const SkillsManager: React.FC = () => {
 
     return () => window.clearTimeout(timer)
   }, [debouncedModelFilter, modelFilter])
+
+  React.useEffect(() => {
+    saveSkillsTablePreferences({
+      density: tableDensity,
+      visibleColumns: visibleOptionalColumns
+    })
+  }, [tableDensity, visibleOptionalColumns])
 
   const {
     data,
@@ -239,6 +345,29 @@ export const SkillsManager: React.FC = () => {
 
   const handleModelFilterChange = (nextValue: string) => {
     setModelFilter(nextValue)
+  }
+
+  const handleDensityChange = (nextDensity: SkillTableDensity) => {
+    setTableDensity(nextDensity)
+  }
+
+  const handleColumnVisibilityToggle = (columnKey: string) => {
+    if (!isSkillOptionalColumnKey(columnKey)) return
+
+    if (
+      visibleOptionalColumns.includes(columnKey)
+      && isSkillTableSortField(columnKey)
+      && sortState.field === columnKey
+    ) {
+      setSortState({})
+      setPage(1)
+    }
+
+    setVisibleOptionalColumns((current) => {
+      return current.includes(columnKey)
+        ? current.filter((key) => key !== columnKey)
+        : SKILL_OPTIONAL_COLUMN_KEYS.filter((key) => current.includes(key) || key === columnKey)
+    })
   }
 
   const handleTableChange: TableProps<SkillSummary>["onChange"] = (
@@ -514,45 +643,103 @@ export const SkillsManager: React.FC = () => {
     }
   }
 
+  const isOptionalColumnVisible = (columnKey: SkillOptionalColumnKey) =>
+    visibleOptionalColumns.includes(columnKey)
+
+  const optionalColumnLabels: Record<SkillOptionalColumnKey, string> = {
+    description: t("option:skills.colDescription", { defaultValue: "Description" }),
+    context: t("option:skills.colContext", { defaultValue: "Mode" }),
+    argument_hint: t("option:skills.colArgumentHint", { defaultValue: "Argument hint" }),
+    user_invocable: t("option:skills.colVisibility", { defaultValue: "Visibility" }),
+    model_invocation: t("option:skills.colModelUse", { defaultValue: "Model use" })
+  }
+
+  const columnVisibilityMenuItems: MenuProps["items"] = SKILL_OPTIONAL_COLUMN_KEYS.map(
+    (key) => ({
+      key,
+      label: optionalColumnLabels[key]
+    })
+  )
+
   const columns: ColumnsType<SkillSummary> = [
     {
       title: t("option:skills.colName", { defaultValue: "Name" }),
       dataIndex: "name",
       key: "name",
       sorter: true,
-      sortDirections: ["ascend", "descend"],
-      sortOrder:
-        sortState.field === "name"
-          ? sortState.order === "asc" ? "ascend" : "descend"
-          : null,
+      sortDirections: SKILL_TABLE_SORT_DIRECTIONS,
+      sortOrder: getSkillTableSortOrder(sortState, "name"),
       render: (name: string) => (
         <span className="font-mono text-sm">{name}</span>
       )
     },
-    {
-      title: t("option:skills.colDescription", { defaultValue: "Description" }),
-      dataIndex: "description",
-      key: "description",
-      ellipsis: true,
-      render: (desc: string | null) => desc || "-"
-    },
-    {
-      title: t("option:skills.colContext", { defaultValue: "Mode" }),
-      dataIndex: "context",
-      key: "context",
-      width: 100,
-      sorter: true,
-      sortDirections: ["ascend", "descend"],
-      sortOrder:
-        sortState.field === "context"
-          ? sortState.order === "asc" ? "ascend" : "descend"
-          : null,
-      render: (ctx: string) => (
-        <Tag color={ctx === "fork" ? "blue" : "green"}>
-          {ctx}
-        </Tag>
-      )
-    },
+    ...(isOptionalColumnVisible("description")
+      ? [{
+          title: optionalColumnLabels.description,
+          dataIndex: "description",
+          key: "description",
+          ellipsis: true,
+          render: (desc: string | null) => desc || "-"
+        }]
+      : []),
+    ...(isOptionalColumnVisible("context")
+      ? [{
+          title: optionalColumnLabels.context,
+          dataIndex: "context",
+          key: "context",
+          width: 100,
+          sorter: true,
+          sortDirections: SKILL_TABLE_SORT_DIRECTIONS,
+          sortOrder: getSkillTableSortOrder(sortState, "context"),
+          render: (ctx: string) => (
+            <Tag color={ctx === "fork" ? "blue" : "green"}>
+              {ctx}
+            </Tag>
+          )
+        }]
+      : []),
+    ...(isOptionalColumnVisible("argument_hint")
+      ? [{
+          title: optionalColumnLabels.argument_hint,
+          dataIndex: "argument_hint",
+          key: "argument_hint",
+          width: 160,
+          ellipsis: true,
+          render: (hint: string | null) => hint ? (
+            <span className="font-mono text-sm">{hint}</span>
+          ) : "-"
+        }]
+      : []),
+    ...(isOptionalColumnVisible("user_invocable")
+      ? [{
+          title: optionalColumnLabels.user_invocable,
+          dataIndex: "user_invocable",
+          key: "user_invocable",
+          width: 110,
+          render: (userInvocable: boolean) => (
+            <Tag color={userInvocable ? "green" : "default"}>
+              {userInvocable
+                ? t("option:skills.visibleState", { defaultValue: "Visible" })
+                : t("option:skills.hiddenState", { defaultValue: "Hidden" })}
+            </Tag>
+          )
+        }]
+      : []),
+    ...(isOptionalColumnVisible("model_invocation")
+      ? [{
+          title: optionalColumnLabels.model_invocation,
+          dataIndex: "disable_model_invocation",
+          key: "model_invocation",
+          width: 130,
+          render: (disableModelInvocation: boolean) => (
+            <Tag color={disableModelInvocation ? "orange" : "green"}>
+              {disableModelInvocation
+                ? t("option:skills.modelDisabled", { defaultValue: "Model disabled" })
+                : t("option:skills.modelAllowed", { defaultValue: "Model allowed" })}
+            </Tag>
+          )
+        }]
+      : []),
     {
       title: t("option:skills.colActions", { defaultValue: "Actions" }),
       key: "actions",
@@ -727,6 +914,8 @@ export const SkillsManager: React.FC = () => {
     tableEmptyText = emptyText
   }
 
+  const tableSize = tableDensity === "compact" ? "small" : "middle"
+
   return (
     <div className="flex flex-col gap-4">
       <section
@@ -894,6 +1083,58 @@ export const SkillsManager: React.FC = () => {
           size="small"
           style={{ width: 160 }}
         />
+        <div
+          role="group"
+          aria-label={t("option:skills.tableDensity", {
+            defaultValue: "Table density"
+          })}
+          className="flex flex-wrap items-center gap-1"
+        >
+          <Button
+            size="small"
+            type={tableDensity === "comfortable" ? "primary" : "default"}
+            aria-label={t("option:skills.comfortableDensity", {
+              defaultValue: "Comfortable density"
+            })}
+            aria-pressed={tableDensity === "comfortable"}
+            icon={<Rows3 size={14} />}
+            onClick={() => handleDensityChange("comfortable")}
+          >
+            {t("option:skills.densityComfortable", { defaultValue: "Comfortable" })}
+          </Button>
+          <Button
+            size="small"
+            type={tableDensity === "compact" ? "primary" : "default"}
+            aria-label={t("option:skills.compactDensity", {
+              defaultValue: "Compact density"
+            })}
+            aria-pressed={tableDensity === "compact"}
+            icon={<Rows3 size={14} />}
+            onClick={() => handleDensityChange("compact")}
+          >
+            {t("option:skills.densityCompact", { defaultValue: "Compact" })}
+          </Button>
+        </div>
+        <Dropdown
+          menu={{
+            items: columnVisibilityMenuItems,
+            selectable: true,
+            multiple: true,
+            selectedKeys: visibleOptionalColumns,
+            onClick: ({ key }) => handleColumnVisibilityToggle(key)
+          }}
+          trigger={["click"]}
+        >
+          <Button
+            size="small"
+            aria-label={t("option:skills.columnVisibility", {
+              defaultValue: "Column visibility"
+            })}
+            icon={<Columns3 size={14} />}
+          >
+            {t("option:skills.columns", { defaultValue: "Columns" })}
+          </Button>
+        </Dropdown>
       </div>
 
       {isError && (
@@ -960,13 +1201,15 @@ export const SkillsManager: React.FC = () => {
       )}
 
       <Table
+        data-testid="skills-table"
+        data-density={tableDensity}
         dataSource={data?.skills ?? []}
         columns={columns}
         rowKey="name"
         loading={isLoading}
         onChange={handleTableChange}
         pagination={false}
-        size="middle"
+        size={tableSize}
         locale={{
           emptyText: tableEmptyText
         }}
