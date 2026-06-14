@@ -615,6 +615,20 @@ class MCPServer:
                     })
                     logger.info("MCP_ENABLE_WEB_SEARCH_MODULE=true; queuing WebSearchModule for registration")
 
+            # 6d) Optional: Web research module - disabled by default (composes search + fetch).
+            if self._env_flag_enabled("MCP_ENABLE_WEB_RESEARCH_MODULE"):
+                if not any(m.get("id") == "web_research" for m in modules_to_load if isinstance(m, dict)):
+                    modules_to_load.append({
+                        "id": "web_research",
+                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.web_research_module:WebResearchModule",
+                        "enabled": True,
+                        "name": "WebResearch",
+                        "version": "1.0.0",
+                        "department": "research",
+                        "settings": {},
+                    })
+                    logger.info("MCP_ENABLE_WEB_RESEARCH_MODULE=true; queuing WebResearchModule for registration")
+
             # 7) Optional: Sandbox module (code interpreter) - disabled by default
             if self._env_flag_enabled("MCP_ENABLE_SANDBOX_MODULE"):
                 modules_to_load.append({

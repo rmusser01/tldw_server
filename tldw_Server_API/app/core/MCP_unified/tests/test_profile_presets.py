@@ -248,6 +248,7 @@ def test_deep_researcher_enables_web_tools() -> None:
     tooling = deep_researcher.profile.metadata["tooling"]
     assert "web.fetch" in tooling["enabled_tools"]  # nosec B101
     assert "web.search" in tooling["enabled_tools"]  # nosec B101
+    assert "web.research" in tooling["enabled_tools"]  # nosec B101
     assert "research.web" in tooling["enabled_capabilities"]  # nosec B101
     assert "web" in tooling["progressive_disclosure"]["direct_categories"]  # nosec B101
 
