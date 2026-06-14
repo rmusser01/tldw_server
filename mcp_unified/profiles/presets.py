@@ -203,7 +203,7 @@ _GIT_READ_TOOLS = [
     "git.conflicts.list",
     "git.conflicts.read",
 ]
-_WEB_READ_TOOLS = ["web.fetch", "web.search"]
+_WEB_READ_TOOLS = ["web.fetch", "web.search", "web.research"]
 _TEST_READ_TOOLS = ["tests.results.read", "tests.logs.read"]
 _TEST_REQUEST_TOOLS = [*_TEST_READ_TOOLS, "tests.request"]
 _BROWSER_READ_TOOLS = [
