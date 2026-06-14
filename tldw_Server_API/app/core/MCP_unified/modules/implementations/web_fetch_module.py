@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
 )
 
 from ..base import ModuleConfig, create_tool_definition
+from .web_cache import ResponseCache, make_cache_key
 from .web_rate_limit import DomainRateLimiter
 from .web_tool_base import CONTROL_CHARS_RE, WebToolBase, WebToolError
 
@@ -201,12 +202,15 @@ class WebFetchModule(WebToolBase):
         *,
         client: WebFetchHttpClient | None = None,
         rate_limiter: DomainRateLimiter | None = None,
+        response_cache: ResponseCache | None = None,
     ) -> None:
         super().__init__(config)
         self._client: WebFetchHttpClient = client or HttpxWebFetchClient()
         # A default, generously-bounded per-domain limiter is on unless the caller
         # supplies one (pass DomainRateLimiter(max_requests=0) to disable).
         self._rate_limiter: DomainRateLimiter = rate_limiter or DomainRateLimiter()
+        # Response caching is opt-in (None = no caching) since it trades freshness.
+        self._response_cache: ResponseCache | None = response_cache
 
     async def on_initialize(self) -> None:
         return None
@@ -290,6 +294,39 @@ class WebFetchModule(WebToolBase):
             )
         except WebToolError as exc:
             return self._structured_error(tool_name, exc.reason_code, exc.message, context=context)
+
+        # Cache lookup. A hit still re-applies the outbound policy to the requested
+        # URL (cheap; no body download) so a newly-denied domain or robots rule is
+        # honored, and the eval metadata is rebuilt from the current call context.
+        cache_key = None
+        if self._response_cache is not None:
+            cache_key = make_cache_key(requested_url, fmt, max_bytes, respect_robots)
+            cached = self._response_cache.get(cache_key)
+            if cached is not None:
+                decision = await decide_web_outbound_policy(
+                    requested_url,
+                    respect_robots=respect_robots,
+                    user_agent=_DEFAULT_USER_AGENT,
+                    source="mcp.web_fetch",
+                    stage="web.fetch",
+                )
+                if not getattr(decision, "allowed", False):
+                    return self._structured_error(
+                        tool_name,
+                        "outbound_policy_denied",
+                        f"Outbound policy denied the request ({getattr(decision, 'reason', 'denied')}).",
+                        context=context,
+                    )
+                return {
+                    **cached,
+                    "cached": True,
+                    "eval": self._eval_metadata(
+                        _TOOL_FETCH,
+                        reason_code=None,
+                        truncated=bool(cached.get("truncated")),
+                        context=context,
+                    ),
+                }
 
         # Follow redirects manually, re-applying the outbound policy to every hop
         # so a permitted URL cannot redirect into denied/private address space.
@@ -385,7 +422,7 @@ class WebFetchModule(WebToolBase):
                 context=context,
             )
 
-        return {
+        result = {
             "ok": True,
             "url": requested_url,
             "final_url": response.final_url,
@@ -396,6 +433,7 @@ class WebFetchModule(WebToolBase):
             "content": content,
             "bytes_fetched": len(response.body),
             "truncated": bool(response.truncated),
+            "cached": False,
             "eval": self._eval_metadata(
                 _TOOL_FETCH,
                 reason_code=None,
@@ -403,6 +441,9 @@ class WebFetchModule(WebToolBase):
                 context=context,
             ),
         }
+        if self._response_cache is not None and cache_key is not None:
+            self._response_cache.put(cache_key, result)
+        return result
 
     # ---- validation ----------------------------------------------------
 
