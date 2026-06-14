@@ -388,7 +388,46 @@ export interface BgRequestInit<
   preferDirect?: boolean
 }
 
+// In-flight coalescing for idempotent GET requests: when several callers issue
+// the same GET concurrently (a common pattern when many components mount on a
+// page load and each fetches the same resource), share a single network request
+// instead of firing N identical ones. Only concurrent requests are shared — once
+// the promise settles it is removed, so caching/staleness semantics are unchanged.
+const inFlightGetRequests = new Map<string, Promise<unknown>>()
+
 export async function bgRequest<
+  T = any,
+  P extends PathOrUrl = AllowedPath,
+  M extends AllowedMethodFor<P> = AllowedMethodFor<P>
+>(init: BgRequestInit<P, M>): Promise<T> {
+  const method = String(init.method || "GET").toUpperCase()
+  const coalescable =
+    method === "GET" &&
+    !init.body &&
+    !init.abortSignal &&
+    !init.returnResponse &&
+    !init.responseType &&
+    !init.preferDirect
+  if (!coalescable) {
+    return bgRequestImpl<T, P, M>(init)
+  }
+  const key = JSON.stringify({
+    p: String(init.path),
+    h: init.headers || null,
+    noAuth: Boolean(init.noAuth)
+  })
+  const existing = inFlightGetRequests.get(key)
+  if (existing) {
+    return existing as Promise<T>
+  }
+  const promise = bgRequestImpl<T, P, M>(init).finally(() => {
+    inFlightGetRequests.delete(key)
+  })
+  inFlightGetRequests.set(key, promise)
+  return promise as Promise<T>
+}
+
+async function bgRequestImpl<
   T = any,
   P extends PathOrUrl = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
