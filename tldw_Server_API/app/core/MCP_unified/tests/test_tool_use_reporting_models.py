@@ -43,6 +43,62 @@ def test_tool_use_event_rejects_or_omits_sensitive_payload_fields() -> None:
     assert event.reason_code == "unknown"
 
 
+def test_tool_use_event_sanitizes_file_policy_decisions() -> None:
+    event = ToolUseEvent(
+        runtime_surface="protocol",
+        requested_tool_name="fs.patch",
+        status="denied",
+        file_policy_decisions=[
+            {
+                "requested_action": "edit",
+                "normalized_path": "docs/private/story.md",
+                "grant_outcome": "denied",
+                "grant_source": "path_grants",
+                "matched_grant_prefix": "docs/private",
+                "matched_grant_effect": "deny",
+                "reason_code": "path_action_denied",
+                "redacted": True,
+            },
+            {
+                "requested_action": "write",
+                "normalized_path": "/Users/example/private.txt",
+                "grant_outcome": "allowed",
+                "grant_source": "path_grants",
+                "matched_grant_prefix": "/Users/example",
+                "matched_grant_effect": "allow",
+                "reason_code": "/Users/example/private.txt",
+                "redacted": False,
+            },
+        ],
+        file_policy_sha256_before_present=True,
+        file_policy_sha256_after_present=True,
+        file_policy_lock_lease_present=True,
+    )
+
+    assert len(event.file_policy_decisions) == 2
+    first = event.file_policy_decisions[0]
+    assert first.requested_action == "edit"
+    assert first.normalized_path == "docs/private/story.md"
+    assert first.grant_outcome == "denied"
+    assert first.grant_source == "path_grants"
+    assert first.matched_grant_prefix == "docs/private"
+    assert first.matched_grant_effect == "deny"
+    assert first.reason_code == "path_action_denied"
+    assert first.redacted is True
+
+    second = event.file_policy_decisions[1]
+    assert second.normalized_path is None
+    assert second.matched_grant_prefix is None
+    assert second.reason_code == "unknown"
+    assert second.redacted is True
+
+    dumped = event.model_dump_json()
+    assert "/Users/example" not in dumped
+    assert event.file_policy_sha256_before_present is True
+    assert event.file_policy_sha256_after_present is True
+    assert event.file_policy_lock_lease_present is True
+
+
 def test_tool_use_event_is_immutable() -> None:
     event = ToolUseEvent(
         runtime_surface="protocol",

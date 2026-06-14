@@ -264,6 +264,7 @@ class PreparedToolCall:
     context_fingerprint: str
     integrity_tag: str
     context: RequestContext
+    scope_payload: Optional[dict[str, Any]] = None
 
 
 class IdempotencyManager:
@@ -677,6 +678,48 @@ class MCPProtocol:
         return {}
 
     @staticmethod
+    def _tool_use_file_policy_decisions(scope_payload: dict[str, Any] | None) -> list[dict[str, Any]]:
+        """Extract redacted file-policy path decisions from a scope payload."""
+
+        if not isinstance(scope_payload, dict):
+            return []
+        raw_decisions = scope_payload.get("path_decisions")
+        if not isinstance(raw_decisions, list):
+            return []
+        return [dict(decision) for decision in raw_decisions if isinstance(decision, dict)]
+
+    @staticmethod
+    def _tool_use_contains_key(
+        value: Any,
+        keys: set[str],
+        *,
+        _depth: int = 0,
+    ) -> bool:
+        """Return whether a nested tool payload/args object contains any key."""
+
+        if _depth > 4:
+            return False
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                if key in keys and nested not in (None, ""):
+                    return True
+                if isinstance(nested, (dict, list)) and MCPProtocol._tool_use_contains_key(
+                    nested,
+                    keys,
+                    _depth=_depth + 1,
+                ):
+                    return True
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, (dict, list)) and MCPProtocol._tool_use_contains_key(
+                    item,
+                    keys,
+                    _depth=_depth + 1,
+                ):
+                    return True
+        return False
+
+    @staticmethod
     def _tool_use_category(tool_def: dict[str, Any] | None) -> str | None:
         """Return the metadata category from a tool definition when present."""
         metadata = (tool_def or {}).get("metadata") if isinstance(tool_def, dict) else None
@@ -697,6 +740,8 @@ class MCPProtocol:
         module_id: str | None = None,
         tool_def: dict[str, Any] | None = None,
         payload: dict[str, Any] | None = None,
+        tool_args: Any | None = None,
+        scope_payload: dict[str, Any] | None = None,
         is_write: bool | None = None,
         reason_code: str | None = None,
         idempotency_replay: bool = False,
@@ -707,6 +752,35 @@ class MCPProtocol:
         eval_metadata = self._tool_use_eval_metadata(payload=payload, tool_def=tool_def)
         safe_requested_name = self._safe_tool_use_name(requested_tool_name)
         safe_effective_name = self._safe_tool_use_name(effective_tool_name or safe_requested_name)
+        file_policy_decisions = self._tool_use_file_policy_decisions(scope_payload)
+        file_policy_related = bool(file_policy_decisions) or safe_effective_name.startswith("fs.")
+        sha256_before_keys = {"sha256_before", "expected_sha256", "expected_sha256_by_path"}
+        file_policy_sha256_before_present = (
+            (
+                self._tool_use_contains_key(payload, sha256_before_keys)
+                or self._tool_use_contains_key(tool_args, sha256_before_keys)
+            )
+            if file_policy_related
+            else None
+        )
+        file_policy_sha256_after_present = (
+            self._tool_use_contains_key(payload, {"sha256_after"})
+            if file_policy_related
+            else None
+        )
+        file_policy_lock_lease_present = (
+            (
+                self._tool_use_contains_key(payload, {"lock_lease_id", "lock_lease_id_by_path"})
+                or self._tool_use_contains_key(tool_args, {"lock_lease_id", "lock_lease_id_by_path"})
+            )
+            if file_policy_related
+            else None
+        )
+        decision_grant_outcome = (
+            file_policy_decisions[0].get("grant_outcome")
+            if file_policy_decisions and isinstance(file_policy_decisions[0], dict)
+            else None
+        )
         return ToolUseEvent(
             runtime_surface="protocol",
             execution_origin=execution_origin,  # type: ignore[arg-type]
@@ -727,7 +801,12 @@ class MCPProtocol:
             action_family=eval_metadata.get("action_family"),
             result_kind=eval_metadata.get("result_kind") or eval_metadata.get("expected_result_kind"),
             path_filter_used=eval_metadata.get("path_filter_used"),
+            grant_outcome=eval_metadata.get("grant_outcome") or decision_grant_outcome,
             truncated=eval_metadata.get("truncated"),
+            file_policy_decisions=file_policy_decisions,
+            file_policy_sha256_before_present=file_policy_sha256_before_present,
+            file_policy_sha256_after_present=file_policy_sha256_after_present,
+            file_policy_lock_lease_present=file_policy_lock_lease_present,
             **dimensions,
         )
 
@@ -2549,6 +2628,11 @@ class MCPProtocol:
             if self._should_record_tool_use(context):
                 try:
                     status, reason_code = classify_tool_use_exception(exc)
+                    scope_payload = None
+                    if isinstance(exc, GovernanceDeniedError) and isinstance(exc.governance, dict):
+                        path_scope = exc.governance.get("path_scope")
+                        if isinstance(path_scope, dict):
+                            scope_payload = path_scope
                     event = self._build_tool_use_event(
                         context=context,
                         requested_tool_name=(
@@ -2558,6 +2642,10 @@ class MCPProtocol:
                         execution_origin="failed_before_execution",
                         duration_ms=self._tool_use_duration_ms(start_ts),
                         reason_code=reason_code,
+                        tool_args=(
+                            params.get("arguments") if isinstance(params, dict) else None
+                        ),
+                        scope_payload=scope_payload,
                     )
                     await self._record_tool_use_event(event)
                 except Exception as record_exc:  # noqa: BLE001 - preserve original exception.
@@ -2814,6 +2902,7 @@ class MCPProtocol:
             context_fingerprint=context_fingerprint,
             integrity_tag=integrity_tag,
             context=context,
+            scope_payload=scope_payload,
         )
 
     async def execute_prepared_tool_call(self, prepared: PreparedToolCall) -> dict[str, Any]:
@@ -2852,6 +2941,8 @@ class MCPProtocol:
                     module_id=module_id or getattr(module, "name", None),
                     tool_def=tool_def if isinstance(tool_def, dict) else None,
                     payload=payload,
+                    tool_args=tool_args,
+                    scope_payload=prepared.scope_payload,
                     is_write=is_write,
                     reason_code=reason_code,
                     idempotency_replay=idempotency_replay,
