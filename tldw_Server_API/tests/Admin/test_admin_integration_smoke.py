@@ -27,6 +27,16 @@ def _get_all_route_paths() -> set[str]:
 class TestAdminRouterRegistration:
     """Verify that every admin sub-router is included in the main router."""
 
+    def test_minimal_test_app_requires_admin_router(self) -> None:
+        """Minimal test app should fail fast if the admin aggregate is unavailable."""
+        from tldw_Server_API.app.api.v1.router_groups import minimal
+
+        specs = {spec.name: spec for spec in minimal.iter_minimal_test_router_specs()}
+
+        assert "admin" in minimal.MINIMAL_REQUIRED_ROUTER_NAMES  # nosec B101
+        assert "admin" in specs  # nosec B101
+        assert specs["admin"].skip_exceptions == minimal.REQUIRED_ROUTER_SKIP_EXCEPTIONS  # nosec B101
+
     def test_admin_init_does_not_import_admin_billing_router(self) -> None:
         """OSS admin router assembly should not import admin billing revenue operations."""
         admin_init = importlib.import_module(

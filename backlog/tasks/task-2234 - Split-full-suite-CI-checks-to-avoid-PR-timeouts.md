@@ -246,6 +246,7 @@ modified_files:
 - tldw_Server_API/tests/Workflows/test_engine_scheduler.py
 - tldw_Server_API/tests/Workflows/test_events_cursor_pagination.py
 - tldw_Server_API/tests/Workflows/test_mcp_tool_allowlist_integration.py
+- tldw_Server_API/tests/Admin/test_admin_integration_smoke.py
 - tldw_Server_API/tests/Workflows/test_media_ingest_db_integration.py
 - tldw_Server_API/tests/Workflows/test_new_step_adapters.py
 - tldw_Server_API/tests/Workflows/test_orphan_requeue_integration.py
@@ -332,6 +333,8 @@ Restructure the GitHub Actions CI full-suite jobs so PRs do not run all slow tes
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-06-14 PR #2258 run `27502070819` exposed Windows/Python 3.12 `admin-g-i` failing `test_admin_integration_smoke.py::TestAdminKeyEndpointsExist::test_key_endpoints_present` because `/api/v1/admin/roles` was absent from the app route table. The admin aggregate was still only part of the optional minimal-test router pass, so platform-specific optional registration could leave admin smoke tests inspecting an app without core admin routes. The minimal-test required router set now includes `admin` with fail-fast skip semantics, and the admin integration smoke test asserts that contract.
+
 2026-06-13 terminal audit of PR #2258 run `27472165841` found no pending rows. Ubuntu, macOS, and Windows aggregate `Full Suite` rows were rollups only, with logs containing only `full-suite shards finished with: failure`. The remaining new non-aggregate row was Ubuntu/Python 3.13 `product-workflows`, canceled after about 35 minutes at 91% with no pytest failure summary, so the broad Workflows directory shard was split into five non-overlapping shards: adapters, engine, API, storage, and runtime. The CI contract now rejects the old broad `product-workflows` shard and proves every `tldw_Server_API/tests/Workflows/**/test*.py` file is matched by exactly one new Workflows shard. Verification: `.github/workflows/ci.yml` parsed with PyYAML and `test_required_workflow_contracts.py` passed locally with `26 passed`.
 
 2026-06-13 PR #2258 run `27472165841` later exposed Ubuntu/Python 3.12 and 3.13 `platform-services-core` failing `test_append_imported_router_spec_skips_optional_import_error_at_registration`. Root cause: the test monkeypatched `conditional.importlib.import_module`, which mutates the shared `importlib` module object; on CI, the subsequent string-target `monkeypatch.setattr("loguru.logger.debug", ...)` resolved `loguru` through that intentionally broken importer before the router helper ran. The router contract tests now import Loguru's logger before the importlib patch and patch the logger object directly anywhere debug calls are captured. Verification: the exact failed test passed locally and the full router contract file passed locally with `175 passed`.
