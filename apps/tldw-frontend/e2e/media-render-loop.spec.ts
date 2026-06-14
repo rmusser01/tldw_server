@@ -21,7 +21,15 @@ test("/media loads without a Maximum update depth render loop", async ({ page })
   await seedAuth(page)
   await page.goto("/media", { waitUntil: "domcontentloaded" })
   await page.getByTestId("media-search-input").first().waitFor({ state: "visible", timeout: 30_000 })
-  await page.waitForTimeout(5000)
+
+  // Wait for the page to actually settle (results render + network quiesces) rather
+  // than a fixed sleep — the render loop, if present, manifests during this window.
+  await page
+    .getByTestId("media-results-list")
+    .first()
+    .waitFor({ state: "visible", timeout: 20_000 })
+    .catch(() => {})
+  await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {})
 
   expect(renderLoopErrors, "no Maximum update depth render loop on /media load").toEqual([])
 })

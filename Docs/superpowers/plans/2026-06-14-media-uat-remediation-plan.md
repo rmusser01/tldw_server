@@ -8,13 +8,12 @@
 
 ---
 
-## Stage 1: Fix the `bgRequest` timeout-race double-send — **High (perf, app-wide), Open**
+## Stage 1: Serve the media list without a 307 trailing-slash redirect — **Done (PR #2353)**
 **Finding:** #1. On passive `/media` load the list is fetched ~10×, every request duplicated as `/media?…` and `/media/?…`.
-**Root cause (traced during this UAT):** the duplication is **not** a `/media` caller — it is in the shared `bgRequest` transport. `bgRequest` races the background `sendMessage` against a timeout (`services/background-proxy.ts:619`); on timeout it fires a **direct fallback** (`:660`) while the background fetch is still in flight, so both reach the network (background = raw `/media/?…`, direct = normalized `/media?…`). Two attempts confirmed the caller is not at fault: removing the trailing slash in `useMediaSearch` (lines 404/854/867) and normalizing the coalescing key (`normalizeKnownPathQuirks(init.path)`) both had **no effect**; the `/media/?…` requests are invisible to page `fetch`/XHR (they run in the background transport).
-**Approach (owned, app-wide):** when the timeout wins the race, abort/ignore the in-flight `sendMessage` request before issuing the direct fallback (e.g. propagate an AbortController, or have the background handler short-circuit when a fallback is taken), so one logical GET = one network request. This is core-transport surgery used by **every** page — it needs broad regression testing, not a `/media`-local change.
-**Success:** `scripts/media-list-probe.mjs` shows each logical query fetched once (no `/media/?…` twin); reduced request counts app-wide.
-**Tests:** unit tests in `background-proxy.test.ts` (timeout fallback does not double-send); e2e network assertion.
-**Status:** Not Started (deferred — shared transport, out of scope for a `/media`-only PR).
+**Root cause (corrected):** a **307 trailing-slash redirect** — **not** a `bgRequest` double-send (an earlier draft said that; the web shim's `sendMessage` is a no-op, so that path never runs). The list route was registered only for the slash form (`@router.get("/")` in `tldw_Server_API/app/api/v1/endpoints/media/listing.py`), so FastAPI's default `redirect_slashes` 307-redirects `/api/v1/media` → `/api/v1/media/`. The client normalizes media-list URLs to the no-slash form (`normalizeKnownPathQuirks`, for the proxy-404 case), so each call is `/media?…` (307) → followed to `/media/?…` (200). Confirmed via CDP initiator (the `/media/?…` are `type:other`/no-stack redirect-follows) and `curl` (307 no-slash → 200 slash). Two ruled-out attempts: removing the trailing slash in `useMediaSearch` and normalizing the coalescing key both had **no effect** (the redirect is server-side).
+**Fix:** register both `""` and `"/"` on the `list_media_endpoint` handler so the no-slash form serves 200 directly. Client unchanged.
+**Tests:** `tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py` (both forms registered; neither 307s) — red before, green after.
+**Status:** Completed (PR #2353).
 
 ## Stage 2: Batch the per-item reading-progress fetch — **High (perf), Open**
 **Finding:** #2. `useMediaSelection.ts:190` fetches `/api/v1/media/{id}/progress` sequentially per visible result (~20/list, 37 across load+search). N+1.
@@ -37,5 +36,5 @@
 ---
 
 ## Notes
-- The `bgRequest` GET-coalescing key was briefly tested with `normalizeKnownPathQuirks(init.path)` (CodeRabbit's deferred #2350 suggestion) to collapse the slash variants — it had **no effect** here because the duplicate path bypasses `bgRequest` entirely, so it was reverted. The real fix is Stage 1 (consolidate the callers).
+- The `bgRequest` GET-coalescing key was briefly tested with `normalizeKnownPathQuirks(init.path)` (CodeRabbit's deferred #2350 suggestion) to collapse the slash variants — it had **no effect** because the duplicate `/media/?…` is a server-side **307 redirect-follow**, not a client request, so it was reverted. The real fix was the backend 307 redirect (Stage 1, PR #2353).
 - `/media-multi` and `/media-trash` were only smoke-checked per the agreed scope.
