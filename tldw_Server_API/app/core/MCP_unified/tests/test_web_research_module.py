@@ -364,3 +364,76 @@ async def test_permission_check_failure_denies() -> None:
     result = await module.execute_tool("web.research", {"query": "q", "fetch_top_n": 1})
     assert fetch.calls == []  # nosec B101 - fail closed
     assert result["sources"][0]["reason_code"] == "permission_denied"  # nosec B101
+
+
+async def test_sources_carry_citation_fields() -> None:
+    results = [
+        {
+            "title": "Doc One",
+            "url": "https://example.com/one",
+            "content": "snippet one",
+            "metadata": {"author": "A. Writer", "date_published": "2026-01-02", "source": "example.com"},
+        }
+    ]
+    search = _FakeSearchModule(_search_ok(results=results))
+    # Use by_url so the fake does not override final_url — verifying that a
+    # redirected final_url propagates into the source.
+    fetch = _FakeFetchModule(
+        by_url={
+            "https://example.com/one": {
+                "ok": True,
+                "final_url": "https://example.com/one-final",
+                "status_code": 200,
+                "content_type": "text/html",
+                "content": "page",
+                "truncated": False,
+                "eval": {},
+            }
+        }
+    )
+    module = _module(search, fetch)
+    result = await module.execute_tool("web.research", {"query": "q", "fetch_top_n": 1})
+    src = result["sources"][0]
+    assert src["rank"] == 1  # nosec B101
+    assert src["domain"] == "example.com"  # nosec B101
+    assert src["search_metadata"]["author"] == "A. Writer"  # nosec B101
+    assert src["final_url"] == "https://example.com/one-final"  # nosec B101 - propagated
+    assert src["content_type"] == "text/html"  # nosec B101
+    assert isinstance(src["retrieved_at"], str) and src["retrieved_at"]  # nosec B101
+
+
+async def test_source_rank_is_one_based_and_sequential() -> None:
+    search = _FakeSearchModule(_search_ok())  # 3 results
+    fetch = _FakeFetchModule(default=_fetch_ok())
+    module = _module(search, fetch)
+    result = await module.execute_tool("web.research", {"query": "q", "fetch_top_n": 3})
+    assert [s["rank"] for s in result["sources"]] == [1, 2, 3]  # nosec B101
+
+
+async def test_unfetched_source_omits_retrieval_fields() -> None:
+    search = _FakeSearchModule(_search_ok())  # 3 results
+    fetch = _FakeFetchModule(default=_fetch_ok())
+    module = _module(search, fetch)
+    result = await module.execute_tool("web.research", {"query": "q", "fetch_top_n": 1})
+    unfetched = result["sources"][2]
+    assert unfetched["fetched"] is False  # nosec B101
+    assert "retrieved_at" not in unfetched  # nosec B101
+    assert "final_url" not in unfetched  # nosec B101
+    # citation fields available even without a fetch
+    assert unfetched["rank"] == 3  # nosec B101
+    assert unfetched["domain"] == "example.net"  # nosec B101
+
+
+async def test_duplicate_urls_share_one_retrieved_at() -> None:
+    dup = [
+        {"title": "A", "url": "https://example.com/x", "content": "s", "metadata": {}},
+        {"title": "B", "url": "https://example.com/x", "content": "s", "metadata": {}},
+    ]
+    search = _FakeSearchModule(_search_ok(results=dup))
+    fetch = _FakeFetchModule(default=_fetch_ok())
+    module = _module(search, fetch)
+    result = await module.execute_tool("web.research", {"query": "q", "fetch_top_n": 2})
+    stamps = [s["retrieved_at"] for s in result["sources"]]
+    # Deduplicated fetch -> both duplicate sources share one retrieved_at.
+    assert stamps[0] == stamps[1]  # nosec B101
+    assert isinstance(stamps[0], str) and stamps[0]  # nosec B101

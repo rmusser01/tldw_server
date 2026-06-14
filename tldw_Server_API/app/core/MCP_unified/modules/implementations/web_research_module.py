@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -259,12 +260,17 @@ class WebResearchModule(WebToolBase):
                 fetch_args["max_bytes"] = params["max_bytes"]
             async with semaphore:
                 try:
-                    return url, await self._fetch.execute_tool("web.fetch", fetch_args, context)
+                    fetch_result = await self._fetch.execute_tool("web.fetch", fetch_args, context)
                 except Exception as exc:  # noqa: BLE001 - a fetch crash must not fail the bundle.
                     logger.bind(stage="web.research", host=_safe_host(url)).opt(exception=exc).warning(
                         "web.research sub-fetch raised"
                     )
                     return url, {"ok": False, "reason_code": "fetch_failed"}
+            # Stamp the retrieval time once per fetched URL so deduplicated
+            # duplicates share a single, consistent retrieved_at.
+            if isinstance(fetch_result, dict) and fetch_result.get("ok"):
+                fetch_result["retrieved_at"] = datetime.now(timezone.utc).isoformat()
+            return url, fetch_result
 
         pairs = await asyncio.gather(*(_fetch_one(url) for url in to_fetch))
         results.update(dict(pairs))
@@ -286,26 +292,48 @@ class WebResearchModule(WebToolBase):
     def _assemble_sources(
         self, results: list[Any], fetched: dict[str, dict[str, Any]]
     ) -> tuple[list[dict[str, Any]], int, bool]:
+        """Build the citation-oriented source list from search results + fetches.
+
+        Each source always carries ``rank`` (1-based), ``title``, ``url``,
+        ``domain``, ``snippet`` (search excerpt), ``search_metadata`` (the
+        provider's per-result metadata), and ``fetched``. A successfully fetched
+        source also carries ``final_url``, ``status_code``, ``content_type``,
+        ``content``, and ``retrieved_at`` (ISO-8601 UTC, stamped once per URL);
+        an unfetched/denied source carries ``reason_code`` instead. Returns
+        ``(sources, fetched_count, any_truncated)``.
+        """
         sources: list[dict[str, Any]] = []
         fetched_count = 0
         any_truncated = False
+        rank = 0
         for entry in results:
             if not isinstance(entry, dict):
                 continue
+            rank += 1
             url = entry.get("url")
             url = url.strip() if isinstance(url, str) else ""
+            metadata = entry.get("metadata")
             source: dict[str, Any] = {
+                # Citation-oriented fields: rank for ordering, domain for
+                # attribution, and the search provider's own metadata
+                # (author/date/source/...) carried through for the caller.
+                "rank": rank,
                 "title": entry.get("title"),
                 "url": url,
+                "domain": _safe_host(url) if url else None,
                 "snippet": entry.get("content"),
+                "search_metadata": metadata if isinstance(metadata, dict) else {},
                 "fetched": False,
             }
             fetch_result = fetched.get(url) if url else None
             if isinstance(fetch_result, dict):
                 if fetch_result.get("ok"):
                     source["fetched"] = True
+                    source["final_url"] = fetch_result.get("final_url") or url
                     source["status_code"] = fetch_result.get("status_code")
+                    source["content_type"] = fetch_result.get("content_type")
                     source["content"] = fetch_result.get("content")
+                    source["retrieved_at"] = fetch_result.get("retrieved_at")
                     if fetch_result.get("truncated"):
                         any_truncated = True
                     fetched_count += 1
