@@ -32,6 +32,7 @@ API_V1_PREFIX = "/api/v1"
 REQUIRED_ROUTER_SKIP_EXCEPTIONS: tuple[type[Exception], ...] = ()
 MINIMAL_REQUIRED_ROUTER_NAMES = (
     "health",
+    "monitoring",
     "auth",
     "research",
     "research_runs",
@@ -489,18 +490,6 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
         tags=("evaluations",),
         route_key="evaluations",
     ))
-
-    append_imported_router_spec(
-        specs,
-        ImportedRouterSpec(
-            import_path="tldw_Server_API.app.api.v1.endpoints.monitoring",
-            log_name="monitoring",
-            prefix=f"{API_V1_PREFIX}",
-            tags=("monitoring",),
-            route_key="monitoring",
-            skip_context=minimal_skip_context,
-        ),
-    )
 
     for experience_spec in (
         ImportedRouterSpec(

@@ -31,6 +31,7 @@ modified_files:
 - tldw_Server_API/app/api/v1/endpoints/media/__init__.py
 - tldw_Server_API/app/api/v1/router_groups/content.py
 - tldw_Server_API/app/api/v1/router_groups/minimal.py
+- tldw_Server_API/tests/Services/test_main_router_contract.py
 - tldw_Server_API/tests/helpers/app_main_state.py
 - tldw_Server_API/tests/Admin/test_admin_integration_smoke.py
 - tldw_Server_API/tests/Admin/test_monitoring_alerts_overlay_integration.py
@@ -338,6 +339,8 @@ Restructure the GitHub Actions CI full-suite jobs so PRs do not run all slow tes
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-06-14 PR #2258 run `27504395236` exposed Windows/Python 3.12 `admin-monitoring` failing `test_monitoring_alerts_include_backend_overlay_and_authoritative_actions` because the reloaded minimal test app did not treat the public monitoring router as part of the required core surface. The minimal router group now selects `monitoring` with the required routers instead of relying on the optional pass, and the router contract asserts that `monitoring` remains required. Verification: the regression failed before the fix and passed after; the local admin-monitoring shard passed with `20 passed`; compileall passed for touched files; `git diff --check` passed; Bandit on the touched scope reported no findings in production `minimal.py` and only pre-existing `test_main_router_contract.py` test-file baseline warnings after avoiding a new assert finding.
+
 2026-06-14 PR #2258 run `27502070819` exposed Windows/Python 3.12 `admin-g-i` failing `test_admin_integration_smoke.py::TestAdminKeyEndpointsExist::test_key_endpoints_present` because `/api/v1/admin/roles` was absent from the app route table. The admin aggregate was still only part of the optional minimal-test router pass, so platform-specific optional registration could leave admin smoke tests inspecting an app without core admin routes. The minimal-test required router set now includes `admin` with fail-fast skip semantics, and the admin integration smoke test asserts that contract.
 
 2026-06-13 terminal audit of PR #2258 run `27472165841` found no pending rows. Ubuntu, macOS, and Windows aggregate `Full Suite` rows were rollups only, with logs containing only `full-suite shards finished with: failure`. The remaining new non-aggregate row was Ubuntu/Python 3.13 `product-workflows`, canceled after about 35 minutes at 91% with no pytest failure summary, so the broad Workflows directory shard was split into five non-overlapping shards: adapters, engine, API, storage, and runtime. The CI contract now rejects the old broad `product-workflows` shard and proves every `tldw_Server_API/tests/Workflows/**/test*.py` file is matched by exactly one new Workflows shard. Verification: `.github/workflows/ci.yml` parsed with PyYAML and `test_required_workflow_contracts.py` passed locally with `26 passed`.
