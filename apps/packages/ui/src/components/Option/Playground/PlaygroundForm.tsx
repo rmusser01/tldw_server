@@ -1300,11 +1300,17 @@ export const PlaygroundForm = ({
     handleMentionsOpen,
   } = useTabMentions(textareaRef);
 
-  const { data: composerModels } = useQuery({
+  const { data: composerModels, isFetching: composerModelsFetching } = useQuery({
     queryKey: ["playground:chatModels"],
     queryFn: () => fetchChatModels({ returnEmpty: true }),
     enabled: modelCatalogEnabled,
   });
+  // True while the catalog is actively being fetched and none have arrived yet.
+  // Used to show a loading affordance instead of a "connect your server" error.
+  const composerModelsLoading =
+    modelCatalogEnabled &&
+    composerModelsFetching &&
+    ((composerModels as any[] | undefined)?.length ?? 0) === 0;
   const { data: imageModels = [] } = useQuery({
     queryKey: ["playground:imageModels"],
     queryFn: () => fetchImageModels({ returnEmpty: true }),
@@ -1342,6 +1348,7 @@ export const PlaygroundForm = ({
     selectedModel,
     setSelectedModel,
     navigate,
+    modelsLoading: composerModelsLoading,
   });
   const restoreModelSelectorFocus = React.useCallback(() => {
     const returnFocusSelector = modelSelectorReturnFocusSelectorRef.current;

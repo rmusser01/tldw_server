@@ -30,13 +30,15 @@ export type UseModelSelectorParams = {
   selectedModel: string | null
   setSelectedModel: (model: string) => void
   navigate: (path: string) => void
+  modelsLoading?: boolean
 }
 
 export function useModelSelector({
   composerModels,
   selectedModel,
   setSelectedModel,
-  navigate
+  navigate,
+  modelsLoading = false
 }: UseModelSelectorParams) {
   const { t } = useTranslation(["playground", "common"])
   const apiProvider = useStoreChatModelSettings((state) => state.apiProvider)
@@ -280,6 +282,25 @@ export function useModelSelector({
     const allModels = (composerModels as any[]) || []
 
     if (allModels.length === 0) {
+      // While the catalog is still being fetched, show a loading affordance
+      // rather than the terminal "connect your server" error — the server may
+      // be perfectly reachable and models simply haven't arrived yet.
+      if (modelsLoading) {
+        return [
+          {
+            key: "models-loading",
+            disabled: true,
+            label: (
+              <div
+                data-testid="model-loading"
+                className="px-1 py-1 text-xs text-text-muted"
+              >
+                {t("playground:composer.modelsLoading", "Loading models…")}
+              </div>
+            )
+          }
+        ]
+      }
       return [
         {
           key: "no-models",
@@ -654,6 +675,7 @@ export function useModelSelector({
     favoriteModelSet,
     filteredModels,
     isFavoriteModel,
+    modelsLoading,
     modelSortMode,
     navigate,
     normalizedModelUsageByKey,

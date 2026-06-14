@@ -337,10 +337,14 @@ export const Playground = () => {
     "playgroundChatLayoutMode",
     defaultChatLayoutMode,
   );
+  // Default the cockpit rails collapsed for users without a saved preference, so
+  // the first-run view leads with the composer rather than dense context/runtime
+  // panels. Restoring a rail persists the choice; returning users who already set
+  // a preference are unaffected.
   const [cockpitContextRailVisible, setCockpitContextRailVisible] =
-    useStorage<boolean>("playgroundChatContextRailVisible", true);
+    useStorage<boolean>("playgroundChatContextRailVisible", false);
   const [cockpitRuntimeRailVisible, setCockpitRuntimeRailVisible] =
-    useStorage<boolean>("playgroundChatRuntimeRailVisible", true);
+    useStorage<boolean>("playgroundChatRuntimeRailVisible", false);
   const [mobileCockpitPanel, setMobileCockpitPanel] = useStorage<
     "context" | "runtime" | null
   >("playgroundChatMobileCockpitPanel", "context");
@@ -2065,6 +2069,32 @@ export const Playground = () => {
     requestAnimationFrame(() => {
       shortcutsCloseRef.current?.focus();
     });
+  }, [shortcutsHelpOpen]);
+
+  // Dismiss the shortcuts help panel on Escape. A global capture-phase listener
+  // elsewhere calls stopPropagation() on Escape, which prevents the window
+  // bubble-phase shortcut handler above from ever seeing it. Listening in the
+  // capture phase (a sibling listener that stopPropagation does not block) keeps
+  // Escape working regardless of registration order.
+  React.useEffect(() => {
+    if (!shortcutsHelpOpen) return;
+    if (typeof window === "undefined") return;
+    const handleEscapeCapture = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      // Closing the shortcuts panel is the intended action for Escape while it is
+      // open; stop propagation so the same keypress does not also dismiss a parent
+      // overlay/dialog.
+      event.preventDefault();
+      event.stopPropagation();
+      setShortcutsHelpOpen(false);
+      requestAnimationFrame(() => {
+        shortcutsTriggerRef.current?.focus();
+      });
+    };
+    window.addEventListener("keydown", handleEscapeCapture, true);
+    return () => {
+      window.removeEventListener("keydown", handleEscapeCapture, true);
+    };
   }, [shortcutsHelpOpen]);
 
   React.useEffect(() => {

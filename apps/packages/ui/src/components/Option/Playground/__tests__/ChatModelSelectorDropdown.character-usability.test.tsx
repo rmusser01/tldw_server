@@ -110,6 +110,36 @@ describe("ChatModelSelectorDropdown character model usability", () => {
     expect(selector).not.toHaveTextContent("Ready")
   })
 
+  it("does not show the connection-healthy badge when no model is selected", () => {
+    render(
+      <ChatModelSelectorDropdown
+        {...baseProps}
+        apiModelLabel="Select a model"
+        connectionStatusLabel="Healthy"
+        selectedModel={null}
+      />
+    )
+
+    const selector = screen.getByRole("button", { name: /select a model/i })
+    expect(selector).toHaveTextContent("Select a model")
+    expect(selector).toHaveTextContent("No model selected")
+    expect(selector).not.toHaveTextContent("Healthy")
+  })
+
+  it("shows the connection status badge once a model is selected", () => {
+    render(
+      <ChatModelSelectorDropdown
+        {...baseProps}
+        connectionStatusLabel="Healthy"
+        selectedModel="openai:gpt-4o"
+      />
+    )
+
+    const selector = screen.getByRole("button", { name: /OpenAI \/ gpt-4o/i })
+    expect(selector).toHaveTextContent("Healthy")
+    expect(selector).not.toHaveTextContent("No model selected")
+  })
+
   it("uses neutral checking copy while model readiness is loading", () => {
     render(
       <ChatModelSelectorDropdown
