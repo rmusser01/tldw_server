@@ -288,6 +288,16 @@ def _should_delegate_media_search_to_email(
     return bool(delegation_mode == "auto_email" and email_operator_enabled and email_only_media_scope)
 
 
+# Serve both the no-slash and trailing-slash forms directly. FastAPI's default
+# redirect_slashes would 307 `/api/v1/media` -> `/api/v1/media/`, which turns
+# every media-list call into a redirect round-trip for clients that send the
+# no-slash form. Registering both paths on the same handler avoids that.
+@router.get(
+    "",
+    summary="List Media",
+    responses=_NOT_MODIFIED_OPENAPI_RESPONSE,
+    include_in_schema=False,
+)
 @router.get(
     "/",
     summary="List Media (slash)",
