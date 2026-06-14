@@ -37,6 +37,7 @@ export const MediaReviewBatchBar: React.FC<MediaReviewBatchBarProps> = ({ state,
         })}
       </span>
       <Input
+        data-testid="media-multi-batch-keywords"
         value={batchKeywordsDraft}
         onChange={(event) => setBatchKeywordsDraft(event.target.value)}
         placeholder={t(
@@ -52,6 +53,7 @@ export const MediaReviewBatchBar: React.FC<MediaReviewBatchBarProps> = ({ state,
         className="min-w-[14rem] max-w-[22rem]"
       />
       <Button
+        data-testid="media-multi-batch-add-tags"
         size="small"
         onClick={() => { void handleBatchAddTags() }}
         disabled={batchActionLoading != null && batchActionLoading !== "keywords"}
@@ -59,6 +61,7 @@ export const MediaReviewBatchBar: React.FC<MediaReviewBatchBarProps> = ({ state,
         {t("mediaPage.batchAddTags", "Add tags")}
       </Button>
       <Select
+        data-testid="media-multi-batch-export-format"
         value={batchExportFormat}
         aria-label={t("mediaPage.batchExportFormat", "Export format") as string}
         className="min-w-[10rem]"
@@ -70,6 +73,7 @@ export const MediaReviewBatchBar: React.FC<MediaReviewBatchBarProps> = ({ state,
         ]}
       />
       <Button
+        data-testid="media-multi-batch-export"
         size="small"
         onClick={handleBatchExport}
         disabled={batchActionLoading != null && batchActionLoading !== "export"}
@@ -77,6 +81,7 @@ export const MediaReviewBatchBar: React.FC<MediaReviewBatchBarProps> = ({ state,
         {t("mediaPage.batchExportSelected", "Export selected")}
       </Button>
       <Button
+        data-testid="media-multi-batch-reprocess"
         size="small"
         onClick={() => { void handleBatchReprocess() }}
         disabled={batchActionLoading != null && batchActionLoading !== "reprocess"}
@@ -84,6 +89,7 @@ export const MediaReviewBatchBar: React.FC<MediaReviewBatchBarProps> = ({ state,
         {t("mediaPage.batchReprocess", "Reprocess")}
       </Button>
       <Button
+        data-testid="media-multi-batch-trash"
         size="small"
         danger
         className="ml-auto"

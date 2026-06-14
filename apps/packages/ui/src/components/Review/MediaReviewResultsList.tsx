@@ -123,6 +123,7 @@ export const MediaReviewResultsList: React.FC<MediaReviewResultsListProps> = ({ 
                     ref={(el: any) => {
                       if (el) listVirtualizer.measureElement(el)
                     }}
+                    data-testid="media-review-result-row"
                     data-media-id={String(item.id)}
                     data-index={virtualRow.index}
                     role="button"
