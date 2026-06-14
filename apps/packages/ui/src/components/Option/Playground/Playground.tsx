@@ -337,10 +337,14 @@ export const Playground = () => {
     "playgroundChatLayoutMode",
     defaultChatLayoutMode,
   );
+  // Default the cockpit rails collapsed for users without a saved preference, so
+  // the first-run view leads with the composer rather than dense context/runtime
+  // panels. Restoring a rail persists the choice; returning users who already set
+  // a preference are unaffected.
   const [cockpitContextRailVisible, setCockpitContextRailVisible] =
-    useStorage<boolean>("playgroundChatContextRailVisible", true);
+    useStorage<boolean>("playgroundChatContextRailVisible", false);
   const [cockpitRuntimeRailVisible, setCockpitRuntimeRailVisible] =
-    useStorage<boolean>("playgroundChatRuntimeRailVisible", true);
+    useStorage<boolean>("playgroundChatRuntimeRailVisible", false);
   const [mobileCockpitPanel, setMobileCockpitPanel] = useStorage<
     "context" | "runtime" | null
   >("playgroundChatMobileCockpitPanel", "context");
