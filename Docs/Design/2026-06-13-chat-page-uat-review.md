@@ -16,8 +16,9 @@
 > - **#4** — Escape now dismisses the shortcuts help panel (a global capture-phase listener was swallowing Escape; fixed with a capture-phase handler).
 > - **#6** — concurrent identical GETs on load are now coalesced in `bgRequest` (`/users/me/profile` 5→1, `/config/providers` 3→1, `/characters` 2→1, `/persona/catalog` 2→1). `fetchWithAuth` endpoints (`/persona/profiles`, `/notifications`) remain a follow-up.
 > - **#2, #8** — resolved by #1: the model auto-selects after the catalog loads, the empty-picker error no longer shows during loading, and the recovery link ("Open model settings" → `/settings/tldw`) works. The dead "Open current chat settings" was a Sidepanel control, not `/chat`.
+> - **#5** — the Context/Runtime cockpit rails now default collapsed for first-time users (composer-first first-run; rails one click away via edge tabs/header toggles; persists once restored). See `assets/chat-uat-2026-06-13/30-collapsed-firstrun.png`.
 >
-> Remaining open: **#5** (empty-state cognitive load), **#7** (terminology), **#9** (mobile density) — these are design/IA changes, not bugs, and need design direction.
+> Remaining open (design decisions, not bugs): **#7** (terminology — renaming "cockpit/sidechannel/composition/runtime" changes product voice) and **#9** (mobile already defaults to a "focus" layout; remaining work is refinement).
 
 ## Summary
 

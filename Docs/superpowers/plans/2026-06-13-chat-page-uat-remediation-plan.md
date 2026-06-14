@@ -77,15 +77,14 @@ With the loading state in place, the empty picker only appears once the fetch ge
 **Findings addressed:** #5, #7, #9.
 **Key files:** `PlaygroundEmpty.tsx`, `PlaygroundCockpitShell.tsx`, `PlaygroundContextRail.tsx`, `playground-cockpit-state.ts`, mobile layout (`mobile-composer-layout.ts`, `useMobileComposerViewport.ts`).
 
-**Approach:**
-1. Default the cockpit rails to collapsed for first-time users (persist once they expand).
-2. Composer-first empty state; reveal cockpit via an explicit "Details/Context" affordance.
-3. Plain-language labels or first-run tooltips for cockpit / sidechannel / composition / runtime / artifacts.
-4. Mobile: defer rails behind a single affordance.
+**What was implemented (#5 — rail default):** Defaulted the Context/Runtime cockpit rails **collapsed** for users without a saved preference (`Playground.tsx`: `playgroundChatContextRailVisible`/`playgroundChatRuntimeRailVisible` defaults `true`→`false`). First-run now leads with the composer and a clean "Start a new chat" card; both rails are one click away via the edge restore tabs (`playground-cockpit-left/right-rail-restore`) and the Context/Runtime header toggles. Restoring persists; returning users who set a preference are unaffected (the `!== false` normalization keeps explicit `true`). Verified live (screenshot `assets/chat-uat-2026-06-13/30-collapsed-firstrun.png`).
+**Tests:** `e2e/chat-cockpit-rail-default.spec.ts` (collapsed by default with restore affordances; restore shows the rail and persists across reload).
 
-**Success criteria:** First-run empty state leads with composer + model state; rails collapsed by default; no loss of power-user access (one click to full cockpit).
-**Tests:** E2E first-run vs. returning-user rail default; mobile snapshot.
-**Status:** Not Started
+**#7 (terminology) and #9 (mobile) — not done (need design direction):**
+- #7: "cockpit" is deeply embedded (i18n namespace `cockpit.*`, CSS vars, data-attributes, component names, plus user-facing labels "Chat cockpit"/"Composition"/"Runtime"/"sidechannel"). Renaming the **display strings** is feasible but changes the product's established voice — a product/voice decision, not a bug.
+- #9: mobile already defaults to a `"focus"` layout (not full cockpit); remaining work is refinement of the focus-mode IA. Lower priority.
+
+**Status:** #5 Completed; #7 and #9 deferred (design decisions)
 
 ---
 
