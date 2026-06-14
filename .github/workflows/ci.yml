@@ -953,9 +953,17 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
               tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
               tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
-          - name: chat-character-db
+          - name: chat-character-db-core
             paths: >-
-              tldw_Server_API/tests/Characters
+              tldw_Server_API/tests/Characters/test_ccv3_parser.py
+              tldw_Server_API/tests/Characters/test_chacha_postgres_sync_log_entity_column.py
+              tldw_Server_API/tests/Characters/test_character_chat_greetings_api.py
+              tldw_Server_API/tests/Characters/test_character_chat_lib.py
+              tldw_Server_API/tests/Characters/test_character_functionality_db.py
+              tldw_Server_API/tests/Characters/test_characters_world_book_permissions_unit.py
+          - name: chat-character-db-api
+            paths: >-
+              tldw_Server_API/tests/Characters/test_characters_endpoint.py
           - name: chat-character-unit-core
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
@@ -1534,7 +1542,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
@@ -2093,9 +2101,17 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
               tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
               tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
-          - name: chat-character-db
+          - name: chat-character-db-core
             paths: >-
-              tldw_Server_API/tests/Characters
+              tldw_Server_API/tests/Characters/test_ccv3_parser.py
+              tldw_Server_API/tests/Characters/test_chacha_postgres_sync_log_entity_column.py
+              tldw_Server_API/tests/Characters/test_character_chat_greetings_api.py
+              tldw_Server_API/tests/Characters/test_character_chat_lib.py
+              tldw_Server_API/tests/Characters/test_character_functionality_db.py
+              tldw_Server_API/tests/Characters/test_characters_world_book_permissions_unit.py
+          - name: chat-character-db-api
+            paths: >-
+              tldw_Server_API/tests/Characters/test_characters_endpoint.py
           - name: chat-character-unit-core
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
@@ -2618,7 +2634,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
@@ -3178,9 +3194,17 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
               tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
               tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
-          - name: chat-character-db
+          - name: chat-character-db-core
             paths: >-
-              tldw_Server_API/tests/Characters
+              tldw_Server_API/tests/Characters/test_ccv3_parser.py
+              tldw_Server_API/tests/Characters/test_chacha_postgres_sync_log_entity_column.py
+              tldw_Server_API/tests/Characters/test_character_chat_greetings_api.py
+              tldw_Server_API/tests/Characters/test_character_chat_lib.py
+              tldw_Server_API/tests/Characters/test_character_functionality_db.py
+              tldw_Server_API/tests/Characters/test_characters_world_book_permissions_unit.py
+          - name: chat-character-db-api
+            paths: >-
+              tldw_Server_API/tests/Characters/test_characters_endpoint.py
           - name: chat-character-unit-core
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
@@ -3630,7 +3654,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
@@ -4189,9 +4213,17 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
               tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
               tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
-          - name: chat-character-db
+          - name: chat-character-db-core
             paths: >-
-              tldw_Server_API/tests/Characters
+              tldw_Server_API/tests/Characters/test_ccv3_parser.py
+              tldw_Server_API/tests/Characters/test_chacha_postgres_sync_log_entity_column.py
+              tldw_Server_API/tests/Characters/test_character_chat_greetings_api.py
+              tldw_Server_API/tests/Characters/test_character_chat_lib.py
+              tldw_Server_API/tests/Characters/test_character_functionality_db.py
+              tldw_Server_API/tests/Characters/test_characters_world_book_permissions_unit.py
+          - name: chat-character-db-api
+            paths: >-
+              tldw_Server_API/tests/Characters/test_characters_endpoint.py
           - name: chat-character-unit-core
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
@@ -4641,7 +4673,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
@@ -5202,9 +5234,17 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py
               tldw_Server_API/tests/Character_Chat/test_world_book_prompt_context.py
               tldw_Server_API/tests/Character_Chat/unit/test_chat_session_character_scope_api.py
-          - name: chat-character-db
+          - name: chat-character-db-core
             paths: >-
-              tldw_Server_API/tests/Characters
+              tldw_Server_API/tests/Characters/test_ccv3_parser.py
+              tldw_Server_API/tests/Characters/test_chacha_postgres_sync_log_entity_column.py
+              tldw_Server_API/tests/Characters/test_character_chat_greetings_api.py
+              tldw_Server_API/tests/Characters/test_character_chat_lib.py
+              tldw_Server_API/tests/Characters/test_character_functionality_db.py
+              tldw_Server_API/tests/Characters/test_characters_world_book_permissions_unit.py
+          - name: chat-character-db-api
+            paths: >-
+              tldw_Server_API/tests/Characters/test_characters_endpoint.py
           - name: chat-character-unit-core
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
@@ -5654,7 +5694,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |

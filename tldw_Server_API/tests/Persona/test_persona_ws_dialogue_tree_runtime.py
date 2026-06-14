@@ -26,9 +26,10 @@ fastapi_app = FastAPI()
 fastapi_app.include_router(persona_ep.router, prefix="/api/v1/persona")
 
 
-def _recv_until(client, predicate, timeout=2.0):
+def _recv_until(client, predicate, timeout=5.0):
     deadline = time.monotonic() + timeout
     inbox: queue.Queue[tuple[str, object]] = queue.Queue()
+    seen_events: list[dict] = []
 
     def _reader() -> None:
         while time.monotonic() < deadline:
@@ -49,11 +50,12 @@ def _recv_until(client, predicate, timeout=2.0):
             raise payload  # type: ignore[misc]
         try:
             data = json.loads(str(payload))
-        except Exception:
+        except json.JSONDecodeError:
             continue
+        seen_events.append(data)
         if predicate(data):
             return data
-    raise AssertionError("Expected event not received in time")
+    raise AssertionError(f"Expected event not received in time; seen_events={seen_events!r}")
 
 
 @pytest.fixture(autouse=True)

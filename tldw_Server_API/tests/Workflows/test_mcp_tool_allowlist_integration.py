@@ -111,7 +111,11 @@ def test_mcp_tool_allowlist_blocks(client_with_wf: TestClient, wait_timeout: flo
         ],
     }
     wid = client.post("/api/v1/workflows", json=definition).json()["id"]
-    run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
+    run_id = client.post(
+        f"/api/v1/workflows/{wid}/run",
+        json={"inputs": {}},
+        params={"mode": "sync"},
+    ).json()["run_id"]
     data = _wait_terminal(client, run_id, timeout=wait_timeout)
     assert not data.get("_timeout"), f"Run {run_id} did not finish within {wait_timeout:.2f}s."
     assert data["status"] == "failed"
@@ -129,7 +133,11 @@ def test_mcp_tool_allowlist_allows(client_with_wf: TestClient, wait_timeout: flo
         ],
     }
     wid = client.post("/api/v1/workflows", json=definition).json()["id"]
-    run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
+    run_id = client.post(
+        f"/api/v1/workflows/{wid}/run",
+        json={"inputs": {}},
+        params={"mode": "sync"},
+    ).json()["run_id"]
     data = _wait_terminal(client, run_id, timeout=wait_timeout)
     assert not data.get("_timeout"), f"Run {run_id} did not finish within {wait_timeout:.2f}s."
     assert data["status"] == "succeeded"

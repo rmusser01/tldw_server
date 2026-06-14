@@ -288,6 +288,7 @@ def test_embedding_model_predownload_skips_backpressure_shard() -> None:
     for step in predownload_steps:
         condition = str(step.get("if"))
         assert "matrix.shard.name != 'ai-embeddings-backpressure'" in condition
+        assert "matrix.shard.name != 'ai-embeddings-dlq-config'" in condition
         assert "matrix.shard.name != 'ai-embeddings-media-validation'" in condition
         assert "matrix.shard.name != 'rag-new-unit-rag-contracts'" in condition
         assert "matrix.shard.name != 'rag-new-integration-research'" in condition
@@ -418,6 +419,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         assert "ai-embeddings-policy-v5" not in shard_names
         assert "chat-character-legacy" not in shard_names
         assert "chat-character-integration" not in shard_names
+        assert "chat-character-db" not in shard_names
         assert "product-claims" not in shard_names
         assert "product-evaluations" not in shard_names
         assert "product-prompts-workflows" not in shard_names
@@ -505,7 +507,8 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "chat-character-legacy-core",
             "chat-character-legacy-files",
             "chat-character-legacy-worldbook",
-            "chat-character-db",
+            "chat-character-db-core",
+            "chat-character-db-api",
             "chat-character-unit-core",
             "chat-character-unit-chat",
             "chat-character-unit-persona",
@@ -598,6 +601,8 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         assert "tldw_Server_API/tests/PaperSearch" not in shard_path_sets["research-websearch"]
         assert "tldw_Server_API/tests/WebSearch" not in shard_path_sets["paper-search"]
         assert "tldw_Server_API/tests/Characters" not in shard_path_sets["chat-character-legacy-core"]
+        assert "tldw_Server_API/tests/Characters" not in shard_path_sets["chat-character-db-core"]
+        assert "tldw_Server_API/tests/Characters" not in shard_path_sets["chat-character-db-api"]
         assert "tldw_Server_API/tests/Character_Chat_NEW/unit" not in shard_path_sets["chat-character-property"]
         assert "tldw_Server_API/tests/Claims" not in shard_path_sets["product-collections"]
         assert "tldw_Server_API/tests/Evaluations" not in shard_path_sets["product-claims-core"]
@@ -1036,6 +1041,33 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
                     covered_legacy_character_files[filename] = shard_name
 
         assert set(covered_legacy_character_files) == legacy_character_files
+
+        character_db_shards = {
+            "chat-character-db-core",
+            "chat-character-db-api",
+        }
+        character_db_files = {
+            str(path)
+            for path in Path("tldw_Server_API/tests/Characters").glob("test*.py")
+        }
+        covered_character_db_files: dict[str, str] = {}
+        for shard_name in character_db_shards:
+            for pattern in shard_path_sets[shard_name]:
+                assert pattern.startswith("tldw_Server_API/tests/Characters/")
+                matches = {
+                    filename
+                    for filename in character_db_files
+                    if fnmatch.fnmatch(filename, pattern)
+                }
+                assert matches, f"{shard_name} pattern matched no files: {pattern}"
+                for filename in matches:
+                    assert filename not in covered_character_db_files, (
+                        f"{filename} matched both "
+                        f"{covered_character_db_files[filename]} and {shard_name}"
+                    )
+                    covered_character_db_files[filename] = shard_name
+
+        assert set(covered_character_db_files) == character_db_files
 
         new_character_integration_shards = {
             "chat-character-integration-api",

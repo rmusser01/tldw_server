@@ -488,10 +488,11 @@ async def test_pocket_tts_cpp_fallback_materializes_voice_for_fallback_adapter(
         chunks.append(chunk)
 
     assert b"".join(chunks) == b"fallback"
-    assert "/voices/providers/pocket_tts_cpp/" in seen["voice_path"]
-    assert expected_fragment in seen["voice_path"]
+    voice_path = Path(seen["voice_path"])
+    assert voice_path.parent.parts[-3:] == ("voices", "providers", "pocket_tts_cpp")
+    assert expected_fragment in voice_path.name
     with pytest.raises(ValueError):
-        resolve_provider_managed_voice_path(seen["token"], Path(seen["voice_path"]))
+        resolve_provider_managed_voice_path(seen["token"], voice_path)
 
 
 @pytest.mark.asyncio

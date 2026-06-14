@@ -69,7 +69,9 @@ def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 5.0):
         time.sleep(0.02)
     response = client.get(f"/api/v1/workflows/runs/{run_id}")
     assert response.status_code == 200, response.text
-    return response.json()
+    data = response.json()
+    assert data["status"] in ("succeeded", "failed", "cancelled"), data
+    return data
 
 
 def test_events_pagination_with_next_cursor_header(client_with_wf: TestClient):
@@ -84,10 +86,17 @@ def test_events_pagination_with_next_cursor_header(client_with_wf: TestClient):
         ],
     }
     wid = client.post("/api/v1/workflows", json=definition).json()["id"]
-    run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {"name": "Ada"}}).json()["run_id"]
+    run_response = client.post(
+        f"/api/v1/workflows/{wid}/run",
+        params={"mode": "sync"},
+        json={"inputs": {"name": "Ada"}},
+    )
+    assert run_response.status_code == 200, run_response.text
+    run_id = run_response.json()["run_id"]
 
     # Wait until terminal to have a stable set of events
-    _wait_for_terminal(client, run_id)
+    terminal_run = _wait_for_terminal(client, run_id)
+    assert terminal_run["status"] == "succeeded"
 
     # First page: limit 1 to force pagination; capture Next-Cursor header
     r1 = client.get(f"/api/v1/workflows/runs/{run_id}/events", params={"limit": 1})
