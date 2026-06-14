@@ -10,11 +10,14 @@
 
 > **Correction (post-review, 2026-06-13):** An earlier draft of this report stated that `/chat` "cannot send for any first-time user" and blamed a wrong data source (`/config/providers` vs `/llm/providers`). Deeper investigation disproved that. The chat page sources models from `/api/v1/llm/models/metadata` (which the backend serves correctly — 843 KB of models), and the empty-picker state is **intermittent**, not deterministic. Root cause and severity are corrected below. The original wording is retained only in git history.
 
-> **Implementation status (2026-06-13):** Three findings are fixed on branch `uat/chat-page-review` with tests (see the remediation plan for detail):
+> **Implementation status (2026-06-13):** Fixed on branch `uat/chat-page-review` with tests (see the remediation plan for detail):
 > - **#1** — model picker now shows a "Loading models…" state during the slow catalog fetch instead of the false "No models available. Connect your server in Settings." error.
+> - **#3** — when no model is selected, the selector shows "No model selected" (warn) instead of a contradictory green "Healthy" badge; "Healthy" returns once a model is selected.
 > - **#4** — Escape now dismisses the shortcuts help panel (a global capture-phase listener was swallowing Escape; fixed with a capture-phase handler).
 > - **#6** — concurrent identical GETs on load are now coalesced in `bgRequest` (`/users/me/profile` 5→1, `/config/providers` 3→1, `/characters` 2→1, `/persona/catalog` 2→1). `fetchWithAuth` endpoints (`/persona/profiles`, `/notifications`) remain a follow-up.
-> Findings #2, #3, #5, #7, #8, #9 remain open.
+> - **#2, #8** — resolved by #1: the model auto-selects after the catalog loads, the empty-picker error no longer shows during loading, and the recovery link ("Open model settings" → `/settings/tldw`) works. The dead "Open current chat settings" was a Sidepanel control, not `/chat`.
+>
+> Remaining open: **#5** (empty-state cognitive load), **#7** (terminology), **#9** (mobile density) — these are design/IA changes, not bugs, and need design direction.
 
 ## Summary
 

@@ -49,18 +49,15 @@ Work is sequenced so the highest-impact issue is addressed first. Each stage is 
 
 ---
 
-## Stage 2: Reconcile readiness state — **High**
-**Goal:** One truthful "can I chat now?" signal; no contradictory badges.
-**Findings addressed:** #3.
-**Key files:** `ChatModelSelectorDropdown.tsx` (the `statusLabel`/`statusWarning` "Healthy" badge), right-rail model route summary, composition "MODEL … Active/Unavailable".
+## Stage 2: Reconcile readiness state — **DONE**
+**Goal:** No contradictory "Healthy" badge when you cannot chat yet.
+**Findings addressed:** #3 (and, via the Stage 1 loading fix, #2 and #8 — see note).
+**What was implemented:** `ChatModelSelectorDropdown.tsx` — when no model is selected and there is no explicit `modelUsabilityLabel`, the status badge shows "No model selected" in warn styling instead of falling back to the connection status ("Healthy"/"Connected"). Once a model is selected the connection badge is shown as before. Verified live: badge reads "No model selected" pre-load and "Healthy" after a model auto-selects.
+**Tests:** `ChatModelSelectorDropdown.character-usability.test.tsx` (no connection badge with no model; restored once selected).
+**Status:** Completed
 
-**Approach:**
-1. Derive provider-health and model-availability from a single selector/hook.
-2. Suppress or recolor the "Healthy" badge when no model is selectable; keep right rail, composition card, and composer button in agreement.
-
-**Success criteria:** No state where "Healthy" shows beside "No models available"; right rail and composition agree with the composer.
-**Tests:** Unit snapshot of the status derivation for: no providers, configured-but-no-model, model-selected.
-**Status:** Not Started
+### #2 (failure-state recovery) and #8 (empty-state CTA) — resolved by Stage 1
+With the loading state in place, the empty picker only appears once the fetch genuinely returns zero models, and the model **auto-selects** after the catalog loads (verified live: `tldw:gpt-4o` becomes active without user action). The Playground model dropdown's recovery link is "Open model settings" → `/settings/tldw` (a real route); the dead "Open current chat settings" string is in the **Sidepanel** chat (`components/Sidepanel/Chat/form.tsx`), not `/chat`. The empty-state "Start chatting" CTA dispatches a starter and focuses the composer, which is the correct action. No separate `/chat` change required; closing #2 and #8.
 
 ---
 
