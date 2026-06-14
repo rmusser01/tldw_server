@@ -8,6 +8,7 @@ opt-in: ``WebFetchModule`` only uses it when a cache instance is supplied.
 
 from __future__ import annotations
 
+import copy
 import threading
 import time
 from collections import OrderedDict
@@ -18,9 +19,15 @@ _DEFAULT_TTL_SECONDS = 300.0
 _DEFAULT_MAX_ENTRIES = 256
 
 
-def make_cache_key(url: str, fmt: str, max_bytes: int) -> tuple[str, str, int]:
-    """Build the cache key from the request inputs that determine the output."""
-    return (url, fmt, int(max_bytes))
+def make_cache_key(
+    url: str, fmt: str, max_bytes: int, respect_robots: bool
+) -> tuple[str, str, int, bool]:
+    """Build the cache key from the request inputs that determine the output.
+
+    ``respect_robots`` is policy-relevant, so requests with different robots
+    modes never share a cached entry.
+    """
+    return (url, fmt, int(max_bytes), bool(respect_robots))
 
 
 class ResponseCache:
@@ -49,7 +56,11 @@ class ResponseCache:
         return self._ttl_seconds > 0 and self._max_entries > 0
 
     def get(self, key: Any) -> Any | None:
-        """Return the cached value for ``key`` or ``None`` if missing/expired."""
+        """Return a copy of the cached value for ``key`` or ``None`` if missing/expired.
+
+        A copy is returned so callers can mutate the result without corrupting the
+        cached entry (and vice versa).
+        """
         if not self.enabled:
             return None
         now = self._clock()
@@ -62,15 +73,16 @@ class ResponseCache:
                 del self._entries[key]
                 return None
             self._entries.move_to_end(key)
-            return value
+            return copy.deepcopy(value)
 
     def put(self, key: Any, value: Any) -> None:
-        """Store ``value`` for ``key`` with the configured TTL, evicting LRU as needed."""
+        """Store a copy of ``value`` for ``key`` with the configured TTL, evicting LRU."""
         if not self.enabled:
             return
         expires_at = self._clock() + self._ttl_seconds
+        stored = copy.deepcopy(value)
         with self._lock:
-            self._entries[key] = (expires_at, value)
+            self._entries[key] = (expires_at, stored)
             self._entries.move_to_end(key)
             while len(self._entries) > self._max_entries:
                 self._entries.popitem(last=False)

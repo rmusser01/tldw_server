@@ -295,13 +295,38 @@ class WebFetchModule(WebToolBase):
         except WebToolError as exc:
             return self._structured_error(tool_name, exc.reason_code, exc.message, context=context)
 
-        # Cache hit: return the stored result (the gateway already enforced the
-        # call's permission rules, and a cache hit performs no network request).
-        cache_key = make_cache_key(requested_url, fmt, max_bytes)
+        # Cache lookup. A hit still re-applies the outbound policy to the requested
+        # URL (cheap; no body download) so a newly-denied domain or robots rule is
+        # honored, and the eval metadata is rebuilt from the current call context.
+        cache_key = None
         if self._response_cache is not None:
+            cache_key = make_cache_key(requested_url, fmt, max_bytes, respect_robots)
             cached = self._response_cache.get(cache_key)
             if cached is not None:
-                return {**cached, "cached": True}
+                decision = await decide_web_outbound_policy(
+                    requested_url,
+                    respect_robots=respect_robots,
+                    user_agent=_DEFAULT_USER_AGENT,
+                    source="mcp.web_fetch",
+                    stage="web.fetch",
+                )
+                if not getattr(decision, "allowed", False):
+                    return self._structured_error(
+                        tool_name,
+                        "outbound_policy_denied",
+                        f"Outbound policy denied the request ({getattr(decision, 'reason', 'denied')}).",
+                        context=context,
+                    )
+                return {
+                    **cached,
+                    "cached": True,
+                    "eval": self._eval_metadata(
+                        _TOOL_FETCH,
+                        reason_code=None,
+                        truncated=bool(cached.get("truncated")),
+                        context=context,
+                    ),
+                }
 
         # Follow redirects manually, re-applying the outbound policy to every hop
         # so a permitted URL cannot redirect into denied/private address space.
@@ -416,7 +441,7 @@ class WebFetchModule(WebToolBase):
                 context=context,
             ),
         }
-        if self._response_cache is not None:
+        if self._response_cache is not None and cache_key is not None:
             self._response_cache.put(cache_key, result)
         return result
 
