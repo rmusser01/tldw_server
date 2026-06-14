@@ -49,8 +49,8 @@ class _FakeClient:
         return self.response
 
 
-def _module(client: _FakeClient) -> WebFetchModule:
-    return WebFetchModule(ModuleConfig(name="WebFetch"), client=client)
+def _module(client: _FakeClient, *, rate_limiter: Any | None = None) -> WebFetchModule:
+    return WebFetchModule(ModuleConfig(name="WebFetch"), client=client, rate_limiter=rate_limiter)
 
 
 def _allow_policy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -470,3 +470,50 @@ async def test_httpx_client_skips_body_for_unsupported_content_type() -> None:
     assert response.status_code == 200  # nosec B101
     assert response.content_type == "image/png"  # nosec B101
     assert response.body == b""  # nosec B101 - unsupported type not downloaded
+
+
+async def test_per_domain_rate_limit_blocks_second_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations.web_rate_limit import (
+        DomainRateLimiter,
+    )
+
+    _allow_policy(monkeypatch)
+    client = _FakeClient(_html_response(_RICH_HTML))
+    module = _module(client, rate_limiter=DomainRateLimiter(max_requests=1, window_seconds=60))
+
+    first = await module.execute_tool("web.fetch", {"url": "https://example.com/a"})
+    assert first["ok"] is True  # nosec B101
+
+    second = await module.execute_tool("web.fetch", {"url": "https://example.com/b"})
+    assert second["ok"] is False  # nosec B101
+    assert second["reason_code"] == "rate_limited"  # nosec B101
+    # The blocked request never reached the client (one successful fetch only).
+    assert len(client.calls) == 1  # nosec B101
+
+
+async def test_rate_limit_is_per_domain(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations.web_rate_limit import (
+        DomainRateLimiter,
+    )
+
+    _allow_policy(monkeypatch)
+    client = _FakeClient(_html_response(_RICH_HTML))
+    module = _module(client, rate_limiter=DomainRateLimiter(max_requests=1, window_seconds=60))
+
+    a = await module.execute_tool("web.fetch", {"url": "https://example.com/x"})
+    b = await module.execute_tool("web.fetch", {"url": "https://example.org/y"})
+    assert a["ok"] is True  # nosec B101
+    assert b["ok"] is True  # nosec B101 - different domain, independent budget
+
+
+async def test_rate_limit_disabled_allows_many(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations.web_rate_limit import (
+        DomainRateLimiter,
+    )
+
+    _allow_policy(monkeypatch)
+    client = _FakeClient(_html_response(_RICH_HTML))
+    module = _module(client, rate_limiter=DomainRateLimiter(max_requests=0))
+    for _ in range(5):
+        result = await module.execute_tool("web.fetch", {"url": "https://example.com/a"})
+        assert result["ok"] is True  # nosec B101

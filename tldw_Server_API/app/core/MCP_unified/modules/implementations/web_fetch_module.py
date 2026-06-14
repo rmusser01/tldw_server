@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
 )
 
 from ..base import ModuleConfig, create_tool_definition
+from .web_rate_limit import DomainRateLimiter
 from .web_tool_base import CONTROL_CHARS_RE, WebToolBase, WebToolError
 
 _TOOL_FETCH = "web.fetch"
@@ -199,9 +200,13 @@ class WebFetchModule(WebToolBase):
         config: ModuleConfig,
         *,
         client: WebFetchHttpClient | None = None,
+        rate_limiter: DomainRateLimiter | None = None,
     ) -> None:
         super().__init__(config)
         self._client: WebFetchHttpClient = client or HttpxWebFetchClient()
+        # A default, generously-bounded per-domain limiter is on unless the caller
+        # supplies one (pass DomainRateLimiter(max_requests=0) to disable).
+        self._rate_limiter: DomainRateLimiter = rate_limiter or DomainRateLimiter()
 
     async def on_initialize(self) -> None:
         return None
@@ -302,6 +307,16 @@ class WebFetchModule(WebToolBase):
                     tool_name,
                     "outbound_policy_denied",
                     f"Outbound policy denied the request ({getattr(decision, 'reason', 'denied')}).",
+                    context=context,
+                )
+
+            host = _safe_host(current_url)
+            if not self._rate_limiter.try_acquire(host):
+                logger.bind(stage="web.fetch", host=host).warning("web.fetch per-domain rate limit exceeded")
+                return self._structured_error(
+                    tool_name,
+                    "rate_limited",
+                    "Per-domain request rate limit exceeded.",
                     context=context,
                 )
 
