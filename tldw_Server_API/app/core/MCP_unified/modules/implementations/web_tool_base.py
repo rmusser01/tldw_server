@@ -92,7 +92,8 @@ class WebToolBase(BaseModule):
             ),
         }
         for key, value in extra.items():
-            if value is not None:
+            # Never let caller-supplied extras overwrite the core error fields.
+            if value is not None and key not in result:
                 result[key] = value
         return result
 
@@ -104,7 +105,9 @@ class WebToolBase(BaseModule):
         truncated: bool = False,
         context: Any | None = None,
     ) -> dict[str, Any]:
-        from ...tool_observability import build_execution_eval_metadata
+        from tldw_Server_API.app.core.MCP_unified.tool_observability import (
+            build_execution_eval_metadata,
+        )
 
         return build_execution_eval_metadata(
             tool_name=tool_name,

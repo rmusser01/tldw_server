@@ -167,8 +167,10 @@ class WebResearchModule(WebToolBase):
         if tool_name != _TOOL_RESEARCH:
             return self._structured_error(tool_name, "unknown_tool", "Unknown web tool.", context=context)
 
+        # The MCP protocol layer already runs sanitize_input on arguments before
+        # execute_tool, so we do not re-sanitize here.
         try:
-            params = self._validate(self.sanitize_input(arguments or {}))
+            params = self._validate(arguments or {})
         except WebToolError as exc:
             return self._structured_error(tool_name, exc.reason_code, exc.message, context=context)
 
