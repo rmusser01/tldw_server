@@ -1548,7 +1548,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install huggingface_hub
-          python Helper_Scripts/download_embedding_models.py --target models/embeddings
+          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]; then
+            python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
+          else
+            python Helper_Scripts/download_embedding_models.py --target models/embeddings
+          fi
           echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
 
       - name: Run shard tests
@@ -2640,7 +2644,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install huggingface_hub
-          python Helper_Scripts/download_embedding_models.py --target models/embeddings
+          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]; then
+            python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
+          else
+            python Helper_Scripts/download_embedding_models.py --target models/embeddings
+          fi
           echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
 
       - name: Run shard tests
@@ -3660,7 +3668,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install huggingface_hub
-          python Helper_Scripts/download_embedding_models.py --target models/embeddings
+          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]; then
+            python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
+          else
+            python Helper_Scripts/download_embedding_models.py --target models/embeddings
+          fi
           echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
 
       - name: Run OS shard tests
@@ -4679,7 +4691,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install huggingface_hub
-          python Helper_Scripts/download_embedding_models.py --target models/embeddings
+          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]; then
+            python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
+          else
+            python Helper_Scripts/download_embedding_models.py --target models/embeddings
+          fi
           echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
 
       - name: Run OS shard tests
@@ -5700,7 +5716,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install huggingface_hub
-          python Helper_Scripts/download_embedding_models.py --target models/embeddings
+          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]; then
+            python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
+          else
+            python Helper_Scripts/download_embedding_models.py --target models/embeddings
+          fi
           echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
 
       - name: Run release OS shard tests

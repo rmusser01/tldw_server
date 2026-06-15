@@ -287,11 +287,14 @@ def test_embedding_model_predownload_skips_backpressure_shard() -> None:
     assert len(predownload_steps) == 5
     for step in predownload_steps:
         condition = str(step.get("if"))
+        run_script = str(step.get("run") or "")
         assert "matrix.shard.name != 'ai-embeddings-backpressure'" in condition
         assert "matrix.shard.name != 'ai-embeddings-dlq-config'" in condition
         assert "matrix.shard.name != 'ai-embeddings-media-validation'" in condition
         assert "matrix.shard.name != 'rag-new-unit-rag-contracts'" in condition
         assert "matrix.shard.name != 'rag-new-integration-research'" in condition
+        assert '[[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]' in run_script
+        assert "--skip-defaults --model sentence-transformers/all-MiniLM-L6-v2" in run_script
 
 
 def test_full_suite_test_result_uploads_are_non_blocking() -> None:
