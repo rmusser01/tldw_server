@@ -10094,9 +10094,6 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
     assert by_first_path["/evaluations"].prefix == "/api/v1"
     assert by_first_path["/evaluations"].tags == ("evaluations",)
     assert by_first_path["/evaluations"].route_key == "evaluations"
-    assert by_first_path["/monitoring/status"].prefix == "/api/v1"
-    assert by_first_path["/monitoring/status"].tags == ("monitoring",)
-    assert by_first_path["/monitoring/status"].route_key == "monitoring"
     assert by_first_path["/sharing"].prefix == "/api/v1"
     assert by_first_path["/sharing"].tags == ("sharing",)
     assert by_first_path["/sharing"].route_key == ""

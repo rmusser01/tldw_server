@@ -79,7 +79,11 @@ def test_delay_step_then_log_succeeds(client_with_wf: TestClient):
         ],
     }
     wid = client.post("/api/v1/workflows", json=definition).json()["id"]
-    run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {"name": "Alice"}}).json()["run_id"]
+    run_id = client.post(
+        f"/api/v1/workflows/{wid}/run",
+        json={"inputs": {"name": "Alice"}},
+        params={"mode": "sync"},
+    ).json()["run_id"]
     data = _wait_for_terminal(client, run_id)
     assert data["status"] == "succeeded"
     # Final outputs should be from the last step (log)

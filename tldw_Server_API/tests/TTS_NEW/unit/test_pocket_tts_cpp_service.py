@@ -418,6 +418,7 @@ async def test_generate_with_adapter_closes_stream_before_pocket_tts_cpp_cleanup
         ("custom:voice-1", None, "custom_voice-1.wav"),
         ("alloy", _make_wav_base64(b"\x01\x02" * 8), "ref_"),
     ],
+    ids=("stored-custom-voice", "inline-reference-audio"),
 )
 async def test_pocket_tts_cpp_fallback_materializes_voice_for_fallback_adapter(
     tmp_path,
