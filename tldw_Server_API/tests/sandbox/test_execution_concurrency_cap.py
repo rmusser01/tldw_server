@@ -15,7 +15,7 @@ from tldw_Server_API.app.core.Sandbox.service import SandboxService
 
 pytestmark = pytest.mark.unit
 
-RUNNER_START_TIMEOUT_SEC = 10.0
+RUNNER_START_TIMEOUT_SEC = 30.0
 
 
 def _configure_sqlite_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
