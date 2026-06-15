@@ -5817,14 +5817,15 @@ def test_iter_minimal_optional_router_specs_propagates_workflow_runtime_import_f
         register_router_specs(FastAPI(), (selected_spec,))
 
 
-def test_iter_minimal_optional_router_specs_defers_monitoring_attr_lookup(
+def test_iter_minimal_required_router_specs_defers_monitoring_attr_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify minimal monitoring spec keeps router attr lookup lazy."""
     import importlib
 
     from tldw_Server_API.app.api.v1.router_groups.minimal import (
-        iter_minimal_optional_router_specs,
+        REQUIRED_ROUTER_SKIP_EXCEPTIONS,
+        iter_minimal_test_router_specs,
     )
 
     module_name = "tldw_Server_API.app.api.v1.endpoints.monitoring"
@@ -5861,7 +5862,7 @@ def test_iter_minimal_optional_router_specs_defers_monitoring_attr_lookup(
         _import_module,
     )
 
-    specs = list(iter_minimal_optional_router_specs())
+    specs = list(iter_minimal_test_router_specs())
     assert import_calls == []
     assert access_count == {f"{module_name}.router": 0}
 
@@ -5869,29 +5870,26 @@ def test_iter_minimal_optional_router_specs_defers_monitoring_attr_lookup(
     assert selected_spec.prefix == "/api/v1"
     assert selected_spec.tags == ("monitoring",)
     assert selected_spec.route_key == "monitoring"
-    assert selected_spec.skip_context == "in minimal test app"
+    assert selected_spec.skip_context == ""
     assert selected_spec.default_stable is True
-    assert selected_spec.skip_exceptions == (
-        OptionalRouterMissingModule,
-        OptionalRouterMissingAttribute,
-    )
+    assert selected_spec.skip_exceptions == REQUIRED_ROUTER_SKIP_EXCEPTIONS
     assert _first_router_path(selected_spec.router) == "/monitoring/status"
     assert import_calls == [module_name]
     assert access_count == {f"{module_name}.router": 1}
 
 
-def test_iter_minimal_optional_router_specs_skips_monitoring_missing_import_failures(
+def test_iter_minimal_required_router_specs_propagates_monitoring_missing_import_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify minimal monitoring spec skips missing optional router module."""
+    """Verify required minimal monitoring spec fails when the router module is missing."""
     import importlib
 
     from tldw_Server_API.app.api.v1.router_groups.minimal import (
-        iter_minimal_optional_router_specs,
+        iter_minimal_test_router_specs,
     )
 
     module_name = "tldw_Server_API.app.api.v1.endpoints.monitoring"
-    specs = list(iter_minimal_optional_router_specs())
+    specs = list(iter_minimal_test_router_specs())
     selected_spec = next(spec for spec in specs if spec.name == "monitoring")
 
     real_import_module = importlib.import_module
@@ -5910,18 +5908,8 @@ def test_iter_minimal_optional_router_specs_skips_monitoring_missing_import_fail
         _import_module,
     )
 
-    debug_messages: list[str] = []
-    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
-
-    assert register_router_specs(FastAPI(), (selected_spec,)) == 0
-    skip_debug_messages = [
-        message for message in debug_messages if message.startswith("Skipping ")
-    ]
-    assert len(skip_debug_messages) == 1
-    skip_message = skip_debug_messages[0]
-    assert skip_message.startswith("Skipping monitoring router in minimal test app:")
-    assert module_name in skip_message
-    assert "missing during import" in skip_message
+    with pytest.raises(OptionalRouterMissingModule, match="missing during import"):
+        register_router_specs(FastAPI(), (selected_spec,))
 
 
 @pytest.mark.parametrize(
@@ -5932,20 +5920,20 @@ def test_iter_minimal_optional_router_specs_skips_monitoring_missing_import_fail
         (AttributeError, "monitoring attribute failed during import"),
     ),
 )
-def test_iter_minimal_optional_router_specs_propagates_monitoring_runtime_import_failures(
+def test_iter_minimal_required_router_specs_propagates_monitoring_runtime_import_failures(
     monkeypatch: pytest.MonkeyPatch,
     exception_type: type[Exception],
     message: str,
 ) -> None:
-    """Verify minimal monitoring runtime import defects are not silently skipped."""
+    """Verify required minimal monitoring runtime import defects are not silently skipped."""
     import importlib
 
     from tldw_Server_API.app.api.v1.router_groups.minimal import (
-        iter_minimal_optional_router_specs,
+        iter_minimal_test_router_specs,
     )
 
     module_name = "tldw_Server_API.app.api.v1.endpoints.monitoring"
-    specs = list(iter_minimal_optional_router_specs())
+    specs = list(iter_minimal_test_router_specs())
     selected_spec = next(spec for spec in specs if spec.name == "monitoring")
 
     real_import_module = importlib.import_module

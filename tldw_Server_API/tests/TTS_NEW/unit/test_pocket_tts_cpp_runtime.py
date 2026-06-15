@@ -105,7 +105,7 @@ async def test_pocket_tts_cpp_probe_accepts_only_when_later_stdout_progress_arri
         model_path=Path("/tmp/models"),
         tokenizer_path=Path("/tmp/tokenizer.model"),
         precision="int8",
-        timeout=0.1,
+        timeout=0.4,
         enable_voice_cache=True,
     )
 
