@@ -34,7 +34,7 @@ struct BundleTemplateResolver {
         let bundleURL = URL(fileURLWithPath: templatePath, isDirectory: true)
         let manifestURL = bundleURL.appendingPathComponent("manifest.json", isDirectory: false)
 
-        guard FileManager.default.fileExists(atPath: manifestURL.path) else {
+        guard FileManager.default.fileExists(atPath: manifestURL.path(percentEncoded: false)) else {
             throw TemplateResolutionError.bundleManifestMissing
         }
 
@@ -46,31 +46,31 @@ struct BundleTemplateResolver {
         }
 
         let kernelURL = bundleURL.appendingPathComponent(manifest.kernel, isDirectory: false)
-        guard FileManager.default.fileExists(atPath: kernelURL.path) else {
+        guard FileManager.default.fileExists(atPath: kernelURL.path(percentEncoded: false)) else {
             throw TemplateResolutionError.bundleKernelMissing
         }
 
         let rootfsURL = bundleURL.appendingPathComponent(manifest.rootfs, isDirectory: false)
-        guard FileManager.default.fileExists(atPath: rootfsURL.path) else {
+        guard FileManager.default.fileExists(atPath: rootfsURL.path(percentEncoded: false)) else {
             throw TemplateResolutionError.bundleRootfsMissing
         }
 
         let initrdPath: String?
         if let initrd = manifest.initrd {
             let initrdURL = bundleURL.appendingPathComponent(initrd, isDirectory: false)
-            guard FileManager.default.fileExists(atPath: initrdURL.path) else {
+            guard FileManager.default.fileExists(atPath: initrdURL.path(percentEncoded: false)) else {
                 throw TemplateResolutionError.bundleInitrdMissing
             }
-            initrdPath = initrdURL.path
+            initrdPath = initrdURL.path(percentEncoded: false)
         } else {
             initrdPath = nil
         }
 
         return .bundle(
             BundleTemplateBootSpec(
-                kernelPath: kernelURL.path,
+                kernelPath: kernelURL.path(percentEncoded: false),
                 initrdPath: initrdPath,
-                rootfsPath: rootfsURL.path,
+                rootfsPath: rootfsURL.path(percentEncoded: false),
                 workspaceMountTag: manifest.workspaceMountTag,
                 vsockPort: manifest.vsockPort,
                 guestAgentPath: manifest.guestAgentPath

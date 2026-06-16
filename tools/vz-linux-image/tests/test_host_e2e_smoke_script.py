@@ -340,6 +340,8 @@ def test_host_e2e_smoke_script_removes_stale_socket_before_helper_start(tmp_path
     fake_python.write_text(
         "#!/usr/bin/env python3\n"
         "import sys\n"
+        "if len(sys.argv) > 2 and sys.argv[1] == '-c':\n"
+        "    raise SystemExit(1)\n"
         "sys.exit(0 if sys.argv[1:3] == ['-m', 'pytest'] else 2)\n",
         encoding="utf-8",
     )
@@ -389,6 +391,7 @@ def test_host_e2e_smoke_script_removes_stale_socket_before_helper_start(tmp_path
 
 
 def test_host_e2e_smoke_script_refuses_live_socket_before_helper_start(tmp_path: Path) -> None:
+    """Refuse a socket with an active listener instead of replacing it."""
     bundle = tmp_path / "bundle"
     bundle.mkdir()
     (bundle / "kernel").write_bytes(b"kernel")
@@ -441,6 +444,59 @@ def test_host_e2e_smoke_script_refuses_live_socket_before_helper_start(tmp_path:
 
             assert result.returncode != 0  # nosec B101
             assert "helper socket path is already in use" in result.stderr  # nosec B101
+            assert socket_path.exists()  # nosec B101
+
+
+def test_host_e2e_smoke_script_refuses_unsafe_socket_probe_result(tmp_path: Path) -> None:
+    """Refuse to delete an existing socket when the probe cannot classify it as stale."""
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    serial_log_dir = tmp_path / "serial"
+    fake_python = tmp_path / "fake-python"
+    fake_helper = tmp_path / "fake-helper"
+    fake_python.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "if len(sys.argv) > 2 and sys.argv[1] == '-c':\n"
+        "    raise SystemExit(2)\n"
+        "sys.exit(0 if sys.argv[1:3] == ['-m', 'pytest'] else 2)\n",
+        encoding="utf-8",
+    )
+    fake_helper.write_text("#!/bin/sh\nsleep 30\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+    fake_helper.chmod(0o755)
+
+    # AF_UNIX paths must stay short on macOS; this mirrors the existing smoke-test socket fixture.
+    with tempfile.TemporaryDirectory(  # nosec B108
+        prefix="vz-smoke-",
+        dir="/tmp",  # nosec B108
+    ) as socket_dir:
+        socket_path = Path(socket_dir) / "helper.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as existing_socket:
+            try:
+                existing_socket.bind(str(socket_path))
+            except PermissionError:
+                pytest.skip("AF_UNIX socket binding is not permitted in this sandbox")
+
+            result = _run_smoke_script(
+                "--bundle",
+                str(bundle),
+                "--helper",
+                str(fake_helper),
+                "--socket",
+                str(socket_path),
+                "--serial-log-dir",
+                str(serial_log_dir),
+                "--python",
+                str(fake_python),
+                "--skip-build",
+                "--skip-sign",
+            )
+
+            assert result.returncode != 0  # nosec B101
+            assert "refusing to remove" in result.stderr  # nosec B101
             assert socket_path.exists()  # nosec B101
 
 

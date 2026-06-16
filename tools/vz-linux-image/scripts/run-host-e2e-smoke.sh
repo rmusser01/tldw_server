@@ -200,10 +200,11 @@ require_helper_binary() {
   [[ -x "${HELPER_PATH}" ]] || die "helper binary is not executable: ${HELPER_PATH}"
 }
 
-socket_accepts_connection() {
+socket_probe_state() {
   local socket_path="$1"
   [[ -S "${socket_path}" ]] || return 1
   "${PYTHON_BIN}" -c '
+import errno
 import socket
 import sys
 
@@ -211,13 +212,17 @@ try:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(0.2)
         client.connect(sys.argv[1])
-except OSError:
-    raise SystemExit(1)
+except OSError as exc:
+    if exc.errno in {errno.ECONNREFUSED, errno.ENOENT}:
+        raise SystemExit(1)
+    raise SystemExit(2)
 raise SystemExit(0)
 ' "${socket_path}"
 }
 
 prepare_socket_path() {
+  local socket_probe_status
+
   if [[ -d "${SOCKET_PATH}" ]]; then
     die "helper socket path is a directory: ${SOCKET_PATH}"
   fi
@@ -225,8 +230,13 @@ prepare_socket_path() {
     die "helper socket path already exists and is not a UNIX socket: ${SOCKET_PATH}"
   fi
   if [[ -S "${SOCKET_PATH}" ]]; then
-    if socket_accepts_connection "${SOCKET_PATH}"; then
+    if socket_probe_state "${SOCKET_PATH}"; then
       die "helper socket path is already in use: ${SOCKET_PATH}"
+    else
+      socket_probe_status=$?
+      if [[ "${socket_probe_status}" -ne 1 ]]; then
+        die "helper socket path could not be safely probed; refusing to remove: ${SOCKET_PATH}"
+      fi
     fi
     rm -f "${SOCKET_PATH}"
     return 0
