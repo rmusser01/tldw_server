@@ -82,6 +82,45 @@ private func templateFixturesRoot(file: StaticString = #filePath) -> URL {
     #expect(!response.source.contains("%20"))
 }
 
+@Test func validatorRejectsBundleArtifactPathEscapingBundleRoot() throws {
+    let validator = TemplateValidator()
+    let parentDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("bundle escape \(UUID().uuidString)", isDirectory: true)
+    let bundleDirectory = parentDirectory.appendingPathComponent("bundle", isDirectory: true)
+    try FileManager.default.createDirectory(at: bundleDirectory, withIntermediateDirectories: true)
+
+    defer {
+        try? FileManager.default.removeItem(at: parentDirectory)
+    }
+
+    FileManager.default.createFile(
+        atPath: parentDirectory.appendingPathComponent("outside-kernel").path,
+        contents: Data("kernel".utf8)
+    )
+    FileManager.default.createFile(
+        atPath: bundleDirectory.appendingPathComponent("rootfs.img").path,
+        contents: Data("rootfs".utf8)
+    )
+
+    let manifest = """
+    {
+      "bundle_version": "1",
+      "boot_mode": "bundle",
+      "kernel": "../outside-kernel",
+      "rootfs": "rootfs.img",
+      "guest_agent_path": "/usr/local/bin/tldw-agent-guest",
+      "workspace_mount_tag": "workspace",
+      "vsock_port": 1024
+    }
+    """
+    try manifest.write(to: bundleDirectory.appendingPathComponent("manifest.json"), atomically: true, encoding: .utf8)
+
+    let response = validator.validate(runtime: "vz_linux", templatePath: bundleDirectory.path)
+
+    #expect(response.ready == false)
+    #expect(response.reasons.contains("vz_linux_bundle_artifact_outside_bundle"))
+}
+
 private func temporaryBundleDirectory(includeKernel: Bool) throws -> URL {
     try temporaryBundleDirectory(
         parentName: nil,

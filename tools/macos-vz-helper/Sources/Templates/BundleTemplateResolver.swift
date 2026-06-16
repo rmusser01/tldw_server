@@ -7,6 +7,7 @@ enum TemplateResolutionError: Error, Equatable {
     case bundleKernelMissing
     case bundleInitrdMissing
     case bundleRootfsMissing
+    case bundleArtifactOutsideBundle(String)
     case unsupportedBundleBootMode(TemplateBootMode)
 
     func reason(for runtime: String) -> String {
@@ -23,6 +24,8 @@ enum TemplateResolutionError: Error, Equatable {
             return "vz_linux_bundle_initrd_missing"
         case .bundleRootfsMissing:
             return "vz_linux_bundle_rootfs_missing"
+        case .bundleArtifactOutsideBundle:
+            return "vz_linux_bundle_artifact_outside_bundle"
         case .unsupportedBundleBootMode:
             return "vz_linux_bundle_boot_mode_unsupported"
         }
@@ -30,11 +33,31 @@ enum TemplateResolutionError: Error, Equatable {
 }
 
 struct BundleTemplateResolver {
+    private func filesystemPath(for url: URL) -> String {
+        url.path(percentEncoded: false)
+    }
+
+    private func artifactURL(in bundleURL: URL, artifactPath: String) throws -> URL {
+        let rootURL = bundleURL.standardizedFileURL.resolvingSymlinksInPath()
+        let candidateURL = rootURL
+            .appendingPathComponent(artifactPath, isDirectory: false)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        let rootPath = filesystemPath(for: rootURL)
+        let candidatePath = filesystemPath(for: candidateURL)
+        let rootPrefix = rootPath.hasSuffix("/") ? rootPath : "\(rootPath)/"
+
+        guard candidatePath.hasPrefix(rootPrefix) else {
+            throw TemplateResolutionError.bundleArtifactOutsideBundle(artifactPath)
+        }
+        return candidateURL
+    }
+
     func resolve(templatePath: String) throws -> TemplateBootSpec {
         let bundleURL = URL(fileURLWithPath: templatePath, isDirectory: true)
         let manifestURL = bundleURL.appendingPathComponent("manifest.json", isDirectory: false)
 
-        guard FileManager.default.fileExists(atPath: manifestURL.path(percentEncoded: false)) else {
+        guard FileManager.default.fileExists(atPath: filesystemPath(for: manifestURL)) else {
             throw TemplateResolutionError.bundleManifestMissing
         }
 
@@ -45,32 +68,32 @@ struct BundleTemplateResolver {
             throw TemplateResolutionError.unsupportedBundleBootMode(manifest.bootMode)
         }
 
-        let kernelURL = bundleURL.appendingPathComponent(manifest.kernel, isDirectory: false)
-        guard FileManager.default.fileExists(atPath: kernelURL.path(percentEncoded: false)) else {
+        let kernelURL = try artifactURL(in: bundleURL, artifactPath: manifest.kernel)
+        guard FileManager.default.fileExists(atPath: filesystemPath(for: kernelURL)) else {
             throw TemplateResolutionError.bundleKernelMissing
         }
 
-        let rootfsURL = bundleURL.appendingPathComponent(manifest.rootfs, isDirectory: false)
-        guard FileManager.default.fileExists(atPath: rootfsURL.path(percentEncoded: false)) else {
+        let rootfsURL = try artifactURL(in: bundleURL, artifactPath: manifest.rootfs)
+        guard FileManager.default.fileExists(atPath: filesystemPath(for: rootfsURL)) else {
             throw TemplateResolutionError.bundleRootfsMissing
         }
 
         let initrdPath: String?
         if let initrd = manifest.initrd {
-            let initrdURL = bundleURL.appendingPathComponent(initrd, isDirectory: false)
-            guard FileManager.default.fileExists(atPath: initrdURL.path(percentEncoded: false)) else {
+            let initrdURL = try artifactURL(in: bundleURL, artifactPath: initrd)
+            guard FileManager.default.fileExists(atPath: filesystemPath(for: initrdURL)) else {
                 throw TemplateResolutionError.bundleInitrdMissing
             }
-            initrdPath = initrdURL.path(percentEncoded: false)
+            initrdPath = filesystemPath(for: initrdURL)
         } else {
             initrdPath = nil
         }
 
         return .bundle(
             BundleTemplateBootSpec(
-                kernelPath: kernelURL.path(percentEncoded: false),
+                kernelPath: filesystemPath(for: kernelURL),
                 initrdPath: initrdPath,
-                rootfsPath: rootfsURL.path(percentEncoded: false),
+                rootfsPath: filesystemPath(for: rootfsURL),
                 workspaceMountTag: manifest.workspaceMountTag,
                 vsockPort: manifest.vsockPort,
                 guestAgentPath: manifest.guestAgentPath
