@@ -293,7 +293,7 @@ def test_embedding_model_predownload_skips_backpressure_shard() -> None:
         assert "matrix.shard.name != 'ai-embeddings-media-validation'" in condition
         assert "matrix.shard.name != 'rag-new-unit-rag-contracts'" in condition
         assert "matrix.shard.name != 'rag-new-integration-research'" in condition
-        assert '[[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]' in run_script
+        assert '[[ "$SHARD_NAME" == "ai-embeddings-v5-core" || "$SHARD_NAME" == rag-new-unit-* ]]' in run_script
         assert "--skip-defaults --model sentence-transformers/all-MiniLM-L6-v2" in run_script
 
 
