@@ -897,63 +897,61 @@ Notes
 ## Architecture Diagram
 
 ```mermaid
+```mermaid
 flowchart LR
-  subgraph CLIENTS [Clients]
+  subgraph CLIENTS ["Clients"]
     WebUI["Next.js WebUI (primary web client)"]:::client
-    MCPClients[MCP Clients (IDE/tools)]:::client
-    APIClients[CLI/HTTP Clients]:::client
+    MCPClients["MCP Clients (IDE/tools)"]:::client
+    APIClients["CLI/HTTP Clients"]:::client
   end
 
-  subgraph API_STACK [FastAPI App]
-    API[FastAPI App /api/v1]:::api
-    Endpoints[Endpoints + Schemas]:::module
-    Dependencies[API Deps (Auth, DB, rate limits, resource governor)]:::module
-    Services[Background Services/Jobs]:::module
+  subgraph API_STACK ["FastAPI App"]
+    API["FastAPI App /api/v1"]:::api
+    Endpoints["Endpoints + Schemas"]:::module
+    Dependencies["API Deps (Auth, DB, rate limits, resource governor)"]:::module
+    Services["Background Services/Jobs"]:::module
   end
 
-  subgraph CORE [Core Modules]
-    AuthNZ[AuthNZ]:::core
-    RAG[RAG]:::core
-    LLM[LLM Calls]:::core
-    Embeddings[Embeddings]:::core
-    Media[Ingestion & Media Processing]:::core
-    Chunking[Chunking]:::core
-    Chat[Chat/Characters]:::core
-    Audio[Audio STT/TTS]:::core
-    Evaluations[Evaluations]:::core
-    PromptStudio[Prompt Studio]:::core
-    Knowledge[Notes/Prompts/Chatbooks]:::core
-    MCP[MCP Unified]:::core
-    Research[Research/Web Search]:::core
+  subgraph CORE ["Core Modules"]
+    AuthNZ["AuthNZ"]:::core
+    RAG["RAG"]:::core
+    LLM["LLM Calls"]:::core
+    Embeddings["Embeddings"]:::core
+    Media["Ingestion & Media Processing"]:::core
+    Chunking["Chunking"]:::core
+    Chat["Chat/Characters"]:::core
+    Audio["Audio STT/TTS"]:::core
+    Evaluations["Evaluations"]:::core
+    PromptStudio["Prompt Studio"]:::core
+    Knowledge["Notes/Prompts/Chatbooks"]:::core
+    MCP["MCP Unified"]:::core
+    Research["Research/Web Search"]:::core
   end
 
-  subgraph STORAGE [Storage]
-    UsersDB[(AuthNZ DB: SQLite/PostgreSQL)]:::db
-    ContentDB[(Content DBs: Media/Notes/Chats)]:::db
-    EvalsDB[(Evaluations DB: SQLite/PostgreSQL)]:::db
-    VectorDB[(Vector DB: ChromaDB/pgvector)]:::db
+  subgraph STORAGE ["Storage"]
+    UsersDB[("AuthNZ DB: SQLite/PostgreSQL")]:::db
+    ContentDB[("Content DBs: Media/Notes/Chats")]:::db
+    EvalsDB[("Evaluations DB: SQLite/PostgreSQL")]:::db
+    VectorDB[("Vector DB: ChromaDB/pgvector")]:::db
   end
 
-  subgraph EXTERNAL [External Providers]
-    LLMCloud[LLM APIs (OpenAI, Anthropic, etc.)]:::ext
-    LLMOnPrem[Local LLMs (vLLM, Ollama, llama.cpp, ...)]:::ext
-    AudioProv[STT/TTS Providers]:::ext
-    OCRVLM[OCR/VLM (tesseract, dots, points)]:::ext
-    MediaDL[yt-dlp / ffmpeg]:::ext
-    WebSearch[Web Search/Scrapers]:::ext
+  subgraph EXTERNAL ["External Providers"]
+    LLMCloud["LLM APIs (OpenAI, Anthropic, etc.)"]:::ext
+    LLMOnPrem["Local LLMs (vLLM, Ollama, llama.cpp, ...)"]:::ext
+    AudioProv["STT/TTS Providers"]:::ext
+    OCRVLM["OCR/VLM (tesseract, dots, points)"]:::ext
+    MediaDL["yt-dlp / ffmpeg"]:::ext
+    WebSearch["Web Search/Scrapers"]:::ext
   end
 
-  %% Client to API
   WebUI -->|HTTP| API
   MCPClients -->|HTTP/WebSocket| API
   APIClients -->|HTTP/WebSocket| API
 
-  %% Inside API stack
   API --> Endpoints
   API --> Dependencies
   API --> Services
 
-  %% Endpoints to core modules
   Endpoints --> AuthNZ
   Endpoints --> RAG
   Endpoints --> LLM
@@ -968,7 +966,6 @@ flowchart LR
   Endpoints --> MCP
   Endpoints --> Research
 
-  %% Core to storage
   AuthNZ --> UsersDB
   Media --> ContentDB
   Knowledge --> ContentDB
@@ -978,7 +975,6 @@ flowchart LR
   RAG --> VectorDB
   Embeddings --> VectorDB
 
-  %% Core to external services
   LLM --> LLMCloud
   LLM --> LLMOnPrem
   Audio --> AudioProv
