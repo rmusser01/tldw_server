@@ -6,6 +6,7 @@ from mcp_unified.tool_use_reporting.builders import (
 )
 from mcp_unified.tool_use_reporting.models import (
     ExecutionOrigin,
+    FilePolicyDecisionMetadata,
     MAX_EVENT_QUERY_LIMIT,
     MAX_REPORT_EVENT_LIMIT,
     MAX_REPORT_GROUP_LIMIT,
@@ -43,6 +44,7 @@ __all__ = [
     "classify_tool_use_exception",
     "ExecutionOrigin",
     "extract_safe_context_dimensions",
+    "FilePolicyDecisionMetadata",
     "InMemoryToolUseEventStore",
     "MAX_EVENT_QUERY_LIMIT",
     "MAX_REPORT_EVENT_LIMIT",
