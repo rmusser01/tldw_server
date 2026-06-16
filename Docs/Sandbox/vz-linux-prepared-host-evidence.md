@@ -23,7 +23,9 @@ manual or host-gated only:
 
 Do not add pull request triggers, push triggers, scheduled destructive drills,
 host reboot automation, launchd automation, or network expansion from this
-tracker.
+tracker. Host reboot and launchd validation are explicit manual/operator-gated
+drills; this tracker records whether those drills were run or intentionally
+skipped for a prepared-host evidence packet.
 
 ## Evidence Packet
 
@@ -48,7 +50,7 @@ Each prepared-host evidence packet should include these fields.
 | Artifacts | workflow run URL or local artifact root, helper stdout/stderr files, serial logs, pytest logs, workflow logs, and checksums or sizes for retained artifacts. |
 | Expected skips | explicit non-blocking skips from the acceptance policy, including missing nightly opt-in, no launchd request, no failure-drill request, or local unprepared-host checks. |
 | Blocking regressions | any failed guarantee from the acceptance policy and the first failing command/log pointer. |
-| Residual gaps | known uncovered cases such as host reboot, stuck boot/readiness, guest-agent mismatch, stale socket handling, or launchd validation when skipped. |
+| Residual gaps | known unrun or uncovered cases such as host reboot when no manual pre/post drill was run, launchd validation when skipped, stale socket validation when skipped, stuck boot/readiness or guest-agent mismatch beyond host-independent coverage, or broader helper crash classes not covered by the selected drills. |
 | Follow-up owner | issue, task, or PR that will address each residual gap. |
 
 Do not paste secrets, API keys, raw user data, or full runner logs into the
@@ -90,7 +92,8 @@ themselves:
 - `launchd-drill` skipped because no maintainer requested LaunchAgent validation
 - manual stuck boot/readiness drill skipped because only host-independent
   helper/runner coverage was requested for the current implementation slice
-- host reboot validation skipped because it remains a manual operator procedure
+- host reboot validation skipped because no explicit manual pre/post drill was
+  requested for the current evidence packet
 
 If a prepared host passes preflight and then fails helper startup, real
 ephemeral execution, same-session VM reuse, recovery diagnostics, cleanup, or
