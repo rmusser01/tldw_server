@@ -546,13 +546,20 @@ tools/macos-vz-helper/scripts/vz-helperctl.py smoke \
 ```
 
 The wrapper delegates to `tools/vz-linux-image/scripts/run-host-e2e-smoke.sh`
-with the managed helper defaults. That lower-level script validates the bundle,
-builds the Swift helper when the binary is missing, ad hoc signs it with the
-supplied entitlements unless the helper is already signed with
-`com.apple.security.virtualization`, runs the helper-daemon smoke, starts one
-helper daemon for real `vz_linux` E2E, verifies ephemeral execution, verifies
-same-session VM reuse, verifies recovery diagnostics plus dry-run
-reconciliation repair planning, and stops the helper on exit.
+with the managed helper defaults. That lower-level script validates the
+operator-provided bundle as the canonical source, prepares a disposable
+image-store run bundle under the private runtime directory, builds the Swift
+helper when the binary is missing, ad hoc signs it with the supplied
+entitlements unless the helper is already signed with
+`com.apple.security.virtualization`, runs the helper-daemon smoke against the
+disposable bundle, starts one helper daemon for real `vz_linux` E2E, verifies
+ephemeral execution, verifies same-session VM reuse, verifies recovery
+diagnostics plus dry-run reconciliation repair planning, and stops the helper on
+exit.
+
+Evidence should record source bundle hashes separately from disposable run
+bundle hashes. The real VM stages may update the disposable run `rootfs.img`;
+they should not update the source bundle.
 
 `restart-drill` validates the direct `vz-helperctl.py`-managed lifecycle. Use it
 after starting the helper through `vz-helperctl.py start` when you need to prove
@@ -657,6 +664,10 @@ tools/vz-linux-image/scripts/run-host-e2e-smoke.sh \
   --entitlements /path/to/helper.entitlements
 ```
 
+The fallback script uses `$runtime_dir/image-store` by default. Pass
+`--image-store-root "$runtime_dir/image-store"` only when you need to make that
+path explicit in logs or evidence.
+
 The underlying opt-in pytest module is still available directly:
 
 - `tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py`
@@ -731,8 +742,9 @@ bash tools/vz-linux-image/scripts/run-host-e2e-smoke.sh \
 ```
 
 That keeps CI aligned with local operator behavior instead of creating a second
-helper lifecycle path. The job uploads helper logs from the runner temp
-directory even when the smoke fails.
+helper lifecycle path. The job uploads helper logs and the disposable
+image-store run bundle from the runner temp directory even when the smoke
+fails.
 
 ## Helper Daemon Smoke
 

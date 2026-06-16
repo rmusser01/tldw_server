@@ -52,6 +52,7 @@ class RunCloneManifest:
 
     template_id: str
     run_id: str
+    target_subdir: str | None = None
     clone_items: list[CloneItem] = field(default_factory=list)
 
 
@@ -233,10 +234,21 @@ class SandboxImageStore:
             records = [record for record in records if record.runtime == runtime_name]
         return sorted(records, key=lambda record: record.template_id)
 
-    def prepare_run_clone(self, *, template_id: str, run_id: str) -> RunCloneManifest:
+    def prepare_run_clone(
+        self,
+        *,
+        template_id: str,
+        run_id: str,
+        target_subdir: str | None = None,
+    ) -> RunCloneManifest:
         """Build a deterministic per-run clone manifest for a template."""
 
         normalized_run_id = self._normalize_manifest_segment(run_id, "run_id")
+        normalized_target_subdir = (
+            self._normalize_manifest_segment(target_subdir, "target_subdir")
+            if target_subdir is not None
+            else None
+        )
         template = self._templates[template_id]
         target_names = [Path(source_path).name for source_path in template.disk_paths]
         seen_target_names: set[str] = set()
@@ -252,13 +264,15 @@ class SandboxImageStore:
                 f"{template.template_id}: {','.join(sorted(duplicate_target_names))}"
             )
         run_root = self.root_path / "runs" / normalized_run_id
+        target_root = run_root / normalized_target_subdir if normalized_target_subdir else run_root
         manifest = RunCloneManifest(
             template_id=template.template_id,
             run_id=normalized_run_id,
+            target_subdir=normalized_target_subdir,
             clone_items=[
                 CloneItem(
                     source_path=str(source_path),
-                    target_path=str(run_root / Path(source_path).name),
+                    target_path=str(target_root / Path(source_path).name),
                     mode="clone",
                 )
                 for source_path in template.disk_paths
@@ -577,6 +591,7 @@ class SandboxImageStore:
             "schema_version": MANIFEST_SCHEMA_VERSION,
             "template_id": manifest.template_id,
             "run_id": manifest.run_id,
+            "target_subdir": manifest.target_subdir,
             "clone_items": [
                 {
                     "source_path": item.source_path,
@@ -616,11 +631,26 @@ class SandboxImageStore:
         if not isinstance(raw_clone_items, list):
             raise ImageStoreValidationError(f"run_manifest_clone_items_invalid: {manifest_path}")
 
+        target_subdir = payload.get("target_subdir")
+        if target_subdir is not None and not isinstance(target_subdir, str):
+            raise ImageStoreValidationError(f"run_manifest_target_subdir_invalid: {manifest_path}")
+        normalized_target_subdir = (
+            self._normalize_manifest_segment(target_subdir, "target_subdir")
+            if target_subdir is not None
+            else None
+        )
+
         return RunCloneManifest(
             template_id=str(payload["template_id"]),
             run_id=run_id,
+            target_subdir=normalized_target_subdir,
             clone_items=[
-                self._clone_item_from_payload(item, run_id=run_id, manifest_path=manifest_path)
+                self._clone_item_from_payload(
+                    item,
+                    run_id=run_id,
+                    target_subdir=normalized_target_subdir,
+                    manifest_path=manifest_path,
+                )
                 for item in raw_clone_items
             ],
         )
@@ -630,6 +660,7 @@ class SandboxImageStore:
         item: Any,
         *,
         run_id: str,
+        target_subdir: str | None,
         manifest_path: Path,
     ) -> CloneItem:
         if not isinstance(item, dict):
@@ -651,6 +682,8 @@ class SandboxImageStore:
         if clone_item.mode != "clone":
             raise ImageStoreValidationError(f"run_manifest_clone_item_mode_invalid: {manifest_path}")
         expected_target_root = self.root_path / "runs" / run_id
+        if target_subdir is not None:
+            expected_target_root = expected_target_root / target_subdir
         if Path(clone_item.target_path).parent != expected_target_root:
             raise ImageStoreValidationError(f"run_manifest_clone_item_target_invalid: {manifest_path}")
         return clone_item

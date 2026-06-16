@@ -248,6 +248,58 @@ def test_sandbox_image_store_rejects_duplicate_run_clone_target_names(tmp_path: 
         store.prepare_run_clone(template_id=template_id, run_id="run-duplicate")
 
 
+def test_sandbox_image_store_can_target_run_clone_subdirectory(tmp_path: Path) -> None:
+    disk = tmp_path / "rootfs.img"
+    disk.write_bytes(b"rootfs")
+    store = SandboxImageStore(root_path=tmp_path / "store")
+    template_id = store.register_template(
+        runtime="vz_linux",
+        template_name="debian-bookworm-arm64",
+        disk_paths=[str(disk)],
+    )
+
+    manifest = store.prepare_run_clone(
+        template_id=template_id,
+        run_id="run-with-bundle",
+        target_subdir="bundle",
+    )
+    reloaded = SandboxImageStore(root_path=tmp_path / "store").get_run_clone_manifest("run-with-bundle")
+
+    assert manifest.target_subdir == "bundle"
+    assert manifest.clone_items[0].target_path.endswith("run-with-bundle/bundle/rootfs.img")
+    assert reloaded is not None
+    assert reloaded.target_subdir == "bundle"
+    assert reloaded.clone_items[0].target_path.endswith("run-with-bundle/bundle/rootfs.img")
+
+
+def test_sandbox_image_store_rejects_non_string_run_manifest_target_subdir(tmp_path: Path) -> None:
+    source = tmp_path / "rootfs.img"
+    source.write_bytes(b"rootfs")
+    manifest_path = tmp_path / "store" / "runs" / "run-tampered" / "manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "template_id": "vz_linux:bundle",
+                "run_id": "run-tampered",
+                "target_subdir": ["bundle"],
+                "clone_items": [
+                    {
+                        "source_path": str(source),
+                        "target_path": str(manifest_path.parent / "rootfs.img"),
+                        "mode": "clone",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ImageStoreValidationError, match="run_manifest_target_subdir_invalid"):
+        SandboxImageStore(root_path=tmp_path / "store").list_run_clone_manifests()
+
+
 def test_sandbox_image_store_rejects_tampered_run_manifest_mode(tmp_path: Path) -> None:
     source = tmp_path / "rootfs.img"
     source.write_bytes(b"rootfs")
