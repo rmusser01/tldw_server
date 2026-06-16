@@ -552,6 +552,38 @@ def test_agent_profile_manifest_preserves_registry_support_and_adapter_metadata(
     assert manifest["entrypoint"]["runtime_backend"] == "acp_downstream"
 
 
+def test_registry_aider_manifest_records_unverified_adapter_candidate(monkeypatch) -> None:
+    module = _load_module()
+    monkeypatch.setenv("PATH", "")
+
+    manifest = module._build_registry_agent_manifest("aider")
+
+    assert manifest["profile"] == "aider"
+    assert manifest["support_state"] == "documented_unverified"
+    assert manifest["verification_level"] == "documented_only"
+    assert manifest["entrypoint"]["entrypoint_strategy"] == "external_acp_adapter"
+    assert manifest["entrypoint"]["acp_command"] == "aider-acp"
+    assert manifest["entrypoint"]["adapter_source"] == "jorgejhms/aider-acp"
+    assert manifest["entrypoint"]["adapter_docs_url"] == "https://github.com/jorgejhms/aider-acp"
+    assert manifest["entrypoint"]["adapter_package"] == "aider-acp"
+    assert manifest["commands"] == []
+    assert "adapter_missing" in manifest["blockers"]
+
+
+def test_registry_continue_manifest_records_cn_without_acp_entrypoint() -> None:
+    module = _load_module()
+
+    manifest = module._build_registry_agent_manifest("continue_dev")
+
+    assert manifest["profile"] == "continue_dev"
+    assert manifest["support_state"] == "documented_unverified"
+    assert manifest["verification_level"] == "documented_only"
+    assert manifest["entrypoint"]["entrypoint_strategy"] == "documented_candidate"
+    assert manifest["entrypoint"]["acp_command"] == ""
+    assert manifest["commands"] == []
+    assert manifest["blockers"] == ["entrypoint_strategy_missing"]
+
+
 def test_run_profile_manifest_uses_stdio_sequence_runner(monkeypatch, capsys) -> None:
     module = _load_module()
     sequences = []

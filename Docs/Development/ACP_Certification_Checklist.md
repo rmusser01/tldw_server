@@ -158,6 +158,30 @@ The seeded `custom` profile should remain `documented_unverified` /
 register custom profiles for their own use, but release/support claims require
 the concrete evidence above.
 
+## Adapter Candidate And Headless CLI Decisions
+
+Direct prompts, one-shot CLI modes, browser modes, and headless text output do
+not satisfy ACP certification by themselves. A support claim requires a concrete
+ACP stdio entrypoint that can pass `initialize`, `session/new`, and
+`session/prompt` through the smoke helper or backend live-E2E path.
+
+When an agent has no native ACP command but a plausible adapter exists:
+
+- Keep support state `documented_unverified` and verification level
+  `documented_only`.
+- Use `external_acp_adapter` only when the registry names the adapter command
+  that would speak ACP stdio, such as `aider-acp`.
+- Record adapter source, docs URL, package/install source, and version policy.
+- Treat missing adapters as `adapter_missing`, not as successful agent
+  compatibility.
+- Do not promote support until the adapter and downstream agent pass live ACP
+  evidence with provider/runtime caveats recorded.
+
+When an agent CLI package has a different binary name than the product name,
+record the actual executable used by the package. For Continue, the current
+`@continuedev/cli` package exposes `cn`; the local shell word `continue` is a
+shell builtin and must not be used as a certifiable command.
+
 ## Live-E2E Checklist
 
 Run this when changing a candidate agent row from `documented_unverified` to

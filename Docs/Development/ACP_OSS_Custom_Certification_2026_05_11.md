@@ -14,6 +14,26 @@ The live E2E harness also refused to run without `TLDW_E2E_SERVER_URL`,
 `TLDW_E2E_API_KEY`, and `ACP_AGENT_PROFILE`, which is the expected safety
 behavior for named live-agent support claims.
 
+## 2026-06-16 Aider And Continue Decision Addendum
+
+The Aider and Continue rows were rechecked after OpenCode, Goose, Hermes, Codex,
+and concrete custom-profile evidence work landed.
+
+- Aider 0.86.2 remains non-native for ACP: direct `aider --message ...`
+  prompting is useful local LLM evidence but does not expose an ACP stdio server.
+  A third-party `jorgejhms/aider-acp` bridge is now recorded as an
+  `external_acp_adapter` candidate with `acp_command=aider-acp`, but it is not
+  installed, pinned, audited, or live-E2E certified in this environment. Keep
+  Aider at `documented_unverified` / `documented_only` until the adapter path
+  passes initialize/session/prompt evidence. Follow-up: #2050.
+- Continue now uses the actual current package binary name `cn` for setup
+  surfaces. The old `continue` command resolved to a shell builtin locally, and
+  `@continuedev/cli 1.5.46` help exposes interactive/headless/review modes but
+  no ACP stdio server entrypoint. Keep Continue at `documented_unverified` /
+  `documented_only` with blocker `entrypoint_strategy_missing` until a native
+  ACP command or maintained adapter exists and is live-certified. Follow-up:
+  #2051.
+
 ## Aider
 
 ```text
