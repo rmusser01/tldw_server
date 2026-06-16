@@ -899,7 +899,7 @@ Notes
 ```mermaid
 flowchart LR
   subgraph CLIENTS [Clients]
-    WebUI[Next.js WebUI (primary web client)]:::client
+    WebUI["Next.js WebUI (primary web client)"]:::client
     MCPClients[MCP Clients (IDE/tools)]:::client
     APIClients[CLI/HTTP Clients]:::client
   end
