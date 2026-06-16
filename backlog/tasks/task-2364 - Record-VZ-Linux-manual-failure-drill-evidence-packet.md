@@ -13,7 +13,7 @@ references:
 - Docs/Sandbox/macos-runtime-operator-notes.md
 modified_files:
 - Docs/Sandbox/vz-linux-prepared-host-evidence.md
-- backlog/tasks/task-2364 - Record-VZ-Linux-manual-failure-drill-evidence-packet.md
+- backlog/tasks/task-2364-record-vz-linux-manual-failure-drill-evidence-packet.md
 ---
 
 ## Description
