@@ -633,20 +633,21 @@ enabled = true
 runtime = docker
 base_image = tldw/acp-agent:latest
 network_policy = allow_all
-agent_command = claude
-agent_args = ["code"]
+agent_command = claude-agent-acp
+agent_args = []
 session_retention_days = 30
 audit_retention_days = 30
 ```
 
-`agent_command` must be the downstream coding agent executable (`claude`, `codex`, `opencode`, etc).
+For a native ACP command, set `agent_command` plus `agent_args` to the command that serves ACP over stdio, such as `opencode` with `["acp"]`.
+For an external adapter, set `agent_command` to the adapter binary, such as `codex-acp` or `claude-agent-acp`.
 Do not set it to `tldw-agent-acp` (that recursively launches the runner and fails with `resource temporarily unavailable`).
 
 ### Required Env
 
 ```bash
 ACP_SANDBOX_ENABLED=1
-ACP_SANDBOX_AGENT_COMMAND=claude
+ACP_SANDBOX_AGENT_COMMAND=claude-agent-acp
 SANDBOX_ENABLE_EXECUTION=1
 SANDBOX_BACKGROUND_EXECUTION=1
 SANDBOX_DOCKER_BIND_WORKSPACE=1
@@ -693,15 +694,15 @@ incompatibilities.
 agent:
   # Command to execute (required)
   # Can be an absolute path or command in PATH
-  command: "claude"
+  command: "opencode"
 
   # Command-line arguments (optional, default: [])
-  args: ["code"]
+  args: ["acp"]
 
   # Environment variables for the agent process (optional)
   # Use ${VAR_NAME} to reference existing environment variables
   env:
-    ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+    TERM: "xterm-256color"
     # Add any additional env vars needed by your agent
     # SOME_CONFIG: "value"
 
@@ -739,12 +740,30 @@ logging:
 ### Claude Code
 
 ```yaml
-agent:
-  command: "claude"
-  args: ["code"]
-  env:
-    ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+agents:
+  default: claude_code
+  agents:
+    - type: claude_code
+      name: Claude Code
+      command: claude
+      args: []
+      env:
+        - TERM=xterm-256color
+        - HOME=${TLDW_ACP_HOST_HOME}
+      entrypoint_strategy: external_acp_adapter
+      acp_command: claude-agent-acp
+      acp_args: []
+      adapter_source: agentclientprotocol/claude-agent-acp
+      adapter_docs_url: https://github.com/agentclientprotocol/claude-agent-acp
+      adapter_package: "@agentclientprotocol/claude-agent-acp"
+      adapter_version: "0.40.0"
+      credential_policy: delegated_to_adapter
+      runtime_backend: acp_downstream
 ```
+
+This profile is a documented adapter candidate. The installed Claude Code CLI
+does not expose a native ACP stdio command; live support requires the pinned
+`@agentclientprotocol/claude-agent-acp` adapter plus live ACP verification.
 
 ### Codex CLI
 
@@ -891,5 +910,5 @@ changing support states in
 ### Agent Not Responding
 
 1. **Check agent config**: Verify `~/.tldw-agent/config.yaml` has correct agent configuration.
-2. **Check API keys**: Ensure ANTHROPIC_API_KEY or OPENAI_API_KEY is set for the agent.
+2. **Check agent auth**: Ensure the downstream agent or adapter has provider/login state in the runner environment.
 3. **Check logs**: Review server logs for ACP-related errors.
