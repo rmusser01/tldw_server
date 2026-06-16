@@ -272,6 +272,34 @@ def test_sandbox_image_store_can_target_run_clone_subdirectory(tmp_path: Path) -
     assert reloaded.clone_items[0].target_path.endswith("run-with-bundle/bundle/rootfs.img")
 
 
+def test_sandbox_image_store_rejects_non_string_run_manifest_target_subdir(tmp_path: Path) -> None:
+    source = tmp_path / "rootfs.img"
+    source.write_bytes(b"rootfs")
+    manifest_path = tmp_path / "store" / "runs" / "run-tampered" / "manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "template_id": "vz_linux:bundle",
+                "run_id": "run-tampered",
+                "target_subdir": ["bundle"],
+                "clone_items": [
+                    {
+                        "source_path": str(source),
+                        "target_path": str(manifest_path.parent / "rootfs.img"),
+                        "mode": "clone",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ImageStoreValidationError, match="run_manifest_target_subdir_invalid"):
+        SandboxImageStore(root_path=tmp_path / "store").list_run_clone_manifests()
+
+
 def test_sandbox_image_store_rejects_tampered_run_manifest_mode(tmp_path: Path) -> None:
     source = tmp_path / "rootfs.img"
     source.write_bytes(b"rootfs")

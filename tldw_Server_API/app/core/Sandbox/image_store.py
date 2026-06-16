@@ -632,6 +632,8 @@ class SandboxImageStore:
             raise ImageStoreValidationError(f"run_manifest_clone_items_invalid: {manifest_path}")
 
         target_subdir = payload.get("target_subdir")
+        if target_subdir is not None and not isinstance(target_subdir, str):
+            raise ImageStoreValidationError(f"run_manifest_target_subdir_invalid: {manifest_path}")
         normalized_target_subdir = (
             self._normalize_manifest_segment(target_subdir, "target_subdir")
             if target_subdir is not None

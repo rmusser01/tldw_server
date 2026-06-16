@@ -198,23 +198,19 @@ validate_inputs() {
   fi
 }
 
-expected_smoke_bundle_path() {
-  printf '%s/runs/%s/bundle' "${IMAGE_STORE_ROOT}" "${SMOKE_RUN_ID}"
-}
-
 prepare_smoke_bundle() {
-  print_cmd "${PYTHON_BIN}" "${PREPARE_SMOKE_BUNDLE_SCRIPT}" \
+  local prepare_args=(
+    "${PYTHON_BIN}" "${PREPARE_SMOKE_BUNDLE_SCRIPT}"
     --source-bundle "${SOURCE_BUNDLE_PATH}" \
     --store-root "${IMAGE_STORE_ROOT}" \
     --run-id "${SMOKE_RUN_ID}"
+  )
+  print_cmd "${prepare_args[@]}"
   if [[ "${DRY_RUN}" -eq 1 ]]; then
-    BUNDLE_PATH="$(expected_smoke_bundle_path)"
+    BUNDLE_PATH="$("${prepare_args[@]}" --print-path-only)"
     return 0
   fi
-  BUNDLE_PATH="$("${PYTHON_BIN}" "${PREPARE_SMOKE_BUNDLE_SCRIPT}" \
-    --source-bundle "${SOURCE_BUNDLE_PATH}" \
-    --store-root "${IMAGE_STORE_ROOT}" \
-    --run-id "${SMOKE_RUN_ID}")"
+  BUNDLE_PATH="$("${prepare_args[@]}")"
   [[ -d "${BUNDLE_PATH}" ]] || die "prepared smoke bundle directory missing: ${BUNDLE_PATH}"
 }
 

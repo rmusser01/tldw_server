@@ -40,6 +40,7 @@ def _run_prepare(
     source_bundle: Path,
     store_root: Path,
     run_id: str,
+    extra_args: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
@@ -51,6 +52,7 @@ def _run_prepare(
             str(store_root),
             "--run-id",
             run_id,
+            *extra_args,
         ],
         check=False,
         capture_output=True,
@@ -96,9 +98,66 @@ def test_prepare_smoke_bundle_does_not_mutate_source_rootfs(tmp_path: Path) -> N
 
     assert result.returncode == 0, result.stderr
     run_rootfs = Path(result.stdout.strip()) / "rootfs.img"
+    assert run_rootfs.is_file(), f"prepared run rootfs missing: {run_rootfs}"
     run_rootfs.write_bytes(b"mutated run rootfs")
     assert source_rootfs.read_bytes() == source_before
     assert source_rootfs.stat().st_mtime_ns == source_mtime_before
+
+
+def test_prepare_smoke_bundle_print_path_only_normalizes_without_creating_store(tmp_path: Path) -> None:
+    source_bundle = _create_bundle(tmp_path)
+    store_root = tmp_path / "missing-store"
+
+    result = _run_prepare(
+        source_bundle=source_bundle,
+        store_root=store_root,
+        run_id="  smoke-run  ",
+        extra_args=("--print-path-only",),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert Path(result.stdout.strip()) == store_root / "runs" / "smoke-run" / "bundle"
+    assert not store_root.exists()
+
+
+def test_prepare_smoke_bundle_rejects_invalid_utf8_manifest_without_traceback(tmp_path: Path) -> None:
+    source_bundle = _create_bundle(tmp_path)
+    (source_bundle / "manifest.json").write_bytes(b"\xff")
+
+    result = _run_prepare(
+        source_bundle=source_bundle,
+        store_root=tmp_path / "image-store",
+        run_id="smoke-run",
+    )
+
+    assert result.returncode != 0
+    assert "json invalid:" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_prepare_smoke_bundle_rejects_manifest_path_traversal(tmp_path: Path) -> None:
+    source_bundle = _create_bundle(tmp_path)
+    outside_kernel = tmp_path / "outside-kernel"
+    outside_kernel.write_bytes(b"outside")
+    (source_bundle / "manifest.json").write_text(
+        json.dumps(
+            {
+                "bundle_version": "1",
+                "kernel": "../outside-kernel",
+                "rootfs": "rootfs.img",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = _run_prepare(
+        source_bundle=source_bundle,
+        store_root=tmp_path / "image-store",
+        run_id="smoke-run",
+    )
+
+    assert result.returncode != 0
+    assert "bundle artifact path invalid: ../outside-kernel" in result.stderr
 
 
 def test_prepare_smoke_bundle_rejects_missing_source_artifact(tmp_path: Path) -> None:

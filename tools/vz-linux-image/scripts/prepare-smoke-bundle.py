@@ -41,6 +41,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_TEMPLATE_NAME,
         help=f"Image-store template name to use for the source bundle. Defaults to {DEFAULT_TEMPLATE_NAME}.",
     )
+    parser.add_argument(
+        "--print-path-only",
+        action="store_true",
+        help="Validate inputs and print the resolved disposable bundle path without writing image-store state.",
+    )
     return parser.parse_args(argv)
 
 
@@ -49,7 +54,7 @@ def read_optional_json(path: Path) -> dict[str, Any]:
         return {}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
         raise RuntimeError(f"json invalid: {path}") from exc
     if not isinstance(payload, dict):
         raise RuntimeError(f"json expected object: {path}")
@@ -72,8 +77,14 @@ def bundle_artifact_names(source_bundle: Path) -> list[str]:
 def validate_bundle(source_bundle: Path) -> None:
     if not source_bundle.is_dir():
         raise RuntimeError(f"bundle directory does not exist: {source_bundle}")
+    resolved_source = source_bundle.resolve()
     for artifact_name in bundle_artifact_names(source_bundle):
-        artifact_path = source_bundle / artifact_name
+        artifact_fragment = Path(artifact_name)
+        if artifact_fragment.is_absolute() or artifact_fragment.name != artifact_name:
+            raise RuntimeError(f"bundle artifact path invalid: {artifact_name}")
+        artifact_path = (resolved_source / artifact_fragment).resolve()
+        if not artifact_path.is_relative_to(resolved_source):
+            raise RuntimeError(f"bundle artifact path escapes bundle: {artifact_name}")
         if not artifact_path.is_file():
             raise RuntimeError(f"bundle missing {artifact_name}: {artifact_path}")
 
@@ -91,7 +102,7 @@ def clonefile(source: Path, target: Path) -> bool:
         return False
     try:
         clonefile_func = ctypes.CDLL(None, use_errno=True).clonefile
-    except AttributeError:
+    except (AttributeError, OSError):
         return False
     clonefile_func.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
     clonefile_func.restype = ctypes.c_int
@@ -158,10 +169,19 @@ def prepare_bundle(args: argparse.Namespace) -> Path:
     return run_bundle
 
 
+def resolve_run_bundle_path(args: argparse.Namespace) -> Path:
+    source_bundle = Path(args.source_bundle).expanduser().resolve()
+    store_root = Path(args.store_root).expanduser().resolve()
+    validate_bundle(source_bundle)
+    store = SandboxImageStore(root_path=store_root, create_root=False)
+    normalized_run_id = store._normalize_manifest_segment(args.run_id, "run_id")
+    return store_root / "runs" / normalized_run_id / TARGET_SUBDIR
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        run_bundle = prepare_bundle(args)
+        run_bundle = resolve_run_bundle_path(args) if args.print_path_only else prepare_bundle(args)
     except (ImageStoreError, OSError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1

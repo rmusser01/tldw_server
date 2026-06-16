@@ -13,6 +13,7 @@ import pytest
 
 
 IMAGE_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = IMAGE_DIR.parents[1]
 SMOKE_SCRIPT = IMAGE_DIR / "scripts" / "run-host-e2e-smoke.sh"
 
 
@@ -125,6 +126,59 @@ def test_host_e2e_smoke_script_dry_run_uses_disposable_run_bundle(tmp_path: Path
     assert run_bundle != str(bundle)
     assert f"TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH={run_bundle}" in result.stdout
     assert f"TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE={bundle}" not in result.stdout
+
+
+def test_host_e2e_smoke_script_dry_run_uses_materializer_normalized_path(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    helper = tmp_path / "macos-vz-helper"
+    relative_store = "relative-image-store"
+
+    result = _run_smoke_script(
+        "--dry-run",
+        "--bundle",
+        str(bundle),
+        "--helper",
+        str(helper),
+        "--image-store-root",
+        relative_store,
+        "--smoke-run-id",
+        "  smoke-run  ",
+        "--python",
+        sys.executable,
+    )
+
+    expected_run_bundle = REPO_ROOT / relative_store / "runs" / "smoke-run" / "bundle"
+    assert result.returncode == 0, result.stderr
+    assert f"TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH={expected_run_bundle}" in result.stdout
+    assert f"TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE={expected_run_bundle}" in result.stdout
+    assert "  smoke-run  " not in result.stdout.split(f"TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH={expected_run_bundle}", 1)[-1]
+    assert not (REPO_ROOT / relative_store).exists()
+
+
+def test_host_e2e_smoke_script_dry_run_rejects_invalid_run_id(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    helper = tmp_path / "macos-vz-helper"
+
+    result = _run_smoke_script(
+        "--dry-run",
+        "--bundle",
+        str(bundle),
+        "--helper",
+        str(helper),
+        "--smoke-run-id",
+        "../escape",
+        "--python",
+        sys.executable,
+    )
+
+    assert result.returncode != 0
+    assert "run_id_invalid" in result.stderr
 
 
 def test_host_e2e_smoke_script_real_run_passes_disposable_bundle_to_pytest(tmp_path: Path) -> None:
