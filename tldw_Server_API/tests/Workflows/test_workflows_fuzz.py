@@ -73,12 +73,22 @@ def _wait_for_terminal(client: TestClient, run_id: str, timeout: float = 5.0) ->
     pytest.fail(f"workflow run {run_id} did not finish before timeout; last status={last_status}")
 
 
-@settings(max_examples=12, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=12,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+)
 @given(
     st.integers(min_value=1, max_value=5),
     st.lists(st.sampled_from(["prompt", "log", "delay"]), min_size=1, max_size=5),
+    st.booleans(),
 )
-def test_definition_fuzz_linear_or_branch(client_with_db: TestClient, n_steps: int, types_list: List[str]):
+def test_definition_fuzz_linear_or_branch(
+    client_with_db: TestClient,
+    n_steps: int,
+    types_list: List[str],
+    make_cycle: bool,
+):
     client = client_with_db
     # Build a small randomized definition; on_success may be valid or dangling
     steps = []
@@ -90,8 +100,7 @@ def test_definition_fuzz_linear_or_branch(client_with_db: TestClient, n_steps: i
     # Optionally add a branch creating a tiny cycle for robustness
     if len(steps) >= 2:
         steps[0]["on_success"] = steps[1]["id"]
-        # 20% chance to form a trivial cycle
-        if os.urandom(1)[0] % 5 == 0:
+        if make_cycle:
             steps[1]["on_success"] = steps[0]["id"]
 
     definition = {"name": "fuzz", "version": 1, "steps": steps}
