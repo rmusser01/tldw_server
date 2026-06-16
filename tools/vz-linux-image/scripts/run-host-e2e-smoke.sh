@@ -200,6 +200,23 @@ require_helper_binary() {
   [[ -x "${HELPER_PATH}" ]] || die "helper binary is not executable: ${HELPER_PATH}"
 }
 
+socket_accepts_connection() {
+  local socket_path="$1"
+  [[ -S "${socket_path}" ]] || return 1
+  "${PYTHON_BIN}" -c '
+import socket
+import sys
+
+try:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(0.2)
+        client.connect(sys.argv[1])
+except OSError:
+    raise SystemExit(1)
+raise SystemExit(0)
+' "${socket_path}"
+}
+
 prepare_socket_path() {
   if [[ -d "${SOCKET_PATH}" ]]; then
     die "helper socket path is a directory: ${SOCKET_PATH}"
@@ -208,6 +225,9 @@ prepare_socket_path() {
     die "helper socket path already exists and is not a UNIX socket: ${SOCKET_PATH}"
   fi
   if [[ -S "${SOCKET_PATH}" ]]; then
+    if socket_accepts_connection "${SOCKET_PATH}"; then
+      die "helper socket path is already in use: ${SOCKET_PATH}"
+    fi
     rm -f "${SOCKET_PATH}"
     return 0
   fi

@@ -56,21 +56,56 @@ private func templateFixturesRoot(file: StaticString = #filePath) -> URL {
         try? FileManager.default.removeItem(at: bundleDirectory)
     }
 
-    let response = validator.validate(runtime: "vz_linux", templatePath: bundleDirectory.path())
+    let response = validator.validate(runtime: "vz_linux", templatePath: bundleDirectory.path)
 
     #expect(response.ready == false)
     #expect(response.reasons.contains("vz_linux_bundle_kernel_missing"))
 }
 
+@Test func validatorAcceptsBundlePathContainingSpaces() throws {
+    let validator = TemplateValidator()
+    let bundleDirectory = try temporaryBundleDirectory(
+        parentName: "bundle parent \(UUID().uuidString)",
+        bundleName: "bundle child",
+        includeKernel: true
+    )
+
+    defer {
+        try? FileManager.default.removeItem(at: bundleDirectory.deletingLastPathComponent())
+    }
+
+    let response = validator.validate(runtime: "vz_linux", templatePath: bundleDirectory.path)
+
+    #expect(response.ready == true)
+    #expect(response.reasons.isEmpty)
+    #expect(response.source.contains(" "))
+    #expect(!response.source.contains("%20"))
+}
+
 private func temporaryBundleDirectory(includeKernel: Bool) throws -> URL {
+    try temporaryBundleDirectory(
+        parentName: nil,
+        bundleName: UUID().uuidString,
+        includeKernel: includeKernel
+    )
+}
+
+private func temporaryBundleDirectory(
+    parentName: String?,
+    bundleName: String,
+    includeKernel: Bool
+) throws -> URL {
     let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        .appendingPathComponent(UUID().uuidString, isDirectory: true)
-    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        .appendingPathComponent(parentName ?? bundleName, isDirectory: true)
+    let bundleRoot = parentName == nil
+        ? root
+        : root.appendingPathComponent(bundleName, isDirectory: true)
+    try FileManager.default.createDirectory(at: bundleRoot, withIntermediateDirectories: true)
 
     if includeKernel {
-        FileManager.default.createFile(atPath: root.appendingPathComponent("kernel").path(), contents: Data("kernel".utf8))
+        FileManager.default.createFile(atPath: bundleRoot.appendingPathComponent("kernel").path, contents: Data("kernel".utf8))
     }
-    FileManager.default.createFile(atPath: root.appendingPathComponent("rootfs.img").path(), contents: Data("rootfs".utf8))
+    FileManager.default.createFile(atPath: bundleRoot.appendingPathComponent("rootfs.img").path, contents: Data("rootfs".utf8))
 
     let manifest = """
     {
@@ -83,6 +118,6 @@ private func temporaryBundleDirectory(includeKernel: Bool) throws -> URL {
       "vsock_port": 1024
     }
     """
-    try manifest.write(to: root.appendingPathComponent("manifest.json"), atomically: true, encoding: .utf8)
-    return root
+    try manifest.write(to: bundleRoot.appendingPathComponent("manifest.json"), atomically: true, encoding: .utf8)
+    return bundleRoot
 }
