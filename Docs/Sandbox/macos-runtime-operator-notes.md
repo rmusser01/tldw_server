@@ -629,11 +629,13 @@ tools/macos-vz-helper/scripts/vz-helperctl.py smoke \
   --include-failure-drills
 ```
 
-The manual drills currently cover a drill-owned stale session VM after
-helper-side VM termination and stale session-control VM state after the smoke
-harness stops and restarts its helper process through a private restart lease.
-They do not cover host reboot, launchd bootstrap/load behavior, broad helper
-crash classes, networking changes, or destructive repair generalization.
+The smoke `--include-failure-drills` set currently covers a drill-owned stale
+session VM after helper-side VM termination and stale session-control VM state
+after the smoke harness stops and restarts its helper process through a private
+restart lease. It does not cover host reboot, launchd bootstrap/load behavior,
+broad helper crash classes, networking changes, or destructive repair
+generalization; those remain separate explicit operator drills or future
+follow-ups.
 
 The recovery smoke is non-destructive. It seeds an isolated test-store stale VZ
 session-control row, verifies `/api/v1/sandbox/admin/macos-diagnostics` style
