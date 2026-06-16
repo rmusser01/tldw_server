@@ -918,10 +918,33 @@ jobs:
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
               tldw_Server_API/tests/VLM
-          - name: media-ingestion
+          - name: media-core-documents
             paths: >-
-              tldw_Server_API/tests/Media
-              tldw_Server_API/tests/MediaIngestion_NEW
+              tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_pdf_text_normalization.py
+          - name: media-core-api
+            paths: >-
+              tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
+              tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
+              tldw_Server_API/tests/Media/test_json_*.py
+              tldw_Server_API/tests/Media/test_media_*.py
+              tldw_Server_API/tests/Media/test_navigation_policy_contract.py
+              tldw_Server_API/tests/Media/test_process_code_and_uploads.py
+              tldw_Server_API/tests/Media/test_upload_sink_security.py
+              tldw_Server_API/tests/Media/unit
+          - name: media-ingestion-new-ocr
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/test_*.py
+          - name: media-ingestion-new-integration
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/integration
+          - name: media-ingestion-new-unit
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit
+          - name: media-ingestion-modification
+            paths: >-
               tldw_Server_API/tests/Media_Ingestion_Modification
           - name: media-legacy-free
             paths: >-
@@ -2111,10 +2134,33 @@ jobs:
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
               tldw_Server_API/tests/VLM
-          - name: media-ingestion
+          - name: media-core-documents
             paths: >-
-              tldw_Server_API/tests/Media
-              tldw_Server_API/tests/MediaIngestion_NEW
+              tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_pdf_text_normalization.py
+          - name: media-core-api
+            paths: >-
+              tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
+              tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
+              tldw_Server_API/tests/Media/test_json_*.py
+              tldw_Server_API/tests/Media/test_media_*.py
+              tldw_Server_API/tests/Media/test_navigation_policy_contract.py
+              tldw_Server_API/tests/Media/test_process_code_and_uploads.py
+              tldw_Server_API/tests/Media/test_upload_sink_security.py
+              tldw_Server_API/tests/Media/unit
+          - name: media-ingestion-new-ocr
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/test_*.py
+          - name: media-ingestion-new-integration
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/integration
+          - name: media-ingestion-new-unit
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit
+          - name: media-ingestion-modification
+            paths: >-
               tldw_Server_API/tests/Media_Ingestion_Modification
           - name: media-legacy-free
             paths: >-
@@ -3249,10 +3295,33 @@ jobs:
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
               tldw_Server_API/tests/VLM
-          - name: media-ingestion
+          - name: media-core-documents
             paths: >-
-              tldw_Server_API/tests/Media
-              tldw_Server_API/tests/MediaIngestion_NEW
+              tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_pdf_text_normalization.py
+          - name: media-core-api
+            paths: >-
+              tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
+              tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
+              tldw_Server_API/tests/Media/test_json_*.py
+              tldw_Server_API/tests/Media/test_media_*.py
+              tldw_Server_API/tests/Media/test_navigation_policy_contract.py
+              tldw_Server_API/tests/Media/test_process_code_and_uploads.py
+              tldw_Server_API/tests/Media/test_upload_sink_security.py
+              tldw_Server_API/tests/Media/unit
+          - name: media-ingestion-new-ocr
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/test_*.py
+          - name: media-ingestion-new-integration
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/integration
+          - name: media-ingestion-new-unit
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit
+          - name: media-ingestion-modification
+            paths: >-
               tldw_Server_API/tests/Media_Ingestion_Modification
           - name: media-legacy-free
             paths: >-
@@ -4313,10 +4382,33 @@ jobs:
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
               tldw_Server_API/tests/VLM
-          - name: media-ingestion
+          - name: media-core-documents
             paths: >-
-              tldw_Server_API/tests/Media
-              tldw_Server_API/tests/MediaIngestion_NEW
+              tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_pdf_text_normalization.py
+          - name: media-core-api
+            paths: >-
+              tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
+              tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
+              tldw_Server_API/tests/Media/test_json_*.py
+              tldw_Server_API/tests/Media/test_media_*.py
+              tldw_Server_API/tests/Media/test_navigation_policy_contract.py
+              tldw_Server_API/tests/Media/test_process_code_and_uploads.py
+              tldw_Server_API/tests/Media/test_upload_sink_security.py
+              tldw_Server_API/tests/Media/unit
+          - name: media-ingestion-new-ocr
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/test_*.py
+          - name: media-ingestion-new-integration
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/integration
+          - name: media-ingestion-new-unit
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit
+          - name: media-ingestion-modification
+            paths: >-
               tldw_Server_API/tests/Media_Ingestion_Modification
           - name: media-legacy-free
             paths: >-
@@ -5379,10 +5471,33 @@ jobs:
               tldw_Server_API/tests/TTS
               tldw_Server_API/tests/TTS_NEW
               tldw_Server_API/tests/VLM
-          - name: media-ingestion
+          - name: media-core-documents
             paths: >-
-              tldw_Server_API/tests/Media
-              tldw_Server_API/tests/MediaIngestion_NEW
+              tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_pdf_text_normalization.py
+          - name: media-core-api
+            paths: >-
+              tldw_Server_API/tests/Media/test_archive_member_cap.py
+              tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py
+              tldw_Server_API/tests/Media/test_cache_index.py
+              tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py
+              tldw_Server_API/tests/Media/test_json_*.py
+              tldw_Server_API/tests/Media/test_media_*.py
+              tldw_Server_API/tests/Media/test_navigation_policy_contract.py
+              tldw_Server_API/tests/Media/test_process_code_and_uploads.py
+              tldw_Server_API/tests/Media/test_upload_sink_security.py
+              tldw_Server_API/tests/Media/unit
+          - name: media-ingestion-new-ocr
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/test_*.py
+          - name: media-ingestion-new-integration
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/integration
+          - name: media-ingestion-new-unit
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit
+          - name: media-ingestion-modification
+            paths: >-
               tldw_Server_API/tests/Media_Ingestion_Modification
           - name: media-legacy-free
             paths: >-

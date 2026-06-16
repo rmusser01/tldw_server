@@ -583,7 +583,18 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         shard_path_sets = {
             name: set(str(paths).split()) for name, paths in shard_paths.items()
         }
-        assert {"media-audio", "media-ingestion", "media-legacy-free"}.issubset(shard_names)
+        media_ingestion_shards = {
+            "media-core-documents",
+            "media-core-api",
+            "media-ingestion-new-ocr",
+            "media-ingestion-new-integration",
+            "media-ingestion-new-unit",
+            "media-ingestion-modification",
+        }
+        assert ({"media-audio", "media-legacy-free"} | media_ingestion_shards).issubset(
+            shard_names
+        )
+        assert "media-ingestion" not in shard_names
         assert shard_path_sets["media-audio"] == {
             "tldw_Server_API/tests/Audio",
             "tldw_Server_API/tests/AudioJobs",
@@ -592,15 +603,65 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/TTS_NEW",
             "tldw_Server_API/tests/VLM",
         }
-        assert shard_path_sets["media-ingestion"] == {
-            "tldw_Server_API/tests/Media",
-            "tldw_Server_API/tests/MediaIngestion_NEW",
-            "tldw_Server_API/tests/Media_Ingestion_Modification",
+        assert shard_path_sets["media-core-documents"] == {
+            "tldw_Server_API/tests/Media/test_document*.py",
+            "tldw_Server_API/tests/Media/test_pdf_text_normalization.py",
+        }
+        assert shard_path_sets["media-core-api"] == {
+            "tldw_Server_API/tests/Media/test_archive_member_cap.py",
+            "tldw_Server_API/tests/Media/test_auto_chunking_process_endpoints.py",
+            "tldw_Server_API/tests/Media/test_cache_index.py",
+            "tldw_Server_API/tests/Media/test_ingest_web_content_endpoint_sanitization.py",
+            "tldw_Server_API/tests/Media/test_json_*.py",
+            "tldw_Server_API/tests/Media/test_media_*.py",
+            "tldw_Server_API/tests/Media/test_navigation_policy_contract.py",
+            "tldw_Server_API/tests/Media/test_process_code_and_uploads.py",
+            "tldw_Server_API/tests/Media/test_upload_sink_security.py",
+            "tldw_Server_API/tests/Media/unit",
+        }
+        assert shard_path_sets["media-ingestion-new-ocr"] == {
+            "tldw_Server_API/tests/MediaIngestion_NEW/test_*.py"
+        }
+        assert shard_path_sets["media-ingestion-new-integration"] == {
+            "tldw_Server_API/tests/MediaIngestion_NEW/integration"
+        }
+        assert shard_path_sets["media-ingestion-new-unit"] == {
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit"
+        }
+        assert shard_path_sets["media-ingestion-modification"] == {
+            "tldw_Server_API/tests/Media_Ingestion_Modification"
         }
         assert shard_path_sets["media-legacy-free"] == {
             "tldw_Server_API/tests/Media",
             "tldw_Server_API/tests/MediaIngestion_NEW",
         }
+        media_ingestion_test_files = sorted(
+            str(path)
+            for dirname in (
+                "Media",
+                "MediaIngestion_NEW",
+                "Media_Ingestion_Modification",
+            )
+            for path in Path("tldw_Server_API/tests", dirname).glob("**/test*.py")
+        )
+        covered_media_files: dict[str, str] = {}
+        for shard_name in media_ingestion_shards:
+            for pattern in shard_path_sets[shard_name]:
+                if Path(pattern).is_dir():
+                    matches = [
+                        filename
+                        for filename in media_ingestion_test_files
+                        if filename.startswith(f"{pattern}/")
+                    ]
+                else:
+                    matches = sorted(fnmatch.filter(media_ingestion_test_files, pattern))
+                assert matches, f"{shard_name} pattern {pattern} did not match any media tests"
+                for filename in matches:
+                    assert filename not in covered_media_files, (
+                        f"{filename} covered by both {covered_media_files[filename]} and {shard_name}"
+                    )
+                    covered_media_files[filename] = shard_name
+        assert set(covered_media_files) == set(media_ingestion_test_files)
         assert "tldw_Server_API/tests/VectorStores" not in shard_path_sets["ai-embeddings-core"]
         assert "vector-stores" not in shard_names
         assert shard_path_sets["ai-chromadb"] == {"tldw_Server_API/tests/ChromaDB"}
