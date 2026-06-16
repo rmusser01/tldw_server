@@ -102,6 +102,132 @@ triage issue.
 
 ## Latest Evidence
 
+### 2026-06-16: local-operator disposable image-store clone smoke on `codex/vz-smoke-clone-evidence`@`ab1c55c67c`
+
+- Evidence source: local operator run on the same prepared Apple silicon macOS
+  host after PR `#2370` merged the disposable image-store smoke-clone path.
+- Operator or workflow run: local shell run; no GitHub Actions workflow URL.
+  Git state at capture time was branch `codex/vz-smoke-clone-evidence`,
+  commit `ab1c55c67c852040a5162308ef987ea124937baa`, with only the new
+  Backlog evidence task untracked before this evidence doc was edited.
+- Host identity: Apple M4 Pro, `arm64`, macOS 15.6 build `24G84`, Darwin
+  `24.6.0`; local developer machine rather than a dedicated CI runner.
+- Host prep: SwiftPM available with Swift `6.1.2`; `xcrun --find codesign`
+  returned `/usr/bin/codesign`; `/usr/bin/codesign --version` is not a valid
+  version probe on this host, but `codesign` signed and verified the helper;
+  Virtualization.framework was exercised by the real helper and `vz_linux`
+  smoke.
+- Source bundle:
+  `/Users/macbook-dev/Library/Application Support/tldw/sandbox-images/source-bundles/debian-bookworm-arm64/bundle`.
+  Source bundle hashes and stat output were identical before and after the
+  smoke run. The unchanged source hashes were `kernel` SHA-256
+  `6dc5255afb8c7722896b860e50a892c1a1f0e774a18338dc259e19736f27a3ef`,
+  `initrd` SHA-256
+  `89ae29154c08e22d09714588bfa94e7ed5894316c89c819b84be62f4e213a054`,
+  `rootfs.img` SHA-256
+  `e52c82e96667f6daa8f7e1d40be8a655aad110cd2c5acedb0a9fb5fa01118cbf`,
+  and `manifest.json` SHA-256
+  `a7b5dc7d9e4932e5d6c13c287263f6e49dca3e48fa08e191d760f5545f8e3c29`.
+- Image-store disposable run bundle:
+  `/var/folders/p_/x47tgtn57cv43r7yxxn40tyh0000gn/T/tldw-vz-clone-evidence-20260616-130222/image-store/runs/clone-evidence-20260616-130222/bundle`.
+  The run manifest used template `vz_linux:host-smoke-source`, run id
+  `clone-evidence-20260616-130222`, and `mode=clone` entries for `kernel`,
+  `rootfs.img`, and `initrd` from the source bundle into the run bundle.
+  The run bundle rootfs hash after execution was
+  `ba04818c7f99b8742481b184bcb98eabbcfcdd476760bf13926be82f3cf7bb7c`,
+  while the source rootfs hash remained
+  `e52c82e96667f6daa8f7e1d40be8a655aad110cd2c5acedb0a9fb5fa01118cbf`.
+  This proves the smoke path absorbed VM writes in the disposable run bundle
+  instead of mutating the canonical source bundle.
+- Helper build/signing: helper built from this worktree at
+  `tools/macos-vz-helper/.build/debug/macos-vz-helper`; ad hoc `codesign`
+  completed with `tools/macos-vz-helper/macos-vz-helper.entitlements`; signed
+  entitlement check showed `com.apple.security.virtualization=true`; helper
+  signature CDHash `4e060df093d6f7dd3b5f87a7ee43ad8e81e9ed35`.
+- Runtime paths: artifact root
+  `/var/folders/p_/x47tgtn57cv43r7yxxn40tyh0000gn/T/tldw-vz-clone-evidence-20260616-130222`;
+  helper socket
+  `/var/folders/p_/x47tgtn57cv43r7yxxn40tyh0000gn/T/tldw-vz-clone-evidence-20260616-130222/helper.sock`;
+  serial log directory
+  `/var/folders/p_/x47tgtn57cv43r7yxxn40tyh0000gn/T/tldw-vz-clone-evidence-20260616-130222/serial`;
+  image-store root
+  `/var/folders/p_/x47tgtn57cv43r7yxxn40tyh0000gn/T/tldw-vz-clone-evidence-20260616-130222/image-store`.
+  The artifact root, image-store root, run directory, run bundle, and serial
+  directory were owner-only mode `0700`. The `runs` and `templates` parent
+  directories were mode `0755`, but they were nested under the owner-only
+  image-store root.
+- Commands:
+
+  ```bash
+  ./tools/vz-linux-image/scripts/run-host-e2e-smoke.sh \
+    --dry-run \
+    --bundle "/Users/macbook-dev/Library/Application Support/tldw/sandbox-images/source-bundles/debian-bookworm-arm64/bundle" \
+    --socket "/var/folders/p_/x47tgtn57cv43r7yxxn40tyh0000gn/T/tldw-vz-clone-evidence-20260616-130222/helper.sock" \
+    --serial-log-dir "/var/folders/p_/x47tgtn57cv43r7yxxn40tyh0000gn/T/tldw-vz-clone-evidence-20260616-130222/serial" \
+    --image-store-root "/var/folders/p_/x47tgtn57cv43r7yxxn40tyh0000gn/T/tldw-vz-clone-evidence-20260616-130222/image-store" \
+    --smoke-run-id clone-evidence-20260616-130222 \
+    --entitlements tools/macos-vz-helper/macos-vz-helper.entitlements \
+    --python /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python
+
+  ./tools/vz-linux-image/scripts/run-host-e2e-smoke.sh \
+    --bundle "/Users/macbook-dev/Library/Application Support/tldw/sandbox-images/source-bundles/debian-bookworm-arm64/bundle" \
+    --socket "/var/folders/p_/x47tgtn57cv43r7yxxn40tyh0000gn/T/tldw-vz-clone-evidence-20260616-130222/helper.sock" \
+    --serial-log-dir "/var/folders/p_/x47tgtn57cv43r7yxxn40tyh0000gn/T/tldw-vz-clone-evidence-20260616-130222/serial" \
+    --image-store-root "/var/folders/p_/x47tgtn57cv43r7yxxn40tyh0000gn/T/tldw-vz-clone-evidence-20260616-130222/image-store" \
+    --smoke-run-id clone-evidence-20260616-130222 \
+    --entitlements tools/macos-vz-helper/macos-vz-helper.entitlements \
+    --python /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python
+  ```
+
+- Results: the dry-run expansion used the disposable run bundle for
+  `TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH` and
+  `TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE`. The real run completed
+  `swift build`, signed the helper, ran helper daemon smoke `2 passed`, and ran
+  real `vz_linux` host smoke `3 passed, 11 deselected`. The selected real-host
+  tests included `test_vz_linux_real_ephemeral_run_smoke`,
+  `test_vz_linux_real_session_reuse_smoke`, and
+  `test_vz_linux_real_recovery_diagnostics_dry_run_smoke`.
+- Failure drills: skipped; this evidence packet did not request
+  `--include-failure-drills` because those opt-in drills were already captured
+  by the preceding failure-drill packet.
+- Launchd drill: skipped; this evidence packet did not request LaunchAgent
+  validation.
+- Stale socket drill: skipped; this evidence packet did not request the manual
+  `stale-socket-drill`.
+- Stuck boot/readiness drills: host-independent coverage remains represented by
+  the portable test suite; no manual prepared-host boot-fault injection was
+  requested for this packet.
+- Artifacts: `metadata.env`, `smoke-dry-run.log`, `smoke-run.log`,
+  `source-hashes-before.txt`, `source-hashes-after.txt`,
+  `source-stat-before.txt`, `source-stat-after.txt`,
+  `run-bundle-hashes.txt`, `run-bundle-stat.txt`, `image-store-manifests.txt`,
+  and `source-hash-diff.txt` retained under the artifact root. Helper
+  stdout/stderr were retained and empty, both SHA-256
+  `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+  Serial logs were retained as pointers only:
+  `447ffdb6-6ae3-4782-a75e-6fa016f6c819.serial.log` SHA-256
+  `48b271960cfbb9611e58c546666c2cfd5280378d8632682f13d63d71323bc85f`,
+  `bundle-smoke-vm.serial.log` SHA-256
+  `ab44a909ba9c2c6dc0d10e9268d8d145f9981d2c6d26defd747cb548daf6c712`,
+  and `vz-linux-real-ephemeral.serial.log` SHA-256
+  `6d431955fe9535fe33af62354fdbceae3021fa0b78199d0b24f6e3ccb1031b80`.
+  The accepted helper socket was absent after cleanup. The recorded helper pid
+  `44279` was no longer running; a separate helper from an earlier worktree was
+  still running and was not part of this evidence packet.
+- Expected skips: no PR workflow, no nightly schedule, no self-hosted runner
+  URL, no opt-in failure drills in this packet, launchd validation not
+  requested, stale socket drill not requested, no manual host reboot drill, and
+  no manual boot/readiness fault injection.
+- Blocking regressions: none observed for the selected disposable-clone smoke
+  coverage.
+- Residual gaps: launchd drill, stale socket drill, host reboot pre/post drill,
+  manual stuck boot/readiness fault injection, guest-agent mismatch coverage
+  beyond host-independent tests, broader helper crash classes beyond helper
+  termination/restart, and automatic long-term retention of local evidence
+  artifacts remain separate manual/operator-gated or implementation follow-ups.
+- Follow-up owner: issue `#1442` and future focused Backlog tasks for remaining
+  manually skipped drills and evidence-retention automation.
+
 ### 2026-06-16: local-operator failure drills on `codex/vz-failure-drill-evidence`@`e17d8cbf07`
 
 - Evidence source: local operator run on a prepared Apple silicon macOS host
