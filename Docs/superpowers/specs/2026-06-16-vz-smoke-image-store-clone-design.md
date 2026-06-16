@@ -65,10 +65,11 @@ operator visibility and catches accidental direct-source regressions in tests.
 ## Clone Semantics
 
 The materializer should prefer APFS copy-on-write clone behavior on macOS using
-`cp -c` when available. If COW clone fails or is unavailable, it should fall back
-to `shutil.copy2()` so Linux test hosts and non-APFS volumes still work. A
-fallback copy is acceptable for this slice because the safety property is source
-immutability; COW performance is an optimization.
+the platform `clonefile(2)` syscall when available. If COW clone fails or is
+unavailable, it should fall back to `shutil.copy2()` so Linux test hosts and
+non-APFS volumes still work. A fallback copy is acceptable for this slice
+because the safety property is source immutability; COW performance is an
+optimization.
 
 The run directory should be private when created through the wrapper because it
 lives under the existing owner-only runtime directory. The materializer should
