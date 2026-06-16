@@ -935,8 +935,8 @@ flowchart LR
   end
 
   subgraph EXTERNAL [External Providers]
-    LLMCloud[LLM APIs (OpenAI, Anthropic, etc.)]:::ext
-    LLMOnPrem[Local LLMs (vLLM, Ollama, llama.cpp, ...)]:::ext
+    LLMCloud["LLM APIs (OpenAI, Anthropic, etc.)"]:::ext
+    LLMOnPrem["Local LLMs (vLLM, Ollama, llama.cpp, ...)"]:::ext
     AudioProv[STT/TTS Providers]:::ext
     OCRVLM[OCR/VLM (tesseract, dots, points)]:::ext
     MediaDL[yt-dlp / ffmpeg]:::ext
