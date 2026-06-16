@@ -102,9 +102,93 @@ triage issue.
 
 ## Latest Evidence
 
-No prepared-host evidence packet is currently recorded in this tracker. The
-next maintainer run should add a dated entry under this section or link a
-GitHub Actions run with the packet fields above.
+### 2026-06-16: local-operator on `codex/vz-prepared-host-evidence-packet`@`ce6276da23`
+
+- Evidence source: local operator run on a prepared Apple silicon macOS host.
+- Operator or workflow run: local shell run; no GitHub Actions workflow URL.
+- Host identity: Apple M4 Pro, `arm64`, macOS 15.6 build `24G84`, Darwin
+  `24.6.0`; local developer machine rather than a dedicated CI runner.
+- Host prep: SwiftPM available at `/usr/bin/swift` with Swift `6.1.2`; Xcode
+  command line tools at `/Library/Developer/CommandLineTools`; macOS SDK path
+  `/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk`; `xcrun` and
+  `/usr/bin/codesign` available; Virtualization.framework exercised by the real
+  helper and `vz_linux` smoke.
+- Bundle/template:
+  `/Users/macbook-dev/Library/Application Support/tldw/sandbox-images/source-bundles/debian-bookworm-arm64/bundle`;
+  canonical bundle manifest reports `bundle_version=1`, `boot_mode=bundle`,
+  `guest_agent_path=/usr/local/bin/tldw-agent-guest`, workspace mount tag
+  `workspace`, and vsock port `1024`. Build provenance file reports
+  `artifact_kind=canonical_bundle`, Debian `bookworm`, profile `minimal`,
+  architecture `arm64`, kernel package `linux-image-arm64`.
+- Bundle hashes:
+  `kernel` SHA-256
+  `6dc5255afb8c7722896b860e50a892c1a1f0e774a18338dc259e19736f27a3ef`;
+  `initrd` SHA-256
+  `89ae29154c08e22d09714588bfa94e7ed5894316c89c819b84be62f4e213a054`;
+  `rootfs.img` SHA-256
+  `5cf0e2278e8ec080b46ff496417d2b503ac5c55d1913795633a420b3973ff639`;
+  `manifest.json` SHA-256
+  `a7b5dc7d9e4932e5d6c13c287263f6e49dca3e48fa08e191d760f5545f8e3c29`.
+- Helper build/signing: helper built from this worktree at
+  `tools/macos-vz-helper/.build/debug/macos-vz-helper`; ad hoc `codesign`
+  completed with `tools/macos-vz-helper/macos-vz-helper.entitlements`; signed
+  entitlement check showed `com.apple.security.virtualization=true`; helper
+  signature CDHash `80016eb2a537d71efaa51da8a82ee712daae6fa5`.
+- Runtime paths: artifact root
+  `/var/folders/p_/x47tgtn57cv43r7yxxn40tyh0000gn/T/tldw-vz-evidence-20260616-065631`;
+  helper socket
+  `/var/folders/p_/x47tgtn57cv43r7yxxn40tyh0000gn/T/tldw-vz-evidence-20260616-065631/helper.sock`;
+  serial log directory
+  `/var/folders/p_/x47tgtn57cv43r7yxxn40tyh0000gn/T/tldw-vz-evidence-20260616-065631/serial`;
+  runtime and serial directories were owner-only mode `0700`.
+- Commands:
+
+  ```bash
+  /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python \
+    tools/macos-vz-helper/scripts/vz-helperctl.py smoke \
+    --bundle "/Users/macbook-dev/Library/Application Support/tldw/sandbox-images/source-bundles/debian-bookworm-arm64/bundle" \
+    --socket "/var/folders/p_/x47tgtn57cv43r7yxxn40tyh0000gn/T/tldw-vz-evidence-20260616-065631/helper.sock" \
+    --serial-log-dir "/var/folders/p_/x47tgtn57cv43r7yxxn40tyh0000gn/T/tldw-vz-evidence-20260616-065631/serial" \
+    --entitlements tools/macos-vz-helper/macos-vz-helper.entitlements \
+    --python /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python
+  ```
+
+- Results: `swift build` completed, helper was signed, helper daemon smoke ran
+  `2 passed`, and real `vz_linux` host smoke ran `3 passed, 11 deselected`.
+  The selected real-host tests were
+  `test_vz_linux_real_ephemeral_run_smoke`,
+  `test_vz_linux_real_session_reuse_smoke`, and
+  `test_vz_linux_real_recovery_diagnostics_dry_run_smoke`; the wrapper ended
+  with `smoke: ok`.
+- Failure drills: skipped; default smoke did not pass `--include-failure-drills`.
+- Launchd drill: skipped; this evidence packet did not request LaunchAgent
+  validation.
+- Stale socket drill: skipped; this evidence packet did not request the manual
+  `stale-socket-drill`.
+- Stuck boot/readiness drills: host-independent coverage remains represented by
+  the portable test suite; no manual prepared-host boot-fault injection was
+  requested for this packet.
+- Artifacts: `smoke-dry-run.log` and `smoke-run.log` retained under the
+  artifact root; serial logs retained as pointers only:
+  `bundle-smoke-vm.serial.log` SHA-256
+  `07ded39bf985377a11776ea903d9f5cdb21f5ca10e9c5fea534f2491e659944d`,
+  `vz-linux-real-ephemeral.serial.log` SHA-256
+  `1ed98d62d51d61453523c76569dc64395baa031c15b199bcd04bbcbf2b4e27d1`,
+  and `dafc6190-c98c-4209-bc37-110958c029cc.serial.log` SHA-256
+  `c6e510fc08ce7556ebac4c4c6541e625a240a3945ddc32efbabb75677de4f3fc`.
+  Helper stdout/stderr files were present and empty. The helper socket was
+  removed after cleanup, and the recorded helper pid was no longer running.
+- Expected skips: no PR workflow, no nightly schedule, no self-hosted runner
+  URL, failure drills not requested, launchd validation not requested, stale
+  socket drill not requested, no manual host reboot drill, and no manual
+  boot/readiness fault injection.
+- Blocking regressions: none observed for the default prepared-host smoke.
+- Residual gaps: failure drills, launchd drill, stale socket drill, host reboot
+  pre/post drill, manual stuck boot/readiness fault injection, guest-agent
+  mismatch coverage beyond host-independent tests, and broader helper crash
+  classes remain separate manual/operator-gated evidence items.
+- Follow-up owner: issue `#1442` and future focused Backlog tasks for each
+  manually skipped drill when maintainers choose to collect that evidence.
 
 ### Template
 
@@ -133,10 +217,10 @@ GitHub Actions run with the packet fields above.
 
 | Gap | Current status | Next action |
 | --- | --- | --- |
-| Prepared-host default smoke evidence | Tracker exists, but no dated evidence packet has been recorded here yet. | Run local or host-gated smoke on a prepared Apple silicon host and add the evidence packet. |
+| Prepared-host default smoke evidence | Recorded locally on 2026-06-16 with helper daemon smoke, real ephemeral execution, same-session reuse, and recovery diagnostics/dry-run repair smoke passing. | Repeat periodically through a trusted local or host-gated run and add newer evidence packets as needed. |
 | Failure-drill evidence | Manual opt-in only. | Record results when a maintainer runs with `include_failure_drills=true`. |
 | Launchd-drill evidence | Manual opt-in only. | Record results only when a runner is intentionally configured for LaunchAgent validation. |
-| Host reboot recovery | Manual operator procedure only and out of scheduled CI. | Add a dedicated operator drill once a prepared host can tolerate disruptive reboot testing and preserve logs. |
+| Host reboot recovery | Manual `host-reboot-drill pre/post` procedure only and out of scheduled CI. | Record results when a maintainer explicitly runs the reboot drill on a prepared host that can tolerate disruptive reboot testing and preserve logs. |
 | Stuck boot/readiness | Host-independent helper and runner coverage verifies boot-driver failure cleanup, guest-readiness failure cleanup, and no reusable session state after create failure. The default prepared-host smoke still does not inject real boot faults. | Record manual prepared-host evidence only after a separate reviewed fault-injection plan; diagnostics/evidence should report stable reason codes and artifact pointers, not raw serial log contents. |
 | Guest-agent mismatch | Not covered by the default smoke. | Use `Docs/superpowers/specs/2026-05-18-vz-linux-lifecycle-drill-gaps-design.md` to guide narrow tests or diagnostics checks before considering automated coverage. |
 | Stale socket handling | `tools/macos-vz-helper/scripts/vz-helperctl.py stale-socket-drill` provides a manual operator check for safe inactive socket recovery. | Record prepared-host evidence when a maintainer intentionally runs the drill; keep it manual-only and out of PR/push/scheduled destructive triggers. |
