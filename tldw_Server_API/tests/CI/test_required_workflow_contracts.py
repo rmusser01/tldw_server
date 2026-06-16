@@ -533,11 +533,14 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "llm-local-backends",
         }.issubset(shard_names)
         workflow_shards = {
-            "product-workflows-adapters",
+            "product-workflows-adapters-core",
             "product-workflows-api",
             "product-workflows-engine",
             "product-workflows-runtime",
             "product-workflows-storage",
+            "product-workflows-step-adapters",
+            "product-workflows-step-capabilities",
+            "product-workflows-step-registry",
         }
         product_shards = {
             "product-claims-core",
@@ -561,6 +564,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         } | workflow_shards
         assert product_shards.issubset(shard_names)
         assert "product-workflows" not in shard_names
+        assert "product-workflows-adapters" not in shard_names
         assert "product-watchlists" not in shard_names
         platform_shards = {
             "platform-infrastructure-metrics",

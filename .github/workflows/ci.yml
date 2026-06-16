@@ -1200,11 +1200,17 @@ jobs:
           - name: product-watchlists-pipeline
             paths: >-
               tldw_Server_API/tests/Watchlists/test_watchlists_*.py
-          - name: product-workflows-adapters
+          - name: product-workflows-adapters-core
             paths: >-
               tldw_Server_API/tests/Workflows/adapters/test_*.py
+          - name: product-workflows-step-adapters
+            paths: >-
               tldw_Server_API/tests/Workflows/test_new_step_adapters.py
+          - name: product-workflows-step-registry
+            paths: >-
               tldw_Server_API/tests/Workflows/test_step_registry_runtime_coverage.py
+          - name: product-workflows-step-capabilities
+            paths: >-
               tldw_Server_API/tests/Workflows/test_workflow_step_capabilities.py
           - name: product-workflows-engine
             paths: >-
@@ -2387,11 +2393,17 @@ jobs:
           - name: product-watchlists-pipeline
             paths: >-
               tldw_Server_API/tests/Watchlists/test_watchlists_*.py
-          - name: product-workflows-adapters
+          - name: product-workflows-adapters-core
             paths: >-
               tldw_Server_API/tests/Workflows/adapters/test_*.py
+          - name: product-workflows-step-adapters
+            paths: >-
               tldw_Server_API/tests/Workflows/test_new_step_adapters.py
+          - name: product-workflows-step-registry
+            paths: >-
               tldw_Server_API/tests/Workflows/test_step_registry_runtime_coverage.py
+          - name: product-workflows-step-capabilities
+            paths: >-
               tldw_Server_API/tests/Workflows/test_workflow_step_capabilities.py
           - name: product-workflows-engine
             paths: >-
@@ -3519,11 +3531,17 @@ jobs:
           - name: product-watchlists-pipeline
             paths: >-
               tldw_Server_API/tests/Watchlists/test_watchlists_*.py
-          - name: product-workflows-adapters
+          - name: product-workflows-adapters-core
             paths: >-
               tldw_Server_API/tests/Workflows/adapters/test_*.py
+          - name: product-workflows-step-adapters
+            paths: >-
               tldw_Server_API/tests/Workflows/test_new_step_adapters.py
+          - name: product-workflows-step-registry
+            paths: >-
               tldw_Server_API/tests/Workflows/test_step_registry_runtime_coverage.py
+          - name: product-workflows-step-capabilities
+            paths: >-
               tldw_Server_API/tests/Workflows/test_workflow_step_capabilities.py
           - name: product-workflows-engine
             paths: >-
@@ -4577,11 +4595,17 @@ jobs:
           - name: product-watchlists-pipeline
             paths: >-
               tldw_Server_API/tests/Watchlists/test_watchlists_*.py
-          - name: product-workflows-adapters
+          - name: product-workflows-adapters-core
             paths: >-
               tldw_Server_API/tests/Workflows/adapters/test_*.py
+          - name: product-workflows-step-adapters
+            paths: >-
               tldw_Server_API/tests/Workflows/test_new_step_adapters.py
+          - name: product-workflows-step-registry
+            paths: >-
               tldw_Server_API/tests/Workflows/test_step_registry_runtime_coverage.py
+          - name: product-workflows-step-capabilities
+            paths: >-
               tldw_Server_API/tests/Workflows/test_workflow_step_capabilities.py
           - name: product-workflows-engine
             paths: >-
@@ -5637,11 +5661,17 @@ jobs:
           - name: product-watchlists-pipeline
             paths: >-
               tldw_Server_API/tests/Watchlists/test_watchlists_*.py
-          - name: product-workflows-adapters
+          - name: product-workflows-adapters-core
             paths: >-
               tldw_Server_API/tests/Workflows/adapters/test_*.py
+          - name: product-workflows-step-adapters
+            paths: >-
               tldw_Server_API/tests/Workflows/test_new_step_adapters.py
+          - name: product-workflows-step-registry
+            paths: >-
               tldw_Server_API/tests/Workflows/test_step_registry_runtime_coverage.py
+          - name: product-workflows-step-capabilities
+            paths: >-
               tldw_Server_API/tests/Workflows/test_workflow_step_capabilities.py
           - name: product-workflows-engine
             paths: >-
