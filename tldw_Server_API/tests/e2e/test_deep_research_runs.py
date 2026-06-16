@@ -941,6 +941,7 @@ def test_deep_research_live_progress_stream_reports_checkpoint_and_terminal_even
     stream_thread = threading.Thread(
         target=_collect_sse_events,
         args=(app, f"/api/v1/research/runs/{session_id}/events/stream", events, snapshot_seen),
+        kwargs={"stop_when": lambda event, _sink: event["event"] == "terminal"},
         daemon=True,
     )
     stream_thread.start()
