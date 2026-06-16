@@ -99,6 +99,29 @@ def test_tool_use_event_sanitizes_file_policy_decisions() -> None:
     assert event.file_policy_lock_lease_present is True
 
 
+def test_tool_use_event_rejects_uri_like_file_policy_paths_before_normalization() -> None:
+    event = ToolUseEvent(
+        runtime_surface="protocol",
+        requested_tool_name="fs.patch",
+        status="denied",
+        file_policy_decisions=[
+            {
+                "requested_action": "edit",
+                "normalized_path": "https://host/private/story.txt",
+                "grant_outcome": "denied",
+                "matched_grant_prefix": "file:/tmp/private",
+                "redacted": True,
+            },
+        ],
+    )
+
+    decision = event.file_policy_decisions[0]
+    assert decision.normalized_path is None
+    assert decision.matched_grant_prefix is None
+    assert "https:" not in event.model_dump_json()
+    assert "file:" not in event.model_dump_json()
+
+
 def test_tool_use_event_is_immutable() -> None:
     event = ToolUseEvent(
         runtime_surface="protocol",

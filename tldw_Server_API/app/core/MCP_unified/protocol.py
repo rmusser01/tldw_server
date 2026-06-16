@@ -42,7 +42,11 @@ from mcp_unified.tool_use_reporting.builders import (
     classify_tool_use_exception,
     extract_safe_context_dimensions,
 )
-from mcp_unified.tool_use_reporting.models import ToolUseEvent, ToolUseStatus
+from mcp_unified.tool_use_reporting.models import (
+    MAX_FILE_POLICY_DECISIONS,
+    ToolUseEvent,
+    ToolUseStatus,
+)
 from mcp_unified.tool_use_reporting.recorder import record_tool_use_safely
 
 from .auth.authnz_rbac import Action, Resource
@@ -686,7 +690,39 @@ class MCPProtocol:
         raw_decisions = scope_payload.get("path_decisions")
         if not isinstance(raw_decisions, list):
             return []
-        return [dict(decision) for decision in raw_decisions if isinstance(decision, dict)]
+        bounded_decisions = raw_decisions[:MAX_FILE_POLICY_DECISIONS]
+        return [dict(decision) for decision in bounded_decisions if isinstance(decision, dict)]
+
+    @staticmethod
+    def _tool_use_decision_grant_outcome(file_policy_decisions: list[dict[str, Any]]) -> str | None:
+        """Summarize path-decision grant outcomes with denial precedence."""
+
+        outcomes = [
+            outcome.strip()
+            for decision in file_policy_decisions
+            if isinstance(decision, dict)
+            and isinstance(outcome := decision.get("grant_outcome"), str)
+            and outcome.strip()
+        ]
+        if "denied" in outcomes:
+            return "denied"
+        if "not_granted" in outcomes:
+            return "not_granted"
+        if outcomes:
+            return "allowed"
+        return None
+
+    @staticmethod
+    def _tool_use_value_present(value: Any) -> bool:
+        """Return whether a sensitive value marker contains actual data."""
+
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, (dict, list, tuple, set)):
+            return bool(value)
+        return True
 
     @staticmethod
     def _tool_use_contains_key(
@@ -701,7 +737,7 @@ class MCPProtocol:
             return False
         if isinstance(value, dict):
             for key, nested in value.items():
-                if key in keys and nested not in (None, ""):
+                if key in keys and MCPProtocol._tool_use_value_present(nested):
                     return True
                 if isinstance(nested, (dict, list)) and MCPProtocol._tool_use_contains_key(
                     nested,
@@ -776,11 +812,7 @@ class MCPProtocol:
             if file_policy_related
             else None
         )
-        decision_grant_outcome = (
-            file_policy_decisions[0].get("grant_outcome")
-            if file_policy_decisions and isinstance(file_policy_decisions[0], dict)
-            else None
-        )
+        decision_grant_outcome = self._tool_use_decision_grant_outcome(file_policy_decisions)
         return ToolUseEvent(
             runtime_surface="protocol",
             execution_origin=execution_origin,  # type: ignore[arg-type]

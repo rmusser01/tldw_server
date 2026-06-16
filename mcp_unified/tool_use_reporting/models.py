@@ -43,6 +43,7 @@ MAX_FILE_POLICY_DECISIONS = 20
 MAX_FILE_POLICY_PATH_LENGTH = 512
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_URI_SCHEME_PATH_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:/")
 _WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"^[A-Za-z]:")
 
 
@@ -87,6 +88,8 @@ def _safe_workspace_relative_path(value: Any) -> str | None:
     text = value.strip().replace("\\", "/")
     if not text or len(text) > MAX_FILE_POLICY_PATH_LENGTH:
         return None
+    if "://" in text or _URI_SCHEME_PATH_RE.match(text):
+        return None
     text = re.sub(r"/+", "/", text)
     while text.startswith("./"):
         text = text[2:]
@@ -94,7 +97,6 @@ def _safe_workspace_relative_path(value: Any) -> str | None:
         not text
         or text.startswith("/")
         or _WINDOWS_ABSOLUTE_PATH_RE.match(text)
-        or "://" in text
         or "\x00" in text
     ):
         return None

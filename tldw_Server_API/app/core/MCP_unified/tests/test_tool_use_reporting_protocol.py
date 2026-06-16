@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from mcp_unified.tool_use_reporting.models import ToolUseEvent
+from mcp_unified.tool_use_reporting.models import MAX_FILE_POLICY_DECISIONS, ToolUseEvent
 
 from tldw_Server_API.app.core.MCP_unified.auth.rate_limiter import RateLimitExceeded
 from tldw_Server_API.app.core.MCP_unified.protocol import (
@@ -59,6 +59,8 @@ class _NoopMetrics:
 
 
 class _StaticEffectivePolicyResolver:
+    """Test double that returns a fixed effective policy for any context."""
+
     def __init__(self, policy: dict[str, Any] | None = None) -> None:
         self.policy = policy
 
@@ -73,11 +75,15 @@ class _StaticEffectivePolicyResolver:
 
 
 class _AllowApprovalEvaluator:
+    """Test double that always allows tool calls through approval evaluation."""
+
     async def evaluate_tool_call(self, **_kwargs: Any) -> dict[str, Any]:
         return {"status": "allow", "reason": "test_allow"}
 
 
 class _FilePolicyPathScopeEnforcer:
+    """Test double that returns an allowed redacted file-policy decision."""
+
     async def evaluate_tool_call(self, **_kwargs: Any) -> dict[str, Any]:
         return {
             "enabled": True,
@@ -107,6 +113,8 @@ class _FilePolicyPathScopeEnforcer:
 
 
 class _DenyFilePolicyPathScopeEnforcer:
+    """Test double that returns a denied redacted file-policy decision."""
+
     async def evaluate_tool_call(self, **_kwargs: Any) -> dict[str, Any]:
         return {
             "enabled": True,
@@ -309,6 +317,108 @@ def _request_context(metadata: dict[str, Any] | None = None) -> RequestContext:
         client_id="client-1",
         metadata=metadata or {},
     )
+
+
+def test_tool_use_file_policy_decisions_bounds_copied_entries() -> None:
+    decisions = [
+        {
+            "requested_action": "edit",
+            "normalized_path": f"private/story-{index}.txt",
+            "grant_outcome": "allowed",
+            "redacted": True,
+        }
+        for index in range(MAX_FILE_POLICY_DECISIONS + 5)
+    ]
+
+    copied = MCPProtocol._tool_use_file_policy_decisions({"path_decisions": decisions})
+
+    assert len(copied) == MAX_FILE_POLICY_DECISIONS
+    assert copied[-1]["normalized_path"] == (
+        f"private/story-{MAX_FILE_POLICY_DECISIONS - 1}.txt"
+    )
+
+
+def test_protocol_derives_grant_outcome_from_all_file_policy_decisions() -> None:
+    protocol, _ = _protocol()
+
+    denied_event = protocol._build_tool_use_event(
+        context=_request_context(),
+        requested_tool_name="fs.patch",
+        effective_tool_name="fs.patch",
+        status="denied",
+        execution_origin="failed_before_execution",
+        duration_ms=0,
+        scope_payload={
+            "path_decisions": [
+                {"grant_outcome": "allowed", "normalized_path": "private/ok.txt"},
+                {"grant_outcome": "denied", "normalized_path": "private/blocked.txt"},
+            ],
+        },
+    )
+    not_granted_event = protocol._build_tool_use_event(
+        context=_request_context(),
+        requested_tool_name="fs.patch",
+        effective_tool_name="fs.patch",
+        status="denied",
+        execution_origin="failed_before_execution",
+        duration_ms=0,
+        scope_payload={
+            "path_decisions": [
+                {"grant_outcome": "allowed", "normalized_path": "private/ok.txt"},
+                {"grant_outcome": "not_granted", "normalized_path": "private/missing.txt"},
+            ],
+        },
+    )
+
+    assert denied_event.grant_outcome == "denied"
+    assert not_granted_event.grant_outcome == "not_granted"
+
+
+def test_protocol_eval_metadata_grant_outcome_overrides_derived_decisions() -> None:
+    protocol, _ = _protocol()
+
+    event = protocol._build_tool_use_event(
+        context=_request_context(),
+        requested_tool_name="fs.patch",
+        effective_tool_name="fs.patch",
+        status="denied",
+        execution_origin="failed_before_execution",
+        duration_ms=0,
+        tool_def={"metadata": {"eval": {"grant_outcome": "metadata_override"}}},
+        scope_payload={
+            "path_decisions": [
+                {"grant_outcome": "denied", "normalized_path": "private/blocked.txt"},
+            ],
+        },
+    )
+
+    assert event.grant_outcome == "metadata_override"
+
+
+def test_protocol_file_policy_presence_ignores_empty_containers() -> None:
+    protocol, _ = _protocol()
+
+    event = protocol._build_tool_use_event(
+        context=_request_context(),
+        requested_tool_name="fs.patch",
+        effective_tool_name="fs.patch",
+        status="success",
+        execution_origin="executed",
+        duration_ms=0,
+        payload={
+            "expected_sha256_by_path": {},
+            "sha256_after": [],
+            "lock_lease_id_by_path": {},
+        },
+        tool_args={
+            "expected_sha256_by_path": [],
+            "lock_lease_id_by_path": {},
+        },
+    )
+
+    assert event.file_policy_sha256_before_present is False
+    assert event.file_policy_sha256_after_present is False
+    assert event.file_policy_lock_lease_present is False
 
 
 @pytest.mark.asyncio
