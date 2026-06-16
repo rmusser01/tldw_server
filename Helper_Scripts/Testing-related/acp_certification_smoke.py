@@ -42,6 +42,35 @@ _WORKSPACE_LIVE_E2E_PROMPT = (
     "Create a concise markdown workspace certification artifact with a title, "
     "one evidence bullet, and the literal marker TLDW_WORKSPACE_ACP_CERTIFIED."
 )
+_CUSTOM_PROFILE_EVIDENCE_REQUIREMENTS: dict[str, Any] = {
+    "profile_class": "custom_concrete_profile",
+    "template_profile": "custom",
+    "certifiable_profile": "named_profile_required",
+    "required_metadata": [
+        "profile_key",
+        "profile_name",
+        "entrypoint_strategy",
+        "acp_command",
+        "acp_args",
+        "env_var_names",
+        "workspace_policy",
+        "host_runtime",
+        "agent_version",
+        "provider_assumptions",
+        "repo_commit",
+        "runner_version",
+    ],
+    "required_live_results": [
+        "initialize",
+        "session_new",
+        "session_prompt",
+    ],
+    "redaction_policy": {
+        "record_env_var_names_only": True,
+        "forbid_sensitive_values": True,
+        "use_redacted_support_views": True,
+    },
+}
 
 
 _MANIFESTS: dict[str, dict[str, Any]] = {
@@ -255,6 +284,10 @@ def build_agent_profile_manifest(entrypoint: dict[str, Any]) -> dict[str, Any]:
     if primary_blocker and primary_blocker not in blockers:
         blockers.insert(0, str(primary_blocker))
 
+    evidence_requirements = entrypoint.get("evidence_requirements")
+    if entrypoint.get("entrypoint_strategy") == "custom_template":
+        evidence_requirements = deepcopy(_CUSTOM_PROFILE_EVIDENCE_REQUIREMENTS)
+
     manifest: dict[str, Any] = {
         "profile": profile,
         "name": entrypoint.get("name") or profile,
@@ -286,6 +319,8 @@ def build_agent_profile_manifest(entrypoint: dict[str, Any]) -> dict[str, Any]:
         ],
         "commands": [],
     }
+    if evidence_requirements:
+        manifest["evidence_requirements"] = deepcopy(evidence_requirements)
 
     if entrypoint.get("probe_state") == "ready_to_probe":
         manifest["commands"].append(
@@ -380,6 +415,25 @@ def render_manifest_dict(
         lines.append("")
         lines.append("## Blockers")
         lines.extend(f"- {blocker}" for blocker in manifest["blockers"])
+    if manifest.get("evidence_requirements"):
+        requirements = manifest["evidence_requirements"]
+        lines.append("")
+        lines.append("## Evidence Requirements")
+        for key in ("profile_class", "template_profile", "certifiable_profile"):
+            value = requirements.get(key)
+            if value:
+                lines.append(f"- {key}: `{value}`")
+        if requirements.get("required_metadata"):
+            lines.append("- required_metadata:")
+            lines.extend(f"  - `{item}`" for item in requirements["required_metadata"])
+        if requirements.get("required_live_results"):
+            lines.append("- required_live_results:")
+            lines.extend(f"  - `{item}`" for item in requirements["required_live_results"])
+        if requirements.get("redaction_policy"):
+            lines.append("- redaction_policy:")
+            for key, value in requirements["redaction_policy"].items():
+                rendered_value = str(value).lower() if isinstance(value, bool) else str(value)
+                lines.append(f"  - `{key}`: `{rendered_value}`")
     lines.append("")
     lines.append("## Commands")
     if not manifest["commands"]:

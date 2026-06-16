@@ -49,6 +49,10 @@ _ADAPTER_INSTALL_SOURCES = frozenset({
 })
 _CREDENTIAL_POLICIES = frozenset({"env_var", "delegated_to_adapter", "none", "unknown"})
 _RUNTIME_BACKENDS = frozenset({"acp_downstream", "codex_app_server", "runner_adapter", "unknown"})
+_CUSTOM_TEMPLATE_STATUS_MESSAGE = (
+    "Create a distinct named custom ACP profile instead of certifying the seeded "
+    "custom template; record command, args, env, workspace policy, and evidence bundle."
+)
 
 
 def _coerce_entrypoint_strategy(value: Any) -> AgentEntrypointStrategy:
@@ -338,10 +342,7 @@ def classify_agent_entrypoint(
         return classification(
             "custom_template",
             blockers=("custom_template",),
-            status_message=(
-                "Create a named custom ACP profile with command, args, env, "
-                "workspace policy, and evidence bundle."
-            ),
+            status_message=_CUSTOM_TEMPLATE_STATUS_MESSAGE,
             command="",
             args=[],
         )

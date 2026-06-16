@@ -675,6 +675,8 @@ def test_classifier_custom_template_is_never_probe_ready() -> None:
     assert result.acp_command == ""
     assert result.primary_blocker == "custom_template"
     assert result.blockers == ("custom_template",)
+    assert "Create a distinct named custom ACP profile" in result.status_message
+    assert "seeded custom template" in result.status_message
     assert "command, args, env, workspace policy, and evidence bundle" in result.status_message
 
 

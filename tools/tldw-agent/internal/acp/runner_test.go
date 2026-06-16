@@ -262,6 +262,7 @@ func TestPassiveBlockedStatusUsesActionableMessages(t *testing.T) {
 	cases := map[string]string{
 		"live_certification_required": "Run live ACP certification before claiming this agent is supported.",
 		"entrypoint_strategy_missing": "Identify and configure a concrete ACP stdio entrypoint before live certification.",
+		"custom_template":             "Create a distinct named custom ACP profile instead of certifying the seeded custom template; record command, args, env, workspace policy, and evidence bundle.",
 	}
 
 	for blocker, want := range cases {

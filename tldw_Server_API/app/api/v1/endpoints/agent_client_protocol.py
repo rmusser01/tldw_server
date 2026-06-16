@@ -1773,7 +1773,7 @@ _ACP_ENTRYPOINT_STEP_MAP = {
     "credentials_missing": "Set the required provider credential before live certification.",
     "entrypoint_strategy_missing": "Identify and configure a concrete ACP stdio entrypoint before live certification.",
     "shell_builtin_collision": "Use an executable ACP command, not a shell builtin or alias.",
-    "custom_template": "Create a named custom ACP profile with command, args, env, workspace policy, and evidence bundle.",
+    "custom_template": "Create a distinct named custom ACP profile instead of certifying the seeded custom template; record command, args, env, workspace policy, and evidence bundle.",
     "live_certification_required": "Run live ACP certification before claiming this agent is supported.",
     "mutable_adapter_invocation": "Install a pinned ACP adapter binary instead of using a mutable package invocation.",
     "adapter_auth_missing": "Authenticate the ACP adapter or configure its accepted credential source.",

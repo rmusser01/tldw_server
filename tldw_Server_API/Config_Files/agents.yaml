@@ -186,7 +186,7 @@ agents:
     default: false
     support_state: documented_unverified
     verification_level: documented_only
-    compatibility_notes: "Custom ACP profiles require a named command, workspace policy, and certification evidence before release claims."
+    compatibility_notes: "The seeded custom profile is a template only. Create a distinct named custom ACP profile with command, args, env redaction policy, workspace policy, host/runtime, version output, provider assumptions, and live certification evidence before release claims."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
     entrypoint_strategy: custom_template
     acp_command: ""

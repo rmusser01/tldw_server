@@ -636,7 +636,7 @@ func passiveBlockedStatus(blocker string) string {
 	case "mutable_adapter_invocation":
 		return "Configured ACP adapter invocation uses a mutable package version."
 	case "custom_template":
-		return "Create a named custom ACP profile with command, args, env, workspace policy, and evidence bundle."
+		return "Create a distinct named custom ACP profile instead of certifying the seeded custom template; record command, args, env, workspace policy, and evidence bundle."
 	case "live_certification_required":
 		return "Run live ACP certification before claiming this agent is supported."
 	case "entrypoint_strategy_missing":
