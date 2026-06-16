@@ -84,7 +84,7 @@ Agent Registry rows use these stable strategy names:
 | `native_acp` | The downstream agent binary itself exposes an ACP-compatible stdio entrypoint. |
 | `external_acp_adapter` | A separate adapter binary exposes ACP stdio and controls the downstream agent CLI. The adapter command is the ACP entrypoint, while the agent command remains the display/downstream binary. |
 | `documented_candidate` | Setup information exists, but no concrete ACP stdio entrypoint is configured for passive readiness or certification. |
-| `custom_template` | Operator-provided template that must be completed with command, args, env, workspace policy, and evidence before certification. |
+| `custom_template` | Seeded template profile. It is not itself certifiable; concrete custom support requires a distinct named profile plus command, args, env redaction policy, workspace policy, and evidence. |
 
 Legacy `adapter_acp` input may be imported as `external_acp_adapter` for
 compatibility, but release-facing docs and seeded registry rows should use only
@@ -98,7 +98,7 @@ PR without code changes. A row must include:
 | Field | Required | Description |
 | --- | --- | --- |
 | Agent | Yes | Human-readable downstream agent or profile name. |
-| Profile key | Yes | Stable key used in docs/setup examples, such as `codex`, `claude_code`, `opencode`, `custom_acp`, or `stub`. |
+| Profile key | Yes | Stable key used in docs/setup examples, such as `codex`, `claude_code`, `opencode`, `my_acp_agent`, or `stub`. The seeded `custom` key is reserved for the template row and is not a concrete certification target. |
 | Transport/runner mode | Yes | `host_stdio`, `sandbox_stdio`, `external_acp_adapter`, or `stub_fixture`. |
 | Host/runtime | Yes | OS/runtime profile such as `macos-host`, `linux-host`, `docker`, `lima`, or `vz`. |
 | Version | Yes | Agent binary version, commit, or `unknown` with caveat. |
@@ -121,7 +121,37 @@ PR without code changes. A row must include:
 | Hermes | `hermes` | `host_stdio` | macOS host; other hosts unverified | `Hermes Agent v0.13.0 (2026.5.7)` on May 23, 2026 backend live E2E | `supported_with_caveats` | `live_e2e_tested` | `init=pass`, `session_new=pass`, `prompt=pass`, `structured_completion=pass`, `artifacts=n/a`, `diagnostics=limited`, `cancel_close=pass`, `review_loop=n/a`, `workspace_env=limited`, `mcp_injection=skip`, `sandbox=skip`, `redacted_support_view=pass` | `python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile live-e2e --run` with `ACP_AGENT_PROFILE=hermes` on branch `codex/acp-hermes-live-e2e-certification` commit `5e6672f8f`, macOS host, tldw-agent runner `0.1.0`, May 23, 2026: exit 0 after backend health/setup-guide, `sessions/new`, `sessions/prompt`, redacted detail/events/artifacts, diagnostics, cancel, close, and `tools/tldw-agent/scripts/verify-local-build.sh`; result summary: `stop_reason=end_turn`, `events_total=2`, `artifacts_total=0`, `diagnostics_total=0`. Earlier direct host-stdio evidence: `python Helper_Scripts/Testing-related/acp_certification_smoke.py --agent-profile hermes --run` on `codex/acp-goose-hermes-certification` commit `8c4a76c15`, May 23, 2026. | Supported for the verified macOS host runner profile with configured Hermes provider state. Artifact-producing workflows, non-empty MCP server injection, sandbox behavior, and reviewer-loop behavior remain unverified; diagnostics endpoint was reachable but no failure diagnostic payload was produced in the passing run. | #1563 |
 | Continue | `continue_dev` | `host_stdio` | macOS host; other hosts unverified | unavailable on May 11, 2026 probe | `documented_unverified` | `documented_only` | `init=skip`, `session_new=skip`, `prompt=skip`, `structured_completion=skip`, `artifacts=skip`, `diagnostics=skip`, `cancel_close=skip`, `review_loop=skip`, `workspace_env=skip`, `mcp_injection=skip`, `sandbox=skip`, `redacted_support_view=skip` | Blocker evidence in `ACP_OSS_Custom_Certification_2026_05_11.md`. | `continue` resolved to a zsh shell builtin, not an installed CLI. Requires installed ACP-compatible Continue command and live stdio verification before release claims. | #1563 |
 | OpenCode | `opencode` | `host_stdio` | macOS host; other hosts unverified | `1.15.7` on May 23, 2026 backend live E2E | `supported_with_caveats` | `live_e2e_tested` | `init=pass`, `session_new=pass`, `prompt=pass`, `structured_completion=pass`, `artifacts=n/a`, `diagnostics=limited`, `cancel_close=pass`, `review_loop=n/a`, `workspace_env=limited`, `mcp_injection=skip`, `sandbox=skip`, `redacted_support_view=pass` | OpenCode was configured in `~/.config/opencode/opencode.json` to use local llama.cpp at `http://127.0.0.1:9099/v1` with model `gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf`; `opencode run --pure --format json --model llama.cpp/gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf "Reply with exactly ACP_LOCAL_OK."` returned `ACP_LOCAL_OK.`. `python Helper_Scripts/Testing-related/acp_certification_smoke.py --agent-profile opencode --run` exited 0. `python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile live-e2e --run` with `ACP_AGENT_PROFILE=opencode` on branch `codex/acp-opencode-aider-llamacpp-certification` commit `53c018269`, macOS host, tldw-agent runner `0.1.0`, May 23, 2026: exit 0 after backend health/setup-guide, `sessions/new`, `sessions/prompt`, redacted detail/events/artifacts, diagnostics, cancel, close, and `tools/tldw-agent/scripts/verify-local-build.sh`; result summary: `stop_reason=end_turn`, `events_total=2`, `artifacts_total=0`, `diagnostics_total=0`, session `ses_1a80f9407ffejmMKs2NWMrv52z`. | Supported for the verified macOS host runner profile with configured OpenCode local llama.cpp provider state. Artifact-producing workflows, non-empty MCP server injection, sandbox behavior, and reviewer-loop behavior remain unverified; diagnostics endpoint was reachable but no failure diagnostic payload was produced in the passing run. | #1563 |
-| Custom ACP-compatible agent | `custom_acp` | `host_stdio` or `sandbox_stdio` | host dependent | operator supplied | `documented_unverified` | `documented_only` | `init=skip`, `session_new=skip`, `prompt=skip`, `structured_completion=skip`, `artifacts=skip`, `diagnostics=skip`, `cancel_close=skip`, `review_loop=skip`, `workspace_env=skip`, `mcp_injection=skip`, `sandbox=skip`, `redacted_support_view=skip` | Blocker evidence and requirements in `ACP_OSS_Custom_Certification_2026_05_11.md`. | Operators must provide a named ACP-compatible binary, args, env, workspace policy, host/runtime, version, and evidence. Do not imply generic support for arbitrary commands. | #1563 |
+| Custom ACP template | `custom` | `template` | n/a | n/a | `documented_unverified` | `documented_only` | `init=skip`, `session_new=skip`, `prompt=skip`, `structured_completion=skip`, `artifacts=skip`, `diagnostics=skip`, `cancel_close=skip`, `review_loop=skip`, `workspace_env=skip`, `mcp_injection=skip`, `sandbox=skip`, `redacted_support_view=skip` | Blocker evidence and requirements in `ACP_OSS_Custom_Certification_2026_05_11.md`; `python Helper_Scripts/Testing-related/acp_certification_smoke.py --agent-profile custom --format json` emits the concrete-profile evidence contract and no runnable commands. | The seeded `custom` profile is template-only. Operators must create a distinct named profile with an ACP-compatible binary, args, env redaction policy, workspace policy, host/runtime, version output, provider assumptions, and live evidence before making support claims. Do not imply generic support for arbitrary commands. | #2052 |
+
+## Concrete Custom Profile Evidence Contract
+
+The seeded `custom` registry profile is a template and must stay
+`documented_unverified` / `documented_only`. A certifiable custom profile is a
+separate named profile, for example `my_acp_agent`, with its own evidence row.
+Do not upgrade the seeded `custom` row or use it as a generic support claim.
+
+The smoke helper exposes the required contract:
+
+```bash
+python Helper_Scripts/Testing-related/acp_certification_smoke.py --agent-profile custom --format json
+```
+
+Minimum metadata for a concrete custom profile:
+
+- `profile_key` and `profile_name`, distinct from the seeded `custom` template.
+- `entrypoint_strategy`, `acp_command`, and `acp_args`.
+- `env_var_names` only; never record secret values.
+- `workspace_policy`, including cwd, allowed roots, and sandbox expectation.
+- `host_runtime`, provider assumptions, agent version output, repo commit, and
+  runner version.
+- Live results for `initialize`, `session_new`, and `session_prompt` at minimum.
+
+Redaction requirements:
+
+- Record credential and environment variable names only, not values.
+- Use redacted support views for transcript, event, artifact, and diagnostics
+  evidence.
+- Treat missing redaction evidence as a blocker for public support claims.
 
 ## Evidence Record Template
 
@@ -136,7 +166,11 @@ Verification level:
 Commit/branch:
 Host/runtime:
 Agent binary/version:
+Runner version:
 Config profile:
+Env var names:
+Workspace policy:
+Provider assumptions:
 Commands:
 Capability results:
 Caveats:
@@ -157,6 +191,8 @@ checklist lives in `ACP_Certification_Checklist.md`.
 - State whether the agent is expected to speak ACP stdio directly or through a
   wrapper.
 - Mark support state `documented_unverified` unless prior evidence exists.
+- For seeded `custom`, document only the template and evidence contract; do not
+  treat the template as a certifiable concrete profile.
 
 ### Stub Or Smoke Tested
 
@@ -169,6 +205,7 @@ checklist lives in `ACP_Certification_Checklist.md`.
 ### Live E2E Tested
 
 - Verify the downstream binary is installed and record its version.
+- For concrete custom profiles, use a distinct profile key rather than `custom`.
 - Run a real session through tldw_server using the configured runner profile.
 - Exercise `init`, `session_new`, `prompt`, `structured_completion`,
   `diagnostics`, and `cancel_close`.
@@ -201,6 +238,7 @@ language later:
 | Caveat | Meaning |
 | --- | --- |
 | `protocol_incompatibility` | Agent does not satisfy ACP stdio contract or required JSON-RPC behavior. |
+| `custom_template` | The seeded `custom` profile is a template and cannot be live-certified without a distinct named concrete profile. |
 | `entrypoint_strategy_missing` | Registry row has no verified ACP stdio entrypoint strategy or command. |
 | `binary_missing` | Expected command is not installed or not on PATH. |
 | `credentials_missing` | Provider/API key or account login is unavailable. |

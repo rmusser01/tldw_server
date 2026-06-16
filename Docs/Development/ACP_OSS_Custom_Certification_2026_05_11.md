@@ -95,17 +95,20 @@ Agent binary/version: operator supplied; no concrete command configured in defau
 Config profile: tldw_Server_API/Config_Files/agents.yaml command="" args=[]
 Commands run: registry/config inspection; live-e2e safety refusal
 Capability results: init=skip, session_new=skip, prompt=skip, structured_completion=skip, artifacts=skip, diagnostics=skip, cancel_close=skip, review_loop=skip, workspace_env=skip, mcp_injection=skip, sandbox=skip, redacted_support_view=skip
-Caveats: workspace_config_missing, binary_missing, sandbox_unverified, mcp_injection_unverified, artifact_capability_unverified, review_loop_unverified, redacted_view_unverified
+Caveats: custom_template, workspace_config_missing, binary_missing, sandbox_unverified, mcp_injection_unverified, artifact_capability_unverified, review_loop_unverified, redacted_view_unverified
 Follow-up issue: #1563
 ```
 
-Custom profile support remains a documented template only. A future support
-claim needs a named implementation, command, args, env requirements, workspace
-policy, host/runtime, binary version, and `live-e2e` capability evidence.
+Custom profile support remains a documented template only. The seeded `custom`
+profile is not a concrete certification target. A future support claim needs a
+distinct named profile with command, args, env variable names without secret
+values, workspace policy, host/runtime, provider assumptions, binary version,
+runner version, and live initialize/session/prompt evidence.
 
 ## Conclusion
 
 Keep all #1563 OSS/custom profiles at `documented_unverified` /
 `documented_only`. Setup and registry surfaces may show these rows as candidate
-profiles, but release notes must not claim live ACP support until real
-ACP-compatible commands and passing evidence are recorded.
+profiles or templates, but release notes must not claim live ACP support until
+real ACP-compatible commands and passing evidence are recorded for a named
+profile.
