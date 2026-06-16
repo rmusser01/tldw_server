@@ -51,12 +51,17 @@ Verification:
 - `python -m bandit -r tldw_Server_API/tests/Agent_Client_Protocol/test_registry_entrypoint_strategy.py tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py -s B101 -f json -o /tmp/bandit_acp_aider_continue_decisions.json` reported 0 results and 0 errors.
 - Aider and Continue ACP smoke manifests render valid JSON and carry the expected adapter/documented-only blocker metadata.
 - `git diff --check` passed.
+
+Review pass:
+- Rebasing PR #2369 onto `origin/dev` completed without conflicts.
+- Addressed review feedback by aligning the Continue matrix strategy with `documented_candidate`, making the Aider manifest test independent of host PATH state, folding long YAML compatibility notes, and sharing seeded registry setup through a pytest fixture.
+- Re-ran the focused pytest suite with 103 passing tests and Bandit with 0 results / 0 errors.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Opened PR #2369 to resolve the remaining Aider and Continue ACP decision work. Aider is recorded as an unverified `aider-acp` external adapter candidate that blocks on `adapter_missing`; Continue uses the current `cn` CLI command but remains documented-only with `entrypoint_strategy_missing` because no ACP stdio entrypoint or maintained adapter is identified. Posted status comments on #2050, #2051, and #1563; #1563 remains open pending post-merge parent closeout review.
+Opened PR #2369 to resolve the remaining Aider and Continue ACP decision work. Aider is recorded as an unverified `aider-acp` external adapter candidate that blocks on `adapter_missing`; Continue uses the current `cn` CLI command but remains documented-only with `entrypoint_strategy_missing` because no ACP stdio entrypoint or maintained adapter is identified. Posted status comments on #2050, #2051, and #1563; #1563 remains open pending post-merge parent closeout review. Rebased the PR onto latest `dev` and addressed review feedback on strategy consistency, PATH-hermetic tests, YAML readability, and registry-test fixture reuse.
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 

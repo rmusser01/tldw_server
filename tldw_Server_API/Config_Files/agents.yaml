@@ -92,7 +92,15 @@ agents:
     docs_url: "https://aider.chat"
     support_state: documented_unverified
     verification_level: documented_only
-    compatibility_notes: "Aider v0.86.2 was installed and configured May 23, 2026 on branch codex/acp-opencode-aider-llamacpp-certification commit 53c018269 to use a local llama.cpp OpenAI-compatible server at 127.0.0.1:9099; direct Aider prompting succeeded. ACP certification remains blocked because the installed Aider CLI exposes no native ACP stdio server entrypoint. A third-party aider-acp bridge is documented as an external adapter candidate, but it is not installed or live-E2E certified in this environment."
+    compatibility_notes: >-
+      Aider v0.86.2 was installed and configured May 23, 2026 on branch
+      codex/acp-opencode-aider-llamacpp-certification commit 53c018269 to use
+      a local llama.cpp OpenAI-compatible server at 127.0.0.1:9099; direct
+      Aider prompting succeeded. ACP certification remains blocked because the
+      installed Aider CLI exposes no native ACP stdio server entrypoint. A
+      third-party aider-acp bridge is documented as an external adapter
+      candidate, but it is not installed or live-E2E certified in this
+      environment.
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
     entrypoint_strategy: external_acp_adapter
     acp_command: aider-acp
@@ -155,7 +163,12 @@ agents:
     default: false
     support_state: documented_unverified
     verification_level: documented_only
-    compatibility_notes: "Continue CLI 1.5.46 is published as @continuedev/cli with binary cn. The local shell resolves continue as a shell builtin, and cn help exposes interactive/headless/review modes but no ACP stdio server entrypoint. Keep documented-only until a native ACP command or maintained adapter is identified and live-certified."
+    compatibility_notes: >-
+      Continue CLI 1.5.46 is published as @continuedev/cli with binary cn.
+      The local shell resolves continue as a shell builtin, and cn help
+      exposes interactive/headless/review modes but no ACP stdio server
+      entrypoint. Keep documented-only until a native ACP command or
+      maintained adapter is identified and live-certified.
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
     entrypoint_strategy: documented_candidate
     acp_command: ""

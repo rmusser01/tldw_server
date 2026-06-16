@@ -552,8 +552,9 @@ def test_agent_profile_manifest_preserves_registry_support_and_adapter_metadata(
     assert manifest["entrypoint"]["runtime_backend"] == "acp_downstream"
 
 
-def test_registry_aider_manifest_records_unverified_adapter_candidate() -> None:
+def test_registry_aider_manifest_records_unverified_adapter_candidate(monkeypatch) -> None:
     module = _load_module()
+    monkeypatch.setenv("PATH", "")
 
     manifest = module._build_registry_agent_manifest("aider")
 

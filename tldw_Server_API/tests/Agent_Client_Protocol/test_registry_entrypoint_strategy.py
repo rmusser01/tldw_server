@@ -22,6 +22,13 @@ def acp_db(tmp_path):
         db.close()
 
 
+@pytest.fixture
+def loaded_registry() -> AgentRegistry:
+    registry = AgentRegistry()
+    registry.load()
+    return registry
+
+
 def test_entrypoint_strategy_defaults_to_documented_candidate() -> None:
     entry = AgentRegistryEntry(type="legacy", name="Legacy")
 
@@ -57,11 +64,10 @@ agents:
     assert entry.acp_args == ["acp"]
 
 
-def test_seeded_codex_profile_uses_pinned_external_acp_adapter() -> None:
-    registry = AgentRegistry()
-    registry.load()
-
-    entry = registry.get_entry("codex")
+def test_seeded_codex_profile_uses_pinned_external_acp_adapter(
+    loaded_registry: AgentRegistry,
+) -> None:
+    entry = loaded_registry.get_entry("codex")
 
     assert entry is not None
     assert entry.entrypoint_strategy == "external_acp_adapter"
@@ -76,11 +82,10 @@ def test_seeded_codex_profile_uses_pinned_external_acp_adapter() -> None:
     assert entry.verification_level == "live_e2e_tested"
 
 
-def test_seeded_claude_code_profile_uses_current_external_acp_adapter_candidate() -> None:
-    registry = AgentRegistry()
-    registry.load()
-
-    entry = registry.get_entry("claude_code")
+def test_seeded_claude_code_profile_uses_current_external_acp_adapter_candidate(
+    loaded_registry: AgentRegistry,
+) -> None:
+    entry = loaded_registry.get_entry("claude_code")
 
     assert entry is not None
     assert entry.entrypoint_strategy == "external_acp_adapter"
@@ -99,11 +104,10 @@ def test_seeded_claude_code_profile_uses_current_external_acp_adapter_candidate(
     assert entry.verification_level == "documented_only"
 
 
-def test_seeded_aider_profile_uses_unverified_external_acp_adapter_candidate() -> None:
-    registry = AgentRegistry()
-    registry.load()
-
-    entry = registry.get_entry("aider")
+def test_seeded_aider_profile_uses_unverified_external_acp_adapter_candidate(
+    loaded_registry: AgentRegistry,
+) -> None:
+    entry = loaded_registry.get_entry("aider")
 
     assert entry is not None
     assert entry.entrypoint_strategy == "external_acp_adapter"
@@ -132,9 +136,12 @@ def test_aider_external_adapter_candidate_blocks_when_adapter_missing() -> None:
         credential_policy="delegated_to_adapter",
     )
 
+    def resolve_command(command: str) -> str | None:
+        return "/Users/example/.local/bin/aider" if command == "aider" else None
+
     result = classify_agent_entrypoint(
         entry,
-        command_resolver=lambda command: "/Users/example/.local/bin/aider" if command == "aider" else None,
+        command_resolver=resolve_command,
     )
 
     assert result.probe_state == "blocked"
@@ -144,11 +151,10 @@ def test_aider_external_adapter_candidate_blocks_when_adapter_missing() -> None:
     assert result.credential_state == "delegated"
 
 
-def test_seeded_continue_profile_uses_current_cn_cli_but_no_acp_entrypoint() -> None:
-    registry = AgentRegistry()
-    registry.load()
-
-    entry = registry.get_entry("continue_dev")
+def test_seeded_continue_profile_uses_current_cn_cli_but_no_acp_entrypoint(
+    loaded_registry: AgentRegistry,
+) -> None:
+    entry = loaded_registry.get_entry("continue_dev")
 
     assert entry is not None
     assert entry.entrypoint_strategy == "documented_candidate"
