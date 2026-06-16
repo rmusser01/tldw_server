@@ -470,9 +470,17 @@ jobs:
           - name: core-config
             paths: >-
               tldw_Server_API/tests/Config
-          - name: core-audit-security
+          - name: core-audit-support
             paths: >-
-              tldw_Server_API/tests/Audit
+              tldw_Server_API/tests/Audit/test_audit_*.py
+              tldw_Server_API/tests/Audit/test_pii_pattern_groups.py
+              tldw_Server_API/tests/Audit/test_risk_settings_overrides.py
+              tldw_Server_API/tests/Audit/test_sqlite_runtime_pragmas.py
+          - name: core-audit-unified
+            paths: >-
+              tldw_Server_API/tests/Audit/test_unified_audit_service.py
+          - name: core-security
+            paths: >-
               tldw_Server_API/tests/Security
           - name: core-setup-usage
             paths: >-
@@ -1686,9 +1694,17 @@ jobs:
           - name: core-config
             paths: >-
               tldw_Server_API/tests/Config
-          - name: core-audit-security
+          - name: core-audit-support
             paths: >-
-              tldw_Server_API/tests/Audit
+              tldw_Server_API/tests/Audit/test_audit_*.py
+              tldw_Server_API/tests/Audit/test_pii_pattern_groups.py
+              tldw_Server_API/tests/Audit/test_risk_settings_overrides.py
+              tldw_Server_API/tests/Audit/test_sqlite_runtime_pragmas.py
+          - name: core-audit-unified
+            paths: >-
+              tldw_Server_API/tests/Audit/test_unified_audit_service.py
+          - name: core-security
+            paths: >-
               tldw_Server_API/tests/Security
           - name: core-setup-usage
             paths: >-
@@ -2847,9 +2863,17 @@ jobs:
           - name: core-config
             paths: >-
               tldw_Server_API/tests/Config
-          - name: core-audit-security
+          - name: core-audit-support
             paths: >-
-              tldw_Server_API/tests/Audit
+              tldw_Server_API/tests/Audit/test_audit_*.py
+              tldw_Server_API/tests/Audit/test_pii_pattern_groups.py
+              tldw_Server_API/tests/Audit/test_risk_settings_overrides.py
+              tldw_Server_API/tests/Audit/test_sqlite_runtime_pragmas.py
+          - name: core-audit-unified
+            paths: >-
+              tldw_Server_API/tests/Audit/test_unified_audit_service.py
+          - name: core-security
+            paths: >-
               tldw_Server_API/tests/Security
           - name: core-setup-usage
             paths: >-
@@ -3934,9 +3958,17 @@ jobs:
           - name: core-config
             paths: >-
               tldw_Server_API/tests/Config
-          - name: core-audit-security
+          - name: core-audit-support
             paths: >-
-              tldw_Server_API/tests/Audit
+              tldw_Server_API/tests/Audit/test_audit_*.py
+              tldw_Server_API/tests/Audit/test_pii_pattern_groups.py
+              tldw_Server_API/tests/Audit/test_risk_settings_overrides.py
+              tldw_Server_API/tests/Audit/test_sqlite_runtime_pragmas.py
+          - name: core-audit-unified
+            paths: >-
+              tldw_Server_API/tests/Audit/test_unified_audit_service.py
+          - name: core-security
+            paths: >-
               tldw_Server_API/tests/Security
           - name: core-setup-usage
             paths: >-
@@ -5023,9 +5055,17 @@ jobs:
           - name: core-config
             paths: >-
               tldw_Server_API/tests/Config
-          - name: core-audit-security
+          - name: core-audit-support
             paths: >-
-              tldw_Server_API/tests/Audit
+              tldw_Server_API/tests/Audit/test_audit_*.py
+              tldw_Server_API/tests/Audit/test_pii_pattern_groups.py
+              tldw_Server_API/tests/Audit/test_risk_settings_overrides.py
+              tldw_Server_API/tests/Audit/test_sqlite_runtime_pragmas.py
+          - name: core-audit-unified
+            paths: >-
+              tldw_Server_API/tests/Audit/test_unified_audit_service.py
+          - name: core-security
+            paths: >-
               tldw_Server_API/tests/Security
           - name: core-setup-usage
             paths: >-

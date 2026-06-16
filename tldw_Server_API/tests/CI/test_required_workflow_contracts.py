@@ -427,9 +427,12 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         assert "product-evaluations" not in shard_names
         assert "product-prompts-workflows" not in shard_names
         assert "platform-mcp" not in shard_names
+        assert "core-audit-security" not in shard_names
         assert {
-            "core-audit-security",
+            "core-audit-support",
+            "core-audit-unified",
             "core-config",
+            "core-security",
             "core-server-smoke",
             "core-setup-usage",
             "core-utils-tooling",
@@ -701,8 +704,10 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         assert set(covered_watchlist_files) == watchlist_test_files
 
         core_shards = {
-            "core-audit-security",
+            "core-audit-support",
+            "core-audit-unified",
             "core-config",
+            "core-security",
             "core-server-smoke",
             "core-setup-usage",
             "core-utils-tooling",
