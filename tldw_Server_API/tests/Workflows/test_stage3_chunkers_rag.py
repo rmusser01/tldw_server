@@ -1,4 +1,5 @@
 import pytest
+import time
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.main import app
@@ -11,6 +12,8 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 
 
 pytestmark = pytest.mark.integration
+
+TERMINAL_RUN_STATUSES = {"succeeded", "failed", "cancelled", "canceled"}
 
 
 @pytest.fixture()
@@ -53,6 +56,22 @@ def client_with_wf(tmp_path, auth_headers):
     app.dependency_overrides.clear()
 
 
+def _wait_for_run_terminal_data(client: TestClient, run_id: str, timeout: float = 30.0) -> dict:
+    deadline = time.monotonic() + timeout
+    last_data: dict = {}
+    while time.monotonic() < deadline:
+        resp = client.get(f"/api/v1/workflows/runs/{run_id}")
+        assert resp.status_code == 200, resp.text
+        last_data = resp.json()
+        if last_data.get("status") in TERMINAL_RUN_STATUSES:
+            return last_data
+        time.sleep(0.05)
+    pytest.fail(
+        f"workflow run {run_id} did not reach terminal status before timeout; "
+        f"last_response={last_data}"
+    )
+
+
 def test_chunker_options_endpoint(client_with_wf: TestClient):
     client = client_with_wf
     r = client.get("/api/v1/workflows/options/chunkers")
@@ -84,16 +103,8 @@ def test_rag_search_with_citations_returns_citations(client_with_wf: TestClient)
     }
     wid = client.post("/api/v1/workflows", json=definition).json()["id"]
     run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
-    # Poll until completion
-    import time
-    for _ in range(100):
-        resp = client.get(f"/api/v1/workflows/runs/{run_id}")
-        assert resp.status_code == 200, resp.text
-        data = resp.json()
-        if data["status"] in ("succeeded", "failed"):
-            break
-        time.sleep(0.05)
-    assert data["status"] == "succeeded"
+    data = _wait_for_run_terminal_data(client, run_id)
+    assert data["status"] == "succeeded", data
     out = data.get("outputs") or {}
     # Citations may be empty but key should exist when enabled
     if out.get("documents"):
