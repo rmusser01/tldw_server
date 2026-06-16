@@ -104,6 +104,41 @@ def test_scheduler_releases_slot_on_step_failure(workflows_db: WorkflowsDatabase
     assert stats["queue_depth"] == 0
 
 
+def test_drain_pending_reports_active_run(
+    workflows_db: WorkflowsDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    scheduler = WorkflowScheduler.instance()
+    spawned = []
+
+    def fake_spawn(coro):
+        spawned.append(coro)
+        coro.close()
+
+    monkeypatch.setattr(WorkflowScheduler, "_spawn", staticmethod(fake_spawn))
+
+    definition = {
+        "name": "active-run",
+        "steps": [{"id": "step1", "type": "prompt", "config": {"template": "hi"}}],
+    }
+    run_id = "active-run"
+    workflows_db.create_run(
+        run_id=run_id,
+        tenant_id="tenant",
+        user_id="user",
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot=definition,
+    )
+
+    WorkflowEngine(workflows_db).submit(run_id, RunMode.ASYNC)
+
+    assert spawned
+    assert scheduler.stats()["active_tenants"] == 1
+    assert scheduler.drain_pending(run_id) is True
+
+
 def test_waiting_run_keeps_secrets_and_releases_slot(workflows_db: WorkflowsDatabase):
     scheduler = WorkflowScheduler.instance()
     definition = {

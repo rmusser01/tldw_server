@@ -547,7 +547,7 @@ class WorkflowEngine:
                 logger.debug(f"WorkflowEngine: pop_run_secrets failed for {run_id}: {e}")
             self._clear_tenant_cache(run_id)
             with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
-                WorkflowScheduler.instance().notify_finished(_tenant_for_notify, _wf_for_notify)
+                WorkflowScheduler.instance().notify_finished(_tenant_for_notify, _wf_for_notify, run_id=run_id)
 
         keep_secrets = False
         finalized = False
@@ -2193,6 +2193,7 @@ class WorkflowScheduler:
         self._queue = deque()  # items: (engine, run_id, mode, tenant, workflow_id)
         self._active_tenant: dict[str, int] = {}
         self._active_workflow: dict[int | None, int] = {}
+        self._active_runs: set[str] = set()
         self.tenant_limit = int(os.getenv("WORKFLOWS_TENANT_CONCURRENCY", "2"))
         self.workflow_limit = int(os.getenv("WORKFLOWS_WORKFLOW_CONCURRENCY", "1"))
         self._lock = threading.Lock()
@@ -2222,9 +2223,11 @@ class WorkflowScheduler:
             queue_depth = float(len(self._queue))
         self._set_queue_gauge(queue_depth)
 
-    def notify_finished(self, tenant: str, workflow_id: int | None) -> None:
+    def notify_finished(self, tenant: str, workflow_id: int | None, run_id: str | None = None) -> None:
         queue_depth = 0.0
         with self._lock:
+            if run_id:
+                self._active_runs.discard(run_id)
             if tenant:
                 self._active_tenant[tenant] = max(0, self._active_tenant.get(tenant, 0) - 1)
             if workflow_id is not None:
@@ -2245,6 +2248,7 @@ class WorkflowScheduler:
         return self._active_tenant.get(tenant, 0) < self.tenant_limit and self._active_workflow.get(workflow_id, 0) < self.workflow_limit
 
     def _start_locked(self, engine: WorkflowEngine, run_id: str, mode: RunMode, tenant: str, workflow_id: int | None) -> None:
+        self._active_runs.add(run_id)
         self._active_tenant[tenant] = self._active_tenant.get(tenant, 0) + 1
         if workflow_id is not None:
             self._active_workflow[workflow_id] = self._active_workflow.get(workflow_id, 0) + 1
@@ -2268,6 +2272,8 @@ class WorkflowScheduler:
         queue_depth = 0.0
         removed = False
         with self._lock:
+            if run_id in self._active_runs:
+                return True
             for _ in range(len(self._queue)):
                 engine, rid, mode, tenant, wf = self._queue.popleft()
                 if rid == run_id and not removed:
