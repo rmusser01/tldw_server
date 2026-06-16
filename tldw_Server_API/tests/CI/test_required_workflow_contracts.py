@@ -555,10 +555,13 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "product-prompt-studio",
             "product-prompts-legacy",
             "product-prompts-new",
-            "product-watchlists",
+            "product-watchlists-a-r",
+            "product-watchlists-core",
+            "product-watchlists-pipeline",
         } | workflow_shards
         assert product_shards.issubset(shard_names)
         assert "product-workflows" not in shard_names
+        assert "product-watchlists" not in shard_names
         platform_shards = {
             "platform-infrastructure-metrics",
             "platform-mcp-core",
@@ -609,6 +612,28 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         assert "tldw_Server_API/tests/Character_Chat_NEW/unit" not in shard_path_sets["chat-character-property"]
         assert "tldw_Server_API/tests/Claims" not in shard_path_sets["product-collections"]
         assert "tldw_Server_API/tests/Evaluations" not in shard_path_sets["product-claims-core"]
+        watchlist_shards = {
+            "product-watchlists-a-r",
+            "product-watchlists-core",
+            "product-watchlists-pipeline",
+        }
+        watchlist_test_files = {
+            str(path)
+            for path in Path("tldw_Server_API/tests/Watchlists").glob("test*.py")
+        }
+        covered_watchlist_files: dict[str, str] = {}
+        for shard_name in watchlist_shards:
+            for pattern in shard_path_sets[shard_name]:
+                matches = sorted(fnmatch.filter(watchlist_test_files, pattern))
+                assert matches, f"{shard_name} pattern matched no files: {pattern}"
+                for filename in matches:
+                    if filename in covered_watchlist_files:
+                        raise AssertionError(
+                            f"{filename} is listed by multiple watchlist shards: "
+                            f"{covered_watchlist_files[filename]} and {shard_name}"
+                        )
+                    covered_watchlist_files[filename] = shard_name
+        assert set(covered_watchlist_files) == watchlist_test_files
 
         core_shards = {
             "core-audit-security",

@@ -1162,9 +1162,44 @@ jobs:
           - name: product-prompts-new
             paths: >-
               tldw_Server_API/tests/Prompt_Management_NEW
-          - name: product-watchlists
+          - name: product-watchlists-a-r
             paths: >-
-              tldw_Server_API/tests/Watchlists
+              tldw_Server_API/tests/Watchlists/test_admin_*.py
+              tldw_Server_API/tests/Watchlists/test_audio_*.py
+              tldw_Server_API/tests/Watchlists/test_companion_*.py
+              tldw_Server_API/tests/Watchlists/test_dedup_*.py
+              tldw_Server_API/tests/Watchlists/test_delivery_*.py
+              tldw_Server_API/tests/Watchlists/test_e2e_*.py
+              tldw_Server_API/tests/Watchlists/test_fetchers_*.py
+              tldw_Server_API/tests/Watchlists/test_filter_*.py
+              tldw_Server_API/tests/Watchlists/test_filters_*.py
+              tldw_Server_API/tests/Watchlists/test_first_*.py
+              tldw_Server_API/tests/Watchlists/test_full_*.py
+              tldw_Server_API/tests/Watchlists/test_include_*.py
+              tldw_Server_API/tests/Watchlists/test_job_*.py
+              tldw_Server_API/tests/Watchlists/test_newsletter_*.py
+              tldw_Server_API/tests/Watchlists/test_operational_*.py
+              tldw_Server_API/tests/Watchlists/test_opml_*.py
+              tldw_Server_API/tests/Watchlists/test_perf_*.py
+              tldw_Server_API/tests/Watchlists/test_pipeline_*.py
+              tldw_Server_API/tests/Watchlists/test_preview_*.py
+              tldw_Server_API/tests/Watchlists/test_rate_*.py
+              tldw_Server_API/tests/Watchlists/test_rss_*.py
+              tldw_Server_API/tests/Watchlists/test_run_*.py
+              tldw_Server_API/tests/Watchlists/test_runs_*.py
+          - name: product-watchlists-core
+            paths: >-
+              tldw_Server_API/tests/Watchlists/test_scheduler_*.py
+              tldw_Server_API/tests/Watchlists/test_site_*.py
+              tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
+              tldw_Server_API/tests/Watchlists/test_template_*.py
+              tldw_Server_API/tests/Watchlists/test_templates_*.py
+              tldw_Server_API/tests/Watchlists/test_tts_*.py
+              tldw_Server_API/tests/Watchlists/test_watchlist_*.py
+              tldw_Server_API/tests/Watchlists/test_youtube_*.py
+          - name: product-watchlists-pipeline
+            paths: >-
+              tldw_Server_API/tests/Watchlists/test_watchlists_*.py
           - name: product-workflows-adapters
             paths: >-
               tldw_Server_API/tests/Workflows/adapters/test_*.py
@@ -2314,9 +2349,44 @@ jobs:
           - name: product-prompts-new
             paths: >-
               tldw_Server_API/tests/Prompt_Management_NEW
-          - name: product-watchlists
+          - name: product-watchlists-a-r
             paths: >-
-              tldw_Server_API/tests/Watchlists
+              tldw_Server_API/tests/Watchlists/test_admin_*.py
+              tldw_Server_API/tests/Watchlists/test_audio_*.py
+              tldw_Server_API/tests/Watchlists/test_companion_*.py
+              tldw_Server_API/tests/Watchlists/test_dedup_*.py
+              tldw_Server_API/tests/Watchlists/test_delivery_*.py
+              tldw_Server_API/tests/Watchlists/test_e2e_*.py
+              tldw_Server_API/tests/Watchlists/test_fetchers_*.py
+              tldw_Server_API/tests/Watchlists/test_filter_*.py
+              tldw_Server_API/tests/Watchlists/test_filters_*.py
+              tldw_Server_API/tests/Watchlists/test_first_*.py
+              tldw_Server_API/tests/Watchlists/test_full_*.py
+              tldw_Server_API/tests/Watchlists/test_include_*.py
+              tldw_Server_API/tests/Watchlists/test_job_*.py
+              tldw_Server_API/tests/Watchlists/test_newsletter_*.py
+              tldw_Server_API/tests/Watchlists/test_operational_*.py
+              tldw_Server_API/tests/Watchlists/test_opml_*.py
+              tldw_Server_API/tests/Watchlists/test_perf_*.py
+              tldw_Server_API/tests/Watchlists/test_pipeline_*.py
+              tldw_Server_API/tests/Watchlists/test_preview_*.py
+              tldw_Server_API/tests/Watchlists/test_rate_*.py
+              tldw_Server_API/tests/Watchlists/test_rss_*.py
+              tldw_Server_API/tests/Watchlists/test_run_*.py
+              tldw_Server_API/tests/Watchlists/test_runs_*.py
+          - name: product-watchlists-core
+            paths: >-
+              tldw_Server_API/tests/Watchlists/test_scheduler_*.py
+              tldw_Server_API/tests/Watchlists/test_site_*.py
+              tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
+              tldw_Server_API/tests/Watchlists/test_template_*.py
+              tldw_Server_API/tests/Watchlists/test_templates_*.py
+              tldw_Server_API/tests/Watchlists/test_tts_*.py
+              tldw_Server_API/tests/Watchlists/test_watchlist_*.py
+              tldw_Server_API/tests/Watchlists/test_youtube_*.py
+          - name: product-watchlists-pipeline
+            paths: >-
+              tldw_Server_API/tests/Watchlists/test_watchlists_*.py
           - name: product-workflows-adapters
             paths: >-
               tldw_Server_API/tests/Workflows/adapters/test_*.py
@@ -3411,9 +3481,44 @@ jobs:
           - name: product-prompts-new
             paths: >-
               tldw_Server_API/tests/Prompt_Management_NEW
-          - name: product-watchlists
+          - name: product-watchlists-a-r
             paths: >-
-              tldw_Server_API/tests/Watchlists
+              tldw_Server_API/tests/Watchlists/test_admin_*.py
+              tldw_Server_API/tests/Watchlists/test_audio_*.py
+              tldw_Server_API/tests/Watchlists/test_companion_*.py
+              tldw_Server_API/tests/Watchlists/test_dedup_*.py
+              tldw_Server_API/tests/Watchlists/test_delivery_*.py
+              tldw_Server_API/tests/Watchlists/test_e2e_*.py
+              tldw_Server_API/tests/Watchlists/test_fetchers_*.py
+              tldw_Server_API/tests/Watchlists/test_filter_*.py
+              tldw_Server_API/tests/Watchlists/test_filters_*.py
+              tldw_Server_API/tests/Watchlists/test_first_*.py
+              tldw_Server_API/tests/Watchlists/test_full_*.py
+              tldw_Server_API/tests/Watchlists/test_include_*.py
+              tldw_Server_API/tests/Watchlists/test_job_*.py
+              tldw_Server_API/tests/Watchlists/test_newsletter_*.py
+              tldw_Server_API/tests/Watchlists/test_operational_*.py
+              tldw_Server_API/tests/Watchlists/test_opml_*.py
+              tldw_Server_API/tests/Watchlists/test_perf_*.py
+              tldw_Server_API/tests/Watchlists/test_pipeline_*.py
+              tldw_Server_API/tests/Watchlists/test_preview_*.py
+              tldw_Server_API/tests/Watchlists/test_rate_*.py
+              tldw_Server_API/tests/Watchlists/test_rss_*.py
+              tldw_Server_API/tests/Watchlists/test_run_*.py
+              tldw_Server_API/tests/Watchlists/test_runs_*.py
+          - name: product-watchlists-core
+            paths: >-
+              tldw_Server_API/tests/Watchlists/test_scheduler_*.py
+              tldw_Server_API/tests/Watchlists/test_site_*.py
+              tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
+              tldw_Server_API/tests/Watchlists/test_template_*.py
+              tldw_Server_API/tests/Watchlists/test_templates_*.py
+              tldw_Server_API/tests/Watchlists/test_tts_*.py
+              tldw_Server_API/tests/Watchlists/test_watchlist_*.py
+              tldw_Server_API/tests/Watchlists/test_youtube_*.py
+          - name: product-watchlists-pipeline
+            paths: >-
+              tldw_Server_API/tests/Watchlists/test_watchlists_*.py
           - name: product-workflows-adapters
             paths: >-
               tldw_Server_API/tests/Workflows/adapters/test_*.py
@@ -4434,9 +4539,44 @@ jobs:
           - name: product-prompts-new
             paths: >-
               tldw_Server_API/tests/Prompt_Management_NEW
-          - name: product-watchlists
+          - name: product-watchlists-a-r
             paths: >-
-              tldw_Server_API/tests/Watchlists
+              tldw_Server_API/tests/Watchlists/test_admin_*.py
+              tldw_Server_API/tests/Watchlists/test_audio_*.py
+              tldw_Server_API/tests/Watchlists/test_companion_*.py
+              tldw_Server_API/tests/Watchlists/test_dedup_*.py
+              tldw_Server_API/tests/Watchlists/test_delivery_*.py
+              tldw_Server_API/tests/Watchlists/test_e2e_*.py
+              tldw_Server_API/tests/Watchlists/test_fetchers_*.py
+              tldw_Server_API/tests/Watchlists/test_filter_*.py
+              tldw_Server_API/tests/Watchlists/test_filters_*.py
+              tldw_Server_API/tests/Watchlists/test_first_*.py
+              tldw_Server_API/tests/Watchlists/test_full_*.py
+              tldw_Server_API/tests/Watchlists/test_include_*.py
+              tldw_Server_API/tests/Watchlists/test_job_*.py
+              tldw_Server_API/tests/Watchlists/test_newsletter_*.py
+              tldw_Server_API/tests/Watchlists/test_operational_*.py
+              tldw_Server_API/tests/Watchlists/test_opml_*.py
+              tldw_Server_API/tests/Watchlists/test_perf_*.py
+              tldw_Server_API/tests/Watchlists/test_pipeline_*.py
+              tldw_Server_API/tests/Watchlists/test_preview_*.py
+              tldw_Server_API/tests/Watchlists/test_rate_*.py
+              tldw_Server_API/tests/Watchlists/test_rss_*.py
+              tldw_Server_API/tests/Watchlists/test_run_*.py
+              tldw_Server_API/tests/Watchlists/test_runs_*.py
+          - name: product-watchlists-core
+            paths: >-
+              tldw_Server_API/tests/Watchlists/test_scheduler_*.py
+              tldw_Server_API/tests/Watchlists/test_site_*.py
+              tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
+              tldw_Server_API/tests/Watchlists/test_template_*.py
+              tldw_Server_API/tests/Watchlists/test_templates_*.py
+              tldw_Server_API/tests/Watchlists/test_tts_*.py
+              tldw_Server_API/tests/Watchlists/test_watchlist_*.py
+              tldw_Server_API/tests/Watchlists/test_youtube_*.py
+          - name: product-watchlists-pipeline
+            paths: >-
+              tldw_Server_API/tests/Watchlists/test_watchlists_*.py
           - name: product-workflows-adapters
             paths: >-
               tldw_Server_API/tests/Workflows/adapters/test_*.py
@@ -5459,9 +5599,44 @@ jobs:
           - name: product-prompts-new
             paths: >-
               tldw_Server_API/tests/Prompt_Management_NEW
-          - name: product-watchlists
+          - name: product-watchlists-a-r
             paths: >-
-              tldw_Server_API/tests/Watchlists
+              tldw_Server_API/tests/Watchlists/test_admin_*.py
+              tldw_Server_API/tests/Watchlists/test_audio_*.py
+              tldw_Server_API/tests/Watchlists/test_companion_*.py
+              tldw_Server_API/tests/Watchlists/test_dedup_*.py
+              tldw_Server_API/tests/Watchlists/test_delivery_*.py
+              tldw_Server_API/tests/Watchlists/test_e2e_*.py
+              tldw_Server_API/tests/Watchlists/test_fetchers_*.py
+              tldw_Server_API/tests/Watchlists/test_filter_*.py
+              tldw_Server_API/tests/Watchlists/test_filters_*.py
+              tldw_Server_API/tests/Watchlists/test_first_*.py
+              tldw_Server_API/tests/Watchlists/test_full_*.py
+              tldw_Server_API/tests/Watchlists/test_include_*.py
+              tldw_Server_API/tests/Watchlists/test_job_*.py
+              tldw_Server_API/tests/Watchlists/test_newsletter_*.py
+              tldw_Server_API/tests/Watchlists/test_operational_*.py
+              tldw_Server_API/tests/Watchlists/test_opml_*.py
+              tldw_Server_API/tests/Watchlists/test_perf_*.py
+              tldw_Server_API/tests/Watchlists/test_pipeline_*.py
+              tldw_Server_API/tests/Watchlists/test_preview_*.py
+              tldw_Server_API/tests/Watchlists/test_rate_*.py
+              tldw_Server_API/tests/Watchlists/test_rss_*.py
+              tldw_Server_API/tests/Watchlists/test_run_*.py
+              tldw_Server_API/tests/Watchlists/test_runs_*.py
+          - name: product-watchlists-core
+            paths: >-
+              tldw_Server_API/tests/Watchlists/test_scheduler_*.py
+              tldw_Server_API/tests/Watchlists/test_site_*.py
+              tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
+              tldw_Server_API/tests/Watchlists/test_template_*.py
+              tldw_Server_API/tests/Watchlists/test_templates_*.py
+              tldw_Server_API/tests/Watchlists/test_tts_*.py
+              tldw_Server_API/tests/Watchlists/test_watchlist_*.py
+              tldw_Server_API/tests/Watchlists/test_youtube_*.py
+          - name: product-watchlists-pipeline
+            paths: >-
+              tldw_Server_API/tests/Watchlists/test_watchlists_*.py
           - name: product-workflows-adapters
             paths: >-
               tldw_Server_API/tests/Workflows/adapters/test_*.py
