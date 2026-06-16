@@ -35,6 +35,7 @@ def test_host_e2e_smoke_script_help_mentions_required_bundle() -> None:
     assert result.returncode == 0
     assert "Usage:" in result.stdout
     assert "--bundle PATH" in result.stdout
+    assert "Canonical source vz_linux bundle" in result.stdout
     assert "--include-failure-drills" in result.stdout
 
 
@@ -77,14 +78,122 @@ def test_host_e2e_smoke_script_dry_run_prints_helper_and_pytest_commands(tmp_pat
     assert "swift build" in result.stdout
     assert "codesign --force --sign - --entitlements" in result.stdout
     assert f"TLDW_SANDBOX_MACOS_HELPER_SOCKET={socket_path}" in result.stdout
-    assert f"TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH={bundle}" in result.stdout
-    assert f"TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE={bundle}" in result.stdout
+    assert "prepare-smoke-bundle.py" in result.stdout
+    assert f"--source-bundle {bundle}" in result.stdout
+    run_bundle_match = re.search(
+        r"TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=([^ ]+/image-store/runs/[^ ]+/bundle)",
+        result.stdout,
+    )
+    assert run_bundle_match is not None
+    run_bundle = run_bundle_match.group(1)
+    assert f"TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH={run_bundle}" in result.stdout
+    assert f"TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE={bundle}" not in result.stdout
     assert f"TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR={serial_log_dir}" in result.stdout  # nosec B101
     assert "test_macos_virtualization_helper_daemon_host_gated.py" in result.stdout
     assert "test_vz_linux_real_host_e2e.py" in result.stdout
     assert "-m vz_linux_host_smoke" in result.stdout
     assert "vz_linux_host_failure_drill" not in result.stdout
     assert not serial_log_dir.exists()
+
+
+def test_host_e2e_smoke_script_dry_run_uses_disposable_run_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    helper = tmp_path / "macos-vz-helper"
+
+    result = _run_smoke_script(
+        "--dry-run",
+        "--bundle",
+        str(bundle),
+        "--helper",
+        str(helper),
+        "--python",
+        sys.executable,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "prepare-smoke-bundle.py" in result.stdout
+    assert f"--source-bundle {bundle}" in result.stdout
+    run_bundle_match = re.search(
+        r"TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE=([^ ]+/image-store/runs/[^ ]+/bundle)",
+        result.stdout,
+    )
+    assert run_bundle_match is not None
+    run_bundle = run_bundle_match.group(1)
+    assert run_bundle != str(bundle)
+    assert f"TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH={run_bundle}" in result.stdout
+    assert f"TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE={bundle}" not in result.stdout
+
+
+def test_host_e2e_smoke_script_real_run_passes_disposable_bundle_to_pytest(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    source_rootfs = bundle / "rootfs.img"
+    (bundle / "kernel").write_bytes(b"kernel")
+    source_rootfs.write_bytes(b"rootfs")
+    (bundle / "manifest.json").write_text(
+        '{"bundle_version":"1","kernel":"kernel","rootfs":"rootfs.img"}',
+        encoding="utf-8",
+    )
+    source_before = source_rootfs.read_bytes()
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
+    marker = tmp_path / "base-images.txt"
+    fake_python = tmp_path / "fake-python"
+    fake_helper = tmp_path / "fake-helper"
+    fake_python.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os\n"
+        "import sys\n"
+        f"real_python = {str(sys.executable)!r}\n"
+        f"marker = {str(marker)!r}\n"
+        "if len(sys.argv) > 1 and sys.argv[1].endswith('prepare-smoke-bundle.py'):\n"
+        "    os.execv(real_python, [real_python, *sys.argv[1:]])\n"
+        "if sys.argv[1:3] != ['-m', 'pytest']:\n"
+        "    sys.exit(2)\n"
+        "with open(marker, 'a', encoding='utf-8') as handle:\n"
+        "    handle.write(os.environ.get('TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH', '') + '\\n')\n"
+        "    handle.write(os.environ.get('TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE', '') + '\\n')\n"
+        "sys.exit(0)\n",
+        encoding="utf-8",
+    )
+    fake_helper.write_text(
+        "#!/usr/bin/env python3\n"
+        "import signal\n"
+        "import sys\n"
+        "import time\n"
+        "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
+        "while True:\n"
+        "    time.sleep(0.1)\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    fake_helper.chmod(0o755)
+
+    result = _run_smoke_script(
+        "--bundle",
+        str(bundle),
+        "--helper",
+        str(fake_helper),
+        "--python",
+        str(fake_python),
+        "--skip-build",
+        "--skip-sign",
+        env_overrides={
+            "TMPDIR": str(tmp_dir),
+            "TLDW_HOST_E2E_SMOKE_SKIP_SOCKET_WAIT": "1",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    recorded_paths = [line for line in marker.read_text(encoding="utf-8").splitlines() if line]
+    assert recorded_paths
+    assert str(bundle) not in recorded_paths
+    assert all(path.endswith("/bundle") for path in recorded_paths)
+    assert all((Path(path) / "rootfs.img").is_file() for path in recorded_paths)
+    assert source_rootfs.read_bytes() == source_before
 
 
 def test_host_e2e_smoke_script_dry_run_includes_failure_drills_when_requested(tmp_path: Path) -> None:
@@ -283,7 +392,11 @@ def test_host_e2e_smoke_script_default_runtime_dir_is_private_for_real_run(tmp_p
     fake_helper = tmp_path / "fake-helper"
     fake_python.write_text(
         "#!/usr/bin/env python3\n"
+        "import os\n"
         "import sys\n"
+        f"real_python = {str(sys.executable)!r}\n"
+        "if len(sys.argv) > 1 and sys.argv[1].endswith('prepare-smoke-bundle.py'):\n"
+        "    os.execv(real_python, [real_python, *sys.argv[1:]])\n"
         "sys.exit(0 if sys.argv[1:3] == ['-m', 'pytest'] else 2)\n",
         encoding="utf-8",
     )
@@ -339,7 +452,11 @@ def test_host_e2e_smoke_script_removes_stale_socket_before_helper_start(tmp_path
     fake_helper = tmp_path / "fake-helper"
     fake_python.write_text(
         "#!/usr/bin/env python3\n"
+        "import os\n"
         "import sys\n"
+        f"real_python = {str(sys.executable)!r}\n"
+        "if len(sys.argv) > 1 and sys.argv[1].endswith('prepare-smoke-bundle.py'):\n"
+        "    os.execv(real_python, [real_python, *sys.argv[1:]])\n"
         "if len(sys.argv) > 2 and sys.argv[1] == '-c':\n"
         "    raise SystemExit(1)\n"
         "sys.exit(0 if sys.argv[1:3] == ['-m', 'pytest'] else 2)\n",
@@ -640,6 +757,9 @@ def test_host_e2e_smoke_script_cleanup_uses_replacement_helper_pid(tmp_path: Pat
         "import os\n"
         "import subprocess\n"
         "import sys\n"
+        f"real_python = {str(sys.executable)!r}\n"
+        "if len(sys.argv) > 1 and sys.argv[1].endswith('prepare-smoke-bundle.py'):\n"
+        "    os.execv(real_python, [real_python, *sys.argv[1:]])\n"
         "if sys.argv[1:3] != ['-m', 'pytest']:\n"
         "    sys.exit(2)\n"
         "if 'vz_linux_host_failure_drill' in sys.argv:\n"

@@ -195,15 +195,23 @@ chmod 700 "${runtime_dir}"
   --serial-log-dir "${runtime_dir}/serial"
 ```
 
-On a prepared Apple silicon macOS host, that script builds the Swift helper
-when needed, signs it with `--entitlements` unless the helper is already signed
-with `com.apple.security.virtualization`, runs the helper-daemon bundle smoke,
-starts a helper daemon for the Python sandbox runtime, runs real `vz_linux`
-ephemeral execution, verifies same-session VM reuse, verifies recovery
-diagnostics plus dry-run reconciliation repair planning, and stops the helper
-on exit. The recovery step is non-destructive: it uses isolated test-store
-metadata and does not terminate VMs, delete session controls, or run image-store
-cleanup.
+On a prepared Apple silicon macOS host, that script treats `--bundle` as the
+canonical source bundle, prepares a disposable image-store run bundle under the
+private runtime directory, and passes that disposable bundle to every
+VM-executing stage. It builds the Swift helper when needed, signs it with
+`--entitlements` unless the helper is already signed with
+`com.apple.security.virtualization`, runs the helper-daemon bundle smoke, starts
+a helper daemon for the Python sandbox runtime, runs real `vz_linux` ephemeral
+execution, verifies same-session VM reuse, verifies recovery diagnostics plus
+dry-run reconciliation repair planning, and stops the helper on exit. The
+recovery step is non-destructive: it uses isolated test-store metadata and does
+not terminate VMs, delete session controls, or run image-store cleanup.
+
+The smoke wrapper writes image-store metadata under
+`<runtime-dir>/image-store/` by default. Evidence packets should record source
+bundle hashes separately from disposable run bundle hashes. A post-smoke change
+to the disposable run bundle is expected; a source bundle hash or mtime change
+is not.
 
 The helper refuses sockets whose parent directory is not owner-only. Do not put
 the helper socket directly under `/tmp`; use the script defaults or create a
@@ -221,7 +229,8 @@ python -m pytest tldw_Server_API/tests/sandbox/test_macos_virtualization_helper_
 
 Use the direct module command for focused helper or bundle validation. Use
 `run-host-e2e-smoke.sh` for the full operator workflow because it also covers
-real sandbox execution, session VM reuse, and recovery dry-run planning.
+real sandbox execution, session VM reuse, recovery dry-run planning, and
+source-bundle-preserving disposable run-bundle preparation.
 
 The same script is the entrypoint for the host-gated GitHub Actions workflow at
 `.github/workflows/vz-linux-host-gated.yml`. That workflow is intentionally

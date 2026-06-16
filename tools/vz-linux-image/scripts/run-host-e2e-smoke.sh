@@ -5,10 +5,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${IMAGE_DIR}/../.." && pwd)"
 
+SOURCE_BUNDLE_PATH=""
 BUNDLE_PATH=""
 DEFAULT_RUNTIME_DIR="${TMPDIR:-/tmp}/tldw-vz-helper-e2e-$$"
 SOCKET_PATH="${DEFAULT_RUNTIME_DIR}/helper.sock"
 SERIAL_LOG_DIR="${DEFAULT_RUNTIME_DIR}/serial"
+IMAGE_STORE_ROOT=""
+SMOKE_RUN_ID="host-smoke-$$"
+PREPARE_SMOKE_BUNDLE_SCRIPT="${SCRIPT_DIR}/prepare-smoke-bundle.py"
 HELPER_PATH="${REPO_ROOT}/tools/macos-vz-helper/.build/debug/macos-vz-helper"
 ENTITLEMENTS_PATH=""
 PYTHON_BIN=""
@@ -29,7 +33,11 @@ reuse, verify recovery diagnostics plus dry-run repair planning, and stop the
 helper.
 
 Options:
-  --bundle PATH          Canonical vz_linux bundle directory (required)
+  --bundle PATH          Canonical source vz_linux bundle directory (required);
+                         VM stages use a disposable image-store run bundle
+  --image-store-root PATH
+                         Private image-store root for disposable smoke bundles
+  --smoke-run-id ID      Image-store run id for the disposable smoke bundle
   --socket PATH          Host-side helper AF_UNIX socket path
   --serial-log-dir PATH  Directory for helper VM serial logs
   --helper PATH          Helper binary path
@@ -97,7 +105,17 @@ while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --bundle)
       require_value "$1" "${2:-}"
-      BUNDLE_PATH="$2"
+      SOURCE_BUNDLE_PATH="$2"
+      shift 2
+      ;;
+    --image-store-root)
+      require_value "$1" "${2:-}"
+      IMAGE_STORE_ROOT="$2"
+      shift 2
+      ;;
+    --smoke-run-id)
+      require_value "$1" "${2:-}"
+      SMOKE_RUN_ID="$2"
       shift 2
       ;;
     --socket)
@@ -153,7 +171,7 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-if [[ -z "${BUNDLE_PATH}" ]]; then
+if [[ -z "${SOURCE_BUNDLE_PATH}" ]]; then
   echo "--bundle is required" >&2
   usage >&2
   exit 1
@@ -167,13 +185,37 @@ if [[ -z "${PYTHON_BIN}" ]]; then
   fi
 fi
 
+if [[ -z "${IMAGE_STORE_ROOT}" ]]; then
+  IMAGE_STORE_ROOT="$(dirname "${SOCKET_PATH}")/image-store"
+fi
+
 validate_inputs() {
-  [[ -d "${BUNDLE_PATH}" ]] || die "bundle directory does not exist: ${BUNDLE_PATH}"
-  [[ -f "${BUNDLE_PATH}/kernel" ]] || die "bundle missing kernel: ${BUNDLE_PATH}/kernel"
-  [[ -f "${BUNDLE_PATH}/rootfs.img" ]] || die "bundle missing rootfs.img: ${BUNDLE_PATH}/rootfs.img"
+  [[ -d "${SOURCE_BUNDLE_PATH}" ]] || die "bundle directory does not exist: ${SOURCE_BUNDLE_PATH}"
+  [[ -f "${SOURCE_BUNDLE_PATH}/kernel" ]] || die "bundle missing kernel: ${SOURCE_BUNDLE_PATH}/kernel"
+  [[ -f "${SOURCE_BUNDLE_PATH}/rootfs.img" ]] || die "bundle missing rootfs.img: ${SOURCE_BUNDLE_PATH}/rootfs.img"
   if [[ -n "${ENTITLEMENTS_PATH}" ]]; then
     [[ -f "${ENTITLEMENTS_PATH}" ]] || die "entitlements file does not exist: ${ENTITLEMENTS_PATH}"
   fi
+}
+
+expected_smoke_bundle_path() {
+  printf '%s/runs/%s/bundle' "${IMAGE_STORE_ROOT}" "${SMOKE_RUN_ID}"
+}
+
+prepare_smoke_bundle() {
+  print_cmd "${PYTHON_BIN}" "${PREPARE_SMOKE_BUNDLE_SCRIPT}" \
+    --source-bundle "${SOURCE_BUNDLE_PATH}" \
+    --store-root "${IMAGE_STORE_ROOT}" \
+    --run-id "${SMOKE_RUN_ID}"
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    BUNDLE_PATH="$(expected_smoke_bundle_path)"
+    return 0
+  fi
+  BUNDLE_PATH="$("${PYTHON_BIN}" "${PREPARE_SMOKE_BUNDLE_SCRIPT}" \
+    --source-bundle "${SOURCE_BUNDLE_PATH}" \
+    --store-root "${IMAGE_STORE_ROOT}" \
+    --run-id "${SMOKE_RUN_ID}")"
+  [[ -d "${BUNDLE_PATH}" ]] || die "prepared smoke bundle directory missing: ${BUNDLE_PATH}"
 }
 
 build_helper_if_needed() {
@@ -445,6 +487,7 @@ build_helper_if_needed
 sign_helper_if_requested
 require_helper_binary
 prepare_runtime_paths
+prepare_smoke_bundle
 run_helper_daemon_smoke
 start_helper_for_real_e2e
 wait_for_helper_socket

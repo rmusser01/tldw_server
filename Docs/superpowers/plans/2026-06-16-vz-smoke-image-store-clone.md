@@ -16,27 +16,27 @@
 - Create: `tools/vz-linux-image/scripts/prepare-smoke-bundle.py`
 - Test: `tools/vz-linux-image/tests/test_prepare_smoke_bundle.py`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add tests that create a minimal source bundle, run the CLI with `--source-bundle`, `--store-root`, and `--run-id`, then assert:
 
-- stdout is the run bundle directory
+- stdout is `runs/<run-id>/bundle`
 - `runs/<run-id>/manifest.json` exists
 - `kernel`, `rootfs.img`, and optional `initrd` exist in the run bundle
 - source `rootfs.img` contents and mtime are unchanged after mutating the run copy
 - metadata files `manifest.json` and `build-info.json` are copied when present
 
-- [ ] **Step 2: Run the focused new tests and verify they fail**
+- [x] **Step 2: Run the focused new tests and verify they fail**
 
 Run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tools/vz-linux-image/tests/test_prepare_smoke_bundle.py -q`
 
 Expected: failure because `prepare-smoke-bundle.py` does not exist yet.
 
-- [ ] **Step 3: Implement the materializer**
+- [x] **Step 3: Implement the materializer**
 
-Implement an executable Python script that imports `SandboxImageStore`, registers the bundle, prepares a run clone, materializes clone items with macOS `clonefile(2)` fallback to `shutil.copy2()`, copies metadata files, chmods private directories where possible, and prints the run bundle path.
+Implement an executable Python script that imports `SandboxImageStore`, registers the bundle, prepares a run clone with `target_subdir="bundle"`, materializes clone items with macOS `clonefile(2)` fallback to `shutil.copy2()`, copies metadata files, chmods private directories where possible, and prints the run bundle path.
 
-- [ ] **Step 4: Run the focused tests and verify they pass**
+- [x] **Step 4: Run the focused tests and verify they pass**
 
 Run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tools/vz-linux-image/tests/test_prepare_smoke_bundle.py -q`
 
@@ -48,7 +48,7 @@ Expected: all new materializer tests pass.
 - Modify: `tools/vz-linux-image/scripts/run-host-e2e-smoke.sh`
 - Modify: `tools/vz-linux-image/tests/test_host_e2e_smoke_script.py`
 
-- [ ] **Step 1: Write failing shell-wrapper tests**
+- [x] **Step 1: Write failing shell-wrapper tests**
 
 Add/update tests proving:
 
@@ -57,17 +57,17 @@ Add/update tests proving:
 - dry-run helper/pytest commands use the run bundle path rather than the source bundle path
 - a fake real run materializes a run bundle and leaves the source rootfs unchanged
 
-- [ ] **Step 2: Run the focused shell-wrapper tests and verify failure**
+- [x] **Step 2: Run the focused shell-wrapper tests and verify failure**
 
 Run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tools/vz-linux-image/tests/test_host_e2e_smoke_script.py -q`
 
 Expected: failure because the wrapper still passes the source bundle directly.
 
-- [ ] **Step 3: Implement wrapper integration**
+- [x] **Step 3: Implement wrapper integration**
 
 Add `SOURCE_BUNDLE_PATH`, `IMAGE_STORE_ROOT`, `SMOKE_RUN_ID`, and `PREPARE_SMOKE_BUNDLE_SCRIPT`. Validate the source bundle, prepare or dry-run the disposable run bundle before helper smoke, and pass the run bundle to all VM-executing stages.
 
-- [ ] **Step 4: Run shell-wrapper tests and verify pass**
+- [x] **Step 4: Run shell-wrapper tests and verify pass**
 
 Run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tools/vz-linux-image/tests/test_host_e2e_smoke_script.py -q`
 
@@ -81,11 +81,11 @@ Expected: all shell-wrapper tests pass.
 - Modify: `Docs/Sandbox/vz-linux-prepared-host-evidence.md`
 - Modify: `backlog/tasks/task-2365 - Use-image-store-backed-disposable-clones-for-VZ-smoke.md`
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
 Document that `--bundle` is a source bundle, smoke creates a disposable image-store run bundle, and evidence should record source and run bundle hashes separately.
 
-- [ ] **Step 2: Run verification**
+- [x] **Step 2: Run verification**
 
 Run:
 
@@ -99,6 +99,6 @@ git diff --check
 
 Expected: pytest, shell syntax, Bandit, and diff checks pass or any pre-existing/irrelevant warning is explicitly documented.
 
-- [ ] **Step 3: Finalize task and commit**
+- [x] **Step 3: Finalize task and commit**
 
 Update `TASK-2365` with final summary, verification, known skips, and DoD. Commit with a message such as `feat(sandbox): smoke from disposable VZ image clones`.

@@ -45,10 +45,14 @@ The materializer is a command-line bridge from the shell wrapper to
 3. It registers the source bundle as `vz_linux:<template-name>` with
    `allow_existing=True`.
 4. It calls `prepare_run_clone(template_id=..., run_id=...)`.
-5. It materializes each planned clone item into `<store-root>/runs/<run-id>/`.
-6. It copies bundle metadata files such as `manifest.json` and `build-info.json`
-   into the run directory so the run directory is a valid bundle.
-7. It prints the run bundle path on stdout.
+5. It materializes each planned clone item into
+   `<store-root>/runs/<run-id>/bundle/`.
+6. It keeps the image-store run manifest at
+   `<store-root>/runs/<run-id>/manifest.json`.
+7. It copies bundle metadata files such as `manifest.json` and
+   `build-info.json` into the `bundle/` directory so the run directory metadata
+   never conflicts with the guest bundle metadata.
+8. It prints the run bundle path on stdout.
 
 The shell wrapper keeps `--bundle` as the canonical source input, but internally
 tracks two paths:
@@ -58,9 +62,10 @@ tracks two paths:
   host smoke, and optional failure drills.
 
 Dry-run must not create directories or clone files. It should print the
-materializer command that would run, set `BUNDLE_PATH` to the deterministic run
-bundle path, and print later commands with that disposable path. This preserves
-operator visibility and catches accidental direct-source regressions in tests.
+materializer command that would run, set `BUNDLE_PATH` to the deterministic
+`<store-root>/runs/<run-id>/bundle` path, and print later commands with that
+disposable path. This preserves operator visibility and catches accidental
+direct-source regressions in tests.
 
 ## Clone Semantics
 

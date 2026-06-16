@@ -38,9 +38,9 @@ Each prepared-host evidence packet should include these fields.
 | Git state | repository, branch, commit SHA, PR number if applicable, and dirty/clean status. |
 | Host identity | Apple silicon model or runner label summary, macOS version, architecture, runner name if CI, and whether the host is dedicated or shared. |
 | Host prep | Xcode command line tools availability, SwiftPM availability, `xcrun codesign` availability, Virtualization.framework availability, and runner labels for CI. |
-| Bundle/template | bundle path or registered template id, manifest path if registered, artifact hashes when available, build provenance, and whether validation used canonical bundle or compatibility mode. |
+| Bundle/template | source bundle path or registered template id, disposable run bundle path when host smoke materialized one, manifest path if registered, source and run artifact hashes when available, build provenance, and whether validation used canonical bundle or compatibility mode. |
 | Helper build/signing | helper binary path, helper version, protocol version, signing mode, entitlements path, entitlement validation result, and skip-sign rationale when signing was skipped. |
-| Runtime paths | private runtime directory, socket path, serial-log directory, log directory, and evidence that runtime/log directories were owner-only. |
+| Runtime paths | private runtime directory, socket path, serial-log directory, image-store root, disposable run bundle path, log directory, and evidence that runtime/log directories were owner-only. |
 | Commands | exact smoke, helperctl, pytest, workflow, restart-drill, and optional launchd-drill commands that were run. |
 | Results | pass/fail/skip for daemon smoke, ephemeral command execution, same-session VM reuse, recovery diagnostics, dry-run reconciliation repair, helper shutdown, and artifact upload. |
 | Failure drills | pass/fail/skip for drill-owned stale VM replacement and helper restart drill; include skip reason when `include_failure_drills` was not requested. |
@@ -326,7 +326,7 @@ triage issue.
 | Stuck boot/readiness | Host-independent helper and runner coverage verifies boot-driver failure cleanup, guest-readiness failure cleanup, and no reusable session state after create failure. The default prepared-host smoke still does not inject real boot faults. | Record manual prepared-host evidence only after a separate reviewed fault-injection plan; diagnostics/evidence should report stable reason codes and artifact pointers, not raw serial log contents. |
 | Guest-agent mismatch | Not covered by the default smoke. | Use `Docs/superpowers/specs/2026-05-18-vz-linux-lifecycle-drill-gaps-design.md` to guide narrow tests or diagnostics checks before considering automated coverage. |
 | Stale socket handling | `tools/macos-vz-helper/scripts/vz-helperctl.py stale-socket-drill` provides a manual operator check for safe inactive socket recovery. | Record prepared-host evidence when a maintainer intentionally runs the drill; keep it manual-only and out of PR/push/scheduled destructive triggers. |
-| Direct-bundle smoke mutability | The 2026-06-16 failure-drill run updated the direct bundle `rootfs.img` mtime and post-run hash while exercising real VMs. | Prefer disposable image-store clones or reset the source bundle before future evidence packets that rely on immutable source hashes. |
+| Direct-bundle smoke mutability | The 2026-06-16 failure-drill run updated the direct bundle `rootfs.img` mtime and post-run hash while exercising real VMs. The smoke wrapper now prepares a disposable image-store run bundle by default, but fresh prepared-host evidence has not yet proved source-bundle immutability after a real run. | Run the prepared-host smoke again and record both source bundle and disposable run bundle hashes to close this gap. |
 
 ## Recording Guidance
 
@@ -369,6 +369,11 @@ tools/vz-linux-image/scripts/run-host-e2e-smoke.sh \
   --serial-log-dir "$runtime_dir/serial" \
   --entitlements /path/to/helper.entitlements
 ```
+
+The lower-level smoke script treats `--bundle` as the source bundle and creates
+a disposable bundle under `$runtime_dir/image-store/runs/<run-id>/bundle` by
+default. Record source bundle hashes before and after the run, and record run
+bundle hashes separately when retaining the image-store artifacts.
 
 For host-gated CI, record the workflow run URL, runner labels, branch/ref, input
 values, artifact names, and any expected skips. The workflow must remain
