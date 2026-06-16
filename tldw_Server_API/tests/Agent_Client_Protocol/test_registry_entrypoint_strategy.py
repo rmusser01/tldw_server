@@ -99,6 +99,67 @@ def test_seeded_claude_code_profile_uses_current_external_acp_adapter_candidate(
     assert entry.verification_level == "documented_only"
 
 
+def test_seeded_aider_profile_uses_unverified_external_acp_adapter_candidate() -> None:
+    registry = AgentRegistry()
+    registry.load()
+
+    entry = registry.get_entry("aider")
+
+    assert entry is not None
+    assert entry.entrypoint_strategy == "external_acp_adapter"
+    assert entry.command == "aider"
+    assert entry.acp_command == "aider-acp"
+    assert entry.acp_args == []
+    assert entry.adapter_source == "jorgejhms/aider-acp"
+    assert entry.adapter_docs_url == "https://github.com/jorgejhms/aider-acp"
+    assert entry.adapter_package == "aider-acp"
+    assert entry.adapter_version_policy == "operator_managed"
+    assert entry.adapter_install_source == "operator_managed"
+    assert entry.credential_policy == "delegated_to_adapter"
+    assert entry.support_state == "documented_unverified"
+    assert entry.verification_level == "documented_only"
+
+
+def test_aider_external_adapter_candidate_blocks_when_adapter_missing() -> None:
+    entry = AgentRegistryEntry(
+        type="aider",
+        name="Aider",
+        command="aider",
+        entrypoint_strategy="external_acp_adapter",
+        acp_command="aider-acp",
+        adapter_source="jorgejhms/aider-acp",
+        adapter_package="aider-acp",
+        credential_policy="delegated_to_adapter",
+    )
+
+    result = classify_agent_entrypoint(
+        entry,
+        command_resolver=lambda command: "/Users/example/.local/bin/aider" if command == "aider" else None,
+    )
+
+    assert result.probe_state == "blocked"
+    assert result.primary_blocker == "adapter_missing"
+    assert result.display_binary_found is True
+    assert result.adapter_found is False
+    assert result.credential_state == "delegated"
+
+
+def test_seeded_continue_profile_uses_current_cn_cli_but_no_acp_entrypoint() -> None:
+    registry = AgentRegistry()
+    registry.load()
+
+    entry = registry.get_entry("continue_dev")
+
+    assert entry is not None
+    assert entry.entrypoint_strategy == "documented_candidate"
+    assert entry.command == "cn"
+    assert entry.acp_command == ""
+    assert entry.acp_args == []
+    assert entry.certification_blocker == "entrypoint_strategy_missing"
+    assert entry.support_state == "documented_unverified"
+    assert entry.verification_level == "documented_only"
+
+
 def test_claude_code_external_adapter_classification_reports_adapter_missing() -> None:
     entry = AgentRegistryEntry(
         type="claude_code",

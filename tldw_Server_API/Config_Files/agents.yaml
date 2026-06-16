@@ -92,12 +92,18 @@ agents:
     docs_url: "https://aider.chat"
     support_state: documented_unverified
     verification_level: documented_only
-    compatibility_notes: "Aider v0.86.2 was installed and configured May 23, 2026 on branch codex/acp-opencode-aider-llamacpp-certification commit 53c018269 to use a local llama.cpp OpenAI-compatible server at 127.0.0.1:9099; direct Aider prompting succeeded. ACP certification remains blocked because the installed Aider CLI exposes no ACP-compatible stdio server entrypoint."
+    compatibility_notes: "Aider v0.86.2 was installed and configured May 23, 2026 on branch codex/acp-opencode-aider-llamacpp-certification commit 53c018269 to use a local llama.cpp OpenAI-compatible server at 127.0.0.1:9099; direct Aider prompting succeeded. ACP certification remains blocked because the installed Aider CLI exposes no native ACP stdio server entrypoint. A third-party aider-acp bridge is documented as an external adapter candidate, but it is not installed or live-E2E certified in this environment."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
-    entrypoint_strategy: documented_candidate
-    acp_command: ""
+    entrypoint_strategy: external_acp_adapter
+    acp_command: aider-acp
     acp_args: []
-    certification_blocker: entrypoint_strategy_missing
+    adapter_source: jorgejhms/aider-acp
+    adapter_docs_url: "https://github.com/jorgejhms/aider-acp"
+    adapter_package: aider-acp
+    adapter_version_policy: operator_managed
+    adapter_install_source: operator_managed
+    credential_policy: delegated_to_adapter
+    runtime_backend: acp_downstream
 
   - type: goose
     name: Goose
@@ -141,15 +147,15 @@ agents:
   - type: continue_dev
     name: Continue
     description: "Open-source AI code assistant"
-    command: continue
+    command: cn
     requires_api_key: null
     install_instructions:
       - "npm install -g @continuedev/cli"
-    docs_url: "https://continue.dev"
+    docs_url: "https://docs.continue.dev/guides/cli"
     default: false
     support_state: documented_unverified
     verification_level: documented_only
-    compatibility_notes: "Configured-agent setup is documented, but live Continue ACP compatibility remains blocked until an ACP-compatible Continue command is installed and verified."
+    compatibility_notes: "Continue CLI 1.5.46 is published as @continuedev/cli with binary cn. The local shell resolves continue as a shell builtin, and cn help exposes interactive/headless/review modes but no ACP stdio server entrypoint. Keep documented-only until a native ACP command or maintained adapter is identified and live-certified."
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
     entrypoint_strategy: documented_candidate
     acp_command: ""
