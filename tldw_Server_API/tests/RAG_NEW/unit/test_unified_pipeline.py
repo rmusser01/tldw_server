@@ -7,6 +7,7 @@ Tests the single unified pipeline function with all feature combinations.
 import pytest
 from unittest.mock import Mock, AsyncMock, patch, MagicMock, call
 import asyncio
+from types import SimpleNamespace
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
@@ -24,10 +25,11 @@ class TestUnifiedPipeline:
     async def test_unified_pipeline_minimal(self):
         """Test unified pipeline with minimal parameters."""
         with patch('tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever') as mock_retriever:
-            mock_retriever_instance = MagicMock()
-            mock_retriever_instance.retrieve = AsyncMock(return_value=[
-                Document(id="1", content="Test content", metadata={}, source=DataSource.MEDIA_DB, score=0.9)
-            ])
+            mock_retriever_instance = SimpleNamespace(
+                retrieve=AsyncMock(return_value=[
+                    Document(id="1", content="Test content", metadata={}, source=DataSource.MEDIA_DB, score=0.9)
+                ])
+            )
             mock_retriever.return_value = mock_retriever_instance
 
             with patch('tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.AnswerGenerator') as mock_generator:
@@ -40,7 +42,9 @@ class TestUnifiedPipeline:
 
                 result = await unified_rag_pipeline(
                     query="What is RAG?",
-                    top_k=5
+                    top_k=5,
+                    enable_cache=False,
+                    enable_reranking=False,
                 )
 
                 assert result is not None

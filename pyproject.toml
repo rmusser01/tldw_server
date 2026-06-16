@@ -43,6 +43,7 @@ dependencies = [
   "aioresponses",
   "aiosqlite",
   "apscheduler>=3.10.0",
+  "tzlocal>=3.0",
   "argon2-cffi>=23.0.0",
   "asyncpg",
   "psycopg[binary]>=3.1",

@@ -45,7 +45,9 @@ class TestUnifiedPipelineCore:
                 # This is the actual function users call
                 result = await unified_rag_pipeline(
                     query="What is RAG?",
-                    top_k=5
+                    top_k=5,
+                    enable_cache=False,
+                    enable_reranking=False,
                 )
 
                 assert result is not None

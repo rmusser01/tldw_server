@@ -141,6 +141,32 @@ def _wait_for_run_id_in_list(
     pytest.fail(f"workflow run {run_id} was not returned by list filter; last_payload={last_payload}")
 
 
+def _wait_for_webhook_delivery_status(
+    client: TestClient,
+    run_id: str,
+    expected_status: str,
+    timeout: float = 5.0,
+) -> list[str]:
+    deadline = time.time() + timeout
+    statuses: list[str] = []
+    while time.time() < deadline:
+        response = client.get(f"/api/v1/workflows/runs/{run_id}/events")
+        assert response.status_code == 200, response.text
+        events = response.json()
+        statuses = [
+            (e.get("payload") or {}).get("status")
+            for e in events
+            if e.get("event_type") == "webhook_delivery"
+        ]
+        if expected_status in statuses:
+            return statuses
+        time.sleep(0.05)
+    pytest.fail(
+        f"workflow run {run_id} did not record webhook_delivery status "
+        f"{expected_status!r}; statuses={statuses}"
+    )
+
+
 def test_create_and_run_saved_workflow(client_with_workflows_db: TestClient):
     client = client_with_workflows_db
 
@@ -1799,18 +1825,11 @@ def test_completion_webhook_tenant_denylist_blocked(monkeypatch, client_with_wor
     }
     wid = client.post("/api/v1/workflows", json=definition).json()["id"]
     run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
-    # Wait for completion
-    import time
-    deadline = time.time() + 3
-    while time.time() < deadline:
-        st = client.get(f"/api/v1/workflows/runs/{run_id}").json()["status"]
-        if st in ("succeeded", "failed", "cancelled"):
-            break
-        time.sleep(0.05)
-    ev = client.get(f"/api/v1/workflows/runs/{run_id}/events").json()
-    statuses = [e.get("payload", {}).get("status") for e in ev if e.get("event_type") == "webhook_delivery"]
+    data = _wait_for_run_terminal_data(client, run_id)
+    assert data["status"] == "succeeded", data
+
     # blocked event should be present
-    assert "blocked" in statuses
+    _wait_for_webhook_delivery_status(client, run_id, "blocked")
 
     # Admin can filter by specific owner (user 2) and should see that run
     # Ensure there is at least one run owned by user id=2
