@@ -55,6 +55,12 @@ from .policy_grants import (
     GatewayPolicyGrantManagementError,
     GatewayPolicyGrantManager,
 )
+from .policy_explain import (
+    GatewayPolicyExplainError,
+    GatewayPolicyExplainService,
+    PolicyExplainRequest,
+    ProfileToolPreviewRequest,
+)
 from .policy_simulation import simulate_tool_call_policy
 from .profiles import GatewayProfileManagementError, GatewayProfileManager
 from .remote_admin import (
@@ -88,6 +94,7 @@ _ToolEventsOperation = Callable[
     Coroutine[Any, Any, Mapping[str, Any]],
 ]
 _RemoteRuntimeOperation = Callable[[RemoteGatewayAdminClient], dict[str, Any]]
+_RemotePolicyOperation = Callable[[RemoteGatewayAdminClient], dict[str, Any]]
 
 
 class _CliArgumentError(ValueError):
@@ -560,6 +567,81 @@ def _build_parser() -> _JsonArgumentParser:
     _add_profile_config_argument(simulate_policy)
     simulate_policy.set_defaults(handler=_handle_simulate_policy)
 
+    explain_policy = subparsers.add_parser(
+        "explain-policy",
+        help="Explain one effective profile policy decision for a tool call.",
+    )
+    _add_policy_explain_common_arguments(explain_policy)
+    explain_policy.add_argument(
+        "--tool",
+        required=True,
+        help="Tool name for the policy explanation.",
+    )
+    explain_args_group = explain_policy.add_mutually_exclusive_group()
+    explain_args_group.add_argument(
+        "--args-json",
+        help="JSON object of tool arguments for the policy explanation.",
+    )
+    explain_args_group.add_argument(
+        "--args-json-file",
+        type=Path,
+        help="Path to a JSON object of tool arguments, or '-' to read from stdin.",
+    )
+    explain_args_group.add_argument(
+        "--args-stdin",
+        action="store_true",
+        help="Read a JSON object of tool arguments from stdin.",
+    )
+    explain_policy.add_argument(
+        "--capability",
+        help="Optional advertised tool capability for capability-based profiles.",
+    )
+    explain_policy.set_defaults(handler=_handle_explain_policy)
+
+    preview_profile_tools = subparsers.add_parser(
+        "preview-profile-tools",
+        help="Preview one profile's effective tool visibility.",
+    )
+    _add_policy_explain_common_arguments(preview_profile_tools)
+    preview_profile_tools.add_argument(
+        "--category",
+        help="Optional tool category filter.",
+    )
+    recommendations_group = preview_profile_tools.add_mutually_exclusive_group()
+    recommendations_group.add_argument(
+        "--include-recommendations",
+        action="store_true",
+        dest="include_recommendations",
+        default=True,
+        help="Include profile recommendations in preview results.",
+    )
+    recommendations_group.add_argument(
+        "--exclude-recommendations",
+        action="store_false",
+        dest="include_recommendations",
+        help="Exclude profile recommendations from preview results.",
+    )
+    denied_group = preview_profile_tools.add_mutually_exclusive_group()
+    denied_group.add_argument(
+        "--include-denied",
+        action="store_true",
+        dest="include_denied",
+        default=True,
+        help="Include denied or hidden tools in preview results.",
+    )
+    denied_group.add_argument(
+        "--exclude-denied",
+        action="store_false",
+        dest="include_denied",
+        help="Exclude denied or hidden tools from preview results.",
+    )
+    preview_profile_tools.add_argument(
+        "--limit",
+        type=int,
+        help="Maximum preview entries to return.",
+    )
+    preview_profile_tools.set_defaults(handler=_handle_preview_profile_tools)
+
     export_config = subparsers.add_parser(
         "export-config",
         help="Export a persistent gateway config snapshot.",
@@ -830,6 +912,51 @@ def _add_remote_runtime_arguments(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=30.0,
         help="Remote gateway request timeout in seconds.",
+    )
+
+
+def _add_policy_explain_common_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add common local/remote policy explanation options."""
+
+    parser.add_argument(
+        "--profile",
+        required=True,
+        help="Profile id to evaluate.",
+    )
+    _add_profile_config_argument(parser)
+    parser.add_argument(
+        "--gateway-url",
+        help=(
+            "Mounted gateway base URL for remote mode. "
+            "Falls back to MCP_UNIFIED_GATEWAY_URL."
+        ),
+    )
+    parser.add_argument(
+        "--admin-key",
+        help=(
+            "Admin auth key for remote mode. "
+            "Falls back to MCP_UNIFIED_GATEWAY_ADMIN_KEY."
+        ),
+    )
+    parser.add_argument(
+        "--admin-header-name",
+        default="X-MCP-Gateway-Admin-Key",
+        help="Admin auth header name for remote mode.",
+    )
+    parser.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=30.0,
+        help="Remote gateway request timeout in seconds.",
+    )
+    parser.add_argument(
+        "--static-policy-only",
+        action="store_true",
+        help="Ignore runtime/session contributors and explain static policy only.",
+    )
+    parser.add_argument(
+        "--session-id",
+        help="Optional session id for session-scoped policy grants.",
     )
 
 
@@ -1249,6 +1376,274 @@ def _simulation_arguments_from_args(args: argparse.Namespace) -> dict[str, Any]:
             raise ValueError("argv-json must be a JSON array of strings")
         arguments["argv"] = argv
     return arguments
+
+
+def _handle_explain_policy(args: argparse.Namespace) -> int:
+    """Explain one profile policy decision locally or through a gateway."""
+
+    try:
+        payload = _explain_policy_payload_from_args(args)
+    except _CliArgumentError:
+        raise
+    except ValueError as exc:
+        _emit_json(
+            {
+                "error": str(exc),
+                "ok": False,
+                "reason_code": "invalid_policy_explain_arguments",
+            },
+            sys.stderr,
+        )
+        return 1
+
+    if _policy_explain_remote_requested(args):
+        return _handle_remote_policy_explain_command(
+            args,
+            lambda client: client.explain_policy(payload),
+        )
+
+    return _handle_local_policy_explain_command(
+        args,
+        lambda service: service.explain_tool_call(
+            PolicyExplainRequest.model_validate(payload)
+        ),
+    )
+
+
+def _handle_preview_profile_tools(args: argparse.Namespace) -> int:
+    """Preview profile tool visibility locally or through a gateway."""
+
+    payload = _preview_profile_tools_payload_from_args(args)
+    profile_id = _require_cli_text(args.profile, field="profile")
+
+    if _policy_explain_remote_requested(args):
+        return _handle_remote_policy_explain_command(
+            args,
+            lambda client: client.preview_profile_tools(profile_id, payload),
+        )
+
+    return _handle_local_policy_explain_command(
+        args,
+        lambda service: service.preview_profile_tools(
+            ProfileToolPreviewRequest.model_validate(payload)
+        ),
+    )
+
+
+def _explain_policy_payload_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    """Build an explain-policy request payload from CLI flags."""
+
+    payload: dict[str, Any] = {
+        "arguments": _policy_explain_arguments_from_args(args),
+        "mode": _policy_explain_mode_from_args(args),
+        "profile_id": _require_cli_text(args.profile, field="profile"),
+        "tool_name": _require_cli_text(args.tool, field="tool"),
+    }
+    capability = _optional_cli_text(args.capability, field="capability")
+    if capability is not None:
+        payload["capability"] = capability
+    session_id = _optional_cli_text(args.session_id, field="session_id")
+    if session_id is not None:
+        payload["session_id"] = session_id
+    return payload
+
+
+def _preview_profile_tools_payload_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    """Build a preview-profile-tools request payload from CLI flags."""
+
+    payload: dict[str, Any] = {
+        "include_denied": bool(args.include_denied),
+        "include_recommendations": bool(args.include_recommendations),
+        "mode": _policy_explain_mode_from_args(args),
+        "profile_id": _require_cli_text(args.profile, field="profile"),
+    }
+    category = _optional_cli_text(args.category, field="category")
+    if category is not None:
+        payload["category"] = category
+    if args.limit is not None:
+        payload["limit"] = args.limit
+    return payload
+
+
+def _policy_explain_mode_from_args(args: argparse.Namespace) -> str:
+    """Return the policy explain mode encoded by shared CLI flags."""
+
+    if args.static_policy_only:
+        return "static_policy_only"
+    return "runtime_effective"
+
+
+def _policy_explain_arguments_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    """Load the explain-policy tool arguments from one selected source."""
+
+    if args.args_json:
+        return _load_json_argument_text(args.args_json, label="args")
+    if args.args_json_file is not None:
+        return _load_json_argument_file(args.args_json_file, label="args")
+    if args.args_stdin:
+        return _load_json_argument_text(sys.stdin.read(), label="args")
+    return {}
+
+
+def _handle_remote_policy_explain_command(
+    args: argparse.Namespace,
+    operation: _RemotePolicyOperation,
+) -> int:
+    """Run one policy explain command against an already-running gateway."""
+
+    try:
+        config = _remote_policy_explain_config_from_args(args)
+        payload = operation(RemoteGatewayAdminClient(config))
+    except _CliArgumentError:
+        raise
+    except RemoteGatewayAdminError as exc:
+        _emit_json(exc.to_payload(), sys.stderr)
+        return 1
+    except Exception as exc:  # noqa: BLE001
+        _emit_json(
+            {
+                "error": "Remote gateway command failed",
+                "error_type": exc.__class__.__name__,
+                "ok": False,
+                "reason_code": "remote_gateway_command_failed",
+            },
+            sys.stderr,
+        )
+        return 1
+
+    _emit_json(payload, sys.stdout)
+    return 0
+
+
+def _handle_local_policy_explain_command(
+    args: argparse.Namespace,
+    operation: Callable[
+        [GatewayPolicyExplainService],
+        Coroutine[Any, Any, Any],
+    ],
+) -> int:
+    """Run one policy explain command against local config/profile storage."""
+
+    config_path = _config_path_from_args(args)
+    profile_bundle: GatewayProfileStorageBundle | None = None
+    grant_store: Any = None
+    try:
+        try:
+            config = load_gateway_profile_bootstrap_config(config_path)
+            profile_bundle = build_gateway_profile_storage(config.store)
+            if not profile_bundle.metadata.persistent:
+                _run_async(_seed_readonly_memory_store(profile_bundle, config))
+            grant_store = build_gateway_policy_grant_store(config.policy_grants)
+            service = GatewayPolicyExplainService(
+                profile_resolver=_profile_resolver_for_policy_explain(
+                    profile_bundle,
+                    config,
+                ),
+                audit_store=profile_bundle.audit_store,
+                policy_grant_store=grant_store,
+            )
+        except _CliArgumentError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            _emit_json(
+                {
+                    "error": str(exc),
+                    "ok": False,
+                    "path": str(config_path),
+                },
+                sys.stderr,
+            )
+            return 1
+
+        try:
+            response = _run_async(operation(service))
+        except _CliArgumentError:
+            raise
+        except GatewayPolicyExplainError as exc:
+            _emit_json(exc.to_payload().model_dump(mode="json"), sys.stderr)
+            return 1
+        except Exception as exc:  # noqa: BLE001
+            _emit_json(
+                {
+                    "error": "Policy explain command failed",
+                    "error_type": exc.__class__.__name__,
+                    "ok": False,
+                    "reason_code": "policy_explain_command_failed",
+                },
+                sys.stderr,
+            )
+            return 1
+
+        _emit_json(response.model_dump(mode="json", exclude_none=True), sys.stdout)
+        return 0
+    finally:
+        if profile_bundle is not None:
+            _run_async(_close_storage_bundle(profile_bundle))
+        _close_policy_grant_store(grant_store)
+
+
+def _policy_explain_remote_requested(args: argparse.Namespace) -> bool:
+    """Return whether policy explain commands should use remote mode."""
+
+    gateway_url = _optional_cli_text(args.gateway_url, field="gateway_url")
+    if gateway_url is not None:
+        return True
+    env_gateway_url = _optional_cli_text(
+        os.environ.get("MCP_UNIFIED_GATEWAY_URL"),
+        field="MCP_UNIFIED_GATEWAY_URL",
+    )
+    return env_gateway_url is not None
+
+
+def _remote_policy_explain_config_from_args(
+    args: argparse.Namespace,
+) -> RemoteGatewayAdminConfig:
+    """Build a remote admin config for policy explain commands."""
+
+    gateway_url = _optional_cli_text(args.gateway_url, field="gateway_url")
+    if gateway_url is None:
+        gateway_url = _optional_cli_text(
+            os.environ.get("MCP_UNIFIED_GATEWAY_URL"),
+            field="MCP_UNIFIED_GATEWAY_URL",
+        )
+    if gateway_url is None:
+        raise _CliArgumentError(
+            "--gateway-url is required unless MCP_UNIFIED_GATEWAY_URL is set"
+        )
+
+    admin_key = _optional_cli_text(args.admin_key, field="admin_key")
+    if admin_key is None:
+        admin_key = _optional_cli_text(
+            os.environ.get("MCP_UNIFIED_GATEWAY_ADMIN_KEY"),
+            field="MCP_UNIFIED_GATEWAY_ADMIN_KEY",
+        )
+    try:
+        return RemoteGatewayAdminConfig(
+            gateway_url=gateway_url,
+            admin_header_name=args.admin_header_name,
+            admin_key=admin_key,
+            timeout_seconds=args.timeout_seconds,
+        )
+    except ValueError as exc:
+        raise _CliArgumentError(str(exc)) from exc
+
+
+def _profile_resolver_for_policy_explain(
+    bundle: GatewayProfileStorageBundle,
+    config: GatewayProfileBootstrapConfig,
+) -> Callable[[str], Coroutine[Any, Any, Any]]:
+    """Resolve profiles from configured storage with config-document fallback."""
+
+    async def _resolve(profile_id: str) -> Any:
+        profile = await bundle.profile_store.get_profile(profile_id)
+        if profile is not None:
+            return profile
+        for config_profile in config.profiles:
+            if config_profile.id == profile_id:
+                return config_profile.model_copy(deep=True)
+        return None
+
+    return _resolve
 
 
 def _handle_policy_grant_command(
@@ -2284,6 +2679,19 @@ def _load_json_argument_file(path: Path, *, label: str) -> dict[str, Any]:
             payload_text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise _CliArgumentError(f"Unable to read {label} JSON: {exc}") from exc
+
+    try:
+        payload = json.loads(payload_text)
+    except json.JSONDecodeError as exc:
+        raise _CliArgumentError(f"Invalid {label} JSON: {exc.msg}") from exc
+
+    if not isinstance(payload, dict):
+        raise _CliArgumentError(f"{label} JSON must be an object")
+    return payload
+
+
+def _load_json_argument_text(payload_text: str, *, label: str) -> dict[str, Any]:
+    """Load one JSON object payload from already-read text."""
 
     try:
         payload = json.loads(payload_text)

@@ -196,12 +196,41 @@ class RemoteGatewayAdminClient:
             f"/external-servers/{_quote_server_id(server_id)}/update",
         )
 
-    def _request_json(self, method: str, path: str) -> dict[str, Any]:
+    def explain_policy(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Explain one profile policy decision through the running gateway."""
+
+        return self._request_json("POST", "/policy/explain", payload=payload)
+
+    def preview_profile_tools(
+        self,
+        profile_id: str,
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Preview profile tool visibility through the running gateway."""
+
+        return self._request_json(
+            "POST",
+            f"/profiles/{_quote_path_segment(profile_id, field='profile_id')}/tool-preview",
+            payload=payload,
+        )
+
+    def _request_json(
+        self,
+        method: str,
+        path: str,
+        payload: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Send one request and return a JSON object response."""
 
+        request_body = None
+        if method == "POST":
+            request_body = json.dumps(
+                dict(payload) if payload is not None else {},
+                sort_keys=True,
+            ).encode("utf-8")
         request = urllib.request.Request(
             self.endpoint_url(path),
-            data=b"{}" if method == "POST" else None,
+            data=request_body,
             headers=self._headers(method),
             method=method,
         )
@@ -232,9 +261,15 @@ class RemoteGatewayAdminClient:
 def _quote_server_id(server_id: str) -> str:
     """Quote a server id for safe use in one path segment."""
 
-    normalized = server_id.strip()
+    return _quote_path_segment(server_id, field="server_id")
+
+
+def _quote_path_segment(value: str, *, field: str) -> str:
+    """Quote a required value for safe use in one path segment."""
+
+    normalized = value.strip()
     if not normalized:
-        raise ValueError("server_id is required")
+        raise ValueError(f"{field} is required")
     return urllib.parse.quote(normalized, safe="")
 
 
