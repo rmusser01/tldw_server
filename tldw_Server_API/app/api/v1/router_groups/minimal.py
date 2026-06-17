@@ -47,6 +47,7 @@ MINIMAL_REQUIRED_ROUTER_NAMES = (
     "workspace_migrations",
     "workspaces",
     "workspace_memberships",
+    "workspace_eligibility",
 )
 MINIMAL_REQUIRED_ROUTER_OVERRIDES = {
     name: RouterSpecOverride(skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS)
