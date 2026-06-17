@@ -6,6 +6,7 @@ import inspect
 import json
 import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal
@@ -30,6 +31,7 @@ from mcp_unified.profiles.subjects import (
 )
 from mcp_unified.storage.models import AuditEvent
 
+from .tool_discovery import list_admin_tool_catalog
 from .policy_simulation import simulate_tool_call_policy
 
 MAX_POLICY_EXPLAIN_ARGUMENT_BYTES = 64 * 1024
@@ -119,6 +121,9 @@ class ProfileToolPreviewRequest(BaseModel):
     mode: PolicyExplainMode = PolicyExplainMode.RUNTIME_EFFECTIVE
     limit: int = Field(default=200, ge=1, le=1000)
     cursor: str | None = None
+    include_denied: bool = True
+    include_recommendations: bool = True
+    category: str | None = None
 
     @field_validator("profile_id")
     @classmethod
@@ -128,6 +133,11 @@ class ProfileToolPreviewRequest(BaseModel):
     @field_validator("capability")
     @classmethod
     def _normalize_capability(cls, value: str | None) -> str | None:
+        return _optional_text(value)
+
+    @field_validator("category")
+    @classmethod
+    def _normalize_category(cls, value: str | None) -> str | None:
         return _optional_text(value)
 
     @field_validator("cursor")
@@ -265,6 +275,15 @@ class GatewayPolicyExplainError(RuntimeError):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class _PreviewCatalogRow:
+    """Internal catalog row with metadata needed for admin preview filtering."""
+
+    tool_name: str
+    installation_status: str = "unknown"
+    category: str | None = None
+
+
 def parse_policy_explain_request(payload: Any) -> PolicyExplainRequest:
     """Parse a policy explain request without leaking invalid input in errors."""
 
@@ -299,12 +318,19 @@ class GatewayPolicyExplainService:
         audit_store: AuditStore | None,
         actor_id: str | None = None,
         catalog_provider: Callable[[], Iterable[Any] | Awaitable[Iterable[Any]]] | None = None,
+        admin_tool_catalog_provider: Callable[
+            [MCPProfile],
+            Iterable[Any] | Awaitable[Iterable[Any]],
+        ] | None = None,
+        installed_tool_catalog: Any | None = None,
         policy_grant_store: Any | None = None,
     ) -> None:
         self.profile_resolver = profile_resolver
         self.audit_store = audit_store
         self.actor_id = actor_id or DEFAULT_AUDIT_ACTOR_ID
         self.catalog_provider = catalog_provider
+        self.admin_tool_catalog_provider = admin_tool_catalog_provider
+        self.installed_tool_catalog = installed_tool_catalog
         self.policy_grant_store = policy_grant_store
 
     async def explain_tool_call(
@@ -436,29 +462,45 @@ class GatewayPolicyExplainService:
             raise failure from exc
         degraded_reasons: list[str] = []
         try:
-            tool_names = await self._preview_tool_names(profile)
+            catalog_rows = await self._preview_catalog_rows(
+                profile,
+                include_recommendations=request.include_recommendations,
+            )
         except Exception:  # noqa: BLE001
             degraded_reasons.append("catalog_unavailable")
-            tool_names = _policy_tool_names_from_profile(profile)
+            catalog_rows = _policy_tool_rows_from_profile(profile)
         else:
-            if self.catalog_provider is None:
+            if (
+                self.admin_tool_catalog_provider is None
+                and self.installed_tool_catalog is None
+                and self.catalog_provider is None
+            ):
                 degraded_reasons.append("catalog_unavailable")
 
         try:
             argument_sensitive = _has_argument_sensitive_permission_rules(profile)
-            page_tool_names, next_cursor = _preview_page(
-                tool_names,
+            filtered_rows = _filter_preview_catalog_rows(
+                profile,
+                catalog_rows,
+                capability=request.capability,
+                include_denied=request.include_denied,
+                include_recommendations=request.include_recommendations,
+                category=request.category,
+            )
+            page_rows, next_cursor = _preview_page(
+                filtered_rows,
                 limit=request.limit,
                 cursor=request.cursor,
             )
             tools = [
                 _profile_tool_preview_entry(
                     profile,
-                    tool_name,
+                    row.tool_name,
                     capability=request.capability,
                     argument_sensitive=argument_sensitive,
+                    installation_status=row.installation_status,
                 )
-                for tool_name in page_tool_names
+                for row in page_rows
             ]
             response = ProfileToolPreviewResponse(
                 profile_id=profile.id,
@@ -500,12 +542,34 @@ class GatewayPolicyExplainService:
             )
         return profile
 
-    async def _preview_tool_names(self, profile: MCPProfile) -> list[str]:
+    async def _preview_catalog_rows(
+        self,
+        profile: MCPProfile,
+        *,
+        include_recommendations: bool,
+    ) -> list[_PreviewCatalogRow]:
+        if self.admin_tool_catalog_provider is not None:
+            catalog = await _maybe_await(self.admin_tool_catalog_provider(profile))
+            return _preview_rows_from_catalog(catalog)
+
+        if self.installed_tool_catalog is not None:
+            backend_tools = self.installed_tool_catalog
+            if callable(backend_tools):
+                backend_tools = backend_tools()
+            backend_tools = await _maybe_await(backend_tools)
+            return _preview_rows_from_catalog(
+                list_admin_tool_catalog(
+                    profile,
+                    backend_tools,
+                    include_recommendations=include_recommendations,
+                )
+            )
+
         if self.catalog_provider is not None:
             catalog = await _maybe_await(self.catalog_provider())
-            return sorted(_tool_names_from_catalog(catalog))
+            return _preview_rows_from_catalog(catalog)
 
-        return _policy_tool_names_from_profile(profile)
+        return _policy_tool_rows_from_profile(profile)
 
     async def _audit_explain_failure(
         self,
@@ -711,6 +775,7 @@ def _profile_tool_preview_entry(
     *,
     capability: str | None,
     argument_sensitive: bool,
+    installation_status: str = "unknown",
 ) -> ProfileToolPreviewEntry:
     explanation = explain_profile_tool_decision(
         profile,
@@ -725,6 +790,7 @@ def _profile_tool_preview_entry(
             visibility="deferred",
             call_state="deferred",
             requires_approval=False,
+            installation_status=installation_status,
         )
     return ProfileToolPreviewEntry(
         tool_name=_redact_tool_identifier(tool_name),
@@ -736,6 +802,7 @@ def _profile_tool_preview_entry(
         ),
         call_state=explanation.call_state,
         requires_approval=explanation.requires_approval,
+        installation_status=installation_status,
     )
 
 
@@ -819,17 +886,17 @@ def _preview_summary(
 
 
 def _preview_page(
-    tool_names: list[str],
+    rows: list[_PreviewCatalogRow],
     *,
     limit: int,
     cursor: str | None,
-) -> tuple[list[str], str | None]:
+) -> tuple[list[_PreviewCatalogRow], str | None]:
     start = int(cursor) if cursor is not None else 0
-    if start >= len(tool_names):
+    if start >= len(rows):
         return [], None
-    end = min(start + limit, len(tool_names))
-    next_cursor = str(end) if end < len(tool_names) else None
-    return tool_names[start:end], next_cursor
+    end = min(start + limit, len(rows))
+    next_cursor = str(end) if end < len(rows) else None
+    return rows[start:end], next_cursor
 
 
 def _preview_audit_payload(response: ProfileToolPreviewResponse) -> dict[str, Any]:
@@ -859,6 +926,94 @@ def _tool_names_from_catalog(catalog: Any) -> set[str]:
     return tool_names
 
 
+def _preview_rows_from_catalog(catalog: Any) -> list[_PreviewCatalogRow]:
+    rows_by_name: dict[str, _PreviewCatalogRow] = {}
+    for item in _catalog_items(catalog):
+        row = _preview_row_from_catalog_item(item)
+        if row is None:
+            continue
+        rows_by_name.setdefault(row.tool_name, row)
+    return [rows_by_name[tool_name] for tool_name in sorted(rows_by_name)]
+
+
+def _preview_row_from_catalog_item(item: Any) -> _PreviewCatalogRow | None:
+    if isinstance(item, str):
+        tool_name = item
+        installation_status = "unknown"
+        category = None
+    elif isinstance(item, Mapping):
+        tool_name = item.get("tool_id") or item.get("name") or item.get("tool_name")
+        installation_status = item.get("installation_status")
+        category = item.get("category")
+        metadata = item.get("metadata")
+        if category is None and isinstance(metadata, Mapping):
+            category = metadata.get("category")
+    else:
+        tool_name = (
+            getattr(item, "tool_id", None)
+            or getattr(item, "name", None)
+            or getattr(item, "tool_name", None)
+        )
+        installation_status = getattr(item, "installation_status", None)
+        category = getattr(item, "category", None)
+        metadata = getattr(item, "metadata", None)
+        if category is None and isinstance(metadata, Mapping):
+            category = metadata.get("category")
+
+    tool_text = _optional_string(tool_name)
+    if tool_text is None:
+        return None
+    return _PreviewCatalogRow(
+        tool_name=tool_text,
+        installation_status=_preview_installation_status(installation_status),
+        category=_optional_string(category),
+    )
+
+
+def _filter_preview_catalog_rows(
+    profile: MCPProfile,
+    rows: list[_PreviewCatalogRow],
+    *,
+    capability: str | None,
+    include_denied: bool,
+    include_recommendations: bool,
+    category: str | None,
+) -> list[_PreviewCatalogRow]:
+    normalized_category = _normalize_preview_category(category)
+    filtered: list[_PreviewCatalogRow] = []
+    for row in rows:
+        if (
+            normalized_category is not None
+            and _normalize_preview_category(row.category) != normalized_category
+        ):
+            continue
+        if not include_recommendations and row.installation_status == "not_installed":
+            continue
+        explanation = explain_profile_tool_decision(
+            profile,
+            row.tool_name,
+            capability=capability,
+        )
+        if not include_denied and explanation.final_outcome == "deny":
+            continue
+        filtered.append(row)
+    return filtered
+
+
+def _preview_installation_status(value: Any) -> str:
+    status = _optional_string(value)
+    if status in {"installed", "not_installed"}:
+        return status
+    if status in {"recommended_unavailable", "unavailable"}:
+        return "not_installed"
+    return "unknown"
+
+
+def _normalize_preview_category(value: str | None) -> str | None:
+    text = _optional_string(value)
+    return text.casefold() if text is not None else None
+
+
 def _catalog_items(catalog: Any) -> Iterable[Any]:
     if isinstance(catalog, Mapping):
         tools = catalog.get("tools")
@@ -879,6 +1034,13 @@ def _policy_tool_names_from_profile(profile: MCPProfile) -> list[str]:
     policy_tools = set(policy_document.allowed_tools or [])
     policy_tools.update(policy_document.denied_tools or [])
     return sorted(tool_name for tool_name in policy_tools if isinstance(tool_name, str))
+
+
+def _policy_tool_rows_from_profile(profile: MCPProfile) -> list[_PreviewCatalogRow]:
+    return [
+        _PreviewCatalogRow(tool_name=tool_name)
+        for tool_name in _policy_tool_names_from_profile(profile)
+    ]
 
 
 def _has_argument_sensitive_permission_rules(profile: MCPProfile) -> bool:

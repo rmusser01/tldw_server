@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 import mcp_unified.gateway.policy_explain as policy_explain
+from mcp_unified.gateway.tool_discovery import AdminToolCatalogEntry
 from mcp_unified.gateway.policy_explain import (
     GatewayPolicyExplainError,
     GatewayPolicyExplainService,
@@ -834,6 +835,45 @@ async def test_preview_requires_catalog_for_complete_denied_counts() -> None:
         "not_installed": 0,
         "unknown_installation": 2,
     }
+
+
+@pytest.mark.asyncio
+async def test_preview_admin_catalog_includes_denied_installed_tools() -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: _profile(),
+        audit_store=audit,
+        actor_id="operator-1",
+        admin_tool_catalog_provider=lambda profile: [
+            AdminToolCatalogEntry(
+                tool_id="fs.patch",
+                category="filesystem",
+                installation_status="installed",
+            ),
+            AdminToolCatalogEntry(
+                tool_id="shell.exec",
+                category="shell",
+                installation_status="installed",
+            ),
+        ],
+    )
+
+    response = await service.preview_profile_tools(
+        ProfileToolPreviewRequest(profile_id="backend-engineer")
+    )
+
+    tools_by_name = {entry.tool_name: entry for entry in response.tools}
+    assert response.degraded is False
+    assert tools_by_name["fs.patch"].outcome == "allow"
+    assert tools_by_name["fs.patch"].visibility == "visible"
+    assert tools_by_name["fs.patch"].installation_status == "installed"
+    assert tools_by_name["shell.exec"].outcome == "deny"
+    assert tools_by_name["shell.exec"].visibility == "hidden"
+    assert tools_by_name["shell.exec"].installation_status == "installed"
+    assert response.summary.total == 2
+    assert response.summary.installed == 2
+    assert response.summary.deny == 1
+    assert response.summary.hidden == 1
 
 
 @pytest.mark.asyncio
