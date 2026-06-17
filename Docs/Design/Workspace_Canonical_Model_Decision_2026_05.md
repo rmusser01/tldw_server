@@ -8,6 +8,10 @@
 and are treated as specialized entry points/modes, not deleted or fully merged.
 The cross-domain ownership contract is defined in
 `Research_Workspace_Shared_Workspace_Model_Contract_2026_05.md`.
+The broader Phase 2 container contract for Workspace as a single-user operating
+context across notes, media/sources, artifacts, chats, prompts, workflows,
+watchlists, ACP sessions, Sandbox sessions, and runtime bindings is
+`Workspace_Container_Contract_2026_06.md`.
 
 ## Current Entry Points
 
