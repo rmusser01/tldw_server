@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+import mcp_unified.gateway as gateway
 import mcp_unified.gateway.policy_explain as policy_explain
 from mcp_unified.gateway.tool_discovery import (
     AdminToolCatalogEntry,
@@ -122,6 +123,18 @@ def _raise_resolver_failure(_profile_id: str) -> MCPProfile:
 
 async def _raise_async_resolver_failure(_profile_id: str) -> MCPProfile:
     raise RuntimeError("async resolver backend failed")
+
+
+def test_gateway_package_exports_policy_explain_public_api() -> None:
+    expected_exports = {
+        "GatewayPolicyExplainService": GatewayPolicyExplainService,
+        "PolicyExplainRequest": PolicyExplainRequest,
+        "ProfileToolPreviewRequest": ProfileToolPreviewRequest,
+        "GatewayPolicyExplainError": GatewayPolicyExplainError,
+    }
+    for export_name, expected_obj in expected_exports.items():
+        if getattr(gateway, export_name) is not expected_obj:
+            pytest.fail(f"{export_name} does not resolve to the public service API")
 
 
 def test_subject_redaction_states_use_approved_contract() -> None:
