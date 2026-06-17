@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 
 from mcp_unified.gateway.admin_auth import (
     DefaultGatewayAdminPermissionChecker,
@@ -13,11 +15,54 @@ from mcp_unified.gateway.admin_auth import (
     gateway_admin_identity_dependency,
     gateway_admin_permission_error_response,
 )
+from mcp_unified.gateway.fastapi import create_gateway_app
+from mcp_unified.profiles import MCPProfile, ProfilePolicy
+from mcp_unified.storage.models import AuditEvent
 
 
 class _RequestStub:
     def __init__(self, headers: dict[str, str] | None = None) -> None:
         self.headers = headers or {}
+
+
+class _MemoryAuditStore:
+    def __init__(self) -> None:
+        self.events: list[AuditEvent] = []
+
+    async def append_event(self, event: AuditEvent) -> None:
+        self.events.append(event)
+
+
+class _PolicyExplainRuntime:
+    name = "policy-explain-test"
+    version = "0.0-test"
+
+    async def list_tools(self, context: Any) -> list[dict[str, Any]]:
+        assert context.client_id is None
+        assert context.user_id is None
+        return [
+            {
+                "name": "fs.patch",
+                "description": "Patch files",
+                "metadata": {"category": "filesystem"},
+            },
+            {
+                "name": "shell.exec",
+                "description": "Execute shell commands",
+                "metadata": {"category": "shell"},
+            },
+        ]
+
+
+def _policy_profile() -> MCPProfile:
+    return MCPProfile(
+        id="backend-engineer",
+        name="Backend Engineer",
+        policy_document=ProfilePolicy(
+            allowed_tools=["fs.patch"],
+            denied_tools=["shell.exec"],
+        ),
+    )
 
 
 def test_default_admin_identity_has_policy_explain_permission_when_auth_disabled() -> None:
@@ -83,4 +128,109 @@ def test_permission_error_response_uses_stable_error_envelope() -> None:
         "ok": False,
         "error": "Gateway admin permission denied",
         "reason_code": "admin_permission_denied",
+    }
+
+
+def test_policy_explain_route_requires_admin_key_when_admin_auth_enabled() -> None:
+    app = create_gateway_app(
+        _PolicyExplainRuntime(),
+        enable_policy_explain_management=True,
+        policy_explain_profile_resolver=lambda profile_id: _policy_profile(),
+        policy_explain_audit_store=_MemoryAuditStore(),
+        admin_auth=GatewayAdminAuthConfig(enabled=True, api_key="secret"),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/policy/explain",
+            json={"profile_id": "backend-engineer", "tool_name": "fs.patch"},
+        )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "ok": False,
+        "error": "Gateway admin authentication required",
+        "reason_code": "admin_auth_required",
+    }
+
+
+def test_policy_explain_route_succeeds_and_audits_with_valid_admin_key() -> None:
+    audit = _MemoryAuditStore()
+    app = create_gateway_app(
+        _PolicyExplainRuntime(),
+        enable_policy_explain_management=True,
+        policy_explain_profile_resolver=lambda profile_id: _policy_profile(),
+        policy_explain_audit_store=audit,
+        admin_auth=GatewayAdminAuthConfig(enabled=True, api_key="secret"),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/policy/explain",
+            headers={"X-MCP-Gateway-Admin-Key": "secret"},
+            json={
+                "profile_id": "backend-engineer",
+                "tool_name": "fs.patch",
+                "arguments": {"path": "workspace/example.py"},
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["profile_id"] == "backend-engineer"
+    assert payload["tool_name"] == "fs.patch"
+    assert payload["final_outcome"] == "allow"
+    assert audit.events[0].event_type == "policy.explain.requested"
+    assert audit.events[0].actor_id == "gateway-admin"
+    assert audit.events[0].target_id == "fs.patch"
+
+
+def test_profile_tool_preview_route_includes_denied_installed_runtime_tool() -> None:
+    audit = _MemoryAuditStore()
+    app = create_gateway_app(
+        _PolicyExplainRuntime(),
+        enable_policy_explain_management=True,
+        policy_explain_profile_resolver=lambda profile_id: _policy_profile(),
+        policy_explain_audit_store=audit,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/profiles/backend-engineer/tool-preview",
+            json={},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    tools_by_name = {tool["tool_name"]: tool for tool in payload["tools"]}
+    assert tools_by_name["fs.patch"]["outcome"] == "allow"
+    assert tools_by_name["fs.patch"]["installation_status"] == "installed"
+    assert tools_by_name["shell.exec"]["outcome"] == "deny"
+    assert tools_by_name["shell.exec"]["visibility"] == "hidden"
+    assert tools_by_name["shell.exec"]["installation_status"] == "installed"
+    assert audit.events[0].event_type == "policy.preview_tools.requested"
+
+
+def test_policy_explain_route_maps_policy_errors_to_stable_json_envelope() -> None:
+    audit = _MemoryAuditStore()
+    app = create_gateway_app(
+        _PolicyExplainRuntime(),
+        enable_policy_explain_management=True,
+        policy_explain_profile_resolver=lambda profile_id: None,
+        policy_explain_audit_store=audit,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/policy/explain",
+            json={"profile_id": "missing-profile", "tool_name": "fs.patch"},
+        )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "ok": False,
+        "message": "Profile not found",
+        "reason_code": "profile_not_found",
+        "details": {},
     }

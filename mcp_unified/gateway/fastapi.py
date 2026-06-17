@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
@@ -13,12 +13,19 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from mcp_unified.storage.models import CredentialGrant, ExternalServerDefinition
+from mcp_unified.interfaces.storage import AuditStore
+from mcp_unified.profiles import MCPProfile
 
 from .admin_auth import (
+    DefaultGatewayAdminPermissionChecker,
     GatewayAdminAuthConfig,
     GatewayAdminAuthError,
+    GatewayAdminIdentity,
+    GatewayAdminPermissionChecker,
+    GatewayAdminPermissionError,
     gateway_admin_auth_dependencies,
     gateway_admin_auth_error_response,
+    gateway_admin_identity_dependency,
     normalize_gateway_admin_auth_config,
 )
 from .bootstrap import GatewayProfileBootstrap
@@ -68,7 +75,16 @@ from .lifecycle import (
     normalize_external_runtime_lifecycle_config,
 )
 from .profiles import GatewayProfileManagementError, GatewayProfileManager
-from .runtime import GatewayRuntime
+from .policy_explain import (
+    GatewayPolicyExplainError,
+    GatewayPolicyExplainService,
+    PolicyExplainErrorResponse,
+    PolicyExplainResponse,
+    ProfileToolPreviewResponse,
+    parse_policy_explain_request,
+    parse_profile_tool_preview_request,
+)
+from .runtime import GatewayRequestContext, GatewayRuntime
 
 _PROFILE_HEADER_NAMES = ("x-mcp-profile", "x-mcp-profile-id")
 _PROFILE_QUERY_NAMES = ("profile_id", "profileId")
@@ -122,6 +138,14 @@ _CREDENTIAL_GRANT_STATUS_CODES = {
     "invalid_credential_grant_request": 422,
     "invalid_credential_grant_patch": 422,
     CREDENTIAL_GRANT_SENSITIVE_MATERIAL_REJECTED_REASON: 422,
+}
+_POLICY_EXPLAIN_STATUS_CODES = {
+    "profile_not_found": 404,
+    "invalid_policy_explain_request": 422,
+    "invalid_policy_preview_request": 422,
+    "audit_store_unavailable": 503,
+    "profile_resolution_failed": 503,
+    "policy_evaluation_failed": 422,
 }
 _EXTERNAL_SERVER_RESERVED_IDS = frozenset({"runtime", "refresh", "reconcile"})
 _PROFILE_MANAGEMENT_PUBLIC_ERRORS = {
@@ -388,6 +412,22 @@ async def _parse_json_body(request: Request) -> Any:
     return _parse_json_payload(await request.body())
 
 
+async def _parse_policy_explain_json_body(
+    request: Request,
+    *,
+    reason_code: str,
+) -> Any:
+    """Parse a policy-explain JSON body without exposing raw invalid input."""
+
+    try:
+        return await request.json()
+    except ValueError:
+        raise GatewayPolicyExplainError(
+            "Invalid JSON request",
+            reason_code=reason_code,
+        ) from None
+
+
 def _client_host(request: Request | WebSocket) -> str | None:
     """Return the peer host when the transport exposes one."""
 
@@ -503,6 +543,30 @@ def _credential_grant_error_response(
     return JSONResponse(
         status_code=_CREDENTIAL_GRANT_STATUS_CODES.get(exc.reason_code, 500),
         content=_credential_grant_error_payload(exc),
+    )
+
+
+def _policy_explain_error_response(exc: GatewayPolicyExplainError) -> JSONResponse:
+    """Translate expected policy-explain errors into HTTP JSON responses."""
+
+    return JSONResponse(
+        status_code=_POLICY_EXPLAIN_STATUS_CODES.get(exc.reason_code, 500),
+        content=exc.to_payload().model_dump(mode="json"),
+    )
+
+
+def _policy_explain_permission_error_response(
+    exc: GatewayAdminPermissionError,
+) -> JSONResponse:
+    """Return the policy-explain error envelope for admin permission failures."""
+
+    payload = PolicyExplainErrorResponse(
+        message=exc.payload["error"],
+        reason_code=exc.reason_code,
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=payload.model_dump(mode="json"),
     )
 
 
@@ -1292,6 +1356,109 @@ def _mount_credential_grant_routes(
             return _credential_grant_error_response(exc)
 
 
+def _mount_policy_explain_routes(
+    router: APIRouter,
+    runtime: GatewayRuntime,
+    *,
+    admin_auth: GatewayAdminAuthConfig,
+    policy_explain_service: GatewayPolicyExplainService | None = None,
+    policy_explain_profile_resolver: (
+        Callable[[str], MCPProfile | Awaitable[MCPProfile | None]] | None
+    ) = None,
+    policy_explain_audit_store: AuditStore | None = None,
+    policy_explain_permission_checker: GatewayAdminPermissionChecker | None = None,
+) -> None:
+    """Mount read-only policy explanation endpoints on the gateway router."""
+
+    if policy_explain_service is None and policy_explain_profile_resolver is None:
+        raise ValueError(
+            "policy explain management requires policy_explain_service "
+            "or policy_explain_profile_resolver"
+        )
+
+    identity_dependency = gateway_admin_identity_dependency(admin_auth)
+    permission_checker = (
+        policy_explain_permission_checker
+        or DefaultGatewayAdminPermissionChecker()
+    )
+
+    async def installed_tool_catalog() -> list[dict[str, Any]]:
+        return await runtime.list_tools(
+            GatewayRequestContext(request_id="policy-explain-tool-catalog")
+        )
+
+    def service_for_identity(
+        identity: GatewayAdminIdentity,
+    ) -> GatewayPolicyExplainService:
+        if policy_explain_service is not None:
+            return policy_explain_service
+        return GatewayPolicyExplainService(
+            profile_resolver=policy_explain_profile_resolver,
+            audit_store=policy_explain_audit_store,
+            actor_id=identity.actor_id,
+            installed_tool_catalog=installed_tool_catalog,
+        )
+
+    @router.post(
+        "/policy/explain",
+        response_model=PolicyExplainResponse,
+        response_model_exclude_none=True,
+    )
+    async def explain_policy(
+        request: Request,
+        identity: GatewayAdminIdentity = Depends(identity_dependency),
+    ) -> PolicyExplainResponse | JSONResponse:
+        """Return a redacted explanation for one profile/tool policy decision."""
+
+        try:
+            await permission_checker.require_permission(
+                identity,
+                "mcp.policy.explain",
+            )
+            payload = await _parse_policy_explain_json_body(
+                request,
+                reason_code="invalid_policy_explain_request",
+            )
+            return await service_for_identity(identity).explain_tool_call(
+                parse_policy_explain_request(payload)
+            )
+        except GatewayAdminPermissionError as exc:
+            return _policy_explain_permission_error_response(exc)
+        except GatewayPolicyExplainError as exc:
+            return _policy_explain_error_response(exc)
+
+    @router.post(
+        "/profiles/{profile_id}/tool-preview",
+        response_model=ProfileToolPreviewResponse,
+        response_model_exclude_none=True,
+    )
+    async def preview_profile_tools(
+        profile_id: str,
+        request: Request,
+        identity: GatewayAdminIdentity = Depends(identity_dependency),
+    ) -> ProfileToolPreviewResponse | JSONResponse:
+        """Return a redacted profile preview across installed gateway tools."""
+
+        try:
+            await permission_checker.require_permission(
+                identity,
+                "mcp.policy.explain",
+            )
+            payload = await _parse_policy_explain_json_body(
+                request,
+                reason_code="invalid_policy_preview_request",
+            )
+            if isinstance(payload, Mapping):
+                payload = {**payload, "profile_id": profile_id}
+            return await service_for_identity(identity).preview_profile_tools(
+                parse_profile_tool_preview_request(payload)
+            )
+        except GatewayAdminPermissionError as exc:
+            return _policy_explain_permission_error_response(exc)
+        except GatewayPolicyExplainError as exc:
+            return _policy_explain_error_response(exc)
+
+
 def create_gateway_router(
     runtime: GatewayRuntime,
     *,
@@ -1305,6 +1472,13 @@ def create_gateway_router(
     admin_auth: GatewayAdminAuthConfig | Mapping[str, Any] | None = None,
     credential_grant_manager: GatewayCredentialGrantManager | None = None,
     enable_credential_grant_management: bool = False,
+    enable_policy_explain_management: bool = False,
+    policy_explain_service: GatewayPolicyExplainService | None = None,
+    policy_explain_profile_resolver: (
+        Callable[[str], MCPProfile | Awaitable[MCPProfile | None]] | None
+    ) = None,
+    policy_explain_audit_store: AuditStore | None = None,
+    policy_explain_permission_checker: GatewayAdminPermissionChecker | None = None,
 ) -> APIRouter:
     """Create a package-owned FastAPI router for a standalone MCP runtime."""
 
@@ -1357,6 +1531,16 @@ def create_gateway_router(
             router,
             resolved_credential_grant_manager,
             admin_dependencies=admin_dependencies,
+        )
+    if enable_policy_explain_management:
+        _mount_policy_explain_routes(
+            router,
+            runtime,
+            admin_auth=resolved_admin_auth,
+            policy_explain_service=policy_explain_service,
+            policy_explain_profile_resolver=policy_explain_profile_resolver,
+            policy_explain_audit_store=policy_explain_audit_store,
+            policy_explain_permission_checker=policy_explain_permission_checker,
         )
 
     @router.get("/status")
@@ -1437,6 +1621,13 @@ def create_gateway_app(
     admin_auth: GatewayAdminAuthConfig | Mapping[str, Any] | None = None,
     credential_grant_manager: GatewayCredentialGrantManager | None = None,
     enable_credential_grant_management: bool = False,
+    enable_policy_explain_management: bool = False,
+    policy_explain_service: GatewayPolicyExplainService | None = None,
+    policy_explain_profile_resolver: (
+        Callable[[str], MCPProfile | Awaitable[MCPProfile | None]] | None
+    ) = None,
+    policy_explain_audit_store: AuditStore | None = None,
+    policy_explain_permission_checker: GatewayAdminPermissionChecker | None = None,
 ) -> FastAPI:
     """Create a minimal FastAPI app exposing the standalone MCP gateway router."""
 
@@ -1480,6 +1671,11 @@ def create_gateway_app(
             admin_auth=admin_auth,
             credential_grant_manager=credential_grant_manager,
             enable_credential_grant_management=enable_credential_grant_management,
+            enable_policy_explain_management=enable_policy_explain_management,
+            policy_explain_service=policy_explain_service,
+            policy_explain_profile_resolver=policy_explain_profile_resolver,
+            policy_explain_audit_store=policy_explain_audit_store,
+            policy_explain_permission_checker=policy_explain_permission_checker,
         ),
         prefix=prefix,
     )
