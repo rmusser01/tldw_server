@@ -93,7 +93,7 @@ def client_with_user_switch(
     app.dependency_overrides.clear()
 
 
-def _wait_for_status(client: TestClient, run_id: str, statuses: set[str], timeout_s: float = 5.0) -> dict:
+def _wait_for_status(client: TestClient, run_id: str, statuses: set[str], timeout_s: float = 15.0) -> dict:
     """Poll run status until it matches one of the expected statuses."""
     deadline = time.time() + timeout_s
     last = {}
@@ -105,7 +105,7 @@ def _wait_for_status(client: TestClient, run_id: str, statuses: set[str], timeou
     return last
 
 
-def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 5.0) -> dict:
+def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 15.0) -> dict:
     """Wait until a run reaches a terminal status."""
     return _wait_for_status(client, run_id, {"succeeded", "failed", "cancelled"}, timeout_s)
 

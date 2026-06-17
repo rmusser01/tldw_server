@@ -273,6 +273,7 @@ def test_embedding_model_setup_skips_non_embedding_chunking_shard() -> None:
     for step in embedding_setup_steps:
         condition = str(step.get("if"))
         assert "ai-chunking-code-json-xml" not in condition
+        assert "ai-chunking-templates" not in condition
 
 
 def test_embedding_model_predownload_skips_backpressure_shard() -> None:
@@ -296,6 +297,55 @@ def test_embedding_model_predownload_skips_backpressure_shard() -> None:
         assert "matrix.shard.name != 'rag-new-integration-research'" in condition
         assert '[[ "$SHARD_NAME" == "ai-embeddings-v5-core" || "$SHARD_NAME" == rag-new-unit-* ]]' in run_script
         assert "--skip-defaults --model sentence-transformers/all-MiniLM-L6-v2" in run_script
+
+
+def test_setup_ffmpeg_action_can_skip_ffmpeg_but_keep_portaudio() -> None:
+    action = _load(".github/actions/setup-ffmpeg/action.yml")
+    assert action["inputs"]["install-ffmpeg"]["default"] == "true"
+
+    linux_step = _get_step(action["runs"]["steps"], "Install FFmpeg (Linux)")
+    linux_script = linux_step["run"]
+    assert 'inputs.install-ffmpeg' in linux_script
+    assert "sudo apt-get install -y ffmpeg portaudio19-dev python3-all-dev" in linux_script
+    assert "sudo apt-get install -y portaudio19-dev python3-all-dev" in linux_script
+
+    windows_step = _get_step(action["runs"]["steps"], "Install FFmpeg (Windows)")
+    assert "inputs.install-ffmpeg == 'true'" in windows_step["if"]
+
+
+def test_full_suite_ffmpeg_setup_scopes_heavy_install_to_media_runtime_shards() -> None:
+    workflow = _load(".github/workflows/ci.yml")
+    matrix_jobs = [
+        "full-suite-linux-311-smoke",
+        "full-suite-linux-312-shards",
+        "full-suite-linux-313-shards",
+        "full-suite-macos-312-shards",
+        "full-suite-windows-312-shards",
+        "full-suite-os-313-release-shards",
+    ]
+    expected_condition = (
+        "${{ startsWith(matrix.shard.name, 'media-') || "
+        "matrix.shard.name == 'ai-embeddings-media-validation' || "
+        "matrix.shard.name == 'rag-new-unit-media-ingest' || "
+        "matrix.shard.name == 'product-claims-service' || "
+        "matrix.shard.name == 'platform-services-core' }}"
+    )
+
+    wizard_step = _get_step(workflow["jobs"]["wizard-tests"]["steps"], "Install FFmpeg and PortAudio (Linux)")
+    assert wizard_step["with"]["install-ffmpeg"] == "true"
+
+    for job_name in matrix_jobs:
+        setup_steps = [
+            step
+            for step in workflow["jobs"][job_name]["steps"]
+            if step.get("uses") == "./.github/actions/setup-ffmpeg"
+        ]
+        assert len(setup_steps) == 1
+        setup_step = setup_steps[0]
+        assert setup_step["with"]["install-portaudio"] == "true"
+        assert setup_step["with"]["install-ffmpeg"] == expected_condition
+        assert "product-watchlists" not in setup_step["with"]["install-ffmpeg"]
+        assert "product-workflows" not in setup_step["with"]["install-ffmpeg"]
 
 
 def test_full_suite_test_result_uploads_are_non_blocking() -> None:

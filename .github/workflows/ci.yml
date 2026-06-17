@@ -180,6 +180,7 @@ jobs:
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
         with:
+          install-ffmpeg: 'true'
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)
@@ -330,6 +331,7 @@ jobs:
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
         with:
+          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || matrix.shard.name == 'platform-services-core' }}
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)
@@ -1470,6 +1472,7 @@ jobs:
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
         with:
+          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || matrix.shard.name == 'platform-services-core' }}
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)
@@ -1642,7 +1645,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -1652,7 +1655,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
@@ -2732,6 +2735,7 @@ jobs:
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
         with:
+          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || matrix.shard.name == 'platform-services-core' }}
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)
@@ -2848,7 +2852,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -2858,7 +2862,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
@@ -3915,6 +3919,7 @@ jobs:
       - name: Install FFmpeg (multi-OS)
         uses: ./.github/actions/setup-ffmpeg
         with:
+          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || matrix.shard.name == 'platform-services-core' }}
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)
@@ -3982,7 +3987,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -3992,7 +3997,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
@@ -5048,6 +5053,7 @@ jobs:
       - name: Install FFmpeg (multi-OS)
         uses: ./.github/actions/setup-ffmpeg
         with:
+          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || matrix.shard.name == 'platform-services-core' }}
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)
@@ -5115,7 +5121,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -5125,7 +5131,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
@@ -6183,6 +6189,7 @@ jobs:
       - name: Install FFmpeg (multi-OS)
         uses: ./.github/actions/setup-ffmpeg
         with:
+          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || matrix.shard.name == 'platform-services-core' }}
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)
@@ -6250,7 +6257,7 @@ jobs:
           python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
 
       - name: Cache embedding models
-        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ github.event_name != 'workflow_dispatch' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         uses: actions/cache@v5
         with:
@@ -6260,7 +6267,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
