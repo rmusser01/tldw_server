@@ -6,6 +6,7 @@ Implements JSON-RPC 2.0 with enhanced error handling and request routing.
 
 import asyncio
 import contextlib
+import copy
 import hashlib
 import hmac
 import inspect
@@ -19,7 +20,7 @@ from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime, timezone
 from enum import IntEnum
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional, Union
+from typing import Any, Callable, Literal, Optional, Union, cast
 
 from pydantic import BaseModel, Field
 
@@ -33,7 +34,6 @@ except ImportError:  # Fallback for v1
         model_validator = None  # type: ignore
 
 from loguru import logger
-
 from mcp_unified.interfaces.path_scope import (
     PathScopeCandidate,
     normalize_path_scope_candidates,
@@ -54,8 +54,12 @@ from .auth.rate_limiter import RateLimitExceeded
 from .config import get_config
 from .interfaces.runtime import (
     MCPRuntimeDependencies,
+    NoopToolCallHookManager,
     NoopToolUseRecorder,
     TelemetryProvider,
+    ToolHookAction,
+    ToolHookCallContext,
+    ToolHookDecision,
 )
 from .modules.base import BaseModule
 from .tool_observability import (
@@ -600,6 +604,14 @@ class MCPProtocol:
                 NoopToolUseRecorder(),
             )
             or NoopToolUseRecorder()
+        )
+        self._tool_call_hook_manager = (
+            getattr(
+                self.dependencies,
+                "tool_call_hook_manager",
+                NoopToolCallHookManager(),
+            )
+            or NoopToolCallHookManager()
         )
         self.protocol_version = "2024-11-05"
         self.metrics = self.dependencies.metrics_collector
@@ -1498,6 +1510,283 @@ class MCPProtocol:
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
                 pass
             return None
+
+    @staticmethod
+    def _hook_safe_copy(value: Any) -> Any:
+        """Return a detached copy of hook-visible metadata without failing tool preparation."""
+        try:
+            return copy.deepcopy(value)
+        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
+            try:
+                return json.loads(json.dumps(value, default=str))
+            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
+                return str(value)
+
+    @staticmethod
+    def _hook_safe_metadata(context: RequestContext) -> dict[str, Any]:
+        """Return request metadata safe for local lifecycle hook decisions."""
+        metadata = getattr(context, "metadata", None)
+        if not isinstance(metadata, dict):
+            return {}
+        return {
+            str(key): MCPProtocol._hook_safe_copy(value)
+            for key, value in metadata.items()
+            if isinstance(key, str) and not key.startswith("_") and key not in {"governance_preflight"}
+        }
+
+    @staticmethod
+    def _hook_safe_tool_args(tool_args: Any) -> dict[str, Any] | None:
+        """Return detached sanitized tool arguments for hook evaluation."""
+        if not isinstance(tool_args, dict):
+            return None
+        copied = MCPProtocol._hook_safe_copy(tool_args)
+        return copied if isinstance(copied, dict) else None
+
+    @staticmethod
+    def _hook_safe_scope_payload(scope_payload: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Return detached path/external scope metadata for hooks."""
+        if not isinstance(scope_payload, dict):
+            return None
+        copied = MCPProtocol._hook_safe_copy(scope_payload)
+        return copied if isinstance(copied, dict) else None
+
+    def _build_tool_hook_context(
+        self,
+        *,
+        phase: str,
+        tool_name: str,
+        module_id: str | None,
+        tool_def: dict[str, Any] | None,
+        tool_args: Any,
+        is_write: bool | None,
+        arguments_hash: str | None,
+        context: RequestContext,
+        scope_payload: dict[str, Any] | None = None,
+        status: str | None = None,
+        duration_ms: float | None = None,
+        error: Exception | None = None,
+    ) -> ToolHookCallContext:
+        """Build a bounded, detached context object for lifecycle hook evaluation."""
+        return ToolHookCallContext(
+            phase="post" if phase == "post" else "pre",
+            tool_name=str(tool_name),
+            module_id=module_id,
+            is_write=is_write,
+            tool_category=self._tool_use_category(tool_def),
+            arguments_hash=arguments_hash,
+            request_id=str(context.request_id),
+            user_id=context.user_id,
+            client_id=context.client_id,
+            session_id=context.session_id,
+            metadata=self._hook_safe_metadata(context),
+            tool_args=self._hook_safe_tool_args(tool_args),
+            status=status,
+            duration_ms=duration_ms,
+            error_type=error.__class__.__name__ if error is not None else None,
+            scope_payload=self._hook_safe_scope_payload(scope_payload),
+        )
+
+    @staticmethod
+    def _coerce_tool_hook_action(action: Any) -> ToolHookAction | None:
+        """Normalize a runtime hook action into the public literal contract."""
+        normalized = str(action or "allow").strip().lower()
+        if normalized in {"allow", "deny", "ask", "approval_required"}:
+            return cast(ToolHookAction, normalized)
+        return None
+
+    @staticmethod
+    def _coerce_tool_hook_decision(
+        decision: ToolHookDecision | dict[str, Any] | None,
+    ) -> ToolHookDecision:
+        """Normalize hook decision values from typed or dict-based embedders."""
+        if decision is None:
+            return ToolHookDecision(action="allow")
+        if isinstance(decision, ToolHookDecision):
+            return decision
+        if isinstance(decision, dict):
+            metadata = decision.get("metadata")
+            action = MCPProtocol._coerce_tool_hook_action(
+                decision.get("action") or decision.get("status") or "allow"
+            )
+            if action is None:
+                return ToolHookDecision(
+                    action="deny",
+                    reason_code="invalid_tool_hook_action",
+                    message="Invalid MCP tool hook action",
+                )
+            return ToolHookDecision(
+                action=action,
+                reason_code=(
+                    str(decision.get("reason_code"))
+                    if decision.get("reason_code") is not None
+                    else None
+                ),
+                message=str(decision.get("message")) if decision.get("message") is not None else None,
+                metadata=dict(metadata) if isinstance(metadata, dict) else {},
+            )
+        return ToolHookDecision(
+            action="deny",
+            reason_code="invalid_tool_hook_decision",
+            message="Invalid MCP tool hook decision",
+        )
+
+    @staticmethod
+    def _tool_hook_payload(
+        decision: ToolHookDecision,
+        *,
+        phase: str,
+        fallback_reason_code: str | None = None,
+    ) -> dict[str, Any]:
+        """Serialize a normalized hook decision into response-safe metadata."""
+        action = str(decision.action or "allow").strip().lower()
+        if action == "approval_required":
+            action = "ask"
+        payload: dict[str, Any] = {
+            "phase": phase,
+            "action": action,
+            "status": action,
+        }
+        reason_code = decision.reason_code or fallback_reason_code
+        if reason_code:
+            payload["reason_code"] = str(reason_code)
+        if decision.message:
+            payload["message"] = str(decision.message)
+        if isinstance(decision.metadata, dict) and decision.metadata:
+            payload["metadata"] = dict(decision.metadata)
+        return payload
+
+    async def _run_pre_tool_hooks(
+        self,
+        *,
+        tool_name: str,
+        tool_args: Any,
+        module_id: str | None,
+        tool_def: dict[str, Any] | None,
+        is_write: bool | None,
+        arguments_hash: str | None,
+        context: RequestContext,
+        scope_payload: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Run pre-tool hooks and map enforcement decisions to protocol errors."""
+        hook_context = self._build_tool_hook_context(
+            phase="pre",
+            tool_name=tool_name,
+            module_id=module_id,
+            tool_def=tool_def,
+            tool_args=tool_args,
+            is_write=is_write,
+            arguments_hash=arguments_hash,
+            context=context,
+            scope_payload=scope_payload,
+        )
+        try:
+            raw_decision = await self._tool_call_hook_manager.before_tool_call(hook_context)
+        except asyncio.CancelledError:
+            raise
+        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
+            logger.exception(
+                "MCP pre-tool hook failed closed: tool_name={} module_id={} request_id={} error_type={}",
+                tool_name,
+                module_id,
+                context.request_id,
+                exc.__class__.__name__,
+            )
+            payload = {
+                "phase": "pre",
+                "action": "deny",
+                "status": "deny",
+                "reason_code": "tool_hook_unavailable",
+                "error_type": exc.__class__.__name__,
+            }
+            raise GovernanceDeniedError(
+                "Permission denied by MCP tool hook",
+                governance={
+                    "action": "deny",
+                    "status": "deny",
+                    "reason_code": "tool_hook_unavailable",
+                    "hook": payload,
+                },
+            ) from exc
+
+        decision = self._coerce_tool_hook_decision(raw_decision)
+        payload = self._tool_hook_payload(decision, phase="pre")
+        action = str(payload.get("action") or "allow").strip().lower()
+        if action == "allow":
+            return payload
+        if action == "ask":
+            raise ApprovalRequiredError(
+                "Approval required by MCP tool hook",
+                approval={
+                    "source": "tool_hook",
+                    "reason_code": payload.get("reason_code") or "tool_hook_approval_required",
+                    "message": payload.get("message"),
+                    "hook": payload,
+                },
+            )
+        if action != "deny":
+            payload = self._tool_hook_payload(
+                ToolHookDecision(
+                    action="deny",
+                    reason_code="invalid_tool_hook_action",
+                    message=f"Unsupported MCP tool hook action: {action}",
+                    metadata={"requested_action": action},
+                ),
+                phase="pre",
+            )
+        raise GovernanceDeniedError(
+            "Permission denied by MCP tool hook",
+            governance={
+                "action": "deny",
+                "status": "deny",
+                "reason_code": payload.get("reason_code") or "tool_hook_denied",
+                "hook": payload,
+            },
+        )
+
+    async def _run_post_tool_hooks(
+        self,
+        *,
+        tool_name: str,
+        tool_args: Any,
+        module_id: str | None,
+        tool_def: dict[str, Any] | None,
+        is_write: bool | None,
+        arguments_hash: str | None,
+        context: RequestContext,
+        scope_payload: dict[str, Any] | None,
+        status: str,
+        duration_ms: float,
+        error: Exception | None = None,
+    ) -> None:
+        """Notify post-tool hooks while preserving the original tool outcome."""
+        hook_context = self._build_tool_hook_context(
+            phase="post",
+            tool_name=tool_name,
+            module_id=module_id,
+            tool_def=tool_def,
+            tool_args=tool_args,
+            is_write=is_write,
+            arguments_hash=arguments_hash,
+            context=context,
+            scope_payload=scope_payload,
+            status=status,
+            duration_ms=duration_ms,
+            error=error,
+        )
+        try:
+            await self._tool_call_hook_manager.after_tool_call(hook_context)
+        except asyncio.CancelledError:
+            raise
+        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
+            logger.exception(
+                "MCP post-tool hook failed; suppressed to preserve tool outcome: "
+                "tool_name={} module_id={} request_id={} status={} error_type={}",
+                tool_name,
+                module_id,
+                context.request_id,
+                status,
+                exc.__class__.__name__,
+            )
 
     async def process_request(
         self,
@@ -2911,6 +3200,16 @@ class MCPProtocol:
             tool_def=tool_def if isinstance(tool_def, dict) else None,
             context=context,
         )
+        await self._run_pre_tool_hooks(
+            tool_name=tool_name,
+            tool_args=tool_args,
+            module_id=module_id,
+            tool_def=tool_def if isinstance(tool_def, dict) else None,
+            is_write=is_write,
+            arguments_hash=args_hash,
+            context=context,
+            scope_payload=scope_payload,
+        )
         context_fingerprint = self._fingerprint_request_context(context)
         integrity_tag = self._build_prepared_tool_call_integrity_tag(
             tool_name=tool_name,
@@ -3135,7 +3434,7 @@ class MCPProtocol:
                     tool_name,
                     module_name,
                     status="success",
-                    duration_ms=max(0.0, (time.time() - t0) * 1000.0),
+                    duration_ms=duration_ms,
                     arguments_hash=args_hash,
                 )
                 response_payload = {
@@ -3144,9 +3443,22 @@ class MCPProtocol:
                     "tool": tool_name,
                     "eval": execution_eval,
                 }
+                await self._run_post_tool_hooks(
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    module_id=module_name,
+                    tool_def=tool_def if isinstance(tool_def, dict) else None,
+                    is_write=is_write,
+                    arguments_hash=args_hash,
+                    context=context,
+                    scope_payload=prepared.scope_payload,
+                    status="success",
+                    duration_ms=duration_ms,
+                )
                 return response_payload
 
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as e:
+                duration_ms = max(0.0, (time.time() - t0) * 1000.0)
                 context.logger.error(  # noqa: TRY400 - structured audit log records sanitized type only.
                     "Tool execution failed",
                     error_type=e.__class__.__name__,
@@ -3161,8 +3473,21 @@ class MCPProtocol:
                     tool_name,
                     module_id or getattr(module, "name", None),
                     status="failure",
-                    duration_ms=max(0.0, (time.time() - t0) * 1000.0),
+                    duration_ms=duration_ms,
                     arguments_hash=args_hash,
+                    error=e,
+                )
+                await self._run_post_tool_hooks(
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    module_id=module_id or getattr(module, "name", None),
+                    tool_def=tool_def if isinstance(tool_def, dict) else None,
+                    is_write=is_write,
+                    arguments_hash=args_hash,
+                    context=context,
+                    scope_payload=prepared.scope_payload,
+                    status="failure",
+                    duration_ms=duration_ms,
                     error=e,
                 )
                 raise
