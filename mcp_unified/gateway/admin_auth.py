@@ -153,6 +153,15 @@ class GatewayAdminIdentity:
             source="local",
         )
 
+    @classmethod
+    def authenticated_admin(cls) -> "GatewayAdminIdentity":
+        """Return the generic authenticated gateway administrator identity."""
+
+        return cls(
+            actor_id="gateway-admin",
+            permissions=frozenset({_LOCAL_ADMIN_POLICY_EXPLAIN_PERMISSION}),
+        )
+
 
 class GatewayAdminPermissionChecker(Protocol):
     """Protocol for checking gateway admin effective permissions."""
@@ -183,6 +192,12 @@ def default_gateway_admin_identity() -> GatewayAdminIdentity:
     """Return the default local gateway admin identity."""
 
     return GatewayAdminIdentity.local_admin()
+
+
+def authenticated_gateway_admin_identity() -> GatewayAdminIdentity:
+    """Return the default authenticated gateway admin identity."""
+
+    return GatewayAdminIdentity.authenticated_admin()
 
 
 def normalize_gateway_admin_auth_config(
@@ -277,7 +292,7 @@ def _gateway_admin_identity_dependency(
             raise GatewayAdminAuthError(reason_code="admin_auth_required")
         if not await config.verify(credential, request):
             raise GatewayAdminAuthError(reason_code="admin_auth_invalid")
-        return default_gateway_admin_identity()
+        return authenticated_gateway_admin_identity()
 
     require_gateway_admin_identity.__annotations__["request"] = FastAPIRequest
     return require_gateway_admin_identity
@@ -292,6 +307,7 @@ __all__ = [
     "GatewayAdminPermissionChecker",
     "GatewayAdminPermissionError",
     "GatewayAdminVerifier",
+    "authenticated_gateway_admin_identity",
     "default_gateway_admin_identity",
     "gateway_admin_auth_dependencies",
     "gateway_admin_auth_error_response",

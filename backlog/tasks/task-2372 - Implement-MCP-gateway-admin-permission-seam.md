@@ -31,7 +31,7 @@ Implement Task 3 from the MCP effective permission explain implementation plan: 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Task 3 seam implemented in mcp_unified/gateway/admin_auth.py with GatewayAdminIdentity, GatewayAdminPermissionError, GatewayAdminPermissionChecker protocol, DefaultGatewayAdminPermissionChecker, default local identity/dependency helper, and permission error response helper. Focused auth seam tests added in tldw_Server_API/tests/MCP_unified/test_standalone_policy_explain_api.py. Verification passed: focused pytest (4 tests), existing app/core gateway admin auth pytest (7 tests), Bandit touched scope with B101 skipped, and git diff --check. Requested tldw_Server_API/tests/MCP_unified/test_standalone_gateway_admin_auth.py path does not exist. Awaiting controller review; task status remains In Progress.
+Task 3 quality-review fix: _gateway_admin_identity_dependency now preserves local identity only for disabled admin auth and returns a distinct generic authenticated gateway admin identity (actor_id=gateway-admin, source=gateway_admin_auth) after successful enabled admin auth without deriving from the credential. Added focused async test coverage for valid enabled auth identity plus missing/invalid GatewayAdminAuthError reason codes. Verification for review fix passed: focused policy explain API seam pytest (5 passed), existing app/core gateway admin auth pytest (7 passed), Bandit touched scope with B101 skipped (no issues), and git diff --check. Awaiting controller review; task status remains In Progress.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
