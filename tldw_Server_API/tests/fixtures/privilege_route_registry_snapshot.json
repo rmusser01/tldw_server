@@ -3413,6 +3413,11 @@
     {
       "dependencies": [
         {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
           "id": "auth_deps._checker",
           "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
           "type": "dependency"
@@ -5633,6 +5638,11 @@
   "audio.transcriptions.capabilities": [
     {
       "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
         {
           "id": "auth_deps._checker",
           "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
