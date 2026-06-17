@@ -74,6 +74,21 @@ class ProfileToolAvailability:
     has_recommended_unavailable_tools: bool
 
 
+@dataclass(frozen=True, slots=True)
+class AdminToolCatalogEntry:
+    """Policy-preview catalog row that is not filtered by model-facing visibility."""
+
+    tool_id: str
+    tool_name: str | None = None
+    display_name: str | None = None
+    description: str = ""
+    category: str = _DEFAULT_CATEGORY
+    capabilities: tuple[str, ...] = ()
+    installation_status: str = "unknown"
+    source: str = "backend"
+    metadata: dict[str, Any] | None = None
+
+
 def list_profile_tools(profile: MCPProfile, backend_tools: Any) -> dict[str, Any]:
     """Return all tools visible to a profile with deterministic category metadata."""
 
@@ -109,6 +124,47 @@ def search_profile_tools(
     return [
         _entry_payload(entry, score=scores.get(entry.tool_id, 0.0))
         for entry in ordered[:limit]
+    ]
+
+
+def list_admin_tool_catalog(
+    profile: MCPProfile,
+    backend_tools: Any,
+    *,
+    include_recommendations: bool = True,
+) -> list[AdminToolCatalogEntry]:
+    """Return installed and recommended tools for admin policy preview.
+
+    Unlike model-facing discovery, this catalog intentionally does not filter
+    installed backend tools through profile policy visibility. Denied installed
+    tools must remain present so admins can preview their effective decisions.
+    """
+
+    if not getattr(profile, "enabled", False):
+        return []
+    if build_effective_policy_result(profile).status != "resolved":
+        return []
+
+    entries: list[_ToolEntry] = []
+    seen: set[str] = set()
+    for tool in _backend_tool_sequence(backend_tools):
+        entry = _admin_installed_entry(profile, tool)
+        if entry is None or entry.tool_id in seen:
+            continue
+        entries.append(entry)
+        seen.add(entry.tool_id)
+
+    if include_recommendations:
+        for recommendation in _recommended_tool_sequence(profile):
+            entry = _recommended_entry(profile, recommendation)
+            if entry is None or entry.tool_id in seen:
+                continue
+            entries.append(entry)
+            seen.add(entry.tool_id)
+
+    return [
+        _admin_catalog_entry(entry)
+        for entry in _sort_entries(profile, entries, scores={})
     ]
 
 
@@ -275,6 +331,19 @@ def _installed_entry(profile: MCPProfile, tool: Any) -> _ToolEntry | None:
 
     if not isinstance(tool, dict) or not _installed_tool_allowed(profile, tool):
         return None
+    return _installed_backend_entry(profile, tool)
+
+
+def _admin_installed_entry(profile: MCPProfile, tool: Any) -> _ToolEntry | None:
+    """Normalize one installed backend descriptor without policy visibility checks."""
+
+    if not isinstance(tool, dict):
+        return None
+    return _installed_backend_entry(profile, tool)
+
+
+def _installed_backend_entry(profile: MCPProfile, tool: dict[str, Any]) -> _ToolEntry | None:
+    """Normalize one installed backend descriptor."""
 
     tool_id = _tool_name(tool)
     if tool_id is None:
@@ -672,6 +741,29 @@ def _entry_payload(entry: _ToolEntry, *, score: float) -> dict[str, Any]:
     return payload
 
 
+def _admin_catalog_entry(entry: _ToolEntry) -> AdminToolCatalogEntry:
+    """Return a public admin catalog row from a normalized discovery entry."""
+
+    installation_status = (
+        "installed"
+        if entry.installation_status == _INSTALLED
+        else "not_installed"
+        if entry.installation_status == _RECOMMENDED_UNAVAILABLE
+        else entry.installation_status
+    )
+    return AdminToolCatalogEntry(
+        tool_id=entry.tool_id,
+        tool_name=entry.tool_name,
+        display_name=entry.display_name,
+        description=entry.description,
+        category=entry.category,
+        capabilities=entry.capabilities,
+        installation_status=installation_status,
+        source=entry.source,
+        metadata=deepcopy(entry.metadata) if entry.metadata is not None else None,
+    )
+
+
 def _exposure_priority(entry: _ToolEntry) -> int:
     """Return stable sort priority for direct, deferred, and unavailable tools."""
 
@@ -805,8 +897,10 @@ def _normalize_sort_text(value: str) -> str:
 
 
 __all__ = [
+    "AdminToolCatalogEntry",
     "describe_profile_tool",
     "find_direct_profile_backend_tool",
+    "list_admin_tool_catalog",
     "list_direct_profile_backend_tools",
     "list_profile_tools",
     "profile_has_deferred_installed_tools",

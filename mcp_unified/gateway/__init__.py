@@ -35,6 +35,12 @@ from .profile_governance import (
     PermissionChangeGovernor,
     PermissionChangeRequest,
 )
+from .policy_explain import (
+    GatewayPolicyExplainError,
+    GatewayPolicyExplainService,
+    PolicyExplainRequest,
+    ProfileToolPreviewRequest,
+)
 from .profiles import (
     GatewayProfileManagementError,
     GatewayProfileManager,
@@ -67,6 +73,8 @@ __all__ = [
     "GatewayExternalRuntimeManager",
     "ExternalRuntimeGatewayRuntime",
     "AllowPermissionChangeGovernor",
+    "GatewayPolicyExplainError",
+    "GatewayPolicyExplainService",
     "GatewayProfileBootstrap",
     "GatewayProfileBootstrapConfig",
     "GatewayProfileManagementError",
@@ -83,6 +91,8 @@ __all__ = [
     "PermissionChangeDecision",
     "PermissionChangeGovernor",
     "PermissionChangeRequest",
+    "PolicyExplainRequest",
+    "ProfileToolPreviewRequest",
     "ToolUseReportingGatewayRuntime",
     "ProfileAwareGatewayRuntime",
     "bootstrap_profile_gateway",

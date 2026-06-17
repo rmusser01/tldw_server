@@ -93,6 +93,61 @@ Build an aggregate tool-use report when reporting is enabled:
 mcp-unified-gateway tool-events report --group-by profile --config ./gateway.json
 ```
 
+## Policy Explanation
+
+`explain-policy` explains one profile/tool decision before execution. It reports
+the effective `allow`, `ask`, or `deny` outcome, reason code, contributing
+policy state, and redacted subjects for a hypothetical tool call.
+
+`preview-profile-tools` previews a profile's effective tool surface across
+installed tools and profile recommendations so operators can see which tools are
+visible, deferred, blocked, or unavailable before assigning a profile. Pass a
+`session_id` when previewing runtime-effective state that includes session-bound
+approval grants.
+
+Local CLI examples:
+
+```bash
+mcp-unified-gateway explain-policy --profile researcher --tool fs.patch \
+  --args-json-file ./patch-args.json --config ./gateway.json
+
+mcp-unified-gateway preview-profile-tools --profile researcher \
+  --category filesystem --config ./gateway.json
+```
+
+Remote CLI example:
+
+```bash
+export MCP_UNIFIED_GATEWAY_URL=http://127.0.0.1:8000/mcp
+export MCP_UNIFIED_GATEWAY_ADMIN_KEY=replace-with-admin-key
+
+printf '{"path":"src/app.py"}' | mcp-unified-gateway explain-policy \
+  --remote --profile researcher --tool fs.read --args-stdin
+
+mcp-unified-gateway preview-profile-tools --remote --profile researcher \
+  --category filesystem --session-id "$MCP_SESSION_ID" --exclude-denied
+```
+
+Admin API examples:
+
+```bash
+curl -sS -X POST "$MCP_UNIFIED_GATEWAY_URL/policy/explain" \
+  -H "X-MCP-Gateway-Admin-Key: $MCP_UNIFIED_GATEWAY_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"profile_id":"researcher","tool_name":"fs.read","arguments":{"path":"src/app.py"}}'
+
+curl -sS -X POST "$MCP_UNIFIED_GATEWAY_URL/profiles/researcher/tool-preview" \
+  -H "X-MCP-Gateway-Admin-Key: $MCP_UNIFIED_GATEWAY_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"category":"filesystem","include_denied":true,"session_id":"session-1"}'
+```
+
+Policy explanation and preview calls are audited when audit storage is
+configured, and responses redact or sanitize sensitive subjects. Raw tool
+arguments are not echoed back. Prefer `--args-json-file` or `--args-stdin` over
+inline `--args-json` for sensitive arguments so values are not exposed in shell
+history or process listings.
+
 ## Minimal Gateway Config
 
 ```json

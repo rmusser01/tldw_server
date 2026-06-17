@@ -322,6 +322,65 @@ runtime approvals. Runtime integrations for governed shell execution, WebFetch,
 WebSearch, LSP diagnostics, hooks, and admin policy simulation are separate
 follow-up tasks.
 
+### Explain Policy Decisions And Tool Previews
+
+Use `explain-policy` when you need to understand one effective profile/tool
+decision before execution. It returns the final `allow`, `ask`, or `deny`
+outcome, reason code, visibility, call state, relevant policy contributors, and
+redacted subjects for the hypothetical call.
+
+Use `preview-profile-tools` when you need to review a profile's effective tool
+surface. It previews installed tools and profile recommendations, including
+whether tools are visible, deferred, denied, or unavailable. Include a
+`session_id` when runtime-effective preview should account for session-scoped
+approval grants.
+
+Local CLI examples:
+
+```bash
+mcp-unified-gateway explain-policy --profile researcher --tool fs.patch \
+  --args-json-file ./patch-args.json --config ./gateway.json
+
+mcp-unified-gateway preview-profile-tools --profile researcher \
+  --category filesystem --config ./gateway.json
+```
+
+Remote CLI example:
+
+```bash
+export MCP_UNIFIED_GATEWAY_URL=http://127.0.0.1:8000/mcp
+export MCP_UNIFIED_GATEWAY_ADMIN_KEY=replace-with-admin-key
+
+printf '{"path":"src/app.py"}' | mcp-unified-gateway explain-policy \
+  --remote --profile researcher --tool fs.read --args-stdin
+
+mcp-unified-gateway preview-profile-tools --remote --profile researcher \
+  --category filesystem --session-id "$MCP_SESSION_ID" --exclude-denied
+```
+
+Direct admin API examples:
+
+```bash
+curl -sS -X POST "$MCP_UNIFIED_GATEWAY_URL/policy/explain" \
+  -H "X-MCP-Gateway-Admin-Key: $MCP_UNIFIED_GATEWAY_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"profile_id":"researcher","tool_name":"fs.read","arguments":{"path":"src/app.py"}}'
+
+curl -sS -X POST "$MCP_UNIFIED_GATEWAY_URL/profiles/researcher/tool-preview" \
+  -H "X-MCP-Gateway-Admin-Key: $MCP_UNIFIED_GATEWAY_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"category":"filesystem","include_denied":true,"session_id":"session-1"}'
+```
+
+Security notes:
+
+- These calls require the gateway admin policy-explain permission remotely.
+- Calls are audited when audit storage is configured.
+- Responses redact or sanitize sensitive subjects and do not echo raw arguments.
+- Prefer `--args-json-file` or `--args-stdin` over inline `--args-json` for
+  sensitive arguments so values are not exposed in shell history or process
+  listings.
+
 ### Git Inspection Tools
 
 The `tldw-server` MCP host can expose optional native Git inspection tools when
