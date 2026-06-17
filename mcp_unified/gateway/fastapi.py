@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
+from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import Any, Literal
@@ -147,6 +150,9 @@ _POLICY_EXPLAIN_STATUS_CODES = {
     "profile_resolution_failed": 503,
     "policy_evaluation_failed": 422,
 }
+POLICY_EXPLAIN_RATE_LIMIT_MAX_REQUESTS = 120
+POLICY_EXPLAIN_RATE_LIMIT_WINDOW_SECONDS = 60.0
+_POLICY_EXPLAIN_RATE_LIMIT_MAX_KEYS = 2048
 _EXTERNAL_SERVER_RESERVED_IDS = frozenset({"runtime", "refresh", "reconcile"})
 _PROFILE_MANAGEMENT_PUBLIC_ERRORS = {
     "permission_change_denied": "Permission change denied",
@@ -406,6 +412,63 @@ class _GatewayAdminAuthHandlingRoute(APIRoute):
         return route_handler
 
 
+class _GatewayAdminRouteRateLimiter:
+    """Small in-memory rate limiter for standalone admin route surfaces."""
+
+    def __init__(
+        self,
+        *,
+        max_requests: int,
+        window_seconds: float,
+        max_keys: int = _POLICY_EXPLAIN_RATE_LIMIT_MAX_KEYS,
+    ) -> None:
+        self.max_requests = max(1, int(max_requests))
+        self.window_seconds = max(1.0, float(window_seconds))
+        self.max_keys = max(1, int(max_keys))
+        self._hits_by_key: dict[str, deque[float]] = {}
+        self._lock = asyncio.Lock()
+
+    async def allow(self, key: str) -> bool:
+        """Return whether one request is within this limiter's window."""
+
+        now = time.monotonic()
+        cutoff = now - self.window_seconds
+        async with self._lock:
+            self._prune_locked(cutoff)
+            hits = self._hits_by_key.setdefault(key, deque())
+            while hits and hits[0] <= cutoff:
+                hits.popleft()
+            if len(hits) >= self.max_requests:
+                return False
+            hits.append(now)
+            if len(self._hits_by_key) > self.max_keys:
+                self._prune_oldest_key_locked()
+            return True
+
+    def _prune_locked(self, cutoff: float) -> None:
+        empty_keys: list[str] = []
+        for key, hits in self._hits_by_key.items():
+            while hits and hits[0] <= cutoff:
+                hits.popleft()
+            if not hits:
+                empty_keys.append(key)
+        for key in empty_keys:
+            del self._hits_by_key[key]
+
+    def _prune_oldest_key_locked(self) -> None:
+        oldest_key: str | None = None
+        oldest_hit: float | None = None
+        for key, hits in self._hits_by_key.items():
+            if not hits:
+                oldest_key = key
+                break
+            if oldest_hit is None or hits[0] < oldest_hit:
+                oldest_key = key
+                oldest_hit = hits[0]
+        if oldest_key is not None:
+            del self._hits_by_key[oldest_key]
+
+
 async def _parse_json_body(request: Request) -> Any:
     """Parse raw JSON so malformed bodies return JSON-RPC parse errors."""
 
@@ -434,6 +497,15 @@ def _client_host(request: Request | WebSocket) -> str | None:
     if request.client is None:
         return None
     return request.client.host
+
+
+def _policy_explain_rate_limit_key(
+    request: Request,
+    identity: GatewayAdminIdentity,
+) -> str:
+    """Return the admin identity/IP key used for policy explain throttling."""
+
+    return f"{identity.actor_id}:{_client_host(request) or 'unknown'}"
 
 
 def _request_metadata(request: Request | WebSocket) -> dict[str, Any]:
@@ -566,6 +638,19 @@ def _policy_explain_permission_error_response(
     )
     return JSONResponse(
         status_code=exc.status_code,
+        content=payload.model_dump(mode="json"),
+    )
+
+
+def _policy_explain_rate_limit_error_response() -> JSONResponse:
+    """Return the policy-explain error envelope for rate-limit denials."""
+
+    payload = PolicyExplainErrorResponse(
+        message="Policy explain rate limit exceeded",
+        reason_code="policy_explain_rate_limited",
+    )
+    return JSONResponse(
+        status_code=429,
         content=payload.model_dump(mode="json"),
     )
 
@@ -1428,6 +1513,26 @@ def _mount_policy_explain_routes(
             installed_tool_catalog=installed_tool_catalog,
         )
 
+    route_rate_limiter = _GatewayAdminRouteRateLimiter(
+        max_requests=POLICY_EXPLAIN_RATE_LIMIT_MAX_REQUESTS,
+        window_seconds=POLICY_EXPLAIN_RATE_LIMIT_WINDOW_SECONDS,
+    )
+
+    async def policy_explain_rate_limit_response(
+        request: Request,
+        identity: GatewayAdminIdentity,
+    ) -> JSONResponse | None:
+        key = _policy_explain_rate_limit_key(request, identity)
+        if await route_rate_limiter.allow(key):
+            return None
+        logger.warning(
+            "Gateway policy explain route rate limit exceeded "
+            "(actor_id={}, client_host={})",
+            identity.actor_id,
+            _client_host(request) or "unknown",
+        )
+        return _policy_explain_rate_limit_error_response()
+
     @router.post(
         "/policy/explain",
         response_model=PolicyExplainResponse,
@@ -1444,6 +1549,12 @@ def _mount_policy_explain_routes(
                 identity,
                 "mcp.policy.explain",
             )
+            rate_limit_response = await policy_explain_rate_limit_response(
+                request,
+                identity,
+            )
+            if rate_limit_response is not None:
+                return rate_limit_response
             payload = await _parse_policy_explain_json_body(
                 request,
                 reason_code="invalid_policy_explain_request",
@@ -1473,6 +1584,12 @@ def _mount_policy_explain_routes(
                 identity,
                 "mcp.policy.explain",
             )
+            rate_limit_response = await policy_explain_rate_limit_response(
+                request,
+                identity,
+            )
+            if rate_limit_response is not None:
+                return rate_limit_response
             payload = await _parse_policy_explain_json_body(
                 request,
                 reason_code="invalid_policy_preview_request",

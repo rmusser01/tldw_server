@@ -101,7 +101,9 @@ policy state, and redacted subjects for a hypothetical tool call.
 
 `preview-profile-tools` previews a profile's effective tool surface across
 installed tools and profile recommendations so operators can see which tools are
-visible, deferred, blocked, or unavailable before assigning a profile.
+visible, deferred, blocked, or unavailable before assigning a profile. Pass a
+`session_id` when previewing runtime-effective state that includes session-bound
+approval grants.
 
 Local CLI examples:
 
@@ -123,7 +125,7 @@ printf '{"path":"src/app.py"}' | mcp-unified-gateway explain-policy \
   --remote --profile researcher --tool fs.read --args-stdin
 
 mcp-unified-gateway preview-profile-tools --remote --profile researcher \
-  --category filesystem --exclude-denied
+  --category filesystem --session-id "$MCP_SESSION_ID" --exclude-denied
 ```
 
 Admin API examples:
@@ -137,7 +139,7 @@ curl -sS -X POST "$MCP_UNIFIED_GATEWAY_URL/policy/explain" \
 curl -sS -X POST "$MCP_UNIFIED_GATEWAY_URL/profiles/researcher/tool-preview" \
   -H "X-MCP-Gateway-Admin-Key: $MCP_UNIFIED_GATEWAY_ADMIN_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"category":"filesystem","include_denied":true}'
+  -d '{"category":"filesystem","include_denied":true,"session_id":"session-1"}'
 ```
 
 Policy explanation and preview calls are audited when audit storage is

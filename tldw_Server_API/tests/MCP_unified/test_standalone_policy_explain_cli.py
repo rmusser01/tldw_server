@@ -1,3 +1,5 @@
+"""Tests for the standalone MCP gateway policy explain CLI."""
+
 from __future__ import annotations
 
 import json
@@ -12,6 +14,8 @@ from mcp_unified.gateway.remote_admin import (
     RemoteGatewayAdminConfig,
     RemoteGatewayAdminError,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class _Response:
@@ -416,6 +420,8 @@ def test_gateway_cli_preview_profile_tools_maps_remote_payload_flags(
             "--exclude-denied",
             "--limit",
             "25",
+            "--session-id",
+            "session-1",
             "--static-policy-only",
         ]
     )
@@ -432,6 +438,7 @@ def test_gateway_cli_preview_profile_tools_maps_remote_payload_flags(
             "limit": 25,
             "mode": "static_policy_only",
             "profile_id": "backend-engineer",
+            "session_id": "session-1",
         },
         "profile_id": "backend-engineer",
     }
@@ -445,6 +452,7 @@ def test_gateway_cli_preview_profile_tools_maps_remote_payload_flags(
                 "limit": 25,
                 "mode": "static_policy_only",
                 "profile_id": "backend-engineer",
+                "session_id": "session-1",
             },
         )
     ]

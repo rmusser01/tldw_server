@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import re
@@ -9,10 +10,11 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
+from loguru import logger
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -31,8 +33,8 @@ from mcp_unified.profiles.subjects import (
 )
 from mcp_unified.storage.models import AuditEvent
 
-from .tool_discovery import list_admin_tool_catalog
 from .policy_simulation import simulate_tool_call_policy
+from .tool_discovery import list_admin_tool_catalog
 
 MAX_POLICY_EXPLAIN_ARGUMENT_BYTES = 64 * 1024
 POLICY_EXPLAIN_AUDIT_EVENT_TYPE = "policy.explain.requested"
@@ -47,6 +49,10 @@ STATIC_POLICY_ONLY_SKIPPED_CONTRIBUTORS = [
     "approval_grants",
     "runtime_availability",
 ]
+_COMMAND_TOOL_IDENTIFIER_PATTERN = re.compile(
+    r"^(Bash|Shell|PowerShell|Monitor)\s*\(.*\)$",
+    re.IGNORECASE,
+)
 
 _DEFAULTS_BY_OUTCOME: dict[str, dict[str, Any]] = {
     "deny": {
@@ -65,6 +71,7 @@ _DEFAULTS_BY_OUTCOME: dict[str, dict[str, Any]] = {
         "requires_approval": False,
     },
 }
+_TPreviewItem = TypeVar("_TPreviewItem")
 
 
 class PolicyExplainMode(str, Enum):
@@ -118,6 +125,7 @@ class ProfileToolPreviewRequest(BaseModel):
 
     profile_id: str
     capability: str | None = None
+    session_id: str | None = None
     mode: PolicyExplainMode = PolicyExplainMode.RUNTIME_EFFECTIVE
     limit: int = Field(default=200, ge=1, le=1000)
     cursor: str | None = None
@@ -130,7 +138,7 @@ class ProfileToolPreviewRequest(BaseModel):
     def _validate_profile_id(cls, value: str) -> str:
         return _required_text(value)
 
-    @field_validator("capability")
+    @field_validator("capability", "session_id")
     @classmethod
     def _normalize_capability(cls, value: str | None) -> str | None:
         return _optional_text(value)
@@ -393,7 +401,7 @@ class GatewayPolicyExplainService:
         )
         safe_tool_name = _redact_tool_identifier(request.tool_name)
         try:
-            simulator_result = simulate_tool_call_policy(
+            simulator_result = await _simulate_tool_call_policy_async(
                 profile,
                 request.tool_name,
                 request.arguments,
@@ -498,6 +506,11 @@ class GatewayPolicyExplainService:
             )
         except Exception:  # noqa: BLE001
             degraded_reasons.append("catalog_unavailable")
+            logger.opt(exception=True).warning(
+                "Policy preview catalog lookup failed for profile {}; "
+                "falling back to profile policy rows",
+                profile.id,
+            )
             catalog_rows = _policy_tool_rows_from_profile(profile)
         else:
             if (
@@ -510,35 +523,41 @@ class GatewayPolicyExplainService:
         try:
             argument_sensitive = _has_argument_sensitive_permission_rules(profile)
             filtered_rows = _filter_preview_catalog_rows(
-                profile,
                 catalog_rows,
-                capability=request.capability,
-                include_denied=request.include_denied,
                 include_recommendations=request.include_recommendations,
                 category=request.category,
             )
-            page_rows, next_cursor = _preview_page(
-                filtered_rows,
-                limit=request.limit,
-                cursor=request.cursor,
-            )
-            tools = [
-                _profile_tool_preview_entry(
+            runtime_effective = request.mode == PolicyExplainMode.RUNTIME_EFFECTIVE
+            preview_entries: list[ProfileToolPreviewEntry] = []
+            for row in filtered_rows:
+                entry, entry_degraded_reasons = await _profile_tool_preview_entry(
                     profile,
                     row.tool_name,
                     capability=request.capability,
                     argument_sensitive=argument_sensitive,
                     installation_status=row.installation_status,
+                    runtime_effective=runtime_effective,
+                    policy_grant_store=(
+                        self.policy_grant_store if runtime_effective else None
+                    ),
+                    session_id=request.session_id if runtime_effective else None,
                 )
-                for row in page_rows
-            ]
+                for degraded_reason in entry_degraded_reasons:
+                    _append_degraded_reason(degraded_reasons, degraded_reason)
+                if request.include_denied or entry.outcome != "deny":
+                    preview_entries.append(entry)
+            page_tools, next_cursor = _preview_page(
+                preview_entries,
+                limit=request.limit,
+                cursor=request.cursor,
+            )
             response = ProfileToolPreviewResponse(
                 profile_id=profile.id,
                 mode=request.mode,
                 truncated=next_cursor is not None,
                 next_cursor=next_cursor,
-                tools=tools,
-                summary=_preview_summary(tools),
+                tools=page_tools,
+                summary=_preview_summary(page_tools),
                 degraded=bool(degraded_reasons),
                 degraded_reasons=degraded_reasons,
                 skipped_contributors=_skipped_contributors_for_mode(request.mode),
@@ -799,40 +818,99 @@ def _redacted_rule(rule: Mapping[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _profile_tool_preview_entry(
+async def _simulate_tool_call_policy_async(
+    profile: MCPProfile,
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    capability: str | None,
+    policy_grant_store: Any | None,
+    session_id: str | None,
+) -> Mapping[str, Any]:
+    return await asyncio.to_thread(
+        simulate_tool_call_policy,
+        profile,
+        tool_name,
+        arguments,
+        capability=capability,
+        policy_grant_store=policy_grant_store,
+        session_id=session_id,
+    )
+
+
+async def _profile_tool_preview_entry(
     profile: MCPProfile,
     tool_name: str,
     *,
     capability: str | None,
     argument_sensitive: bool,
     installation_status: str = "unknown",
-) -> ProfileToolPreviewEntry:
+    runtime_effective: bool,
+    policy_grant_store: Any | None,
+    session_id: str | None,
+) -> tuple[ProfileToolPreviewEntry, list[str]]:
     explanation = explain_profile_tool_decision(
         profile,
         tool_name,
         capability=capability,
     )
-    if argument_sensitive and explanation.final_outcome == "allow":
-        return ProfileToolPreviewEntry(
-            tool_name=_redact_tool_identifier(tool_name),
-            outcome="ask",
-            reason_code="argument_sensitive_policy",
-            visibility="deferred",
-            call_state="deferred",
-            requires_approval=False,
-            installation_status=installation_status,
+    degraded_reasons: list[str] = []
+    if runtime_effective:
+        simulator_result = await _simulate_tool_call_policy_async(
+            profile,
+            tool_name,
+            {},
+            capability=capability,
+            policy_grant_store=policy_grant_store,
+            session_id=session_id,
         )
-    return ProfileToolPreviewEntry(
-        tool_name=_redact_tool_identifier(tool_name),
-        outcome=explanation.final_outcome,
-        reason_code=explanation.reason_code,
-        visibility=_approved_visibility(
+        effective_decision = _effective_decision_from_simulation(
+            simulator_result,
+            tool_policy_outcome=explanation.final_outcome,
+            tool_policy_reason_code=explanation.reason_code,
+        )
+        degraded_reason = effective_decision["degraded_reason"]
+        if degraded_reason is not None:
+            degraded_reasons.append(degraded_reason)
+        outcome = effective_decision["final_outcome"]
+        reason_code = effective_decision["reason_code"]
+        visibility = effective_decision["visibility"]
+        call_state = effective_decision["call_state"]
+        requires_approval = effective_decision["requires_approval"]
+    else:
+        outcome = explanation.final_outcome
+        reason_code = explanation.reason_code
+        visibility = _approved_visibility(
             explanation.visibility,
             outcome=explanation.final_outcome,
+        )
+        call_state = explanation.call_state
+        requires_approval = explanation.requires_approval
+
+    if argument_sensitive and outcome == "allow":
+        return (
+            ProfileToolPreviewEntry(
+                tool_name=_redact_tool_identifier(tool_name),
+                outcome="ask",
+                reason_code="argument_sensitive_policy",
+                visibility="deferred",
+                call_state="deferred",
+                requires_approval=False,
+                installation_status=installation_status,
+            ),
+            degraded_reasons,
+        )
+    return (
+        ProfileToolPreviewEntry(
+            tool_name=_redact_tool_identifier(tool_name),
+            outcome=outcome,
+            reason_code=reason_code,
+            visibility=visibility,
+            call_state=call_state,
+            requires_approval=requires_approval,
+            installation_status=installation_status,
         ),
-        call_state=explanation.call_state,
-        requires_approval=explanation.requires_approval,
-        installation_status=installation_status,
+        degraded_reasons,
     )
 
 
@@ -916,11 +994,11 @@ def _preview_summary(
 
 
 def _preview_page(
-    rows: list[_PreviewCatalogRow],
+    rows: list[_TPreviewItem],
     *,
     limit: int,
     cursor: str | None,
-) -> tuple[list[_PreviewCatalogRow], str | None]:
+) -> tuple[list[_TPreviewItem], str | None]:
     start = int(cursor) if cursor is not None else 0
     if start >= len(rows):
         return [], None
@@ -1001,11 +1079,8 @@ def _preview_row_from_catalog_item(item: Any) -> _PreviewCatalogRow | None:
 
 
 def _filter_preview_catalog_rows(
-    profile: MCPProfile,
     rows: list[_PreviewCatalogRow],
     *,
-    capability: str | None,
-    include_denied: bool,
     include_recommendations: bool,
     category: str | None,
 ) -> list[_PreviewCatalogRow]:
@@ -1018,13 +1093,6 @@ def _filter_preview_catalog_rows(
         ):
             continue
         if not include_recommendations and row.installation_status == "not_installed":
-            continue
-        explanation = explain_profile_tool_decision(
-            profile,
-            row.tool_name,
-            capability=capability,
-        )
-        if not include_denied and explanation.final_outcome == "deny":
             continue
         filtered.append(row)
     return filtered
@@ -1061,6 +1129,8 @@ def _catalog_items(catalog: Any) -> Iterable[Any]:
 
 def _policy_tool_names_from_profile(profile: MCPProfile) -> list[str]:
     policy_document = profile.policy_document
+    if policy_document is None:
+        return []
     policy_tools = set(policy_document.allowed_tools or [])
     policy_tools.update(policy_document.denied_tools or [])
     return sorted(tool_name for tool_name in policy_tools if isinstance(tool_name, str))
@@ -1143,6 +1213,11 @@ def _skipped_contributors_for_mode(mode: PolicyExplainMode) -> list[str]:
     return list(STATIC_POLICY_ONLY_SKIPPED_CONTRIBUTORS)
 
 
+def _append_degraded_reason(reasons: list[str], reason: str | None) -> None:
+    if reason is not None and reason not in reasons:
+        reasons.append(reason)
+
+
 def _approved_visibility(
     value: Any,
     *,
@@ -1169,9 +1244,9 @@ def _redact_tool_identifier(tool_name: str) -> str:
     stripped = tool_name.strip()
     if "\n" in stripped or "\r" in stripped:
         return "[redacted-tool]"
-    for command_tool in ("Bash", "Shell", "PowerShell", "Monitor"):
-        if stripped.startswith(f"{command_tool}(") and stripped.endswith(")"):
-            return f"{command_tool}([redacted-command])"
+    command_match = _COMMAND_TOOL_IDENTIFIER_PATTERN.match(stripped)
+    if command_match is not None:
+        return f"{command_match.group(1)}([redacted-command])"
     return stripped
 
 

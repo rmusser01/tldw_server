@@ -1,3 +1,5 @@
+"""Tests for the standalone MCP gateway policy explain admin API."""
+
 from __future__ import annotations
 
 import json
@@ -6,6 +8,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+import mcp_unified.gateway.fastapi as gateway_fastapi
 from mcp_unified.gateway.admin_auth import (
     DefaultGatewayAdminPermissionChecker,
     GatewayAdminAuthConfig,
@@ -20,6 +23,8 @@ from mcp_unified.gateway.fastapi import create_gateway_app
 from mcp_unified.gateway.policy_explain import GatewayPolicyExplainService
 from mcp_unified.profiles import MCPProfile, ProfilePolicy
 from mcp_unified.storage.models import AuditEvent
+
+pytestmark = pytest.mark.unit
 
 
 class _RequestStub:
@@ -90,7 +95,6 @@ def test_default_admin_identity_has_policy_explain_permission_when_auth_disabled
     assert "mcp.policy.explain" in identity.permissions
 
 
-@pytest.mark.asyncio
 async def test_gateway_admin_identity_dependency_returns_local_admin_when_auth_disabled() -> None:
     dependency = gateway_admin_identity_dependency(GatewayAdminAuthConfig())
 
@@ -99,7 +103,6 @@ async def test_gateway_admin_identity_dependency_returns_local_admin_when_auth_d
     assert identity == GatewayAdminIdentity.local_admin()
 
 
-@pytest.mark.asyncio
 async def test_gateway_admin_identity_dependency_distinguishes_authenticated_admin() -> None:
     dependency = gateway_admin_identity_dependency(
         GatewayAdminAuthConfig(enabled=True, api_key="secret")
@@ -124,7 +127,6 @@ async def test_gateway_admin_identity_dependency_distinguishes_authenticated_adm
     assert invalid.value.reason_code == "admin_auth_invalid"
 
 
-@pytest.mark.asyncio
 async def test_permission_checker_denies_missing_policy_explain_permission() -> None:
     checker = DefaultGatewayAdminPermissionChecker()
     identity = GatewayAdminIdentity(actor_id="viewer", permissions=frozenset())
@@ -204,6 +206,44 @@ def test_policy_explain_route_succeeds_and_audits_with_valid_admin_key() -> None
     assert audit.events[0].target_id == "fs.patch"
 
 
+def test_profile_tool_preview_route_applies_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gateway_fastapi, "POLICY_EXPLAIN_RATE_LIMIT_MAX_REQUESTS", 1)
+    monkeypatch.setattr(
+        gateway_fastapi,
+        "POLICY_EXPLAIN_RATE_LIMIT_WINDOW_SECONDS",
+        60.0,
+    )
+    audit = _MemoryAuditStore()
+    app = create_gateway_app(
+        _PolicyExplainRuntime(),
+        enable_policy_explain_management=True,
+        policy_explain_profile_resolver=lambda profile_id: _policy_profile(),
+        policy_explain_audit_store=audit,
+    )
+
+    with TestClient(app) as client:
+        first_response = client.post(
+            "/mcp/profiles/backend-engineer/tool-preview",
+            json={},
+        )
+        second_response = client.post(
+            "/mcp/profiles/backend-engineer/tool-preview",
+            json={},
+        )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 429
+    assert second_response.json() == {
+        "ok": False,
+        "message": "Policy explain rate limit exceeded",
+        "reason_code": "policy_explain_rate_limited",
+        "details": {},
+    }
+    assert len(audit.events) == 1
+
+
 def test_profile_tool_preview_route_includes_denied_installed_runtime_tool() -> None:
     audit = _MemoryAuditStore()
     app = create_gateway_app(
@@ -230,7 +270,6 @@ def test_profile_tool_preview_route_includes_denied_installed_runtime_tool() -> 
     assert audit.events[0].event_type == "policy.preview_tools.requested"
 
 
-@pytest.mark.asyncio
 async def test_profile_tool_preview_route_uses_unfiltered_profile_runtime_catalog() -> None:
     audit = _MemoryAuditStore()
     bootstrap = await bootstrap_profile_gateway(

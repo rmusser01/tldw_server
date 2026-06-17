@@ -1467,6 +1467,9 @@ def _preview_profile_tools_payload_from_args(args: argparse.Namespace) -> dict[s
     category = _optional_cli_text(args.category, field="category")
     if category is not None:
         payload["category"] = category
+    session_id = _optional_cli_text(args.session_id, field="session_id")
+    if session_id is not None:
+        payload["session_id"] = session_id
     if args.limit is not None:
         payload["limit"] = args.limit
     return payload
