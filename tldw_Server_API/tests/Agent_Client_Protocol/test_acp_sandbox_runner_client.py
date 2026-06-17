@@ -318,6 +318,73 @@ async def test_standard_runner_create_session_retries_without_agent_type_then_mc
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_standard_runner_close_session_uses_standard_acp_close() -> None:
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, payload))
+            if method == "session/close":
+                return _CallResult({})
+            raise AssertionError(f"unexpected method: {method}")
+
+    runner = ACPRunnerClient(ACPRunnerConfig(command="echo"))
+    fake_client = _FakeClient()
+    runner._client = fake_client
+    runner._updates["session-close"] = asyncio.Queue()
+    runner._session_owners["session-close"] = 7
+
+    await runner.close_session("session-close")
+
+    assert fake_client.calls == [
+        ("session/close", {"sessionId": "session-close"}),
+    ]
+    assert "session-close" not in runner._updates
+    assert "session-close" not in runner._session_owners
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_standard_runner_close_session_falls_back_to_private_runner_close() -> None:
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, payload))
+            if method == "session/close":
+                raise ACPResponseError("method not found")
+            if method == "_tldw/session/close":
+                return _CallResult({})
+            raise AssertionError(f"unexpected method: {method}")
+
+    runner = ACPRunnerClient(ACPRunnerConfig(command="echo"))
+    fake_client = _FakeClient()
+    runner._client = fake_client
+
+    await runner.close_session("session-close-legacy")
+
+    assert fake_client.calls == [
+        ("session/close", {"sessionId": "session-close-legacy"}),
+        ("_tldw/session/close", {"sessionId": "session-close-legacy"}),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_create_session_rejects_unavailable_vz_macos_runtime(monkeypatch) -> None:
     manager = ACPSandboxRunnerManager(
         ACPSandboxConfig(

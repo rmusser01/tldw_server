@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from enum import Enum
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, ClassVar, Literal, Union
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 
@@ -63,6 +64,11 @@ _LEGACY_ENTRYPOINT_STRATEGY_ALIASES = {
 def _coerce_entrypoint_strategy(value: Any) -> Any:
     """Import legacy ACP strategy aliases before public schema validation."""
     return _LEGACY_ENTRYPOINT_STRATEGY_ALIASES.get(str(value), value)
+
+
+def _is_absolute_cross_platform_path(value: str) -> bool:
+    candidate = str(value or "").strip()
+    return PurePosixPath(candidate).is_absolute() or PureWindowsPath(candidate).is_absolute()
 
 
 class ACPAgentEntrypointStatus(BaseModel):
@@ -332,16 +338,60 @@ class ACPMCPServerType(str, Enum):
     """MCP server connection types."""
     WEBSOCKET = "websocket"
     STDIO = "stdio"
+    HTTP = "http"
+    SSE = "sse"
+
+
+class ACPNameValuePair(BaseModel):
+    """ACP name/value pair used by env and header arrays."""
+    name: str = Field(..., min_length=1)
+    value: str = Field(...)
 
 
 class ACPMCPServerConfig(BaseModel):
     """Configuration for an MCP server."""
+    model_config = ConfigDict(use_enum_values=True)
+
     name: str = Field(..., description="Server identifier/name")
     type: ACPMCPServerType = Field(..., description="Connection type")
-    url: str | None = Field(default=None, description="WebSocket URL (for websocket type)")
+    url: str | None = Field(default=None, description="URL (for websocket, http, or sse type)")
     command: str | None = Field(default=None, description="Command to execute (for stdio type)")
     args: list[str] | None = Field(default=None, description="Command arguments (for stdio type)")
-    env: dict[str, str] | None = Field(default=None, description="Environment variables")
+    env: list[ACPNameValuePair] | None = Field(
+        default=None,
+        description="Environment variables as ACP name/value pairs",
+    )
+    headers: list[ACPNameValuePair] | None = Field(
+        default=None,
+        description="HTTP headers as ACP name/value pairs",
+    )
+
+    @field_validator("env", "headers", mode="before")
+    @classmethod
+    def normalize_name_value_pairs(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return [
+                {"name": str(name), "value": str(raw_value)}
+                for name, raw_value in value.items()
+            ]
+        return value
+
+    @model_validator(mode="after")
+    def validate_transport_shape(self) -> "ACPMCPServerConfig":
+        transport = self.type.value if isinstance(self.type, ACPMCPServerType) else str(self.type)
+        if transport == ACPMCPServerType.STDIO.value:
+            if not self.command or not _is_absolute_cross_platform_path(self.command):
+                raise ValueError("stdio MCP server command must be an absolute path")
+            return self
+        if transport in {
+            ACPMCPServerType.WEBSOCKET.value,
+            ACPMCPServerType.HTTP.value,
+            ACPMCPServerType.SSE.value,
+        }:
+            if not self.url:
+                raise ValueError(f"{transport} MCP server url is required")
+            return self
+        return self
 
 
 # -----------------------------------------------------------------------------
@@ -519,6 +569,13 @@ class ACPSessionNewRequest(BaseModel):
         default=None,
         description="Optional materialized scope snapshot identifier for sandbox tenancy metadata",
     )
+
+    @field_validator("cwd")
+    @classmethod
+    def validate_cwd_absolute(cls, value: str) -> str:
+        if not _is_absolute_cross_platform_path(value):
+            raise ValueError("cwd must be an absolute path")
+        return value
 
 
 class ACPSessionNewResponse(BaseModel):
