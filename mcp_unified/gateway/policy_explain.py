@@ -333,6 +333,36 @@ class GatewayPolicyExplainService:
         self.installed_tool_catalog = installed_tool_catalog
         self.policy_grant_store = policy_grant_store
 
+    def with_request_context(
+        self,
+        *,
+        actor_id: str,
+        installed_tool_catalog: Any | None = None,
+    ) -> "GatewayPolicyExplainService":
+        """Return a request-bound copy without mutating this service instance.
+
+        Explicit service catalog providers keep precedence. The route runtime
+        installed catalog is only applied when the injected service has no
+        admin, installed, or generic catalog provider of its own.
+        """
+
+        effective_installed_tool_catalog = self.installed_tool_catalog
+        if (
+            effective_installed_tool_catalog is None
+            and self.admin_tool_catalog_provider is None
+            and self.catalog_provider is None
+        ):
+            effective_installed_tool_catalog = installed_tool_catalog
+        return GatewayPolicyExplainService(
+            profile_resolver=self.profile_resolver,
+            audit_store=self.audit_store,
+            actor_id=actor_id,
+            catalog_provider=self.catalog_provider,
+            admin_tool_catalog_provider=self.admin_tool_catalog_provider,
+            installed_tool_catalog=effective_installed_tool_catalog,
+            policy_grant_store=self.policy_grant_store,
+        )
+
     async def explain_tool_call(
         self,
         request: PolicyExplainRequest,

@@ -16,6 +16,7 @@ from mcp_unified.gateway.admin_auth import (
     gateway_admin_permission_error_response,
 )
 from mcp_unified.gateway.fastapi import create_gateway_app
+from mcp_unified.gateway.policy_explain import GatewayPolicyExplainService
 from mcp_unified.profiles import MCPProfile, ProfilePolicy
 from mcp_unified.storage.models import AuditEvent
 
@@ -221,6 +222,68 @@ def test_profile_tool_preview_route_includes_denied_installed_runtime_tool() -> 
     assert tools_by_name["shell.exec"]["visibility"] == "hidden"
     assert tools_by_name["shell.exec"]["installation_status"] == "installed"
     assert audit.events[0].event_type == "policy.preview_tools.requested"
+
+
+def test_profile_tool_preview_route_rejects_conflicting_body_profile_id() -> None:
+    audit = _MemoryAuditStore()
+    app = create_gateway_app(
+        _PolicyExplainRuntime(),
+        enable_policy_explain_management=True,
+        policy_explain_profile_resolver=lambda profile_id: _policy_profile(),
+        policy_explain_audit_store=audit,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/profiles/backend-engineer/tool-preview",
+            json={"profile_id": "frontend-engineer"},
+        )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "ok": False,
+        "message": "Invalid policy preview request",
+        "reason_code": "invalid_policy_preview_request",
+        "details": {},
+    }
+    assert audit.events == []
+
+
+def test_injected_policy_explain_service_uses_route_identity_and_runtime_catalog() -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: _policy_profile(),
+        audit_store=audit,
+    )
+    app = create_gateway_app(
+        _PolicyExplainRuntime(),
+        enable_policy_explain_management=True,
+        policy_explain_service=service,
+        admin_auth=GatewayAdminAuthConfig(enabled=True, api_key="secret"),
+    )
+
+    with TestClient(app) as client:
+        explain_response = client.post(
+            "/mcp/policy/explain",
+            headers={"X-MCP-Gateway-Admin-Key": "secret"},
+            json={"profile_id": "backend-engineer", "tool_name": "fs.patch"},
+        )
+        preview_response = client.post(
+            "/mcp/profiles/backend-engineer/tool-preview",
+            headers={"X-MCP-Gateway-Admin-Key": "secret"},
+            json={},
+        )
+
+    assert explain_response.status_code == 200
+    assert audit.events[0].event_type == "policy.explain.requested"
+    assert audit.events[0].actor_id == "gateway-admin"
+    assert preview_response.status_code == 200
+    preview_payload = preview_response.json()
+    tools_by_name = {tool["tool_name"]: tool for tool in preview_payload["tools"]}
+    assert preview_payload["degraded"] is False
+    assert tools_by_name["shell.exec"]["installation_status"] == "installed"
+    assert audit.events[1].event_type == "policy.preview_tools.requested"
+    assert audit.events[1].actor_id == "gateway-admin"
 
 
 def test_policy_explain_route_maps_permission_denial_to_stable_json_envelope() -> None:

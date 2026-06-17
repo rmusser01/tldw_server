@@ -570,6 +570,26 @@ def _policy_explain_permission_error_response(
     )
 
 
+def _profile_tool_preview_payload_for_path(
+    payload: Any,
+    *,
+    profile_id: str,
+) -> Any:
+    """Return preview payload with a validated path-canonical profile id."""
+
+    if not isinstance(payload, Mapping):
+        return payload
+    body_profile_id = payload.get("profile_id")
+    if body_profile_id is None:
+        return {**payload, "profile_id": profile_id}
+    if body_profile_id == profile_id:
+        return payload
+    raise GatewayPolicyExplainError(
+        "Invalid policy preview request",
+        reason_code="invalid_policy_preview_request",
+    )
+
+
 def _profile_management_error_payload(exc: GatewayProfileManagementError) -> dict[str, Any]:
     """Return a public profile-management error payload without raw exception text."""
 
@@ -1391,7 +1411,10 @@ def _mount_policy_explain_routes(
         identity: GatewayAdminIdentity,
     ) -> GatewayPolicyExplainService:
         if policy_explain_service is not None:
-            return policy_explain_service
+            return policy_explain_service.with_request_context(
+                actor_id=identity.actor_id,
+                installed_tool_catalog=installed_tool_catalog,
+            )
         return GatewayPolicyExplainService(
             profile_resolver=policy_explain_profile_resolver,
             audit_store=policy_explain_audit_store,
@@ -1448,8 +1471,10 @@ def _mount_policy_explain_routes(
                 request,
                 reason_code="invalid_policy_preview_request",
             )
-            if isinstance(payload, Mapping):
-                payload = {**payload, "profile_id": profile_id}
+            payload = _profile_tool_preview_payload_for_path(
+                payload,
+                profile_id=profile_id,
+            )
             return await service_for_identity(identity).preview_profile_tools(
                 parse_profile_tool_preview_request(payload)
             )
