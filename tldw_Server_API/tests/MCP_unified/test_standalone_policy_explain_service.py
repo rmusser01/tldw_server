@@ -334,6 +334,33 @@ async def test_explain_tool_call_redacts_url_shaped_path_subjects() -> None:
 
 
 @pytest.mark.asyncio
+async def test_explain_tool_call_redacts_path_subject_query_fragment_and_userinfo() -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: _profile(),
+        audit_store=audit,
+        actor_id="operator-1",
+    )
+
+    response = await service.explain_tool_call(
+        PolicyExplainRequest(
+            profile_id="backend-engineer",
+            tool_name="fs.patch",
+            arguments={
+                "path": "user:pass@/Users/example/project/src/app.py?token=secret#frag",
+            },
+        )
+    )
+
+    rendered = response.model_dump_json()
+    audit_payload = str(audit.events[0].payload)
+    for leaked_value in ("token=secret", "frag", "user:pass", "/Users/example"):
+        assert leaked_value not in rendered
+        assert leaked_value not in audit_payload
+    assert response.subjects[0].value == ".../app.py"
+
+
+@pytest.mark.asyncio
 async def test_explain_tool_call_redacts_file_uri_domain_subject() -> None:
     audit = _MemoryAuditStore()
     service = GatewayPolicyExplainService(
@@ -488,6 +515,93 @@ async def test_explain_tool_call_unknown_simulator_status_fails_closed(
     assert response.degraded is True
     assert "unknown_policy_status" in response.degraded_reasons
     assert audit.events[0].payload["final_outcome"] == "deny"
+
+
+def test_effective_decision_keeps_explicit_denial_over_legacy_approval_status() -> None:
+    decision = policy_explain._effective_decision_from_simulation(
+        {
+            "legacy_policy": {
+                "status": "approval_required",
+                "reason_code": "approval_required",
+            },
+            "overall": {
+                "status": "denied",
+                "reason_code": "denied_by_hook",
+            },
+            "denial": {
+                "reason_code": "denied_by_hook",
+            },
+        },
+        tool_policy_outcome="ask",
+        tool_policy_reason_code="approval_required",
+    )
+
+    assert decision["final_outcome"] == "deny"
+    assert decision["reason_code"] == "denied_by_hook"
+    assert decision["visibility"] == "hidden"
+    assert decision["call_state"] == "blocked"
+
+
+def test_effective_decision_preserves_approval_required_without_denial_payload() -> None:
+    decision = policy_explain._effective_decision_from_simulation(
+        {
+            "legacy_policy": {
+                "status": "approval_required",
+                "reason_code": "approval_required",
+            },
+            "overall": {
+                "status": "denied",
+                "reason_code": "approval_required",
+            },
+            "denial": None,
+        },
+        tool_policy_outcome="ask",
+        tool_policy_reason_code="approval_required",
+    )
+
+    assert decision["final_outcome"] == "ask"
+    assert decision["reason_code"] == "approval_required"
+    assert decision["visibility"] == "visible"
+    assert decision["call_state"] == "approval_required"
+
+
+def test_parse_policy_explain_request_redacts_validation_errors() -> None:
+    raw_path = "/Users/example/project/src/app.py?token=secret#frag"
+
+    with pytest.raises(GatewayPolicyExplainError) as exc_info:
+        policy_explain.parse_policy_explain_request(
+            {
+                "profile_id": "backend-engineer",
+                "tool_name": "fs.patch",
+                "arguments": {
+                    "path": raw_path,
+                    "blob": "x"
+                    * (policy_explain.MAX_POLICY_EXPLAIN_ARGUMENT_BYTES + 1),
+                },
+            }
+        )
+
+    assert exc_info.value.reason_code == "invalid_policy_explain_request"
+    rendered = exc_info.value.to_payload().model_dump_json()
+    for leaked_value in ("/Users/example", "token=secret", "frag"):
+        assert leaked_value not in str(exc_info.value)
+        assert leaked_value not in rendered
+
+
+def test_parse_profile_tool_preview_request_redacts_validation_errors() -> None:
+    with pytest.raises(GatewayPolicyExplainError) as exc_info:
+        policy_explain.parse_profile_tool_preview_request(
+            {
+                "profile_id": "/Users/example/project?token=secret#frag",
+                "limit": 1001,
+            }
+        )
+
+    assert exc_info.value.reason_code == "invalid_policy_preview_request"
+    rendered = exc_info.value.to_payload().model_dump_json()
+    for leaked_value in ("/Users/example", "token=secret", "frag"):
+        assert leaked_value not in str(exc_info.value)
+        assert leaked_value not in rendered
 
 
 @pytest.mark.asyncio
@@ -713,6 +827,12 @@ async def test_preview_requires_catalog_for_complete_denied_counts() -> None:
         "allow": 1,
         "ask": 0,
         "deny": 1,
+        "visible": 1,
+        "hidden": 1,
+        "deferred": 0,
+        "installed": 0,
+        "not_installed": 0,
+        "unknown_installation": 2,
     }
 
 
@@ -739,6 +859,42 @@ async def test_preview_defers_argument_sensitive_permission_rules() -> None:
     assert entry.call_state == "deferred"
     assert entry.reason_code == "argument_sensitive_policy"
     assert response.summary.ask == 1
+    assert response.summary.deferred == 1
+    assert response.summary.unknown_installation == 1
+
+
+@pytest.mark.asyncio
+async def test_preview_profile_tools_paginates_and_reports_next_cursor() -> None:
+    audit = _MemoryAuditStore()
+    tool_names = [f"tool.{index:03d}" for index in range(5)]
+    profile = MCPProfile(
+        id="catalog-profile",
+        name="Catalog Profile",
+        policy_document=ProfilePolicy(allowed_tools=tool_names),
+    )
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: profile,
+        audit_store=audit,
+        actor_id="operator-1",
+        catalog_provider=lambda: [{"tool_id": tool_name} for tool_name in tool_names],
+    )
+
+    response = await service.preview_profile_tools(
+        ProfileToolPreviewRequest(
+            profile_id="catalog-profile",
+            limit=2,
+            cursor="2",
+        )
+    )
+
+    assert [tool.tool_name for tool in response.tools] == ["tool.002", "tool.003"]
+    assert response.summary.total == 2
+    assert response.summary.visible == 2
+    assert response.summary.unknown_installation == 2
+    assert response.truncated is True
+    assert response.next_cursor == "4"
+    assert audit.events[0].payload["truncated"] is True
+    assert audit.events[0].payload["next_cursor"] == "4"
 
 
 @pytest.mark.asyncio

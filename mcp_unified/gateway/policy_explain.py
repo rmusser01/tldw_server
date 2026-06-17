@@ -12,7 +12,14 @@ from typing import Any, Literal
 from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from mcp_unified.interfaces.storage import AuditStore
 from mcp_unified.profiles import MCPProfile, explain_profile_tool_decision
@@ -68,7 +75,7 @@ class PolicyExplainMode(str, Enum):
 class PolicyExplainRequest(BaseModel):
     """Request to explain one profile/tool policy decision."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     profile_id: str
     tool_name: str
@@ -105,11 +112,13 @@ class PolicyExplainRequest(BaseModel):
 class ProfileToolPreviewRequest(BaseModel):
     """Request to preview profile decisions across a tool catalog."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     profile_id: str
     capability: str | None = None
     mode: PolicyExplainMode = PolicyExplainMode.RUNTIME_EFFECTIVE
+    limit: int = Field(default=200, ge=1, le=1000)
+    cursor: str | None = None
 
     @field_validator("profile_id")
     @classmethod
@@ -120,6 +129,16 @@ class ProfileToolPreviewRequest(BaseModel):
     @classmethod
     def _normalize_capability(cls, value: str | None) -> str | None:
         return _optional_text(value)
+
+    @field_validator("cursor")
+    @classmethod
+    def _normalize_cursor(cls, value: str | None) -> str | None:
+        cursor = _optional_text(value)
+        if cursor is None:
+            return None
+        if not cursor.isdigit():
+            raise ValueError("cursor must be a non-negative integer offset")
+        return cursor
 
 
 class PolicyExplainSubject(BaseModel):
@@ -192,6 +211,12 @@ class ProfileToolPreviewSummary(BaseModel):
     allow: int = 0
     ask: int = 0
     deny: int = 0
+    visible: int = 0
+    hidden: int = 0
+    deferred: int = 0
+    installed: int = 0
+    not_installed: int = 0
+    unknown_installation: int = 0
 
 
 class ProfileToolPreviewResponse(BaseModel):
@@ -204,6 +229,7 @@ class ProfileToolPreviewResponse(BaseModel):
     mode: PolicyExplainMode
     evaluated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     truncated: bool = False
+    next_cursor: str | None = None
     tools: list[ProfileToolPreviewEntry] = Field(default_factory=list)
     summary: ProfileToolPreviewSummary = Field(default_factory=ProfileToolPreviewSummary)
     degraded: bool = False
@@ -237,6 +263,30 @@ class GatewayPolicyExplainError(RuntimeError):
             message=str(self),
             reason_code=self.reason_code,
         )
+
+
+def parse_policy_explain_request(payload: Any) -> PolicyExplainRequest:
+    """Parse a policy explain request without leaking invalid input in errors."""
+
+    try:
+        return PolicyExplainRequest.model_validate(payload)
+    except ValidationError:
+        raise GatewayPolicyExplainError(
+            "Invalid policy explain request",
+            reason_code="invalid_policy_explain_request",
+        ) from None
+
+
+def parse_profile_tool_preview_request(payload: Any) -> ProfileToolPreviewRequest:
+    """Parse a profile tool preview request without leaking invalid input in errors."""
+
+    try:
+        return ProfileToolPreviewRequest.model_validate(payload)
+    except ValidationError:
+        raise GatewayPolicyExplainError(
+            "Invalid policy preview request",
+            reason_code="invalid_policy_preview_request",
+        ) from None
 
 
 class GatewayPolicyExplainService:
@@ -396,6 +446,11 @@ class GatewayPolicyExplainService:
 
         try:
             argument_sensitive = _has_argument_sensitive_permission_rules(profile)
+            page_tool_names, next_cursor = _preview_page(
+                tool_names,
+                limit=request.limit,
+                cursor=request.cursor,
+            )
             tools = [
                 _profile_tool_preview_entry(
                     profile,
@@ -403,11 +458,13 @@ class GatewayPolicyExplainService:
                     capability=request.capability,
                     argument_sensitive=argument_sensitive,
                 )
-                for tool_name in tool_names
+                for tool_name in page_tool_names
             ]
             response = ProfileToolPreviewResponse(
                 profile_id=profile.id,
                 mode=request.mode,
+                truncated=next_cursor is not None,
+                next_cursor=next_cursor,
                 tools=tools,
                 summary=_preview_summary(tools),
                 degraded=bool(degraded_reasons),
@@ -689,7 +746,6 @@ def _effective_decision_from_simulation(
     tool_policy_reason_code: str,
 ) -> dict[str, Any]:
     overall = _mapping_value(simulator_result, "overall")
-    legacy_policy = _mapping_value(simulator_result, "legacy_policy")
     status = (
         _optional_string(_mapping_value(overall, "status"))
         if isinstance(overall, Mapping)
@@ -700,16 +756,14 @@ def _effective_decision_from_simulation(
         if isinstance(overall, Mapping)
         else None
     )
-    legacy_status = (
-        _optional_string(_mapping_value(legacy_policy, "status"))
-        if isinstance(legacy_policy, Mapping)
-        else None
-    )
+    denial = _mapping_value(simulator_result, "denial")
+    has_explicit_denial = bool(denial)
     degraded_reason: str | None = None
     if (
         status == "denied"
         and tool_policy_outcome == "ask"
-        and (legacy_status == "approval_required" or reason_code == "approval_required")
+        and reason_code == "approval_required"
+        and not has_explicit_denial
     ):
         outcome: PolicyExplainOutcome = "ask"
     elif status == "denied":
@@ -749,7 +803,33 @@ def _preview_summary(
             summary.ask += 1
         elif entry.outcome == "deny":
             summary.deny += 1
+        if entry.visibility == "visible":
+            summary.visible += 1
+        elif entry.visibility == "hidden":
+            summary.hidden += 1
+        elif entry.visibility == "deferred":
+            summary.deferred += 1
+        if entry.installation_status == "installed":
+            summary.installed += 1
+        elif entry.installation_status == "not_installed":
+            summary.not_installed += 1
+        else:
+            summary.unknown_installation += 1
     return summary
+
+
+def _preview_page(
+    tool_names: list[str],
+    *,
+    limit: int,
+    cursor: str | None,
+) -> tuple[list[str], str | None]:
+    start = int(cursor) if cursor is not None else 0
+    if start >= len(tool_names):
+        return [], None
+    end = min(start + limit, len(tool_names))
+    next_cursor = str(end) if end < len(tool_names) else None
+    return tool_names[start:end], next_cursor
 
 
 def _preview_audit_payload(response: ProfileToolPreviewResponse) -> dict[str, Any]:
@@ -818,30 +898,40 @@ def _redact_path(value: str) -> tuple[str, PolicyExplainRedactionState]:
         return _redact_path(file_path)
     if parsed.scheme and parsed.netloc:
         return _redacted_url_origin(parsed), "sanitized"
-    if _is_absolute_path(normalized):
-        filename = normalized.rstrip("/").rsplit("/", 1)[-1]
+    sanitized = _strip_path_private_syntax(normalized)
+    if _is_absolute_path(sanitized):
+        filename = sanitized.rstrip("/").rsplit("/", 1)[-1]
         return (f".../{filename}" if filename else "[path]"), "sanitized"
-    return normalized, "raw_safe"
+    state: PolicyExplainRedactionState = (
+        "sanitized" if sanitized != normalized else "raw_safe"
+    )
+    return sanitized, state
 
 
 def _redact_domain(value: str) -> tuple[str, PolicyExplainRedactionState]:
     normalized = value.replace("\\", "/")
     if "\n" in normalized or "\r" in normalized:
         return "[redacted-domain]", "redacted"
-    if _is_absolute_path(normalized):
-        return _redact_path(normalized)
+    stripped = _strip_path_private_syntax(normalized)
+    if _is_absolute_path(stripped):
+        return _redact_path(stripped)
     parsed = urlsplit(normalized)
     if parsed.scheme.lower() == "file":
         return _redact_path(normalized)
     if parsed.scheme and parsed.netloc:
         return _redacted_url_origin(parsed), "sanitized"
-    sanitized = normalized.split("?", 1)[0].split("#", 1)[0]
-    if "@" in sanitized:
-        sanitized = sanitized.rsplit("@", 1)[-1]
+    sanitized = stripped
     state: PolicyExplainRedactionState = (
         "sanitized" if sanitized != normalized else "raw_safe"
     )
     return sanitized, state
+
+
+def _strip_path_private_syntax(value: str) -> str:
+    sanitized = value.split("?", 1)[0].split("#", 1)[0]
+    if "@" in sanitized:
+        sanitized = sanitized.rsplit("@", 1)[-1]
+    return sanitized
 
 
 def _redacted_url_origin(parsed: Any) -> str:
@@ -957,5 +1047,7 @@ __all__ = [
     "ProfileToolPreviewResponse",
     "ProfileToolPreviewSummary",
     "_append_audit_event_strict",
+    "parse_policy_explain_request",
+    "parse_profile_tool_preview_request",
     "_redact_subject_value",
 ]
