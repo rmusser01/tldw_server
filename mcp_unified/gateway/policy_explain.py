@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from mcp_unified.interfaces.storage import AuditStore
 from mcp_unified.profiles import MCPProfile, explain_profile_tool_decision
+from mcp_unified.profiles.permission_rules import compile_permission_rules
 from mcp_unified.profiles.subjects import (
     PermissionSubjectLimitError,
     extract_permission_rule_subjects,
@@ -27,6 +28,7 @@ from .policy_simulation import simulate_tool_call_policy
 MAX_POLICY_EXPLAIN_ARGUMENT_BYTES = 64 * 1024
 POLICY_EXPLAIN_AUDIT_EVENT_TYPE = "policy.explain.requested"
 POLICY_PREVIEW_TOOLS_AUDIT_EVENT_TYPE = "policy.preview_tools.requested"
+DEFAULT_AUDIT_ACTOR_ID = "local-cli"
 
 PolicyExplainOutcome = Literal["deny", "ask", "allow"]
 PolicyExplainRedactionState = Literal["raw_safe", "sanitized", "redacted", "omitted"]
@@ -251,7 +253,7 @@ class GatewayPolicyExplainService:
     ) -> None:
         self.profile_resolver = profile_resolver
         self.audit_store = audit_store
-        self.actor_id = actor_id
+        self.actor_id = actor_id or DEFAULT_AUDIT_ACTOR_ID
         self.catalog_provider = catalog_provider
         self.policy_grant_store = policy_grant_store
 
@@ -264,9 +266,15 @@ class GatewayPolicyExplainService:
         try:
             profile = await self._resolve_profile(request.profile_id)
         except GatewayPolicyExplainError as exc:
-            if exc.reason_code == "profile_not_found":
-                await self._audit_explain_failure(request, exc)
+            await self._audit_explain_failure(request, exc)
             raise
+        except Exception as exc:  # noqa: BLE001
+            failure = GatewayPolicyExplainError(
+                "Profile resolution failed",
+                reason_code="profile_resolution_failed",
+            )
+            await self._audit_explain_failure(request, failure)
+            raise failure from exc
         policy_grant_store = (
             self.policy_grant_store
             if request.mode == PolicyExplainMode.RUNTIME_EFFECTIVE
@@ -367,9 +375,15 @@ class GatewayPolicyExplainService:
         try:
             profile = await self._resolve_profile(request.profile_id)
         except GatewayPolicyExplainError as exc:
-            if exc.reason_code == "profile_not_found":
-                await self._audit_preview_failure(request, exc)
+            await self._audit_preview_failure(request, exc)
             raise
+        except Exception as exc:  # noqa: BLE001
+            failure = GatewayPolicyExplainError(
+                "Profile resolution failed",
+                reason_code="profile_resolution_failed",
+            )
+            await self._audit_preview_failure(request, failure)
+            raise failure from exc
         degraded_reasons: list[str] = []
         try:
             tool_names = await self._preview_tool_names(profile)
@@ -381,11 +395,13 @@ class GatewayPolicyExplainService:
                 degraded_reasons.append("catalog_unavailable")
 
         try:
+            argument_sensitive = _has_argument_sensitive_permission_rules(profile)
             tools = [
                 _profile_tool_preview_entry(
                     profile,
                     tool_name,
                     capability=request.capability,
+                    argument_sensitive=argument_sensitive,
                 )
                 for tool_name in tool_names
             ]
@@ -414,7 +430,7 @@ class GatewayPolicyExplainService:
             profile_id=profile.id,
             target_type="profile",
             target_id=profile.id,
-            payload=response.model_dump(mode="json", exclude_none=True),
+            payload=_preview_audit_payload(response),
         )
         return response
 
@@ -637,12 +653,22 @@ def _profile_tool_preview_entry(
     tool_name: str,
     *,
     capability: str | None,
+    argument_sensitive: bool,
 ) -> ProfileToolPreviewEntry:
     explanation = explain_profile_tool_decision(
         profile,
         tool_name,
         capability=capability,
     )
+    if argument_sensitive and explanation.final_outcome == "allow":
+        return ProfileToolPreviewEntry(
+            tool_name=_redact_tool_identifier(tool_name),
+            outcome="ask",
+            reason_code="argument_sensitive_policy",
+            visibility="deferred",
+            call_state="deferred",
+            requires_approval=False,
+        )
     return ProfileToolPreviewEntry(
         tool_name=_redact_tool_identifier(tool_name),
         outcome=explanation.final_outcome,
@@ -726,6 +752,14 @@ def _preview_summary(
     return summary
 
 
+def _preview_audit_payload(response: ProfileToolPreviewResponse) -> dict[str, Any]:
+    return response.model_dump(
+        mode="json",
+        exclude={"tools"},
+        exclude_none=True,
+    )
+
+
 def _tool_names_from_catalog(catalog: Any) -> set[str]:
     tool_names: set[str] = set()
     for item in _catalog_items(catalog):
@@ -765,6 +799,11 @@ def _policy_tool_names_from_profile(profile: MCPProfile) -> list[str]:
     policy_tools = set(policy_document.allowed_tools or [])
     policy_tools.update(policy_document.denied_tools or [])
     return sorted(tool_name for tool_name in policy_tools if isinstance(tool_name, str))
+
+
+def _has_argument_sensitive_permission_rules(profile: MCPProfile) -> bool:
+    rules = compile_permission_rules(profile.policy_document)
+    return any(rule.rule_type in {"command", "domain", "path"} for rule in rules)
 
 
 def _redact_path(value: str) -> tuple[str, PolicyExplainRedactionState]:

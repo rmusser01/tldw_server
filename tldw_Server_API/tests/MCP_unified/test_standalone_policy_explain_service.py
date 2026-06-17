@@ -49,6 +49,14 @@ def _profile_with_rules(*, permission_rules: list[dict[str, str]]) -> MCPProfile
     )
 
 
+def _raise_resolver_failure(_profile_id: str) -> MCPProfile:
+    raise RuntimeError("resolver backend failed")
+
+
+async def _raise_async_resolver_failure(_profile_id: str) -> MCPProfile:
+    raise RuntimeError("async resolver backend failed")
+
+
 def test_subject_redaction_states_use_approved_contract() -> None:
     assert _redact_subject_value("tool", "fs.patch")[1] == "raw_safe"
     assert _redact_subject_value("path", "")[1] == "omitted"
@@ -116,6 +124,21 @@ async def test_explain_tool_call_redacts_subjects_and_audits() -> None:
     assert dumped["truncated"] is False
     assert dumped["installation_status"] == "unknown"
     assert dumped["runtime_availability"] == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_explain_tool_call_uses_default_audit_actor() -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: _profile(),
+        audit_store=audit,
+    )
+
+    await service.explain_tool_call(
+        PolicyExplainRequest(profile_id="backend-engineer", tool_name="fs.patch")
+    )
+
+    assert audit.events[0].actor_id == "local-cli"
 
 
 @pytest.mark.asyncio
@@ -529,6 +552,63 @@ async def test_explain_tool_call_audits_profile_not_found_before_raising() -> No
 
 
 @pytest.mark.asyncio
+async def test_explain_tool_call_audits_sync_profile_resolver_failure() -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=_raise_resolver_failure,
+        audit_store=audit,
+        actor_id="operator-1",
+    )
+
+    with pytest.raises(GatewayPolicyExplainError) as exc_info:
+        await service.explain_tool_call(
+            PolicyExplainRequest(
+                profile_id="backend-engineer",
+                tool_name="Bash(echo TOPSECRET)",
+            )
+        )
+
+    assert exc_info.value.reason_code == "profile_resolution_failed"
+    assert audit.events[0].event_type == "policy.explain.requested"
+    assert audit.events[0].payload["reason_code"] == "profile_resolution_failed"
+    assert "TOPSECRET" not in str(audit.events[0].payload)
+
+
+@pytest.mark.asyncio
+async def test_explain_tool_call_audits_async_profile_resolver_failure() -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=_raise_async_resolver_failure,
+        audit_store=audit,
+        actor_id="operator-1",
+    )
+
+    with pytest.raises(GatewayPolicyExplainError) as exc_info:
+        await service.explain_tool_call(
+            PolicyExplainRequest(profile_id="backend-engineer", tool_name="fs.patch")
+        )
+
+    assert exc_info.value.reason_code == "profile_resolution_failed"
+    assert audit.events[0].payload["reason_code"] == "profile_resolution_failed"
+
+
+@pytest.mark.asyncio
+async def test_explain_tool_call_resolver_failure_preserves_audit_store_failure() -> None:
+    service = GatewayPolicyExplainService(
+        profile_resolver=_raise_resolver_failure,
+        audit_store=_MemoryAuditStore(fail=True),
+        actor_id="operator-1",
+    )
+
+    with pytest.raises(GatewayPolicyExplainError) as exc_info:
+        await service.explain_tool_call(
+            PolicyExplainRequest(profile_id="backend-engineer", tool_name="fs.patch")
+        )
+
+    assert exc_info.value.reason_code == "audit_store_unavailable"
+
+
+@pytest.mark.asyncio
 async def test_preview_profile_tools_audits_profile_not_found_before_raising() -> None:
     audit = _MemoryAuditStore()
     service = GatewayPolicyExplainService(
@@ -546,6 +626,43 @@ async def test_preview_profile_tools_audits_profile_not_found_before_raising() -
     assert audit.events[0].event_type == "policy.preview_tools.requested"
     assert audit.events[0].payload["reason_code"] == "profile_not_found"
     assert audit.events[0].payload["profile_id"] == "missing-profile"
+
+
+@pytest.mark.asyncio
+async def test_preview_profile_tools_audits_sync_profile_resolver_failure() -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=_raise_resolver_failure,
+        audit_store=audit,
+        actor_id="operator-1",
+    )
+
+    with pytest.raises(GatewayPolicyExplainError) as exc_info:
+        await service.preview_profile_tools(
+            ProfileToolPreviewRequest(profile_id="backend-engineer")
+        )
+
+    assert exc_info.value.reason_code == "profile_resolution_failed"
+    assert audit.events[0].event_type == "policy.preview_tools.requested"
+    assert audit.events[0].payload["reason_code"] == "profile_resolution_failed"
+
+
+@pytest.mark.asyncio
+async def test_preview_profile_tools_audits_async_profile_resolver_failure() -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=_raise_async_resolver_failure,
+        audit_store=audit,
+        actor_id="operator-1",
+    )
+
+    with pytest.raises(GatewayPolicyExplainError) as exc_info:
+        await service.preview_profile_tools(
+            ProfileToolPreviewRequest(profile_id="backend-engineer")
+        )
+
+    assert exc_info.value.reason_code == "profile_resolution_failed"
+    assert audit.events[0].payload["reason_code"] == "profile_resolution_failed"
 
 
 @pytest.mark.asyncio
@@ -590,6 +707,38 @@ async def test_preview_requires_catalog_for_complete_denied_counts() -> None:
     assert dumped["tools"][0]["installation_status"] == "unknown"
     assert dumped["tools"][0]["runtime_availability"] == "unknown"
     assert "final_outcome" not in dumped["tools"][0]
+    assert "tools" not in audit.events[0].payload
+    assert audit.events[0].payload["summary"] == {
+        "total": 2,
+        "allow": 1,
+        "ask": 0,
+        "deny": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_preview_defers_argument_sensitive_permission_rules() -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: _profile_with_rules(
+            permission_rules=[
+                {"pattern": "Edit(/Users/example/**)", "outcome": "deny"},
+            ]
+        ),
+        audit_store=audit,
+        actor_id="operator-1",
+    )
+
+    response = await service.preview_profile_tools(
+        ProfileToolPreviewRequest(profile_id="backend-engineer")
+    )
+
+    entry = next(tool for tool in response.tools if tool.tool_name == "fs.patch")
+    assert entry.outcome == "ask"
+    assert entry.visibility == "deferred"
+    assert entry.call_state == "deferred"
+    assert entry.reason_code == "argument_sensitive_policy"
+    assert response.summary.ask == 1
 
 
 @pytest.mark.asyncio
