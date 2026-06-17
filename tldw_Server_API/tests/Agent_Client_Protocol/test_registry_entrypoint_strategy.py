@@ -100,8 +100,8 @@ def test_seeded_claude_code_profile_uses_current_external_acp_adapter_candidate(
     assert entry.adapter_version_policy == "exact_pin_required"
     assert entry.adapter_install_source == "npm_pinned_allowed"
     assert entry.credential_policy == "delegated_to_adapter"
-    assert entry.support_state == "documented_unverified"
-    assert entry.verification_level == "documented_only"
+    assert entry.support_state == "supported_with_caveats"
+    assert entry.verification_level == "live_e2e_tested"
 
 
 def test_seeded_aider_profile_uses_unverified_external_acp_adapter_candidate(

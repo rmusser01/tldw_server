@@ -552,6 +552,30 @@ def test_agent_profile_manifest_preserves_registry_support_and_adapter_metadata(
     assert manifest["entrypoint"]["runtime_backend"] == "acp_downstream"
 
 
+def test_registry_claude_manifest_records_live_certified_adapter_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_module()
+    monkeypatch.setenv("PATH", "")
+
+    manifest = module._build_registry_agent_manifest("claude_code")
+
+    assert manifest["profile"] == "claude_code"
+    assert manifest["support_state"] == "supported_with_caveats"
+    assert manifest["verification_level"] == "live_e2e_tested"
+    assert manifest["entrypoint"]["entrypoint_strategy"] == "external_acp_adapter"
+    assert manifest["entrypoint"]["acp_command"] == "claude-agent-acp"
+    assert manifest["entrypoint"]["adapter_source"] == "agentclientprotocol/claude-agent-acp"
+    assert manifest["entrypoint"]["adapter_docs_url"] == "https://github.com/agentclientprotocol/claude-agent-acp"
+    assert manifest["entrypoint"]["adapter_package"] == "@agentclientprotocol/claude-agent-acp"
+    assert manifest["entrypoint"]["adapter_version"] == "0.40.0"
+    assert manifest["entrypoint"]["adapter_version_policy"] == "exact_pin_required"
+    assert manifest["entrypoint"]["adapter_install_source"] == "npm_pinned_allowed"
+    assert manifest["entrypoint"]["credential_policy"] == "delegated_to_adapter"
+    assert manifest["commands"] == []
+    assert "adapter_missing" in manifest["blockers"]
+
+
 def test_registry_aider_manifest_records_unverified_adapter_candidate(monkeypatch) -> None:
     module = _load_module()
     monkeypatch.setenv("PATH", "")
