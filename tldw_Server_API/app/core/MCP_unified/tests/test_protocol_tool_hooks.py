@@ -157,6 +157,12 @@ class _FailingPreToolHookManager(_RecordingToolHookManager):
         raise RuntimeError("pre-hook unavailable")
 
 
+class _FailingPostToolHookManager(_RecordingToolHookManager):
+    async def after_tool_call(self, context: ToolHookCallContext) -> ToolHookDecision | dict[str, Any] | None:
+        self.after_contexts.append(context)
+        raise RuntimeError("post-hook unavailable")
+
+
 def _protocol(
     *,
     module: _ToolModuleStub | None = None,
@@ -308,6 +314,32 @@ async def test_pre_hook_failure_fails_closed_and_skips_execution() -> None:
     assert isinstance(response.error.data, dict)
     assert response.error.data["governance"]["reason_code"] == "tool_hook_unavailable"
     assert response.error.data["governance"]["hook"]["error_type"] == "RuntimeError"
+    assert len(hooks.before_contexts) == 1
+    assert hooks.before_contexts[0].phase == "pre"
+    assert hooks.before_contexts[0].tool_name == "stub.echo"
+    assert hooks.before_contexts[0].module_id == "stub"
+    assert hooks.after_contexts == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_post_hook_failure_preserves_success_result() -> None:
+    hooks = _FailingPostToolHookManager()
+    protocol, module, _ = _protocol(hook_manager=hooks)
+
+    result = await protocol._handle_tools_call(
+        {"name": "stub.echo", "arguments": {"target": "eta"}},
+        _context(),
+    )
+
+    assert module.executions == 1
+    assert result["tool"] == "stub.echo"
+    assert result["content"][0]["json"]["arguments"] == {"target": "eta"}
+    assert len(hooks.after_contexts) == 1
+    assert hooks.after_contexts[0].phase == "post"
+    assert hooks.after_contexts[0].tool_name == "stub.echo"
+    assert hooks.after_contexts[0].module_id == "stub"
+    assert hooks.after_contexts[0].status == "success"
 
 
 @pytest.mark.unit
