@@ -586,6 +586,10 @@ async def test_preview_requires_catalog_for_complete_denied_counts() -> None:
     assert "entries" not in dumped
     assert dumped["evaluated_at"]
     assert dumped["truncated"] is False
+    assert dumped["tools"][0]["outcome"] == "allow"
+    assert dumped["tools"][0]["installation_status"] == "unknown"
+    assert dumped["tools"][0]["runtime_availability"] == "unknown"
+    assert "final_outcome" not in dumped["tools"][0]
 
 
 @pytest.mark.asyncio

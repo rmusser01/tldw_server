@@ -171,11 +171,13 @@ class ProfileToolPreviewEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tool_name: str
-    final_outcome: PolicyExplainOutcome
+    outcome: PolicyExplainOutcome
     reason_code: str
     visibility: PolicyExplainVisibility
     call_state: str
     requires_approval: bool
+    installation_status: str = "unknown"
+    runtime_availability: str = "unknown"
     redacted: bool = True
 
 
@@ -643,7 +645,7 @@ def _profile_tool_preview_entry(
     )
     return ProfileToolPreviewEntry(
         tool_name=_redact_tool_identifier(tool_name),
-        final_outcome=explanation.final_outcome,
+        outcome=explanation.final_outcome,
         reason_code=explanation.reason_code,
         visibility=_approved_visibility(
             explanation.visibility,
@@ -715,11 +717,11 @@ def _preview_summary(
     entry_list = list(entries)
     summary = ProfileToolPreviewSummary(total=len(entry_list))
     for entry in entry_list:
-        if entry.final_outcome == "allow":
+        if entry.outcome == "allow":
             summary.allow += 1
-        elif entry.final_outcome == "ask":
+        elif entry.outcome == "ask":
             summary.ask += 1
-        elif entry.final_outcome == "deny":
+        elif entry.outcome == "deny":
             summary.deny += 1
     return summary
 
