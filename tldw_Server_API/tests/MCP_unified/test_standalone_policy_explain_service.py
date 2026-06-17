@@ -6,6 +6,7 @@ import mcp_unified.gateway.policy_explain as policy_explain
 from mcp_unified.gateway.policy_explain import (
     GatewayPolicyExplainError,
     GatewayPolicyExplainService,
+    PolicyExplainErrorResponse,
     PolicyExplainRequest,
     ProfileToolPreviewRequest,
     _redact_subject_value,
@@ -53,6 +54,38 @@ def test_subject_redaction_states_use_approved_contract() -> None:
     assert _redact_subject_value("path", "")[1] == "omitted"
 
 
+def test_error_response_uses_message_and_details_contract() -> None:
+    payload = PolicyExplainErrorResponse(
+        message="Policy evaluation failed",
+        reason_code="policy_evaluation_failed",
+        details={"field": "safe"},
+    ).model_dump()
+
+    assert payload["ok"] is False
+    assert payload["message"] == "Policy evaluation failed"
+    assert payload["reason_code"] == "policy_evaluation_failed"
+    assert payload["details"] == {"field": "safe"}
+    assert "error" not in payload
+
+
+def test_tool_names_from_catalog_reads_tool_id_and_mapping_payload() -> None:
+    catalog = {
+        "tools": [
+            {"tool_id": "fs.patch"},
+            {"name": "shell.exec"},
+            {"tool_name": "db.query"},
+            "cache.clear",
+        ],
+    }
+
+    assert policy_explain._tool_names_from_catalog(catalog) == {
+        "fs.patch",
+        "shell.exec",
+        "db.query",
+        "cache.clear",
+    }
+
+
 @pytest.mark.asyncio
 async def test_explain_tool_call_redacts_subjects_and_audits() -> None:
     audit = _MemoryAuditStore()
@@ -72,11 +105,17 @@ async def test_explain_tool_call_redacts_subjects_and_audits() -> None:
 
     assert response.ok is True
     assert response.final_outcome == "allow"
+    assert response.visibility == "visible"
     assert response.subjects[0].redaction_state in {"sanitized", "redacted"}
     rendered = response.model_dump_json()
     assert "/Users/example" not in rendered
     assert audit.events[0].event_type == "policy.explain.requested"
     assert "/Users/example" not in str(audit.events[0].payload)
+    dumped = response.model_dump(mode="json")
+    assert dumped["evaluated_at"]
+    assert dumped["truncated"] is False
+    assert dumped["installation_status"] == "unknown"
+    assert dumped["runtime_availability"] == "unknown"
 
 
 @pytest.mark.asyncio
@@ -128,7 +167,7 @@ async def test_explain_tool_call_preserves_tool_level_ask_as_final_outcome() -> 
 
     assert response.final_outcome == "ask"
     assert response.reason_code == "approval_required"
-    assert response.visibility == "direct"
+    assert response.visibility == "visible"
     assert response.call_state == "approval_required"
     assert response.tool_policy_outcome == "ask"
     assert audit.events[0].payload["final_outcome"] == "ask"
@@ -336,6 +375,59 @@ async def test_explain_tool_call_redacts_file_uri_domain_list_subjects() -> None
 
 
 @pytest.mark.asyncio
+async def test_explain_tool_call_redacts_absolute_uri_path_like_domain_subject() -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: _profile(),
+        audit_store=audit,
+        actor_id="operator-1",
+    )
+
+    response = await service.explain_tool_call(
+        PolicyExplainRequest(
+            profile_id="backend-engineer",
+            tool_name="fs.patch",
+            arguments={"uri": "/Users/example/project/src/app.py"},
+        )
+    )
+
+    rendered = response.model_dump_json()
+    audit_payload = str(audit.events[0].payload)
+    assert "/Users/example" not in rendered
+    assert "/Users/example" not in audit_payload
+    assert response.subjects[0].type == "domain"
+    assert response.subjects[0].value == ".../app.py"
+
+
+@pytest.mark.asyncio
+async def test_explain_tool_call_redacts_windows_uri_path_like_domain_subject() -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: _profile(),
+        audit_store=audit,
+        actor_id="operator-1",
+    )
+
+    raw_path = r"C:\Users\example\project\src\app.py"
+    response = await service.explain_tool_call(
+        PolicyExplainRequest(
+            profile_id="backend-engineer",
+            tool_name="fs.patch",
+            arguments={"uri": raw_path},
+        )
+    )
+
+    rendered = response.model_dump_json()
+    audit_payload = str(audit.events[0].payload)
+    assert "C:/Users/example" not in rendered
+    assert "C:/Users/example" not in audit_payload
+    assert raw_path not in rendered
+    assert raw_path not in audit_payload
+    assert response.subjects[0].type == "domain"
+    assert response.subjects[0].value == ".../app.py"
+
+
+@pytest.mark.asyncio
 async def test_explain_tool_call_unknown_simulator_status_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -373,6 +465,42 @@ async def test_explain_tool_call_unknown_simulator_status_fails_closed(
     assert response.degraded is True
     assert "unknown_policy_status" in response.degraded_reasons
     assert audit.events[0].payload["final_outcome"] == "deny"
+
+
+@pytest.mark.asyncio
+async def test_explain_tool_call_audits_policy_evaluation_failure_before_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: _profile(),
+        audit_store=audit,
+        actor_id="operator-1",
+    )
+
+    def _raise_policy_error(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise RuntimeError("invalid policy internals")
+
+    monkeypatch.setattr(
+        policy_explain,
+        "simulate_tool_call_policy",
+        _raise_policy_error,
+    )
+
+    with pytest.raises(GatewayPolicyExplainError) as exc_info:
+        await service.explain_tool_call(
+            PolicyExplainRequest(
+                profile_id="backend-engineer",
+                tool_name="Bash(echo TOPSECRET)",
+                arguments={"path": "/Users/example/project/src/app.py"},
+            )
+        )
+
+    assert exc_info.value.reason_code == "policy_evaluation_failed"
+    assert audit.events[0].event_type == "policy.explain.requested"
+    assert audit.events[0].payload["reason_code"] == "policy_evaluation_failed"
+    assert "TOPSECRET" not in str(audit.events[0].payload)
+    assert "/Users/example" not in str(audit.events[0].payload)
 
 
 @pytest.mark.asyncio
@@ -453,3 +581,34 @@ async def test_preview_requires_catalog_for_complete_denied_counts() -> None:
     assert "catalog_unavailable" in response.degraded_reasons
     assert response.redacted is True
     assert audit.events[0].event_type == "policy.preview_tools.requested"
+    dumped = response.model_dump(mode="json")
+    assert "tools" in dumped
+    assert "entries" not in dumped
+    assert dumped["evaluated_at"]
+    assert dumped["truncated"] is False
+
+
+@pytest.mark.asyncio
+async def test_preview_catalog_provider_failure_degrades_and_audits() -> None:
+    audit = _MemoryAuditStore()
+
+    def _broken_catalog() -> list[str]:
+        raise RuntimeError("catalog backend failed")
+
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: _profile(),
+        audit_store=audit,
+        actor_id="operator-1",
+        catalog_provider=_broken_catalog,
+    )
+
+    response = await service.preview_profile_tools(
+        ProfileToolPreviewRequest(profile_id="backend-engineer")
+    )
+
+    assert response.degraded is True
+    assert "catalog_unavailable" in response.degraded_reasons
+    assert [entry.tool_name for entry in response.tools] == ["fs.patch", "shell.exec"]
+    assert audit.events[0].event_type == "policy.preview_tools.requested"
+    assert audit.events[0].payload["degraded"] is True
+    assert "catalog_unavailable" in audit.events[0].payload["degraded_reasons"]

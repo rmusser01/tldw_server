@@ -30,6 +30,7 @@ POLICY_PREVIEW_TOOLS_AUDIT_EVENT_TYPE = "policy.preview_tools.requested"
 
 PolicyExplainOutcome = Literal["deny", "ask", "allow"]
 PolicyExplainRedactionState = Literal["raw_safe", "sanitized", "redacted", "omitted"]
+PolicyExplainVisibility = Literal["visible", "hidden", "deferred"]
 STATIC_POLICY_ONLY_SKIPPED_CONTRIBUTORS = [
     "session_grants",
     "approval_grants",
@@ -43,12 +44,12 @@ _DEFAULTS_BY_OUTCOME: dict[str, dict[str, Any]] = {
         "requires_approval": False,
     },
     "ask": {
-        "visibility": "direct",
+        "visibility": "visible",
         "call_state": "approval_required",
         "requires_approval": True,
     },
     "allow": {
-        "visibility": "direct",
+        "visibility": "visible",
         "call_state": "callable",
         "requires_approval": False,
     },
@@ -141,14 +142,18 @@ class PolicyExplainResponse(BaseModel):
     profile_id: str
     tool_name: str
     mode: PolicyExplainMode
+    evaluated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    truncated: bool = False
     final_outcome: PolicyExplainOutcome
     reason_code: str
-    visibility: str
+    visibility: PolicyExplainVisibility
     call_state: str
     requires_approval: bool
+    installation_status: str = "unknown"
+    runtime_availability: str = "unknown"
     tool_policy_outcome: PolicyExplainOutcome | None = None
     tool_policy_reason_code: str | None = None
-    tool_policy_visibility: str | None = None
+    tool_policy_visibility: PolicyExplainVisibility | None = None
     tool_policy_call_state: str | None = None
     tool_policy_requires_approval: bool | None = None
     runtime_status: str | None = None
@@ -168,7 +173,7 @@ class ProfileToolPreviewEntry(BaseModel):
     tool_name: str
     final_outcome: PolicyExplainOutcome
     reason_code: str
-    visibility: str
+    visibility: PolicyExplainVisibility
     call_state: str
     requires_approval: bool
     redacted: bool = True
@@ -193,7 +198,9 @@ class ProfileToolPreviewResponse(BaseModel):
     ok: bool = True
     profile_id: str
     mode: PolicyExplainMode
-    entries: list[ProfileToolPreviewEntry] = Field(default_factory=list)
+    evaluated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    truncated: bool = False
+    tools: list[ProfileToolPreviewEntry] = Field(default_factory=list)
     summary: ProfileToolPreviewSummary = Field(default_factory=ProfileToolPreviewSummary)
     degraded: bool = False
     degraded_reasons: list[str] = Field(default_factory=list)
@@ -207,8 +214,9 @@ class PolicyExplainErrorResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     ok: bool = False
-    error: str
+    message: str
     reason_code: str
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class GatewayPolicyExplainError(RuntimeError):
@@ -221,7 +229,10 @@ class GatewayPolicyExplainError(RuntimeError):
     def to_payload(self) -> PolicyExplainErrorResponse:
         """Return a stable redacted error payload."""
 
-        return PolicyExplainErrorResponse(error=str(self), reason_code=self.reason_code)
+        return PolicyExplainErrorResponse(
+            message=str(self),
+            reason_code=self.reason_code,
+        )
 
 
 class GatewayPolicyExplainService:
@@ -264,63 +275,76 @@ class GatewayPolicyExplainService:
             if request.mode == PolicyExplainMode.RUNTIME_EFFECTIVE
             else None
         )
-        simulator_result = simulate_tool_call_policy(
-            profile,
-            request.tool_name,
-            request.arguments,
-            capability=request.capability,
-            policy_grant_store=policy_grant_store,
-            session_id=session_id,
-        )
-        tool_explanation = explain_profile_tool_decision(
-            profile,
-            request.tool_name,
-            capability=request.capability,
-        )
-        subjects, degraded_reasons = _policy_subjects_from_simulation(
-            simulator_result,
-            tool_name=request.tool_name,
-            arguments=request.arguments,
-        )
-        overall = _mapping_value(simulator_result, "overall")
-        effective_decision = _effective_decision_from_simulation(
-            simulator_result,
-            tool_policy_outcome=tool_explanation.final_outcome,
-            tool_policy_reason_code=tool_explanation.reason_code,
-        )
-        if effective_decision["degraded_reason"] is not None:
-            degraded_reasons.append(effective_decision["degraded_reason"])
         safe_tool_name = _redact_tool_identifier(request.tool_name)
-        skipped_contributors = _skipped_contributors_for_mode(request.mode)
-        response = PolicyExplainResponse(
-            profile_id=profile.id,
-            tool_name=safe_tool_name,
-            mode=request.mode,
-            final_outcome=effective_decision["final_outcome"],
-            reason_code=effective_decision["reason_code"],
-            visibility=effective_decision["visibility"],
-            call_state=effective_decision["call_state"],
-            requires_approval=effective_decision["requires_approval"],
-            tool_policy_outcome=tool_explanation.final_outcome,
-            tool_policy_reason_code=tool_explanation.reason_code,
-            tool_policy_visibility=tool_explanation.visibility,
-            tool_policy_call_state=tool_explanation.call_state,
-            tool_policy_requires_approval=tool_explanation.requires_approval,
-            runtime_status=(
-                _mapping_value(overall, "status")
-                if isinstance(overall, Mapping)
-                else None
-            ),
-            runtime_reason_code=(
-                _mapping_value(overall, "reason_code")
-                if isinstance(overall, Mapping)
-                else None
-            ),
-            subjects=subjects,
-            degraded=bool(degraded_reasons),
-            degraded_reasons=degraded_reasons,
-            skipped_contributors=skipped_contributors,
-        )
+        try:
+            simulator_result = simulate_tool_call_policy(
+                profile,
+                request.tool_name,
+                request.arguments,
+                capability=request.capability,
+                policy_grant_store=policy_grant_store,
+                session_id=session_id,
+            )
+            tool_explanation = explain_profile_tool_decision(
+                profile,
+                request.tool_name,
+                capability=request.capability,
+            )
+            subjects, degraded_reasons = _policy_subjects_from_simulation(
+                simulator_result,
+                tool_name=request.tool_name,
+                arguments=request.arguments,
+            )
+            overall = _mapping_value(simulator_result, "overall")
+            effective_decision = _effective_decision_from_simulation(
+                simulator_result,
+                tool_policy_outcome=tool_explanation.final_outcome,
+                tool_policy_reason_code=tool_explanation.reason_code,
+            )
+            if effective_decision["degraded_reason"] is not None:
+                degraded_reasons.append(effective_decision["degraded_reason"])
+            response = PolicyExplainResponse(
+                profile_id=profile.id,
+                tool_name=safe_tool_name,
+                mode=request.mode,
+                final_outcome=effective_decision["final_outcome"],
+                reason_code=effective_decision["reason_code"],
+                visibility=effective_decision["visibility"],
+                call_state=effective_decision["call_state"],
+                requires_approval=effective_decision["requires_approval"],
+                tool_policy_outcome=tool_explanation.final_outcome,
+                tool_policy_reason_code=tool_explanation.reason_code,
+                tool_policy_visibility=_approved_visibility(
+                    tool_explanation.visibility,
+                    outcome=tool_explanation.final_outcome,
+                ),
+                tool_policy_call_state=tool_explanation.call_state,
+                tool_policy_requires_approval=tool_explanation.requires_approval,
+                runtime_status=(
+                    _mapping_value(overall, "status")
+                    if isinstance(overall, Mapping)
+                    else None
+                ),
+                runtime_reason_code=(
+                    _mapping_value(overall, "reason_code")
+                    if isinstance(overall, Mapping)
+                    else None
+                ),
+                subjects=subjects,
+                degraded=bool(degraded_reasons),
+                degraded_reasons=degraded_reasons,
+                truncated="subject_limit_exceeded" in degraded_reasons,
+                skipped_contributors=_skipped_contributors_for_mode(request.mode),
+            )
+        except GatewayPolicyExplainError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            failure = GatewayPolicyExplainError(
+                "Policy evaluation failed",
+                reason_code="policy_evaluation_failed",
+            )
+            await self._audit_explain_failure(request, failure, profile_id=profile.id)
+            raise failure from exc
         await _append_audit_event_strict(
             self.audit_store,
             event_type=POLICY_EXPLAIN_AUDIT_EVENT_TYPE,
@@ -345,23 +369,42 @@ class GatewayPolicyExplainService:
                 await self._audit_preview_failure(request, exc)
             raise
         degraded_reasons: list[str] = []
-        tool_names = await self._preview_tool_names(profile)
-        if self.catalog_provider is None:
+        try:
+            tool_names = await self._preview_tool_names(profile)
+        except Exception:  # noqa: BLE001
             degraded_reasons.append("catalog_unavailable")
+            tool_names = _policy_tool_names_from_profile(profile)
+        else:
+            if self.catalog_provider is None:
+                degraded_reasons.append("catalog_unavailable")
 
-        entries = [
-            _profile_tool_preview_entry(profile, tool_name, capability=request.capability)
-            for tool_name in tool_names
-        ]
-        response = ProfileToolPreviewResponse(
-            profile_id=profile.id,
-            mode=request.mode,
-            entries=entries,
-            summary=_preview_summary(entries),
-            degraded=bool(degraded_reasons),
-            degraded_reasons=degraded_reasons,
-            skipped_contributors=_skipped_contributors_for_mode(request.mode),
-        )
+        try:
+            tools = [
+                _profile_tool_preview_entry(
+                    profile,
+                    tool_name,
+                    capability=request.capability,
+                )
+                for tool_name in tool_names
+            ]
+            response = ProfileToolPreviewResponse(
+                profile_id=profile.id,
+                mode=request.mode,
+                tools=tools,
+                summary=_preview_summary(tools),
+                degraded=bool(degraded_reasons),
+                degraded_reasons=degraded_reasons,
+                skipped_contributors=_skipped_contributors_for_mode(request.mode),
+            )
+        except GatewayPolicyExplainError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            failure = GatewayPolicyExplainError(
+                "Policy evaluation failed",
+                reason_code="policy_evaluation_failed",
+            )
+            await self._audit_preview_failure(request, failure, profile_id=profile.id)
+            raise failure from exc
         await _append_audit_event_strict(
             self.audit_store,
             event_type=POLICY_PREVIEW_TOOLS_AUDIT_EVENT_TYPE,
@@ -387,23 +430,23 @@ class GatewayPolicyExplainService:
             catalog = await _maybe_await(self.catalog_provider())
             return sorted(_tool_names_from_catalog(catalog))
 
-        policy_document = profile.policy_document
-        policy_tools = set(policy_document.allowed_tools or [])
-        policy_tools.update(policy_document.denied_tools or [])
-        return sorted(tool_name for tool_name in policy_tools if isinstance(tool_name, str))
+        return _policy_tool_names_from_profile(profile)
 
     async def _audit_explain_failure(
         self,
         request: PolicyExplainRequest,
         exc: GatewayPolicyExplainError,
+        *,
+        profile_id: str | None = None,
     ) -> None:
+        event_profile_id = profile_id or request.profile_id
         safe_tool_name = _redact_tool_identifier(request.tool_name)
         payload = {
             "ok": False,
-            "profile_id": request.profile_id,
+            "profile_id": event_profile_id,
             "tool_name": safe_tool_name,
             "mode": request.mode.value,
-            "error": str(exc),
+            "message": str(exc),
             "reason_code": exc.reason_code,
             "redacted": True,
         }
@@ -411,7 +454,7 @@ class GatewayPolicyExplainService:
             self.audit_store,
             event_type=POLICY_EXPLAIN_AUDIT_EVENT_TYPE,
             actor_id=self.actor_id,
-            profile_id=request.profile_id,
+            profile_id=event_profile_id,
             target_type="tool",
             target_id=safe_tool_name,
             payload=payload,
@@ -421,12 +464,15 @@ class GatewayPolicyExplainService:
         self,
         request: ProfileToolPreviewRequest,
         exc: GatewayPolicyExplainError,
+        *,
+        profile_id: str | None = None,
     ) -> None:
+        event_profile_id = profile_id or request.profile_id
         payload = {
             "ok": False,
-            "profile_id": request.profile_id,
+            "profile_id": event_profile_id,
             "mode": request.mode.value,
-            "error": str(exc),
+            "message": str(exc),
             "reason_code": exc.reason_code,
             "redacted": True,
         }
@@ -434,9 +480,9 @@ class GatewayPolicyExplainService:
             self.audit_store,
             event_type=POLICY_PREVIEW_TOOLS_AUDIT_EVENT_TYPE,
             actor_id=self.actor_id,
-            profile_id=request.profile_id,
+            profile_id=event_profile_id,
             target_type="profile",
-            target_id=request.profile_id,
+            target_id=event_profile_id,
             payload=payload,
         )
 
@@ -599,7 +645,10 @@ def _profile_tool_preview_entry(
         tool_name=_redact_tool_identifier(tool_name),
         final_outcome=explanation.final_outcome,
         reason_code=explanation.reason_code,
-        visibility=explanation.visibility,
+        visibility=_approved_visibility(
+            explanation.visibility,
+            outcome=explanation.final_outcome,
+        ),
         call_state=explanation.call_state,
         requires_approval=explanation.requires_approval,
     )
@@ -675,19 +724,45 @@ def _preview_summary(
     return summary
 
 
-def _tool_names_from_catalog(catalog: Iterable[Any]) -> set[str]:
+def _tool_names_from_catalog(catalog: Any) -> set[str]:
     tool_names: set[str] = set()
-    for item in catalog:
+    for item in _catalog_items(catalog):
         tool_name: Any
         if isinstance(item, str):
             tool_name = item
         elif isinstance(item, Mapping):
-            tool_name = item.get("name") or item.get("tool_name")
+            tool_name = item.get("tool_id") or item.get("name") or item.get("tool_name")
         else:
-            tool_name = getattr(item, "name", None) or getattr(item, "tool_name", None)
+            tool_name = (
+                getattr(item, "tool_id", None)
+                or getattr(item, "name", None)
+                or getattr(item, "tool_name", None)
+            )
         if isinstance(tool_name, str) and tool_name.strip():
             tool_names.add(tool_name.strip())
     return tool_names
+
+
+def _catalog_items(catalog: Any) -> Iterable[Any]:
+    if isinstance(catalog, Mapping):
+        tools = catalog.get("tools")
+        if tools is not None and not isinstance(tools, str):
+            if isinstance(tools, Iterable):
+                return tools
+            return []
+        return [catalog]
+    if isinstance(catalog, str):
+        return [catalog]
+    if isinstance(catalog, Iterable):
+        return catalog
+    return []
+
+
+def _policy_tool_names_from_profile(profile: MCPProfile) -> list[str]:
+    policy_document = profile.policy_document
+    policy_tools = set(policy_document.allowed_tools or [])
+    policy_tools.update(policy_document.denied_tools or [])
+    return sorted(tool_name for tool_name in policy_tools if isinstance(tool_name, str))
 
 
 def _redact_path(value: str) -> tuple[str, PolicyExplainRedactionState]:
@@ -709,16 +784,21 @@ def _redact_path(value: str) -> tuple[str, PolicyExplainRedactionState]:
 
 
 def _redact_domain(value: str) -> tuple[str, PolicyExplainRedactionState]:
-    parsed = urlsplit(value)
+    normalized = value.replace("\\", "/")
+    if "\n" in normalized or "\r" in normalized:
+        return "[redacted-domain]", "redacted"
+    if _is_absolute_path(normalized):
+        return _redact_path(normalized)
+    parsed = urlsplit(normalized)
     if parsed.scheme.lower() == "file":
-        return _redact_path(value)
+        return _redact_path(normalized)
     if parsed.scheme and parsed.netloc:
         return _redacted_url_origin(parsed), "sanitized"
-    sanitized = value.split("?", 1)[0].split("#", 1)[0]
+    sanitized = normalized.split("?", 1)[0].split("#", 1)[0]
     if "@" in sanitized:
         sanitized = sanitized.rsplit("@", 1)[-1]
     state: PolicyExplainRedactionState = (
-        "sanitized" if sanitized != value else "raw_safe"
+        "sanitized" if sanitized != normalized else "raw_safe"
     )
     return sanitized, state
 
@@ -738,6 +818,20 @@ def _skipped_contributors_for_mode(mode: PolicyExplainMode) -> list[str]:
     if mode != PolicyExplainMode.STATIC_POLICY_ONLY:
         return []
     return list(STATIC_POLICY_ONLY_SKIPPED_CONTRIBUTORS)
+
+
+def _approved_visibility(
+    value: Any,
+    *,
+    outcome: str | None = None,
+) -> PolicyExplainVisibility:
+    if value == "hidden":
+        return "hidden"
+    if value == "deferred":
+        return "deferred"
+    if outcome == "deny":
+        return "hidden"
+    return "visible"
 
 
 def _is_absolute_path(value: str) -> bool:
@@ -816,6 +910,7 @@ __all__ = [
     "PolicyExplainRequest",
     "PolicyExplainResponse",
     "PolicyExplainSubject",
+    "PolicyExplainVisibility",
     "ProfileToolPreviewEntry",
     "ProfileToolPreviewRequest",
     "ProfileToolPreviewResponse",
