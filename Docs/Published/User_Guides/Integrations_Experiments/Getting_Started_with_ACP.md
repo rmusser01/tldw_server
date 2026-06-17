@@ -214,7 +214,7 @@ logging:
   level: "info"
 ```
 
-Claude Code ACP support is currently a documented external-adapter candidate, not a live-certified profile. Validate both `claude --version` and `claude-agent-acp --help`, then configure Claude Code or the adapter's provider settings before making release support claims.
+Claude Code ACP support is live-E2E certified with caveats for the verified macOS host runner profile using pinned `@agentclientprotocol/claude-agent-acp@0.40.0`. Validate both `claude --version` and `claude-agent-acp --help`, ensure the adapter is on the `tldw_server` and runner `PATH`, and configure Claude Code or the adapter's provider settings in the same runner environment. Sandbox, artifact-producing workflows, non-empty MCP injection, reviewer-loop behavior, and other host profiles remain unverified.
 
 ### Step 4: Test the Connection
 
