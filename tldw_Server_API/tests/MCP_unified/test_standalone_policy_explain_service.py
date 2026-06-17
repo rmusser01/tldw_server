@@ -135,6 +135,7 @@ def test_gateway_package_exports_policy_explain_public_api() -> None:
     for export_name, expected_obj in expected_exports.items():
         if getattr(gateway, export_name) is not expected_obj:
             pytest.fail(f"{export_name} does not resolve to the public service API")
+        assert export_name in gateway.__all__
 
 
 def test_subject_redaction_states_use_approved_contract() -> None:

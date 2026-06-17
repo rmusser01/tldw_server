@@ -121,6 +121,9 @@ export MCP_UNIFIED_GATEWAY_ADMIN_KEY=replace-with-admin-key
 
 printf '{"path":"src/app.py"}' | mcp-unified-gateway explain-policy \
   --remote --profile researcher --tool fs.read --args-stdin
+
+mcp-unified-gateway preview-profile-tools --remote --profile researcher \
+  --category filesystem --exclude-denied
 ```
 
 Admin API examples:
