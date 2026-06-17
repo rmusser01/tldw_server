@@ -177,6 +177,8 @@ class TestStateTransitionsSync:
                 failure_threshold=1,
                 recovery_timeout=0.05,
                 success_threshold=2,
+                backoff_factor=100.0,
+                max_recovery_timeout=10.0,
             ),
         )
         with pytest.raises(TransientError):

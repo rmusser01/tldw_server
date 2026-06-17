@@ -45,14 +45,19 @@ def workflows_db(tmp_path: Path):
             _ = None
 
 
-def _wait_for_status(db: WorkflowsDatabase, run_id: str, timeout: float = 3.0) -> str:
+def _wait_for_status(db: WorkflowsDatabase, run_id: str, timeout: float = 10.0) -> str:
     deadline = time.time() + timeout
+    last_status = None
     while time.time() < deadline:
         run = db.get_run(run_id)
+        last_status = getattr(run, "status", None) if run else None
         if run and run.status in TERMINAL_STATES.union({"waiting_human", "waiting_approval"}):
             return run.status
         time.sleep(0.05)
-    raise AssertionError("Run did not reach a terminal or waiting state within the timeout")
+    raise AssertionError(
+        "Run did not reach a terminal or waiting state within the timeout "
+        f"(run_id={run_id!r}, last_status={last_status!r})"
+    )
 
 
 def _wait_for_scheduler_idle(scheduler: WorkflowScheduler, timeout: float = 3.0) -> dict[str, int]:

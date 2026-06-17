@@ -16,6 +16,7 @@ def _same_iso_week_across_rough_bucket_boundary(
     now: datetime,
 ) -> tuple[datetime, datetime]:
     """Return old timestamps that share an ISO week but cross the former rough bucket."""
+    primary_cutoff = now - timedelta(days=90)
     for days_back in range(91, 360):
         first = (now - timedelta(days=days_back)).replace(
             hour=22,
@@ -27,7 +28,8 @@ def _same_iso_week_across_rough_bucket_boundary(
         same_iso_week = first.isocalendar()[:2] == second.isocalendar()[:2]
         rough_first = (first.year, (first.timetuple().tm_yday - 1) // 7 + 1)
         rough_second = (second.year, (second.timetuple().tm_yday - 1) // 7 + 1)
-        if same_iso_week and rough_first != rough_second:
+        both_weekly_retained = second < primary_cutoff
+        if same_iso_week and rough_first != rough_second and both_weekly_retained:
             return first, second
     raise AssertionError("Could not find a stable same-ISO-week boundary pair")
 

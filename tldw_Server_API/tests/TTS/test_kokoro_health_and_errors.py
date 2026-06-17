@@ -48,6 +48,10 @@ async def test_kokoro_pytorch_requires_pkg(monkeypatch):
     monkeypatch.setattr(
         "tldw_Server_API.app.core.TTS.adapters.kokoro_adapter.get_resource_manager", fake_get_resource_manager
     )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.adapters.kokoro_adapter.safe_import_torch",
+        lambda: torch,
+    )
 
     class DummyTorchModule:
         def eval(self):
