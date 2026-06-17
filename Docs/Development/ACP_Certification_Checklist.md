@@ -123,6 +123,65 @@ Minimum capability IDs expected from stub-smoke evidence:
 `workspace_env` and `mcp_injection` can be limited/mocked in stub-smoke mode.
 Do not upgrade those checks to live support without named host/runtime evidence.
 
+## Concrete Custom Profile Evidence Contract
+
+The seeded `custom` agent profile is a template. It is useful for setup UI and
+operator education, but it is not a certifiable downstream agent. To claim
+custom ACP support, create a distinct named profile such as `my_acp_agent` and
+attach evidence for that profile key.
+
+Emit the template contract with:
+
+```bash
+python Helper_Scripts/Testing-related/acp_certification_smoke.py --agent-profile custom --format json
+```
+
+Required metadata for a concrete custom profile:
+
+- `profile_key` and `profile_name`, distinct from `custom`.
+- `entrypoint_strategy`, `acp_command`, and `acp_args`.
+- Environment variable names only; never include credential values.
+- Workspace policy: cwd, allowed roots, sandbox expectation, and any MCP server
+  injection assumptions.
+- Host/runtime, provider assumptions, agent version output, repo commit, and
+  tldw-agent runner version.
+
+Required live evidence:
+
+- `initialize` response from the concrete ACP entrypoint.
+- `session_new` result with the expected profile key and workspace policy.
+- `session_prompt` result with a terminal state or structured completion.
+- Redacted detail/events/artifacts/diagnostics views for any public evidence.
+
+The seeded `custom` profile should remain `documented_unverified` /
+`documented_only` with blocker `custom_template`. A local operator may still
+register custom profiles for their own use, but release/support claims require
+the concrete evidence above.
+
+## Adapter Candidate And Headless CLI Decisions
+
+Direct prompts, one-shot CLI modes, browser modes, and headless text output do
+not satisfy ACP certification by themselves. A support claim requires a concrete
+ACP stdio entrypoint that can pass `initialize`, `session/new`, and
+`session/prompt` through the smoke helper or backend live-E2E path.
+
+When an agent has no native ACP command but a plausible adapter exists:
+
+- Keep support state `documented_unverified` and verification level
+  `documented_only`.
+- Use `external_acp_adapter` only when the registry names the adapter command
+  that would speak ACP stdio, such as `aider-acp`.
+- Record adapter source, docs URL, package/install source, and version policy.
+- Treat missing adapters as `adapter_missing`, not as successful agent
+  compatibility.
+- Do not promote support until the adapter and downstream agent pass live ACP
+  evidence with provider/runtime caveats recorded.
+
+When an agent CLI package has a different binary name than the product name,
+record the actual executable used by the package. For Continue, the current
+`@continuedev/cli` package exposes `cn`; the local shell word `continue` is a
+shell builtin and must not be used as a certifiable command.
+
 ## Live-E2E Checklist
 
 Run this when changing a candidate agent row from `documented_unverified` to
@@ -130,6 +189,8 @@ Run this when changing a candidate agent row from `documented_unverified` to
 
 - Record host OS, runtime profile, repo commit, branch, and tldw_server config.
 - Record downstream agent binary path and version.
+- For concrete custom profiles, use a distinct profile key rather than the
+  seeded `custom` template.
 - Record required provider credentials or local login state as present without
   exposing secret values.
 - Confirm the configured profile can start through `/api/v1/acp/health` or
@@ -174,7 +235,11 @@ Verification level:
 Commit/branch:
 Host/runtime:
 Agent binary/version:
+Runner version:
 Config profile:
+Env var names:
+Workspace policy:
+Provider assumptions:
 Manifest command:
 Commands run:
 Capability results:

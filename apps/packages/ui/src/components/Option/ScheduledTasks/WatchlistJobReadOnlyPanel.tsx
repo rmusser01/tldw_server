@@ -1,7 +1,12 @@
 import React from "react"
-import { Button, Card, Descriptions, Tag, Typography } from "antd"
+import { Button, Card, Descriptions, Typography } from "antd"
+import { Badge as DesignSystemBadge } from "@/components/ui/primitives"
 import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
-import { buildWatchlistTaskLinks } from "./scheduled-task-status"
+import {
+  buildWatchlistTaskLinks,
+  getScheduledTaskProductStatus,
+  scheduledTaskStatusToneToBadgeVariant
+} from "./scheduled-task-status"
 
 type WatchlistJobReadOnlyPanelProps = {
   task: ScheduledTask
@@ -13,6 +18,7 @@ export const WatchlistJobReadOnlyPanel: React.FC<WatchlistJobReadOnlyPanelProps>
   onOpenManageUrl
 }) => {
   const manageUrl = buildWatchlistTaskLinks(task).settingsUrl ?? "/watchlists?tab=jobs"
+  const productStatus = getScheduledTaskProductStatus(task)
 
   return (
     <Card title={task.title}>
@@ -24,7 +30,11 @@ export const WatchlistJobReadOnlyPanel: React.FC<WatchlistJobReadOnlyPanelProps>
           <Descriptions.Item label="Schedule">{task.schedule_summary || "Manual"}</Descriptions.Item>
           <Descriptions.Item label="Timezone">{task.timezone || "—"}</Descriptions.Item>
           <Descriptions.Item label="Status">
-            <Tag color={task.enabled ? "green" : "default"}>{task.status}</Tag>
+            <DesignSystemBadge
+              variant={scheduledTaskStatusToneToBadgeVariant(productStatus)}
+            >
+              {productStatus.label}
+            </DesignSystemBadge>
           </Descriptions.Item>
         </Descriptions>
         <Button href={manageUrl} onClick={() => onOpenManageUrl(task)}>

@@ -45,6 +45,7 @@ TOOLING_PRESET_IDS = {
     "merge-conflict-resolver",
     "documentation-writer",
     "project-researcher",
+    "deep-researcher",
     "code-reviewer",
     "devops-engineer",
     "backend-engineer",
@@ -74,6 +75,7 @@ TOOL_CATEGORY_BY_PREFIX = {
     "tool_describe": "tool_discovery",
     "tool_search": "tool_discovery",
     "ui": "frontend",
+    "web": "web",
 }
 
 
@@ -237,6 +239,18 @@ def test_web_search_is_recommended_unavailable_not_enabled() -> None:
     assert "web_search" not in progressive_disclosure["deferred_categories"]
     assert web_search_recommendations
     assert all(item["required"] is False for item in web_search_recommendations)
+
+
+def test_deep_researcher_enables_web_tools() -> None:
+    deep_researcher = presets.get_builtin_preset("deep-researcher")
+    assert deep_researcher is not None  # nosec B101
+
+    tooling = deep_researcher.profile.metadata["tooling"]
+    assert "web.fetch" in tooling["enabled_tools"]  # nosec B101
+    assert "web.search" in tooling["enabled_tools"]  # nosec B101
+    assert "web.research" in tooling["enabled_tools"]  # nosec B101
+    assert "research.web" in tooling["enabled_capabilities"]  # nosec B101
+    assert "web" in tooling["progressive_disclosure"]["direct_categories"]  # nosec B101
 
 
 def test_cdp_browser_exact_target_is_documented() -> None:

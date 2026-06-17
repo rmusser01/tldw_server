@@ -39,15 +39,16 @@ type Runner struct {
 }
 
 type Session struct {
-	id          string
-	downstream  *Conn
-	process     *exec.Cmd
-	workspace   *workspace.Session
-	fsTools     *tools.FSTools
-	searchTools *tools.SearchTools
-	gitTools    *tools.GitTools
-	terminal    *TerminalManager
-	runErr      <-chan error
+	id           string
+	downstream   *Conn
+	process      *exec.Cmd
+	capabilities map[string]interface{}
+	workspace    *workspace.Session
+	fsTools      *tools.FSTools
+	searchTools  *tools.SearchTools
+	gitTools     *tools.GitTools
+	terminal     *TerminalManager
+	runErr       <-chan error
 }
 
 func NewRunner(cfg *config.Config) *Runner {
@@ -98,7 +99,7 @@ func (r *Runner) handleUpstreamRequest(msg *RPCMessage) (*RPCResponse, error) {
 		return r.handleSessionPrompt(msg)
 	case "session/cancel":
 		return r.handleSessionCancel(msg)
-	case "_tldw/session/close":
+	case "session/close", "_tldw/session/close":
 		return r.handleSessionClose(msg)
 	case "session/load":
 		return NewErrorResponse(msg.ID, ErrMethodNotFound, "session/load not supported"), nil
@@ -268,7 +269,15 @@ func (r *Runner) handleSessionNew(msg *RPCMessage) (*RPCResponse, error) {
 		return &RPCResponse{JSONRPC: JSONRPCVersion, ID: msg.ID, Error: initResp.Error}, nil
 	}
 	if initResp != nil && initResp.Result != nil {
-		r.updateCachedCapabilities(initResp.Result)
+		session.capabilities = parseAgentCapabilities(initResp.Result)
+		if session.capabilities != nil {
+			r.setCachedCapabilities(session.capabilities)
+		}
+	}
+
+	if err := validateSessionNewMCPTransports(msg.Params, session.capabilities); err != nil {
+		r.terminateProcess(cmd)
+		return NewErrorResponse(msg.ID, ErrInvalidParams, err.Error()), nil
 	}
 
 	downstreamParams, err := stripSessionRoutingParams(msg.Params)
@@ -359,6 +368,22 @@ func (r *Runner) handleSessionClose(msg *RPCMessage) (*RPCResponse, error) {
 		return NewErrorResponse(msg.ID, ErrInvalidParams, "invalid session/close params"), nil
 	}
 
+	session := r.getSession(params.SessionID)
+	if session != nil {
+		if capabilityEnabled(session.capabilities, "sessionCapabilities", "close") {
+			resp, err := session.downstream.CallRaw(context.Background(), "session/close", msg.Params)
+			if err != nil {
+				r.cleanupSession(params.SessionID)
+				return NewErrorResponse(msg.ID, ErrInternal, fmt.Sprintf("downstream session/close failed: %v", err)), nil
+			}
+			if resp != nil && resp.Error != nil && resp.Error.Code != ErrMethodNotFound {
+				r.cleanupSession(params.SessionID)
+				return &RPCResponse{JSONRPC: JSONRPCVersion, ID: msg.ID, Error: resp.Error}, nil
+			}
+		} else {
+			_ = session.downstream.NotifyRaw("session/cancel", msg.Params)
+		}
+	}
 	r.cleanupSession(params.SessionID)
 	return NewResultResponse(msg.ID, nil), nil
 }
@@ -636,7 +661,7 @@ func passiveBlockedStatus(blocker string) string {
 	case "mutable_adapter_invocation":
 		return "Configured ACP adapter invocation uses a mutable package version."
 	case "custom_template":
-		return "Create a named custom ACP profile with command, args, env, workspace policy, and evidence bundle."
+		return "Create a distinct named custom ACP profile instead of certifying the seeded custom template; record command, args, env, workspace policy, and evidence bundle."
 	case "live_certification_required":
 		return "Run live ACP certification before claiming this agent is supported."
 	case "entrypoint_strategy_missing":
@@ -676,9 +701,96 @@ func (r *Runner) updateCachedCapabilities(raw json.RawMessage) {
 	if caps == nil {
 		return
 	}
+	r.setCachedCapabilities(caps)
+}
+
+func (r *Runner) setCachedCapabilities(caps map[string]interface{}) {
 	r.capsMu.Lock()
-	r.cachedCaps = caps
+	r.cachedCaps = copyMap(caps)
 	r.capsMu.Unlock()
+}
+
+func validateSessionNewMCPTransports(raw json.RawMessage, caps map[string]interface{}) error {
+	if raw == nil {
+		return nil
+	}
+	var params map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return fmt.Errorf("invalid session/new params")
+	}
+	rawServers, ok := params["mcpServers"]
+	if !ok || len(rawServers) == 0 || string(rawServers) == "null" {
+		return nil
+	}
+	var servers []map[string]interface{}
+	if err := json.Unmarshal(rawServers, &servers); err != nil {
+		return fmt.Errorf("mcpServers must be an array")
+	}
+	for idx, server := range servers {
+		rawTransport, ok := server["type"]
+		if !ok {
+			return fmt.Errorf("mcpServers[%d].type must be a string", idx)
+		}
+		transport, ok := rawTransport.(string)
+		if !ok {
+			return fmt.Errorf("mcpServers[%d].type must be a string", idx)
+		}
+		normalizedTransport := strings.ToLower(strings.TrimSpace(transport))
+		if normalizedTransport == "" {
+			return fmt.Errorf("mcpServers[%d].type must not be empty", idx)
+		}
+		switch normalizedTransport {
+		case "stdio", "websocket":
+			continue
+		case "http":
+			if !capabilityEnabled(caps, "mcpCapabilities", "http") {
+				return fmt.Errorf("mcpServers transport http requires agentCapabilities.mcpCapabilities.http")
+			}
+		case "sse":
+			if !capabilityEnabled(caps, "mcpCapabilities", "sse") {
+				return fmt.Errorf("mcpServers transport sse requires agentCapabilities.mcpCapabilities.sse")
+			}
+		default:
+			return fmt.Errorf("mcpServers[%d].type %q is not supported", idx, transport)
+		}
+	}
+	return nil
+}
+
+func capabilityEnabled(caps map[string]interface{}, section string, capability string) bool {
+	if caps == nil {
+		return false
+	}
+	rawSection, ok := caps[section]
+	if !ok {
+		return false
+	}
+	switch typedSection := rawSection.(type) {
+	case map[string]interface{}:
+		rawValue, ok := typedSection[capability]
+		if !ok {
+			return false
+		}
+		return capabilityValueEnabled(rawValue)
+	case map[string]bool:
+		return typedSection[capability]
+	case map[string]map[string]interface{}:
+		_, ok := typedSection[capability]
+		return ok
+	default:
+		return false
+	}
+}
+
+func capabilityValueEnabled(value interface{}) bool {
+	switch typedValue := value.(type) {
+	case bool:
+		return typedValue
+	case nil:
+		return false
+	default:
+		return true
+	}
 }
 
 func (r *Runner) refreshCapabilities() map[string]interface{} {

@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-ScheduledTaskPrimitive = Literal["reminder_task", "watchlist_job"]
+ScheduledTaskPrimitive = Literal["reminder_task", "watchlist_job", "automation_definition"]
 ScheduledTaskEditMode = Literal["native", "external"]
 
 

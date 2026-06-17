@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  SCHEDULED_TASK_TEMPLATES,
+  type ScheduledTaskTemplateId
+} from "../scheduled-task-templates"
+import {
   DEFAULT_SCHEDULED_TASK_TEMPLATE_CAPABILITIES,
   REQUIRED_INGEST_AVAILABILITY_GATES,
   REQUIRED_WATCH_AVAILABILITY_GATES,
+  applyScheduledTaskTemplateCapabilities,
   buildNotificationPolicyCopy,
   buildResultDestinationCopy,
   buildScheduledTaskTemplateCapability,
@@ -14,6 +19,11 @@ import {
 } from "../scheduled-task-template-capabilities"
 
 describe("scheduled task template capabilities", () => {
+  const plannedTemplateIds = [
+    "recurring_question",
+    "agent_task"
+  ] as const satisfies readonly ScheduledTaskTemplateId[]
+
   it("exports an immutable default capability map", () => {
     expect(Object.isFrozen(DEFAULT_SCHEDULED_TASK_TEMPLATE_CAPABILITIES)).toBe(true)
   })
@@ -53,6 +63,38 @@ describe("scheduled task template capabilities", () => {
     })
 
     expect(resolveTemplateCapabilityState("ingest", capability)).toBe("available")
+  })
+
+  it.each(plannedTemplateIds)(
+    "ignores Watch/Ingest fallback gates for planned template %s",
+    (templateId) => {
+      const capability = buildScheduledTaskTemplateCapability(templateId, {
+        creationAdapterSupported: true,
+        passedGates: REQUIRED_WATCH_AVAILABILITY_GATES
+      })
+
+      expect(resolveTemplateCapabilityState(templateId, capability)).toBeNull()
+    }
+  )
+
+  it("preserves planned template states when capability input would make Watch available", () => {
+    const templates = applyScheduledTaskTemplateCapabilities(SCHEDULED_TASK_TEMPLATES, {
+      recurring_question: buildScheduledTaskTemplateCapability("recurring_question", {
+        creationAdapterSupported: true,
+        passedGates: REQUIRED_WATCH_AVAILABILITY_GATES
+      }),
+      agent_task: buildScheduledTaskTemplateCapability("agent_task", {
+        creationAdapterSupported: true,
+        passedGates: REQUIRED_WATCH_AVAILABILITY_GATES
+      })
+    })
+
+    expect(templates.find((template) => template.id === "recurring_question")?.state).toBe(
+      "planned"
+    )
+    expect(templates.find((template) => template.id === "agent_task")?.state).toBe(
+      "planned"
+    )
   })
 
   it("generates source-intent copy from source support metadata", () => {

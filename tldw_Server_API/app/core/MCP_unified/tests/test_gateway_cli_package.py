@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -2727,3 +2728,404 @@ def _seed_sqlite_tool_use_events(
             await store.aclose()
 
     asyncio.run(_seed())
+
+
+def test_gateway_cli_approval_grant_lifecycle(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Create, list, and revoke an approval grant through the CLI."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "policy_grants": {
+                    "kind": "sqlite",
+                    "sqlite_path": str(tmp_path / "grants.db"),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-approval-grant",
+            "--config",
+            str(config_path),
+            "--profile",
+            "researcher",
+            "--subject-type",
+            "domain",
+            "--value",
+            "https://Example.com/private",
+            "--ttl-seconds",
+            "900",
+            "--granted-by",
+            "operator",
+        ]
+    )
+    created = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    grant_payload = created["grant"]
+    assert grant_payload["value"] == "example.com"
+    assert grant_payload["profile_id"] == "researcher"
+    grant_id = grant_payload["grant_id"]
+
+    exit_code = gateway_cli.main(
+        ["list-approval-grants", "--config", str(config_path)]
+    )
+    listed = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert [grant["grant_id"] for grant in listed["grants"]] == [grant_id]
+
+    exit_code = gateway_cli.main(
+        ["revoke-approval-grant", grant_id, "--config", str(config_path)]
+    )
+    revoked = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert revoked["grant"]["grant_id"] == grant_id
+
+    exit_code = gateway_cli.main(
+        ["list-approval-grants", "--config", str(config_path)]
+    )
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out)["grants"] == []
+
+
+def test_gateway_cli_approval_grant_requires_configured_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Fail closed when no policy grant store is configured."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(json.dumps({"store": {"kind": "memory"}}), encoding="utf-8")
+
+    exit_code = gateway_cli.main(
+        ["list-approval-grants", "--config", str(config_path)]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["reason_code"] == "policy_grant_store_unavailable"
+
+
+def test_gateway_cli_approval_grant_requires_persistent_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject CLI grant management against a process-local memory store."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "policy_grants": {"kind": "memory"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        ["list-approval-grants", "--config", str(config_path)]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["reason_code"] == "policy_grant_store_unavailable"
+
+
+def test_gateway_cli_path_grant_lifecycle(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Create, list, and revoke a TTL path grant through the CLI."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "policy_grants": {
+                    "kind": "sqlite",
+                    "sqlite_path": str(tmp_path / "grants.db"),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-path-grant",
+            "--config",
+            str(config_path),
+            "--profile",
+            "reviewer",
+            "--prefix",
+            "docs\\scratch/./sub",
+            "--actions",
+            "read,write",
+            "--ttl-seconds",
+            "900",
+            "--session-id",
+            "session-1",
+        ]
+    )
+    created = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    grant_payload = created["grant"]
+    assert grant_payload["grant_type"] == "path"
+    assert grant_payload["value"] == "docs/scratch/sub"
+    assert grant_payload["actions"] == ["read", "write"]
+    grant_id = grant_payload["grant_id"]
+
+    exit_code = gateway_cli.main(
+        [
+            "list-approval-grants",
+            "--config",
+            str(config_path),
+            "--grant-type",
+            "path",
+        ]
+    )
+    listed = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert [grant["grant_id"] for grant in listed["grants"]] == [grant_id]
+
+    exit_code = gateway_cli.main(
+        ["revoke-approval-grant", grant_id, "--config", str(config_path)]
+    )
+    assert exit_code == 0
+    capsys.readouterr()
+
+
+def test_gateway_cli_path_grant_rejects_invalid_actions(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Fail closed on invalid path grant actions."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "policy_grants": {
+                    "kind": "sqlite",
+                    "sqlite_path": str(tmp_path / "grants.db"),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-path-grant",
+            "--config",
+            str(config_path),
+            "--profile",
+            "reviewer",
+            "--prefix",
+            "docs/scratch",
+            "--actions",
+            "read,launch_missiles",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert json.loads(captured.err)["reason_code"] == "invalid_policy_grant"
+
+
+def test_gateway_cli_simulate_policy_reports_decision(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Simulate a profile policy decision for one hypothetical tool call."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "profiles": [
+                    {
+                        "id": "researcher",
+                        "name": "Researcher",
+                        "policy_document": {
+                            "allowed_tools": ["web.fetch"],
+                            "permission_rules": [
+                                {"pattern": "WebFetch(example.com)", "outcome": "ask"}
+                            ],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "simulate-policy",
+            "--config",
+            str(config_path),
+            "--profile",
+            "researcher",
+            "--tool",
+            "web.fetch",
+            "--url",
+            "https://example.com/private",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["overall"]["status"] == "approval_required"
+    assert payload["profile_id"] == "researcher"
+
+    exit_code = gateway_cli.main(
+        [
+            "simulate-policy",
+            "--config",
+            str(config_path),
+            "--profile",
+            "researcher",
+            "--tool",
+            "web.fetch",
+            "--url",
+            "https://other.example.org/page",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["overall"]["status"] == "allowed"
+
+
+def test_gateway_cli_simulate_policy_unknown_profile_errors(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report a JSON error payload for an unknown profile id."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(json.dumps({"store": {"kind": "memory"}}), encoding="utf-8")
+
+    exit_code = gateway_cli.main(
+        [
+            "simulate-policy",
+            "--config",
+            str(config_path),
+            "--profile",
+            "missing",
+            "--tool",
+            "web.fetch",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert json.loads(captured.err)["reason_code"] == "profile_not_found"
+
+
+def test_gateway_cli_simulate_policy_does_not_write_persistent_profile_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Simulation must stay read-only even against a persistent profile store."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "sqlite", "sqlite_path": str(tmp_path / "profiles.db")},
+                "profiles": [
+                    {
+                        "id": "researcher",
+                        "name": "Researcher",
+                        "policy_document": {"allowed_tools": ["web.fetch"]},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "simulate-policy",
+            "--config",
+            str(config_path),
+            "--profile",
+            "researcher",
+            "--tool",
+            "web.fetch",
+            "--url",
+            "https://example.com/page",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["overall"]["status"] == "allowed"
+
+    exit_code = gateway_cli.main(
+        ["show-profile", "researcher", "--config", str(config_path)]
+    )
+    capsys.readouterr()
+    assert exit_code == 1
+
+
+def test_gateway_cli_simulate_policy_flags_override_arguments_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Explicit convenience flags must win over --arguments-json keys."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "profiles": [
+                    {
+                        "id": "reviewer",
+                        "name": "Reviewer",
+                        "policy_document": {
+                            "allowed_tools": ["fs.read_text"],
+                            "permission_rules": [
+                                {
+                                    "pattern": "Read(docs/private/**)",
+                                    "outcome": "deny",
+                                    "reason_code": "private_docs_denied",
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "simulate-policy",
+            "--config",
+            str(config_path),
+            "--profile",
+            "reviewer",
+            "--tool",
+            "fs.read_text",
+            "--path",
+            "docs/private/secret.txt",
+            "--arguments-json",
+            json.dumps({"path": "docs/public/notes.txt"}),
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["overall"]["status"] == "denied"
+    assert payload["overall"]["reason_code"] == "private_docs_denied"

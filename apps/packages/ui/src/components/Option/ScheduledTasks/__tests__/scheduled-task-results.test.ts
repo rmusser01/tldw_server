@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 
+import { BLOCKED_STATE_LABEL } from "@/design-system"
 import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
 
 import {
@@ -137,6 +138,42 @@ describe("scheduled task result helpers", () => {
       summary: "Paused monitor is paused."
     })
     expect(buildScheduledTaskAutomationHomeItems([result])).toEqual([])
+  })
+
+  it("does not project automation definition lifecycle states as fake result rows", () => {
+    const results = projectScheduledTaskResults([
+      buildTask({
+        id: "automation_definition:definition_1",
+        primitive: "automation_definition",
+        title: "Track answer",
+        status: "configured_execution_unavailable",
+        edit_mode: "native",
+        manage_url: null,
+        source_ref: {
+          definition_id: "definition_1",
+          family: "recurring_question",
+          lifecycle: "configured",
+          health: "execution_unavailable"
+        }
+      })
+    ])
+
+    expect(results).toEqual([])
+  })
+
+  it("uses the canonical blocked label for blocked automation home items", () => {
+    const [result] = projectScheduledTaskResults([
+      buildTask({
+        id: "watchlist_job:blocked",
+        title: "Blocked monitor",
+        status: "blocked",
+        source_ref: { job_id: 9 }
+      })
+    ])
+
+    expect(buildScheduledTaskAutomationHomeItems([result])?.[0]?.statusLabel).toBe(
+      BLOCKED_STATE_LABEL
+    )
   })
 
   it("keeps result and failure signals separate for failed tasks that produced output", () => {

@@ -28,7 +28,9 @@ describe("AutomationInboxCard", () => {
     expect(screen.getByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
     expect(screen.getByText("No automation results yet")).toBeInTheDocument()
     expect(
-      screen.getByText("Results and failures from scheduled tasks appear here after a run.")
+      screen.getByText(
+        "Results and failures from scheduled tasks appear here after a run. Future scheduled questions and agent outputs appear here only when routed by task visibility policy."
+      )
     ).toBeInTheDocument()
   })
 

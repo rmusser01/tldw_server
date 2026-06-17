@@ -97,6 +97,12 @@ def _as_action_list(value: Any) -> list[str]:
     return sorted({str(item or "").strip().lower() for item in raw_items if str(item or "").strip()})
 
 
+def normalize_path_grant_prefix(raw_value: Any) -> str | None:
+    """Public wrapper normalizing a workspace-relative path-grant prefix."""
+
+    return _normalize_path_prefix(raw_value)
+
+
 def _normalize_path_prefix(raw_value: Any) -> str | None:
     """Normalize a workspace-relative path-grant prefix."""
 

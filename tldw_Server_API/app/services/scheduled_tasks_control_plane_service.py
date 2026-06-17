@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.Personalization.companion_activity import (
     record_reminder_task_updated,
 )
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase, ReminderTaskRow
+from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import DefinitionRow, ScheduledTasksDatabase
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import JobRow, WatchlistsDatabase
 from tldw_Server_API.app.services.reminders_scheduler import get_reminders_scheduler
 
@@ -47,6 +48,7 @@ _NONCRITICAL_READ_EXCEPTIONS = (
 
 _REMINDER_PREFIX = "reminder_task"
 _WATCHLIST_PREFIX = "watchlist_job"
+_AUTOMATION_DEFINITION_PREFIX = "automation_definition"
 
 
 def _load_json_object(raw: str | None) -> dict[str, Any]:
@@ -77,6 +79,58 @@ def _watchlist_schedule_summary(row: JobRow) -> str | None:
     return "Manual"
 
 
+def _automation_schedule_summary(row: DefinitionRow) -> str | None:
+    kind = row.schedule.get("kind")
+    if not isinstance(kind, str) or not kind:
+        return None
+    timezone = row.schedule.get("timezone")
+    if kind == "daily":
+        time = row.schedule.get("time")
+        summary = f"Daily at {time}" if isinstance(time, str) and time else "Daily"
+    elif kind == "weekly":
+        day = row.schedule.get("day")
+        time = row.schedule.get("time")
+        parts = ["Weekly"]
+        if isinstance(day, str) and day:
+            parts.append(day)
+        if isinstance(time, str) and time:
+            parts.append(f"at {time}")
+        summary = " ".join(parts)
+    elif kind == "cron":
+        expr = row.schedule.get("cron") or row.schedule.get("expr")
+        summary = str(expr) if expr else "Cron"
+    elif kind == "one_time":
+        run_at = row.schedule.get("run_at")
+        summary = str(run_at) if run_at else "One time"
+    elif kind == "interval":
+        every = row.schedule.get("every")
+        unit = row.schedule.get("unit")
+        summary = f"Every {every} {unit}" if every and unit else "Interval"
+    else:
+        summary = kind
+    if isinstance(timezone, str) and timezone:
+        return f"{summary} ({timezone})"
+    return summary
+
+
+def _automation_definition_status(row: DefinitionRow) -> tuple[bool, str]:
+    if row.lifecycle == "configured":
+        if row.health == "execution_unavailable":
+            return True, "configured_execution_unavailable"
+        if row.health == "capability_unavailable":
+            return True, "blocked_capability_unavailable"
+        if row.health == "permission_required":
+            return True, "blocked_permission_required"
+        return True, row.health
+    if row.lifecycle == "paused":
+        return False, "paused"
+    if row.lifecycle == "archived":
+        return False, "archived"
+    if row.lifecycle == "disabled":
+        return False, "disabled"
+    return False, "needs_attention"
+
+
 def _reminder_row_to_activity_payload(row: ReminderTaskRow) -> dict[str, Any]:
     return {
         "id": row.id,
@@ -104,6 +158,12 @@ class ScheduledTasksControlPlaneService:
         db = WatchlistsDatabase.for_user(user_id=user_id)
         with suppress(Exception):
             db.ensure_schema()
+        return db
+
+    @staticmethod
+    def _scheduled_tasks_db(user_id: int) -> ScheduledTasksDatabase:
+        db = ScheduledTasksDatabase.for_user(user_id=user_id)
+        db.ensure_schema()
         return db
 
     @staticmethod
@@ -158,6 +218,36 @@ class ScheduledTasksControlPlaneService:
             },
         )
 
+    @staticmethod
+    def _normalize_automation_definition(row: DefinitionRow) -> ScheduledTask:
+        enabled, status = _automation_definition_status(row)
+        timezone = row.schedule.get("timezone")
+        return ScheduledTask(
+            id=f"{_AUTOMATION_DEFINITION_PREFIX}:{row.id}",
+            primitive="automation_definition",
+            title=row.name,
+            description=row.description,
+            status=status,
+            enabled=enabled,
+            schedule_summary=_automation_schedule_summary(row),
+            timezone=timezone if isinstance(timezone, str) else None,
+            next_run_at=None,
+            last_run_at=None,
+            edit_mode="native",
+            manage_url=None,
+            source_ref={
+                "definition_id": row.id,
+                "family": row.family,
+                "lifecycle": row.lifecycle,
+                "health": row.health,
+                "version": row.version,
+                "visibility_policy": row.visibility_policy,
+                "execution_available": False,
+                "disabled_lock_kind": row.disabled_lock_kind,
+                "disabled_reason": row.disabled_reason,
+            },
+        )
+
     async def _reconcile_reminder_task_best_effort(self, *, task_id: str, user_id: int) -> None:
         try:
             await get_reminders_scheduler().reconcile_task(task_id=task_id, user_id=user_id)
@@ -196,6 +286,21 @@ class ScheduledTasksControlPlaneService:
             )
             errors.append("watchlist_jobs_unavailable")
 
+        try:
+            definition_rows, _ = self._scheduled_tasks_db(user_id).list_definitions(
+                owner_id=user_id,
+                limit=500,
+                offset=0,
+            )
+            items.extend(self._normalize_automation_definition(row) for row in definition_rows)
+        except _NONCRITICAL_READ_EXCEPTIONS as exc:
+            logger.warning(
+                "scheduled tasks control plane could not list automation definitions user_id={} error={}",
+                user_id,
+                exc,
+            )
+            errors.append("automation_definitions_unavailable")
+
         return ScheduledTaskListResponse(
             items=items,
             total=len(items),
@@ -213,6 +318,13 @@ class ScheduledTasksControlPlaneService:
             raw_task_id = task_id.removeprefix(f"{_WATCHLIST_PREFIX}:")
             row = self._watchlists_db(user_id).get_job(int(raw_task_id))
             return self._normalize_watchlist_job(row)
+
+        if task_id.startswith(f"{_AUTOMATION_DEFINITION_PREFIX}:"):
+            raw_task_id = task_id.removeprefix(f"{_AUTOMATION_DEFINITION_PREFIX}:")
+            row = self._scheduled_tasks_db(user_id).get_definition(owner_id=user_id, definition_id=raw_task_id)
+            if row is None:
+                raise KeyError("scheduled_task_not_found")
+            return self._normalize_automation_definition(row)
 
         raise KeyError("scheduled_task_not_found")
 

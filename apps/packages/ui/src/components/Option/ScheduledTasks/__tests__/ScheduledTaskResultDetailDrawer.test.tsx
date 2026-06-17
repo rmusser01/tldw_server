@@ -5,6 +5,7 @@ import { render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
+import { expectInsideDesignSystemAlert } from "@/test-utils/designSystemAlert"
 
 import { ScheduledTaskResultDetailDrawer } from "../ScheduledTaskResultDetailDrawer"
 import { projectScheduledTaskResults } from "../scheduled-task-results"
@@ -38,6 +39,16 @@ const buildResult = () =>
     capabilityMode: "projected_signals"
   })[0]
 
+const expectInsideDesignSystemBadge = (text: string | RegExp): HTMLElement => {
+  const match = screen
+    .getAllByText(text)
+    .map((node) => node.closest('[data-ds-component="Badge"]'))
+    .find((node): node is HTMLElement => node instanceof HTMLElement)
+
+  expect(match).toBeTruthy()
+  return match
+}
+
 describe("ScheduledTaskResultDetailDrawer", () => {
   it("shows result provenance, owner, ids, and Watchlists deep links", () => {
     const result = buildResult()
@@ -55,6 +66,7 @@ describe("ScheduledTaskResultDetailDrawer", () => {
     expect(screen.getByRole("dialog", { name: /Release monitor/i })).toBeInTheDocument()
     expect(screen.getByText("Why this is here")).toBeInTheDocument()
     expect(screen.getByText("Found 3 results from Release feed.")).toBeInTheDocument()
+    expectInsideDesignSystemBadge("Found results")
     expect(screen.getByText("Watchlists")).toBeInTheDocument()
     expect(screen.getByText("Release feed")).toBeInTheDocument()
     expect(screen.getByText("New release")).toBeInTheDocument()
@@ -92,6 +104,9 @@ describe("ScheduledTaskResultDetailDrawer", () => {
     expect(
       screen.getByText("Review and retry actions appear when this server supports them for the selected result.")
     ).toBeInTheDocument()
+    expectInsideDesignSystemAlert(
+      "Review and retry actions appear when this server supports them for the selected result."
+    )
   })
 
   it("shows mutation actions only when item capabilities allow them", () => {

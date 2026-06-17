@@ -8,11 +8,12 @@ from typing import Any
 
 import pytest
 
-from mcp_unified.tool_use_reporting.models import ToolUseEvent
+from mcp_unified.tool_use_reporting.models import MAX_FILE_POLICY_DECISIONS, ToolUseEvent
 
 from tldw_Server_API.app.core.MCP_unified.auth.rate_limiter import RateLimitExceeded
 from tldw_Server_API.app.core.MCP_unified.protocol import (
     ErrorCode,
+    GovernanceDeniedError,
     InvalidParamsException,
     MCPProtocol,
     RequestContext,
@@ -55,6 +56,91 @@ class _ToolOnlyRateLimiter:
 class _NoopMetrics:
     def __getattr__(self, _name: str):
         return lambda *args, **kwargs: None
+
+
+class _StaticEffectivePolicyResolver:
+    """Test double that returns a fixed effective policy for any context."""
+
+    def __init__(self, policy: dict[str, Any] | None = None) -> None:
+        self.policy = policy
+
+    async def resolve_for_context(
+        self,
+        *,
+        user_id: str | None,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        del user_id, metadata
+        return self.policy
+
+
+class _AllowApprovalEvaluator:
+    """Test double that always allows tool calls through approval evaluation."""
+
+    async def evaluate_tool_call(self, **_kwargs: Any) -> dict[str, Any]:
+        return {"status": "allow", "reason": "test_allow"}
+
+
+class _FilePolicyPathScopeEnforcer:
+    """Test double that returns an allowed redacted file-policy decision."""
+
+    async def evaluate_tool_call(self, **_kwargs: Any) -> dict[str, Any]:
+        return {
+            "enabled": True,
+            "within_scope": True,
+            "reason": None,
+            "force_approval": False,
+            "normalized_paths": ["/Users/me/workspace/private/story.txt"],
+            "scope_payload": {
+                "path_scope_mode": "workspace_root",
+                "workspace_root": "/Users/me/workspace",
+                "scope_root": "/Users/me/workspace",
+                "normalized_paths": ["/Users/me/workspace/private/story.txt"],
+                "path_decisions": [
+                    {
+                        "requested_action": "edit",
+                        "normalized_path": "private/story.txt",
+                        "grant_outcome": "allowed",
+                        "grant_source": "path_grants",
+                        "matched_grant_prefix": "private",
+                        "matched_grant_effect": "allow",
+                        "reason_code": None,
+                        "redacted": True,
+                    }
+                ],
+            },
+        }
+
+
+class _DenyFilePolicyPathScopeEnforcer:
+    """Test double that returns a denied redacted file-policy decision."""
+
+    async def evaluate_tool_call(self, **_kwargs: Any) -> dict[str, Any]:
+        return {
+            "enabled": True,
+            "within_scope": False,
+            "reason": "path_action_denied",
+            "force_approval": False,
+            "normalized_paths": ["/Users/me/workspace/private/story.txt"],
+            "scope_payload": {
+                "path_scope_mode": "workspace_root",
+                "workspace_root": "/Users/me/workspace",
+                "scope_root": "/Users/me/workspace",
+                "normalized_paths": ["/Users/me/workspace/private/story.txt"],
+                "path_decisions": [
+                    {
+                        "requested_action": "edit",
+                        "normalized_path": "private/story.txt",
+                        "grant_outcome": "denied",
+                        "grant_source": "path_grants",
+                        "matched_grant_prefix": "private",
+                        "matched_grant_effect": "deny",
+                        "reason_code": "path_action_denied",
+                        "redacted": True,
+                    }
+                ],
+            },
+        }
 
 
 class _Span:
@@ -171,6 +257,9 @@ class _FilesystemPayloadModule(_ToolModule):
             "content": "SECRET FILE CONTENT",
             "read_receipt": "receipt-token-secret",
             "diff": "--- a/private/story.txt\n+++ b/private/story.txt\n",
+            "sha256_before": "a" * 64,
+            "sha256_after": "b" * 64,
+            "lock_lease_id": "lease-token-secret",
             "eval": {
                 "tool_name": "fs.patch",
                 "tool_prompt_id": "mcp.fs.patch.v1",
@@ -199,6 +288,8 @@ def _protocol(
     module: _ToolModule | None = None,
     recorder: Any | None = None,
     rate_limiter: Any | None = None,
+    effective_policy: dict[str, Any] | None = None,
+    path_scope_enforcer: Any | None = None,
 ) -> tuple[MCPProtocol, Any]:
     recorder = recorder or _RecordingToolUseRecorder()
     module = module or _ToolModule()
@@ -209,6 +300,9 @@ def _protocol(
         metrics_collector=_NoopMetrics(),
         telemetry_provider=_Telemetry(),
         tool_catalog_provider=object(),
+        effective_policy_resolver=_StaticEffectivePolicyResolver(effective_policy),
+        approval_evaluator=_AllowApprovalEvaluator(),
+        path_scope_enforcer=path_scope_enforcer or _FilePolicyPathScopeEnforcer(),
         redis_client_factory=lambda **kwargs: None,
         tool_use_recorder=recorder,
     )
@@ -223,6 +317,108 @@ def _request_context(metadata: dict[str, Any] | None = None) -> RequestContext:
         client_id="client-1",
         metadata=metadata or {},
     )
+
+
+def test_tool_use_file_policy_decisions_bounds_copied_entries() -> None:
+    decisions = [
+        {
+            "requested_action": "edit",
+            "normalized_path": f"private/story-{index}.txt",
+            "grant_outcome": "allowed",
+            "redacted": True,
+        }
+        for index in range(MAX_FILE_POLICY_DECISIONS + 5)
+    ]
+
+    copied = MCPProtocol._tool_use_file_policy_decisions({"path_decisions": decisions})
+
+    assert len(copied) == MAX_FILE_POLICY_DECISIONS
+    assert copied[-1]["normalized_path"] == (
+        f"private/story-{MAX_FILE_POLICY_DECISIONS - 1}.txt"
+    )
+
+
+def test_protocol_derives_grant_outcome_from_all_file_policy_decisions() -> None:
+    protocol, _ = _protocol()
+
+    denied_event = protocol._build_tool_use_event(
+        context=_request_context(),
+        requested_tool_name="fs.patch",
+        effective_tool_name="fs.patch",
+        status="denied",
+        execution_origin="failed_before_execution",
+        duration_ms=0,
+        scope_payload={
+            "path_decisions": [
+                {"grant_outcome": "allowed", "normalized_path": "private/ok.txt"},
+                {"grant_outcome": "denied", "normalized_path": "private/blocked.txt"},
+            ],
+        },
+    )
+    not_granted_event = protocol._build_tool_use_event(
+        context=_request_context(),
+        requested_tool_name="fs.patch",
+        effective_tool_name="fs.patch",
+        status="denied",
+        execution_origin="failed_before_execution",
+        duration_ms=0,
+        scope_payload={
+            "path_decisions": [
+                {"grant_outcome": "allowed", "normalized_path": "private/ok.txt"},
+                {"grant_outcome": "not_granted", "normalized_path": "private/missing.txt"},
+            ],
+        },
+    )
+
+    assert denied_event.grant_outcome == "denied"
+    assert not_granted_event.grant_outcome == "not_granted"
+
+
+def test_protocol_eval_metadata_grant_outcome_overrides_derived_decisions() -> None:
+    protocol, _ = _protocol()
+
+    event = protocol._build_tool_use_event(
+        context=_request_context(),
+        requested_tool_name="fs.patch",
+        effective_tool_name="fs.patch",
+        status="denied",
+        execution_origin="failed_before_execution",
+        duration_ms=0,
+        tool_def={"metadata": {"eval": {"grant_outcome": "metadata_override"}}},
+        scope_payload={
+            "path_decisions": [
+                {"grant_outcome": "denied", "normalized_path": "private/blocked.txt"},
+            ],
+        },
+    )
+
+    assert event.grant_outcome == "metadata_override"
+
+
+def test_protocol_file_policy_presence_ignores_empty_containers() -> None:
+    protocol, _ = _protocol()
+
+    event = protocol._build_tool_use_event(
+        context=_request_context(),
+        requested_tool_name="fs.patch",
+        effective_tool_name="fs.patch",
+        status="success",
+        execution_origin="executed",
+        duration_ms=0,
+        payload={
+            "expected_sha256_by_path": {},
+            "sha256_after": [],
+            "lock_lease_id_by_path": {},
+        },
+        tool_args={
+            "expected_sha256_by_path": [],
+            "lock_lease_id_by_path": {},
+        },
+    )
+
+    assert event.file_policy_sha256_before_present is False
+    assert event.file_policy_sha256_after_present is False
+    assert event.file_policy_lock_lease_present is False
 
 
 @pytest.mark.asyncio
@@ -271,8 +467,113 @@ async def test_protocol_records_filesystem_eval_metadata_without_sensitive_paylo
     assert event.profile_id == "backend-engineer"
     assert "SECRET FILE CONTENT" not in dumped
     assert "receipt-token-secret" not in dumped
+    assert "lease-token-secret" not in dumped
+    assert "aaaaaaaaaaaaaaaa" not in dumped
+    assert "bbbbbbbbbbbbbbbb" not in dumped
     assert "/Users/me" not in dumped
     assert "--- a/private" not in dumped
+
+
+@pytest.mark.asyncio
+async def test_protocol_records_file_policy_decision_metadata() -> None:
+    protocol, recorder = _protocol(
+        module=_FilesystemPayloadModule(),
+        effective_policy={
+            "enabled": True,
+            "allowed_tools": ["fs.patch"],
+            "denied_tools": [],
+            "policy_document": {"path_scope_mode": "workspace_root"},
+        },
+        path_scope_enforcer=_FilePolicyPathScopeEnforcer(),
+    )
+
+    await protocol._handle_tools_call(
+        {
+            "name": "fs.patch",
+            "arguments": {
+                "diff": "--- a/private/story.txt\n+++ b/private/story.txt\n",
+                "read_receipt_by_path": {"private/story.txt": "receipt-token-secret"},
+            },
+        },
+        _request_context(
+            metadata={
+                "profile_id": "backend-engineer",
+                "mcp_policy_context_enabled": True,
+            }
+        ),
+    )
+
+    event = recorder.events[-1]
+    assert event.requested_tool_name == "fs.patch"
+    assert event.file_policy_sha256_before_present is True
+    assert event.file_policy_sha256_after_present is True
+    assert event.file_policy_lock_lease_present is True
+    assert len(event.file_policy_decisions) == 1
+    decision = event.file_policy_decisions[0]
+    assert decision.requested_action == "edit"
+    assert decision.normalized_path == "private/story.txt"
+    assert decision.grant_outcome == "allowed"
+    assert decision.grant_source == "path_grants"
+    assert decision.matched_grant_prefix == "private"
+    assert decision.matched_grant_effect == "allow"
+    assert decision.redacted is True
+    dumped = event.model_dump_json()
+    assert "/Users/me" not in dumped
+    assert "receipt-token-secret" not in dumped
+    assert "lease-token-secret" not in dumped
+
+
+@pytest.mark.asyncio
+async def test_protocol_records_denied_file_policy_decision_metadata() -> None:
+    protocol, recorder = _protocol(
+        module=_FilesystemPayloadModule(),
+        effective_policy={
+            "enabled": True,
+            "allowed_tools": ["fs.patch"],
+            "denied_tools": [],
+            "policy_document": {"path_scope_mode": "workspace_root"},
+        },
+        path_scope_enforcer=_DenyFilePolicyPathScopeEnforcer(),
+    )
+
+    with pytest.raises(GovernanceDeniedError):
+        await protocol._handle_tools_call(
+            {
+                "name": "fs.patch",
+                "arguments": {
+                    "diff": "--- a/private/story.txt\n+++ b/private/story.txt\n",
+                    "expected_sha256_by_path": {"private/story.txt": "c" * 64},
+                    "lock_lease_id_by_path": {"private/story.txt": "lease-token-secret"},
+                    "read_receipt_by_path": {"private/story.txt": "receipt-token-secret"},
+                },
+            },
+            _request_context(
+                metadata={
+                    "profile_id": "backend-engineer",
+                    "mcp_policy_context_enabled": True,
+                }
+            ),
+        )
+
+    event = recorder.events[-1]
+    assert event.execution_origin == "failed_before_execution"
+    assert event.status == "denied"
+    assert event.reason_code == "path_action_denied"
+    assert event.grant_outcome == "denied"
+    assert event.file_policy_sha256_before_present is True
+    assert event.file_policy_sha256_after_present is False
+    assert event.file_policy_lock_lease_present is True
+    assert len(event.file_policy_decisions) == 1
+    decision = event.file_policy_decisions[0]
+    assert decision.normalized_path == "private/story.txt"
+    assert decision.grant_outcome == "denied"
+    assert decision.matched_grant_effect == "deny"
+    assert decision.reason_code == "path_action_denied"
+    dumped = event.model_dump_json()
+    assert "/Users/me" not in dumped
+    assert "cccccccccccccccc" not in dumped
+    assert "lease-token-secret" not in dumped
+    assert "receipt-token-secret" not in dumped
 
 
 @pytest.mark.asyncio

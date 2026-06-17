@@ -7,9 +7,22 @@ import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { expectInsideDesignSystemAlert } from "@/test-utils/designSystemAlert"
+
 const mocks = vi.hoisted(() => ({
   useCanonicalConnectionConfig: vi.fn(),
   listScheduledTasks: vi.fn(),
+  getScheduledTaskCapabilities: vi.fn(),
+  createScheduledTaskPreview: vi.fn(),
+  createScheduledTaskDefinition: vi.fn(),
+  updateScheduledTaskDefinition: vi.fn(),
+  getScheduledTaskDefinition: vi.fn(),
+  listScheduledTaskPreviews: vi.fn(),
+  listScheduledTaskDefinitionAudit: vi.fn(),
+  pauseScheduledTaskDefinition: vi.fn(),
+  resumeScheduledTaskDefinition: vi.fn(),
+  archiveScheduledTaskDefinition: vi.fn(),
+  duplicateScheduledTaskDefinition: vi.fn(),
   createScheduledTaskReminder: vi.fn(),
   updateScheduledTaskReminder: vi.fn(),
   deleteScheduledTaskReminder: vi.fn()
@@ -22,6 +35,28 @@ vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
 
 vi.mock("@/services/scheduled-tasks-control-plane", () => ({
   listScheduledTasks: (...args: unknown[]) => mocks.listScheduledTasks(...args),
+  getScheduledTaskCapabilities: (...args: unknown[]) =>
+    mocks.getScheduledTaskCapabilities(...args),
+  createScheduledTaskPreview: (...args: unknown[]) =>
+    mocks.createScheduledTaskPreview(...args),
+  createScheduledTaskDefinition: (...args: unknown[]) =>
+    mocks.createScheduledTaskDefinition(...args),
+  updateScheduledTaskDefinition: (...args: unknown[]) =>
+    mocks.updateScheduledTaskDefinition(...args),
+  getScheduledTaskDefinition: (...args: unknown[]) =>
+    mocks.getScheduledTaskDefinition(...args),
+  listScheduledTaskPreviews: (...args: unknown[]) =>
+    mocks.listScheduledTaskPreviews(...args),
+  listScheduledTaskDefinitionAudit: (...args: unknown[]) =>
+    mocks.listScheduledTaskDefinitionAudit(...args),
+  pauseScheduledTaskDefinition: (...args: unknown[]) =>
+    mocks.pauseScheduledTaskDefinition(...args),
+  resumeScheduledTaskDefinition: (...args: unknown[]) =>
+    mocks.resumeScheduledTaskDefinition(...args),
+  archiveScheduledTaskDefinition: (...args: unknown[]) =>
+    mocks.archiveScheduledTaskDefinition(...args),
+  duplicateScheduledTaskDefinition: (...args: unknown[]) =>
+    mocks.duplicateScheduledTaskDefinition(...args),
   createScheduledTaskReminder: (...args: unknown[]) => mocks.createScheduledTaskReminder(...args),
   updateScheduledTaskReminder: (...args: unknown[]) => mocks.updateScheduledTaskReminder(...args),
   deleteScheduledTaskReminder: (...args: unknown[]) => mocks.deleteScheduledTaskReminder(...args)
@@ -44,6 +79,102 @@ const fetchMock = vi.fn()
 vi.stubGlobal("fetch", fetchMock)
 
 const SLOW_SCHEDULE_FORM_TIMEOUT_MS = 20000
+
+const availableAutomationCapabilities = {
+  items: [
+    {
+      family: "recurring_question",
+      family_availability: "available",
+      actions: {
+        create_definition: {
+          status: "available",
+          reason: null,
+          required_permissions: []
+        },
+        update_definition: {
+          status: "available",
+          reason: null,
+          required_permissions: []
+        }
+      },
+      missing_dependencies: [],
+      related_capabilities: {},
+      schema_version: "2026-06-10"
+    },
+    {
+      family: "agent_task",
+      family_availability: "available",
+      actions: {
+        create_definition: {
+          status: "available",
+          reason: null,
+          required_permissions: []
+        }
+      },
+      missing_dependencies: [],
+      related_capabilities: {},
+      schema_version: "2026-06-10"
+    }
+  ]
+}
+
+const emptyAutomationCapabilities = {
+  items: []
+}
+
+const automationTask = (overrides: Record<string, unknown> = {}) => ({
+  id: "automation_definition:definition_1",
+  primitive: "automation_definition",
+  title: "Track answer",
+  description: "Ask until the answer appears",
+  status: "configured_execution_unavailable",
+  enabled: true,
+  schedule_summary: "0 9 * * *",
+  timezone: "UTC",
+  next_run_at: null,
+  last_run_at: null,
+  edit_mode: "native",
+  manage_url: null,
+  source_ref: {
+    definition_id: "definition_1",
+    family: "recurring_question",
+    lifecycle: "configured",
+    health: "execution_unavailable",
+    visibility: "private"
+  },
+  ...overrides
+})
+
+const definitionResponse = (overrides: Record<string, unknown> = {}) => ({
+  id: "definition_1",
+  version: 1,
+  family: "recurring_question",
+  name: "Track answer",
+  description: null,
+  lifecycle: "configured",
+  health: "execution_unavailable",
+  schedule: {},
+  input: {},
+  config: {},
+  visibility_policy: { visibility: "private" },
+  notification_policy: {},
+  approval_policy: {},
+  ...overrides
+})
+
+const expectInsideDesignSystemComponent = (
+  text: string | RegExp,
+  componentName: string
+): HTMLElement => {
+  const marker = `[data-ds-component="${componentName}"]`
+  const match = screen
+    .getAllByText(text)
+    .map((node) => node.closest(marker))
+    .find((node): node is HTMLElement => node instanceof HTMLElement)
+
+  expect(match).toBeTruthy()
+  return match
+}
 
 const renderWithQueryClient = (
   ui: React.ReactElement,
@@ -82,6 +213,43 @@ describe("ScheduledTasksPage", () => {
         }
       })
     })
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(emptyAutomationCapabilities)
+    mocks.createScheduledTaskPreview.mockResolvedValue({
+      id: "preview_1",
+      mode: "create",
+      family: "recurring_question",
+      status: "valid",
+      normalized_config: {},
+      validation_errors: [],
+      warnings: [],
+      visibility_policy: {},
+      schedule_preview: {},
+      redaction_policy: {},
+      expires_at: "2026-06-10T00:00:00Z"
+    })
+    mocks.createScheduledTaskDefinition.mockResolvedValue(definitionResponse())
+    mocks.updateScheduledTaskDefinition.mockResolvedValue(definitionResponse())
+    mocks.getScheduledTaskDefinition.mockResolvedValue(definitionResponse())
+    mocks.listScheduledTaskPreviews.mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 20,
+      offset: 0,
+      has_more: false
+    })
+    mocks.listScheduledTaskDefinitionAudit.mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 20,
+      offset: 0,
+      has_more: false
+    })
+    mocks.pauseScheduledTaskDefinition.mockResolvedValue(definitionResponse({ lifecycle: "paused" }))
+    mocks.resumeScheduledTaskDefinition.mockResolvedValue(definitionResponse({ lifecycle: "configured" }))
+    mocks.archiveScheduledTaskDefinition.mockResolvedValue(definitionResponse({ lifecycle: "archived" }))
+    mocks.duplicateScheduledTaskDefinition.mockResolvedValue(
+      definitionResponse({ id: "definition_copy", lifecycle: "paused" })
+    )
   })
 
   it("shows an unsupported-state message without calling the list endpoint when scheduled tasks are unavailable", async () => {
@@ -253,7 +421,7 @@ describe("ScheduledTasksPage", () => {
 
     expect(await screen.findByRole("tab", { name: "Results" })).toHaveAttribute("aria-selected", "true")
     expect(await screen.findByRole("heading", { level: 3, name: "Scheduled task results" })).toBeInTheDocument()
-    expect(screen.getByText("Latest signals inferred from task status. Result history and item actions appear when the results API is available.")).toBeInTheDocument()
+    expect(screen.getByText("Future scheduled questions and agent outputs appear here only when the results API and each task visibility policy route them here.")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Open signal for Release monitor" })).toBeInTheDocument()
     expect(screen.getByText("Found 3 results from Release feed.")).toBeInTheDocument()
   })
@@ -339,6 +507,7 @@ describe("ScheduledTasksPage", () => {
 
     expect(await screen.findByRole("tab", { name: "Results" })).toHaveAttribute("aria-selected", "true")
     expect(await screen.findByText("Result signal not found.")).toBeInTheDocument()
+    expectInsideDesignSystemAlert("Result signal not found.")
     expect(screen.getByText("No scheduled tasks yet")).toBeInTheDocument()
   })
 
@@ -354,6 +523,502 @@ describe("ScheduledTasksPage", () => {
 
     expect(await screen.findByText("No scheduled task has been created yet.")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /Create watch/i })).not.toBeInTheDocument()
+  })
+
+  it("opens the Create tab with the planned Recurring Question shell from the route", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(
+      <ScheduledTasksPage />,
+      "/scheduled-tasks?tab=create&template=recurring_question"
+    )
+
+    expect(await screen.findByRole("tab", { name: "Create" })).toHaveAttribute("aria-selected", "true")
+    expect(
+      await screen.findByText(
+        "Recurring Question scheduling is planned for the API contract and is not executable in this client yet."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByText("Scheduled RAG query support")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open Research" })).toHaveAttribute(
+      "href",
+      "/research"
+    )
+    expect(screen.queryByRole("button", { name: /Create/i })).not.toBeInTheDocument()
+  })
+
+  it("opens the Create tab with the planned Agent Task shell from the route", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(
+      <ScheduledTasksPage />,
+      "/scheduled-tasks?tab=create&template=agent_task"
+    )
+
+    expect(await screen.findByRole("tab", { name: "Create" })).toHaveAttribute("aria-selected", "true")
+    expect(
+      await screen.findByText(
+        "Agent Task scheduling is planned for the API contract and is not executable in this client yet."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByText("Preview and risk classification")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open ACP Playground" })).toHaveAttribute(
+      "href",
+      "/acp-playground"
+    )
+    expect(screen.queryByRole("button", { name: /Create/i })).not.toBeInTheDocument()
+  })
+
+  it("loads automation capabilities for API-first create flows", async () => {
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [],
+      total: 0,
+      partial: false,
+      errors: []
+    })
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+
+    renderWithQueryClient(
+      <ScheduledTasksPage />,
+      "/scheduled-tasks?tab=create&template=recurring_question"
+    )
+
+    expect(await screen.findByText("Create Recurring question")).toBeInTheDocument()
+    expect(mocks.getScheduledTaskCapabilities).toHaveBeenCalledTimes(1)
+    expect(screen.getByLabelText("Question")).toBeInTheDocument()
+  })
+
+  it("creates a Recurring Question definition through preview and create APIs", async () => {
+    const user = userEvent.setup()
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+    mocks.listScheduledTasks
+      .mockResolvedValueOnce({
+        items: [],
+        total: 0,
+        partial: false,
+        errors: []
+      })
+      .mockResolvedValueOnce({
+        items: [automationTask()],
+        total: 1,
+        partial: false,
+        errors: []
+      })
+    mocks.createScheduledTaskPreview.mockResolvedValue({
+      id: "preview_recurring",
+      mode: "create",
+      family: "recurring_question",
+      status: "valid",
+      normalized_config: { name: "Track answer" },
+      validation_errors: [],
+      warnings: [],
+      visibility_policy: { visibility: "private" },
+      schedule_preview: { summary: "Manual" },
+      redaction_policy: {},
+      expires_at: "2026-06-10T00:00:00Z"
+    })
+    mocks.createScheduledTaskDefinition.mockResolvedValue(definitionResponse())
+
+    renderWithQueryClient(
+      <ScheduledTasksPage />,
+      "/scheduled-tasks?tab=create&template=recurring_question"
+    )
+
+    await user.type(await screen.findByLabelText("Question"), "Has the answer appeared?")
+    await user.click(screen.getByRole("button", { name: "Preview" }))
+    expect(await screen.findByText("Preview ready")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Save definition" }))
+
+    await waitFor(() => {
+      expect(mocks.createScheduledTaskPreview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          family: "recurring_question",
+          input: expect.objectContaining({
+            question: "Has the answer appeared?"
+          })
+        })
+      )
+    })
+    expect(mocks.createScheduledTaskDefinition).toHaveBeenCalledWith({
+      preview_id: "preview_recurring",
+      initial_lifecycle: "configured"
+    })
+    await waitFor(() => expect(mocks.listScheduledTasks).toHaveBeenCalledTimes(2))
+    await waitFor(() => {
+      expect(screen.getAllByText("Track answer").length).toBeGreaterThan(0)
+    })
+  })
+
+  it("updates an automation definition through preview and update APIs", async () => {
+    const user = userEvent.setup()
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+    mocks.listScheduledTasks
+      .mockResolvedValueOnce({
+        items: [automationTask()],
+        total: 1,
+        partial: false,
+        errors: []
+      })
+      .mockResolvedValueOnce({
+        items: [
+          automationTask({
+            title: "Track answer updated",
+            description: "Updated definition"
+          })
+        ],
+        total: 1,
+        partial: false,
+        errors: []
+      })
+    mocks.getScheduledTaskDefinition.mockResolvedValue(
+      definitionResponse({
+        version: 3,
+        input: {
+          question: "Has the answer appeared?",
+          success_criteria: "Answer found",
+          scope: { collection_id: "research" }
+        },
+        schedule: { kind: "cron", cron: "0 9 * * *", timezone: "UTC" },
+        visibility_policy: { visibility: "private" }
+      })
+    )
+    mocks.createScheduledTaskPreview.mockResolvedValue({
+      id: "preview_update",
+      mode: "update",
+      family: "recurring_question",
+      definition_id: "definition_1",
+      definition_version: 3,
+      status: "valid",
+      normalized_config: { name: "Track answer updated" },
+      validation_errors: [],
+      warnings: [],
+      visibility_policy: { visibility: "private" },
+      schedule_preview: { summary: "0 9 * * *" },
+      redaction_policy: {},
+      expires_at: "2026-06-10T00:00:00Z"
+    })
+    mocks.updateScheduledTaskDefinition.mockResolvedValue(
+      definitionResponse({
+        name: "Track answer updated",
+        version: 4
+      })
+    )
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
+
+    await user.click(await screen.findByRole("button", { name: "Edit Track answer" }))
+    expect(await screen.findByText("Update Recurring question")).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("Question"), {
+      target: { value: "Has the answer appeared now?" }
+    })
+    await user.click(screen.getByRole("button", { name: "Preview" }))
+    expect(await screen.findByText("Preview ready")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Save definition" }))
+
+    await waitFor(() => {
+      expect(mocks.createScheduledTaskPreview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "update",
+          family: "recurring_question",
+          definition_id: "definition_1",
+          definition_version: 3,
+          input: expect.objectContaining({
+            question: "Has the answer appeared now?"
+          })
+        })
+      )
+    })
+    expect(mocks.updateScheduledTaskDefinition).toHaveBeenCalledWith("definition_1", {
+      preview_id: "preview_update"
+    })
+    await waitFor(() => expect(mocks.listScheduledTasks).toHaveBeenCalledTimes(2))
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
+
+  it.each(["daily", "weekly", "interval", "one_time"])(
+    "preserves %s schedule kind when updating an automation definition",
+    async (scheduleKind) => {
+      const user = userEvent.setup()
+      mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+      mocks.listScheduledTasks.mockResolvedValue({
+        items: [automationTask()],
+        total: 1,
+        partial: false,
+        errors: []
+      })
+      mocks.getScheduledTaskDefinition.mockResolvedValue(
+        definitionResponse({
+          version: 5,
+          input: {
+            question: "Has the answer appeared?",
+            scope: { collection_id: "research" }
+          },
+          schedule: {
+            kind: scheduleKind,
+            timezone: "America/New_York",
+            run_at: "2030-04-05T12:30:00Z",
+            every_seconds: 3600,
+            day_of_week: "monday"
+          }
+        })
+      )
+      mocks.createScheduledTaskPreview.mockResolvedValue({
+        id: `preview_${scheduleKind}`,
+        mode: "update",
+        family: "recurring_question",
+        definition_id: "definition_1",
+        definition_version: 5,
+        status: "valid",
+        normalized_config: { name: "Track answer" },
+        validation_errors: [],
+        warnings: [],
+        visibility_policy: { visibility: "private" },
+        schedule_preview: { summary: scheduleKind },
+        redaction_policy: {},
+        expires_at: "2026-06-10T00:00:00Z"
+      })
+
+      renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
+
+      await user.click(await screen.findByRole("button", { name: "Edit Track answer" }))
+      expect(await screen.findByText("Update Recurring question")).toBeInTheDocument()
+      await user.click(screen.getByRole("button", { name: "Preview" }))
+
+      await waitFor(() => {
+        expect(mocks.createScheduledTaskPreview).toHaveBeenCalledWith(
+          expect.objectContaining({
+            mode: "update",
+            definition_id: "definition_1",
+            schedule: expect.objectContaining({
+              kind: scheduleKind,
+              timezone: "America/New_York"
+            })
+          })
+        )
+      })
+    },
+    SLOW_SCHEDULE_FORM_TIMEOUT_MS
+  )
+
+  it("preserves an Agent Task string agent ref when updating", async () => {
+    const user = userEvent.setup()
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [
+        automationTask({
+          title: "Dispatch agent",
+          source_ref: {
+            definition_id: "agent_definition",
+            family: "agent_task",
+            lifecycle: "configured",
+            health: "execution_unavailable",
+            visibility: "private"
+          }
+        })
+      ],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+    mocks.getScheduledTaskDefinition.mockResolvedValue(
+      definitionResponse({
+        id: "agent_definition",
+        version: 2,
+        family: "agent_task",
+        name: "Dispatch agent",
+        input: {
+          agent_ref: "agent://primary",
+          message: "Summarize the report"
+        },
+        schedule: { kind: "daily", timezone: "UTC" }
+      })
+    )
+    mocks.createScheduledTaskPreview.mockResolvedValue({
+      id: "preview_agent_update",
+      mode: "update",
+      family: "agent_task",
+      definition_id: "agent_definition",
+      definition_version: 2,
+      status: "valid",
+      normalized_config: { name: "Dispatch agent" },
+      validation_errors: [],
+      warnings: [],
+      visibility_policy: { visibility: "private" },
+      schedule_preview: { summary: "Daily" },
+      redaction_policy: {},
+      expires_at: "2026-06-10T00:00:00Z"
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
+
+    await user.click(await screen.findByRole("button", { name: "Edit Dispatch agent" }))
+    expect(await screen.findByDisplayValue("agent://primary")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Preview" }))
+
+    await waitFor(() => {
+      expect(mocks.createScheduledTaskPreview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          family: "agent_task",
+          definition_id: "agent_definition",
+          input: expect.objectContaining({
+            agent_ref: "agent://primary",
+            message: "Summarize the report"
+          })
+        })
+      )
+    })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
+
+  it("runs automation definition lifecycle actions from rows and refreshes the list", async () => {
+    const user = userEvent.setup()
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [
+        automationTask({ id: "automation_definition:projected_definition_1" }),
+        automationTask({
+          id: "automation_definition:paused",
+          title: "Paused agent",
+          status: "paused",
+          source_ref: {
+            definition_id: "paused",
+            family: "agent_task",
+            lifecycle: "paused",
+            health: "execution_unavailable"
+          }
+        })
+      ],
+      total: 2,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
+
+    await user.click(await screen.findByRole("button", { name: "Pause Track answer" }))
+    await waitFor(() => {
+      expect(mocks.pauseScheduledTaskDefinition).toHaveBeenCalledWith("definition_1")
+    })
+
+    await user.click(await screen.findByRole("button", { name: "Resume Paused agent" }))
+    await waitFor(() => {
+      expect(mocks.resumeScheduledTaskDefinition).toHaveBeenCalledWith("paused")
+    })
+
+    await user.click(await screen.findByRole("button", { name: "Archive Track answer" }))
+    await waitFor(() => {
+      expect(mocks.archiveScheduledTaskDefinition).toHaveBeenCalledWith("definition_1")
+    })
+
+    await user.click(await screen.findByRole("button", { name: "Duplicate Track answer" }))
+    await waitFor(() => {
+      expect(mocks.duplicateScheduledTaskDefinition).toHaveBeenCalledWith(
+        "definition_1",
+        expect.objectContaining({ name: expect.stringContaining("Track answer") })
+      )
+    })
+    await waitFor(() => expect(mocks.listScheduledTasks).toHaveBeenCalledTimes(5))
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
+
+  it("shows API error detail code and message for automation lifecycle failures", async () => {
+    const user = userEvent.setup()
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [automationTask()],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+    mocks.pauseScheduledTaskDefinition.mockRejectedValue({
+      details: {
+        detail: {
+          code: "definition_locked",
+          message: "Definition is locked by policy."
+        }
+      }
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
+
+    await user.click(await screen.findByRole("button", { name: "Pause Track answer" }))
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByText("definition_locked: Definition is locked by policy.").length
+      ).toBeGreaterThan(0)
+    })
+  })
+
+  it("shows row Results buttons only for real result signals", async () => {
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [
+        {
+          id: "reminder_task:completed",
+          primitive: "reminder_task",
+          title: "Completed review",
+          description: "No output was produced",
+          status: "completed",
+          enabled: true,
+          schedule_summary: "One-time reminder",
+          timezone: "UTC",
+          next_run_at: null,
+          last_run_at: "2030-04-05T12:30:00+00:00",
+          edit_mode: "native",
+          manage_url: null,
+          source_ref: { task_id: "completed" }
+        },
+        automationTask({
+          id: "automation_definition:no_result",
+          title: "Automation no result",
+          source_ref: {
+            definition_id: "no_result",
+            family: "recurring_question",
+            lifecycle: "configured",
+            health: "execution_unavailable"
+          }
+        }),
+        automationTask({
+          id: "automation_definition:with_result",
+          title: "Automation result",
+          status: "configured",
+          source_ref: {
+            definition_id: "with_result",
+            family: "recurring_question",
+            lifecycle: "configured",
+            health: "ready",
+            latest_result_id: "909",
+            result_count: 1
+          }
+        })
+      ],
+      total: 3,
+      partial: false,
+      errors: []
+    })
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
+
+    expect(await screen.findByText("Completed review")).toBeInTheDocument()
+    expect(screen.getByText("Automation no result")).toBeInTheDocument()
+    expect(screen.getByText("Automation result")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "View results for Completed review" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "View results for Automation no result" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "View results for Automation result" })
+    ).toBeInTheDocument()
   })
 
   it("opens a task detail deep link after task data loads", async () => {
@@ -401,6 +1066,7 @@ describe("ScheduledTasksPage", () => {
     renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=runs")
 
     expect(await screen.findByText("That tab is not available. Showing Overview.")).toBeInTheDocument()
+    expectInsideDesignSystemAlert("That tab is not available. Showing Overview.")
     expect(await screen.findByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true")
     expect(await screen.findByText("0 scheduled tasks")).toBeInTheDocument()
   })
@@ -419,6 +1085,7 @@ describe("ScheduledTasksPage", () => {
     )
 
     expect(await screen.findByText("Task not found.")).toBeInTheDocument()
+    expectInsideDesignSystemAlert("Task not found.")
     expect(screen.getByRole("tab", { name: "Tasks" })).toHaveAttribute("aria-selected", "true")
     expect(await screen.findByText("No scheduled tasks yet.")).toBeInTheDocument()
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
@@ -479,6 +1146,9 @@ describe("ScheduledTasksPage", () => {
     expect(screen.getByRole("button", { name: "Open latest result signal" })).toBeInTheDocument()
     expect(screen.getAllByText(/2030/).length).toBeGreaterThan(0)
     expect(screen.getByText(/Watchlists remains the full workspace/)).toBeInTheDocument()
+    expectInsideDesignSystemAlert(/Watchlists remains the full workspace/)
+    expectInsideDesignSystemComponent("Review required", "Badge")
+    expectInsideDesignSystemComponent("Active", "Badge")
     expect(screen.queryByRole("columnheader", { name: "Task" })).not.toBeInTheDocument()
   })
 
@@ -535,6 +1205,11 @@ describe("ScheduledTasksPage", () => {
     const reminderRow = screen.getByText("Review notes").closest("tr")
     expect(reminderRow).not.toBeNull()
     expect(within(reminderRow as HTMLElement).getByText("Needs attention")).toBeInTheDocument()
+    expect(
+      within(reminderRow as HTMLElement)
+        .getByText("Needs attention")
+        .closest('[data-ds-component="Badge"]')
+    ).not.toBeNull()
     expect(within(reminderRow as HTMLElement).getByText("No completed runs yet")).toBeInTheDocument()
 
     expect(screen.getByRole("button", { name: "Inspect Review notes" })).toBeInTheDocument()
@@ -685,6 +1360,31 @@ describe("ScheduledTasksPage", () => {
     })
   }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
+  it("opens the automation editor from the detail drawer without leaving the drawer open", async () => {
+    const user = userEvent.setup()
+
+    mocks.getScheduledTaskCapabilities.mockResolvedValue(availableAutomationCapabilities)
+    mocks.listScheduledTasks.mockResolvedValue({
+      items: [automationTask()],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+    mocks.getScheduledTaskDefinition.mockResolvedValue(definitionResponse())
+
+    renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
+
+    await user.click(await screen.findByRole("button", { name: "Inspect Track answer" }))
+    expect(await screen.findByRole("dialog", { name: /Track answer/i })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Edit definition" }))
+
+    expect(await screen.findByText("Update Recurring question")).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /Track answer/i })).not.toBeInTheDocument()
+    })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
+
   it("deletes the selected reminder from the detail drawer and does not leave stale drawer state", async () => {
     const user = userEvent.setup()
 
@@ -733,7 +1433,7 @@ describe("ScheduledTasksPage", () => {
       expect(screen.queryByRole("dialog", { name: /Review notes/i })).not.toBeInTheDocument()
     })
     expect(await screen.findByText("No scheduled tasks yet.")).toBeInTheDocument()
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("filters scheduled tasks by product status and search text", async () => {
     const user = userEvent.setup()
@@ -769,9 +1469,20 @@ describe("ScheduledTasksPage", () => {
           edit_mode: "external",
           manage_url: "/watchlists?tab=jobs",
           source_ref: { job_id: 42 }
-        }
+        },
+        automationTask({
+          id: "automation_definition:archived",
+          title: "Archived automation",
+          status: "archived",
+          source_ref: {
+            definition_id: "archived",
+            family: "recurring_question",
+            lifecycle: "archived",
+            health: "execution_unavailable"
+          }
+        })
       ],
-      total: 2,
+      total: 3,
       partial: false,
       errors: []
     })
@@ -780,6 +1491,7 @@ describe("ScheduledTasksPage", () => {
 
     expect(await screen.findByText("Healthy reminder")).toBeInTheDocument()
     expect(screen.getByText("Blocked monitor")).toBeInTheDocument()
+    expect(screen.getByText("Archived automation")).toBeInTheDocument()
     const healthyRow = screen.getByText("Healthy reminder").closest("tr")
     expect(healthyRow).not.toBeNull()
     expect(within(healthyRow as HTMLElement).getByText("Waiting for next run")).toBeInTheDocument()
@@ -790,6 +1502,14 @@ describe("ScheduledTasksPage", () => {
 
     expect(screen.queryByText("Healthy reminder")).not.toBeInTheDocument()
     expect(screen.getByText("Blocked monitor")).toBeInTheDocument()
+    expect(screen.queryByText("Archived automation")).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("combobox", { name: "Status filter" }))
+    await user.click(await screen.findByTitle("Archived"))
+
+    expect(screen.queryByText("Healthy reminder")).not.toBeInTheDocument()
+    expect(screen.queryByText("Blocked monitor")).not.toBeInTheDocument()
+    expect(screen.getByText("Archived automation")).toBeInTheDocument()
 
     await user.click(screen.getByRole("combobox", { name: "Status filter" }))
     await user.click(await screen.findByTitle("All statuses"))
@@ -882,6 +1602,7 @@ describe("ScheduledTasksPage", () => {
     renderWithQueryClient(<ScheduledTasksPage />)
 
     expect(await screen.findByText("Loading tasks and latest run state")).toBeInTheDocument()
+    expectInsideDesignSystemComponent("Loading tasks and latest run state", "LoadingState")
   })
 
   it("shows an actionable empty state when no scheduled tasks exist", async () => {
@@ -897,6 +1618,7 @@ describe("ScheduledTasksPage", () => {
     renderWithQueryClient(<ScheduledTasksPage />, "/scheduled-tasks?tab=tasks")
 
     expect(await screen.findByText("No scheduled tasks yet.")).toBeInTheDocument()
+    expectInsideDesignSystemComponent("No scheduled tasks yet.", "EmptyState")
     await user.click(screen.getByRole("button", { name: "Create scheduled task" }))
     expect(
       await screen.findByRole("heading", {
@@ -1090,7 +1812,7 @@ describe("ScheduledTasksPage", () => {
         })
       )
     })
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("does not create a recurring reminder without cron and timezone", async () => {
     const user = userEvent.setup()
@@ -1260,7 +1982,7 @@ describe("ScheduledTasksPage", () => {
         })
       )
     })
-  })
+  }, SLOW_SCHEDULE_FORM_TIMEOUT_MS)
 
   it("edits and deletes a reminder task from the table", async () => {
     mocks.listScheduledTasks.mockResolvedValue({

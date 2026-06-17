@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import inspect
 import json
 import os
 import sys
@@ -33,6 +34,7 @@ from .config import (
     GatewayProfileStorageBundle,
     GatewayToolUseReportingConfig,
     build_gateway_external_registry_storage,
+    build_gateway_policy_grant_store,
     build_gateway_profile_storage,
     build_gateway_tool_use_event_store,
     credential_grant_manager_from_storage,
@@ -48,6 +50,12 @@ from .external_registry import (
     GatewayExternalRegistryManagementError,
     GatewayExternalRegistryManager,
 )
+from .policy_grants import (
+    APPROVAL_GRANT_DEFAULT_TTL_SECONDS,
+    GatewayPolicyGrantManagementError,
+    GatewayPolicyGrantManager,
+)
+from .policy_simulation import simulate_tool_call_policy
 from .profiles import GatewayProfileManagementError, GatewayProfileManager
 from .remote_admin import (
     RemoteGatewayAdminClient,
@@ -396,6 +404,161 @@ def _build_parser() -> _JsonArgumentParser:
     )
     _add_profile_config_argument(delete_credential_grant)
     delete_credential_grant.set_defaults(handler=_handle_delete_credential_grant)
+
+    create_approval_grant = subparsers.add_parser(
+        "create-approval-grant",
+        help="Create a TTL-bound approval lease for one ask permission subject.",
+    )
+    create_approval_grant.add_argument(
+        "--profile",
+        required=True,
+        help="Profile id the approval lease applies to.",
+    )
+    create_approval_grant.add_argument(
+        "--subject-type",
+        required=True,
+        choices=("tool", "path", "domain", "command", "mcp"),
+        help="Permission subject family the lease approves.",
+    )
+    create_approval_grant.add_argument(
+        "--value",
+        required=True,
+        help="Subject value to approve (normalized before storage).",
+    )
+    create_approval_grant.add_argument(
+        "--ttl-seconds",
+        type=int,
+        default=None,
+        help="Lease lifetime in seconds (clamped to safe bounds).",
+    )
+    create_approval_grant.add_argument(
+        "--session-id",
+        help="Optional session id restricting where the lease applies.",
+    )
+    create_approval_grant.add_argument(
+        "--granted-by",
+        help="Optional operator identity recorded with the lease.",
+    )
+    create_approval_grant.add_argument(
+        "--reason",
+        help="Optional human-readable reason recorded with the lease.",
+    )
+    _add_profile_config_argument(create_approval_grant)
+    create_approval_grant.set_defaults(handler=_handle_create_approval_grant)
+
+    create_path_grant = subparsers.add_parser(
+        "create-path-grant",
+        help="Create a TTL-bound temporary path grant for one profile.",
+    )
+    create_path_grant.add_argument(
+        "--profile",
+        required=True,
+        help="Profile id the path grant applies to.",
+    )
+    create_path_grant.add_argument(
+        "--prefix",
+        required=True,
+        help="Workspace-relative path prefix to grant (normalized before storage).",
+    )
+    create_path_grant.add_argument(
+        "--actions",
+        required=True,
+        help="Comma-separated file policy actions the grant allows (e.g. read,write).",
+    )
+    create_path_grant.add_argument(
+        "--ttl-seconds",
+        type=int,
+        default=None,
+        help="Grant lifetime in seconds (clamped to safe bounds).",
+    )
+    create_path_grant.add_argument(
+        "--session-id",
+        help="Optional session id restricting where the grant applies.",
+    )
+    create_path_grant.add_argument(
+        "--granted-by",
+        help="Optional operator identity recorded with the grant.",
+    )
+    create_path_grant.add_argument(
+        "--reason",
+        help="Optional human-readable reason recorded with the grant.",
+    )
+    _add_profile_config_argument(create_path_grant)
+    create_path_grant.set_defaults(handler=_handle_create_path_grant)
+
+    list_approval_grants = subparsers.add_parser(
+        "list-approval-grants",
+        help="List active policy grants from a configured grant store.",
+    )
+    list_approval_grants.add_argument(
+        "--profile",
+        help="Optional profile id filter.",
+    )
+    list_approval_grants.add_argument(
+        "--grant-type",
+        choices=("approval", "path"),
+        help="Optional grant type filter.",
+    )
+    _add_profile_config_argument(list_approval_grants)
+    list_approval_grants.set_defaults(handler=_handle_list_approval_grants)
+
+    revoke_approval_grant = subparsers.add_parser(
+        "revoke-approval-grant",
+        help="Revoke one active policy grant by id.",
+    )
+    revoke_approval_grant.add_argument(
+        "grant_id",
+        help="Policy grant id to revoke.",
+    )
+    _add_profile_config_argument(revoke_approval_grant)
+    revoke_approval_grant.set_defaults(handler=_handle_revoke_approval_grant)
+
+    simulate_policy = subparsers.add_parser(
+        "simulate-policy",
+        help="Simulate one profile policy decision for a hypothetical tool call.",
+    )
+    simulate_policy.add_argument(
+        "--profile",
+        required=True,
+        help="Profile id to simulate against.",
+    )
+    simulate_policy.add_argument(
+        "--tool",
+        required=True,
+        help="Tool name for the simulated call.",
+    )
+    simulate_policy.add_argument(
+        "--path",
+        action="append",
+        help="Path argument for the simulated call (repeatable).",
+    )
+    simulate_policy.add_argument(
+        "--url",
+        action="append",
+        help="URL argument for the simulated call (repeatable).",
+    )
+    simulate_policy.add_argument(
+        "--command",
+        help="Shell command string argument for the simulated call.",
+    )
+    simulate_policy.add_argument(
+        "--argv-json",
+        help="JSON array of argv tokens for the simulated call.",
+    )
+    simulate_policy.add_argument(
+        "--arguments-json",
+        help="JSON object of raw tool arguments (merged with convenience flags).",
+    )
+    simulate_policy.add_argument(
+        "--capability",
+        help="Optional advertised tool capability for capability-based profiles.",
+    )
+    simulate_policy.add_argument(
+        "--session-id",
+        help="Optional session id for session-scoped grants.",
+    )
+    _add_profile_config_argument(simulate_policy)
+    simulate_policy.set_defaults(handler=_handle_simulate_policy)
 
     export_config = subparsers.add_parser(
         "export-config",
@@ -892,6 +1055,263 @@ def _handle_delete_credential_grant(args: argparse.Namespace) -> int:
         args,
         lambda manager: manager.delete_grant(grant_id),
     )
+
+
+def _handle_create_approval_grant(args: argparse.Namespace) -> int:
+    """Create one TTL-bound approval lease in a configured grant store."""
+
+    profile_id = _require_cli_text(args.profile, field="profile")
+    value = _require_cli_text(args.value, field="value")
+    ttl_seconds = (
+        args.ttl_seconds
+        if args.ttl_seconds is not None
+        else APPROVAL_GRANT_DEFAULT_TTL_SECONDS
+    )
+    session_id = _optional_cli_text(args.session_id, field="session_id")
+    granted_by = _optional_cli_text(args.granted_by, field="granted_by")
+    reason = _optional_cli_text(args.reason, field="reason")
+    return _handle_policy_grant_command(
+        args,
+        lambda manager: manager.grant_approval(
+            profile_id=profile_id,
+            subject_type=args.subject_type,
+            value=value,
+            ttl_seconds=ttl_seconds,
+            session_id=session_id,
+            granted_by=granted_by,
+            reason=reason,
+        ),
+    )
+
+
+def _handle_create_path_grant(args: argparse.Namespace) -> int:
+    """Create one TTL-bound path grant in a configured grant store."""
+
+    profile_id = _require_cli_text(args.profile, field="profile")
+    prefix = _require_cli_text(args.prefix, field="prefix")
+    raw_actions = _require_cli_text(args.actions, field="actions")
+    actions = tuple(action.strip() for action in raw_actions.split(",") if action.strip())
+    ttl_seconds = (
+        args.ttl_seconds
+        if args.ttl_seconds is not None
+        else APPROVAL_GRANT_DEFAULT_TTL_SECONDS
+    )
+    session_id = _optional_cli_text(args.session_id, field="session_id")
+    granted_by = _optional_cli_text(args.granted_by, field="granted_by")
+    reason = _optional_cli_text(args.reason, field="reason")
+    return _handle_policy_grant_command(
+        args,
+        lambda manager: manager.grant_path(
+            profile_id=profile_id,
+            prefix=prefix,
+            actions=actions,
+            ttl_seconds=ttl_seconds,
+            session_id=session_id,
+            granted_by=granted_by,
+            reason=reason,
+        ),
+    )
+
+
+def _handle_list_approval_grants(args: argparse.Namespace) -> int:
+    """List active policy grants from a configured grant store."""
+
+    profile_id = _optional_cli_text(args.profile, field="profile")
+    grant_type = _optional_cli_text(args.grant_type, field="grant_type")
+    return _handle_policy_grant_command(
+        args,
+        lambda manager: manager.list_grants(profile_id=profile_id, grant_type=grant_type),
+    )
+
+
+def _handle_revoke_approval_grant(args: argparse.Namespace) -> int:
+    """Revoke one active policy grant by id."""
+
+    grant_id = _require_cli_text(args.grant_id, field="grant_id")
+    return _handle_policy_grant_command(
+        args,
+        lambda manager: manager.revoke_grant(grant_id),
+    )
+
+
+def _handle_simulate_policy(args: argparse.Namespace) -> int:
+    """Simulate one profile policy decision for a hypothetical tool call."""
+
+    profile_id = _require_cli_text(args.profile, field="profile")
+    tool_name = _require_cli_text(args.tool, field="tool")
+    capability = _optional_cli_text(args.capability, field="capability")
+    session_id = _optional_cli_text(args.session_id, field="session_id")
+    try:
+        arguments = _simulation_arguments_from_args(args)
+    except ValueError as exc:
+        _emit_json(
+            {"ok": False, "error": str(exc), "reason_code": "invalid_simulation_arguments"},
+            sys.stderr,
+        )
+        return 1
+
+    config_path = _config_path_from_args(args)
+    profile_bundle: GatewayProfileStorageBundle | None = None
+    grant_store: Any = None
+    try:
+        try:
+            config = load_gateway_profile_bootstrap_config(config_path)
+            profile_bundle = build_gateway_profile_storage(config.store)
+            # Simulation is read-only: never write config profiles into the
+            # store; fall back to the config document in memory instead.
+            profile = _run_async(profile_bundle.profile_store.get_profile(profile_id))
+            if profile is None:
+                for config_profile in config.profiles:
+                    if config_profile.id == profile_id:
+                        profile = config_profile.model_copy(deep=True)
+                        break
+            if profile is None:
+                _emit_json(
+                    {
+                        "ok": False,
+                        "error": f"Profile not found: {profile_id}",
+                        "reason_code": "profile_not_found",
+                        "profile_id": profile_id,
+                    },
+                    sys.stderr,
+                )
+                return 1
+            grant_store = build_gateway_policy_grant_store(config.policy_grants)
+        except _CliArgumentError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            _emit_json(
+                {"error": str(exc), "ok": False, "path": str(config_path)},
+                sys.stderr,
+            )
+            return 1
+
+        payload = simulate_tool_call_policy(
+            profile,
+            tool_name,
+            arguments,
+            capability=capability,
+            policy_grant_store=grant_store,
+            session_id=session_id,
+        )
+        _emit_json(_cli_payload(payload), sys.stdout)
+        return 0
+    finally:
+        if profile_bundle is not None:
+            _run_async(_close_storage_bundle(profile_bundle))
+        _close_policy_grant_store(grant_store)
+
+
+def _close_policy_grant_store(grant_store: Any) -> None:
+    """Close a policy grant store, awaiting coroutine-style close methods."""
+
+    close_grant_store = getattr(grant_store, "close", None)
+    if not callable(close_grant_store):
+        return
+    result = close_grant_store()
+    if inspect.iscoroutine(result):
+        _run_async(result)
+
+
+def _simulation_arguments_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    """Build the simulated tool-call arguments from CLI flags.
+
+    Explicit convenience flags override keys supplied via --arguments-json.
+    """
+
+    arguments: dict[str, Any] = {}
+    if args.arguments_json:
+        try:
+            parsed = json.loads(args.arguments_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"arguments-json is not valid JSON: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("arguments-json must be a JSON object")
+        arguments.update(parsed)
+    paths = [path for path in (args.path or []) if path.strip()]
+    if len(paths) == 1:
+        arguments["path"] = paths[0]
+    elif paths:
+        arguments["paths"] = paths
+    urls = [url for url in (args.url or []) if url.strip()]
+    if len(urls) == 1:
+        arguments["url"] = urls[0]
+    elif urls:
+        arguments["urls"] = urls
+    if args.command and args.command.strip():
+        arguments["command"] = args.command.strip()
+    if args.argv_json:
+        try:
+            argv = json.loads(args.argv_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"argv-json is not valid JSON: {exc}") from exc
+        if not isinstance(argv, list) or not all(isinstance(token, str) for token in argv):
+            raise ValueError("argv-json must be a JSON array of strings")
+        arguments["argv"] = argv
+    return arguments
+
+
+def _handle_policy_grant_command(
+    args: argparse.Namespace,
+    operation: Callable[[GatewayPolicyGrantManager], Coroutine[Any, Any, Any]],
+) -> int:
+    """Run a policy-grant command against the configured grant store."""
+
+    config_path = _config_path_from_args(args)
+    profile_bundle: GatewayProfileStorageBundle | None = None
+    grant_store: Any = None
+    try:
+        try:
+            config = load_gateway_profile_bootstrap_config(config_path)
+            if config.policy_grants is None or config.policy_grants.kind != "sqlite":
+                raise GatewayPolicyGrantManagementError(
+                    "Policy grant management requires a persistent (sqlite) "
+                    "policy_grants store in the gateway config",
+                    reason_code="policy_grant_store_unavailable",
+                )
+            grant_store = build_gateway_policy_grant_store(config.policy_grants)
+            profile_bundle = build_gateway_profile_storage(config.store)
+            manager = GatewayPolicyGrantManager(
+                policy_grant_store=grant_store,
+                audit_store=profile_bundle.audit_store,
+            )
+        except _CliArgumentError:
+            raise
+        except GatewayPolicyGrantManagementError as exc:
+            _emit_json(exc.to_payload(), sys.stderr)
+            return 1
+        except Exception as exc:  # noqa: BLE001
+            _emit_json(
+                {
+                    "error": str(exc),
+                    "ok": False,
+                    "path": str(config_path),
+                },
+                sys.stderr,
+            )
+            return 1
+
+        try:
+            payload = _run_async(operation(manager))
+        except _CliArgumentError:
+            raise
+        except GatewayPolicyGrantManagementError as exc:
+            _emit_json(exc.to_payload(), sys.stderr)
+            return 1
+        except Exception:  # noqa: BLE001
+            unavailable_error = GatewayPolicyGrantManagementError(
+                "Policy grant store unavailable",
+                reason_code="policy_grant_store_unavailable",
+            )
+            _emit_json(unavailable_error.to_payload(), sys.stderr)
+            return 1
+
+        _emit_json(_cli_payload(payload), sys.stdout)
+        return 0
+    finally:
+        if profile_bundle is not None:
+            _run_async(_close_storage_bundle(profile_bundle))
+        _close_policy_grant_store(grant_store)
 
 
 def _handle_export_config(args: argparse.Namespace) -> int:

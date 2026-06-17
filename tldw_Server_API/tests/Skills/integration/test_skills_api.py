@@ -371,6 +371,78 @@ class TestListSkills:
             "next_offset": None,
         }
 
+    def test_list_skills_filters_and_sorts_before_pagination(self, client):
+        for i in range(12):
+            r = client.post(
+                f"{SKILLS_PREFIX}/",
+                json={
+                    "name": f"alpha-{i:02d}",
+                    "content": "---\ndescription: General utility skill\ncontext: inline\n---\n\nCommon content",
+                },
+            )
+            assert r.status_code == 201, r.text
+
+        for name, tool in (("beta-first", "Read"), ("beta-second", "Grep")):
+            r = client.post(
+                f"{SKILLS_PREFIX}/",
+                json={
+                    "name": name,
+                    "content": (
+                        "---\n"
+                        "description: Forked tool skill\n"
+                        "context: fork\n"
+                        "allowed-tools:\n"
+                        f"  - {tool}\n"
+                        "model: gpt-4o\n"
+                        "---\n\n"
+                        "Use this with tools."
+                    ),
+                },
+            )
+            assert r.status_code == 201, r.text
+
+        r = client.get(
+            f"{SKILLS_PREFIX}/?context=fork&has_tools=true&model=gpt-4o"
+            "&sort=name&order=desc&limit=1&offset=0"
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+
+        assert [skill["name"] for skill in data["skills"]] == ["beta-second"]
+        assert data["count"] == 1
+        assert data["total"] == 2
+        assert data["pagination"] == {
+            "mode": "offset",
+            "limit": 1,
+            "offset": 0,
+            "total": 2,
+            "has_more": True,
+            "next_offset": 1,
+        }
+
+    def test_list_skills_explicit_hidden_filter(self, client):
+        for name, user_invocable in (("visible", "true"), ("hidden", "false")):
+            r = client.post(
+                f"{SKILLS_PREFIX}/",
+                json={
+                    "name": name,
+                    "content": f"---\nuser-invocable: {user_invocable}\n---\n\nContent",
+                },
+            )
+            assert r.status_code == 201, r.text
+
+        r = client.get(f"{SKILLS_PREFIX}/?user_invocable=false")
+        assert r.status_code == 200, r.text
+        data = r.json()
+
+        assert [skill["name"] for skill in data["skills"]] == ["hidden"]
+        assert data["total"] == 1
+
+    def test_list_skills_rejects_unapproved_sort_field(self, client):
+        r = client.get(f"{SKILLS_PREFIX}/?sort=directory_path")
+
+        assert r.status_code == 422, r.text
+
 
 class TestCreateAndGetSkill:
     def test_create_skill_and_get(self, client):

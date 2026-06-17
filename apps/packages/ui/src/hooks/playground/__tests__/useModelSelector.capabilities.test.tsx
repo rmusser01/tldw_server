@@ -249,6 +249,51 @@ describe("useModelSelector capability rendering", () => {
     expect(setSelectedModel).toHaveBeenCalledWith("openai:gpt-4o-mini")
   })
 
+  it("shows a loading affordance (not the connect-server error) while models load", () => {
+    const { result } = renderHook(() =>
+      useModelSelector({
+        composerModels: [],
+        selectedModel: null,
+        setSelectedModel: vi.fn(),
+        navigate: vi.fn(),
+        modelsLoading: true
+      })
+    )
+
+    const items = result.current.modelDropdownMenuItems
+    expect(items).toHaveLength(1)
+    expect(items[0]?.key).toBe("models-loading")
+
+    render(<>{items[0]?.label}</>)
+    expect(screen.getByTestId("model-loading")).toBeInTheDocument()
+    expect(
+      screen.queryByText(/Connect your server in Settings/i)
+    ).not.toBeInTheDocument()
+  })
+
+  it("shows the connect-server error once loading finishes with no models", () => {
+    const navigate = vi.fn()
+    const { result } = renderHook(() =>
+      useModelSelector({
+        composerModels: [],
+        selectedModel: null,
+        setSelectedModel: vi.fn(),
+        navigate,
+        modelsLoading: false
+      })
+    )
+
+    const items = result.current.modelDropdownMenuItems
+    expect(items.some((item: any) => item?.key === "no-models")).toBe(true)
+    expect(items.some((item: any) => item?.key === "open-model-settings")).toBe(true)
+
+    const noModels = items.find((item: any) => item?.key === "no-models")
+    render(<>{noModels?.label}</>)
+    expect(
+      screen.getByText(/No models available\. Connect your server in Settings\./i)
+    ).toBeInTheDocument()
+  })
+
   it("promotes current and recent configured models ahead of provider groups", () => {
     storageSeed.values.set("chatModelUsageByProviderModel", {
       "google:gemini-1.5-pro": {

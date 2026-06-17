@@ -1,4 +1,11 @@
 import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
+import { BLOCKED_STATE_LABEL } from "@/design-system"
+import type { BadgeVariant } from "@/components/ui/primitives"
+import {
+  getAutomationDefinitionFamilyLabel,
+  getAutomationDefinitionProductStatus,
+  isAutomationDefinitionTask
+} from "./scheduled-task-automation-status"
 
 export type ScheduledTaskStatusTone =
   | "success"
@@ -14,6 +21,7 @@ export type ScheduledTaskStatusKey =
   | "waiting"
   | "found_results"
   | "paused"
+  | "archived"
   | "disabled"
   | "draft"
   | "completed"
@@ -43,6 +51,7 @@ type ScheduledTaskStatusInput =
 
 type ScheduledTaskTypeInput = {
   primitive?: unknown
+  source_ref?: Record<string, unknown>
 }
 
 type WatchlistTaskLinkInput =
@@ -86,20 +95,20 @@ export const SCHEDULED_TASK_ATTENTION_STATUS_KEYS: readonly ScheduledTaskStatusK
 export const isNativeReminderTask = (task: ScheduledTask): boolean =>
   task.primitive === "reminder_task" && task.edit_mode === "native"
 
-export const scheduledTaskStatusToneToTagColor = (
+export const scheduledTaskStatusToneToBadgeVariant = (
   status: ScheduledTaskProductStatus
-): string => {
+): BadgeVariant => {
   switch (status.tone) {
     case "success":
-      return "green"
+      return "success"
     case "processing":
-      return "processing"
+      return "info"
     case "warning":
-      return "gold"
+      return "warning"
     case "error":
-      return "red"
+      return "danger"
     default:
-      return "default"
+      return "secondary"
   }
 }
 
@@ -192,6 +201,10 @@ const hasPositiveResultSignal = (sourceRef: Record<string, unknown>): boolean =>
 export const getScheduledTaskProductStatus = (
   task: ScheduledTaskStatusInput
 ): ScheduledTaskProductStatus => {
+  if (isAutomationDefinitionTask(task)) {
+    return getAutomationDefinitionProductStatus(task)
+  }
+
   if (!task.enabled) {
     return {
       key: "disabled",
@@ -227,7 +240,7 @@ export const getScheduledTaskProductStatus = (
   ) {
     return {
       key: "blocked",
-      label: "Blocked",
+      label: BLOCKED_STATE_LABEL,
       tone: "warning",
       description: "This task cannot run until a required dependency is fixed."
     }
@@ -295,6 +308,10 @@ export const getScheduledTaskProductStatus = (
 }
 
 export const getScheduledTaskTypeLabel = (task: ScheduledTaskTypeInput): string => {
+  if (task.primitive === "automation_definition") {
+    return getAutomationDefinitionFamilyLabel(task)
+  }
+
   switch (task.primitive) {
     case "reminder_task":
       return "Reminder"

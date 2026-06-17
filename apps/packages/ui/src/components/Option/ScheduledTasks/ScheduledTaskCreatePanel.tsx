@@ -1,9 +1,25 @@
 import React, { useMemo, useState } from "react"
-import { Alert, Button, Card, Empty, Input, Segmented, Space, Tag, Typography } from "antd"
+import { Button, Card, Input, Segmented, Space, Typography } from "antd"
 import type { SegmentedValue } from "antd/es/segmented"
+import { Link } from "react-router-dom"
 
-import type { CreateScheduledTaskReminderPayload } from "@/services/scheduled-tasks-control-plane"
+import { EmptyState } from "@/components/ui/feedback"
+import {
+  Alert as DesignSystemAlert,
+  Badge as DesignSystemBadge,
+  type BadgeVariant
+} from "@/components/ui/primitives"
+import type {
+  CreateScheduledTaskReminderPayload,
+  ScheduledTaskAutomationCapabilitiesResponse,
+  ScheduledTaskAutomationFamily,
+  ScheduledTaskDefinitionCreateRequest,
+  ScheduledTaskDefinitionResponse,
+  ScheduledTaskPreviewCreateRequest,
+  ScheduledTaskPreviewResponse
+} from "@/services/scheduled-tasks-control-plane"
 import { ReminderTaskEditor } from "./ReminderTaskEditor"
+import { ScheduledTaskAutomationDefinitionEditor } from "./ScheduledTaskAutomationDefinitionEditor"
 import {
   applyScheduledTaskTemplateCapabilities,
   buildNotificationPolicyCopy,
@@ -14,6 +30,11 @@ import {
   type ScheduledTaskTemplateCapability,
   type ScheduledTaskTemplateCapabilityMap
 } from "./scheduled-task-template-capabilities"
+import {
+  buildPlannedScheduledTaskPanelModel,
+  type PlannedRequirementStatus,
+  type PlannedScheduledTaskPanelModel
+} from "./scheduled-task-planned-template-copy"
 import {
   SCHEDULED_TASK_TEMPLATES,
   SCHEDULED_TASK_TEMPLATE_FILTERS,
@@ -33,6 +54,14 @@ export interface ScheduledTaskCreatePanelProps {
   onCreateReminder: (payload: CreateScheduledTaskReminderPayload) => Promise<void> | void
   savingReminder?: boolean
   templateCapabilities?: ScheduledTaskTemplateCapabilityMap
+  automationCapabilities?: ScheduledTaskAutomationCapabilitiesResponse | null
+  onPreviewAutomationDefinition?: (
+    payload: ScheduledTaskPreviewCreateRequest
+  ) => Promise<ScheduledTaskPreviewResponse> | ScheduledTaskPreviewResponse
+  onCreateAutomationDefinition?: (
+    payload: ScheduledTaskDefinitionCreateRequest
+  ) => Promise<ScheduledTaskDefinitionResponse | unknown> | ScheduledTaskDefinitionResponse | unknown
+  onAutomationDefinitionCreated?: (definition: ScheduledTaskDefinitionResponse | unknown) => void
 }
 
 const WATCHLISTS_HREF = "/watchlists"
@@ -42,6 +71,45 @@ const isTemplateFilterId = (value: SegmentedValue): value is ScheduledTaskTempla
 
 const requiresWatchlistsHandoff = (template: ScheduledTaskTemplate): boolean =>
   template.id === "watch" || template.id === "ingest"
+
+const templateIdToAutomationFamily = (
+  templateId: ScheduledTaskTemplateId
+): ScheduledTaskAutomationFamily | null =>
+  templateId === "recurring_question" || templateId === "agent_task"
+    ? templateId
+    : null
+
+const canCreateAutomationDefinition = (
+  capabilities: ScheduledTaskAutomationCapabilitiesResponse | null | undefined,
+  family: ScheduledTaskAutomationFamily
+): boolean =>
+  capabilities?.items.some(
+    (capability) =>
+      capability.family === family &&
+      capability.actions.create_definition?.status === "available"
+  ) ?? false
+
+const templateStateToBadgeVariant = (
+  state: ScheduledTaskTemplate["state"]
+): BadgeVariant => {
+  switch (state) {
+    case "available":
+      return "success"
+    case "limited_availability":
+    case "needs_setup":
+      return "warning"
+    case "unavailable":
+      return "danger"
+    case "planned":
+      return "secondary"
+    case "managed_in_watchlists":
+    case "handoff_only":
+      return "info"
+  }
+
+  const _exhaustive: never = state
+  return _exhaustive
+}
 
 const PRIVATE_LOOKING_PROSE_PATTERN =
   /\b(api[_ -]?key|password|passphrase|secret|bearer\s+token|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret)\b|sk-[A-Za-z0-9_-]+/i
@@ -56,6 +124,28 @@ const WATCHLISTS_ADAPTER_UNAVAILABLE_COPY =
 
 const OWNER_WORKSPACE_ADAPTER_UNAVAILABLE_COPY =
   "Creation from Scheduled Tasks is not available yet. Choose the owner workspace to continue setup."
+
+const PLANNED_REQUIREMENT_STATUS_LABELS: Record<PlannedRequirementStatus, string> = {
+  planned: "Planned",
+  related_available: "Related available",
+  missing: "Missing"
+}
+
+const plannedRequirementStatusToBadgeVariant = (
+  status: PlannedRequirementStatus
+): BadgeVariant => {
+  switch (status) {
+    case "planned":
+      return "secondary"
+    case "related_available":
+      return "success"
+    case "missing":
+      return "warning"
+  }
+
+  const _exhaustive: never = status
+  return _exhaustive
+}
 
 const buildAvailabilityCopy = (
   template: ScheduledTaskTemplate,
@@ -105,7 +195,9 @@ const TemplateCard: React.FC<{
     title={
       <Space wrap size={8}>
         <Typography.Text strong>{template.title}</Typography.Text>
-        <Tag>{stateLabel}</Tag>
+        <DesignSystemBadge variant={templateStateToBadgeVariant(template.state)}>
+          {stateLabel}
+        </DesignSystemBadge>
       </Space>
     }
   >
@@ -155,7 +247,9 @@ const HandoffPanel: React.FC<{
   return (
     <Card title={template.title} size="small">
       <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-        <Tag>{getScheduledTaskTemplateStateLabel(template.state)}</Tag>
+        <DesignSystemBadge variant={templateStateToBadgeVariant(template.state)}>
+          {getScheduledTaskTemplateStateLabel(template.state)}
+        </DesignSystemBadge>
         <Typography.Text>{template.intent}</Typography.Text>
         <Typography.Paragraph style={{ marginBottom: 0 }}>
           {watchlistsHandoff
@@ -177,9 +271,8 @@ const HandoffPanel: React.FC<{
           onChange={(event) => setSourceNote(event.target.value)}
         />
         {hasUnsafeSource ? (
-          <Alert
-            type="warning"
-            showIcon
+          <DesignSystemAlert
+            variant="warning"
             title="This source contains private-looking values. Remove secrets before copying or opening setup."
           />
         ) : null}
@@ -203,24 +296,90 @@ const HandoffPanel: React.FC<{
   )
 }
 
-const PlannedPanel: React.FC<{ template: ScheduledTaskTemplate }> = ({ template }) => (
-  <Card title={template.title} size="small">
-    <Space orientation="vertical" size={8}>
-      <Tag>{getScheduledTaskTemplateStateLabel(template.state)}</Tag>
-      <Typography.Text>{template.intent}</Typography.Text>
-      <Typography.Paragraph style={{ marginBottom: 0 }}>
-        {template.description}
-      </Typography.Paragraph>
-    </Space>
-  </Card>
+const PlannedRequirementList: React.FC<{
+  requirements: PlannedScheduledTaskPanelModel["requirements"]
+}> = ({ requirements }) => (
+  <Space orientation="vertical" size={8} style={{ width: "100%" }}>
+    <Typography.Text strong>Requirements</Typography.Text>
+    {requirements.map((requirement) => (
+      <Space key={requirement.label} orientation="vertical" size={2} style={{ width: "100%" }}>
+        <Space wrap size={6}>
+          <Typography.Text strong>{requirement.label}</Typography.Text>
+          <DesignSystemBadge variant={plannedRequirementStatusToBadgeVariant(requirement.status)}>
+            {PLANNED_REQUIREMENT_STATUS_LABELS[requirement.status]}
+          </DesignSystemBadge>
+        </Space>
+        <Typography.Text type="secondary">{requirement.detail}</Typography.Text>
+      </Space>
+    ))}
+  </Space>
 )
+
+const PlannedPanel: React.FC<{ template: ScheduledTaskTemplate }> = ({ template }) => {
+  const model = buildPlannedScheduledTaskPanelModel(template.id)
+
+  if (!model) {
+    return (
+      <Card title={template.title} size="small">
+        <Space orientation="vertical" size={8}>
+          <DesignSystemBadge variant={templateStateToBadgeVariant(template.state)}>
+            {getScheduledTaskTemplateStateLabel(template.state)}
+          </DesignSystemBadge>
+          <Typography.Text>{template.intent}</Typography.Text>
+          <Typography.Paragraph style={{ marginBottom: 0 }}>
+            {template.description}
+          </Typography.Paragraph>
+        </Space>
+      </Card>
+    )
+  }
+
+  return (
+    <Card
+      title={
+        <Space wrap size={8}>
+          <Typography.Text strong>{template.title}</Typography.Text>
+          <DesignSystemBadge variant="secondary">{model.statusLabel}</DesignSystemBadge>
+        </Space>
+      }
+      size="small"
+    >
+      <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+        <Typography.Text>{model.jobStatement}</Typography.Text>
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          {model.availabilityReason}
+        </Typography.Paragraph>
+        <Typography.Text>No scheduled task can be created from this template yet.</Typography.Text>
+        <PlannedRequirementList requirements={model.requirements} />
+        <CapabilityCopyGroup title="Result destinations" lines={model.resultDestinations} />
+        {model.safetyLines.length > 0 ? (
+          <CapabilityCopyGroup title="Safety" lines={model.safetyLines} />
+        ) : null}
+        <Space orientation="vertical" size={4}>
+          <Typography.Text strong>Related destinations</Typography.Text>
+          <Space wrap size={12}>
+            {model.links.map((link) => (
+              <Link key={link.href} to={link.href}>
+                {link.label}
+              </Link>
+            ))}
+          </Space>
+        </Space>
+      </Space>
+    </Card>
+  )
+}
 
 export const ScheduledTaskCreatePanel: React.FC<ScheduledTaskCreatePanelProps> = ({
   selectedTemplateId,
   onSelectTemplate,
   onCreateReminder,
   savingReminder,
-  templateCapabilities
+  templateCapabilities,
+  automationCapabilities,
+  onPreviewAutomationDefinition,
+  onCreateAutomationDefinition,
+  onAutomationDefinitionCreated
 }) => {
   const [finderText, setFinderText] = useState("")
   const [filterId, setFilterId] = useState<ScheduledTaskTemplateFilterId>("all")
@@ -260,6 +419,25 @@ export const ScheduledTaskCreatePanel: React.FC<ScheduledTaskCreatePanelProps> =
           saving={savingReminder}
           onClose={() => onSelectTemplate(null)}
           onSubmit={(payload) => onCreateReminder(payload as CreateScheduledTaskReminderPayload)}
+        />
+      )
+    }
+
+    const automationFamily = templateIdToAutomationFamily(selectedTemplate.id)
+    if (
+      automationFamily &&
+      canCreateAutomationDefinition(automationCapabilities, automationFamily) &&
+      onPreviewAutomationDefinition &&
+      onCreateAutomationDefinition
+    ) {
+      return (
+        <ScheduledTaskAutomationDefinitionEditor
+          family={automationFamily}
+          mode="create"
+          onPreview={onPreviewAutomationDefinition}
+          onCreate={onCreateAutomationDefinition}
+          onSaved={onAutomationDefinitionCreated}
+          onCancel={() => onSelectTemplate(null)}
         />
       )
     }
@@ -333,7 +511,11 @@ export const ScheduledTaskCreatePanel: React.FC<ScheduledTaskCreatePanelProps> =
                 ))}
               </div>
             ) : (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No templates match this filter." />
+              <EmptyState
+                variant="inline"
+                size="sm"
+                title="No templates match this filter."
+              />
             )}
           </>
         )}

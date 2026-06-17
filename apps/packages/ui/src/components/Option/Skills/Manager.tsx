@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
-  Alert,
   Button,
   Form,
   Input,
@@ -13,7 +12,9 @@ import {
   Modal,
   Switch
 } from "antd"
-import type { ColumnsType } from "antd/es/table"
+import type { MenuProps } from "antd"
+import type { ColumnsType, TableProps } from "antd/es/table"
+import type { SortOrder } from "antd/es/table/interface"
 import React from "react"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import {
@@ -26,13 +27,19 @@ import {
   FileDown,
   FileText,
   Database,
-  Copy
+  Copy,
+  Columns3,
+  Rows3
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { SkillDrawer } from "./SkillDrawer"
 import { SkillPreview } from "./SkillPreview"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import type {
+  SkillContext,
+  SkillListOrder,
+  SkillListSort,
   SkillSummary,
   SkillResponse,
   SkillsListResponse
@@ -41,6 +48,8 @@ import type {
 const DEFAULT_PAGE_SIZE = 10
 const SKILLS_SEARCH_DEBOUNCE_MS = 300
 const SKILL_NAME_REGEX = /^[a-z][a-z0-9-]{0,63}$/
+const SKILLS_TABLE_PREFERENCES_STORAGE_KEY = "tldw:skills-manager:table-preferences:v1"
+const SKILL_TABLE_SORT_DIRECTIONS: SortOrder[] = ["ascend", "descend"]
 
 interface ImportTextFormValues {
   name?: string
@@ -61,6 +70,40 @@ interface SeedSkillsResult {
   seeded?: unknown
 }
 
+type SkillContextFilter = "all" | SkillContext
+type SkillVisibilityFilter = "visible" | "hidden" | "all"
+type SkillToolsFilter = "any" | "with-tools" | "without-tools"
+type SkillTableDensity = "comfortable" | "compact"
+type SkillOptionalColumnKey =
+  | "description"
+  | "context"
+  | "argument_hint"
+  | "user_invocable"
+  | "model_invocation"
+
+interface SkillSortState {
+  field?: SkillListSort
+  order?: SkillListOrder
+}
+
+interface SkillsTablePreferences {
+  density: SkillTableDensity
+  visibleColumns: SkillOptionalColumnKey[]
+}
+
+const DEFAULT_SKILLS_TABLE_PREFERENCES: SkillsTablePreferences = {
+  density: "comfortable",
+  visibleColumns: ["description", "context"]
+}
+
+const SKILL_OPTIONAL_COLUMN_KEYS: SkillOptionalColumnKey[] = [
+  "description",
+  "context",
+  "argument_hint",
+  "user_invocable",
+  "model_invocation"
+]
+
 const getResponseSkillName = (result: unknown): string | undefined => {
   if (!result || typeof result !== "object") return undefined
   const name = (result as { name?: unknown }).name
@@ -77,6 +120,72 @@ const getSeededSkillNames = (result: SeedSkillsResult | undefined): string[] => 
 
 const buildSkillInvocation = (skillName: string) => `/skill ${skillName}`
 
+const isSkillTableSortField = (value: React.Key | undefined): value is SkillListSort =>
+  value === "name" || value === "context"
+
+const getSkillTableSortOrder = (
+  sortState: SkillSortState,
+  field: SkillListSort
+): SortOrder => {
+  if (sortState.field !== field) return null
+  return sortState.order === "asc" ? "ascend" : "descend"
+}
+
+const isSkillTableDensity = (value: unknown): value is SkillTableDensity =>
+  value === "comfortable" || value === "compact"
+
+const isSkillOptionalColumnKey = (value: unknown): value is SkillOptionalColumnKey =>
+  typeof value === "string"
+  && SKILL_OPTIONAL_COLUMN_KEYS.includes(value as SkillOptionalColumnKey)
+
+const normalizeSkillsTablePreferences = (value: unknown): SkillsTablePreferences => {
+  if (!value || typeof value !== "object") return DEFAULT_SKILLS_TABLE_PREFERENCES
+
+  const raw = value as {
+    density?: unknown
+    visibleColumns?: unknown
+  }
+  const density = isSkillTableDensity(raw.density)
+    ? raw.density
+    : DEFAULT_SKILLS_TABLE_PREFERENCES.density
+  const visibleColumnValues = Array.isArray(raw.visibleColumns)
+    ? raw.visibleColumns
+    : undefined
+  const visibleColumns = visibleColumnValues
+    ? SKILL_OPTIONAL_COLUMN_KEYS.filter((key) => visibleColumnValues.includes(key))
+    : DEFAULT_SKILLS_TABLE_PREFERENCES.visibleColumns
+
+  return {
+    density,
+    visibleColumns
+  }
+}
+
+const loadSkillsTablePreferences = (): SkillsTablePreferences => {
+  if (typeof window === "undefined") return DEFAULT_SKILLS_TABLE_PREFERENCES
+
+  try {
+    const raw = window.localStorage.getItem(SKILLS_TABLE_PREFERENCES_STORAGE_KEY)
+    if (!raw) return DEFAULT_SKILLS_TABLE_PREFERENCES
+    return normalizeSkillsTablePreferences(JSON.parse(raw))
+  } catch {
+    return DEFAULT_SKILLS_TABLE_PREFERENCES
+  }
+}
+
+const saveSkillsTablePreferences = (preferences: SkillsTablePreferences) => {
+  if (typeof window === "undefined") return
+
+  try {
+    window.localStorage.setItem(
+      SKILLS_TABLE_PREFERENCES_STORAGE_KEY,
+      JSON.stringify(preferences)
+    )
+  } catch {
+    // Preference persistence is best-effort; rendering must not depend on storage.
+  }
+}
+
 export const SkillsManager: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
   const queryClient = useQueryClient()
@@ -86,6 +195,19 @@ export const SkillsManager: React.FC = () => {
   const [pageSize, setPageSize] = React.useState(DEFAULT_PAGE_SIZE)
   const [search, setSearch] = React.useState("")
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
+  const [contextFilter, setContextFilter] =
+    React.useState<SkillContextFilter>("all")
+  const [visibilityFilter, setVisibilityFilter] =
+    React.useState<SkillVisibilityFilter>("visible")
+  const [toolsFilter, setToolsFilter] = React.useState<SkillToolsFilter>("any")
+  const [modelFilter, setModelFilter] = React.useState("")
+  const [debouncedModelFilter, setDebouncedModelFilter] = React.useState("")
+  const [tableDensity, setTableDensity] =
+    React.useState<SkillTableDensity>(() => loadSkillsTablePreferences().density)
+  const [visibleOptionalColumns, setVisibleOptionalColumns] = React.useState<
+    SkillOptionalColumnKey[]
+  >(() => loadSkillsTablePreferences().visibleColumns)
+  const [sortState, setSortState] = React.useState<SkillSortState>({})
   const [drawerOpen, setDrawerOpen] = React.useState(false)
   const [importTextOpen, setImportTextOpen] = React.useState(false)
   const [editingSkill, setEditingSkill] = React.useState<SkillResponse | null>(null)
@@ -96,6 +218,22 @@ export const SkillsManager: React.FC = () => {
 
   const offset = (page - 1) * pageSize
   const searchQuery = debouncedSearch.trim()
+  const modelQuery = debouncedModelFilter.trim()
+  const contextQuery = contextFilter === "all" ? undefined : contextFilter
+  const includeHiddenQuery =
+    visibilityFilter === "hidden" || visibilityFilter === "all" ? true : undefined
+  const userInvocableQuery = visibilityFilter === "hidden" ? false : undefined
+  const hasToolsQuery =
+    toolsFilter === "with-tools"
+      ? true
+      : toolsFilter === "without-tools"
+        ? false
+        : undefined
+  const hasActiveFilters =
+    contextFilter !== "all"
+    || visibilityFilter !== "visible"
+    || toolsFilter !== "any"
+    || modelQuery.length > 0
 
   React.useEffect(() => {
     if (search === debouncedSearch) return
@@ -108,6 +246,24 @@ export const SkillsManager: React.FC = () => {
     return () => window.clearTimeout(timer)
   }, [debouncedSearch, search])
 
+  React.useEffect(() => {
+    if (modelFilter === debouncedModelFilter) return
+
+    const timer = window.setTimeout(() => {
+      setDebouncedModelFilter(modelFilter)
+      setPage(1)
+    }, SKILLS_SEARCH_DEBOUNCE_MS)
+
+    return () => window.clearTimeout(timer)
+  }, [debouncedModelFilter, modelFilter])
+
+  React.useEffect(() => {
+    saveSkillsTablePreferences({
+      density: tableDensity,
+      visibleColumns: visibleOptionalColumns
+    })
+  }, [tableDensity, visibleOptionalColumns])
+
   const {
     data,
     isLoading,
@@ -115,10 +271,28 @@ export const SkillsManager: React.FC = () => {
     error,
     refetch
   } = useQuery<SkillsListResponse>({
-    queryKey: ["skills", page, pageSize, searchQuery],
+    queryKey: [
+      "skills",
+      page,
+      pageSize,
+      searchQuery,
+      contextFilter,
+      visibilityFilter,
+      toolsFilter,
+      modelQuery,
+      sortState.field ?? "",
+      sortState.order ?? ""
+    ],
     queryFn: ({ signal }) =>
       tldwClient.listSkills({
         ...(searchQuery ? { q: searchQuery } : {}),
+        ...(contextQuery ? { context: contextQuery } : {}),
+        ...(includeHiddenQuery !== undefined ? { includeHidden: includeHiddenQuery } : {}),
+        ...(userInvocableQuery !== undefined ? { userInvocable: userInvocableQuery } : {}),
+        ...(hasToolsQuery !== undefined ? { hasTools: hasToolsQuery } : {}),
+        ...(modelQuery ? { model: modelQuery } : {}),
+        ...(sortState.field ? { sort: sortState.field } : {}),
+        ...(sortState.order ? { order: sortState.order } : {}),
         limit: pageSize,
         offset,
         abortSignal: signal
@@ -129,7 +303,7 @@ export const SkillsManager: React.FC = () => {
   const totalSkills = data?.total ?? 0
   const hasSearch = searchQuery.length > 0
   const isLibraryEmpty =
-    hasLoadedSkills && !isLoading && totalSkills === 0 && !hasSearch
+    hasLoadedSkills && !isLoading && totalSkills === 0 && !hasSearch && !hasActiveFilters
   const skillCountLabel = isError
     ? t("option:skills.countUnavailable", {
         defaultValue: "Count unavailable"
@@ -153,6 +327,71 @@ export const SkillsManager: React.FC = () => {
       setPage(lastPage)
     }
   }, [hasLoadedSkills, page, pageSize, totalSkills])
+
+  const handleContextFilterChange = (nextFilter: SkillContextFilter) => {
+    setContextFilter(nextFilter)
+    setPage(1)
+  }
+
+  const handleVisibilityFilterChange = (nextFilter: SkillVisibilityFilter) => {
+    setVisibilityFilter(nextFilter)
+    setPage(1)
+  }
+
+  const handleToolsFilterChange = (nextFilter: SkillToolsFilter) => {
+    setToolsFilter(nextFilter)
+    setPage(1)
+  }
+
+  const handleModelFilterChange = (nextValue: string) => {
+    setModelFilter(nextValue)
+  }
+
+  const handleDensityChange = (nextDensity: SkillTableDensity) => {
+    setTableDensity(nextDensity)
+  }
+
+  const handleColumnVisibilityToggle = (columnKey: string) => {
+    if (!isSkillOptionalColumnKey(columnKey)) return
+
+    if (
+      visibleOptionalColumns.includes(columnKey)
+      && isSkillTableSortField(columnKey)
+      && sortState.field === columnKey
+    ) {
+      setSortState({})
+      setPage(1)
+    }
+
+    setVisibleOptionalColumns((current) => {
+      return current.includes(columnKey)
+        ? current.filter((key) => key !== columnKey)
+        : SKILL_OPTIONAL_COLUMN_KEYS.filter((key) => current.includes(key) || key === columnKey)
+    })
+  }
+
+  const handleTableChange: TableProps<SkillSummary>["onChange"] = (
+    _pagination,
+    _filters,
+    sorter
+  ) => {
+    const activeSorter = Array.isArray(sorter)
+      ? sorter.find((entry) => entry.order)
+      : sorter
+
+    if (
+      activeSorter?.order
+      && isSkillTableSortField(activeSorter.columnKey)
+    ) {
+      setSortState({
+        field: activeSorter.columnKey,
+        order: activeSorter.order === "ascend" ? "asc" : "desc"
+      })
+    } else {
+      setSortState({})
+    }
+    setPage(1)
+  }
 
   const deleteMutation = useMutation({
     mutationFn: (name: string) => tldwClient.deleteSkill(name),
@@ -404,33 +643,103 @@ export const SkillsManager: React.FC = () => {
     }
   }
 
+  const isOptionalColumnVisible = (columnKey: SkillOptionalColumnKey) =>
+    visibleOptionalColumns.includes(columnKey)
+
+  const optionalColumnLabels: Record<SkillOptionalColumnKey, string> = {
+    description: t("option:skills.colDescription", { defaultValue: "Description" }),
+    context: t("option:skills.colContext", { defaultValue: "Mode" }),
+    argument_hint: t("option:skills.colArgumentHint", { defaultValue: "Argument hint" }),
+    user_invocable: t("option:skills.colVisibility", { defaultValue: "Visibility" }),
+    model_invocation: t("option:skills.colModelUse", { defaultValue: "Model use" })
+  }
+
+  const columnVisibilityMenuItems: MenuProps["items"] = SKILL_OPTIONAL_COLUMN_KEYS.map(
+    (key) => ({
+      key,
+      label: optionalColumnLabels[key]
+    })
+  )
+
   const columns: ColumnsType<SkillSummary> = [
     {
       title: t("option:skills.colName", { defaultValue: "Name" }),
       dataIndex: "name",
       key: "name",
+      sorter: true,
+      sortDirections: SKILL_TABLE_SORT_DIRECTIONS,
+      sortOrder: getSkillTableSortOrder(sortState, "name"),
       render: (name: string) => (
         <span className="font-mono text-sm">{name}</span>
       )
     },
-    {
-      title: t("option:skills.colDescription", { defaultValue: "Description" }),
-      dataIndex: "description",
-      key: "description",
-      ellipsis: true,
-      render: (desc: string | null) => desc || "-"
-    },
-    {
-      title: t("option:skills.colContext", { defaultValue: "Mode" }),
-      dataIndex: "context",
-      key: "context",
-      width: 100,
-      render: (ctx: string) => (
-        <Tag color={ctx === "fork" ? "blue" : "green"}>
-          {ctx}
-        </Tag>
-      )
-    },
+    ...(isOptionalColumnVisible("description")
+      ? [{
+          title: optionalColumnLabels.description,
+          dataIndex: "description",
+          key: "description",
+          ellipsis: true,
+          render: (desc: string | null) => desc || "-"
+        }]
+      : []),
+    ...(isOptionalColumnVisible("context")
+      ? [{
+          title: optionalColumnLabels.context,
+          dataIndex: "context",
+          key: "context",
+          width: 100,
+          sorter: true,
+          sortDirections: SKILL_TABLE_SORT_DIRECTIONS,
+          sortOrder: getSkillTableSortOrder(sortState, "context"),
+          render: (ctx: string) => (
+            <Tag color={ctx === "fork" ? "blue" : "green"}>
+              {ctx}
+            </Tag>
+          )
+        }]
+      : []),
+    ...(isOptionalColumnVisible("argument_hint")
+      ? [{
+          title: optionalColumnLabels.argument_hint,
+          dataIndex: "argument_hint",
+          key: "argument_hint",
+          width: 160,
+          ellipsis: true,
+          render: (hint: string | null) => hint ? (
+            <span className="font-mono text-sm">{hint}</span>
+          ) : "-"
+        }]
+      : []),
+    ...(isOptionalColumnVisible("user_invocable")
+      ? [{
+          title: optionalColumnLabels.user_invocable,
+          dataIndex: "user_invocable",
+          key: "user_invocable",
+          width: 110,
+          render: (userInvocable: boolean) => (
+            <Tag color={userInvocable ? "green" : "default"}>
+              {userInvocable
+                ? t("option:skills.visibleState", { defaultValue: "Visible" })
+                : t("option:skills.hiddenState", { defaultValue: "Hidden" })}
+            </Tag>
+          )
+        }]
+      : []),
+    ...(isOptionalColumnVisible("model_invocation")
+      ? [{
+          title: optionalColumnLabels.model_invocation,
+          dataIndex: "disable_model_invocation",
+          key: "model_invocation",
+          width: 130,
+          render: (disableModelInvocation: boolean) => (
+            <Tag color={disableModelInvocation ? "orange" : "green"}>
+              {disableModelInvocation
+                ? t("option:skills.modelDisabled", { defaultValue: "Model disabled" })
+                : t("option:skills.modelAllowed", { defaultValue: "Model allowed" })}
+            </Tag>
+          )
+        }]
+      : []),
     {
       title: t("option:skills.colActions", { defaultValue: "Actions" }),
       key: "actions",
@@ -439,6 +748,10 @@ export const SkillsManager: React.FC = () => {
         <div className="flex items-center gap-1">
           <Tooltip title={t("option:skills.preview", { defaultValue: "Preview" })}>
             <Button
+              aria-label={t("option:skills.previewSkill", {
+                defaultValue: `Preview ${record.name}`,
+                name: record.name
+              })}
               type="text"
               size="small"
               icon={<Play size={14} />}
@@ -447,6 +760,10 @@ export const SkillsManager: React.FC = () => {
           </Tooltip>
           <Tooltip title={t("common:edit", { defaultValue: "Edit" })}>
             <Button
+              aria-label={t("option:skills.editSkill", {
+                defaultValue: `Edit ${record.name}`,
+                name: record.name
+              })}
               type="text"
               size="small"
               icon={<Pen size={14} />}
@@ -455,6 +772,10 @@ export const SkillsManager: React.FC = () => {
           </Tooltip>
           <Tooltip title={t("option:skills.export", { defaultValue: "Export" })}>
             <Button
+              aria-label={t("option:skills.exportSkill", {
+                defaultValue: `Export ${record.name}`,
+                name: record.name
+              })}
               type="text"
               size="small"
               icon={<Download size={14} />}
@@ -463,6 +784,10 @@ export const SkillsManager: React.FC = () => {
           </Tooltip>
           <Tooltip title={t("common:delete", { defaultValue: "Delete" })}>
             <Button
+              aria-label={t("option:skills.deleteSkill", {
+                defaultValue: `Delete ${record.name}`,
+                name: record.name
+              })}
               type="text"
               size="small"
               danger
@@ -572,6 +897,10 @@ export const SkillsManager: React.FC = () => {
       emptyText = t("option:skills.emptyTableError", {
         defaultValue: "Unable to load skills."
       })
+    } else if (hasActiveFilters) {
+      emptyText = t("option:skills.noFilterMatches", {
+        defaultValue: "No skills match these filters."
+      })
     } else if (hasSearch) {
       emptyText = t("option:skills.noMatches", {
         defaultValue: "No skills match this search."
@@ -584,6 +913,8 @@ export const SkillsManager: React.FC = () => {
 
     tableEmptyText = emptyText
   }
+
+  const tableSize = tableDensity === "compact" ? "small" : "middle"
 
   return (
     <div className="flex flex-col gap-4">
@@ -642,37 +973,201 @@ export const SkillsManager: React.FC = () => {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-3">
+        <div
+          role="group"
+          aria-label={t("option:skills.contextFilter", {
+            defaultValue: "Skill mode filter"
+          })}
+          className="flex flex-wrap items-center gap-1"
+        >
+          <Button
+            size="small"
+            type={contextFilter === "all" ? "primary" : "default"}
+            aria-pressed={contextFilter === "all"}
+            onClick={() => handleContextFilterChange("all")}
+          >
+            {t("option:skills.filterAllModes", { defaultValue: "All modes" })}
+          </Button>
+          <Button
+            size="small"
+            type={contextFilter === "inline" ? "primary" : "default"}
+            aria-pressed={contextFilter === "inline"}
+            onClick={() => handleContextFilterChange("inline")}
+          >
+            {t("option:skills.filterInline", { defaultValue: "Inline" })}
+          </Button>
+          <Button
+            size="small"
+            type={contextFilter === "fork" ? "primary" : "default"}
+            aria-pressed={contextFilter === "fork"}
+            onClick={() => handleContextFilterChange("fork")}
+          >
+            {t("option:skills.filterFork", { defaultValue: "Fork" })}
+          </Button>
+        </div>
+        <div
+          role="group"
+          aria-label={t("option:skills.visibilityFilter", {
+            defaultValue: "Skill visibility filter"
+          })}
+          className="flex flex-wrap items-center gap-1"
+        >
+          <Button
+            size="small"
+            type={visibilityFilter === "visible" ? "primary" : "default"}
+            aria-pressed={visibilityFilter === "visible"}
+            onClick={() => handleVisibilityFilterChange("visible")}
+          >
+            {t("option:skills.filterVisible", { defaultValue: "Visible" })}
+          </Button>
+          <Button
+            size="small"
+            type={visibilityFilter === "hidden" ? "primary" : "default"}
+            aria-pressed={visibilityFilter === "hidden"}
+            onClick={() => handleVisibilityFilterChange("hidden")}
+          >
+            {t("option:skills.filterHidden", { defaultValue: "Hidden" })}
+          </Button>
+          <Button
+            size="small"
+            type={visibilityFilter === "all" ? "primary" : "default"}
+            aria-pressed={visibilityFilter === "all"}
+            onClick={() => handleVisibilityFilterChange("all")}
+          >
+            {t("option:skills.filterAllVisibility", { defaultValue: "All visibility" })}
+          </Button>
+        </div>
+        <div
+          role="group"
+          aria-label={t("option:skills.toolsFilter", {
+            defaultValue: "Skill tools filter"
+          })}
+          className="flex flex-wrap items-center gap-1"
+        >
+          <Button
+            size="small"
+            type={toolsFilter === "any" ? "primary" : "default"}
+            aria-pressed={toolsFilter === "any"}
+            onClick={() => handleToolsFilterChange("any")}
+          >
+            {t("option:skills.filterAnyTools", { defaultValue: "Any tools" })}
+          </Button>
+          <Button
+            size="small"
+            type={toolsFilter === "with-tools" ? "primary" : "default"}
+            aria-pressed={toolsFilter === "with-tools"}
+            onClick={() => handleToolsFilterChange("with-tools")}
+          >
+            {t("option:skills.filterHasTools", { defaultValue: "Has tools" })}
+          </Button>
+          <Button
+            size="small"
+            type={toolsFilter === "without-tools" ? "primary" : "default"}
+            aria-pressed={toolsFilter === "without-tools"}
+            onClick={() => handleToolsFilterChange("without-tools")}
+          >
+            {t("option:skills.filterNoTools", { defaultValue: "No tools" })}
+          </Button>
+        </div>
+        <Input
+          aria-label={t("option:skills.modelFilter", {
+            defaultValue: "Filter by model"
+          })}
+          placeholder={t("option:skills.modelFilterPlaceholder", {
+            defaultValue: "Model"
+          })}
+          value={modelFilter}
+          onChange={(event) => handleModelFilterChange(event.target.value)}
+          allowClear
+          size="small"
+          style={{ width: 160 }}
+        />
+        <div
+          role="group"
+          aria-label={t("option:skills.tableDensity", {
+            defaultValue: "Table density"
+          })}
+          className="flex flex-wrap items-center gap-1"
+        >
+          <Button
+            size="small"
+            type={tableDensity === "comfortable" ? "primary" : "default"}
+            aria-label={t("option:skills.comfortableDensity", {
+              defaultValue: "Comfortable density"
+            })}
+            aria-pressed={tableDensity === "comfortable"}
+            icon={<Rows3 size={14} />}
+            onClick={() => handleDensityChange("comfortable")}
+          >
+            {t("option:skills.densityComfortable", { defaultValue: "Comfortable" })}
+          </Button>
+          <Button
+            size="small"
+            type={tableDensity === "compact" ? "primary" : "default"}
+            aria-label={t("option:skills.compactDensity", {
+              defaultValue: "Compact density"
+            })}
+            aria-pressed={tableDensity === "compact"}
+            icon={<Rows3 size={14} />}
+            onClick={() => handleDensityChange("compact")}
+          >
+            {t("option:skills.densityCompact", { defaultValue: "Compact" })}
+          </Button>
+        </div>
+        <Dropdown
+          menu={{
+            items: columnVisibilityMenuItems,
+            selectable: true,
+            multiple: true,
+            selectedKeys: visibleOptionalColumns,
+            onClick: ({ key }) => handleColumnVisibilityToggle(key)
+          }}
+          trigger={["click"]}
+        >
+          <Button
+            size="small"
+            aria-label={t("option:skills.columnVisibility", {
+              defaultValue: "Column visibility"
+            })}
+            icon={<Columns3 size={14} />}
+          >
+            {t("option:skills.columns", { defaultValue: "Columns" })}
+          </Button>
+        </Dropdown>
+      </div>
+
       {isError && (
-        <Alert
-          type="error"
-          showIcon
+        <DesignSystemAlert
+          variant="error"
           title={t("option:skills.loadListError", {
             defaultValue: "Failed to load skills"
           })}
-          description={listErrorDescription}
-          action={
-            <Button size="small" onClick={() => void refetch()}>
-              {t("common:tryAgain", { defaultValue: "Try again" })}
-            </Button>
-          }
-        />
+          action={{
+            label: t("common:tryAgain", { defaultValue: "Try again" }),
+            onClick: () => void refetch()
+          }}
+        >
+          {listErrorDescription}
+        </DesignSystemAlert>
       )}
 
       {successAction && (
-        <Alert
+        <DesignSystemAlert
           data-testid="skills-success-actions"
-          type="success"
-          showIcon
+          variant="success"
           title={successAction.title}
-          description={successAction.description}
-          closable
-          onClose={() => setSuccessAction(null)}
-          action={(() => {
+          dismissible
+          dismissLabel={t("common:close", { defaultValue: "Close" })}
+          onDismiss={() => setSuccessAction(null)}
+        >
+          <p className="m-0">{successAction.description}</p>
+          {(() => {
             const skillName = successAction.skillName
-            if (!skillName) return undefined
+            if (!skillName) return null
             const invocation = buildSkillInvocation(skillName)
             return (
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="mt-2 flex flex-wrap items-center gap-2">
                 <Button
                   size="small"
                   icon={<Play size={14} />}
@@ -702,16 +1197,19 @@ export const SkillsManager: React.FC = () => {
               </div>
             )
           })()}
-        />
+        </DesignSystemAlert>
       )}
 
       <Table
+        data-testid="skills-table"
+        data-density={tableDensity}
         dataSource={data?.skills ?? []}
         columns={columns}
         rowKey="name"
         loading={isLoading}
+        onChange={handleTableChange}
         pagination={false}
-        size="middle"
+        size={tableSize}
         locale={{
           emptyText: tableEmptyText
         }}

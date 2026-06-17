@@ -203,6 +203,7 @@ _GIT_READ_TOOLS = [
     "git.conflicts.list",
     "git.conflicts.read",
 ]
+_WEB_READ_TOOLS = ["web.fetch", "web.search", "web.research"]
 _TEST_READ_TOOLS = ["tests.results.read", "tests.logs.read"]
 _TEST_REQUEST_TOOLS = [*_TEST_READ_TOOLS, "tests.request"]
 _BROWSER_READ_TOOLS = [
@@ -452,6 +453,26 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             },
         },
         requires_workspace_binding=True,
+        tooling_metadata_document=tooling_metadata(
+            enabled_tools=[
+                *_TOOL_DISCOVERY_TOOLS,
+                *_WEB_READ_TOOLS,
+            ],
+            enabled_capabilities=["research.web", "external.network"],
+            direct_categories=["web", "tool_discovery"],
+            deferred_categories=["web_search", "citations", "browser"],
+            recommended_tools=[
+                recommended_tool(
+                    "citations.collect",
+                    category="citations",
+                    description="Collect citation candidates from fetched sources for later review.",
+                ),
+            ],
+            recommended_servers=[
+                web_search_server_recommendation(),
+                browser_server_recommendation(),
+            ],
+        ),
     ),
     _preset(
         preset_id="code-reviewer",

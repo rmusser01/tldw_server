@@ -1,3 +1,5 @@
+import { UNAVAILABLE_STATE_LABEL } from "@/design-system"
+
 export type ScheduledTaskTemplateId =
   | "reminder"
   | "watch"
@@ -218,7 +220,7 @@ export const getScheduledTaskTemplateStateLabel = (
     case "planned":
       return "Planned capability"
     case "unavailable":
-      return "Unavailable"
+      return UNAVAILABLE_STATE_LABEL
   }
 }
 

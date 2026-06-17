@@ -460,10 +460,38 @@ async def test_filesystem_lock_manager_injection_shares_leases_between_modules(t
     assert reacquired["lease_id"] != first["lease_id"]  # nosec B101
 
 
-@pytest.mark.parametrize("backend", ["sqlite", False, 0])
+@pytest.mark.asyncio
+async def test_filesystem_lock_tool_descriptions_are_backend_neutral() -> None:
+    mod = FilesystemModule(ModuleConfig(name="filesystem"))
+    tools = {tool["name"]: tool for tool in await mod.get_tools()}
+
+    assert "process-local" not in tools["fs.lock_acquire"]["description"]  # nosec B101
+    assert "process-local" not in tools["fs.lock_release"]["description"]  # nosec B101
+
+
+def test_filesystem_lock_manager_sqlite_backend_config_creates_manager(tmp_path: Path) -> None:
+    mod = FilesystemModule(
+        ModuleConfig(
+            name="filesystem",
+            settings={
+                "lock_manager_backend": "sqlite",
+                "lock_manager_sqlite_path": str(tmp_path / "locks.db"),
+            },
+        )
+    )
+
+    assert mod._lock_leases.__class__.__name__ == "SQLiteFilesystemLockManager"  # nosec B101
+
+
+@pytest.mark.parametrize("backend", ["", False, 0, "unsupported"])
 def test_filesystem_lock_manager_rejects_unsupported_backend_config(backend: Any) -> None:
     with pytest.raises(ValueError, match="unsupported filesystem lock_manager_backend"):
         FilesystemModule(ModuleConfig(name="filesystem", settings={"lock_manager_backend": backend}))
+
+
+def test_filesystem_lock_manager_sqlite_backend_requires_path() -> None:
+    with pytest.raises(ValueError, match="lock_manager_sqlite_path is required"):
+        FilesystemModule(ModuleConfig(name="filesystem", settings={"lock_manager_backend": "sqlite"}))
 
 
 @pytest.mark.asyncio

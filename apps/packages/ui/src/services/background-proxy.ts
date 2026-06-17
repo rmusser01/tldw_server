@@ -388,7 +388,67 @@ export interface BgRequestInit<
   preferDirect?: boolean
 }
 
+// In-flight coalescing for idempotent GET requests: when several callers issue
+// the same GET concurrently (a common pattern when many components mount on a
+// page load and each fetches the same resource), share a single network request
+// instead of firing N identical ones. Only concurrent requests are shared — once
+// the promise settles it is removed, so caching/staleness semantics are unchanged.
+const inFlightGetRequests = new Map<string, Promise<unknown>>()
+
 export async function bgRequest<
+  T = any,
+  P extends PathOrUrl = AllowedPath,
+  M extends AllowedMethodFor<P> = AllowedMethodFor<P>
+>(init: BgRequestInit<P, M>): Promise<T> {
+  const method = String(init.method || "GET").toUpperCase()
+  const coalescable =
+    method === "GET" &&
+    !init.body &&
+    !init.abortSignal &&
+    !init.returnResponse &&
+    !init.responseType &&
+    !init.preferDirect
+  if (!coalescable) {
+    return bgRequestImpl<T, P, M>(init)
+  }
+  // Header keys are case-insensitive and object key order is not meaningful, so
+  // normalize (lowercase + sort) for a stable key. Keep timeoutMs in the key so
+  // GETs with different timeouts are not merged, and preserve the distinction
+  // between "noAuth omitted" and "noAuth: false" (bgRequestImpl uses
+  // hasOwnProperty(noAuth) to decide cross-origin auth suppression).
+  const initHeaders = init.headers as Record<string, string> | undefined
+  const normalizedHeaders = initHeaders
+    ? Object.keys(initHeaders)
+        .sort()
+        .reduce<Record<string, string>>((acc, headerKey) => {
+          acc[headerKey.toLowerCase()] = initHeaders[headerKey]
+          return acc
+        }, {})
+    : null
+  const key = JSON.stringify({
+    p: String(init.path),
+    h: normalizedHeaders,
+    noAuth: Object.prototype.hasOwnProperty.call(init, "noAuth")
+      ? Boolean(init.noAuth)
+      : "__unset__",
+    timeoutMs: typeof init.timeoutMs === "number" ? init.timeoutMs : null
+  })
+  const existing = inFlightGetRequests.get(key)
+  if (existing) {
+    return existing as Promise<T>
+  }
+  const promise = bgRequestImpl<T, P, M>(init).finally(() => {
+    // Only clear the entry if it is still the promise we created — defensive in
+    // case the map handling changes to allow overwrites in the future.
+    if (inFlightGetRequests.get(key) === promise) {
+      inFlightGetRequests.delete(key)
+    }
+  })
+  inFlightGetRequests.set(key, promise)
+  return promise as Promise<T>
+}
+
+async function bgRequestImpl<
   T = any,
   P extends PathOrUrl = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>

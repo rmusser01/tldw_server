@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -38,8 +39,12 @@ MAX_EVENT_QUERY_LIMIT = 10_000
 MAX_REPORT_EVENT_LIMIT = 5_000
 MAX_REPORT_GROUP_LIMIT = 500
 MAX_REPORT_REASON_CODE_LIMIT = 25
+MAX_FILE_POLICY_DECISIONS = 20
+MAX_FILE_POLICY_PATH_LENGTH = 512
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_URI_SCHEME_PATH_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:/")
+_WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"^[A-Za-z]:")
 
 
 def _utc_now() -> datetime:
@@ -73,6 +78,89 @@ def _safe_optional_id(value: Any, *, field: str) -> str | None:
     """Return a safe optional id."""
 
     return sanitize_safe_id(value, field=field)
+
+
+def _safe_workspace_relative_path(value: Any) -> str | None:
+    """Return a bounded workspace-relative path, rejecting host paths."""
+
+    if not isinstance(value, str):
+        return None
+    text = value.strip().replace("\\", "/")
+    if not text or len(text) > MAX_FILE_POLICY_PATH_LENGTH:
+        return None
+    if "://" in text or _URI_SCHEME_PATH_RE.match(text):
+        return None
+    text = re.sub(r"/+", "/", text)
+    while text.startswith("./"):
+        text = text[2:]
+    if (
+        not text
+        or text.startswith("/")
+        or _WINDOWS_ABSOLUTE_PATH_RE.match(text)
+        or "\x00" in text
+    ):
+        return None
+
+    parts: list[str] = []
+    for part in text.split("/"):
+        cleaned = part.strip()
+        if not cleaned or cleaned == ".":
+            continue
+        if cleaned == "..":
+            return None
+        parts.append(cleaned)
+    if not parts:
+        return "."
+    return "/".join(parts)
+
+
+class FilePolicyDecisionMetadata(BaseModel):
+    """Safe metadata for one file-policy decision attached to a tool event."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    requested_action: str | None = None
+    normalized_path: str | None = None
+    grant_outcome: str | None = None
+    grant_source: str | None = None
+    matched_grant_prefix: str | None = None
+    matched_grant_effect: str | None = None
+    reason_code: str | None = None
+    redacted: bool = True
+
+    @field_validator(
+        "requested_action",
+        "grant_outcome",
+        "grant_source",
+        "matched_grant_effect",
+        mode="before",
+    )
+    @classmethod
+    def _sanitize_optional_ids(cls, value: Any, info: Any) -> str | None:
+        """Sanitize bounded scalar decision fields."""
+
+        return _safe_optional_id(value, field=str(info.field_name))
+
+    @field_validator("normalized_path", "matched_grant_prefix", mode="before")
+    @classmethod
+    def _sanitize_relative_path_fields(cls, value: Any) -> str | None:
+        """Keep only workspace-relative path metadata."""
+
+        return _safe_workspace_relative_path(value)
+
+    @field_validator("reason_code", mode="before")
+    @classmethod
+    def _sanitize_policy_reason_code(cls, value: Any) -> str | None:
+        """Sanitize policy reason codes without preserving raw paths."""
+
+        return sanitize_reason_code(value)
+
+    @field_validator("redacted", mode="before")
+    @classmethod
+    def _force_redacted(cls, _value: Any) -> bool:
+        """File-policy event metadata is always stored as redacted."""
+
+        return True
 
 
 class ToolUseEvent(BaseModel):
@@ -121,6 +209,10 @@ class ToolUseEvent(BaseModel):
     runtime_availability: str | None = None
     idempotency_replay: bool = False
     capture_ref: str | None = None
+    file_policy_decisions: tuple[FilePolicyDecisionMetadata, ...] = ()
+    file_policy_sha256_before_present: bool | None = None
+    file_policy_sha256_after_present: bool | None = None
+    file_policy_lock_lease_present: bool | None = None
 
     @field_validator("event_id", mode="before")
     @classmethod
@@ -176,6 +268,17 @@ class ToolUseEvent(BaseModel):
         """Sanitize reason codes without preserving raw error text."""
 
         return sanitize_reason_code(value)
+
+    @field_validator("file_policy_decisions", mode="before")
+    @classmethod
+    def _bound_file_policy_decisions(cls, value: Any) -> list[Any]:
+        """Bound file-policy decision metadata cardinality."""
+
+        if value is None:
+            return []
+        if not isinstance(value, list | tuple):
+            return []
+        return list(value[:MAX_FILE_POLICY_DECISIONS])
 
     @field_validator("duration_ms", mode="before")
     @classmethod

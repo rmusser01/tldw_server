@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import (
     PERMISSION_TIMEOUT_SECONDS,
     PendingPermission,
     SessionWebSocketRegistry,
+    _call_session_close_with_fallback,
     _merge_runtime_and_governance_permission_outcome,
     _resolve_runtime_permission_outcome,
 )
@@ -717,7 +718,7 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
             return
         if sess:
             with contextlib.suppress(_ACP_SANDBOX_NONCRITICAL_EXCEPTIONS):
-                await sess.client.call("_tldw/session/close", {"sessionId": session_id})
+                await _call_session_close_with_fallback(sess.client, session_id)
             try:
                 if sess.reader_task:
                     sess.reader_task.cancel()

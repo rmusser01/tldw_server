@@ -49,10 +49,21 @@ export const ChatModelSelectorDropdown = React.memo(
     setModelSortMode = () => undefined
   }: ChatModelSelectorDropdownProps) {
     const { t } = useTranslation(["playground", "common"])
-    const statusLabel = modelUsabilityLabel ?? connectionStatusLabel
+    // When no model is selected, the provider connection may well be "Healthy",
+    // but showing that green badge next to "Select a model" is contradictory —
+    // you cannot chat yet. Surface a truthful "No model selected" state instead.
+    const noModelSelected = !selectedModel
+    const statusLabel =
+      modelUsabilityLabel ??
+      (noModelSelected
+        ? t("playground:composer.providerStatusNoModel", "No model selected")
+        : connectionStatusLabel)
     const statusTitle = modelUsabilityTitle ?? apiModelLabel
     const statusWarning =
-      modelUsabilityWarning || connectionStatusWarning || modelSelectorWarning
+      noModelSelected ||
+      modelUsabilityWarning ||
+      connectionStatusWarning ||
+      modelSelectorWarning
 
     return (
       <Dropdown

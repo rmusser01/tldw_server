@@ -337,8 +337,8 @@ def test_profile_manifest_refuses_custom_template() -> None:
             "primary_blocker": None,
             "blockers": [],
             "status_message": (
-                "Create a named custom ACP profile with command, args, env, "
-                "workspace policy, and evidence bundle."
+                "Create a distinct named custom ACP profile instead of certifying the seeded "
+                "custom template; record command, args, env, workspace policy, and evidence bundle."
             ),
             "docs_url": "/docs-static/Development/ACP_Compatibility_Matrix.md",
         }
@@ -352,6 +352,70 @@ def test_profile_manifest_refuses_custom_template() -> None:
     assert manifest["entrypoint"]["probe_state"] == "custom_template"
     assert manifest["entrypoint"]["acp_command"] == ""
     assert "command, args, env, workspace policy, and evidence bundle" in manifest["notes"][0]
+    assert manifest["evidence_requirements"] == {
+        "profile_class": "custom_concrete_profile",
+        "template_profile": "custom",
+        "certifiable_profile": "named_profile_required",
+        "required_metadata": [
+            "profile_key",
+            "profile_name",
+            "entrypoint_strategy",
+            "acp_command",
+            "acp_args",
+            "env_var_names",
+            "workspace_policy",
+            "host_runtime",
+            "agent_version",
+            "provider_assumptions",
+            "repo_commit",
+            "runner_version",
+        ],
+        "required_live_results": [
+            "initialize",
+            "session_new",
+            "session_prompt",
+        ],
+        "redaction_policy": {
+            "record_env_var_names_only": True,
+            "forbid_sensitive_values": True,
+            "use_redacted_support_views": True,
+        },
+    }
+
+
+def test_render_manifest_dict_prints_custom_evidence_requirements() -> None:
+    module = _load_module()
+    manifest = module.build_agent_profile_manifest(
+        {
+            "type": "custom",
+            "name": "Custom",
+            "entrypoint_strategy": "custom_template",
+            "acp_command": "",
+            "acp_args": [],
+            "probe_state": "custom_template",
+            "primary_blocker": "custom_template",
+            "blockers": [],
+            "status_message": (
+                "Create a distinct named custom ACP profile instead of certifying the seeded "
+                "custom template; record command, args, env, workspace policy, and evidence bundle."
+            ),
+            "docs_url": "/docs-static/Development/ACP_Compatibility_Matrix.md",
+        }
+    )
+
+    rendered = module.render_manifest_dict(manifest)
+
+    assert "## Evidence Requirements" in rendered
+    assert "- profile_class: `custom_concrete_profile`" in rendered
+    assert "- certifiable_profile: `named_profile_required`" in rendered
+    assert "- required_metadata:" in rendered
+    assert "  - `env_var_names`" in rendered
+    assert "  - `workspace_policy`" in rendered
+    assert "- required_live_results:" in rendered
+    assert "  - `session_prompt`" in rendered
+    assert "- redaction_policy:" in rendered
+    assert "  - `record_env_var_names_only`: `true`" in rendered
+    assert "No runnable commands for this manifest." in rendered
 
 
 def test_render_manifest_dict_prints_stdin_jsonl_and_blockers() -> None:
@@ -486,6 +550,38 @@ def test_agent_profile_manifest_preserves_registry_support_and_adapter_metadata(
     assert manifest["entrypoint"]["adapter_install_source"] == "github_release_preferred"
     assert manifest["entrypoint"]["credential_policy"] == "delegated_to_adapter"
     assert manifest["entrypoint"]["runtime_backend"] == "acp_downstream"
+
+
+def test_registry_aider_manifest_records_unverified_adapter_candidate(monkeypatch) -> None:
+    module = _load_module()
+    monkeypatch.setenv("PATH", "")
+
+    manifest = module._build_registry_agent_manifest("aider")
+
+    assert manifest["profile"] == "aider"
+    assert manifest["support_state"] == "documented_unverified"
+    assert manifest["verification_level"] == "documented_only"
+    assert manifest["entrypoint"]["entrypoint_strategy"] == "external_acp_adapter"
+    assert manifest["entrypoint"]["acp_command"] == "aider-acp"
+    assert manifest["entrypoint"]["adapter_source"] == "jorgejhms/aider-acp"
+    assert manifest["entrypoint"]["adapter_docs_url"] == "https://github.com/jorgejhms/aider-acp"
+    assert manifest["entrypoint"]["adapter_package"] == "aider-acp"
+    assert manifest["commands"] == []
+    assert "adapter_missing" in manifest["blockers"]
+
+
+def test_registry_continue_manifest_records_cn_without_acp_entrypoint() -> None:
+    module = _load_module()
+
+    manifest = module._build_registry_agent_manifest("continue_dev")
+
+    assert manifest["profile"] == "continue_dev"
+    assert manifest["support_state"] == "documented_unverified"
+    assert manifest["verification_level"] == "documented_only"
+    assert manifest["entrypoint"]["entrypoint_strategy"] == "documented_candidate"
+    assert manifest["entrypoint"]["acp_command"] == ""
+    assert manifest["commands"] == []
+    assert manifest["blockers"] == ["entrypoint_strategy_missing"]
 
 
 def test_run_profile_manifest_uses_stdio_sequence_runner(monkeypatch, capsys) -> None:

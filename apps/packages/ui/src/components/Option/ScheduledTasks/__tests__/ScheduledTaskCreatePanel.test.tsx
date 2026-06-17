@@ -5,11 +5,56 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
+import { expectInsideDesignSystemAlert } from "@/test-utils/designSystemAlert"
+
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>()
+
+  return {
+    ...actual,
+    Link: ({
+      children,
+      to,
+      ...props
+    }: React.AnchorHTMLAttributes<HTMLAnchorElement> & {
+      children: React.ReactNode
+      to: string
+    }) => (
+      <a {...props} href={to} data-router-link="true">
+        {children}
+      </a>
+    )
+  }
+})
+
 import { ScheduledTaskCreatePanel } from "../ScheduledTaskCreatePanel"
 import {
   REQUIRED_WATCH_AVAILABILITY_GATES,
   buildScheduledTaskTemplateCapability
 } from "../scheduled-task-template-capabilities"
+import type { ScheduledTaskAutomationCapabilitiesResponse } from "@/services/scheduled-tasks-control-plane"
+
+const automationCapabilities = (
+  family: "recurring_question" | "agent_task",
+  createStatus: "available" | "planned" | "unavailable" | "disabled" = "available"
+): ScheduledTaskAutomationCapabilitiesResponse => ({
+  items: [
+    {
+      family,
+      family_availability: createStatus === "available" ? "available" : "planned",
+      actions: {
+        create_definition: {
+          status: createStatus,
+          reason: createStatus === "available" ? null : "API creation is not available.",
+          required_permissions: []
+        }
+      },
+      missing_dependencies: [],
+      related_capabilities: {},
+      schema_version: "2026-06-10"
+    }
+  ]
+})
 
 describe("ScheduledTaskCreatePanel", () => {
   it("renders intent templates by state without source-vendor IA", () => {
@@ -263,6 +308,7 @@ describe("ScheduledTaskCreatePanel", () => {
     )
 
     expect(screen.getByText(/private-looking values/)).toBeInTheDocument()
+    expectInsideDesignSystemAlert(/private-looking values/)
     expect(screen.getByLabelText("Setup summary")).not.toHaveTextContent(
       "https://example.com/feed?token=secret"
     )
@@ -290,7 +336,7 @@ describe("ScheduledTaskCreatePanel", () => {
     expect(screen.getByLabelText("Setup summary")).not.toHaveTextContent("sample credential")
   })
 
-  it("renders planned Recurring question without create controls", () => {
+  it("renders rich planned Recurring question guidance without create controls", () => {
     render(
       <ScheduledTaskCreatePanel
         selectedTemplateId="recurring_question"
@@ -299,8 +345,151 @@ describe("ScheduledTaskCreatePanel", () => {
       />
     )
 
-    expect(screen.getByText("Planned capability")).toBeInTheDocument()
+    expect(screen.getByText("Planned automation type")).toBeInTheDocument()
+    expect(
+      screen.getByText("Run this question on a schedule across selected searchable content.")
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Recurring Question scheduling is planned for the API contract and is not executable in this client yet."
+      )
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Safety")).not.toBeInTheDocument()
+    expect(screen.getByText("Scheduled RAG query support")).toBeInTheDocument()
+    expect(screen.getByText("Task visibility policy")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open Research" })).toHaveAttribute(
+      "href",
+      "/research"
+    )
+    expect(screen.getByRole("link", { name: "Open Results" })).toHaveAttribute(
+      "href",
+      "/scheduled-tasks/results"
+    )
     expect(screen.queryByRole("button", { name: /Create/i })).not.toBeInTheDocument()
+  })
+
+  it("renders the Recurring Question API editor when definition creation is available", () => {
+    render(
+      <ScheduledTaskCreatePanel
+        selectedTemplateId="recurring_question"
+        onSelectTemplate={vi.fn()}
+        onCreateReminder={vi.fn()}
+        automationCapabilities={automationCapabilities("recurring_question")}
+        onPreviewAutomationDefinition={vi.fn()}
+        onCreateAutomationDefinition={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("Create Recurring question")).toBeInTheDocument()
+    expect(screen.getByLabelText("Question")).toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        "Recurring Question scheduling is planned for the API contract and is not executable in this client yet."
+      )
+    ).not.toBeInTheDocument()
+  })
+
+  it("renders the Agent Task API editor when definition creation is available", () => {
+    render(
+      <ScheduledTaskCreatePanel
+        selectedTemplateId="agent_task"
+        onSelectTemplate={vi.fn()}
+        onCreateReminder={vi.fn()}
+        automationCapabilities={automationCapabilities("agent_task")}
+        onPreviewAutomationDefinition={vi.fn()}
+        onCreateAutomationDefinition={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("Create Agent task")).toBeInTheDocument()
+    expect(screen.getByLabelText("Agent ref")).toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        "Agent Task scheduling is planned for the API contract and is not executable in this client yet."
+      )
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps planned Recurring Question copy when API creation is unavailable", () => {
+    render(
+      <ScheduledTaskCreatePanel
+        selectedTemplateId="recurring_question"
+        onSelectTemplate={vi.fn()}
+        onCreateReminder={vi.fn()}
+        automationCapabilities={automationCapabilities("recurring_question", "planned")}
+        onPreviewAutomationDefinition={vi.fn()}
+        onCreateAutomationDefinition={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByText(
+        "Recurring Question scheduling is planned for the API contract and is not executable in this client yet."
+      )
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText("Question")).not.toBeInTheDocument()
+  })
+
+  it("renders rich planned Agent Task guidance without create controls", () => {
+    render(
+      <ScheduledTaskCreatePanel
+        selectedTemplateId="agent_task"
+        onSelectTemplate={vi.fn()}
+        onCreateReminder={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("Planned automation type")).toBeInTheDocument()
+    expect(
+      screen.getByText("Send this message to the selected agent at the scheduled time.")
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Agent Task scheduling is planned for the API contract and is not executable in this client yet."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByText("Schedulable ACP/API agents")).toBeInTheDocument()
+    expect(screen.getByText("Preview and risk classification")).toBeInTheDocument()
+    expect(screen.getByText("Approval policy")).toBeInTheDocument()
+    expect(
+      screen.getByText("Preview is required before scheduling an agent task.")
+    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open Agent Tasks" })).toHaveAttribute(
+      "href",
+      "/agent-tasks"
+    )
+    expect(screen.getByRole("link", { name: "Open ACP Playground" })).toHaveAttribute(
+      "href",
+      "/acp-playground"
+    )
+    expect(screen.getByRole("link", { name: "Open Results" })).toHaveAttribute(
+      "href",
+      "/scheduled-tasks/results"
+    )
+    expect(screen.queryByRole("button", { name: /Create/i })).not.toBeInTheDocument()
+  })
+
+  it("renders planned related destinations through router links", () => {
+    render(
+      <ScheduledTaskCreatePanel
+        selectedTemplateId="agent_task"
+        onSelectTemplate={vi.fn()}
+        onCreateReminder={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole("link", { name: "Open Agent Tasks" })).toHaveAttribute(
+      "data-router-link",
+      "true"
+    )
+    expect(screen.getByRole("link", { name: "Open ACP Playground" })).toHaveAttribute(
+      "data-router-link",
+      "true"
+    )
+    expect(screen.getByRole("link", { name: "Open Results" })).toHaveAttribute(
+      "data-router-link",
+      "true"
+    )
   })
 
   it("renders Reminder editor and delegates create payload", async () => {

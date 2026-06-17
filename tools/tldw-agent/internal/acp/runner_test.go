@@ -20,6 +20,7 @@ type stubAgent struct {
 	caps         map[string]interface{}
 	sessionNewCh chan map[string]interface{}
 	promptCh     chan promptParams
+	closeCh      chan string
 }
 
 type promptParams struct {
@@ -262,6 +263,7 @@ func TestPassiveBlockedStatusUsesActionableMessages(t *testing.T) {
 	cases := map[string]string{
 		"live_certification_required": "Run live ACP certification before claiming this agent is supported.",
 		"entrypoint_strategy_missing": "Identify and configure a concrete ACP stdio entrypoint before live certification.",
+		"custom_template":             "Create a distinct named custom ACP profile instead of certifying the seeded custom template; record command, args, env, workspace policy, and evidence bundle.",
 	}
 
 	for blocker, want := range cases {
@@ -280,6 +282,7 @@ func newStubAgent(conn *Conn, sessionID string, caps map[string]interface{}) *st
 		caps:         caps,
 		sessionNewCh: make(chan map[string]interface{}, 1),
 		promptCh:     make(chan promptParams, 1),
+		closeCh:      make(chan string, 1),
 	}
 
 	conn.SetHandler(func(msg *RPCMessage) (*RPCResponse, error) {
@@ -314,6 +317,14 @@ func newStubAgent(conn *Conn, sessionID string, caps map[string]interface{}) *st
 			return NewResultResponse(msg.ID, map[string]interface{}{
 				"stopReason": "end",
 			}), nil
+		case "session/close":
+			var params struct {
+				SessionID string `json:"sessionId"`
+			}
+			if err := json.Unmarshal(msg.Params, &params); err == nil {
+				agent.closeCh <- params.SessionID
+			}
+			return NewResultResponse(msg.ID, nil), nil
 		default:
 			return NewErrorResponse(msg.ID, ErrMethodNotFound, "method not found"), nil
 		}
@@ -542,6 +553,353 @@ func TestRunnerStripsAgentTypeBeforeForwardingSessionNew(t *testing.T) {
 		}
 		if _, ok := params["mcpServers"]; !ok {
 			t.Fatalf("mcpServers should be preserved for downstream session/new: %#v", params)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("session/new was not forwarded to downstream")
+	}
+}
+
+func TestRunnerAcceptsStandardSessionCloseAndForwardsWhenAdvertised(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.Command = "stub-agent"
+	runner := NewRunner(cfg)
+
+	caps := map[string]interface{}{
+		"sessionCapabilities": map[string]interface{}{
+			"close": true,
+		},
+	}
+
+	var (
+		mu                sync.Mutex
+		stubAgentInstance *stubAgent
+		spawnedConns      []net.Conn
+	)
+
+	runner.SetSpawnFunc(func(_ config.AgentConfig) (*Conn, *exec.Cmd, error) {
+		clientConn, serverConn := net.Pipe()
+
+		stubConn := NewConn(serverConn, serverConn)
+		mu.Lock()
+		spawnedConns = append(spawnedConns, clientConn, serverConn)
+		stubAgentInstance = newStubAgent(stubConn, "session_close", caps)
+		mu.Unlock()
+		go func() {
+			_ = stubConn.Run()
+		}()
+
+		return NewConn(clientConn, clientConn), nil, nil
+	})
+
+	upstreamConn, runnerConn := net.Pipe()
+	upstream := NewConn(upstreamConn, upstreamConn)
+	go func() {
+		_ = upstream.Run()
+	}()
+
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- runner.Run(runnerConn, runnerConn)
+	}()
+
+	t.Cleanup(func() {
+		_ = upstreamConn.Close()
+		_ = runnerConn.Close()
+		mu.Lock()
+		conns := append([]net.Conn(nil), spawnedConns...)
+		mu.Unlock()
+		for _, conn := range conns {
+			_ = conn.Close()
+		}
+		select {
+		case <-runErr:
+		case <-time.After(time.Second):
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	newResp, err := upstream.Call(ctx, "session/new", map[string]interface{}{
+		"cwd": t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("session/new failed: %v", err)
+	}
+	if newResp.Error != nil {
+		t.Fatalf("session/new returned RPC error: %#v", newResp.Error)
+	}
+	sessionID := extractSessionID(t, newResp.Result)
+
+	closeResp, err := upstream.Call(ctx, "session/close", map[string]interface{}{
+		"sessionId": sessionID,
+	})
+	if err != nil {
+		t.Fatalf("session/close failed: %v", err)
+	}
+	if closeResp.Error != nil {
+		t.Fatalf("session/close returned RPC error: %#v", closeResp.Error)
+	}
+
+	mu.Lock()
+	instance := stubAgentInstance
+	mu.Unlock()
+	if instance == nil {
+		t.Fatalf("stub agent was not spawned")
+	}
+
+	select {
+	case closedSessionID := <-instance.closeCh:
+		if closedSessionID != sessionID {
+			t.Fatalf("closed session = %q, want %q", closedSessionID, sessionID)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("downstream session/close was not forwarded")
+	}
+}
+
+func TestValidateSessionNewMCPTransportsRejectsMalformedTypes(t *testing.T) {
+	caps := map[string]interface{}{
+		"mcpCapabilities": map[string]bool{
+			"http": true,
+			"sse":  true,
+		},
+	}
+
+	tests := []struct {
+		name    string
+		server  map[string]interface{}
+		wantErr string
+	}{
+		{
+			name:    "missing type",
+			server:  map[string]interface{}{"name": "missing"},
+			wantErr: "mcpServers[0].type must be a string",
+		},
+		{
+			name:    "non string type",
+			server:  map[string]interface{}{"name": "bad", "type": 123},
+			wantErr: "mcpServers[0].type must be a string",
+		},
+		{
+			name:    "empty type",
+			server:  map[string]interface{}{"name": "empty", "type": "  "},
+			wantErr: "mcpServers[0].type must not be empty",
+		},
+		{
+			name:    "unknown type",
+			server:  map[string]interface{}{"name": "unknown", "type": "grpc"},
+			wantErr: "mcpServers[0].type \"grpc\" is not supported",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(map[string]interface{}{
+				"cwd":        t.TempDir(),
+				"mcpServers": []map[string]interface{}{tc.server},
+			})
+			if err != nil {
+				t.Fatalf("marshal session/new params: %v", err)
+			}
+
+			err = validateSessionNewMCPTransports(raw, caps)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("validateSessionNewMCPTransports error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestRunnerRejectsUnsupportedHTTPMCPServerTransport(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.Command = "stub-agent"
+	runner := NewRunner(cfg)
+
+	caps := map[string]interface{}{
+		"mcpCapabilities": map[string]bool{
+			"http": false,
+			"sse":  false,
+		},
+	}
+
+	var (
+		mu                sync.Mutex
+		stubAgentInstance *stubAgent
+		spawnedConns      []net.Conn
+	)
+
+	runner.SetSpawnFunc(func(_ config.AgentConfig) (*Conn, *exec.Cmd, error) {
+		clientConn, serverConn := net.Pipe()
+
+		stubConn := NewConn(serverConn, serverConn)
+		mu.Lock()
+		spawnedConns = append(spawnedConns, clientConn, serverConn)
+		stubAgentInstance = newStubAgent(stubConn, "session_mcp_rejected", caps)
+		mu.Unlock()
+		go func() {
+			_ = stubConn.Run()
+		}()
+
+		return NewConn(clientConn, clientConn), nil, nil
+	})
+
+	upstreamConn, runnerConn := net.Pipe()
+	upstream := NewConn(upstreamConn, upstreamConn)
+	go func() {
+		_ = upstream.Run()
+	}()
+
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- runner.Run(runnerConn, runnerConn)
+	}()
+
+	t.Cleanup(func() {
+		_ = upstreamConn.Close()
+		_ = runnerConn.Close()
+		mu.Lock()
+		conns := append([]net.Conn(nil), spawnedConns...)
+		mu.Unlock()
+		for _, conn := range conns {
+			_ = conn.Close()
+		}
+		select {
+		case <-runErr:
+		case <-time.After(time.Second):
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	resp, err := upstream.Call(ctx, "session/new", map[string]interface{}{
+		"cwd": t.TempDir(),
+		"mcpServers": []map[string]interface{}{
+			{
+				"name": "remote",
+				"type": "http",
+				"url":  "https://mcp.example.com",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("session/new transport rejection should return RPC error response: %v", err)
+	}
+	if resp.Error == nil {
+		t.Fatalf("session/new should reject unsupported http MCP transport")
+	}
+	if resp.Error.Code != ErrInvalidParams || !strings.Contains(resp.Error.Message, "mcpCapabilities.http") {
+		t.Fatalf("unexpected MCP transport rejection: %#v", resp.Error)
+	}
+
+	mu.Lock()
+	instance := stubAgentInstance
+	mu.Unlock()
+	if instance == nil {
+		t.Fatalf("stub agent was not spawned")
+	}
+	select {
+	case params := <-instance.sessionNewCh:
+		t.Fatalf("unsupported MCP transport should not reach downstream session/new: %#v", params)
+	default:
+	}
+}
+
+func TestRunnerPreservesSupportedHTTPMCPServerTransport(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.Command = "stub-agent"
+	runner := NewRunner(cfg)
+
+	caps := map[string]interface{}{
+		"mcpCapabilities": map[string]bool{
+			"http": true,
+			"sse":  false,
+		},
+	}
+
+	var (
+		mu                sync.Mutex
+		stubAgentInstance *stubAgent
+		spawnedConns      []net.Conn
+	)
+
+	runner.SetSpawnFunc(func(_ config.AgentConfig) (*Conn, *exec.Cmd, error) {
+		clientConn, serverConn := net.Pipe()
+
+		stubConn := NewConn(serverConn, serverConn)
+		mu.Lock()
+		spawnedConns = append(spawnedConns, clientConn, serverConn)
+		stubAgentInstance = newStubAgent(stubConn, "session_mcp_supported", caps)
+		mu.Unlock()
+		go func() {
+			_ = stubConn.Run()
+		}()
+
+		return NewConn(clientConn, clientConn), nil, nil
+	})
+
+	upstreamConn, runnerConn := net.Pipe()
+	upstream := NewConn(upstreamConn, upstreamConn)
+	go func() {
+		_ = upstream.Run()
+	}()
+
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- runner.Run(runnerConn, runnerConn)
+	}()
+
+	t.Cleanup(func() {
+		_ = upstreamConn.Close()
+		_ = runnerConn.Close()
+		mu.Lock()
+		conns := append([]net.Conn(nil), spawnedConns...)
+		mu.Unlock()
+		for _, conn := range conns {
+			_ = conn.Close()
+		}
+		select {
+		case <-runErr:
+		case <-time.After(time.Second):
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	resp, err := upstream.Call(ctx, "session/new", map[string]interface{}{
+		"cwd": t.TempDir(),
+		"mcpServers": []map[string]interface{}{
+			{
+				"name": "remote",
+				"type": "http",
+				"url":  "https://mcp.example.com",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("session/new failed: %v", err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("session/new returned RPC error: %#v", resp.Error)
+	}
+
+	mu.Lock()
+	instance := stubAgentInstance
+	mu.Unlock()
+	if instance == nil {
+		t.Fatalf("stub agent was not spawned")
+	}
+	select {
+	case params := <-instance.sessionNewCh:
+		servers, ok := params["mcpServers"].([]interface{})
+		if !ok || len(servers) != 1 {
+			t.Fatalf("mcpServers not preserved: %#v", params["mcpServers"])
+		}
+		server, ok := servers[0].(map[string]interface{})
+		if !ok || server["type"] != "http" || server["url"] != "https://mcp.example.com" {
+			t.Fatalf("unexpected forwarded MCP server: %#v", servers[0])
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("session/new was not forwarded to downstream")

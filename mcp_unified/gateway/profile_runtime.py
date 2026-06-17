@@ -2,24 +2,41 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+from collections import OrderedDict
 from collections.abc import Sequence
 from copy import deepcopy
 from typing import Any, Protocol
 
+from loguru import logger
+
 from mcp_unified.interfaces.storage import ProfileStore
+from mcp_unified.policy_grants import PolicyGrantStore
+from mcp_unified.profiles.decisions import PolicyDecisionRule
 from mcp_unified.profiles.models import MCPProfile
+from mcp_unified.profiles.permission_rules import (
+    compile_permission_rules,
+    evaluate_permission_rule_decision,
+)
 from mcp_unified.profiles.resolution import (
     EffectivePolicyResult,
     ProfileResolutionResult,
     build_effective_policy_result,
 )
 from mcp_unified.profiles.resolver import StoreBackedProfileResolver
+from mcp_unified.profiles.subjects import (
+    PermissionSubjectLimitError,
+    extract_permission_rule_subjects,
+)
 from mcp_unified.tool_use_reporting.sanitization import sanitize_safe_id
 
 from .runtime import GatewayPolicyDenied, GatewayRequestContext, GatewayRuntime
 from .tool_discovery import (
     describe_profile_tool,
+    find_direct_profile_backend_tool,
     list_profile_tools,
+    profile_tool_availability,
     resolve_profile_tool_call,
     search_profile_tools,
 )
@@ -50,6 +67,7 @@ _TOOL_CALL_ARGUMENT_KEYS = frozenset({"tool_id", "arguments"})
 _TOOL_SEARCH_ARGUMENT_KEYS = frozenset({"query", "category", "limit"})
 _TOOL_DESCRIBE_ARGUMENT_KEYS = frozenset({"tool_id"})
 _EMPTY_ARGUMENT_KEYS = frozenset()
+_PERMISSION_RULE_CACHE_MAX_ENTRIES = 64
 _BRIDGE_TOOL_DESCRIPTORS: dict[str, dict[str, Any]] = {
     _TOOL_CATEGORIES_LIST: {
         "name": _TOOL_CATEGORIES_LIST,
@@ -161,6 +179,7 @@ class ProfileAwareGatewayRuntime:
         profile_store: ProfileStore | None = None,
         profile_resolver: GatewayProfileResolver | None = None,
         default_profile_id: str | None = None,
+        policy_grant_store: PolicyGrantStore | None = None,
     ) -> None:
         if profile_resolver is None:
             if profile_store is None:
@@ -171,6 +190,10 @@ class ProfileAwareGatewayRuntime:
             )
         self._backend = backend
         self._profile_resolver = profile_resolver
+        self._policy_grant_store = policy_grant_store
+        self._permission_rule_cache: OrderedDict[
+            tuple[str, Any], tuple[PolicyDecisionRule, ...]
+        ] = OrderedDict()
 
     @property
     def name(self) -> str:
@@ -192,26 +215,23 @@ class ProfileAwareGatewayRuntime:
             return []
 
         tools = await self._safe_backend_tools(context)
-        allowed_tools: list[dict[str, Any]] = []
-        allowed_tool_names: set[str] = set()
-        for tool in tools:
-            if not isinstance(tool, dict):
-                continue
-            name = _tool_name(tool)
-            if (
-                name is not None
-                and _tool_allowed_by_profile(
-                    profile_result.profile,
-                    tool,
-                )
-            ):
-                allowed_tool_names.add(name)
-                allowed_tools.append(deepcopy(tool))
+        availability = profile_tool_availability(profile_result.profile, tools)
+        direct_tools = availability.direct_tools
+        allowed_tool_names = {
+            name
+            for tool in direct_tools
+            if (name := _tool_name(tool)) is not None
+        }
+        include_tool_call = (
+            _profile_has_deferred_categories(profile_result.profile)
+            or availability.has_deferred_installed_tools
+        )
         return [
-            *allowed_tools,
+            *direct_tools,
             *_profile_bridge_tool_descriptors(
                 profile_result.profile,
                 suppressed_names=allowed_tool_names,
+                include_tool_call=include_tool_call,
             ),
         ]
 
@@ -395,7 +415,11 @@ class ProfileAwareGatewayRuntime:
             return description
         if name == _TOOL_CALL:
             tool_id, delegated_arguments = _validated_tool_call_arguments(arguments)
-            if not _profile_has_deferred_categories(profile):
+            availability = profile_tool_availability(profile, backend_tools)
+            if not (
+                _profile_has_deferred_categories(profile)
+                or availability.has_deferred_installed_tools
+            ):
                 raise GatewayPolicyDenied(
                     "Gateway profile denied tool execution: tool_not_allowed",
                     reason_code="tool_not_allowed",
@@ -478,11 +502,80 @@ class ProfileAwareGatewayRuntime:
                 policy_result,
                 message=f"Gateway profile denied tool execution: {policy_result.reason_code}",
             )
+        session_id = _context_session_id(context)
+        compiled_rules = self._compiled_permission_rules(profile, tool_name=name)
+        if self._policy_grant_store is None:
+            approval_grant_markers = _enforce_permission_rules_for_tool_call(
+                profile,
+                name,
+                arguments,
+                compiled_rules,
+            )
+            delegated_policy = policy_result.policy
+        else:
+            # Grant-store lookups may hit SQLite; keep them off the event loop.
+            approval_grant_markers = await asyncio.to_thread(
+                _enforce_permission_rules_for_tool_call,
+                profile,
+                name,
+                arguments,
+                compiled_rules,
+                policy_grant_store=self._policy_grant_store,
+                session_id=session_id,
+            )
+            delegated_policy = await asyncio.to_thread(
+                _policy_with_ttl_path_grants,
+                policy_result.policy,
+                self._policy_grant_store,
+                profile_id=profile.id,
+                session_id=session_id,
+            )
+        delegated_context = _context_with_effective_policy(context, delegated_policy)
+        if approval_grant_markers:
+            delegated_context = _context_with_metadata_value(
+                delegated_context,
+                "mcp_policy_approval_grants",
+                approval_grant_markers,
+            )
         return await self._backend.call_tool(
             name,
             arguments,
-            _context_with_effective_policy(context, policy_result.policy),
+            delegated_context,
         )
+
+    def _compiled_permission_rules(
+        self,
+        profile: MCPProfile | None,
+        *,
+        tool_name: str | None = None,
+    ) -> tuple[PolicyDecisionRule, ...]:
+        """Return compiled profile permission rules, cached per profile version."""
+
+        if profile is None or profile.policy_document is None:
+            return ()
+        cache_key = (profile.id, profile.updated_at)
+        cached = self._permission_rule_cache.get(cache_key)
+        if cached is not None:
+            self._permission_rule_cache.move_to_end(cache_key)
+            return cached
+        try:
+            rules = tuple(compile_permission_rules(profile.policy_document))
+        except ValueError as exc:
+            provenance: dict[str, Any] = {
+                "profile_id": profile.id,
+                "error_type": exc.__class__.__name__,
+            }
+            if tool_name is not None:
+                provenance["tool_name"] = tool_name
+            raise GatewayPolicyDenied(
+                "Gateway profile contains invalid permission rules",
+                reason_code="invalid_permission_rules",
+                provenance=provenance,
+            ) from exc
+        self._permission_rule_cache[cache_key] = rules
+        while len(self._permission_rule_cache) > _PERMISSION_RULE_CACHE_MAX_ENTRIES:
+            self._permission_rule_cache.popitem(last=False)
+        return rules
 
 
 def _validate_synthetic_bridge_arguments(name: str, arguments: Any) -> None:
@@ -528,20 +621,14 @@ def _allowed_backend_tool_by_name(
 ) -> dict[str, Any] | None:
     """Return an allowed backend descriptor matching a bridge-reserved name."""
 
-    for tool in backend_tools:
-        if (
-            isinstance(tool, dict)
-            and _tool_name(tool) == name
-            and _tool_allowed_by_profile(profile, tool)
-        ):
-            return tool
-    return None
+    return find_direct_profile_backend_tool(profile, backend_tools, name)
 
 
 def _profile_bridge_tool_descriptors(
     profile: MCPProfile,
     *,
     suppressed_names: set[str],
+    include_tool_call: bool | None = None,
 ) -> list[dict[str, Any]]:
     """Return caller-owned synthetic discovery tool descriptors for a profile."""
 
@@ -551,7 +638,12 @@ def _profile_bridge_tool_descriptors(
         _TOOL_SEARCH,
         _TOOL_DESCRIBE,
     ]
-    if _profile_has_deferred_categories(profile):
+    should_include_tool_call = (
+        _profile_has_deferred_categories(profile)
+        if include_tool_call is None
+        else include_tool_call
+    )
+    if should_include_tool_call:
         names.append(_TOOL_CALL)
     return [
         deepcopy(_BRIDGE_TOOL_DESCRIPTORS[name])
@@ -764,6 +856,17 @@ def _context_profile_id(context: GatewayRequestContext) -> str | None:
     return None
 
 
+def _context_session_id(context: GatewayRequestContext) -> str | None:
+    """Return an explicit session id from transport metadata, if present."""
+
+    metadata = context.metadata or {}
+    for key in ("session_id", "sessionId", "mcp_session", "mcp-session"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def _context_with_effective_policy(
     context: GatewayRequestContext,
     policy: Any,
@@ -774,6 +877,65 @@ def _context_with_effective_policy(
         return context
     metadata = dict(context.metadata or {})
     metadata[EFFECTIVE_POLICY_METADATA_KEY] = _json_safe_model(policy)
+    return GatewayRequestContext(
+        request_id=context.request_id,
+        client_id=context.client_id,
+        user_id=context.user_id,
+        metadata=metadata,
+    )
+
+
+def _policy_with_ttl_path_grants(
+    policy: Any,
+    policy_grant_store: PolicyGrantStore | None,
+    *,
+    profile_id: str,
+    session_id: str | None,
+) -> Any:
+    """Return the effective policy with active TTL path grants merged in."""
+
+    if policy is None or policy_grant_store is None or not hasattr(policy, "path_scopes"):
+        return policy
+    try:
+        grants = policy_grant_store.list_active_grants(
+            profile_id=profile_id,
+            grant_type="path",
+        )
+    except Exception:  # noqa: BLE001 - grant store failures must not alter base policy
+        logger.opt(exception=True).warning(
+            "Policy grant store listing failed; delegating base policy without "
+            "TTL path grants (profile_id={profile_id})",
+            profile_id=profile_id,
+        )
+        return policy
+    merged_scopes = [
+        {
+            "prefix": grant.value,
+            "actions": list(grant.actions),
+            "effect": grant.effect,
+            "source": "ttl_grant",
+            "grant_id": grant.grant_id,
+            "expires_at": grant.expires_at_iso(),
+        }
+        for grant in grants
+        if grant.matches_session(session_id)
+    ]
+    if not merged_scopes:
+        return policy
+    return policy.model_copy(
+        update={"path_scopes": [*(policy.path_scopes or []), *merged_scopes]}
+    )
+
+
+def _context_with_metadata_value(
+    context: GatewayRequestContext,
+    key: str,
+    value: Any,
+) -> GatewayRequestContext:
+    """Return a copy of the context with one extra metadata entry."""
+
+    metadata = dict(context.metadata or {})
+    metadata[key] = value
     return GatewayRequestContext(
         request_id=context.request_id,
         client_id=context.client_id,
@@ -930,6 +1092,127 @@ def _effective_policy_for_tool(
         tool_name=tool_name,
         capability=capability if capability is not None else _primary_capability(tool),
     )
+
+
+def _enforce_permission_rules_for_tool_call(
+    profile: MCPProfile,
+    tool_name: str,
+    arguments: dict[str, Any],
+    rules: Sequence[PolicyDecisionRule],
+    *,
+    policy_grant_store: PolicyGrantStore | None = None,
+    session_id: str | None = None,
+) -> list[str]:
+    """Apply matching non-grant permission rules to one allowed runtime call.
+
+    Returns redacted markers for approval leases that satisfied ask decisions.
+    """
+
+    if not rules:
+        return []
+
+    approval_grant_markers: list[str] = []
+    try:
+        subjects = extract_permission_rule_subjects(tool_name, arguments)
+    except PermissionSubjectLimitError as exc:
+        raise GatewayPolicyDenied(
+            "Gateway profile rejected oversized tool arguments for permission rules",
+            reason_code="permission_subject_limits_exceeded",
+            provenance={
+                "profile_id": profile.id,
+                "tool_name": tool_name,
+                "limit": exc.limit,
+            },
+        ) from exc
+
+    for subject_type, value, argv in subjects:
+        try:
+            decision = evaluate_permission_rule_decision(
+                rules,
+                subject_type=subject_type,
+                value=value,
+                argv=argv,
+            )
+        except ValueError as exc:
+            raise GatewayPolicyDenied(
+                "Gateway profile could not evaluate permission rules",
+                reason_code="invalid_permission_rule_subject",
+                provenance={
+                    "profile_id": profile.id,
+                    "tool_name": tool_name,
+                    "subject_type": subject_type,
+                    "error_type": exc.__class__.__name__,
+                },
+            ) from exc
+        if not decision.matched_rules or decision.outcome == "allow":
+            continue
+        if decision.outcome == "ask":
+            lease_marker = _active_approval_lease_marker(
+                policy_grant_store,
+                profile_id=profile.id,
+                subject_type=subject_type,
+                value=value,
+                session_id=session_id,
+            )
+            if lease_marker is not None:
+                approval_grant_markers.append(lease_marker)
+                continue
+        status = "approval_required" if decision.outcome == "ask" else "denied"
+        provenance: dict[str, Any] = {
+            "profile_id": profile.id,
+            "tool_name": tool_name,
+            "subject_type": subject_type,
+            "matched_rules": [
+                matched_rule.model_dump(mode="json", exclude_none=True)
+                for matched_rule in decision.matched_rules
+            ],
+        }
+        if decision.outcome == "ask":
+            provenance["approval"] = {
+                "available": policy_grant_store is not None,
+                "grant_type": "approval",
+                "subject_type": subject_type,
+            }
+        raise GatewayPolicyDenied(
+            f"Gateway profile denied tool execution: {decision.reason_code}",
+            status=status,
+            reason_code=decision.reason_code,
+            provenance=provenance,
+        )
+    return approval_grant_markers
+
+
+def _active_approval_lease_marker(
+    policy_grant_store: PolicyGrantStore | None,
+    *,
+    profile_id: str,
+    subject_type: str,
+    value: str,
+    session_id: str | None,
+) -> str | None:
+    """Return a redacted marker when an active approval lease covers one subject."""
+
+    if policy_grant_store is None:
+        return None
+    try:
+        lease = policy_grant_store.find_active_grant(
+            profile_id=profile_id,
+            grant_type="approval",
+            subject_type=subject_type,
+            value=value,
+            session_id=session_id,
+        )
+    except Exception:  # noqa: BLE001 - store failures must fail closed to denial
+        logger.opt(exception=True).warning(
+            "Policy grant store lookup failed; treating ask decision as unapproved "
+            "(profile_id={profile_id}, subject_type={subject_type})",
+            profile_id=profile_id,
+            subject_type=subject_type,
+        )
+        return None
+    if lease is None:
+        return None
+    return hashlib.sha256(lease.grant_id.encode("utf-8")).hexdigest()[:16]
 
 
 def _primary_capability(tool: Any) -> str | None:

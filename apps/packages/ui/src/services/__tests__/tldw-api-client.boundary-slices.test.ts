@@ -144,6 +144,44 @@ describe("TldwApiClient Wave 5 boundary slices", () => {
     )
   })
 
+  it("serializes listSkills filter and sort params for the backend contract", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      skills: [],
+      count: 0,
+      total: 0,
+      limit: 10,
+      offset: 20
+    })
+
+    const client = new TldwApiClient()
+    client.resolveApiPath = vi
+      .fn(async () => "/api/v1/skills") as typeof client.resolveApiPath
+
+    await client.listSkills({
+      q: " summary ",
+      includeHidden: true,
+      userInvocable: false,
+      hasTools: true,
+      context: "fork",
+      model: " gpt-4o ",
+      sort: "name",
+      order: "desc",
+      limit: 10,
+      offset: 20
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: (
+          "/api/v1/skills?q=summary&include_hidden=true&user_invocable=false"
+          + "&has_tools=true&context=fork&model=gpt-4o&sort=name&order=desc"
+          + "&limit=10&offset=20"
+        ),
+        method: "GET"
+      })
+    )
+  })
+
   it("keeps presentation methods on the mixed presentations domain paths after class cleanup", async () => {
     const client = new TldwApiClient()
     client.ensureConfigForRequest = vi

@@ -34,11 +34,14 @@ from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_
 
 # Local Imports
 from tldw_Server_API.app.api.v1.schemas.skills_schemas import (
+    SkillContext,
     SkillContextPayload,
     SkillCreate,
     SkillExecuteRequest,
     SkillExecutionResult,
     SkillImportRequest,
+    SkillListOrder,
+    SkillListSort,
     SkillResponse,
     SkillsListResponse,
     SkillSummary,
@@ -116,7 +119,32 @@ async def list_skills(
     q: Optional[str] = Query(
         None,
         max_length=200,
-        description="Case-insensitive search across skill names and descriptions",
+        description="Case-insensitive search across skill names, descriptions, and argument hints",
+    ),
+    context: SkillContext | None = Query(
+        None,
+        description="Filter by execution context",
+    ),
+    user_invocable: bool | None = Query(
+        None,
+        description="Filter by visibility; overrides include_hidden when provided",
+    ),
+    has_tools: bool | None = Query(
+        None,
+        description="Filter by whether a skill declares allowed tools",
+    ),
+    model: Optional[str] = Query(
+        None,
+        max_length=200,
+        description="Filter by exact model override",
+    ),
+    sort: SkillListSort = Query(
+        "name",
+        description="Sort field",
+    ),
+    order: SkillListOrder = Query(
+        "asc",
+        description="Sort direction",
     ),
     limit: int = Query(100, ge=1, le=500, description="Maximum number of skills to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
@@ -131,10 +159,23 @@ async def list_skills(
         skills = await service.list_skills(
             include_hidden=include_hidden,
             q=q,
+            context=context,
+            user_invocable=user_invocable,
+            has_tools=has_tools,
+            model=model,
+            sort=sort,
+            order=order,
             limit=limit,
             offset=offset,
         )
-        total = await service.get_total_count(include_hidden=include_hidden, q=q)
+        total = await service.get_total_count(
+            include_hidden=include_hidden,
+            q=q,
+            context=context,
+            user_invocable=user_invocable,
+            has_tools=has_tools,
+            model=model,
+        )
 
         return SkillsListResponse(
             skills=[_metadata_to_summary(s) for s in skills],

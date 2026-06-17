@@ -1374,3 +1374,74 @@ describe("background proxy fallback safety", () => {
     ])
   })
 })
+
+describe("background proxy GET coalescing", () => {
+  beforeEach(() => {
+    vi.resetModules()
+    mocks.sendMessage.mockReset()
+    mocks.tldwRequest.mockReset()
+    mocks.storageGet.mockReset()
+    mocks.storageSet.mockReset()
+    mocks.storageGet.mockResolvedValue(null)
+    mocks.storageSet.mockResolvedValue(undefined)
+  })
+
+  it("coalesces concurrent identical GETs into a single underlying request", async () => {
+    let resolveSend: (value: unknown) => void = () => {}
+    const pending = new Promise((resolve) => {
+      resolveSend = resolve
+    })
+    mocks.sendMessage.mockReturnValue(pending)
+
+    const { bgRequest } = await importProxy()
+
+    // Two identical concurrent GETs + one different concurrent GET.
+    const a1 = bgRequest({ path: "/api/v1/users/me/profile?sections=preferences", method: "GET" })
+    const a2 = bgRequest({ path: "/api/v1/users/me/profile?sections=preferences", method: "GET" })
+    const b1 = bgRequest({ path: "/api/v1/config/providers", method: "GET" })
+
+    resolveSend({ ok: true, status: 200, data: { ok: true } })
+    const [ra1, ra2] = await Promise.all([a1, a2])
+    await b1
+
+    // Identical pair shares one underlying call; the different path makes its own.
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+    expect(ra1).toBe(ra2)
+  })
+
+  it("does not coalesce POST requests", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "/api/v1/users/me/profile", method: "POST", body: { a: 1 } }),
+      bgRequest({ path: "/api/v1/users/me/profile", method: "POST", body: { a: 1 } })
+    ])
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not coalesce GETs with different timeoutMs", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "/api/v1/config/providers", method: "GET", timeoutMs: 5000 }),
+      bgRequest({ path: "/api/v1/config/providers", method: "GET", timeoutMs: 30000 })
+    ])
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not coalesce absolute-URL GETs that differ only by noAuth omitted vs false", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "https://api.example.com/api/v1/health", method: "GET" }),
+      bgRequest({ path: "https://api.example.com/api/v1/health", method: "GET", noAuth: false })
+    ])
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+  })
+})

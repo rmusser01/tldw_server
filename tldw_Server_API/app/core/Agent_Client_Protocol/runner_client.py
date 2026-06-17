@@ -48,6 +48,27 @@ _ACP_GOVERNANCE_NONCRITICAL_EXCEPTIONS = (
 )
 
 
+def _is_method_not_found_error(exc: ACPResponseError, method: str) -> bool:
+    if getattr(exc, "code", None) == -32601:
+        return True
+    message = str(exc).lower()
+    return (
+        "method not found" in message
+        or "-32601" in message
+        or ("not supported" in message and method.lower() in message)
+    )
+
+
+async def _call_session_close_with_fallback(client: Any, session_id: str) -> None:
+    params = {"sessionId": session_id}
+    try:
+        await client.call("session/close", params)
+    except ACPResponseError as exc:
+        if not _is_method_not_found_error(exc, "session/close"):
+            raise
+        await client.call("_tldw/session/close", params)
+
+
 def _policy_match_patterns(policy_document: dict[str, Any], *keys: str) -> list[str]:
     patterns: list[str] = []
     for key in keys:
@@ -809,7 +830,7 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
         await self._client.notify("session/cancel", {"sessionId": session_id})
 
     async def close_session(self, session_id: str) -> None:
-        await self._client.call("_tldw/session/close", {"sessionId": session_id})
+        await _call_session_close_with_fallback(self._client, session_id)
         self._updates.pop(session_id, None)
         self._session_owners.pop(str(session_id), None)
         self._clear_runtime_policy_session_state(session_id)

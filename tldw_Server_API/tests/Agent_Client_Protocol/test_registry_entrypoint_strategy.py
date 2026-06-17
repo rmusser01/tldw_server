@@ -22,6 +22,13 @@ def acp_db(tmp_path):
         db.close()
 
 
+@pytest.fixture
+def loaded_registry() -> AgentRegistry:
+    registry = AgentRegistry()
+    registry.load()
+    return registry
+
+
 def test_entrypoint_strategy_defaults_to_documented_candidate() -> None:
     entry = AgentRegistryEntry(type="legacy", name="Legacy")
 
@@ -57,11 +64,10 @@ agents:
     assert entry.acp_args == ["acp"]
 
 
-def test_seeded_codex_profile_uses_pinned_external_acp_adapter() -> None:
-    registry = AgentRegistry()
-    registry.load()
-
-    entry = registry.get_entry("codex")
+def test_seeded_codex_profile_uses_pinned_external_acp_adapter(
+    loaded_registry: AgentRegistry,
+) -> None:
+    entry = loaded_registry.get_entry("codex")
 
     assert entry is not None
     assert entry.entrypoint_strategy == "external_acp_adapter"
@@ -72,8 +78,120 @@ def test_seeded_codex_profile_uses_pinned_external_acp_adapter() -> None:
     assert entry.adapter_version_policy == "exact_pin_required"
     assert entry.adapter_install_source == "github_release_preferred"
     assert entry.credential_policy == "delegated_to_adapter"
-    assert entry.support_state == "experimental"
+    assert entry.support_state == "supported_with_caveats"
+    assert entry.verification_level == "live_e2e_tested"
+
+
+def test_seeded_claude_code_profile_uses_current_external_acp_adapter_candidate(
+    loaded_registry: AgentRegistry,
+) -> None:
+    entry = loaded_registry.get_entry("claude_code")
+
+    assert entry is not None
+    assert entry.entrypoint_strategy == "external_acp_adapter"
+    assert entry.command == "claude"
+    assert entry.requires_api_key is None
+    assert entry.acp_command == "claude-agent-acp"
+    assert entry.acp_args == []
+    assert entry.adapter_source == "agentclientprotocol/claude-agent-acp"
+    assert entry.adapter_docs_url == "https://github.com/agentclientprotocol/claude-agent-acp"
+    assert entry.adapter_package == "@agentclientprotocol/claude-agent-acp"
+    assert entry.adapter_version == "0.40.0"
+    assert entry.adapter_version_policy == "exact_pin_required"
+    assert entry.adapter_install_source == "npm_pinned_allowed"
+    assert entry.credential_policy == "delegated_to_adapter"
+    assert entry.support_state == "documented_unverified"
     assert entry.verification_level == "documented_only"
+
+
+def test_seeded_aider_profile_uses_unverified_external_acp_adapter_candidate(
+    loaded_registry: AgentRegistry,
+) -> None:
+    entry = loaded_registry.get_entry("aider")
+
+    assert entry is not None
+    assert entry.entrypoint_strategy == "external_acp_adapter"
+    assert entry.command == "aider"
+    assert entry.acp_command == "aider-acp"
+    assert entry.acp_args == []
+    assert entry.adapter_source == "jorgejhms/aider-acp"
+    assert entry.adapter_docs_url == "https://github.com/jorgejhms/aider-acp"
+    assert entry.adapter_package == "aider-acp"
+    assert entry.adapter_version_policy == "operator_managed"
+    assert entry.adapter_install_source == "operator_managed"
+    assert entry.credential_policy == "delegated_to_adapter"
+    assert entry.support_state == "documented_unverified"
+    assert entry.verification_level == "documented_only"
+
+
+def test_aider_external_adapter_candidate_blocks_when_adapter_missing() -> None:
+    entry = AgentRegistryEntry(
+        type="aider",
+        name="Aider",
+        command="aider",
+        entrypoint_strategy="external_acp_adapter",
+        acp_command="aider-acp",
+        adapter_source="jorgejhms/aider-acp",
+        adapter_package="aider-acp",
+        credential_policy="delegated_to_adapter",
+    )
+
+    def resolve_command(command: str) -> str | None:
+        return "/Users/example/.local/bin/aider" if command == "aider" else None
+
+    result = classify_agent_entrypoint(
+        entry,
+        command_resolver=resolve_command,
+    )
+
+    assert result.probe_state == "blocked"
+    assert result.primary_blocker == "adapter_missing"
+    assert result.display_binary_found is True
+    assert result.adapter_found is False
+    assert result.credential_state == "delegated"
+
+
+def test_seeded_continue_profile_uses_current_cn_cli_but_no_acp_entrypoint(
+    loaded_registry: AgentRegistry,
+) -> None:
+    entry = loaded_registry.get_entry("continue_dev")
+
+    assert entry is not None
+    assert entry.entrypoint_strategy == "documented_candidate"
+    assert entry.command == "cn"
+    assert entry.acp_command == ""
+    assert entry.acp_args == []
+    assert entry.certification_blocker == "entrypoint_strategy_missing"
+    assert entry.support_state == "documented_unverified"
+    assert entry.verification_level == "documented_only"
+
+
+def test_claude_code_external_adapter_classification_reports_adapter_missing() -> None:
+    entry = AgentRegistryEntry(
+        type="claude_code",
+        name="Claude Code",
+        command="claude",
+        entrypoint_strategy="external_acp_adapter",
+        acp_command="claude-agent-acp",
+        adapter_source="agentclientprotocol/claude-agent-acp",
+        adapter_package="@agentclientprotocol/claude-agent-acp",
+        adapter_version="0.40.0",
+        credential_policy="delegated_to_adapter",
+    )
+
+    result = classify_agent_entrypoint(
+        entry,
+        command_resolver=lambda command: "/opt/homebrew/bin/claude" if command == "claude" else None,
+    )
+
+    assert result.entrypoint_strategy == "external_acp_adapter"
+    assert result.probe_state == "blocked"
+    assert result.primary_blocker == "adapter_missing"
+    assert result.display_binary_found is True
+    assert result.adapter_found is False
+    assert result.credential_state == "delegated"
+    assert result.adapter_package == "@agentclientprotocol/claude-agent-acp"
+    assert result.adapter_version == "0.40.0"
 
 
 def test_legacy_adapter_acp_input_is_imported_as_external_acp_adapter(tmp_path) -> None:
@@ -624,6 +742,8 @@ def test_classifier_custom_template_is_never_probe_ready() -> None:
     assert result.acp_command == ""
     assert result.primary_blocker == "custom_template"
     assert result.blockers == ("custom_template",)
+    assert "Create a distinct named custom ACP profile" in result.status_message
+    assert "seeded custom template" in result.status_message
     assert "command, args, env, workspace policy, and evidence bundle" in result.status_message
 
 

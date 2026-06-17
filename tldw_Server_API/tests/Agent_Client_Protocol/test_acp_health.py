@@ -217,7 +217,8 @@ def test_acp_health_includes_custom_entrypoint_metadata(client_user_only, stub_r
     assert entrypoint["probe_state"] == "custom_template"
     assert entrypoint["primary_blocker"] == "custom_template"
     assert "custom_template" in entrypoint["blockers"]
-    assert "custom ACP profile" in entrypoint["status_message"]
+    assert "distinct named custom ACP profile" in entrypoint["status_message"]
+    assert "seeded custom template" in entrypoint["status_message"]
 
 
 def test_acp_health_runner_probe_with_running_client(client_user_only, stub_runner_client):

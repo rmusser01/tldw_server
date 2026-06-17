@@ -410,6 +410,46 @@ def test_acp_session_new_preserves_explicit_empty_mcp_servers(
     assert call["mcp_servers"] == []
 
 
+def test_acp_session_new_rejects_relative_cwd(
+    client_user_only,
+    stub_runner_client,
+):
+    resp = client_user_only.post(
+        "/api/v1/acp/sessions/new",
+        json={
+            "cwd": "relative/project",
+        },
+    )
+
+    assert resp.status_code == 422
+    assert stub_runner_client.create_session_calls == []
+    assert "absolute" in resp.text
+
+
+def test_acp_session_new_rejects_relative_stdio_mcp_command(
+    client_user_only,
+    stub_runner_client,
+    tmp_path,
+):
+    resp = client_user_only.post(
+        "/api/v1/acp/sessions/new",
+        json={
+            "cwd": str(tmp_path),
+            "mcp_servers": [
+                {
+                    "name": "workspace",
+                    "type": "stdio",
+                    "command": "mcp-filesystem",
+                }
+            ],
+        },
+    )
+
+    assert resp.status_code == 422
+    assert stub_runner_client.create_session_calls == []
+    assert "absolute" in resp.text
+
+
 def test_acp_session_new_records_sanitized_audit_event(
     client_user_only,
     stub_runner_client,
@@ -652,7 +692,7 @@ def test_agent_audit_scope_is_admin_readable_without_runner_session(
         acp_endpoints._ACP_AUDIT_EVENTS.clear()
         acp_endpoints._ACP_AUDIT_EVENTS.append(
             {
-                "timestamp": "2026-05-10T00:00:00+00:00",
+                "timestamp": "2999-01-01T00:00:00+00:00",
                 "action": "agent_registered",
                 "user_id": 1,
                 "session_id": "agent:audit_agent",
