@@ -865,9 +865,10 @@ Hook ordering:
 - A pre-hook `allow` decision permits execution to continue.
 - A pre-hook `deny` decision maps to the normal authorization error with structured `error.data.governance.hook` metadata.
 - A pre-hook `ask` decision maps to the normal authorization error with structured `error.data.approval` metadata.
+- Pre-hook exceptions fail closed with `tool_hook_unavailable` because pre-hooks are enforcement hooks; hosts that only need observation should use a no-op pre-hook and place observers in `after_tool_call()`.
 - `after_tool_call()` runs after successful or failed module execution with bounded metadata. Its return value is ignored, and hook failures are logged but do not rewrite the tool result.
 
-Hook contexts contain sanitized tool arguments, request identity, tool name, module id, write classification, category, argument hash, scope metadata, status, duration, and error type. Post-hook contexts are for observation/audit only; they cannot convert a failed tool call into success.
+Hook contexts contain detached sanitized tool arguments, request identity, tool name, module id, write classification, category, argument hash, scope metadata, status, duration, and error type. Post-hook contexts are for observation/audit only; they cannot convert a failed tool call into success.
 
 ## Testing
 

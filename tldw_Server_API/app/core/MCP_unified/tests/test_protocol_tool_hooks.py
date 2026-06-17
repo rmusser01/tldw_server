@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
 from typing import Any
 
@@ -25,7 +26,7 @@ class _NoopRateLimiter:
 
 
 class _NoopMetrics:
-    def __getattr__(self, _name: str):
+    def __getattr__(self, _name: str) -> Callable[..., None]:
         return lambda *args, **kwargs: None
 
 
@@ -35,7 +36,7 @@ class _Span:
 
 
 class _Telemetry:
-    def trace_context(self, *_args: Any, **_kwargs: Any):
+    def trace_context(self, *_args: Any, **_kwargs: Any) -> contextlib.AbstractContextManager[_Span]:
         return contextlib.nullcontext(_Span())
 
 
@@ -84,7 +85,12 @@ class _ToolModuleStub:
         del tool_def
         return False
 
-    async def execute_with_circuit_breaker(self, func, *args: Any, **kwargs: Any) -> Any:
+    async def execute_with_circuit_breaker(
+        self,
+        func: Callable[..., Awaitable[Any]],
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
         return await func(*args, **kwargs)
 
     async def execute_tool(
@@ -130,6 +136,25 @@ class _RecordingToolHookManager:
     async def after_tool_call(self, context: ToolHookCallContext) -> ToolHookDecision | dict[str, Any] | None:
         self.after_contexts.append(context)
         return self.after_decision
+
+
+class _MutatingToolHookManager(_RecordingToolHookManager):
+    async def before_tool_call(self, context: ToolHookCallContext) -> ToolHookDecision | dict[str, Any] | None:
+        self.before_contexts.append(context)
+        if isinstance(context.tool_args, dict):
+            nested_args = context.tool_args.get("nested")
+            if isinstance(nested_args, dict):
+                nested_args["value"] = "mutated-by-hook"
+        nested_metadata = context.metadata.get("nested")
+        if isinstance(nested_metadata, dict):
+            nested_metadata["value"] = "mutated-by-hook"
+        return self.before_decision
+
+
+class _FailingPreToolHookManager(_RecordingToolHookManager):
+    async def before_tool_call(self, context: ToolHookCallContext) -> ToolHookDecision | dict[str, Any] | None:
+        self.before_contexts.append(context)
+        raise RuntimeError("pre-hook unavailable")
 
 
 def _protocol(
@@ -188,6 +213,29 @@ async def test_pre_hook_allow_observes_sanitized_metadata_and_post_hook_observes
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_hook_context_mutation_cannot_mutate_prepared_tool_arguments() -> None:
+    hooks = _MutatingToolHookManager()
+    protocol, module, _ = _protocol(hook_manager=hooks)
+    context = _context(metadata={"nested": {"value": "original"}})
+
+    result = await protocol._handle_tools_call(
+        {
+            "name": "stub.echo",
+            "arguments": {"nested": {"value": "original"}},
+        },
+        context,
+    )
+
+    assert module.executions == 1
+    assert result["content"][0]["json"]["arguments"] == {"nested": {"value": "original"}}
+    assert context.metadata == {"nested": {"value": "original"}}
+    assert len(hooks.before_contexts) == 1
+    assert hooks.before_contexts[0].tool_args == {"nested": {"value": "mutated-by-hook"}}
+    assert hooks.before_contexts[0].metadata == {"nested": {"value": "mutated-by-hook"}}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_pre_hook_deny_maps_to_authorization_error_and_skips_execution() -> None:
     hooks = _RecordingToolHookManager(
         before_decision=ToolHookDecision(
@@ -239,6 +287,27 @@ async def test_pre_hook_ask_maps_to_approval_error_and_skips_execution() -> None
     assert isinstance(response.error.data, dict)
     assert response.error.data["approval"]["source"] == "tool_hook"
     assert response.error.data["approval"]["reason_code"] == "operator_review_required"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_pre_hook_failure_fails_closed_and_skips_execution() -> None:
+    hooks = _FailingPreToolHookManager()
+    protocol, module, _ = _protocol(hook_manager=hooks)
+    request = MCPRequest(
+        method="tools/call",
+        params={"name": "stub.echo", "arguments": {"target": "zeta"}},
+        id="hook-failure",
+    )
+
+    response = await protocol.process_request(request, _context())
+
+    assert module.executions == 0
+    assert response.error is not None
+    assert response.error.code == -32001
+    assert isinstance(response.error.data, dict)
+    assert response.error.data["governance"]["reason_code"] == "tool_hook_unavailable"
+    assert response.error.data["governance"]["hook"]["error_type"] == "RuntimeError"
 
 
 @pytest.mark.unit

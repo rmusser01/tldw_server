@@ -52,6 +52,8 @@ Docs/superpowers/plans/2026-06-17-mcp-tool-call-hooks-plan.md
 Implemented a host-neutral MCP tool-call hook seam through `ToolHookCallContext`, `ToolHookDecision`, `ToolCallHookManager`, and `NoopToolCallHookManager` in the standalone runtime interface. `MCPProtocol` now resolves an optional runtime hook manager, runs pre-hooks after existing policy/RBAC/path/approval/governance gates, maps pre-hook deny/ask decisions into the existing authorization response shapes, and runs post-hooks after success/failure without letting post-hooks rewrite outcomes.
 
 Regression coverage was added for pre-hook allow/deny/ask behavior, post-hook success/failure observation, and explicit context-policy denial precedence over hooks. Extraction-boundary coverage now asserts the hook types are re-exported through the standalone and tldw compatibility interface packages and that runtime dependencies default to the no-op hook manager.
+
+PR review follow-up addressed Qodo findings by adding missing docstrings/type annotations, detaching hook-visible metadata/tool args/scope payload to prevent nested mutation from affecting prepared execution, adding stack-trace logging with request/tool context for pre/post hook failures, and documenting that pre-hook exceptions intentionally fail closed because pre-hooks are enforcement hooks. Added regression coverage for nested hook-context mutation isolation and pre-hook unavailable fail-closed behavior.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -59,7 +61,7 @@ Regression coverage was added for pre-hook allow/deny/ask behavior, post-hook su
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added the first MCP Unified tool-call lifecycle hook seam for standalone embedders. The implementation keeps existing permission/profile/path/governance checks authoritative, adds a pre-execution hook decision point for allow/deny/ask, adds post-execution observation for success and failure, documents lifecycle ordering, and preserves no-op behavior when no hook manager is configured.
 
-Verification: initial red run failed on missing hook contract; focused hook/export tests then passed. Final checks passed: 37 focused pytest tests, compileall on touched MCP Python files, Ruff on touched Python files, Bandit on touched MCP production Python with 0 findings, and `git diff --check`.
+Verification: initial red run failed on missing hook contract; focused hook/export tests then passed. Qodo follow-up final checks passed: 39 focused pytest tests, compileall on touched MCP Python files, Ruff on touched Python files, Bandit on touched MCP production Python with 0 findings, and `git diff --check`.
 
 PR: https://github.com/rmusser01/tldw_server/pull/2377
 <!-- SECTION:FINAL_SUMMARY:END -->

@@ -6,6 +6,7 @@ Implements JSON-RPC 2.0 with enhanced error handling and request routing.
 
 import asyncio
 import contextlib
+import copy
 import hashlib
 import hmac
 import inspect
@@ -1510,30 +1511,43 @@ class MCPProtocol:
             return None
 
     @staticmethod
+    def _hook_safe_copy(value: Any) -> Any:
+        """Return a detached copy of hook-visible metadata without failing tool preparation."""
+        try:
+            return copy.deepcopy(value)
+        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
+            try:
+                return json.loads(json.dumps(value, default=str))
+            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
+                return str(value)
+
+    @staticmethod
     def _hook_safe_metadata(context: RequestContext) -> dict[str, Any]:
         """Return request metadata safe for local lifecycle hook decisions."""
         metadata = getattr(context, "metadata", None)
         if not isinstance(metadata, dict):
             return {}
         return {
-            str(key): value
+            str(key): MCPProtocol._hook_safe_copy(value)
             for key, value in metadata.items()
             if isinstance(key, str) and not key.startswith("_") and key not in {"governance_preflight"}
         }
 
     @staticmethod
     def _hook_safe_tool_args(tool_args: Any) -> dict[str, Any] | None:
-        """Return a shallow copy of sanitized tool arguments for hook evaluation."""
+        """Return detached sanitized tool arguments for hook evaluation."""
         if not isinstance(tool_args, dict):
             return None
-        return dict(tool_args)
+        copied = MCPProtocol._hook_safe_copy(tool_args)
+        return copied if isinstance(copied, dict) else None
 
     @staticmethod
     def _hook_safe_scope_payload(scope_payload: dict[str, Any] | None) -> dict[str, Any] | None:
-        """Return a shallow copy of path/external scope metadata for hooks."""
+        """Return detached path/external scope metadata for hooks."""
         if not isinstance(scope_payload, dict):
             return None
-        return dict(scope_payload)
+        copied = MCPProtocol._hook_safe_copy(scope_payload)
+        return copied if isinstance(copied, dict) else None
 
     def _build_tool_hook_context(
         self,
@@ -1551,6 +1565,7 @@ class MCPProtocol:
         duration_ms: float | None = None,
         error: Exception | None = None,
     ) -> ToolHookCallContext:
+        """Build a bounded, detached context object for lifecycle hook evaluation."""
         return ToolHookCallContext(
             phase="post" if phase == "post" else "pre",
             tool_name=str(tool_name),
@@ -1604,6 +1619,7 @@ class MCPProtocol:
         phase: str,
         fallback_reason_code: str | None = None,
     ) -> dict[str, Any]:
+        """Serialize a normalized hook decision into response-safe metadata."""
         action = str(decision.action or "allow").strip().lower()
         if action == "approval_required":
             action = "ask"
@@ -1633,6 +1649,7 @@ class MCPProtocol:
         context: RequestContext,
         scope_payload: dict[str, Any] | None,
     ) -> dict[str, Any]:
+        """Run pre-tool hooks and map enforcement decisions to protocol errors."""
         hook_context = self._build_tool_hook_context(
             phase="pre",
             tool_name=tool_name,
@@ -1649,6 +1666,13 @@ class MCPProtocol:
         except asyncio.CancelledError:
             raise
         except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
+            logger.exception(
+                "MCP pre-tool hook failed closed: tool_name={} module_id={} request_id={} error_type={}",
+                tool_name,
+                module_id,
+                context.request_id,
+                exc.__class__.__name__,
+            )
             payload = {
                 "phase": "pre",
                 "action": "deny",
@@ -1716,6 +1740,7 @@ class MCPProtocol:
         duration_ms: float,
         error: Exception | None = None,
     ) -> None:
+        """Notify post-tool hooks while preserving the original tool outcome."""
         hook_context = self._build_tool_hook_context(
             phase="post",
             tool_name=tool_name,
@@ -1735,7 +1760,15 @@ class MCPProtocol:
         except asyncio.CancelledError:
             raise
         except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("MCP post-tool hook failed: {}", exc.__class__.__name__)
+            logger.exception(
+                "MCP post-tool hook failed; suppressed to preserve tool outcome: "
+                "tool_name={} module_id={} request_id={} status={} error_type={}",
+                tool_name,
+                module_id,
+                context.request_id,
+                status,
+                exc.__class__.__name__,
+            )
 
     async def process_request(
         self,

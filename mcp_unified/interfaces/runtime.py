@@ -197,6 +197,7 @@ class NoopToolCallHookManager:
         self,
         context: ToolHookCallContext,
     ) -> ToolHookDecision | None:
+        """Allow tool execution when no host hook manager is configured."""
         del context
         return None
 
@@ -204,6 +205,7 @@ class NoopToolCallHookManager:
         self,
         context: ToolHookCallContext,
     ) -> None:
+        """Ignore completed tool calls when no host hook manager is configured."""
         del context
         return None
 
