@@ -15,6 +15,7 @@ from mcp_unified.gateway.admin_auth import (
     gateway_admin_identity_dependency,
     gateway_admin_permission_error_response,
 )
+from mcp_unified.gateway.bootstrap import bootstrap_profile_gateway
 from mcp_unified.gateway.fastapi import create_gateway_app
 from mcp_unified.gateway.policy_explain import GatewayPolicyExplainService
 from mcp_unified.profiles import MCPProfile, ProfilePolicy
@@ -222,6 +223,36 @@ def test_profile_tool_preview_route_includes_denied_installed_runtime_tool() -> 
     assert tools_by_name["shell.exec"]["visibility"] == "hidden"
     assert tools_by_name["shell.exec"]["installation_status"] == "installed"
     assert audit.events[0].event_type == "policy.preview_tools.requested"
+
+
+@pytest.mark.asyncio
+async def test_profile_tool_preview_route_uses_unfiltered_profile_runtime_catalog() -> None:
+    audit = _MemoryAuditStore()
+    bootstrap = await bootstrap_profile_gateway(
+        _PolicyExplainRuntime(),
+        profiles=[_policy_profile()],
+        default_profile_id="backend-engineer",
+    )
+    app = create_gateway_app(
+        bootstrap.runtime,
+        enable_policy_explain_management=True,
+        policy_explain_profile_resolver=lambda profile_id: _policy_profile(),
+        policy_explain_audit_store=audit,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/profiles/backend-engineer/tool-preview",
+            json={},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    tools_by_name = {tool["tool_name"]: tool for tool in payload["tools"]}
+    assert tools_by_name["fs.patch"]["installation_status"] == "installed"
+    assert tools_by_name["shell.exec"]["outcome"] == "deny"
+    assert tools_by_name["shell.exec"]["visibility"] == "hidden"
+    assert tools_by_name["shell.exec"]["installation_status"] == "installed"
 
 
 def test_profile_tool_preview_route_rejects_conflicting_body_profile_id() -> None:

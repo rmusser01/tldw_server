@@ -10,6 +10,8 @@ labels:
 modified_files:
 - mcp_unified/gateway/fastapi.py
 - mcp_unified/gateway/policy_explain.py
+- mcp_unified/gateway/profile_runtime.py
+- mcp_unified/gateway/tool_use_reporting.py
 - tldw_Server_API/tests/MCP_unified/test_standalone_policy_explain_api.py
 ---
 
@@ -33,7 +35,7 @@ Implement Task 4 from the MCP effective permission explain implementation plan: 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Task 4 implemented with opt-in FastAPI route mounting in mcp_unified/gateway/fastapi.py. Added route tests for admin-auth enforcement, valid admin-key audit, runtime catalog denied-tool preview, GatewayPolicyExplainError stable envelope mapping, review-gap coverage for injected GatewayAdminPermissionError route-level 403 mapping, conflicting preview profile_id validation, and injected-service route actor/runtime catalog binding. Verification run before commit: focused policy explain API pytest passed; gateway admin auth pytest passed; Bandit initially found a test-only hardcoded /tmp path, then passed after changing fixture data; git diff --check passed.
+Task 4 implemented with opt-in FastAPI route mounting in mcp_unified/gateway/fastapi.py. Added route tests for admin-auth enforcement, valid admin-key audit, runtime catalog denied-tool preview, GatewayPolicyExplainError stable envelope mapping, review-gap coverage for injected GatewayAdminPermissionError route-level 403 mapping, conflicting preview profile_id validation, injected-service route actor/runtime catalog binding, and profile-aware runtime unfiltered admin catalog discovery. Verification run before commit: focused policy explain API pytest passed; gateway admin auth pytest passed; Bandit initially found a test-only hardcoded /tmp path, then passed after changing fixture data; git diff --check passed.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes

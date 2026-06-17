@@ -1403,9 +1403,15 @@ def _mount_policy_explain_routes(
     )
 
     async def installed_tool_catalog() -> list[dict[str, Any]]:
-        return await runtime.list_tools(
-            GatewayRequestContext(request_id="policy-explain-tool-catalog")
+        context = GatewayRequestContext(request_id="policy-explain-tool-catalog")
+        admin_catalog = getattr(
+            runtime,
+            "list_backend_tools_for_admin_catalog",
+            None,
         )
+        if callable(admin_catalog):
+            return await admin_catalog(context)
+        return await runtime.list_tools(context)
 
     def service_for_identity(
         identity: GatewayAdminIdentity,
