@@ -138,6 +138,7 @@ class TelemetryProvider(Protocol):
 
 
 ToolHookPhase = Literal["pre", "post"]
+ToolHookAction = Literal["allow", "deny", "ask", "approval_required"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,11 +167,12 @@ class ToolHookCallContext:
 class ToolHookDecision:
     """Decision returned by a pre-tool hook.
 
-    Supported actions are ``allow``, ``deny``, and ``ask``. Post-tool hook
-    decisions are accepted for API symmetry, but the protocol ignores them.
+    Supported actions are ``allow``, ``deny``, ``ask``, and
+    ``approval_required``. Post-tool hook decisions are accepted for API
+    symmetry, but the protocol ignores them.
     """
 
-    action: str = "allow"
+    action: ToolHookAction = "allow"
     reason_code: str | None = None
     message: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)

@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime, timezone
 from enum import IntEnum
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional, Union
+from typing import Any, Callable, Literal, Optional, Union, cast
 
 from pydantic import BaseModel, Field
 
@@ -57,6 +57,7 @@ from .interfaces.runtime import (
     NoopToolCallHookManager,
     NoopToolUseRecorder,
     TelemetryProvider,
+    ToolHookAction,
     ToolHookCallContext,
     ToolHookDecision,
 )
@@ -1586,6 +1587,14 @@ class MCPProtocol:
         )
 
     @staticmethod
+    def _coerce_tool_hook_action(action: Any) -> ToolHookAction | None:
+        """Normalize a runtime hook action into the public literal contract."""
+        normalized = str(action or "allow").strip().lower()
+        if normalized in {"allow", "deny", "ask", "approval_required"}:
+            return cast(ToolHookAction, normalized)
+        return None
+
+    @staticmethod
     def _coerce_tool_hook_decision(
         decision: ToolHookDecision | dict[str, Any] | None,
     ) -> ToolHookDecision:
@@ -1596,8 +1605,17 @@ class MCPProtocol:
             return decision
         if isinstance(decision, dict):
             metadata = decision.get("metadata")
+            action = MCPProtocol._coerce_tool_hook_action(
+                decision.get("action") or decision.get("status") or "allow"
+            )
+            if action is None:
+                return ToolHookDecision(
+                    action="deny",
+                    reason_code="invalid_tool_hook_action",
+                    message="Invalid MCP tool hook action",
+                )
             return ToolHookDecision(
-                action=str(decision.get("action") or decision.get("status") or "allow"),
+                action=action,
                 reason_code=(
                     str(decision.get("reason_code"))
                     if decision.get("reason_code") is not None

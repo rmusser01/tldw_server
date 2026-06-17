@@ -630,6 +630,7 @@ def test_stage3_runtime_contracts_are_exported_by_interface_packages() -> None:
         "ServerAuthProvider",
         "ToolCallHookManager",
         "ToolCatalogProvider",
+        "ToolHookAction",
         "ToolHookCallContext",
         "ToolHookDecision",
         "ToolUseRecorder",

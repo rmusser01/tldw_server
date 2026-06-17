@@ -56,6 +56,8 @@ Regression coverage was added for pre-hook allow/deny/ask behavior, post-hook su
 PR review follow-up addressed Qodo findings by adding missing docstrings/type annotations, detaching hook-visible metadata/tool args/scope payload to prevent nested mutation from affecting prepared execution, adding stack-trace logging with request/tool context for pre/post hook failures, and documenting that pre-hook exceptions intentionally fail closed because pre-hooks are enforcement hooks. Added regression coverage for nested hook-context mutation isolation and pre-hook unavailable fail-closed behavior.
 
 Outside-diff review follow-up verified the requested pre-hook exception test was already present, then expanded it to assert the captured pre-hook context and absence of post-hook execution. Added missing post-hook exception coverage proving a raised post-hook preserves the successful tool result while recording the post-hook context.
+
+Follow-up review verified the repeated hook exception test request is now stale against current code. The `ToolHookDecision.action` annotation was still a plain `str`, so it was narrowed to a public `ToolHookAction` literal alias and re-exported through standalone and compatibility interface packages. Runtime dict coercion now normalizes incoming actions before constructing `ToolHookDecision`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -63,7 +65,7 @@ Outside-diff review follow-up verified the requested pre-hook exception test was
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added the first MCP Unified tool-call lifecycle hook seam for standalone embedders. The implementation keeps existing permission/profile/path/governance checks authoritative, adds a pre-execution hook decision point for allow/deny/ask, adds post-execution observation for success and failure, documents lifecycle ordering, and preserves no-op behavior when no hook manager is configured.
 
-Verification: initial red run failed on missing hook contract; focused hook/export tests then passed. Qodo follow-up final checks passed: 39 focused pytest tests, compileall on touched MCP Python files, Ruff on touched Python files, Bandit on touched MCP production Python with 0 findings, and `git diff --check`. Outside-diff test follow-up checks passed: hook test file (8 tests), focused MCP regression suite (40 tests), Ruff on touched test file, compileall on touched test file, Bandit on touched test file with pytest `B101` skipped (`results=0`, `errors=[]`), and `git diff --check`.
+Verification: initial red run failed on missing hook contract; focused hook/export tests then passed. Qodo follow-up final checks passed: 39 focused pytest tests, compileall on touched MCP Python files, Ruff on touched Python files, Bandit on touched MCP production Python with 0 findings, and `git diff --check`. Outside-diff test follow-up checks passed: hook test file (8 tests), focused MCP regression suite (40 tests), Ruff on touched test file, compileall on touched test file, Bandit on touched test file with pytest `B101` skipped (`results=0`, `errors=[]`), and `git diff --check`. Hook action literal follow-up checks passed: focused MCP regression suite (40 tests), Ruff, compileall, production Bandit (`results=0`, `errors=[]`), and `git diff --check`; test Bandit findings were pre-existing `B108` temp-path warnings in unchanged `test_extraction_contracts.py` fixtures.
 
 PR: https://github.com/rmusser01/tldw_server/pull/2377
 <!-- SECTION:FINAL_SUMMARY:END -->
