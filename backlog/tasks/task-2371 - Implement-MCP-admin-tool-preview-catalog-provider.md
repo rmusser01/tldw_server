@@ -4,7 +4,7 @@ title: Implement MCP admin tool preview catalog provider
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-17 05:16'
+updated_date: '2026-06-17 05:27'
 labels:
   - mcp
   - policy
@@ -33,6 +33,10 @@ Implement Task 2 from the MCP effective permission explain implementation plan: 
 Started Task 2 implementation under the approved subagent-driven workflow.
 
 Implemented Task 2 preview catalog wiring. Added AdminToolCatalogEntry and list_admin_tool_catalog without model-facing visibility filtering, wired GatewayPolicyExplainService to prefer admin_tool_catalog_provider and fall back to installed_tool_catalog/list_admin_tool_catalog, and added denied-installed admin catalog preview coverage. Verification so far: focused pytest passed (35 passed), Bandit passed with no issues, git diff --check passed.
+
+Code-quality review follow-up: added installed_tool_catalog fallback coverage, model-facing discovery exclusion assertions, preview filter coverage for include_denied/include_recommendations/category, and pagination-after-filtering coverage. The new pagination test exposed a row-ordering bug in preview catalog normalization; fixed by preserving catalog/provider order while de-duplicating.
+
+Verification caveat: requested command for tldw_Server_API/tests/MCP_unified/test_gateway_tool_discovery.py returned pytest exit 4 because that file does not exist in this worktree; no new test file was created because the review follow-up kept the owned-file scope unchanged.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

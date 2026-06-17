@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 
 import mcp_unified.gateway.policy_explain as policy_explain
-from mcp_unified.gateway.tool_discovery import AdminToolCatalogEntry
+from mcp_unified.gateway.tool_discovery import (
+    AdminToolCatalogEntry,
+    list_profile_tools,
+    search_profile_tools,
+)
 from mcp_unified.gateway.policy_explain import (
     GatewayPolicyExplainError,
     GatewayPolicyExplainService,
@@ -37,6 +41,68 @@ def _profile() -> MCPProfile:
             denied_tools=["shell.exec"],
         ),
     )
+
+
+def _profile_with_preview_recommendations() -> MCPProfile:
+    return MCPProfile(
+        id="backend-engineer",
+        name="Backend Engineer",
+        policy_document=ProfilePolicy(
+            allowed_tools=["cache.clear", "fs.patch", "fs.read"],
+            denied_tools=["shell.exec"],
+        ),
+        metadata={
+            "tooling": {
+                "recommended_tools": [
+                    {
+                        "id": "fs.inspect",
+                        "display_name": "Inspect Files",
+                        "category": "filesystem",
+                    },
+                ],
+            },
+        },
+    )
+
+
+def _installed_preview_backend_tools() -> list[dict[str, object]]:
+    return [
+        {
+            "name": "fs.patch",
+            "description": "Patch files",
+            "metadata": {"category": "filesystem"},
+        },
+        {
+            "name": "shell.exec",
+            "description": "Execute shell commands",
+            "metadata": {"category": "shell"},
+        },
+    ]
+
+
+def _filter_preview_backend_tools() -> list[dict[str, object]]:
+    return [
+        {
+            "name": "cache.clear",
+            "description": "Clear cache entries",
+            "metadata": {"category": "cache"},
+        },
+        {
+            "name": "fs.patch",
+            "description": "Patch files",
+            "metadata": {"category": "filesystem"},
+        },
+        {
+            "name": "fs.read",
+            "description": "Read files",
+            "metadata": {"category": "filesystem"},
+        },
+        {
+            "name": "shell.exec",
+            "description": "Execute shell commands",
+            "metadata": {"category": "shell"},
+        },
+    ]
 
 
 def _profile_with_rules(*, permission_rules: list[dict[str, str]]) -> MCPProfile:
@@ -874,6 +940,124 @@ async def test_preview_admin_catalog_includes_denied_installed_tools() -> None:
     assert response.summary.installed == 2
     assert response.summary.deny == 1
     assert response.summary.hidden == 1
+
+
+@pytest.mark.asyncio
+async def test_preview_installed_catalog_fallback_includes_denied_installed_tools() -> None:
+    audit = _MemoryAuditStore()
+    backend_tools = _installed_preview_backend_tools()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: _profile(),
+        audit_store=audit,
+        actor_id="operator-1",
+        installed_tool_catalog=backend_tools,
+    )
+
+    response = await service.preview_profile_tools(
+        ProfileToolPreviewRequest(profile_id="backend-engineer")
+    )
+
+    tools_by_name = {entry.tool_name: entry for entry in response.tools}
+    assert response.degraded is False
+    assert tools_by_name["fs.patch"].outcome == "allow"
+    assert tools_by_name["fs.patch"].visibility == "visible"
+    assert tools_by_name["fs.patch"].installation_status == "installed"
+    assert tools_by_name["shell.exec"].outcome == "deny"
+    assert tools_by_name["shell.exec"].visibility == "hidden"
+    assert tools_by_name["shell.exec"].installation_status == "installed"
+
+    model_catalog = list_profile_tools(_profile(), backend_tools)
+    model_tool_ids = {tool["tool_id"] for tool in model_catalog["tools"]}
+    assert model_tool_ids == {"fs.patch"}
+    search_tool_ids = {
+        tool["tool_id"]
+        for tool in search_profile_tools(
+            _profile(),
+            backend_tools,
+            query="shell",
+            limit=10,
+        )
+    }
+    assert "shell.exec" not in search_tool_ids
+
+
+@pytest.mark.asyncio
+async def test_preview_filters_denied_and_recommendation_rows() -> None:
+    audit = _MemoryAuditStore()
+    profile = _profile_with_preview_recommendations()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: profile,
+        audit_store=audit,
+        actor_id="operator-1",
+        installed_tool_catalog=_filter_preview_backend_tools(),
+    )
+
+    allowed_response = await service.preview_profile_tools(
+        ProfileToolPreviewRequest(
+            profile_id="backend-engineer",
+            include_denied=False,
+        )
+    )
+    assert "shell.exec" not in {entry.tool_name for entry in allowed_response.tools}
+
+    installed_response = await service.preview_profile_tools(
+        ProfileToolPreviewRequest(
+            profile_id="backend-engineer",
+            include_recommendations=False,
+        )
+    )
+    assert "fs.inspect" not in {entry.tool_name for entry in installed_response.tools}
+    assert all(
+        entry.installation_status == "installed"
+        for entry in installed_response.tools
+    )
+
+
+@pytest.mark.asyncio
+async def test_preview_category_filter_paginates_after_filtering() -> None:
+    audit = _MemoryAuditStore()
+    profile = _profile_with_preview_recommendations()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: profile,
+        audit_store=audit,
+        actor_id="operator-1",
+        installed_tool_catalog=_filter_preview_backend_tools(),
+    )
+
+    first_page = await service.preview_profile_tools(
+        ProfileToolPreviewRequest(
+            profile_id="backend-engineer",
+            category="filesystem",
+            limit=1,
+        )
+    )
+    second_page = await service.preview_profile_tools(
+        ProfileToolPreviewRequest(
+            profile_id="backend-engineer",
+            category="filesystem",
+            limit=1,
+            cursor=first_page.next_cursor,
+        )
+    )
+
+    assert [entry.tool_name for entry in first_page.tools] == ["fs.patch"]
+    assert first_page.next_cursor == "1"
+    assert first_page.truncated is True
+    assert [entry.tool_name for entry in second_page.tools] == ["fs.read"]
+    assert second_page.next_cursor == "2"
+    assert second_page.truncated is True
+
+    all_filesystem = await service.preview_profile_tools(
+        ProfileToolPreviewRequest(
+            profile_id="backend-engineer",
+            category="filesystem",
+        )
+    )
+    assert [entry.tool_name for entry in all_filesystem.tools] == [
+        "fs.patch",
+        "fs.read",
+        "fs.inspect",
+    ]
 
 
 @pytest.mark.asyncio

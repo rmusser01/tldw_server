@@ -933,7 +933,7 @@ def _preview_rows_from_catalog(catalog: Any) -> list[_PreviewCatalogRow]:
         if row is None:
             continue
         rows_by_name.setdefault(row.tool_name, row)
-    return [rows_by_name[tool_name] for tool_name in sorted(rows_by_name)]
+    return list(rows_by_name.values())
 
 
 def _preview_row_from_catalog_item(item: Any) -> _PreviewCatalogRow | None:
