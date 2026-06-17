@@ -1,7 +1,7 @@
 ---
 id: TASK-2368
 title: Certify Claude Code ACP adapter live path for issue 1564
-status: In Progress
+status: Done
 labels:
 - ACP
 - certification
@@ -12,6 +12,7 @@ references:
 - https://github.com/rmusser01/tldw_server/pull/2248
 - https://agentclientprotocol.com/get-started/agents
 - https://github.com/rmusser01/tldw_server/issues/1564#issuecomment-4730743066
+- https://github.com/rmusser01/tldw_server/pull/2374
 modified_files:
 - Docs/superpowers/plans/2026-06-17-claude-acp-live-certification.md
 - Docs/Development/ACP_Compatibility_Matrix.md

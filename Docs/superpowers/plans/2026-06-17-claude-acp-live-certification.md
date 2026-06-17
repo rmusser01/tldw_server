@@ -181,6 +181,8 @@ Comment with exact evidence or blocker. Keep issue open unless all acceptance cr
 
 Result: Commented certification evidence and retained caveats at https://github.com/rmusser01/tldw_server/issues/1564#issuecomment-4730743066.
 
-- [ ] **Step 4: Open PR if repo files changed**
+- [x] **Step 4: Open PR if repo files changed**
 
 Push branch `codex/claude-acp-live-certification` and open a narrow PR. The PR body must include a human-readable change summary explaining what changed and why the support claim is or is not upgraded.
+
+Result: Opened PR https://github.com/rmusser01/tldw_server/pull/2374.
