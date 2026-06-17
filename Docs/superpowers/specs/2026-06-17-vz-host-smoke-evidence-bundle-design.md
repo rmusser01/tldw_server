@@ -50,7 +50,9 @@ The wrapper writes these files on real runs:
   result, and final smoke exit code.
 
 The JSON must not include raw helper stdout/stderr or serial log contents. It
-may include paths, sizes, and SHA-256 values for those files.
+may include paths, sizes, and SHA-256 values for those files. Hash and JSON
+generation should use a standard-library Python interpreter rather than shell
+string assembly, so path quoting remains safe and portable.
 
 ## Path Safety
 

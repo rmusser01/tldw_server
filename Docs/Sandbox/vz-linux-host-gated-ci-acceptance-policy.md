@@ -233,6 +233,23 @@ The upload step must run with `if: always()` and `if-no-files-found: ignore` so
 failed early setup still preserves available logs without creating noisy
 secondary failures.
 
+The delegated smoke wrapper writes structured evidence under the uploaded
+runtime directory's `evidence/` subdirectory by default. Expected evidence files
+are:
+
+```text
+host-smoke-evidence.json
+source-bundle-hashes-before.txt
+source-bundle-hashes-after.txt
+run-bundle-hashes.txt
+runtime-paths.txt
+cleanup-status.txt
+```
+
+The structured evidence should contain paths, sizes, hashes, phase outcomes,
+and cleanup state. It must not contain raw serial log contents, helper
+stdout/stderr contents, secrets, or raw user data.
+
 Uploaded logs are for operator debugging. They must not be treated as public API
 output and should not contain secrets or raw user data.
 

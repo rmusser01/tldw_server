@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import signal
@@ -15,6 +16,14 @@ import pytest
 IMAGE_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = IMAGE_DIR.parents[1]
 SMOKE_SCRIPT = IMAGE_DIR / "scripts" / "run-host-e2e-smoke.sh"
+EVIDENCE_FILES = {
+    "host-smoke-evidence.json",
+    "source-bundle-hashes-before.txt",
+    "source-bundle-hashes-after.txt",
+    "run-bundle-hashes.txt",
+    "runtime-paths.txt",
+    "cleanup-status.txt",
+}
 
 
 def _run_smoke_script(*args: str, env_overrides: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -126,6 +135,61 @@ def test_host_e2e_smoke_script_dry_run_uses_disposable_run_bundle(tmp_path: Path
     assert run_bundle != str(bundle)
     assert f"TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH={run_bundle}" in result.stdout
     assert f"TLDW_SANDBOX_VZ_LINUX_E2E_BASE_IMAGE={bundle}" not in result.stdout
+
+
+def test_host_e2e_smoke_script_dry_run_prints_default_evidence_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    helper = tmp_path / "macos-vz-helper"
+
+    result = _run_smoke_script(
+        "--dry-run",
+        "--bundle",
+        str(bundle),
+        "--helper",
+        str(helper),
+        "--python",
+        sys.executable,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "evidence directory:" in result.stdout
+    evidence_match = re.search(r"evidence directory: ([^\n]+/evidence)", result.stdout)
+    assert evidence_match is not None
+    evidence_dir = Path(evidence_match.group(1))
+    assert evidence_dir.name == "evidence"
+    assert not evidence_dir.exists()
+    for evidence_file in EVIDENCE_FILES:
+        assert evidence_file in result.stdout
+
+
+def test_host_e2e_smoke_script_dry_run_accepts_evidence_dir_override(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    helper = tmp_path / "macos-vz-helper"
+    evidence_dir = tmp_path / "custom-evidence"
+
+    result = _run_smoke_script(
+        "--dry-run",
+        "--bundle",
+        str(bundle),
+        "--helper",
+        str(helper),
+        "--evidence-dir",
+        str(evidence_dir),
+        "--python",
+        sys.executable,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"evidence directory: {evidence_dir}" in result.stdout
+    assert not evidence_dir.exists()
+    for evidence_file in EVIDENCE_FILES:
+        assert f"{evidence_dir}/{evidence_file}" in result.stdout
 
 
 def test_host_e2e_smoke_script_dry_run_uses_materializer_normalized_path(tmp_path: Path) -> None:
@@ -248,6 +312,190 @@ def test_host_e2e_smoke_script_real_run_passes_disposable_bundle_to_pytest(tmp_p
     assert all(path.endswith("/bundle") for path in recorded_paths)
     assert all((Path(path) / "rootfs.img").is_file() for path in recorded_paths)
     assert source_rootfs.read_bytes() == source_before
+
+
+def test_host_e2e_smoke_script_real_run_writes_evidence_bundle(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    (bundle / "manifest.json").write_text(
+        '{"bundle_version":"1","kernel":"kernel","rootfs":"rootfs.img"}',
+        encoding="utf-8",
+    )
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
+    evidence_dir = tmp_path / "evidence"
+    fake_python = tmp_path / "fake-python"
+    fake_helper = tmp_path / "fake-helper"
+    fake_python.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os\n"
+        "import sys\n"
+        f"real_python = {str(sys.executable)!r}\n"
+        "if len(sys.argv) > 1 and sys.argv[1].endswith('prepare-smoke-bundle.py'):\n"
+        "    os.execv(real_python, [real_python, *sys.argv[1:]])\n"
+        "if sys.argv[1:3] != ['-m', 'pytest']:\n"
+        "    sys.exit(2)\n"
+        "sys.exit(0)\n",
+        encoding="utf-8",
+    )
+    fake_helper.write_text(
+        "#!/usr/bin/env python3\n"
+        "import signal\n"
+        "import sys\n"
+        "import time\n"
+        "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
+        "while True:\n"
+        "    time.sleep(0.1)\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    fake_helper.chmod(0o755)
+
+    result = _run_smoke_script(
+        "--bundle",
+        str(bundle),
+        "--helper",
+        str(fake_helper),
+        "--evidence-dir",
+        str(evidence_dir),
+        "--python",
+        str(fake_python),
+        "--skip-build",
+        "--skip-sign",
+        env_overrides={
+            "TMPDIR": str(tmp_dir),
+            "TLDW_HOST_E2E_SMOKE_SKIP_SOCKET_WAIT": "1",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert {path.name for path in evidence_dir.iterdir()} >= EVIDENCE_FILES
+    evidence = json.loads((evidence_dir / "host-smoke-evidence.json").read_text(encoding="utf-8"))
+    assert evidence["schema_version"] == 1
+    assert evidence["source_bundle_path"] == str(bundle)
+    assert evidence["evidence_dir"] == str(evidence_dir)
+    assert evidence["serial_log_dir"].endswith("/serial")
+    assert evidence["helper_pid_file"].endswith("/helper.pid")
+    assert evidence["final_exit_code"] == 0
+    assert evidence["phases"]["real_host_smoke"]["status"] == "ok"
+    assert evidence["cleanup"]["socket_present_after_cleanup"] is False
+    assert Path(evidence["run_bundle_path"]).name == "bundle"
+    assert "raw_log_contents" not in evidence
+
+
+def test_host_e2e_smoke_script_refuses_non_private_evidence_directory(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    socket_dir = tmp_path / "private-runtime"
+    socket_dir.mkdir(mode=0o700)
+    socket_dir.chmod(0o700)
+    serial_log_dir = tmp_path / "serial"
+    evidence_dir = tmp_path / "public-evidence"
+    evidence_dir.mkdir(mode=0o755)
+    evidence_dir.chmod(0o755)
+    fake_python = tmp_path / "fake-python"
+    fake_helper = tmp_path / "fake-helper"
+    fake_python.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "sys.exit(0 if sys.argv[1:3] == ['-m', 'pytest'] else 2)\n",
+        encoding="utf-8",
+    )
+    fake_helper.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+    fake_helper.chmod(0o755)
+
+    result = _run_smoke_script(
+        "--bundle",
+        str(bundle),
+        "--helper",
+        str(fake_helper),
+        "--socket",
+        str(socket_dir / "helper.sock"),
+        "--serial-log-dir",
+        str(serial_log_dir),
+        "--evidence-dir",
+        str(evidence_dir),
+        "--python",
+        str(fake_python),
+        "--skip-build",
+        "--skip-sign",
+        env_overrides={"TLDW_HOST_E2E_SMOKE_SKIP_SOCKET_WAIT": "1"},
+    )
+
+    assert result.returncode != 0
+    assert "evidence directory must be owner-only" in result.stderr
+
+
+def test_host_e2e_smoke_script_late_failure_preserves_exit_and_writes_evidence(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    (bundle / "manifest.json").write_text(
+        '{"bundle_version":"1","kernel":"kernel","rootfs":"rootfs.img"}',
+        encoding="utf-8",
+    )
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
+    evidence_dir = tmp_path / "evidence"
+    fake_python = tmp_path / "fake-python"
+    fake_helper = tmp_path / "fake-helper"
+    fake_python.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os\n"
+        "import sys\n"
+        f"real_python = {str(sys.executable)!r}\n"
+        "if len(sys.argv) > 1 and sys.argv[1].endswith('prepare-smoke-bundle.py'):\n"
+        "    os.execv(real_python, [real_python, *sys.argv[1:]])\n"
+        "if sys.argv[1:3] != ['-m', 'pytest']:\n"
+        "    sys.exit(2)\n"
+        "if any(arg.endswith('test_vz_linux_real_host_e2e.py') for arg in sys.argv):\n"
+        "    sys.exit(7)\n"
+        "sys.exit(0)\n",
+        encoding="utf-8",
+    )
+    fake_helper.write_text(
+        "#!/usr/bin/env python3\n"
+        "import signal\n"
+        "import sys\n"
+        "import time\n"
+        "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
+        "while True:\n"
+        "    time.sleep(0.1)\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    fake_helper.chmod(0o755)
+
+    result = _run_smoke_script(
+        "--bundle",
+        str(bundle),
+        "--helper",
+        str(fake_helper),
+        "--evidence-dir",
+        str(evidence_dir),
+        "--python",
+        str(fake_python),
+        "--skip-build",
+        "--skip-sign",
+        env_overrides={
+            "TMPDIR": str(tmp_dir),
+            "TLDW_HOST_E2E_SMOKE_SKIP_SOCKET_WAIT": "1",
+        },
+    )
+
+    assert result.returncode == 7
+    assert (evidence_dir / "cleanup-status.txt").is_file()
+    evidence = json.loads((evidence_dir / "host-smoke-evidence.json").read_text(encoding="utf-8"))
+    assert evidence["final_exit_code"] == 7
+    assert evidence["phases"]["real_host_smoke"]["status"] == "failed"
+    assert evidence["phases"]["real_host_smoke"]["exit_code"] == 7
+    assert evidence["cleanup"]["socket_present_after_cleanup"] is False
 
 
 def test_host_e2e_smoke_script_dry_run_includes_failure_drills_when_requested(tmp_path: Path) -> None:
