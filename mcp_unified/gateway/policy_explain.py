@@ -273,8 +273,11 @@ class GatewayPolicyExplainService:
         overall = _mapping_value(simulator_result, "overall")
         effective_decision = _effective_decision_from_simulation(
             simulator_result,
+            tool_policy_outcome=tool_explanation.final_outcome,
             tool_policy_reason_code=tool_explanation.reason_code,
         )
+        if effective_decision["degraded_reason"] is not None:
+            degraded_reasons.append(effective_decision["degraded_reason"])
         safe_tool_name = _redact_tool_identifier(request.tool_name)
         response = PolicyExplainResponse(
             profile_id=profile.id,
@@ -537,9 +540,11 @@ def _profile_tool_preview_entry(
 def _effective_decision_from_simulation(
     simulator_result: Mapping[str, Any],
     *,
+    tool_policy_outcome: str,
     tool_policy_reason_code: str,
 ) -> dict[str, Any]:
     overall = _mapping_value(simulator_result, "overall")
+    legacy_policy = _mapping_value(simulator_result, "legacy_policy")
     status = (
         _optional_string(_mapping_value(overall, "status"))
         if isinstance(overall, Mapping)
@@ -550,20 +555,40 @@ def _effective_decision_from_simulation(
         if isinstance(overall, Mapping)
         else None
     )
-    if status == "denied":
+    legacy_status = (
+        _optional_string(_mapping_value(legacy_policy, "status"))
+        if isinstance(legacy_policy, Mapping)
+        else None
+    )
+    degraded_reason: str | None = None
+    if (
+        status == "denied"
+        and tool_policy_outcome == "ask"
+        and (legacy_status == "approval_required" or reason_code == "approval_required")
+    ):
+        outcome: PolicyExplainOutcome = "ask"
+    elif status == "denied":
         outcome: PolicyExplainOutcome = "deny"
     elif status == "approval_required":
         outcome = "ask"
-    else:
+    elif status == "allowed":
         outcome = "allow"
+    else:
+        outcome = "deny"
+        degraded_reason = "unknown_policy_status"
 
     defaults = _DEFAULTS_BY_OUTCOME[outcome]
     return {
         "final_outcome": outcome,
-        "reason_code": reason_code or tool_policy_reason_code,
+        "reason_code": (
+            "policy_status_unknown"
+            if degraded_reason is not None
+            else reason_code or tool_policy_reason_code
+        ),
         "visibility": defaults["visibility"],
         "call_state": defaults["call_state"],
         "requires_approval": defaults["requires_approval"],
+        "degraded_reason": degraded_reason,
     }
 
 
@@ -615,6 +640,8 @@ def _redact_path(value: str) -> tuple[str, PolicyExplainRedactionState]:
 
 def _redact_domain(value: str) -> tuple[str, PolicyExplainRedactionState]:
     parsed = urlsplit(value)
+    if parsed.scheme.lower() == "file":
+        return _redact_path(value)
     if parsed.scheme and parsed.netloc:
         host = parsed.hostname or "[domain]"
         try:

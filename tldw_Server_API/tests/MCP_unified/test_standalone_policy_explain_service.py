@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+import mcp_unified.gateway.policy_explain as policy_explain
 from mcp_unified.gateway.policy_explain import (
     GatewayPolicyExplainError,
     GatewayPolicyExplainService,
@@ -98,6 +99,33 @@ async def test_explain_tool_call_uses_runtime_permission_rule_denial_as_final_ou
     assert response.visibility == "hidden"
     assert response.call_state == "blocked"
     assert audit.events[0].payload["final_outcome"] == "deny"
+
+
+@pytest.mark.asyncio
+async def test_explain_tool_call_preserves_tool_level_ask_as_final_outcome() -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: MCPProfile(
+            id="backend-engineer",
+            name="Backend Engineer",
+            policy_document=ProfilePolicy(
+                tool_rules=[{"pattern": "fs.patch", "outcome": "ask"}],
+            ),
+        ),
+        audit_store=audit,
+        actor_id="operator-1",
+    )
+
+    response = await service.explain_tool_call(
+        PolicyExplainRequest(profile_id="backend-engineer", tool_name="fs.patch")
+    )
+
+    assert response.final_outcome == "ask"
+    assert response.reason_code == "approval_required"
+    assert response.visibility == "direct"
+    assert response.call_state == "approval_required"
+    assert response.tool_policy_outcome == "ask"
+    assert audit.events[0].payload["final_outcome"] == "ask"
 
 
 @pytest.mark.asyncio
@@ -200,6 +228,110 @@ async def test_explain_tool_call_redacts_file_uri_paths() -> None:
     assert "token=secret" not in rendered
     assert "fragment" not in rendered
     assert response.subjects[0].value == ".../app.py"
+
+
+@pytest.mark.asyncio
+async def test_explain_tool_call_redacts_file_uri_domain_subject() -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: _profile(),
+        audit_store=audit,
+        actor_id="operator-1",
+    )
+
+    response = await service.explain_tool_call(
+        PolicyExplainRequest(
+            profile_id="backend-engineer",
+            tool_name="fs.patch",
+            arguments={
+                "uri": "file:///Users/example/project/src/app.py?token=secret#fragment",
+            },
+        )
+    )
+
+    rendered = response.model_dump_json()
+    audit_payload = str(audit.events[0].payload)
+    assert "/Users/example" not in rendered
+    assert "/Users/example" not in audit_payload
+    assert "token=secret" not in rendered
+    assert "token=secret" not in audit_payload
+    assert "fragment" not in rendered
+    assert "fragment" not in audit_payload
+    assert response.subjects[0].type == "domain"
+    assert response.subjects[0].value == ".../app.py"
+
+
+@pytest.mark.asyncio
+async def test_explain_tool_call_redacts_file_uri_domain_list_subjects() -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: _profile(),
+        audit_store=audit,
+        actor_id="operator-1",
+    )
+
+    response = await service.explain_tool_call(
+        PolicyExplainRequest(
+            profile_id="backend-engineer",
+            tool_name="fs.patch",
+            arguments={
+                "uris": [
+                    "file:///Users/example/project/src/app.py?token=secret#fragment",
+                ],
+            },
+        )
+    )
+
+    rendered = response.model_dump_json()
+    audit_payload = str(audit.events[0].payload)
+    assert "/Users/example" not in rendered
+    assert "/Users/example" not in audit_payload
+    assert "token=secret" not in rendered
+    assert "token=secret" not in audit_payload
+    assert "fragment" not in rendered
+    assert "fragment" not in audit_payload
+    assert response.subjects[0].type == "domain"
+    assert response.subjects[0].value == ".../app.py"
+
+
+@pytest.mark.asyncio
+async def test_explain_tool_call_unknown_simulator_status_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: _profile(),
+        audit_store=audit,
+        actor_id="operator-1",
+    )
+
+    def _unknown_policy_status(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return {
+            "profile_id": "backend-engineer",
+            "tool_name": "fs.patch",
+            "legacy_policy": {"status": "resolved", "reason_code": "resolved"},
+            "subjects": [],
+            "approval_grant_markers": [],
+            "path_scopes": [],
+            "denial": None,
+            "overall": {"status": "mystery", "reason_code": "mystery_status"},
+        }
+
+    monkeypatch.setattr(
+        policy_explain,
+        "simulate_tool_call_policy",
+        _unknown_policy_status,
+    )
+
+    response = await service.explain_tool_call(
+        PolicyExplainRequest(profile_id="backend-engineer", tool_name="fs.patch")
+    )
+
+    assert response.final_outcome == "deny"
+    assert response.reason_code == "policy_status_unknown"
+    assert response.degraded is True
+    assert "unknown_policy_status" in response.degraded_reasons
+    assert audit.events[0].payload["final_outcome"] == "deny"
 
 
 @pytest.mark.asyncio
