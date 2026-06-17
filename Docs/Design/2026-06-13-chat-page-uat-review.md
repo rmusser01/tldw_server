@@ -57,7 +57,7 @@
 
 ## Top 5 prioritized fixes
 
-1. **Fix the intermittent model-load race (#1).** Make the mount-time model fetch await config readiness / re-fetch on `tldw:config-updated`, stop caching the unconfigured-empty result, and show a truthful connecting/not-connected state. *Rationale: highest user impact when it hits, and the failure is currently silent and unrecoverable without a reload. Confirm the exact root cause with a reliable repro first (it is timing-dependent).* 
+1. **Fix the intermittent model-load race (#1).** Make the mount-time model fetch await config readiness / re-fetch on `tldw:config-updated`, stop caching the unconfigured-empty result, and show a truthful connecting/not-connected state. *Rationale: highest user impact when it hits, and the failure is currently silent and unrecoverable without a reload. Confirm the exact root cause with a reliable repro first (it is timing-dependent).*
 2. **Escape-to-dismiss overlays (#4).** Start with the shortcuts panel; audit other dismissible panels. *Rationale: deterministic, confirmed, cheap; high-frequency expectation for power users.*
 3. **Cut redundant fetching (#6).** `/users/me/profile` ×5, `/persona/profiles` ×4, `/config/providers` ×3, `/characters/` ×2, `/notifications` ×2 on a single load. *Rationale: deterministic, confirmed; meaningful load/perf win.*
 4. **Reconcile readiness state (#3) and failure-state UX (#2).** One truthful "ready to chat?" signal; make the empty-picker recovery path actually work. *Rationale: removes the contradictory "Healthy" + dead-end that make #1 feel worse.*

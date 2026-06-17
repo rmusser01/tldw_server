@@ -474,7 +474,13 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "admin-watchlists-webhooks",
         }.issubset(shard_names)
         auth_db_shards = {
-            "auth-core",
+            "auth-core-root-property",
+            "auth-core-unit-a-l",
+            "auth-core-unit-m-z",
+            "auth-integration-admin-auth",
+            "auth-integration-authnz",
+            "auth-integration-b-z",
+            "auth-postgres",
             "auth-sqlite",
             "auth-unit-a-l",
             "auth-unit-m-z",
@@ -484,6 +490,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "db-privileges",
         }
         assert auth_db_shards.issubset(shard_names)
+        assert "auth-core" not in shard_names
         assert {
             "ai-chromadb",
             "ai-chunking-code-json-xml",

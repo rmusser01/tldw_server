@@ -25,8 +25,7 @@ const serverUrl = (
 
 const apiKey =
   process.env.TLDW_E2E_API_KEY || process.env.TLDW_API_KEY || process.env.SINGLE_USER_API_KEY || '';
-const expectStreamingControlEvidence =
-  process.env.TLDW_E2E_EXPECT_STREAMING_CONTROLS === 'true';
+const expectStreamingControlEvidence = process.env.TLDW_E2E_EXPECT_STREAMING_CONTROLS === 'true';
 
 test.skip(
   !apiKey,
@@ -275,6 +274,7 @@ const seedRealServerConfig = async (
   options: {
     selectedModel?: RealChatModelSelection;
     persistedServerChatId?: string | null;
+    cockpitRailsVisible?: boolean;
   } = {}
 ) => {
   await page.addInitScript(
@@ -283,17 +283,13 @@ const seedRealServerConfig = async (
       configuredApiKey,
       configuredSelectedModel,
       configuredPersistedServerChatId,
+      configuredCockpitRailsVisible,
     }) => {
       const fnv1a36 = (value: string) => {
         let hash = 2166136261;
         for (let i = 0; i < value.length; i += 1) {
           hash ^= value.charCodeAt(i);
-          hash +=
-            (hash << 1) +
-            (hash << 4) +
-            (hash << 7) +
-            (hash << 8) +
-            (hash << 24);
+          hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
         }
         return (hash >>> 0).toString(36);
       };
@@ -306,10 +302,10 @@ const seedRealServerConfig = async (
           const hostname = parsed.hostname.toLowerCase();
           const includePort = Boolean(
             parsed.port &&
-              !(
-                (protocol === 'http:' && parsed.port === '80') ||
-                (protocol === 'https:' && parsed.port === '443')
-              )
+            !(
+              (protocol === 'http:' && parsed.port === '80') ||
+              (protocol === 'https:' && parsed.port === '443')
+            )
           );
           const port = includePort ? `:${parsed.port}` : '';
           const pathname = parsed.pathname.replace(/\/+$/, '');
@@ -346,6 +342,11 @@ const seedRealServerConfig = async (
       localStorage.setItem('__tldw_first_run_complete', 'true');
       localStorage.setItem('assistant_setup_dismissed', 'true');
       localStorage.setItem('playgroundComposerOptionsExpanded', 'true');
+      if (configuredCockpitRailsVisible) {
+        localStorage.setItem('playgroundChatContextRailVisible', 'true');
+        localStorage.setItem('playgroundChatRuntimeRailVisible', 'true');
+        localStorage.setItem('playgroundChatMobileCockpitPanel', 'context');
+      }
       if (configuredPersistedServerChatId) {
         localStorage.setItem(
           'tldw-playground-session',
@@ -389,6 +390,7 @@ const seedRealServerConfig = async (
       configuredApiKey: apiKey,
       configuredSelectedModel: options.selectedModel || null,
       configuredPersistedServerChatId: options.persistedServerChatId ?? null,
+      configuredCockpitRailsVisible: options.cockpitRailsVisible ?? true,
     }
   );
 };
@@ -735,7 +737,6 @@ const clickFirstAvailableControl = async (
   return null;
 };
 
-
 const assertChatCompletionRenderedOrRecoverable = async (
   page: Page,
   response?: Response | null
@@ -865,16 +866,21 @@ const createDisposableCharacter = async (
   name: string
 ): Promise<DisposableCharacter> => {
   const firstMessage = 'Ready for overlay continuity proof.';
-  const created = await apiPostWithRetry<any>(request, '/api/v1/characters', {
-    name,
-    system_prompt: `You are ${name}, a concise overlay test assistant.`,
-    first_message: firstMessage,
-    creator: 'tldw e2e',
-    tags: ['e2e', 'overlay-rail'],
-  }, {
-    attempts: 6,
-    retryDelayMs: 2_000,
-  });
+  const created = await apiPostWithRetry<any>(
+    request,
+    '/api/v1/characters',
+    {
+      name,
+      system_prompt: `You are ${name}, a concise overlay test assistant.`,
+      first_message: firstMessage,
+      creator: 'tldw e2e',
+      tags: ['e2e', 'overlay-rail'],
+    },
+    {
+      attempts: 6,
+      retryDelayMs: 2_000,
+    }
+  );
 
   expect(created.status).toBe(201);
   expect(created.body?.id).toBeTruthy();
@@ -892,17 +898,22 @@ const createDisposablePersona = async (
   personaId: string,
   name: string
 ): Promise<DisposablePersona> => {
-  const created = await apiPostWithRetry<any>(request, '/api/v1/persona/profiles', {
-    id: personaId,
-    name,
-    mode: 'session_scoped',
-    system_prompt: `You are ${name}, a concise overlay test persona.`,
-    is_active: true,
-    use_persona_state_context_default: true,
-  }, {
-    attempts: 6,
-    retryDelayMs: 2_000,
-  });
+  const created = await apiPostWithRetry<any>(
+    request,
+    '/api/v1/persona/profiles',
+    {
+      id: personaId,
+      name,
+      mode: 'session_scoped',
+      system_prompt: `You are ${name}, a concise overlay test persona.`,
+      is_active: true,
+      use_persona_state_context_default: true,
+    },
+    {
+      attempts: 6,
+      retryDelayMs: 2_000,
+    }
+  );
 
   expect(created.status).toBe(201);
   expect(created.body?.id).toBeTruthy();
@@ -913,9 +924,7 @@ const createDisposablePersona = async (
         const catalog = await apiGetWithRetry<any>(request, '/api/v1/persona/catalog');
         return extractPersonaProfiles(catalog.body).some((item) => {
           const candidateId =
-            typeof item?.id === 'string' || typeof item?.id === 'number'
-              ? String(item.id)
-              : '';
+            typeof item?.id === 'string' || typeof item?.id === 'number' ? String(item.id) : '';
           return candidateId === String(created.body?.id ?? personaId);
         });
       },
@@ -967,9 +976,7 @@ const selectAssistantFromRuntimeRail = async (
   }
 ) => {
   const runtimeInspector = getDesktopRuntimeInspector(page);
-  await runtimeInspector
-    .getByRole('button', { name: 'Select character or persona' })
-    .click();
+  await runtimeInspector.getByRole('button', { name: 'Select character or persona' }).click();
   const panel = page.getByTestId('assistant-select-panel');
   await expect(panel).toBeVisible();
   await page.getByRole('tab', { name: options.tab }).click();
@@ -1108,7 +1115,7 @@ const sendChatTurnAndCapture = async (
           url: call.url,
           status: call.status,
           requestBody: call.requestBody,
-          responseBody: call.responseBody
+          responseBody: call.responseBody,
         })),
         null,
         2
@@ -1123,11 +1130,7 @@ const sendChatTurnAndCapture = async (
   };
 };
 
-const waitForSuccessfulChatMessagesLoad = (
-  page: Page,
-  chatId: string,
-  timeout = 60_000
-) => {
+const waitForSuccessfulChatMessagesLoad = (page: Page, chatId: string, timeout = 60_000) => {
   const backendOrigin = new URL(serverUrl).origin;
   return page.waitForResponse(
     (response) => {
@@ -1154,9 +1157,7 @@ type PlaygroundSessionSnapshot = {
   serverChatId?: string | null;
 } | null;
 
-const readPlaygroundSessionSnapshot = async (
-  page: Page
-): Promise<PlaygroundSessionSnapshot> =>
+const readPlaygroundSessionSnapshot = async (page: Page): Promise<PlaygroundSessionSnapshot> =>
   page.evaluate(() => {
     const raw = window.localStorage.getItem('tldw-playground-session');
     if (!raw) return null;
@@ -2089,13 +2090,9 @@ test.describe('/chat cockpit real-server parity', () => {
     const mobileSmokePrompt = 'mobile cockpit smoke deterministic prompt';
     await page.getByTestId('chat-input').fill(mobileSmokePrompt);
     await page.getByRole('button', { name: /send message/i }).click();
-    await expect(page.locator("article[data-role='user']").last()).toContainText(
-      mobileSmokePrompt
-    );
+    await expect(page.locator("article[data-role='user']").last()).toContainText(mobileSmokePrompt);
     await assertChatCompletionRenderedOrRecoverable(page, null);
-    await expect(
-      page.getByText('Chat now saved on server', { exact: true })
-    ).toHaveCount(0);
+    await expect(page.getByText('Chat now saved on server', { exact: true })).toHaveCount(0);
     await expect(page.getByTestId('chat-input')).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath('chat-cockpit-mobile-conversation.png'),
@@ -2377,10 +2374,7 @@ test.describe('/chat cockpit real-server parity', () => {
     let character: DisposableCharacter | null = null;
 
     try {
-      character = await createDisposableCharacter(
-        request,
-        `Tracked Character ${timestamp}`
-      );
+      character = await createDisposableCharacter(request, `Tracked Character ${timestamp}`);
 
       await openDesktopChatCockpit(page, chatModelSelection);
 
@@ -2397,7 +2391,7 @@ test.describe('/chat cockpit real-server parity', () => {
       expect(createCall).toBeDefined();
       const trackedCharacterId = (createCall?.requestBody as Record<string, unknown> | null)
         ?.character_id;
-      expect(String(trackedCharacterId ?? "")).toBe(character.id);
+      expect(String(trackedCharacterId ?? '')).toBe(character.id);
 
       const chatId =
         extractCreatedChatIdFromCreateCall(createCall) ??
@@ -2596,9 +2590,7 @@ test.describe('/chat cockpit real-server parity', () => {
       .getByRole('status', { name: 'Chat status' })
       .getByRole('button', { name: 'Stop generation' });
     const runtimeStop = runtimeInspector.getByRole('button', { name: 'Stop generation' });
-    const messageStop = page
-      .getByRole('button', { name: /Stop streaming response/i })
-      .first();
+    const messageStop = page.getByRole('button', { name: /Stop streaming response/i }).first();
     const stopCandidates = [
       { label: 'status strip stop', locator: statusStripStop },
       { label: 'runtime rail stop', locator: runtimeStop, requireEnabled: true },

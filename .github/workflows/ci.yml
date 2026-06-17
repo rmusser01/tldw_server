@@ -627,10 +627,30 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
-          - name: auth-core
+          - name: auth-integration-admin-auth
             paths: >-
-              tldw_Server_API/tests/AuthNZ
+              tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_auth_*.py
+          - name: auth-integration-authnz
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_authnz_*.py
+          - name: auth-integration-b-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_[b-z]*.py
+          - name: auth-postgres
+            paths: >-
               tldw_Server_API/tests/AuthNZ_Postgres
+          - name: auth-core-root-property
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/test*.py
+              tldw_Server_API/tests/AuthNZ/property/test*.py
+          - name: auth-core-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[a-l]*.py
+          - name: auth-core-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[m-z]*.py
           - name: auth-sqlite
             paths: >-
               tldw_Server_API/tests/AuthNZ_SQLite
@@ -1851,10 +1871,30 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
-          - name: auth-core
+          - name: auth-integration-admin-auth
             paths: >-
-              tldw_Server_API/tests/AuthNZ
+              tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_auth_*.py
+          - name: auth-integration-authnz
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_authnz_*.py
+          - name: auth-integration-b-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_[b-z]*.py
+          - name: auth-postgres
+            paths: >-
               tldw_Server_API/tests/AuthNZ_Postgres
+          - name: auth-core-root-property
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/test*.py
+              tldw_Server_API/tests/AuthNZ/property/test*.py
+          - name: auth-core-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[a-l]*.py
+          - name: auth-core-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[m-z]*.py
           - name: auth-sqlite
             paths: >-
               tldw_Server_API/tests/AuthNZ_SQLite
@@ -3020,10 +3060,30 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
-          - name: auth-core
+          - name: auth-integration-admin-auth
             paths: >-
-              tldw_Server_API/tests/AuthNZ
+              tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_auth_*.py
+          - name: auth-integration-authnz
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_authnz_*.py
+          - name: auth-integration-b-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_[b-z]*.py
+          - name: auth-postgres
+            paths: >-
               tldw_Server_API/tests/AuthNZ_Postgres
+          - name: auth-core-root-property
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/test*.py
+              tldw_Server_API/tests/AuthNZ/property/test*.py
+          - name: auth-core-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[a-l]*.py
+          - name: auth-core-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[m-z]*.py
           - name: auth-sqlite
             paths: >-
               tldw_Server_API/tests/AuthNZ_SQLite
@@ -4115,10 +4175,30 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
-          - name: auth-core
+          - name: auth-integration-admin-auth
             paths: >-
-              tldw_Server_API/tests/AuthNZ
+              tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_auth_*.py
+          - name: auth-integration-authnz
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_authnz_*.py
+          - name: auth-integration-b-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_[b-z]*.py
+          - name: auth-postgres
+            paths: >-
               tldw_Server_API/tests/AuthNZ_Postgres
+          - name: auth-core-root-property
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/test*.py
+              tldw_Server_API/tests/AuthNZ/property/test*.py
+          - name: auth-core-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[a-l]*.py
+          - name: auth-core-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[m-z]*.py
           - name: auth-sqlite
             paths: >-
               tldw_Server_API/tests/AuthNZ_SQLite
@@ -5212,10 +5292,30 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
-          - name: auth-core
+          - name: auth-integration-admin-auth
             paths: >-
-              tldw_Server_API/tests/AuthNZ
+              tldw_Server_API/tests/AuthNZ/integration/test_admin_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_api_key_*.py
+              tldw_Server_API/tests/AuthNZ/integration/test_auth_*.py
+          - name: auth-integration-authnz
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_authnz_*.py
+          - name: auth-integration-b-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/integration/test_[b-z]*.py
+          - name: auth-postgres
+            paths: >-
               tldw_Server_API/tests/AuthNZ_Postgres
+          - name: auth-core-root-property
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/test*.py
+              tldw_Server_API/tests/AuthNZ/property/test*.py
+          - name: auth-core-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[a-l]*.py
+          - name: auth-core-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[m-z]*.py
           - name: auth-sqlite
             paths: >-
               tldw_Server_API/tests/AuthNZ_SQLite
