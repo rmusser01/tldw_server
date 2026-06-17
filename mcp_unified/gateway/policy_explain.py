@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -25,16 +25,36 @@ from mcp_unified.storage.models import AuditEvent
 from .policy_simulation import simulate_tool_call_policy
 
 MAX_POLICY_EXPLAIN_ARGUMENT_BYTES = 64 * 1024
+POLICY_EXPLAIN_AUDIT_EVENT_TYPE = "policy.explain.requested"
+POLICY_PREVIEW_TOOLS_AUDIT_EVENT_TYPE = "policy.preview_tools.requested"
 
 PolicyExplainOutcome = Literal["deny", "ask", "allow"]
 PolicyExplainRedactionState = Literal["plain", "sanitized", "redacted"]
+
+_DEFAULTS_BY_OUTCOME: dict[str, dict[str, Any]] = {
+    "deny": {
+        "visibility": "hidden",
+        "call_state": "blocked",
+        "requires_approval": False,
+    },
+    "ask": {
+        "visibility": "direct",
+        "call_state": "approval_required",
+        "requires_approval": True,
+    },
+    "allow": {
+        "visibility": "direct",
+        "call_state": "callable",
+        "requires_approval": False,
+    },
+}
 
 
 class PolicyExplainMode(str, Enum):
     """How closely an explanation should mirror runtime policy state."""
 
     RUNTIME_EFFECTIVE = "runtime_effective"
-    STATIC_PROFILE = "static_profile"
+    STATIC_POLICY_ONLY = "static_policy_only"
 
 
 class PolicyExplainRequest(BaseModel):
@@ -121,6 +141,11 @@ class PolicyExplainResponse(BaseModel):
     visibility: str
     call_state: str
     requires_approval: bool
+    tool_policy_outcome: PolicyExplainOutcome | None = None
+    tool_policy_reason_code: str | None = None
+    tool_policy_visibility: str | None = None
+    tool_policy_call_state: str | None = None
+    tool_policy_requires_approval: bool | None = None
     runtime_status: str | None = None
     runtime_reason_code: str | None = None
     subjects: list[PolicyExplainSubject] = Field(default_factory=list)
@@ -217,13 +242,23 @@ class GatewayPolicyExplainService:
         """Return a redacted explanation for one tool call policy check."""
 
         profile = await self._resolve_profile(request.profile_id)
+        policy_grant_store = (
+            self.policy_grant_store
+            if request.mode == PolicyExplainMode.RUNTIME_EFFECTIVE
+            else None
+        )
+        session_id = (
+            request.session_id
+            if request.mode == PolicyExplainMode.RUNTIME_EFFECTIVE
+            else None
+        )
         simulator_result = simulate_tool_call_policy(
             profile,
             request.tool_name,
             request.arguments,
             capability=request.capability,
-            policy_grant_store=self.policy_grant_store,
-            session_id=request.session_id,
+            policy_grant_store=policy_grant_store,
+            session_id=session_id,
         )
         tool_explanation = explain_profile_tool_decision(
             profile,
@@ -236,15 +271,25 @@ class GatewayPolicyExplainService:
             arguments=request.arguments,
         )
         overall = _mapping_value(simulator_result, "overall")
+        effective_decision = _effective_decision_from_simulation(
+            simulator_result,
+            tool_policy_reason_code=tool_explanation.reason_code,
+        )
+        safe_tool_name = _redact_tool_identifier(request.tool_name)
         response = PolicyExplainResponse(
             profile_id=profile.id,
-            tool_name=request.tool_name,
+            tool_name=safe_tool_name,
             mode=request.mode,
-            final_outcome=tool_explanation.final_outcome,
-            reason_code=tool_explanation.reason_code,
-            visibility=tool_explanation.visibility,
-            call_state=tool_explanation.call_state,
-            requires_approval=tool_explanation.requires_approval,
+            final_outcome=effective_decision["final_outcome"],
+            reason_code=effective_decision["reason_code"],
+            visibility=effective_decision["visibility"],
+            call_state=effective_decision["call_state"],
+            requires_approval=effective_decision["requires_approval"],
+            tool_policy_outcome=tool_explanation.final_outcome,
+            tool_policy_reason_code=tool_explanation.reason_code,
+            tool_policy_visibility=tool_explanation.visibility,
+            tool_policy_call_state=tool_explanation.call_state,
+            tool_policy_requires_approval=tool_explanation.requires_approval,
             runtime_status=(
                 _mapping_value(overall, "status")
                 if isinstance(overall, Mapping)
@@ -261,11 +306,11 @@ class GatewayPolicyExplainService:
         )
         await _append_audit_event_strict(
             self.audit_store,
-            event_type="policy.explain.requested",
+            event_type=POLICY_EXPLAIN_AUDIT_EVENT_TYPE,
             actor_id=self.actor_id,
             profile_id=profile.id,
             target_type="tool",
-            target_id=request.tool_name,
+            target_id=safe_tool_name,
             payload=response.model_dump(mode="json", exclude_none=True),
         )
         return response
@@ -296,7 +341,7 @@ class GatewayPolicyExplainService:
         )
         await _append_audit_event_strict(
             self.audit_store,
-            event_type="policy.preview.requested",
+            event_type=POLICY_PREVIEW_TOOLS_AUDIT_EVENT_TYPE,
             actor_id=self.actor_id,
             profile_id=profile.id,
             target_type="profile",
@@ -489,6 +534,39 @@ def _profile_tool_preview_entry(
     )
 
 
+def _effective_decision_from_simulation(
+    simulator_result: Mapping[str, Any],
+    *,
+    tool_policy_reason_code: str,
+) -> dict[str, Any]:
+    overall = _mapping_value(simulator_result, "overall")
+    status = (
+        _optional_string(_mapping_value(overall, "status"))
+        if isinstance(overall, Mapping)
+        else None
+    )
+    reason_code = (
+        _optional_string(_mapping_value(overall, "reason_code"))
+        if isinstance(overall, Mapping)
+        else None
+    )
+    if status == "denied":
+        outcome: PolicyExplainOutcome = "deny"
+    elif status == "approval_required":
+        outcome = "ask"
+    else:
+        outcome = "allow"
+
+    defaults = _DEFAULTS_BY_OUTCOME[outcome]
+    return {
+        "final_outcome": outcome,
+        "reason_code": reason_code or tool_policy_reason_code,
+        "visibility": defaults["visibility"],
+        "call_state": defaults["call_state"],
+        "requires_approval": defaults["requires_approval"],
+    }
+
+
 def _preview_summary(
     entries: Iterable[ProfileToolPreviewEntry],
 ) -> ProfileToolPreviewSummary:
@@ -523,6 +601,12 @@ def _redact_path(value: str) -> tuple[str, PolicyExplainRedactionState]:
     normalized = value.replace("\\", "/")
     if "\n" in normalized or "\r" in normalized:
         return "[redacted-path]", "redacted"
+    parsed = urlsplit(normalized)
+    if parsed.scheme.lower() == "file":
+        file_path = unquote(parsed.path or "")
+        if not file_path:
+            return "file://[redacted-path]", "redacted"
+        return _redact_path(file_path)
     if _is_absolute_path(normalized):
         filename = normalized.rstrip("/").rsplit("/", 1)[-1]
         return (f".../{filename}" if filename else "[path]"), "sanitized"
