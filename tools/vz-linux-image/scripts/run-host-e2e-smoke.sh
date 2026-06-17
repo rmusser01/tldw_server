@@ -400,7 +400,7 @@ prepare_private_evidence_dir() {
     fi
     return 0
   fi
-  mkdir -p "${EVIDENCE_DIR}"
+  mkdir -p -m 700 "${EVIDENCE_DIR}"
   chmod 700 "${EVIDENCE_DIR}"
   if ! directory_is_owner_private "${EVIDENCE_DIR}"; then
     die "evidence directory must be owner-only: ${EVIDENCE_DIR}"
@@ -587,13 +587,26 @@ phase_records_text() {
   done
 }
 
+evidence_python_supports_stdlib() {
+  local candidate="$1"
+  [[ -n "${candidate}" && -x "${candidate}" ]] || return 1
+  "${candidate}" -c 'import hashlib, json, pathlib' >/dev/null 2>&1
+}
+
 evidence_python_bin() {
-  if command -v python3 >/dev/null 2>&1; then
-    command -v python3
+  local candidate
+  candidate="$(command -v python3 2>/dev/null || true)"
+  if evidence_python_supports_stdlib "${candidate}"; then
+    printf '%s\n' "${candidate}"
     return 0
   fi
-  if command -v python >/dev/null 2>&1; then
-    command -v python
+  candidate="$(command -v python 2>/dev/null || true)"
+  if evidence_python_supports_stdlib "${candidate}"; then
+    printf '%s\n' "${candidate}"
+    return 0
+  fi
+  if evidence_python_supports_stdlib "${PYTHON_BIN}"; then
+    printf '%s\n' "${PYTHON_BIN}"
     return 0
   fi
   return 1
@@ -606,6 +619,15 @@ hash_bundle_files() {
   local bundle_root="$1"
   local output_path="$2"
   local evidence_python
+  if [[ -z "${bundle_root}" ]]; then
+    mkdir -p -m 700 "$(dirname "${output_path}")"
+    {
+      printf '# sha256  relative_path\n'
+      printf '# missing: <empty bundle path>\n'
+    } > "${output_path}"
+    chmod 600 "${output_path}"
+    return 0
+  fi
   evidence_python="$(evidence_python_bin)" || return 1
   EVIDENCE_HASH_ROOT="${bundle_root}" \
     EVIDENCE_HASH_OUTPUT="${output_path}" \
@@ -636,6 +658,7 @@ with output.open("w", encoding="utf-8") as handle:
         digest = sha256_file(path)
         handle.write(f"{digest}  {path.relative_to(root)}\n")
 PY
+  chmod 600 "${output_path}"
 }
 
 write_runtime_paths() {
@@ -687,6 +710,7 @@ with output.open("w", encoding="utf-8") as handle:
         if value:
             handle.write(f"{key}_metadata={metadata(value)}\n")
 PY
+  chmod 600 "${EVIDENCE_DIR}/runtime-paths.txt"
 }
 
 CLEANUP_HELPER_PID=""
@@ -720,6 +744,7 @@ write_cleanup_status() {
     printf 'socket_path=%s\n' "${SOCKET_PATH}"
     printf 'socket_present_after_cleanup=%s\n' "${CLEANUP_SOCKET_PRESENT}"
   } > "${EVIDENCE_DIR}/cleanup-status.txt"
+  chmod 600 "${EVIDENCE_DIR}/cleanup-status.txt"
 }
 
 write_json_evidence() {
@@ -727,11 +752,12 @@ write_json_evidence() {
     return 0
   fi
   local final_exit="$1"
+  local phase_records="${2:-$(phase_records_text)}"
   local evidence_python
   evidence_python="$(evidence_python_bin)" || return 1
   EVIDENCE_JSON_OUTPUT="${EVIDENCE_DIR}/host-smoke-evidence.json" \
     EVIDENCE_CREATED_AT="$(timestamp_utc)" \
-    EVIDENCE_PHASE_RECORDS="$(phase_records_text)" \
+    EVIDENCE_PHASE_RECORDS="${phase_records}" \
     EVIDENCE_SOURCE_BUNDLE="${SOURCE_BUNDLE_PATH}" \
     EVIDENCE_RUN_BUNDLE="${BUNDLE_PATH}" \
     EVIDENCE_IMAGE_STORE_ROOT="${IMAGE_STORE_ROOT}" \
@@ -808,7 +834,10 @@ logs = []
 if serial_dir.is_dir():
     for path in sorted(serial_dir.glob("*.log")):
         if path.is_file() and not path.is_symlink():
-            logs.append(file_metadata(path))
+            try:
+                logs.append(file_metadata(path))
+            except OSError:
+                pass
 
 payload = {
     "schema_version": 1,
@@ -837,10 +866,14 @@ payload = {
     "log_artifacts": logs,
 }
 
-Path(os.environ["EVIDENCE_JSON_OUTPUT"]).write_text(
+output = Path(os.environ["EVIDENCE_JSON_OUTPUT"])
+temporary_output = output.with_name(f".{output.name}.{os.getpid()}.tmp")
+temporary_output.write_text(
     json.dumps(payload, indent=2, sort_keys=True) + "\n",
     encoding="utf-8",
 )
+temporary_output.chmod(0o600)
+os.replace(temporary_output, output)
 PY
 }
 
@@ -848,10 +881,13 @@ finalize_evidence() {
   local final_exit="$1"
   local cleanup_status="$2"
   local status=0
+  local old_umask
   if [[ "${DRY_RUN}" -eq 1 || "${EVIDENCE_FINALIZED}" -eq 1 ]]; then
     return 0
   fi
   EVIDENCE_FINALIZED=1
+  old_umask="$(umask)"
+  umask 077
   mark_phase_started "evidence_finalize"
   prepare_private_evidence_dir || status="$?"
   if [[ "${status}" -eq 0 ]]; then
@@ -867,13 +903,17 @@ finalize_evidence() {
     write_cleanup_status "${final_exit}" "${cleanup_status}" || status="$?"
   fi
   if [[ "${status}" -eq 0 ]]; then
-    mark_phase_ok "evidence_finalize"
-  else
+    local evidence_success_record
+    evidence_success_record="evidence_finalize|ok|0|$(timestamp_utc)"
+    write_json_evidence "${final_exit}" "$(phase_records_text; printf '%s\n' "${evidence_success_record}")" || status="$?"
+    if [[ "${status}" -eq 0 ]]; then
+      PHASE_RECORDS+=("${evidence_success_record}")
+    fi
+  fi
+  if [[ "${status}" -ne 0 ]]; then
     mark_phase_failed "evidence_finalize" "${status}"
   fi
-  if [[ "${status}" -eq 0 ]]; then
-    write_json_evidence "${final_exit}" || status="$?"
-  fi
+  umask "${old_umask}"
   return "${status}"
 }
 

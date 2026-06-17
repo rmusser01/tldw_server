@@ -50,6 +50,13 @@ Add default-on structured evidence capture to the VZ Linux host smoke wrapper so
 - Whitespace verification: `git diff --check` exited `0`.
 - Security verification: `python -m bandit -r tools/vz-linux-image/scripts -f json -o /tmp/bandit_vz_host_smoke_evidence.json` exited `0` with `0` results and `0` errors.
 - Known skip: no real Apple Virtualization VM smoke was run for this local code slice; validation used the existing portable fake-helper wrapper tests plus the host-gated workflow contract tests.
+- Review fixes: rebased on latest `origin/dev`; addressed reviewer findings for empty run-bundle hash roots, best-effort unreadable log metadata, direct `mkdir -p -m 700` evidence directory creation, validated `--python` fallback for evidence serialization, owner-only evidence files, evidence finalize phase accuracy, exact dry-run evidence paths, and new evidence-test docstrings.
+- Review-fix RED verification: `python -m pytest tools/vz-linux-image/tests/test_host_e2e_smoke_script.py -q` failed before wrapper fixes on unreadable log metadata, empty run-bundle hashing, invalid PATH Python fallback, and exact evidence path assertions.
+- Review-fix final focused verification: `python -m pytest tools/vz-linux-image/tests/test_prepare_smoke_bundle.py tools/vz-linux-image/tests/test_host_e2e_smoke_script.py tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_workflow.py -q` returned `53 passed, 6 warnings`.
+- Review-fix shell syntax verification: `bash -n tools/vz-linux-image/scripts/run-host-e2e-smoke.sh` exited `0`.
+- Review-fix whitespace verification: `git diff --check` exited `0`.
+- Review-fix security verification: `python -m bandit -r tools/vz-linux-image/scripts -f json -o /tmp/bandit_vz_host_smoke_evidence_review.json` exited `0` with `0` results and `0` errors.
+- CI note: PR check inspection found only canceled GitHub Actions runs for the old head SHA, with logs unavailable; no code failure was available to patch locally before pushing the review-fix commit.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
