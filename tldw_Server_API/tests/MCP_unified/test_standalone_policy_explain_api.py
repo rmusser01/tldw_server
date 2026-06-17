@@ -54,6 +54,17 @@ class _PolicyExplainRuntime:
         ]
 
 
+class _DenyingPermissionChecker:
+    async def require_permission(
+        self,
+        identity: GatewayAdminIdentity,
+        permission: str,
+    ) -> None:
+        assert identity.actor_id == "local-admin"
+        assert permission == "mcp.policy.explain"
+        raise GatewayAdminPermissionError(reason_code="admin_permission_denied")
+
+
 def _policy_profile() -> MCPProfile:
     return MCPProfile(
         id="backend-engineer",
@@ -210,6 +221,32 @@ def test_profile_tool_preview_route_includes_denied_installed_runtime_tool() -> 
     assert tools_by_name["shell.exec"]["visibility"] == "hidden"
     assert tools_by_name["shell.exec"]["installation_status"] == "installed"
     assert audit.events[0].event_type == "policy.preview_tools.requested"
+
+
+def test_policy_explain_route_maps_permission_denial_to_stable_json_envelope() -> None:
+    audit = _MemoryAuditStore()
+    app = create_gateway_app(
+        _PolicyExplainRuntime(),
+        enable_policy_explain_management=True,
+        policy_explain_profile_resolver=lambda profile_id: _policy_profile(),
+        policy_explain_audit_store=audit,
+        policy_explain_permission_checker=_DenyingPermissionChecker(),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/policy/explain",
+            json={"profile_id": "backend-engineer", "tool_name": "fs.patch"},
+        )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "ok": False,
+        "message": "Gateway admin permission denied",
+        "reason_code": "admin_permission_denied",
+        "details": {},
+    }
+    assert audit.events == []
 
 
 def test_policy_explain_route_maps_policy_errors_to_stable_json_envelope() -> None:

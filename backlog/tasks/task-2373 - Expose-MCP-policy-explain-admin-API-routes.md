@@ -33,7 +33,7 @@ Implement Task 4 from the MCP effective permission explain implementation plan: 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Task 4 implemented with opt-in FastAPI route mounting in mcp_unified/gateway/fastapi.py. Added route tests for admin-auth enforcement, valid admin-key audit, runtime catalog denied-tool preview, and GatewayPolicyExplainError stable envelope mapping. Verification run before commit: focused policy explain API pytest passed; gateway admin auth pytest passed; Bandit initially found a test-only hardcoded /tmp path, then passed after changing fixture data; git diff --check passed.
+Task 4 implemented with opt-in FastAPI route mounting in mcp_unified/gateway/fastapi.py. Added route tests for admin-auth enforcement, valid admin-key audit, runtime catalog denied-tool preview, GatewayPolicyExplainError stable envelope mapping, and review-gap coverage for injected GatewayAdminPermissionError route-level 403 mapping. Verification run before commit: focused policy explain API pytest passed; gateway admin auth pytest passed; Bandit initially found a test-only hardcoded /tmp path, then passed after changing fixture data; git diff --check passed.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
