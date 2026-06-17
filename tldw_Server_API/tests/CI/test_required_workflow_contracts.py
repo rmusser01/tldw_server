@@ -291,6 +291,7 @@ def test_embedding_model_predownload_skips_backpressure_shard() -> None:
         assert "matrix.shard.name != 'ai-embeddings-backpressure'" in condition
         assert "matrix.shard.name != 'ai-embeddings-dlq-config'" in condition
         assert "matrix.shard.name != 'ai-embeddings-media-validation'" in condition
+        assert "matrix.shard.name != 'ai-embeddings-policy'" in condition
         assert "matrix.shard.name != 'rag-new-unit-rag-contracts'" in condition
         assert "matrix.shard.name != 'rag-new-integration-research'" in condition
         assert '[[ "$SHARD_NAME" == "ai-embeddings-v5-core" || "$SHARD_NAME" == rag-new-unit-* ]]' in run_script

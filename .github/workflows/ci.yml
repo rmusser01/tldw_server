@@ -1614,7 +1614,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
@@ -2782,7 +2782,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
@@ -3878,7 +3878,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
@@ -4973,7 +4973,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
@@ -6070,7 +6070,7 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || startsWith(matrix.shard.name, 'ai-chunking-templates') || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |

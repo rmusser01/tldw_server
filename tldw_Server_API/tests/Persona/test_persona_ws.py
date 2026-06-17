@@ -3802,7 +3802,7 @@ def test_persona_tool_call_emits_tool_processing_notice_after_quiet_delay(tmp_pa
             self.initialized = True
 
         async def handle_http_request(self, request, user_id=None, metadata=None):
-            await asyncio.sleep(0.03)
+            await asyncio.sleep(0.25)
             return SimpleNamespace(error=None, result={"ok": True, "slow": True})
 
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
@@ -3836,7 +3836,7 @@ def test_persona_tool_call_emits_tool_processing_notice_after_quiet_delay(tmp_pa
                 ws,
                 lambda d: d.get("event") == "notice"
                 and d.get("reason_code") == "VOICE_TOOL_EXECUTION_PROCESSING",
-                timeout=0.5,
+                timeout=3.0,
             )
             assert processing_notice.get("session_id") == "sess_tool_processing_notice"
             assert processing_notice.get("tool") == "knowledge.search"

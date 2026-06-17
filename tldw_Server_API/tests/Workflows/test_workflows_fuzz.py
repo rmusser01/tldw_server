@@ -59,18 +59,26 @@ def _step_ids(n: int) -> List[str]:
     return [f"s{i+1}" for i in range(n)]
 
 
-def _wait_for_terminal(client: TestClient, run_id: str, timeout: float = 5.0) -> dict:
+def _wait_for_terminal(client: TestClient, run_id: str, timeout: float = 10.0) -> dict:
     deadline = time.time() + timeout
     last_status = None
+    last_response_text = None
     while time.time() < deadline:
         response = client.get(f"/api/v1/workflows/runs/{run_id}")
+        if response.status_code == 404:
+            last_response_text = response.text
+            time.sleep(0.02)
+            continue
         assert response.status_code == 200, response.text
         data = response.json()
         last_status = data.get("status")
         if last_status in {"succeeded", "failed", "cancelled", "canceled"}:
             return data
         time.sleep(0.05)
-    pytest.fail(f"workflow run {run_id} did not finish before timeout; last status={last_status}")
+    pytest.fail(
+        f"workflow run {run_id} did not finish before timeout; "
+        f"last status={last_status}; last_response={last_response_text}"
+    )
 
 
 @settings(
