@@ -35,6 +35,11 @@ class _MemoryAuditStore:
         self.events.append(event)
 
 
+class _FailingAuditStore:
+    async def append_event(self, event: AuditEvent) -> None:
+        raise RuntimeError("audit backend failed for workspace/private-token.txt")
+
+
 class _PolicyExplainRuntime:
     name = "policy-explain-test"
     version = "0.0-test"
@@ -341,6 +346,35 @@ def test_policy_explain_route_maps_permission_denial_to_stable_json_envelope() -
         "details": {},
     }
     assert audit.events == []
+
+
+def test_policy_explain_route_maps_audit_failure_to_stable_json_envelope() -> None:
+    app = create_gateway_app(
+        _PolicyExplainRuntime(),
+        enable_policy_explain_management=True,
+        policy_explain_profile_resolver=lambda profile_id: _policy_profile(),
+        policy_explain_audit_store=_FailingAuditStore(),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/policy/explain",
+            json={
+                "profile_id": "backend-engineer",
+                "tool_name": "fs.patch",
+                "arguments": {"path": "workspace/private-token.txt"},
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "ok": False,
+        "message": "Audit store unavailable",
+        "reason_code": "audit_store_unavailable",
+        "details": {},
+    }
+    assert "private-token" not in response.text
+    assert "fs.patch" not in response.text
 
 
 def test_policy_explain_route_maps_policy_errors_to_stable_json_envelope() -> None:
