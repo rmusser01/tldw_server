@@ -622,12 +622,16 @@ def test_stage3_runtime_contracts_are_exported_by_interface_packages() -> None:
     names = [
         "AuthenticatedIdentity",
         "LifecycleGuard",
+        "NoopToolCallHookManager",
         "NoopToolUseRecorder",
         "ModuleConfigProvider",
         "PermissionSeeder",
         "PolicyContextProvider",
         "ServerAuthProvider",
+        "ToolCallHookManager",
         "ToolCatalogProvider",
+        "ToolHookCallContext",
+        "ToolHookDecision",
         "ToolUseRecorder",
         "EnvironmentFlagsProvider",
         "WebSocketStream",
@@ -664,7 +668,7 @@ def test_mcp_protocol_treats_none_tool_use_recorder_as_unconfigured() -> None:
 
 
 def test_runtime_dependencies_default_to_noop_tool_use_recorder() -> None:
-    from mcp_unified.interfaces.runtime import MCPRuntimeDependencies
+    from mcp_unified.interfaces.runtime import MCPRuntimeDependencies, NoopToolCallHookManager
     from mcp_unified.tool_use_reporting.recorder import NoopToolUseRecorder
 
     deps = _fake_runtime_dependencies()
@@ -672,6 +676,7 @@ def test_runtime_dependencies_default_to_noop_tool_use_recorder() -> None:
     runtime_dependencies = MCPRuntimeDependencies(**dependency_kwargs)
 
     assert isinstance(runtime_dependencies.tool_use_recorder, NoopToolUseRecorder)
+    assert isinstance(runtime_dependencies.tool_call_hook_manager, NoopToolCallHookManager)
 
 
 def test_mcp_server_accepts_runtime_dependencies() -> None:

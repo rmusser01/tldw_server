@@ -7,9 +7,9 @@ host application. Embedders can satisfy them with local implementations, while
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from mcp_unified.tool_use_reporting.recorder import (
     NoopToolUseRecorder,
@@ -135,6 +135,77 @@ class TelemetryProvider(Protocol):
         operation_name: str,
         attributes: dict[str, Any] | None = None,
     ) -> Any: ...
+
+
+ToolHookPhase = Literal["pre", "post"]
+
+
+@dataclass(frozen=True, slots=True)
+class ToolHookCallContext:
+    """Bounded metadata passed to MCP tool-call lifecycle hooks."""
+
+    phase: ToolHookPhase
+    tool_name: str
+    module_id: str | None
+    is_write: bool | None
+    tool_category: str | None
+    arguments_hash: str | None
+    request_id: str
+    user_id: str | None = None
+    client_id: str | None = None
+    session_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    tool_args: Mapping[str, Any] | None = None
+    status: str | None = None
+    duration_ms: float | None = None
+    error_type: str | None = None
+    scope_payload: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ToolHookDecision:
+    """Decision returned by a pre-tool hook.
+
+    Supported actions are ``allow``, ``deny``, and ``ask``. Post-tool hook
+    decisions are accepted for API symmetry, but the protocol ignores them.
+    """
+
+    action: str = "allow"
+    reason_code: str | None = None
+    message: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class ToolCallHookManager(Protocol):
+    """Lifecycle hooks around MCP tool calls."""
+
+    async def before_tool_call(
+        self,
+        context: ToolHookCallContext,
+    ) -> ToolHookDecision | dict[str, Any] | None: ...
+
+    async def after_tool_call(
+        self,
+        context: ToolHookCallContext,
+    ) -> ToolHookDecision | dict[str, Any] | None: ...
+
+
+class NoopToolCallHookManager:
+    """Default hook manager used when embedders do not configure hooks."""
+
+    async def before_tool_call(
+        self,
+        context: ToolHookCallContext,
+    ) -> ToolHookDecision | None:
+        del context
+        return None
+
+    async def after_tool_call(
+        self,
+        context: ToolHookCallContext,
+    ) -> None:
+        del context
+        return None
 
 
 class DatabasePathResolver(Protocol):
@@ -311,3 +382,4 @@ class MCPRuntimeDependencies:
     environment_flags_provider: EnvironmentFlagsProvider
     websocket_stream_factory: WebSocketStreamFactory
     tool_use_recorder: ToolUseRecorder = field(default_factory=NoopToolUseRecorder)
+    tool_call_hook_manager: ToolCallHookManager = field(default_factory=NoopToolCallHookManager)
