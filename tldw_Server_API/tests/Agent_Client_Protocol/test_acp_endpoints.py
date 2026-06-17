@@ -692,7 +692,7 @@ def test_agent_audit_scope_is_admin_readable_without_runner_session(
         acp_endpoints._ACP_AUDIT_EVENTS.clear()
         acp_endpoints._ACP_AUDIT_EVENTS.append(
             {
-                "timestamp": "2026-05-10T00:00:00+00:00",
+                "timestamp": "2999-01-01T00:00:00+00:00",
                 "action": "agent_registered",
                 "user_id": 1,
                 "session_id": "agent:audit_agent",

@@ -11,7 +11,16 @@ from loguru import logger
 
 
 class ACPResponseError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: int | None = None,
+        error: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.error = error or {}
 
 
 @dataclass
@@ -112,7 +121,11 @@ class ACPStdioClient:
         await self._send(payload)
         resp = await future
         if resp.error:
-            raise ACPResponseError(resp.error.get("message", "ACP error"))
+            raise ACPResponseError(
+                resp.error.get("message", "ACP error"),
+                code=resp.error.get("code"),
+                error=resp.error,
+            )
         return resp
 
     async def notify(self, method: str, params: Any | None = None) -> None:
@@ -137,9 +150,11 @@ class ACPStdioClient:
             await self._proc.stdin.drain()
 
     async def _read_loop(self) -> None:
-        assert self._proc is not None
-        assert self._proc.stdout is not None
-        reader = self._proc.stdout
+        proc = self._proc
+        if proc is None or proc.stdout is None:
+            self._drain_pending("ACP stdout not available")
+            return
+        reader = proc.stdout
         while True:
             line = await reader.readline()
             if not line:
@@ -210,10 +225,11 @@ class ACPStdioClient:
         await self._send(payload)
 
     async def _stderr_loop(self) -> None:
-        assert self._proc is not None
-        assert self._proc.stderr is not None
+        proc = self._proc
+        if proc is None or proc.stderr is None:
+            return
         while True:
-            line = await self._proc.stderr.readline()
+            line = await proc.stderr.readline()
             if not line:
                 break
             logger.debug("ACP runner stderr: {}", line.decode("utf-8", errors="ignore").rstrip())

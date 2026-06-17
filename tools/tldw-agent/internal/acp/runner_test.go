@@ -658,6 +658,59 @@ func TestRunnerAcceptsStandardSessionCloseAndForwardsWhenAdvertised(t *testing.T
 	}
 }
 
+func TestValidateSessionNewMCPTransportsRejectsMalformedTypes(t *testing.T) {
+	caps := map[string]interface{}{
+		"mcpCapabilities": map[string]bool{
+			"http": true,
+			"sse":  true,
+		},
+	}
+
+	tests := []struct {
+		name    string
+		server  map[string]interface{}
+		wantErr string
+	}{
+		{
+			name:    "missing type",
+			server:  map[string]interface{}{"name": "missing"},
+			wantErr: "mcpServers[0].type must be a string",
+		},
+		{
+			name:    "non string type",
+			server:  map[string]interface{}{"name": "bad", "type": 123},
+			wantErr: "mcpServers[0].type must be a string",
+		},
+		{
+			name:    "empty type",
+			server:  map[string]interface{}{"name": "empty", "type": "  "},
+			wantErr: "mcpServers[0].type must not be empty",
+		},
+		{
+			name:    "unknown type",
+			server:  map[string]interface{}{"name": "unknown", "type": "grpc"},
+			wantErr: "mcpServers[0].type \"grpc\" is not supported",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(map[string]interface{}{
+				"cwd":        t.TempDir(),
+				"mcpServers": []map[string]interface{}{tc.server},
+			})
+			if err != nil {
+				t.Fatalf("marshal session/new params: %v", err)
+			}
+
+			err = validateSessionNewMCPTransports(raw, caps)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("validateSessionNewMCPTransports error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestRunnerRejectsUnsupportedHTTPMCPServerTransport(t *testing.T) {
 	cfg := config.Default()
 	cfg.Agent.Command = "stub-agent"

@@ -67,7 +67,11 @@ class ACPStreamClient:
         await self._send(payload)
         resp = await future
         if resp.error:
-            raise ACPResponseError(resp.error.get("message", "ACP error"))
+            raise ACPResponseError(
+                resp.error.get("message", "ACP error"),
+                code=resp.error.get("code"),
+                error=resp.error,
+            )
         return resp
 
     async def notify(self, method: str, params: Any | None = None) -> None:

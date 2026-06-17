@@ -12,6 +12,8 @@ modified_files:
 - tldw_Server_API/app/api/v1/schemas/agent_client_protocol.py
 - tldw_Server_API/app/core/Agent_Client_Protocol/runner_client.py
 - tldw_Server_API/app/core/Agent_Client_Protocol/sandbox_runner_client.py
+- tldw_Server_API/app/core/Agent_Client_Protocol/stdio_client.py
+- tldw_Server_API/app/core/Agent_Client_Protocol/stream_client.py
 - tldw_Server_API/tests/Agent_Client_Protocol/test_acp_endpoints.py
 - tldw_Server_API/tests/Agent_Client_Protocol/test_acp_sandbox_runner_client.py
 - tldw_Server_API/tests/Agent_Client_Protocol/test_acp_session_request_schema.py
@@ -27,11 +29,11 @@ Implement the first ACP protocol-hardening slice from the spec audit: standard s
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 ACP runner and Python clients use standard session/close where supported, with compatibility fallback for older runner private close method.
-- [ ] #2 Runner forwards or rejects MCP server transports according to ACP mcpCapabilities instead of silently passing unsupported HTTP/SSE transports downstream.
-- [ ] #3 API session setup rejects invalid cwd and malformed MCP server configs with clear 4xx validation errors.
-- [ ] #4 Focused Python and Go tests cover the new close and validation behavior.
-- [ ] #5 Touched scope passes focused tests and Bandit.
+- [x] #1 ACP runner and Python clients use standard session/close where supported, with compatibility fallback for older runner private close method.
+- [x] #2 Runner forwards or rejects MCP server transports according to ACP mcpCapabilities instead of silently passing unsupported HTTP/SSE transports downstream.
+- [x] #3 API session setup rejects invalid cwd and malformed MCP server configs with clear 4xx validation errors.
+- [x] #4 Focused Python and Go tests cover the new close and validation behavior.
+- [x] #5 Touched Python and Go scope passes focused tests (>38 tests) and Bandit security analysis with zero findings.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -43,21 +45,25 @@ Docs/superpowers/plans/2026-06-16-acp-client-spec-conformance.md
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Verification completed: `python -m compileall -q ...` on touched Python modules passed; `python -m pytest -q tldw_Server_API/tests/Agent_Client_Protocol/test_acp_sandbox_runner_client.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_session_request_schema.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_endpoints.py::test_acp_session_new_preserves_explicit_empty_mcp_servers tldw_Server_API/tests/Agent_Client_Protocol/test_acp_endpoints.py::test_acp_session_new_rejects_relative_cwd tldw_Server_API/tests/Agent_Client_Protocol/test_acp_endpoints.py::test_acp_session_new_rejects_relative_stdio_mcp_command tldw_Server_API/tests/Agent_Client_Protocol/test_acp_session_new_records_sanitized_audit_event` passed with 38 tests; `go test ./internal/acp -count=1` passed from tools/tldw-agent; Bandit touched-scope run wrote /tmp/bandit_acp_client_spec_conformance.json with zero results/errors; `git diff --check` passed.
+- Reopened to address PR #2372 review comments after rebasing the branch onto latest dev.
+- Fixed schema path/url normalization and env/header null handling review findings.
+- Fixed runner MCP type validation and Backlog readability review findings.
+- Stabilized an ACP audit endpoint test whose fixed timestamp had aged outside the default retention window.
+- Verification completed: `python -m compileall -q ...` on touched Python modules passed; `python -m pytest -q tldw_Server_API/tests/Agent_Client_Protocol/test_acp_session_request_schema.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_sandbox_runner_client.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_endpoints.py` passed with 73 tests; `go test ./internal/acp -count=1` passed from `tools/tldw-agent`; Bandit touched-scope run wrote `/tmp/bandit_acp_client_spec_conformance_review.json` with zero results/errors; `git diff --check` passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented ACP client spec-conformance hardening slice. Python standard and sandbox clients now call standard session/close first and fall back to private _tldw/session/close only for method-not-found compatibility. The Go ACP runner accepts standard session/close, stores downstream capabilities per session, forwards close when advertised, and rejects HTTP/SSE MCP server transports unless the downstream agent advertised the matching mcpCapabilities. Public ACP session setup schemas now validate absolute cwd, support stdio/http/sse/websocket MCP transport shapes, require absolute stdio commands and URL-based transport URLs, and normalize env/header dicts to ACP name/value arrays. Added focused Python and Go tests plus endpoint validation tests.
+Implemented ACP client spec-conformance hardening slice. Python standard and sandbox clients now call standard session/close first and fall back to private _tldw/session/close only for method-not-found compatibility. The Go ACP runner accepts standard session/close, stores downstream capabilities per session, forwards close when supported, and rejects HTTP/SSE MCP server transports unless the downstream agent explicitly advertises matching mcpCapabilities. Public ACP session setup schemas now validate absolute cwd, support stdio/http/sse/websocket MCP transport shapes, require absolute stdio commands and URL-based transport URLs, and normalize env/header dicts to ACP name/value arrays. Added focused Python and Go tests plus endpoint validation tests.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

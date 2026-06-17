@@ -385,6 +385,39 @@ async def test_standard_runner_close_session_falls_back_to_private_runner_close(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_standard_runner_close_session_falls_back_on_json_rpc_method_not_found_code() -> None:
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, payload))
+            if method == "session/close":
+                raise ACPResponseError("unsupported", code=-32601)
+            if method == "_tldw/session/close":
+                return _CallResult({})
+            raise AssertionError(f"unexpected method: {method}")
+
+    runner = ACPRunnerClient(ACPRunnerConfig(command="echo"))
+    fake_client = _FakeClient()
+    runner._client = fake_client
+
+    await runner.close_session("session-close-code")
+
+    assert fake_client.calls == [
+        ("session/close", {"sessionId": "session-close-code"}),
+        ("_tldw/session/close", {"sessionId": "session-close-code"}),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_create_session_rejects_unavailable_vz_macos_runtime(monkeypatch) -> None:
     manager = ACPSandboxRunnerManager(
         ACPSandboxConfig(

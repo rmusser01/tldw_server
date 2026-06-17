@@ -49,6 +49,8 @@ _ACP_GOVERNANCE_NONCRITICAL_EXCEPTIONS = (
 
 
 def _is_method_not_found_error(exc: ACPResponseError, method: str) -> bool:
+    if getattr(exc, "code", None) == -32601:
+        return True
     message = str(exc).lower()
     return (
         "method not found" in message

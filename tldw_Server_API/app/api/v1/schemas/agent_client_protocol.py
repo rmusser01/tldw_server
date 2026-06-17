@@ -3,6 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, ClassVar, Literal, Union
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
@@ -69,6 +70,10 @@ def _coerce_entrypoint_strategy(value: Any) -> Any:
 def _is_absolute_cross_platform_path(value: str) -> bool:
     candidate = str(value or "").strip()
     return PurePosixPath(candidate).is_absolute() or PureWindowsPath(candidate).is_absolute()
+
+
+def _normalize_required_string(value: Any) -> str:
+    return str(value or "").strip()
 
 
 class ACPAgentEntrypointStatus(BaseModel):
@@ -371,7 +376,10 @@ class ACPMCPServerConfig(BaseModel):
     def normalize_name_value_pairs(cls, value: Any) -> Any:
         if isinstance(value, dict):
             return [
-                {"name": str(name), "value": str(raw_value)}
+                {
+                    "name": str(name) if name is not None else None,
+                    "value": str(raw_value) if raw_value is not None else None,
+                }
                 for name, raw_value in value.items()
             ]
         return value
@@ -380,16 +388,27 @@ class ACPMCPServerConfig(BaseModel):
     def validate_transport_shape(self) -> "ACPMCPServerConfig":
         transport = self.type.value if isinstance(self.type, ACPMCPServerType) else str(self.type)
         if transport == ACPMCPServerType.STDIO.value:
-            if not self.command or not _is_absolute_cross_platform_path(self.command):
+            command = _normalize_required_string(self.command)
+            if not command or not _is_absolute_cross_platform_path(command):
                 raise ValueError("stdio MCP server command must be an absolute path")
+            self.command = command
             return self
         if transport in {
             ACPMCPServerType.WEBSOCKET.value,
             ACPMCPServerType.HTTP.value,
             ACPMCPServerType.SSE.value,
         }:
-            if not self.url:
-                raise ValueError(f"{transport} MCP server url is required")
+            url = _normalize_required_string(self.url)
+            parsed_url = urlparse(url)
+            allowed_schemes = (
+                {"ws", "wss"}
+                if transport == ACPMCPServerType.WEBSOCKET.value
+                else {"http", "https"}
+            )
+            if not url or parsed_url.scheme not in allowed_schemes or not parsed_url.netloc:
+                allowed = "/".join(sorted(allowed_schemes))
+                raise ValueError(f"{transport} MCP server url must use {allowed}")
+            self.url = url
             return self
         return self
 
@@ -573,9 +592,10 @@ class ACPSessionNewRequest(BaseModel):
     @field_validator("cwd")
     @classmethod
     def validate_cwd_absolute(cls, value: str) -> str:
-        if not _is_absolute_cross_platform_path(value):
+        normalized = _normalize_required_string(value)
+        if not normalized or not _is_absolute_cross_platform_path(normalized):
             raise ValueError("cwd must be an absolute path")
-        return value
+        return normalized
 
 
 class ACPSessionNewResponse(BaseModel):

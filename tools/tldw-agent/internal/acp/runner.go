@@ -726,9 +726,22 @@ func validateSessionNewMCPTransports(raw json.RawMessage, caps map[string]interf
 	if err := json.Unmarshal(rawServers, &servers); err != nil {
 		return fmt.Errorf("mcpServers must be an array")
 	}
-	for _, server := range servers {
-		transport, _ := server["type"].(string)
-		switch strings.ToLower(strings.TrimSpace(transport)) {
+	for idx, server := range servers {
+		rawTransport, ok := server["type"]
+		if !ok {
+			return fmt.Errorf("mcpServers[%d].type must be a string", idx)
+		}
+		transport, ok := rawTransport.(string)
+		if !ok {
+			return fmt.Errorf("mcpServers[%d].type must be a string", idx)
+		}
+		normalizedTransport := strings.ToLower(strings.TrimSpace(transport))
+		if normalizedTransport == "" {
+			return fmt.Errorf("mcpServers[%d].type must not be empty", idx)
+		}
+		switch normalizedTransport {
+		case "stdio", "websocket":
+			continue
 		case "http":
 			if !capabilityEnabled(caps, "mcpCapabilities", "http") {
 				return fmt.Errorf("mcpServers transport http requires agentCapabilities.mcpCapabilities.http")
@@ -737,6 +750,8 @@ func validateSessionNewMCPTransports(raw json.RawMessage, caps map[string]interf
 			if !capabilityEnabled(caps, "mcpCapabilities", "sse") {
 				return fmt.Errorf("mcpServers transport sse requires agentCapabilities.mcpCapabilities.sse")
 			}
+		default:
+			return fmt.Errorf("mcpServers[%d].type %q is not supported", idx, transport)
 		}
 	}
 	return nil
