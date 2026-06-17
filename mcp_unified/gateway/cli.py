@@ -927,21 +927,28 @@ def _add_policy_explain_common_arguments(parser: argparse.ArgumentParser) -> Non
     parser.add_argument(
         "--gateway-url",
         help=(
-            "Mounted gateway base URL for remote mode. "
-            "Falls back to MCP_UNIFIED_GATEWAY_URL."
+            "Mounted gateway base URL for remote mode. Providing this selects "
+            "remote mode."
         ),
     )
-    parser.add_argument(
-        "--admin-key",
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--local",
+        action="store_true",
+        help="Force local config/profile storage mode.",
+    )
+    mode_group.add_argument(
+        "--remote",
+        action="store_true",
         help=(
-            "Admin auth key for remote mode. "
-            "Falls back to MCP_UNIFIED_GATEWAY_ADMIN_KEY."
+            "Use a running gateway. Requires --gateway-url unless "
+            "MCP_UNIFIED_GATEWAY_URL is set."
         ),
     )
     parser.add_argument(
         "--admin-header-name",
         default="X-MCP-Gateway-Admin-Key",
-        help="Admin auth header name for remote mode.",
+        help="Admin auth header name used with MCP_UNIFIED_GATEWAY_ADMIN_KEY.",
     )
     parser.add_argument(
         "--timeout-seconds",
@@ -1476,7 +1483,7 @@ def _policy_explain_mode_from_args(args: argparse.Namespace) -> str:
 def _policy_explain_arguments_from_args(args: argparse.Namespace) -> dict[str, Any]:
     """Load the explain-policy tool arguments from one selected source."""
 
-    if args.args_json:
+    if args.args_json is not None:
         return _load_json_argument_text(args.args_json, label="args")
     if args.args_json_file is not None:
         return _load_json_argument_file(args.args_json_file, label="args")
@@ -1586,13 +1593,13 @@ def _policy_explain_remote_requested(args: argparse.Namespace) -> bool:
     """Return whether policy explain commands should use remote mode."""
 
     gateway_url = _optional_cli_text(args.gateway_url, field="gateway_url")
+    if args.local:
+        if gateway_url is not None:
+            raise _CliArgumentError("--local cannot be combined with --gateway-url")
+        return False
     if gateway_url is not None:
         return True
-    env_gateway_url = _optional_cli_text(
-        os.environ.get("MCP_UNIFIED_GATEWAY_URL"),
-        field="MCP_UNIFIED_GATEWAY_URL",
-    )
-    return env_gateway_url is not None
+    return bool(args.remote)
 
 
 def _remote_policy_explain_config_from_args(
@@ -1611,12 +1618,10 @@ def _remote_policy_explain_config_from_args(
             "--gateway-url is required unless MCP_UNIFIED_GATEWAY_URL is set"
         )
 
-    admin_key = _optional_cli_text(args.admin_key, field="admin_key")
-    if admin_key is None:
-        admin_key = _optional_cli_text(
-            os.environ.get("MCP_UNIFIED_GATEWAY_ADMIN_KEY"),
-            field="MCP_UNIFIED_GATEWAY_ADMIN_KEY",
-        )
+    admin_key = _optional_cli_text(
+        os.environ.get("MCP_UNIFIED_GATEWAY_ADMIN_KEY"),
+        field="MCP_UNIFIED_GATEWAY_ADMIN_KEY",
+    )
     try:
         return RemoteGatewayAdminConfig(
             gateway_url=gateway_url,

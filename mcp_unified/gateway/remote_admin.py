@@ -93,7 +93,13 @@ class RemoteGatewayAdminError(RuntimeError):
         """Build an error from a public gateway JSON error payload."""
 
         error = payload.get("error")
-        message = error if isinstance(error, str) and error else "Remote gateway error"
+        payload_message = payload.get("message")
+        if isinstance(error, str) and error:
+            message = error
+        elif isinstance(payload_message, str) and payload_message:
+            message = payload_message
+        else:
+            message = "Remote gateway error"
         reason_code = payload.get("reason_code")
         return cls(
             message,

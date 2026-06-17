@@ -10,6 +10,7 @@ from mcp_unified.gateway import cli as gateway_cli
 from mcp_unified.gateway.remote_admin import (
     RemoteGatewayAdminClient,
     RemoteGatewayAdminConfig,
+    RemoteGatewayAdminError,
 )
 
 
@@ -119,6 +120,23 @@ def test_remote_gateway_admin_client_preview_profile_tools_posts_json_body() -> 
     ]
 
 
+def test_remote_gateway_admin_error_preserves_message_payload() -> None:
+    """Remote admin errors preserve gateway message fields for CLI stderr."""
+
+    error = RemoteGatewayAdminError.from_payload(
+        {"message": "Policy explanation failed", "reason_code": "policy_failed"},
+        status_code=403,
+    )
+
+    assert error.to_payload() == {
+        "error": "Policy explanation failed",
+        "message": "Policy explanation failed",
+        "ok": False,
+        "reason_code": "policy_failed",
+        "status_code": 403,
+    }
+
+
 def test_gateway_cli_explain_policy_reads_args_json_file_for_remote_payload(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
@@ -140,14 +158,13 @@ def test_gateway_cli_explain_policy_reads_args_json_file_for_remote_payload(
             return {"ok": True, "payload": payload}
 
     monkeypatch.setattr(gateway_cli, "RemoteGatewayAdminClient", _Client)
+    monkeypatch.setenv("MCP_UNIFIED_GATEWAY_ADMIN_KEY", "admin-secret")
 
     exit_code = gateway_cli.main(
         [
             "explain-policy",
             "--gateway-url",
             "http://127.0.0.1:8000/mcp",
-            "--admin-key",
-            "admin-secret",
             "--admin-header-name",
             "X-Admin",
             "--profile",
@@ -191,6 +208,177 @@ def test_gateway_cli_explain_policy_reads_args_json_file_for_remote_payload(
     assert configs[0].gateway_url == "http://127.0.0.1:8000/mcp"
     assert configs[0].admin_header_name == "X-Admin"
     assert configs[0].admin_key == "admin-secret"
+
+
+def test_gateway_cli_explain_policy_defaults_to_local_when_gateway_env_is_set(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ambient gateway env does not silently switch policy explain to remote mode."""
+
+    calls: list[tuple[str, str]] = []
+
+    def local_handler(args: Any, operation: Any) -> int:
+        del operation
+        calls.append((args.profile, args.tool))
+        print(json.dumps({"ok": True, "mode": "local"}))
+        return 0
+
+    monkeypatch.setenv("MCP_UNIFIED_GATEWAY_URL", "http://127.0.0.1:8000/mcp")
+    monkeypatch.setattr(
+        gateway_cli,
+        "_handle_local_policy_explain_command",
+        local_handler,
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "explain-policy",
+            "--profile",
+            "backend-engineer",
+            "--tool",
+            "fs.patch",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err == ""
+    assert json.loads(captured.out) == {"ok": True, "mode": "local"}
+    assert calls == [("backend-engineer", "fs.patch")]
+
+
+def test_gateway_cli_preview_profile_tools_remote_flag_uses_gateway_env(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--remote explicitly selects env-backed remote gateway mode."""
+
+    configs: list[RemoteGatewayAdminConfig] = []
+
+    class _Client:
+        def __init__(self, config: RemoteGatewayAdminConfig) -> None:
+            configs.append(config)
+
+        def preview_profile_tools(
+            self,
+            profile_id: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            return {"ok": True, "profile_id": profile_id, "payload": payload}
+
+    monkeypatch.setenv("MCP_UNIFIED_GATEWAY_URL", "http://127.0.0.1:8000/mcp")
+    monkeypatch.setenv("MCP_UNIFIED_GATEWAY_ADMIN_KEY", "admin-secret")
+    monkeypatch.setattr(gateway_cli, "RemoteGatewayAdminClient", _Client)
+
+    exit_code = gateway_cli.main(
+        [
+            "preview-profile-tools",
+            "--remote",
+            "--profile",
+            "backend-engineer",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err == ""
+    assert json.loads(captured.out) == {
+        "ok": True,
+        "payload": {
+            "include_denied": True,
+            "include_recommendations": True,
+            "mode": "runtime_effective",
+            "profile_id": "backend-engineer",
+        },
+        "profile_id": "backend-engineer",
+    }
+    assert configs == [
+        RemoteGatewayAdminConfig(
+            gateway_url="http://127.0.0.1:8000/mcp",
+            admin_key="admin-secret",
+        )
+    ]
+
+
+def test_gateway_cli_explain_policy_rejects_empty_args_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Explicit empty --args-json is invalid instead of being ignored."""
+
+    exit_code = gateway_cli.main(
+        [
+            "explain-policy",
+            "--profile",
+            "backend-engineer",
+            "--tool",
+            "fs.patch",
+            "--args-json",
+            "",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "error": "Invalid args JSON: Expecting value",
+        "ok": False,
+    }
+
+
+def test_gateway_cli_explain_policy_rejects_local_with_gateway_url(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Local mode cannot be combined with an explicit remote URL."""
+
+    exit_code = gateway_cli.main(
+        [
+            "explain-policy",
+            "--local",
+            "--gateway-url",
+            "http://127.0.0.1:8000/mcp",
+            "--profile",
+            "backend-engineer",
+            "--tool",
+            "fs.patch",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "error": "--local cannot be combined with --gateway-url",
+        "ok": False,
+    }
+
+
+def test_gateway_cli_explain_policy_rejects_admin_key_argument(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Policy explain commands do not accept command-line admin secrets."""
+
+    exit_code = gateway_cli.main(
+        [
+            "explain-policy",
+            "--gateway-url",
+            "http://127.0.0.1:8000/mcp",
+            "--admin-key",
+            "admin-secret",
+            "--profile",
+            "backend-engineer",
+            "--tool",
+            "fs.patch",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload["ok"] is False
+    assert "--admin-key" in payload["error"]
 
 
 def test_gateway_cli_preview_profile_tools_maps_remote_payload_flags(
