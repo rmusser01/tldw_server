@@ -531,7 +531,6 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "chat-character-integration-api",
             "chat-character-integration-chat",
             "chat-character-integration-context",
-            "chat-core",
             "llm-adapters-unit",
             "llm-adapters-chat-endpoint",
             "llm-adapters-chat-errors-core",
@@ -543,6 +542,17 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "llm-local-runtime",
             "llm-local-backends",
         }.issubset(shard_names)
+        chat_core_shards = {
+            "chat-legacy-integration",
+            "chat-legacy-unit-a-l",
+            "chat-legacy-unit-m-z",
+            "chat-new-integration-property",
+            "chat-new-unit-a-l",
+            "chat-new-unit-m-z",
+            "chatbooks-streaming",
+        }
+        assert chat_core_shards.issubset(shard_names)
+        assert "chat-core" not in shard_names
         workflow_shards = {
             "product-workflows-adapters-core",
             "product-workflows-api",
@@ -686,6 +696,59 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         assert "tldw_Server_API/tests/Characters" not in shard_path_sets["chat-character-db-core"]
         assert "tldw_Server_API/tests/Characters" not in shard_path_sets["chat-character-db-api"]
         assert "tldw_Server_API/tests/Character_Chat_NEW/unit" not in shard_path_sets["chat-character-property"]
+        assert shard_path_sets["chat-legacy-integration"] == {
+            "tldw_Server_API/tests/Chat/test*.py",
+            "tldw_Server_API/tests/Chat/integration",
+        }
+        assert shard_path_sets["chat-legacy-unit-a-l"] == {
+            "tldw_Server_API/tests/Chat/unit/test_[a-l]*.py"
+        }
+        assert shard_path_sets["chat-legacy-unit-m-z"] == {
+            "tldw_Server_API/tests/Chat/unit/test_[m-z]*.py"
+        }
+        assert shard_path_sets["chat-new-integration-property"] == {
+            "tldw_Server_API/tests/Chat_NEW/integration",
+            "tldw_Server_API/tests/Chat_NEW/property",
+        }
+        assert shard_path_sets["chat-new-unit-a-l"] == {
+            "tldw_Server_API/tests/Chat_NEW/unit/test_[a-l]*.py"
+        }
+        assert shard_path_sets["chat-new-unit-m-z"] == {
+            "tldw_Server_API/tests/Chat_NEW/unit/test_[m-z]*.py"
+        }
+        assert shard_path_sets["chatbooks-streaming"] == {
+            "tldw_Server_API/tests/Chatbooks",
+            "tldw_Server_API/tests/Streaming",
+        }
+        chat_core_files = {
+            str(path)
+            for dirname in ("Chat", "Chat_NEW", "Chatbooks", "Streaming")
+            for path in Path("tldw_Server_API/tests", dirname).glob("**/test*.py")
+        }
+        covered_chat_core_files: dict[str, str] = {}
+        for shard_name in chat_core_shards:
+            for pattern in shard_path_sets[shard_name]:
+                if Path(pattern).is_dir():
+                    prefix = f"{pattern.rstrip('/')}/"
+                    matches = {
+                        filename
+                        for filename in chat_core_files
+                        if filename.startswith(prefix)
+                    }
+                else:
+                    matches = {
+                        filename
+                        for filename in chat_core_files
+                        if fnmatch.fnmatch(filename, pattern)
+                    }
+                assert matches, f"{shard_name} pattern matched no files: {pattern}"
+                for filename in matches:
+                    assert filename not in covered_chat_core_files, (
+                        f"{filename} matched both "
+                        f"{covered_chat_core_files[filename]} and {shard_name}"
+                    )
+                    covered_chat_core_files[filename] = shard_name
+        assert set(covered_chat_core_files) == chat_core_files
         assert "tldw_Server_API/tests/Claims" not in shard_path_sets["product-collections"]
         assert "tldw_Server_API/tests/Evaluations" not in shard_path_sets["product-claims-core"]
         watchlist_shards = {

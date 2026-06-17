@@ -1065,10 +1065,28 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
-          - name: chat-core
+          - name: chat-legacy-integration
             paths: >-
-              tldw_Server_API/tests/Chat
-              tldw_Server_API/tests/Chat_NEW
+              tldw_Server_API/tests/Chat/test*.py
+              tldw_Server_API/tests/Chat/integration
+          - name: chat-legacy-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/Chat/unit/test_[a-l]*.py
+          - name: chat-legacy-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/Chat/unit/test_[m-z]*.py
+          - name: chat-new-integration-property
+            paths: >-
+              tldw_Server_API/tests/Chat_NEW/integration
+              tldw_Server_API/tests/Chat_NEW/property
+          - name: chat-new-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/Chat_NEW/unit/test_[a-l]*.py
+          - name: chat-new-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/Chat_NEW/unit/test_[m-z]*.py
+          - name: chatbooks-streaming
+            paths: >-
               tldw_Server_API/tests/Chatbooks
               tldw_Server_API/tests/Streaming
           - name: llm-adapters-unit
@@ -2309,10 +2327,28 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
-          - name: chat-core
+          - name: chat-legacy-integration
             paths: >-
-              tldw_Server_API/tests/Chat
-              tldw_Server_API/tests/Chat_NEW
+              tldw_Server_API/tests/Chat/test*.py
+              tldw_Server_API/tests/Chat/integration
+          - name: chat-legacy-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/Chat/unit/test_[a-l]*.py
+          - name: chat-legacy-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/Chat/unit/test_[m-z]*.py
+          - name: chat-new-integration-property
+            paths: >-
+              tldw_Server_API/tests/Chat_NEW/integration
+              tldw_Server_API/tests/Chat_NEW/property
+          - name: chat-new-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/Chat_NEW/unit/test_[a-l]*.py
+          - name: chat-new-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/Chat_NEW/unit/test_[m-z]*.py
+          - name: chatbooks-streaming
+            paths: >-
               tldw_Server_API/tests/Chatbooks
               tldw_Server_API/tests/Streaming
           - name: llm-adapters-unit
@@ -3498,10 +3534,28 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
-          - name: chat-core
+          - name: chat-legacy-integration
             paths: >-
-              tldw_Server_API/tests/Chat
-              tldw_Server_API/tests/Chat_NEW
+              tldw_Server_API/tests/Chat/test*.py
+              tldw_Server_API/tests/Chat/integration
+          - name: chat-legacy-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/Chat/unit/test_[a-l]*.py
+          - name: chat-legacy-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/Chat/unit/test_[m-z]*.py
+          - name: chat-new-integration-property
+            paths: >-
+              tldw_Server_API/tests/Chat_NEW/integration
+              tldw_Server_API/tests/Chat_NEW/property
+          - name: chat-new-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/Chat_NEW/unit/test_[a-l]*.py
+          - name: chat-new-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/Chat_NEW/unit/test_[m-z]*.py
+          - name: chatbooks-streaming
+            paths: >-
               tldw_Server_API/tests/Chatbooks
               tldw_Server_API/tests/Streaming
           - name: llm-adapters-unit
@@ -4613,10 +4667,28 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
-          - name: chat-core
+          - name: chat-legacy-integration
             paths: >-
-              tldw_Server_API/tests/Chat
-              tldw_Server_API/tests/Chat_NEW
+              tldw_Server_API/tests/Chat/test*.py
+              tldw_Server_API/tests/Chat/integration
+          - name: chat-legacy-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/Chat/unit/test_[a-l]*.py
+          - name: chat-legacy-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/Chat/unit/test_[m-z]*.py
+          - name: chat-new-integration-property
+            paths: >-
+              tldw_Server_API/tests/Chat_NEW/integration
+              tldw_Server_API/tests/Chat_NEW/property
+          - name: chat-new-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/Chat_NEW/unit/test_[a-l]*.py
+          - name: chat-new-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/Chat_NEW/unit/test_[m-z]*.py
+          - name: chatbooks-streaming
+            paths: >-
               tldw_Server_API/tests/Chatbooks
               tldw_Server_API/tests/Streaming
           - name: llm-adapters-unit
@@ -5730,10 +5802,28 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
-          - name: chat-core
+          - name: chat-legacy-integration
             paths: >-
-              tldw_Server_API/tests/Chat
-              tldw_Server_API/tests/Chat_NEW
+              tldw_Server_API/tests/Chat/test*.py
+              tldw_Server_API/tests/Chat/integration
+          - name: chat-legacy-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/Chat/unit/test_[a-l]*.py
+          - name: chat-legacy-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/Chat/unit/test_[m-z]*.py
+          - name: chat-new-integration-property
+            paths: >-
+              tldw_Server_API/tests/Chat_NEW/integration
+              tldw_Server_API/tests/Chat_NEW/property
+          - name: chat-new-unit-a-l
+            paths: >-
+              tldw_Server_API/tests/Chat_NEW/unit/test_[a-l]*.py
+          - name: chat-new-unit-m-z
+            paths: >-
+              tldw_Server_API/tests/Chat_NEW/unit/test_[m-z]*.py
+          - name: chatbooks-streaming
+            paths: >-
               tldw_Server_API/tests/Chatbooks
               tldw_Server_API/tests/Streaming
           - name: llm-adapters-unit
