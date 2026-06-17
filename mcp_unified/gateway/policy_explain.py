@@ -29,7 +29,12 @@ POLICY_EXPLAIN_AUDIT_EVENT_TYPE = "policy.explain.requested"
 POLICY_PREVIEW_TOOLS_AUDIT_EVENT_TYPE = "policy.preview_tools.requested"
 
 PolicyExplainOutcome = Literal["deny", "ask", "allow"]
-PolicyExplainRedactionState = Literal["plain", "sanitized", "redacted"]
+PolicyExplainRedactionState = Literal["raw_safe", "sanitized", "redacted", "omitted"]
+STATIC_POLICY_ONLY_SKIPPED_CONTRIBUTORS = [
+    "session_grants",
+    "approval_grants",
+    "runtime_availability",
+]
 
 _DEFAULTS_BY_OUTCOME: dict[str, dict[str, Any]] = {
     "deny": {
@@ -151,6 +156,7 @@ class PolicyExplainResponse(BaseModel):
     subjects: list[PolicyExplainSubject] = Field(default_factory=list)
     degraded: bool = False
     degraded_reasons: list[str] = Field(default_factory=list)
+    skipped_contributors: list[str] = Field(default_factory=list)
     redacted: bool = True
 
 
@@ -191,6 +197,7 @@ class ProfileToolPreviewResponse(BaseModel):
     summary: ProfileToolPreviewSummary = Field(default_factory=ProfileToolPreviewSummary)
     degraded: bool = False
     degraded_reasons: list[str] = Field(default_factory=list)
+    skipped_contributors: list[str] = Field(default_factory=list)
     redacted: bool = True
 
 
@@ -241,7 +248,12 @@ class GatewayPolicyExplainService:
     ) -> PolicyExplainResponse:
         """Return a redacted explanation for one tool call policy check."""
 
-        profile = await self._resolve_profile(request.profile_id)
+        try:
+            profile = await self._resolve_profile(request.profile_id)
+        except GatewayPolicyExplainError as exc:
+            if exc.reason_code == "profile_not_found":
+                await self._audit_explain_failure(request, exc)
+            raise
         policy_grant_store = (
             self.policy_grant_store
             if request.mode == PolicyExplainMode.RUNTIME_EFFECTIVE
@@ -279,6 +291,7 @@ class GatewayPolicyExplainService:
         if effective_decision["degraded_reason"] is not None:
             degraded_reasons.append(effective_decision["degraded_reason"])
         safe_tool_name = _redact_tool_identifier(request.tool_name)
+        skipped_contributors = _skipped_contributors_for_mode(request.mode)
         response = PolicyExplainResponse(
             profile_id=profile.id,
             tool_name=safe_tool_name,
@@ -306,6 +319,7 @@ class GatewayPolicyExplainService:
             subjects=subjects,
             degraded=bool(degraded_reasons),
             degraded_reasons=degraded_reasons,
+            skipped_contributors=skipped_contributors,
         )
         await _append_audit_event_strict(
             self.audit_store,
@@ -324,7 +338,12 @@ class GatewayPolicyExplainService:
     ) -> ProfileToolPreviewResponse:
         """Return a redacted profile tool preview, degrading without a catalog."""
 
-        profile = await self._resolve_profile(request.profile_id)
+        try:
+            profile = await self._resolve_profile(request.profile_id)
+        except GatewayPolicyExplainError as exc:
+            if exc.reason_code == "profile_not_found":
+                await self._audit_preview_failure(request, exc)
+            raise
         degraded_reasons: list[str] = []
         tool_names = await self._preview_tool_names(profile)
         if self.catalog_provider is None:
@@ -341,6 +360,7 @@ class GatewayPolicyExplainService:
             summary=_preview_summary(entries),
             degraded=bool(degraded_reasons),
             degraded_reasons=degraded_reasons,
+            skipped_contributors=_skipped_contributors_for_mode(request.mode),
         )
         await _append_audit_event_strict(
             self.audit_store,
@@ -371,6 +391,54 @@ class GatewayPolicyExplainService:
         policy_tools = set(policy_document.allowed_tools or [])
         policy_tools.update(policy_document.denied_tools or [])
         return sorted(tool_name for tool_name in policy_tools if isinstance(tool_name, str))
+
+    async def _audit_explain_failure(
+        self,
+        request: PolicyExplainRequest,
+        exc: GatewayPolicyExplainError,
+    ) -> None:
+        safe_tool_name = _redact_tool_identifier(request.tool_name)
+        payload = {
+            "ok": False,
+            "profile_id": request.profile_id,
+            "tool_name": safe_tool_name,
+            "mode": request.mode.value,
+            "error": str(exc),
+            "reason_code": exc.reason_code,
+            "redacted": True,
+        }
+        await _append_audit_event_strict(
+            self.audit_store,
+            event_type=POLICY_EXPLAIN_AUDIT_EVENT_TYPE,
+            actor_id=self.actor_id,
+            profile_id=request.profile_id,
+            target_type="tool",
+            target_id=safe_tool_name,
+            payload=payload,
+        )
+
+    async def _audit_preview_failure(
+        self,
+        request: ProfileToolPreviewRequest,
+        exc: GatewayPolicyExplainError,
+    ) -> None:
+        payload = {
+            "ok": False,
+            "profile_id": request.profile_id,
+            "mode": request.mode.value,
+            "error": str(exc),
+            "reason_code": exc.reason_code,
+            "redacted": True,
+        }
+        await _append_audit_event_strict(
+            self.audit_store,
+            event_type=POLICY_PREVIEW_TOOLS_AUDIT_EVENT_TYPE,
+            actor_id=self.actor_id,
+            profile_id=request.profile_id,
+            target_type="profile",
+            target_id=request.profile_id,
+            payload=payload,
+        )
 
 
 async def _append_audit_event_strict(
@@ -422,7 +490,7 @@ def _redact_subject_value(
     subject = subject_type.strip().lower()
     text = value.strip()
     if not text:
-        return "", "plain"
+        return "", "omitted"
     if subject == "path":
         return _redact_path(text)
     if subject == "command":
@@ -430,7 +498,7 @@ def _redact_subject_value(
     if subject == "domain":
         return _redact_domain(text)
     if subject in {"tool", "mcp", "skill", "agent", "capability", "risk_class"}:
-        return text, "plain"
+        return text, "raw_safe"
     return "[redacted]", "redacted"
 
 
@@ -632,10 +700,12 @@ def _redact_path(value: str) -> tuple[str, PolicyExplainRedactionState]:
         if not file_path:
             return "file://[redacted-path]", "redacted"
         return _redact_path(file_path)
+    if parsed.scheme and parsed.netloc:
+        return _redacted_url_origin(parsed), "sanitized"
     if _is_absolute_path(normalized):
         filename = normalized.rstrip("/").rsplit("/", 1)[-1]
         return (f".../{filename}" if filename else "[path]"), "sanitized"
-    return normalized, "plain"
+    return normalized, "raw_safe"
 
 
 def _redact_domain(value: str) -> tuple[str, PolicyExplainRedactionState]:
@@ -643,19 +713,31 @@ def _redact_domain(value: str) -> tuple[str, PolicyExplainRedactionState]:
     if parsed.scheme.lower() == "file":
         return _redact_path(value)
     if parsed.scheme and parsed.netloc:
-        host = parsed.hostname or "[domain]"
-        try:
-            port = parsed.port
-        except ValueError:
-            port = None
-        if port is not None:
-            host = f"{host}:{port}"
-        return f"{parsed.scheme}://{host}", "sanitized"
+        return _redacted_url_origin(parsed), "sanitized"
     sanitized = value.split("?", 1)[0].split("#", 1)[0]
     if "@" in sanitized:
         sanitized = sanitized.rsplit("@", 1)[-1]
-    state: PolicyExplainRedactionState = "sanitized" if sanitized != value else "plain"
+    state: PolicyExplainRedactionState = (
+        "sanitized" if sanitized != value else "raw_safe"
+    )
     return sanitized, state
+
+
+def _redacted_url_origin(parsed: Any) -> str:
+    host = parsed.hostname or "[domain]"
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    if port is not None:
+        host = f"{host}:{port}"
+    return f"{parsed.scheme}://{host}"
+
+
+def _skipped_contributors_for_mode(mode: PolicyExplainMode) -> list[str]:
+    if mode != PolicyExplainMode.STATIC_POLICY_ONLY:
+        return []
+    return list(STATIC_POLICY_ONLY_SKIPPED_CONTRIBUTORS)
 
 
 def _is_absolute_path(value: str) -> bool:

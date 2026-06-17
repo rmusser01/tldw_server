@@ -8,6 +8,7 @@ from mcp_unified.gateway.policy_explain import (
     GatewayPolicyExplainService,
     PolicyExplainRequest,
     ProfileToolPreviewRequest,
+    _redact_subject_value,
 )
 from mcp_unified.policy_grants import InMemoryPolicyGrantStore
 from mcp_unified.profiles import MCPProfile, ProfilePolicy
@@ -45,6 +46,11 @@ def _profile_with_rules(*, permission_rules: list[dict[str, str]]) -> MCPProfile
             permission_rules=permission_rules,
         ),
     )
+
+
+def test_subject_redaction_states_use_approved_contract() -> None:
+    assert _redact_subject_value("tool", "fs.patch")[1] == "raw_safe"
+    assert _redact_subject_value("path", "")[1] == "omitted"
 
 
 @pytest.mark.asyncio
@@ -202,6 +208,11 @@ async def test_explain_tool_call_static_policy_only_ignores_runtime_approval_gra
     assert static_response.final_outcome == "ask"
     assert static_response.reason_code == "approval_required"
     assert static_response.call_state == "approval_required"
+    assert set(static_response.skipped_contributors) >= {
+        "session_grants",
+        "approval_grants",
+        "runtime_availability",
+    }
 
 
 @pytest.mark.asyncio
@@ -228,6 +239,36 @@ async def test_explain_tool_call_redacts_file_uri_paths() -> None:
     assert "token=secret" not in rendered
     assert "fragment" not in rendered
     assert response.subjects[0].value == ".../app.py"
+
+
+@pytest.mark.asyncio
+async def test_explain_tool_call_redacts_url_shaped_path_subjects() -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: _profile(),
+        audit_store=audit,
+        actor_id="operator-1",
+    )
+
+    response = await service.explain_tool_call(
+        PolicyExplainRequest(
+            profile_id="backend-engineer",
+            tool_name="fs.patch",
+            arguments={
+                "path": "https://user:pass@api.example.test/path?token=secret#frag",
+            },
+        )
+    )
+
+    rendered = response.model_dump_json()
+    audit_payload = str(audit.events[0].payload)
+    assert "token=secret" not in rendered
+    assert "token=secret" not in audit_payload
+    assert "frag" not in rendered
+    assert "frag" not in audit_payload
+    assert "user:pass" not in rendered
+    assert "user:pass" not in audit_payload
+    assert response.subjects[0].value == "https://api.example.test"
 
 
 @pytest.mark.asyncio
@@ -332,6 +373,51 @@ async def test_explain_tool_call_unknown_simulator_status_fails_closed(
     assert response.degraded is True
     assert "unknown_policy_status" in response.degraded_reasons
     assert audit.events[0].payload["final_outcome"] == "deny"
+
+
+@pytest.mark.asyncio
+async def test_explain_tool_call_audits_profile_not_found_before_raising() -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: None,
+        audit_store=audit,
+        actor_id="operator-1",
+    )
+
+    with pytest.raises(GatewayPolicyExplainError) as exc_info:
+        await service.explain_tool_call(
+            PolicyExplainRequest(
+                profile_id="missing-profile",
+                tool_name="Bash(echo TOPSECRET)",
+                arguments={"path": "/Users/example/project/src/app.py"},
+            )
+        )
+
+    assert exc_info.value.reason_code == "profile_not_found"
+    assert audit.events[0].event_type == "policy.explain.requested"
+    assert audit.events[0].payload["reason_code"] == "profile_not_found"
+    assert "TOPSECRET" not in str(audit.events[0].payload)
+    assert "/Users/example" not in str(audit.events[0].payload)
+
+
+@pytest.mark.asyncio
+async def test_preview_profile_tools_audits_profile_not_found_before_raising() -> None:
+    audit = _MemoryAuditStore()
+    service = GatewayPolicyExplainService(
+        profile_resolver=lambda profile_id: None,
+        audit_store=audit,
+        actor_id="operator-1",
+    )
+
+    with pytest.raises(GatewayPolicyExplainError) as exc_info:
+        await service.preview_profile_tools(
+            ProfileToolPreviewRequest(profile_id="missing-profile")
+        )
+
+    assert exc_info.value.reason_code == "profile_not_found"
+    assert audit.events[0].event_type == "policy.preview_tools.requested"
+    assert audit.events[0].payload["reason_code"] == "profile_not_found"
+    assert audit.events[0].payload["profile_id"] == "missing-profile"
 
 
 @pytest.mark.asyncio
