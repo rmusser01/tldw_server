@@ -4,7 +4,7 @@ title: Run MCP policy explain full verification and security scan
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-17 07:51'
+updated_date: '2026-06-17 07:52'
 labels:
   - mcp
   - policy
@@ -50,6 +50,11 @@ Verification commands and results:
 - git diff --check -> clean.
 
 Known note: branch remains behind origin/dev by 3 commits; no rebase was requested during this verification task.
+
+Supplemental verification for the explicit plan Task 7 steps also passed:
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/MCP_unified/test_mcp_http_auth_paths.py tldw_Server_API/tests/MCP_unified/test_mcp_config_sanitization.py -v -> 22 passed, 3 warnings. The command emitted expected test telemetry for invalid media.search requests while tests passed.
+- /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python import smoke for from mcp_unified.gateway import GatewayPolicyExplainService, PolicyExplainRequest -> printed GatewayPolicyExplainService PolicyExplainRequest.
+- git status --short remained clean before appending this verification note.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
