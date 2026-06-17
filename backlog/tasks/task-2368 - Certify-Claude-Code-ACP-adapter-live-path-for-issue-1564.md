@@ -53,12 +53,14 @@ Docs/superpowers/plans/2026-06-17-claude-acp-live-certification.md
 - Updated Claude Code registry/docs from `documented_unverified` / `documented_only` to `supported_with_caveats` / `live_e2e_tested` only for the verified macOS host runner profile.
 - Preserved caveats for the external adapter requirement, artifact-producing workflows, non-empty MCP injection, sandbox behavior, reviewer-loop behavior, diagnostics payloads, and unverified host profiles.
 - Added regression coverage for the seeded Claude profile and registry manifest metadata.
+- PR maintenance pass rebased on `origin/dev` (branch was already up to date) and addressed all current Gemini/Qodo review threads: moved Claude Code ACP under the supported setup section, replaced machine-specific plan venv paths with `source .venv/bin/activate`, and revised `agents.yaml` notes to include reproducible command/runtime setup while moving ephemeral branch/commit/session details to the compatibility matrix.
+- Review-pass verification: focused ACP registry/smoke suite passed with `83 passed, 6 warnings`; ACP health suite passed with `21 passed, 6 warnings`. No Python files changed in the review pass, so no new Bandit run was required beyond the existing PR Bandit record.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Claude Code ACP via pinned @agentclientprotocol/claude-agent-acp@0.40.0 is now documented and seeded as supported_with_caveats/live_e2e_tested for the verified macOS host runner profile. Remaining caveats are explicitly preserved for the external adapter requirement, artifact-producing workflows, non-empty MCP injection, sandbox behavior, reviewer-loop behavior, diagnostics payloads, and unverified host profiles. Verification: focused ACP registry/smoke suite passed; ACP health suite passed; Bandit on touched Python tests produced only pytest B101 assert findings and passed with B101 skipped.
+Claude Code ACP via pinned @agentclientprotocol/claude-agent-acp@0.40.0 is now documented and seeded as supported_with_caveats/live_e2e_tested for the verified macOS host runner profile. Remaining caveats are explicitly preserved for the external adapter requirement, artifact-producing workflows, non-empty MCP injection, sandbox behavior, reviewer-loop behavior, diagnostics payloads, and unverified host profiles. PR review feedback was addressed and the branch was checked against latest origin/dev. Verification: focused ACP registry/smoke suite passed; ACP health suite passed; Bandit on touched Python tests produced only pytest B101 assert findings and passed with B101 skipped.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

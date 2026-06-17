@@ -43,7 +43,7 @@
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_registry_entrypoint_strategy.py tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py -q
 ```
 
@@ -132,7 +132,7 @@ If both direct and backend live gates passed, change expected Claude seed suppor
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_registry_entrypoint_strategy.py::test_seeded_claude_code_profile_uses_current_external_acp_adapter_candidate tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py -q
 ```
 
@@ -158,7 +158,7 @@ Result: PASS, `2 passed, 6 warnings in 1.79s`.
 Run:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_registry_entrypoint_strategy.py tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py -q
 ```
 
@@ -169,7 +169,7 @@ Result: PASS, `83 passed, 6 warnings in 2.12s`; ACP health coverage also passed 
 Run if Python files changed:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source .venv/bin/activate
 python -m bandit -r tldw_Server_API/tests/Agent_Client_Protocol/test_registry_entrypoint_strategy.py tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py -f json -o /tmp/bandit_claude_acp_live_certification.json
 ```
 

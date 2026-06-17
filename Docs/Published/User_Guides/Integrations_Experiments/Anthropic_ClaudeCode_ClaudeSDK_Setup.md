@@ -2,15 +2,12 @@
 
 This guide is the Anthropic equivalent of first-time provider setup for `tldw_server`, with focus on Claude Code and Claude SDK workflows.
 
-## Support Status (As of June 3, 2026)
+## Support Status (As of June 17, 2026)
 
 Currently supported:
 
 - Anthropic via API key (`ANTHROPIC_API_KEY`) for server-side model calls
 - Anthropic BYOK API-key storage in multi-user mode
-
-Documented but not live-certified:
-
 - Claude Code through ACP is supported with caveats through the pinned external `@agentclientprotocol/claude-agent-acp@0.40.0` adapter on the verified macOS host runner profile. Sandbox, artifact-producing workflows, non-empty MCP injection, reviewer-loop behavior, and other host profiles remain unverified.
 
 Not yet supported:
