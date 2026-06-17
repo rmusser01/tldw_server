@@ -23,6 +23,8 @@ surface for early standalone gateway work.
   helpers.
 - Metadata-only tool-use reporting for aggregate profile, model, tool, and
   prompt-version analysis.
+- Configurable package-level tool-call hook manager primitives for embedders
+  that need ordered pre/post policy, approval, or audit hooks.
 - Package-local filesystem advisory lock backends for coordinating
   read-before-mutate workflows. The memory backend is the default.
   An optional SQLite backend can coordinate cooperating processes that point at
@@ -198,6 +200,38 @@ store for CLI reporting, export, and cleanup commands.
 
 See [USER_GUIDE.md](USER_GUIDE.md) for report, export, cleanup, privacy, and
 future evaluation workflow details.
+
+## Tool-Call Hooks
+
+The package includes a host-neutral `ConfiguredToolCallHookManager` for
+embedding pre/post tool-call hooks through `MCPRuntimeDependencies`. Pre-hooks
+run in configured order and stop at the first `deny`, `ask`, or
+`approval_required` decision. Post-hooks run after tool completion and continue
+after individual post-hook failures so the original tool result or error is
+preserved.
+
+```python
+from mcp_unified.tool_hooks import (
+    ConfiguredToolCallHookManager,
+    ToolHookRegistration,
+)
+
+hook_manager = ConfiguredToolCallHookManager(
+    [
+        ToolHookRegistration(
+            hook_id="profile-policy",
+            before=check_profile_policy,
+            after=record_profile_observation,
+            order=10,
+        )
+    ]
+)
+```
+
+Hook summaries are metadata-only and can be attached to tool-use reporting
+events when reporting is enabled. Gateway JSON/admin configuration for hook
+registries is intentionally left to a later surface; this slice provides the
+package API and protocol/reporting integration.
 
 ## Documentation
 

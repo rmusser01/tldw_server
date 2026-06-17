@@ -44,6 +44,7 @@ from mcp_unified.tool_use_reporting.builders import (
 )
 from mcp_unified.tool_use_reporting.models import (
     MAX_FILE_POLICY_DECISIONS,
+    MAX_TOOL_HOOK_RESULTS,
     ToolUseEvent,
     ToolUseStatus,
 )
@@ -706,6 +707,68 @@ class MCPProtocol:
         return [dict(decision) for decision in bounded_decisions if isinstance(decision, dict)]
 
     @staticmethod
+    def _tool_use_hook_results(metadata: dict[str, Any] | None) -> list[dict[str, Any]]:
+        """Extract bounded tool-hook result metadata from request metadata."""
+
+        if not isinstance(metadata, dict):
+            return []
+        raw_results = metadata.get("mcp_tool_hook_results")
+        if not isinstance(raw_results, list):
+            return []
+        bounded_results = raw_results[:MAX_TOOL_HOOK_RESULTS]
+        return [dict(result) for result in bounded_results if isinstance(result, dict)]
+
+    @staticmethod
+    def _tool_hook_summary_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return sanitized hook summary rows from a protocol hook payload."""
+
+        metadata = payload.get("metadata")
+        if isinstance(metadata, dict):
+            hook_results = metadata.get("hook_results")
+            if isinstance(hook_results, list):
+                return [
+                    dict(item)
+                    for item in hook_results[:MAX_TOOL_HOOK_RESULTS]
+                    if isinstance(item, dict)
+                ]
+
+        row: dict[str, Any] = {
+            "phase": payload.get("phase"),
+            "action": payload.get("action"),
+            "status": payload.get("status"),
+        }
+        if payload.get("reason_code") is not None:
+            row["reason_code"] = payload.get("reason_code")
+        if payload.get("error_type") is not None:
+            row["error_type"] = payload.get("error_type")
+        if isinstance(metadata, dict):
+            if metadata.get("hook_id") is not None:
+                row["hook_id"] = metadata.get("hook_id")
+            if metadata.get("hook_order") is not None:
+                row["hook_order"] = metadata.get("hook_order")
+        elif payload.get("hook_id") is not None:
+            row["hook_id"] = payload.get("hook_id")
+            if payload.get("hook_order") is not None:
+                row["hook_order"] = payload.get("hook_order")
+        return [row]
+
+    @staticmethod
+    def _append_tool_hook_summary(context: RequestContext, payload: dict[str, Any]) -> None:
+        """Append safe hook metadata for tool-use reporting."""
+
+        metadata = getattr(context, "metadata", None)
+        if not isinstance(metadata, dict):
+            return
+        existing = metadata.get("mcp_tool_hook_results")
+        if not isinstance(existing, list):
+            existing = []
+            metadata["mcp_tool_hook_results"] = existing
+        remaining = max(0, MAX_TOOL_HOOK_RESULTS - len(existing))
+        if remaining <= 0:
+            return
+        existing.extend(MCPProtocol._tool_hook_summary_items(payload)[:remaining])
+
+    @staticmethod
     def _tool_use_decision_grant_outcome(file_policy_decisions: list[dict[str, Any]]) -> str | None:
         """Summarize path-decision grant outcomes with denial precedence."""
 
@@ -797,6 +860,7 @@ class MCPProtocol:
         """Build a metadata-only tool-use event."""
         metadata = getattr(context, "metadata", {})
         dimensions = extract_safe_context_dimensions(metadata if isinstance(metadata, dict) else None)
+        hook_results = self._tool_use_hook_results(metadata if isinstance(metadata, dict) else None)
         eval_metadata = self._tool_use_eval_metadata(payload=payload, tool_def=tool_def)
         safe_requested_name = self._safe_tool_use_name(requested_tool_name)
         safe_effective_name = self._safe_tool_use_name(effective_tool_name or safe_requested_name)
@@ -848,6 +912,7 @@ class MCPProtocol:
             grant_outcome=eval_metadata.get("grant_outcome") or decision_grant_outcome,
             truncated=eval_metadata.get("truncated"),
             file_policy_decisions=file_policy_decisions,
+            tool_hook_results=hook_results,
             file_policy_sha256_before_present=file_policy_sha256_before_present,
             file_policy_sha256_after_present=file_policy_sha256_after_present,
             file_policy_lock_lease_present=file_policy_lock_lease_present,
@@ -1698,6 +1763,13 @@ class MCPProtocol:
                 "reason_code": "tool_hook_unavailable",
                 "error_type": exc.__class__.__name__,
             }
+            hook_id = getattr(exc, "hook_id", None)
+            if hook_id is not None:
+                payload["hook_id"] = hook_id
+            hook_order = getattr(exc, "hook_order", None)
+            if hook_order is not None:
+                payload["hook_order"] = hook_order
+            self._append_tool_hook_summary(context, payload)
             raise GovernanceDeniedError(
                 "Permission denied by MCP tool hook",
                 governance={
@@ -1710,6 +1782,8 @@ class MCPProtocol:
 
         decision = self._coerce_tool_hook_decision(raw_decision)
         payload = self._tool_hook_payload(decision, phase="pre")
+        if raw_decision is not None:
+            self._append_tool_hook_summary(context, payload)
         action = str(payload.get("action") or "allow").strip().lower()
         if action == "allow":
             return payload
@@ -1774,7 +1848,7 @@ class MCPProtocol:
             error=error,
         )
         try:
-            await self._tool_call_hook_manager.after_tool_call(hook_context)
+            raw_decision = await self._tool_call_hook_manager.after_tool_call(hook_context)
         except asyncio.CancelledError:
             raise
         except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
@@ -1787,6 +1861,25 @@ class MCPProtocol:
                 status,
                 exc.__class__.__name__,
             )
+            payload = {
+                "phase": "post",
+                "action": "deny",
+                "status": "error",
+                "reason_code": "tool_hook_unavailable",
+                "error_type": exc.__class__.__name__,
+            }
+            hook_id = getattr(exc, "hook_id", None)
+            if hook_id is not None:
+                payload["hook_id"] = hook_id
+            hook_order = getattr(exc, "hook_order", None)
+            if hook_order is not None:
+                payload["hook_order"] = hook_order
+            self._append_tool_hook_summary(context, payload)
+            return
+        if raw_decision is not None:
+            decision = self._coerce_tool_hook_decision(raw_decision)
+            payload = self._tool_hook_payload(decision, phase="post")
+            self._append_tool_hook_summary(context, payload)
 
     async def process_request(
         self,

@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from mcp_unified.tool_use_reporting.models import MAX_FILE_POLICY_DECISIONS, ToolUseEvent
+from mcp_unified.interfaces.runtime import ToolHookCallContext, ToolHookDecision
 
 from tldw_Server_API.app.core.MCP_unified.auth.rate_limiter import RateLimitExceeded
 from tldw_Server_API.app.core.MCP_unified.protocol import (
@@ -35,6 +36,31 @@ class _FailingToolUseRecorder:
     async def record_tool_use(self, event: ToolUseEvent) -> None:
         self.called = True
         raise RuntimeError(f"do not leak {event.requested_tool_name}")
+
+
+class _DenyingToolHookManager:
+    async def before_tool_call(self, _context: ToolHookCallContext) -> ToolHookDecision:
+        return ToolHookDecision(
+            action="deny",
+            reason_code="blocked_by_profile_hook",
+            message="blocked by hook",
+            metadata={
+                "hook_id": "profile-policy",
+                "hook_order": 10,
+                "path": "/Users/example/private.txt",
+            },
+        )
+
+    async def after_tool_call(self, _context: ToolHookCallContext) -> None:
+        return None
+
+
+class _FailingPostToolHookManager:
+    async def before_tool_call(self, _context: ToolHookCallContext) -> None:
+        return None
+
+    async def after_tool_call(self, _context: ToolHookCallContext) -> None:
+        raise RuntimeError("post hook failed for /Users/example/private.txt")
 
 
 class _AllowAllRbac:
@@ -290,6 +316,7 @@ def _protocol(
     rate_limiter: Any | None = None,
     effective_policy: dict[str, Any] | None = None,
     path_scope_enforcer: Any | None = None,
+    hook_manager: Any | None = None,
 ) -> tuple[MCPProtocol, Any]:
     recorder = recorder or _RecordingToolUseRecorder()
     module = module or _ToolModule()
@@ -305,6 +332,7 @@ def _protocol(
         path_scope_enforcer=path_scope_enforcer or _FilePolicyPathScopeEnforcer(),
         redis_client_factory=lambda **kwargs: None,
         tool_use_recorder=recorder,
+        tool_call_hook_manager=hook_manager,
     )
     protocol = MCPProtocol(dependencies=deps)
     return protocol, recorder
@@ -591,6 +619,55 @@ async def test_protocol_records_prepare_denial_without_raw_error() -> None:
     assert event.status == "denied"
     assert event.reason_code == "permission_denied"
     assert "/Users/me" not in event.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_protocol_records_pre_hook_denial_metadata_without_raw_payload() -> None:
+    protocol, recorder = _protocol(hook_manager=_DenyingToolHookManager())
+
+    with pytest.raises(GovernanceDeniedError):
+        await protocol._handle_tools_call(
+            {"name": "test.read", "arguments": {"path": "/Users/example/private.txt"}},
+            _request_context(metadata={"profile_id": "backend-engineer"}),
+        )
+
+    event = recorder.events[-1]
+    assert event.execution_origin == "failed_before_execution"
+    assert event.status == "denied"
+    assert event.reason_code == "blocked_by_profile_hook"
+    assert len(event.tool_hook_results) == 1
+    hook_result = event.tool_hook_results[0]
+    assert hook_result.phase == "pre"
+    assert hook_result.hook_id == "profile-policy"
+    assert hook_result.hook_order == 10
+    assert hook_result.action == "deny"
+    assert hook_result.status == "deny"
+    assert hook_result.reason_code == "blocked_by_profile_hook"
+    dumped = event.model_dump_json()
+    assert "/Users/example" not in dumped
+    assert "blocked by hook" not in dumped
+
+
+@pytest.mark.asyncio
+async def test_protocol_records_post_hook_failure_without_changing_success() -> None:
+    protocol, recorder = _protocol(hook_manager=_FailingPostToolHookManager())
+
+    response = await protocol._handle_tools_call(
+        {"name": "test.read", "arguments": {"value": "ok"}},
+        _request_context(metadata={"profile_id": "backend-engineer"}),
+    )
+
+    assert response["tool"] == "test.read"
+    event = recorder.events[-1]
+    assert event.status == "success"
+    assert len(event.tool_hook_results) == 1
+    hook_result = event.tool_hook_results[0]
+    assert hook_result.phase == "post"
+    assert hook_result.status == "error"
+    assert hook_result.action == "deny"
+    assert hook_result.reason_code == "tool_hook_unavailable"
+    assert hook_result.error_type == "RuntimeError"
+    assert "/Users/example" not in event.model_dump_json()
 
 
 @pytest.mark.asyncio

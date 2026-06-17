@@ -40,6 +40,7 @@ MAX_REPORT_EVENT_LIMIT = 5_000
 MAX_REPORT_GROUP_LIMIT = 500
 MAX_REPORT_REASON_CODE_LIMIT = 25
 MAX_FILE_POLICY_DECISIONS = 20
+MAX_TOOL_HOOK_RESULTS = 20
 MAX_FILE_POLICY_PATH_LENGTH = 512
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -163,6 +164,61 @@ class FilePolicyDecisionMetadata(BaseModel):
         return True
 
 
+class ToolHookResultMetadata(BaseModel):
+    """Safe metadata for one tool-call hook decision attached to a tool event."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    phase: str | None = None
+    hook_id: str | None = None
+    hook_order: int | None = None
+    action: str | None = None
+    status: str | None = None
+    reason_code: str | None = None
+    error_type: str | None = None
+    redacted: bool = True
+
+    @field_validator(
+        "phase",
+        "hook_id",
+        "action",
+        "status",
+        "error_type",
+        mode="before",
+    )
+    @classmethod
+    def _sanitize_optional_ids(cls, value: Any, info: Any) -> str | None:
+        """Sanitize bounded scalar hook fields."""
+
+        return _safe_optional_id(value, field=str(info.field_name))
+
+    @field_validator("reason_code", mode="before")
+    @classmethod
+    def _sanitize_hook_reason_code(cls, value: Any) -> str | None:
+        """Sanitize hook reason codes without preserving raw paths."""
+
+        return sanitize_reason_code(value)
+
+    @field_validator("hook_order", mode="before")
+    @classmethod
+    def _normalize_hook_order(cls, value: Any) -> int | None:
+        """Normalize hook order metadata when present."""
+
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @field_validator("redacted", mode="before")
+    @classmethod
+    def _force_redacted(cls, _value: Any) -> bool:
+        """Hook event metadata is always stored as redacted."""
+
+        return True
+
+
 class ToolUseEvent(BaseModel):
     """Immutable metadata-only record for one attempted MCP tool call."""
 
@@ -210,6 +266,7 @@ class ToolUseEvent(BaseModel):
     idempotency_replay: bool = False
     capture_ref: str | None = None
     file_policy_decisions: tuple[FilePolicyDecisionMetadata, ...] = ()
+    tool_hook_results: tuple[ToolHookResultMetadata, ...] = ()
     file_policy_sha256_before_present: bool | None = None
     file_policy_sha256_after_present: bool | None = None
     file_policy_lock_lease_present: bool | None = None
@@ -279,6 +336,17 @@ class ToolUseEvent(BaseModel):
         if not isinstance(value, list | tuple):
             return []
         return list(value[:MAX_FILE_POLICY_DECISIONS])
+
+    @field_validator("tool_hook_results", mode="before")
+    @classmethod
+    def _bound_tool_hook_results(cls, value: Any) -> list[Any]:
+        """Bound tool-hook result metadata cardinality."""
+
+        if value is None:
+            return []
+        if not isinstance(value, list | tuple):
+            return []
+        return list(value[:MAX_TOOL_HOOK_RESULTS])
 
     @field_validator("duration_ms", mode="before")
     @classmethod
