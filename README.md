@@ -1183,7 +1183,7 @@ flowchart LR
   Scheduler["Scheduler"]:::core
   ResourceGov["Resource Governance"]:::core
 
-  subgraph PERUSER["Per-user SQLite (Databases/user_databases/&lt;user_id&gt;/)"]
+  subgraph PERUSER["Per-user SQLite (Databases/user_databases/<user_id>/)"]
     dbMedia[("Media_DB_v2.db")]:::db
     dbChaCha[("ChaChaNotes.db")]:::db
     dbPrompts[("prompts_user_dbs/user_prompts_v2.sqlite")]:::db
