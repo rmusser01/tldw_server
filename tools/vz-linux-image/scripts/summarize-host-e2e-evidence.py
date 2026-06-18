@@ -127,24 +127,53 @@ def _missing_evidence_dir_warning(evidence_dir: Path) -> str:
     )
 
 
-def _classify_evidence_dir_open_error(evidence_dir: Path, exc: OSError) -> str:
-    if isinstance(exc, FileNotFoundError):
+def _classify_evidence_dir_open_error(
+    evidence_dir: Path,
+    exc: OSError,
+    *,
+    parent_fd: int | None = None,
+    component: str | None = None,
+) -> str:
+    if parent_fd is not None and component is not None:
+        try:
+            metadata = os.stat(component, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return _missing_evidence_dir_warning(evidence_dir)
+        except OSError:
+            pass
+        else:
+            if stat.S_ISLNK(metadata.st_mode):
+                return f"warning: evidence directory is a symlink or contains a symlink and was not read: {evidence_dir}"
+            if not stat.S_ISDIR(metadata.st_mode):
+                return f"warning: evidence path is not a directory and was not read: {evidence_dir}"
+    if isinstance(exc, FileNotFoundError) or exc.errno == errno.ENOENT:
         return _missing_evidence_dir_warning(evidence_dir)
     if exc.errno == errno.ELOOP:
-        return f"warning: evidence directory is a symlink and was not read: {evidence_dir}"
-    try:
-        metadata = evidence_dir.lstat()
-    except FileNotFoundError:
-        return _missing_evidence_dir_warning(evidence_dir)
-    except OSError:
-        return f"warning: evidence directory cannot be safely opened: {type(exc).__name__}: {exc}"
-    if stat.S_ISLNK(metadata.st_mode):
-        return f"warning: evidence directory is a symlink and was not read: {evidence_dir}"
-    if not stat.S_ISDIR(metadata.st_mode):
+        return f"warning: evidence directory is a symlink or contains a symlink and was not read: {evidence_dir}"
+    if exc.errno == errno.ENOTDIR:
         return f"warning: evidence path is not a directory and was not read: {evidence_dir}"
     if exc.errno in {errno.EACCES, errno.EPERM}:
         return f"warning: evidence directory is unreadable and was not read: {evidence_dir}"
-    return f"warning: evidence directory cannot be safely opened: {type(exc).__name__}: {exc}"
+    return f"warning: evidence directory path is unsafe or unavailable: {type(exc).__name__}: {exc}"
+
+
+def _evidence_dir_components(evidence_dir: Path) -> tuple[str, list[str], str | None]:
+    parts = evidence_dir.parts
+    if evidence_dir.is_absolute():
+        start_path = os.sep
+        raw_components = list(parts[1:])
+    else:
+        start_path = "."
+        raw_components = list(parts)
+
+    components: list[str] = []
+    for component in raw_components:
+        if component in ("", "."):
+            continue
+        if component == "..":
+            return start_path, [], "warning: evidence directory path contains unsafe '..' component and was not read"
+        components.append(component)
+    return start_path, components, None
 
 
 def _open_evidence_dir(evidence_dir: Path) -> EvidenceDirHandle:
@@ -160,9 +189,13 @@ def _open_evidence_dir(evidence_dir: Path) -> EvidenceDirHandle:
             ],
         )
 
+    start_path, components, component_warning = _evidence_dir_components(evidence_dir)
+    if component_warning is not None:
+        return EvidenceDirHandle(path=evidence_dir, fd=None, warnings=[component_warning])
+
     fd: int | None = None
     try:
-        fd = os.open(evidence_dir, _open_dir_flags())
+        fd = os.open(start_path, _open_dir_flags())
         metadata = os.fstat(fd)
     except OSError as exc:
         if fd is not None:
@@ -179,6 +212,41 @@ def _open_evidence_dir(evidence_dir: Path) -> EvidenceDirHandle:
             fd=None,
             warnings=[f"warning: evidence path is not a directory and was not read: {evidence_dir}"],
         )
+    for component in components:
+        next_fd: int | None = None
+        try:
+            next_fd = os.open(component, _open_dir_flags(), dir_fd=fd)
+        except OSError as exc:
+            warning = _classify_evidence_dir_open_error(
+                evidence_dir,
+                exc,
+                parent_fd=fd,
+                component=component,
+            )
+            os.close(fd)
+            return EvidenceDirHandle(
+                path=evidence_dir,
+                fd=None,
+                warnings=[warning],
+            )
+        os.close(fd)
+        fd = next_fd
+        try:
+            metadata = os.fstat(fd)
+        except OSError as exc:
+            os.close(fd)
+            return EvidenceDirHandle(
+                path=evidence_dir,
+                fd=None,
+                warnings=[f"warning: evidence directory cannot be safely opened: {type(exc).__name__}: {exc}"],
+            )
+        if not stat.S_ISDIR(metadata.st_mode):
+            os.close(fd)
+            return EvidenceDirHandle(
+                path=evidence_dir,
+                fd=None,
+                warnings=[f"warning: evidence path is not a directory and was not read: {evidence_dir}"],
+            )
     return EvidenceDirHandle(path=evidence_dir, fd=fd, warnings=[])
 
 

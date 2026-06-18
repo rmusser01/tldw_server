@@ -189,6 +189,32 @@ def test_evidence_directory_symlink_is_warned_and_target_is_not_read(tmp_path: P
         assert evidence_file in result.stdout
 
 
+def test_intermediate_parent_symlink_is_warned_and_target_is_not_read(tmp_path: Path) -> None:
+    target_dir = tmp_path / "target"
+    target_evidence_dir = target_dir / "evidence"
+    target_evidence_dir.mkdir(parents=True)
+    target_secret = "intermediate-parent-symlink-target-should-not-appear"
+    (target_evidence_dir / "host-smoke-evidence.json").write_text(
+        json.dumps({"smoke_run_id": target_secret}),
+        encoding="utf-8",
+    )
+    link_parent = tmp_path / "link-parent"
+    link_parent.symlink_to(target_dir, target_is_directory=True)
+
+    result = _run_summary(link_parent / "evidence")
+
+    _assert_advisory_success(result)
+    assert "warning" in result.stdout.lower()
+    assert (
+        "symlink" in result.stdout.lower()
+        or "unsafe" in result.stdout.lower()
+        or "unavailable" in result.stdout.lower()
+    )
+    assert target_secret not in result.stdout
+    for evidence_file in EXPECTED_EVIDENCE_FILES:
+        assert evidence_file in result.stdout
+
+
 def test_partial_evidence_without_json_warns_and_checks_files(tmp_path: Path) -> None:
     evidence_dir = tmp_path / "evidence"
     evidence_dir.mkdir()
