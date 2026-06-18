@@ -708,11 +708,11 @@ class MCPProtocol:
 
     @staticmethod
     def _tool_use_hook_results(metadata: dict[str, Any] | None) -> list[dict[str, Any]]:
-        """Extract bounded tool-hook result metadata from request metadata."""
+        """Consume bounded tool-hook result metadata from request metadata."""
 
         if not isinstance(metadata, dict):
             return []
-        raw_results = metadata.get("mcp_tool_hook_results")
+        raw_results = metadata.pop("mcp_tool_hook_results", None)
         if not isinstance(raw_results, list):
             return []
         bounded_results = raw_results[:MAX_TOOL_HOOK_RESULTS]

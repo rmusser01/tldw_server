@@ -7,9 +7,9 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-
-from mcp_unified.tool_use_reporting.models import MAX_FILE_POLICY_DECISIONS, ToolUseEvent
 from mcp_unified.interfaces.runtime import ToolHookCallContext, ToolHookDecision
+from mcp_unified.tool_hooks import ConfiguredToolCallHookManager, ToolHookRegistration
+from mcp_unified.tool_use_reporting.models import MAX_FILE_POLICY_DECISIONS, ToolUseEvent
 
 from tldw_Server_API.app.core.MCP_unified.auth.rate_limiter import RateLimitExceeded
 from tldw_Server_API.app.core.MCP_unified.protocol import (
@@ -449,6 +449,44 @@ def test_protocol_file_policy_presence_ignores_empty_containers() -> None:
     assert event.file_policy_lock_lease_present is False
 
 
+def test_protocol_consumes_hook_results_per_tool_use_event() -> None:
+    protocol, _ = _protocol()
+    context = _request_context(
+        metadata={
+            "mcp_tool_hook_results": [
+                {
+                    "phase": "pre",
+                    "hook_id": "policy-hook",
+                    "hook_order": 4,
+                    "action": "deny",
+                    "status": "deny",
+                    "reason_code": "blocked",
+                }
+            ]
+        }
+    )
+
+    first_event = protocol._build_tool_use_event(
+        context=context,
+        requested_tool_name="test.read",
+        status="denied",
+        execution_origin="failed_before_execution",
+        duration_ms=0,
+    )
+    second_event = protocol._build_tool_use_event(
+        context=context,
+        requested_tool_name="test.read",
+        status="success",
+        execution_origin="executed",
+        duration_ms=0,
+    )
+
+    assert len(first_event.tool_hook_results) == 1
+    assert first_event.tool_hook_results[0].hook_id == "policy-hook"
+    assert "mcp_tool_hook_results" not in context.metadata
+    assert len(second_event.tool_hook_results) == 0
+
+
 @pytest.mark.asyncio
 async def test_protocol_records_successful_tool_use_event() -> None:
     protocol, recorder = _protocol()
@@ -649,6 +687,38 @@ async def test_protocol_records_pre_hook_denial_metadata_without_raw_payload() -
 
 
 @pytest.mark.asyncio
+async def test_protocol_records_pre_hook_failure_order_without_executing_tool() -> None:
+    async def fail_pre_hook(_context: ToolHookCallContext) -> ToolHookDecision:
+        raise RuntimeError("policy backend failed")
+
+    hook_manager = ConfiguredToolCallHookManager(
+        [ToolHookRegistration(hook_id="policy-backend", before=fail_pre_hook, order=12)]
+    )
+    module = _ToolModule()
+    protocol, recorder = _protocol(module=module, hook_manager=hook_manager)
+
+    with pytest.raises(GovernanceDeniedError):
+        await protocol._handle_tools_call(
+            {"name": "test.read", "arguments": {"value": "ok"}},
+            _request_context(metadata={"profile_id": "backend-engineer"}),
+        )
+
+    assert module.calls == 0
+    event = recorder.events[-1]
+    assert event.execution_origin == "failed_before_execution"
+    assert event.status == "denied"
+    assert event.reason_code == "tool_hook_unavailable"
+    assert len(event.tool_hook_results) == 1
+    hook_result = event.tool_hook_results[0]
+    assert hook_result.phase == "pre"
+    assert hook_result.hook_id == "policy-backend"
+    assert hook_result.hook_order == 12
+    assert hook_result.status == "deny"
+    assert hook_result.reason_code == "tool_hook_unavailable"
+    assert hook_result.error_type == "ToolHookExecutionError"
+
+
+@pytest.mark.asyncio
 async def test_protocol_records_post_hook_failure_without_changing_success() -> None:
     protocol, recorder = _protocol(hook_manager=_FailingPostToolHookManager())
 
@@ -809,7 +879,7 @@ async def test_protocol_skips_when_tool_use_already_observed() -> None:
 async def test_protocol_records_execution_failure_without_raw_arguments() -> None:
     protocol, recorder = _protocol(module=_ToolModule(fail=ValueError("bad /Users/me/secret.txt")))
 
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidParamsException):
         await protocol._handle_tools_call(
             {"name": "test.read", "arguments": {"path": "/Users/me/secret.txt"}},
             _request_context(),
@@ -825,7 +895,7 @@ async def test_protocol_records_execution_failure_without_raw_arguments() -> Non
 async def test_protocol_records_unavailable_failure_origin_as_unavailable() -> None:
     protocol, recorder = _protocol(module=_ToolModule(fail=LookupError("missing tool")))
 
-    with pytest.raises(Exception):
+    with pytest.raises(LookupError):
         await protocol._handle_tools_call(
             {"name": "test.read", "arguments": {}},
             _request_context(),

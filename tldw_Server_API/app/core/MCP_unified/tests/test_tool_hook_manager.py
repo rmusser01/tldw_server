@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
 from mcp_unified.interfaces.runtime import ToolHookCallContext, ToolHookDecision
 from mcp_unified.tool_hooks import (
     ConfiguredToolCallHookManager,
@@ -98,21 +97,88 @@ async def test_configured_manager_skips_disabled_and_wrong_phase_hooks() -> None
 
 
 @pytest.mark.unit
+def test_configured_manager_rejects_empty_hook_phases() -> None:
+    async def record(_context: ToolHookCallContext) -> ToolHookDecision:
+        return ToolHookDecision(action="allow")
+
+    with pytest.raises(ValueError, match="phases must include at least one"):
+        ToolHookRegistration(hook_id="no-phases", before=record, phases=())
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_configured_manager_pre_hook_failure_identifies_failed_hook() -> None:
     async def explode(_context: ToolHookCallContext) -> ToolHookDecision:
         raise RuntimeError("hook backend unavailable")
 
     manager = ConfiguredToolCallHookManager(
-        [ToolHookRegistration(hook_id="policy-service", before=explode)]
+        [ToolHookRegistration(hook_id="policy-service", before=explode, order=15)]
     )
 
     with pytest.raises(ToolHookExecutionError) as exc_info:
         await manager.before_tool_call(_context())
 
     assert exc_info.value.hook_id == "policy-service"
+    assert exc_info.value.hook_order == 15
     assert exc_info.value.phase == "pre"
     assert exc_info.value.error_type == "RuntimeError"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_configured_manager_fails_closed_and_overwrites_spoofed_provenance() -> None:
+    async def malformed(_context: ToolHookCallContext) -> ToolHookDecision:
+        return ToolHookDecision(
+            action=False,  # type: ignore[arg-type]
+            reason_code="malformed_action",
+            metadata={"hook_id": "spoofed", "hook_order": 999},
+        )
+
+    manager = ConfiguredToolCallHookManager(
+        [ToolHookRegistration(hook_id="real-hook", before=malformed, order=7)]
+    )
+
+    decision = await manager.before_tool_call(_context())
+
+    assert decision.action == "deny"
+    assert decision.reason_code == "malformed_action"
+    assert decision.metadata["hook_id"] == "real-hook"
+    assert decision.metadata["hook_order"] == 7
+    assert decision.metadata["hook_results"] == [
+        {
+            "phase": "pre",
+            "hook_id": "real-hook",
+            "hook_order": 7,
+            "action": "deny",
+            "status": "deny",
+            "reason_code": "malformed_action",
+        }
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_configured_manager_reports_approval_required_as_ask() -> None:
+    async def approval_required(_context: ToolHookCallContext) -> ToolHookDecision:
+        return ToolHookDecision(action="approval_required", reason_code="needs_approval")
+
+    manager = ConfiguredToolCallHookManager(
+        [ToolHookRegistration(hook_id="approval-hook", before=approval_required, order=5)]
+    )
+
+    decision = await manager.before_tool_call(_context())
+
+    assert decision.action == "approval_required"
+    assert decision.metadata["hook_results"] == [
+        {
+            "phase": "pre",
+            "hook_id": "approval-hook",
+            "hook_order": 5,
+            "action": "ask",
+            "status": "ask",
+            "reason_code": "needs_approval",
+        }
+    ]
 
 
 @pytest.mark.unit

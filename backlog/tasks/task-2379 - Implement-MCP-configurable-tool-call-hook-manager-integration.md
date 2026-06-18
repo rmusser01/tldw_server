@@ -31,12 +31,12 @@ Add the first implementation slice after the MCP tool-call hook seam: a configur
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Runtime can be constructed with a concrete hook manager/registry without requiring host-specific code.
-- [ ] #2 Configured hooks execute in deterministic order for pre and post tool-call phases.
-- [ ] #3 Pre-hook failures fail closed with governance errors and do not execute the tool.
-- [ ] #4 Post-hook failures are observed/audited without changing the original tool result or error.
-- [ ] #5 Hook decisions and failures surface in existing tool-call audit/reporting metadata without logging sensitive payloads.
-- [ ] #6 Focused tests cover default no-op behavior, ordering, deny/failure handling, and post-hook non-interference.
+- [x] #1 Runtime can be constructed with a concrete hook manager/registry without requiring host-specific code.
+- [x] #2 Configured hooks execute in deterministic order for pre and post tool-call phases.
+- [x] #3 Pre-hook failures fail closed with governance errors and do not execute the tool.
+- [x] #4 Post-hook failures are observed/audited without changing the original tool result or error.
+- [x] #5 Hook decisions and failures surface in existing tool-call audit/reporting metadata without logging sensitive payloads.
+- [x] #6 Focused tests cover default no-op behavior, ordering, deny/failure handling, and post-hook non-interference.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -54,15 +54,15 @@ Docs/superpowers/plans/2026-06-17-mcp-configurable-tool-call-hooks-plan.md
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented a package-level configurable MCP tool-call hook manager with ordered pre/post registrations, first-blocking pre-hook behavior, pre-hook fail-closed errors, and post-hook failure continuation. Added metadata-only hook result rows to tool-use reporting and wired protocol hook decisions/failures into tool-use events without raw hook messages, callback metadata, tool arguments, or absolute paths. Updated package docs and manifest entries for the new hook package and reporting package. Validation after rebasing onto latest origin/dev: 212 focused MCP package/reporting/protocol tests passed; production Bandit passed with zero findings; full touched-scope Bandit only reported pytest B101 assert warnings; wheel build succeeded with a pre-existing setuptools license deprecation warning.
+Implemented a package-level configurable MCP tool-call hook manager with ordered pre/post registrations, first-blocking pre-hook behavior, pre-hook fail-closed errors, and post-hook failure continuation. Added metadata-only hook result rows to tool-use reporting and wired protocol hook decisions/failures into tool-use events without raw hook messages, callback metadata, tool arguments, or absolute paths. Review remediation added fail-closed normalization for malformed hook actions, authoritative manager hook provenance, hook_order on pre-hook execution failures, empty-phase registration rejection, approval_required-to-ask reporting normalization, and per-event hook result consumption. The Qodo exception-centralization suggestion was skipped because this is a standalone mcp_unified package exception and moving it into tldw_Server_API.app.core would break the package boundary; existing mcp_unified modules already use package-local exceptions. Validation after rebasing onto latest origin/dev: 245 focused MCP package/reporting/protocol tests passed; Ruff passed on modified Python files; production Bandit passed with zero findings; wheel build succeeded with a pre-existing setuptools license deprecation warning.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

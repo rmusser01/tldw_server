@@ -61,6 +61,7 @@ class ConfiguredToolCallHookManager:
             except Exception as exc:
                 raise ToolHookExecutionError(
                     hook_id=registration.hook_id,
+                    hook_order=registration.order,
                     phase="pre",
                     error_type=exc.__class__.__name__,
                 ) from exc
@@ -98,7 +99,7 @@ class ConfiguredToolCallHookManager:
                 raw_decision = await _maybe_await(callback(context))
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - post hooks must not suppress tool outcomes.
                 logger.warning(
                     "MCP post-tool hook failed; continuing. hook_id={} error_type={}",
                     registration.hook_id,
@@ -163,7 +164,9 @@ async def _maybe_await(value: ToolHookResult | Any) -> ToolHookResult:
 def _normalized_action(action: Any) -> ToolHookAction:
     """Return a supported hook action, defaulting invalid values to deny."""
 
-    normalized = str(action or "allow").strip().lower()
+    if not action:
+        return "deny"
+    normalized = str(action).strip().lower()
     if normalized in _VALID_HOOK_ACTIONS:
         return cast(ToolHookAction, normalized)
     return "deny"
@@ -173,7 +176,12 @@ def _coerce_decision(decision: ToolHookResult) -> ToolHookDecision:
     """Normalize callback return values into a typed decision."""
 
     if isinstance(decision, ToolHookDecision):
-        return decision
+        return ToolHookDecision(
+            action=_normalized_action(decision.action),
+            reason_code=decision.reason_code,
+            message=decision.message,
+            metadata=dict(decision.metadata) if isinstance(decision.metadata, dict) else {},
+        )
     if decision is None:
         return ToolHookDecision(action="allow")
     if isinstance(decision, dict):
@@ -203,14 +211,14 @@ def _hook_result_payload(
 ) -> dict[str, Any]:
     """Return safe metadata for one hook result."""
 
-    action = _normalized_action(decision.action)
-    status = "ask" if action == "approval_required" else action
+    normalized_action = _normalized_action(decision.action)
+    action = "ask" if normalized_action == "approval_required" else normalized_action
     payload: dict[str, Any] = {
         "phase": phase,
         "hook_id": registration.hook_id,
         "hook_order": registration.order,
         "action": action,
-        "status": status,
+        "status": action,
     }
     if decision.reason_code:
         payload["reason_code"] = str(decision.reason_code)
@@ -245,11 +253,11 @@ def _decision_with_manager_metadata(
     """Attach manager provenance to a blocking pre-hook decision."""
 
     metadata = dict(decision.metadata) if isinstance(decision.metadata, dict) else {}
-    metadata.setdefault("hook_id", registration.hook_id)
-    metadata.setdefault("hook_order", registration.order)
+    metadata["hook_id"] = registration.hook_id
+    metadata["hook_order"] = registration.order
     metadata["hook_results"] = list(results)
     return ToolHookDecision(
-        action=decision.action,
+        action=_normalized_action(decision.action),
         reason_code=decision.reason_code,
         message=decision.message,
         metadata=metadata,

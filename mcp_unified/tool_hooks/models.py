@@ -47,6 +47,10 @@ class ToolHookRegistration:
                 raise ValueError(f"Unsupported MCP tool hook phase: {phase!r}")
             if phase not in phases:
                 phases.append(phase)
+        if not phases:
+            raise ValueError(
+                "ToolHookRegistration.phases must include at least one of: 'pre', 'post'"
+            )
         object.__setattr__(self, "phases", tuple(phases))
 
         if self.hook is None and self.before is None and self.after is None:
@@ -60,11 +64,13 @@ class ToolHookExecutionError(RuntimeError):
         self,
         *,
         hook_id: str,
+        hook_order: int | None = None,
         phase: ToolHookPhase,
         error_type: str,
     ) -> None:
         super().__init__(f"MCP tool hook failed: {phase}:{hook_id}:{error_type}")
         self.hook_id = hook_id
+        self.hook_order = hook_order
         self.phase = phase
         self.error_type = error_type
 
