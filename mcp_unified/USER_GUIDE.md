@@ -681,18 +681,63 @@ Each event is one attempted MCP tool call. The stored metadata can include:
   and action family.
 - Grant, approval, installation, runtime availability, path-filter, truncation,
   idempotency replay, and nested-call indicators.
+- Bounded tool-call hook summaries: phase, hook id, hook order, action, status,
+  sanitized reason code, and sanitized error type.
 - UTC timestamp and integer epoch microseconds for stable ordering.
 
 This lets operators compare, for example, whether one profile mode has a higher
 tool-call success rate, whether a model is repeatedly denied a tool, or whether
 a new tool prompt version changes latency or reason-code distribution.
 
+### Package-Level Tool-Call Hooks
+
+Embedders can provide ordered pre/post hooks by constructing a
+`ConfiguredToolCallHookManager` and passing it through `MCPRuntimeDependencies`
+as `tool_call_hook_manager`.
+
+```python
+from mcp_unified.tool_hooks import (
+    ConfiguredToolCallHookManager,
+    ToolHookRegistration,
+)
+
+hook_manager = ConfiguredToolCallHookManager(
+    [
+        ToolHookRegistration(
+            hook_id="profile-policy",
+            before=check_profile_policy,
+            after=record_profile_observation,
+            order=10,
+        ),
+        ToolHookRegistration(
+            hook_id="approval-gate",
+            before=request_approval_if_needed,
+            phases=("pre",),
+            order=20,
+        ),
+    ]
+)
+```
+
+Pre-hooks run in ascending `order` and then by `hook_id`. The first pre-hook
+decision with `deny`, `ask`, or `approval_required` stops evaluation and is
+enforced by the protocol. If a pre-hook raises, the protocol fails closed and
+the tool is not executed. Post-hooks run after success or failure; individual
+post-hook failures are recorded as hook metadata and do not suppress the
+original tool result or error.
+
+Hook reporting is metadata-only. Stored events do not include hook messages,
+raw callback metadata, tool arguments, result payloads, raw exception messages,
+or absolute paths. Gateway JSON/admin configuration for hook registries is a
+future surface; this slice exposes the package API for hosts and tests.
+
 ### What Reporting Does Not Capture
 
 The metadata-only recorder does not capture tool arguments, tool result payloads,
-secret values, raw exception text, conversation messages, files, screenshots, or
-browser/page contents. The `capture_ref` field is only a future-safe reference
-slot; this slice does not create or store raw captures.
+secret values, raw exception text, hook messages, raw hook metadata,
+conversation messages, files, screenshots, or browser/page contents. The
+`capture_ref` field is only a future-safe reference slot; this slice does not
+create or store raw captures.
 
 ### Privacy, Retention, And Evaluations
 
