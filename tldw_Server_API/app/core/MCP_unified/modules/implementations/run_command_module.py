@@ -98,6 +98,7 @@ class RunCommandModule(BaseModule):
         command_text = str(args.get("command") or "").strip()
         timeout_seconds = self._timeout_seconds(args)
         cwd = self._cwd(args)
+        retain_output_artifacts = self._retain_output_artifacts(args)
         visible = await self._visible_commands_for_context(context)
         if command_text in {"help", "--help"}:
             return present_command_execution_result(
@@ -195,9 +196,11 @@ class RunCommandModule(BaseModule):
                 spill_dir=spill_dir,
                 byte_limit=preview_byte_limit,
                 line_limit=preview_line_limit,
+                include_artifact_handles=retain_output_artifacts,
             )
         finally:
-            await self._cleanup_spill_artifacts(result)
+            if not retain_output_artifacts:
+                await self._cleanup_spill_artifacts(result)
 
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
         if tool_name not in _RUN_TOOL_NAMES:
@@ -209,6 +212,8 @@ class RunCommandModule(BaseModule):
                 "cwd",
                 "idempotencyKey",
                 "idempotency_key",
+                "retainOutputArtifacts",
+                "retain_output_artifacts",
                 "timeoutSeconds",
                 "timeout_seconds",
                 "workingDirectory",
@@ -235,6 +240,7 @@ class RunCommandModule(BaseModule):
             raise ValueError("idempotencyKey and idempotency_key must match when both are provided")
         self._validate_timeout_arguments(arguments)
         self._validate_cwd_arguments(arguments)
+        self._validate_retain_output_artifact_arguments(arguments)
 
     def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
         """Sanitize input while allowing CLI flags like `--help` and shell-like tokens."""
@@ -319,6 +325,14 @@ class RunCommandModule(BaseModule):
                     "workingDirectory": {
                         "type": "string",
                         "description": "Alias for cwd.",
+                    },
+                    "retain_output_artifacts": {
+                        "type": "boolean",
+                        "description": "Legacy alias for retainOutputArtifacts.",
+                    },
+                    "retainOutputArtifacts": {
+                        "type": "boolean",
+                        "description": "Retain oversized output spill files and include redacted artifact handles.",
                     },
                     "timeout_seconds": {
                         "type": "number",
@@ -627,6 +641,42 @@ class RunCommandModule(BaseModule):
             return False
         windows_path = PureWindowsPath(text)
         return bool(PurePosixPath(text).is_absolute() or windows_path.is_absolute() or windows_path.drive)
+
+    @classmethod
+    def _validate_retain_output_artifact_arguments(cls, arguments: dict[str, Any]) -> None:
+        retain_output_artifacts = arguments.get("retain_output_artifacts")
+        retain_output_artifacts_camel = arguments.get("retainOutputArtifacts")
+        if retain_output_artifacts is not None:
+            cls._coerce_retain_output_artifacts(retain_output_artifacts, "retain_output_artifacts")
+        if retain_output_artifacts_camel is not None:
+            cls._coerce_retain_output_artifacts(retain_output_artifacts_camel, "retainOutputArtifacts")
+        if retain_output_artifacts is not None and retain_output_artifacts_camel is not None:
+            legacy_value = cls._coerce_retain_output_artifacts(
+                retain_output_artifacts,
+                "retain_output_artifacts",
+            )
+            camel_value = cls._coerce_retain_output_artifacts(
+                retain_output_artifacts_camel,
+                "retainOutputArtifacts",
+            )
+            if legacy_value != camel_value:
+                raise ValueError(
+                    "retainOutputArtifacts and retain_output_artifacts must match when both are provided"
+                )
+
+    @classmethod
+    def _retain_output_artifacts(cls, arguments: dict[str, Any]) -> bool:
+        for key in ("retainOutputArtifacts", "retain_output_artifacts"):
+            value = arguments.get(key)
+            if value is not None:
+                return cls._coerce_retain_output_artifacts(value, key)
+        return False
+
+    @staticmethod
+    def _coerce_retain_output_artifacts(value: Any, key: str) -> bool:
+        if not isinstance(value, bool):
+            raise ValueError(f"{key} must be a boolean")
+        return value
 
     @staticmethod
     def _unsupported_shell_feature_message(command_text: str) -> str | None:

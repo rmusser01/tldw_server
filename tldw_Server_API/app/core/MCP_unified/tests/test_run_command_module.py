@@ -204,6 +204,8 @@ async def test_run_module_exposes_governed_bash_and_shell_alias_tools() -> None:
         assert "timeoutSeconds" in alias["inputSchema"]["properties"]
         assert "cwd" in alias["inputSchema"]["properties"]
         assert "workingDirectory" in alias["inputSchema"]["properties"]
+        assert "retainOutputArtifacts" in alias["inputSchema"]["properties"]
+        assert "retain_output_artifacts" in alias["inputSchema"]["properties"]
 
 
 @pytest.mark.asyncio
@@ -871,6 +873,55 @@ async def test_run_cleans_up_internal_spill_files_after_rendering(tmp_path: Path
     assert "stored internally" in rendered
     assert spill_root.exists()
     assert list(spill_root.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_run_can_retain_spill_files_as_redacted_output_artifacts(tmp_path: Path) -> None:
+    protocol = _ProtocolStub()
+    protocol.read_text_content = "line\n" * 500
+    spill_root = tmp_path / "spills"
+    module = RunCommandModule(
+        ModuleConfig(
+            name="run",
+            settings={
+                "protocol": protocol,
+                "spill_dir": spill_root,
+                "spill_threshold_bytes": 32,
+            },
+        )
+    )
+    context = RequestContext(request_id="run-spill-retain", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool(
+        "run",
+        {"command": "cat notes.txt", "retainOutputArtifacts": True},
+        context=context,
+    )
+
+    retained = list(spill_root.iterdir())
+    assert len(retained) == 1
+    assert retained[0].read_text(encoding="utf-8") == protocol.read_text_content
+    assert "--- stdout truncated" in rendered
+    assert "artifact: mcp-run-output://stdout/" in rendered
+    assert retained[0].name in rendered
+    assert str(spill_root) not in rendered
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"command": "ls", "retainOutputArtifacts": "yes"},
+        {"command": "ls", "retain_output_artifacts": 1},
+        {"command": "ls", "retainOutputArtifacts": True, "retain_output_artifacts": False},
+    ],
+)
+@pytest.mark.asyncio
+async def test_run_rejects_invalid_retain_output_artifact_arguments(arguments: dict[str, Any]) -> None:
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+
+    with pytest.raises(ValueError, match="retainOutputArtifacts|retain_output_artifacts"):
+        await module.execute_tool("run", arguments, context=RequestContext(request_id="run-retain-invalid"))
 
 
 @pytest.mark.asyncio

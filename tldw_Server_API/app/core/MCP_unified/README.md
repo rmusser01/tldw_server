@@ -427,6 +427,8 @@ Phase-1 adds a governed virtual CLI foundation to MCP Unified.
 
 `cwd` / `workingDirectory` may be set to a workspace-relative directory for a single governed command chain. Relative file paths and search base paths are evaluated beneath that cwd, while absolute paths and final read/write decisions still flow through the backing MCP tools and profile policy. The cwd value rejects absolute paths, Windows drive roots, home-relative paths, and `..` traversal.
 
+`retainOutputArtifacts` / `retain_output_artifacts` may be set to keep oversized output spill files after rendering. Retained outputs are shown with redacted `mcp-run-output://...` handles rather than absolute filesystem paths; by default, spill files are deleted after the preview is rendered.
+
 Phase-1 command families:
 
 - Pure transforms (no MCP backend call): `grep`, `head`, `tail`, `json`
