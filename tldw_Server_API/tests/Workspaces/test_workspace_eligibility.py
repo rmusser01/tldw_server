@@ -178,7 +178,7 @@ def test_active_operation_rejects_unlinked_resource(service: WorkspaceEligibilit
     assert {action.action for action in result.recovery_actions} == {"link_to_active_workspace"}
 
 
-def test_active_operation_rejects_unsupported_resource_type(
+def test_active_operation_rejects_unlinked_supported_runtime_session_resource(
     service: WorkspaceEligibilityService,
 ) -> None:
     result = service.check(
@@ -191,8 +191,27 @@ def test_active_operation_rejects_unsupported_resource_type(
     )
 
     assert result.allowed is False
-    assert result.reason_code == "unsupported_resource_type"
+    assert result.reason_code == "resource_not_linked"
     assert result.resource_type == "acp_session"
+    assert result.resource_workspace_ids == []
+    assert {action.action for action in result.recovery_actions} == {"link_to_active_workspace"}
+
+
+def test_active_operation_rejects_unsupported_resource_type(
+    service: WorkspaceEligibilityService,
+) -> None:
+    result = service.check(
+        _request(
+            "acp_run",
+            resource_type=" acp_run ",
+            resource_id="run-1",
+            runtime_state="ready",
+        )
+    )
+
+    assert result.allowed is False
+    assert result.reason_code == "unsupported_resource_type"
+    assert result.resource_type == "acp_run"
     assert {action.action for action in result.recovery_actions} == {"wait_for_adapter"}
 
 

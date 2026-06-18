@@ -1557,13 +1557,13 @@ describe("WorkspaceHeader workspace browser modal", () => {
       within(modal).getByText("Identified two release blockers.")
     ).toBeInTheDocument()
 
-    fireEvent.click(within(modal).getByRole("button", { name: "Open Agent Tasks" }))
-    expect(mockNavigate).toHaveBeenCalledWith("/agent-tasks?workspace=workspace-alpha")
-
     fireEvent.click(within(modal).getByRole("button", { name: "Open diagnostics" }))
     expect(mockNavigate).toHaveBeenCalledWith(
       "/acp-playground?session=sess-alpha&view=diagnostics"
     )
+
+    fireEvent.click(within(modal).getByRole("button", { name: "Open Agent Tasks" }))
+    expect(mockNavigate).toHaveBeenCalledWith("/agent-tasks?workspace=workspace-alpha")
   })
 
   it("shows direct workspace ACP sessions when Agent Tasks history has no runs", async () => {
