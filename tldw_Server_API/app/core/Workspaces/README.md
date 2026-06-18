@@ -6,6 +6,12 @@ status projection, and traceable artifact export. The broader workspace CRUD API
 and persistence live in endpoint and ChaChaNotes database layers; this package
 holds focused core helpers used by those flows.
 
+The Phase 2 domain contract for Workspace as the durable single-user operating
+context is documented in
+`Docs/Design/Workspace_Container_Contract_2026_06.md`. New Workspace adapters,
+runtime bindings, eligibility operations, activity/index surfaces, and frontend
+context work should start from that contract.
+
 ## Start Here
 
 - `models.py` defines canonical Workspace Core literals and fail-closed helpers.
