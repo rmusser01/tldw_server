@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import html
 import json
 import os
@@ -31,6 +32,7 @@ RUNTIME_POINTER_KEYS = (
     "helper_pid_file",
     "evidence_dir",
 )
+MARKDOWN_ESCAPE_CHARS = frozenset("\\`[]()!|")
 
 
 @dataclass(frozen=True)
@@ -46,7 +48,10 @@ def _display(value: object, *, max_chars: int = DISPLAY_MAX_CHARS) -> str:
     text = "" if value is None else str(value)
     text = " ".join(text.replace("\r", "\n").splitlines())
     text = html.escape(text, quote=False)
-    text = text.replace("|", "\\|")
+    text = "".join(
+        f"\\{character}" if character in MARKDOWN_ESCAPE_CHARS else character
+        for character in text
+    )
     if len(text) > max_chars:
         return text[: max_chars - 1] + "..."
     return text
@@ -146,6 +151,41 @@ def _probe_expected_files(evidence_dir: Path) -> dict[str, EvidenceFileStatus]:
     return {name: _probe_expected_file(evidence_dir, name) for name in EXPECTED_EVIDENCE_FILES}
 
 
+def _open_json_flags() -> int:
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    return flags
+
+
+def _read_json_bytes_from_descriptor(path: Path) -> tuple[bytes | None, list[str]]:
+    fd: int | None = None
+    try:
+        fd = os.open(path, _open_json_flags())
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            return None, ["warning: structured metadata skipped: opened path is not a regular file"]
+        if metadata.st_size > JSON_MAX_BYTES:
+            return None, [f"warning: structured metadata skipped: exceeds {JSON_MAX_BYTES} bytes"]
+        with os.fdopen(fd, "rb") as handle:
+            fd = None
+            raw_bytes = handle.read(JSON_MAX_BYTES + 1)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            return None, ["warning: structured metadata open failed: symlink skipped"]
+        return None, [f"warning: structured metadata open/read failed: {type(exc).__name__}: {exc}"]
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    if len(raw_bytes) > JSON_MAX_BYTES:
+        return None, [f"warning: structured metadata skipped: exceeds {JSON_MAX_BYTES} bytes"]
+    return raw_bytes, []
+
+
 def _load_evidence_json(
     evidence_dir: Path,
     file_statuses: dict[str, EvidenceFileStatus],
@@ -156,14 +196,16 @@ def _load_evidence_json(
     if json_status.size_bytes is not None and json_status.size_bytes > JSON_MAX_BYTES:
         return None, [f"warning: structured metadata skipped: exceeds {JSON_MAX_BYTES} bytes"]
 
+    raw_bytes, read_warnings = _read_json_bytes_from_descriptor(evidence_dir / "host-smoke-evidence.json")
+    if read_warnings:
+        return None, read_warnings
+    if raw_bytes is None:
+        return None, ["warning: structured metadata unavailable: descriptor read returned no data"]
+
     try:
-        with (evidence_dir / "host-smoke-evidence.json").open("rb") as handle:
-            raw_bytes = handle.read(JSON_MAX_BYTES + 1)
-        if len(raw_bytes) > JSON_MAX_BYTES:
-            return None, [f"warning: structured metadata skipped: exceeds {JSON_MAX_BYTES} bytes"]
         raw_text = raw_bytes.decode("utf-8")
         payload = json.loads(raw_text)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         return None, [f"warning: structured metadata parse failed: {type(exc).__name__}: {exc}"]
     if not isinstance(payload, dict):
         return None, ["warning: structured metadata parse failed: top-level JSON is not an object"]

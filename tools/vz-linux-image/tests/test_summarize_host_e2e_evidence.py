@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -100,6 +101,17 @@ def _write_complete_evidence(evidence_dir: Path) -> None:
     )
 
 
+def _load_summary_module():
+    module_name = "vz_evidence_summary_under_test"
+    spec = importlib.util.spec_from_file_location(module_name, SUMMARY_SCRIPT)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _assert_advisory_success(result: subprocess.CompletedProcess[str]) -> None:
     assert result.returncode == 0, result.stderr
     assert "Traceback" not in result.stdout
@@ -152,6 +164,27 @@ def test_evidence_path_that_is_regular_file_warns_without_traceback(tmp_path: Pa
     _assert_advisory_success(result)
     assert "warning" in result.stdout.lower()
     assert "not a directory" in result.stdout
+    for evidence_file in EXPECTED_EVIDENCE_FILES:
+        assert evidence_file in result.stdout
+
+
+def test_evidence_directory_symlink_is_warned_and_target_is_not_read(tmp_path: Path) -> None:
+    target_dir = tmp_path / "target-evidence"
+    target_dir.mkdir()
+    target_secret = "evidence-root-symlink-target-should-not-appear"
+    (target_dir / "host-smoke-evidence.json").write_text(
+        json.dumps({"smoke_run_id": target_secret}),
+        encoding="utf-8",
+    )
+    evidence_link = tmp_path / "evidence-link"
+    evidence_link.symlink_to(target_dir, target_is_directory=True)
+
+    result = _run_summary(evidence_link)
+
+    _assert_advisory_success(result)
+    assert "warning" in result.stdout.lower()
+    assert "evidence directory is a symlink" in result.stdout
+    assert target_secret not in result.stdout
     for evidence_file in EXPECTED_EVIDENCE_FILES:
         assert evidence_file in result.stdout
 
@@ -222,6 +255,39 @@ def test_json_symlink_is_skipped_without_reading_target(tmp_path: Path) -> None:
     assert target_secret not in result.stdout
 
 
+def test_json_loader_rejects_path_swapped_to_symlink_after_probe(tmp_path: Path) -> None:
+    if not hasattr(os, "O_NOFOLLOW"):
+        pytest.skip("descriptor-level symlink rejection requires os.O_NOFOLLOW")
+    module = _load_summary_module()
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    json_path = evidence_dir / "host-smoke-evidence.json"
+    original_json = json.dumps({"smoke_run_id": "original"})
+    json_path.write_text(original_json, encoding="utf-8")
+    file_statuses = {
+        "host-smoke-evidence.json": module.EvidenceFileStatus(
+            name="host-smoke-evidence.json",
+            present=True,
+            readable=True,
+            reason="ok",
+            size_bytes=len(original_json.encode("utf-8")),
+        )
+    }
+    target_secret = "swapped-symlink-target-should-not-appear"
+    target = tmp_path / "target.json"
+    target.write_text(json.dumps({"smoke_run_id": target_secret}), encoding="utf-8")
+    json_path.unlink()
+    json_path.symlink_to(target)
+
+    payload, warnings = module._load_evidence_json(evidence_dir, file_statuses)
+
+    assert payload is None
+    warning_text = "\n".join(warnings)
+    assert "structured metadata" in warning_text
+    assert "symlink" in warning_text.lower() or "open" in warning_text.lower()
+    assert target_secret not in warning_text
+
+
 def test_expected_evidence_file_that_is_directory_is_warned_and_skipped(tmp_path: Path) -> None:
     evidence_dir = tmp_path / "evidence"
     evidence_dir.mkdir()
@@ -233,6 +299,46 @@ def test_expected_evidence_file_that_is_directory_is_warned_and_skipped(tmp_path
     assert "warning" in result.stdout.lower()
     assert "cleanup-status.txt" in result.stdout
     assert "non-regular file skipped" in result.stdout
+
+
+def test_summary_sanitizes_dynamic_markdown_metadata(tmp_path: Path) -> None:
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    for evidence_file in EXPECTED_EVIDENCE_FILES - {"host-smoke-evidence.json"}:
+        (evidence_dir / evidence_file).write_text(f"{evidence_file}\n", encoding="utf-8")
+    hostile_value = (
+        "line one|pipe\n"
+        "line two <b>tag</b>\n"
+        "[docs](https://example.test)\n"
+        "![alt](https://example.test/image.png)\n"
+        "`inline-code`"
+    )
+    (evidence_dir / "host-smoke-evidence.json").write_text(
+        json.dumps(
+            {
+                "smoke_run_id": hostile_value,
+                "final_exit_code": 0,
+                "phases": {
+                    "phase|one\nphase two": {
+                        "status": hostile_value,
+                        "exit_code": 0,
+                        "timestamp": "2026-06-17T00:00:01Z",
+                    }
+                },
+                "cleanup": {"status": hostile_value},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = _run_summary(evidence_dir)
+
+    _assert_advisory_success(result)
+    assert "line one\\|pipe line two &lt;b&gt;tag&lt;/b&gt;" in result.stdout
+    assert "<b>tag</b>" not in result.stdout
+    assert "[docs](https://example.test)" not in result.stdout
+    assert "![alt](https://example.test/image.png)" not in result.stdout
+    assert "`inline-code`" not in result.stdout
 
 
 def test_valid_github_step_summary_path_appends_markdown(tmp_path: Path) -> None:
