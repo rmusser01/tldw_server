@@ -56,6 +56,11 @@ def _workflow_step_run(steps: list[dict[str, Any]], step_name: str) -> str:
     pytest.fail(f"Workflow step not found: {step_name}")
 
 
+def _workflow_step_names(steps: list[dict[str, Any]]) -> list[str]:
+    """Return workflow step names as strings for ordering assertions."""
+    return [str(step.get("name", "")) for step in steps]
+
+
 def _workflow_run_blocks(steps: list[dict[str, Any]]) -> str:
     """Return all non-empty workflow run blocks joined for broad contract assertions."""
     return "\n".join(
@@ -162,6 +167,42 @@ def test_vz_linux_host_gated_workflow_passes_explicit_evidence_dir() -> None:
 
     assert 'evidence_dir="${runtime_dir}/evidence"' in smoke_step_run  # nosec B101
     assert '--evidence-dir "${evidence_dir}"' in smoke_step_run  # nosec B101
+
+
+def test_vz_linux_host_gated_workflow_summarizes_evidence_before_uploads() -> None:
+    """The advisory summary should run after smoke finalization and before upload."""
+    workflow = _load_workflow()
+    steps = workflow["jobs"]["vz-linux-host-gated-smoke"]["steps"]
+    names = _workflow_step_names(steps)
+
+    assert "Run managed host smoke" in names  # nosec B101
+    assert "Summarize smoke evidence" in names  # nosec B101
+    assert "Upload smoke evidence" in names  # nosec B101
+    assert names.index("Run managed host smoke") < names.index("Summarize smoke evidence")  # nosec B101
+    assert names.index("Summarize smoke evidence") < names.index("Upload smoke evidence")  # nosec B101
+
+    summary_step = steps[names.index("Summarize smoke evidence")]
+    assert summary_step["if"] == "always()"  # nosec B101
+    assert summary_step["shell"] == "bash"  # nosec B101
+    run_block = summary_step["run"]
+    assert "tools/vz-linux-image/scripts/summarize-host-e2e-evidence.py" in run_block  # nosec B101
+    assert '${RUNNER_TEMP}/tldw-vz-helper-ci/evidence' in run_block  # nosec B101
+    assert "GITHUB_STEP_SUMMARY" in run_block  # nosec B101
+
+
+def test_vz_linux_host_gated_workflow_summary_step_is_guarded() -> None:
+    """The advisory summary should degrade to warnings without changing job failure."""
+    workflow = _load_workflow()
+    steps = workflow["jobs"]["vz-linux-host-gated-smoke"]["steps"]
+    run_block = _workflow_step_run(steps, "Summarize smoke evidence")
+
+    assert "command -v python" in run_block  # nosec B101
+    assert "command -v python3" in run_block  # nosec B101
+    assert "[[ -f" in run_block  # nosec B101
+    assert "exit 0" in run_block  # nosec B101
+    assert "|| true" in run_block  # nosec B101
+    assert "pip install" not in run_block  # nosec B101
+    assert "${{ runner.temp }}/tldw-vz-helper-ci/**" not in run_block  # nosec B101
 
 
 def test_vz_linux_host_gated_workflow_failure_drills_are_manual_opt_in() -> None:
