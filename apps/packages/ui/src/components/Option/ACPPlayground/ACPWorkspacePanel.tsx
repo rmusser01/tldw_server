@@ -5,7 +5,9 @@ import { useTranslation } from "react-i18next"
 
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { buildACPAuthHeaders, resolveACPServerUrl } from "@/services/acp/connection"
+import { compareACPWorkspaceContext } from "@/services/workspace-context"
 import { useACPSessionsStore } from "@/store/acp-sessions"
+import { useWorkspaceStore } from "@/store/workspace"
 import { WORKSPACES_PATH } from "@/routes/route-paths"
 
 type WebSocketWithHeaders = new (
@@ -60,6 +62,16 @@ const resolveTokenColor = (tokenName: string, fallbackRgb: string): string => {
 
 const WORKSPACES_MANAGER_HREF = `#${WORKSPACES_PATH}`
 
+const getACPWorkspaceStateLabel = (
+  state: ReturnType<typeof compareACPWorkspaceContext>["state"]
+): string => {
+  if (state === "aligned") return "Aligned with active Workspace"
+  if (state === "mismatch") return "Workspace mismatch"
+  if (state === "session_only") return "Session Workspace"
+  if (state === "active_only") return "Active Workspace only"
+  return "Session Workspace"
+}
+
 export const ACPWorkspacePanel: React.FC = () => {
   const { t } = useTranslation("playground")
   const { config: connectionConfig } = useCanonicalConnectionConfig()
@@ -71,8 +83,28 @@ export const ACPWorkspacePanel: React.FC = () => {
   const activeSession = useACPSessionsStore((s) =>
     s.activeSessionId ? s.getSession(s.activeSessionId) : undefined
   )
+  const activeWorkspaceId = useWorkspaceStore((s) => s.workspaceId)
 
   const sshPath = activeSession?.sshWsUrl || ""
+  const sessionWorkspaceContext = React.useMemo(
+    () =>
+      compareACPWorkspaceContext({
+        sessionWorkspaceId: activeSession?.workspaceId ?? null,
+        activeWorkspaceId: activeWorkspaceId ?? null
+      }),
+    [activeSession?.workspaceId, activeWorkspaceId]
+  )
+  const sessionWorkspaceStateLabel = getACPWorkspaceStateLabel(
+    sessionWorkspaceContext.state
+  )
+  const sessionWorkspaceMessage =
+    sessionWorkspaceContext.state === "mismatch"
+      ? sessionWorkspaceContext.recovery.message
+      : sessionWorkspaceContext.message
+  const showWorkspaceRecovery =
+    sessionWorkspaceContext.recovery.reasonCode !== "aligned" &&
+    Boolean(sessionWorkspaceContext.recovery.nextStepHref) &&
+    Boolean(sessionWorkspaceContext.recovery.nextStepLabel)
 
   const [wsStatus, setWsStatus] = React.useState<"connecting" | "connected" | "disconnected">("disconnected")
   const [reconnectKey, setReconnectKey] = React.useState(0)
@@ -284,22 +316,63 @@ export const ACPWorkspacePanel: React.FC = () => {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-border bg-surface px-3 py-2 text-sm">
-        <div className="flex items-center gap-2 text-text-muted">
-          <TerminalIcon className="h-4 w-4" />
-          {t("playground:acp.workspace.title", "Workspace Terminal")}
-          <span
-            className={`h-2 w-2 rounded-full ${
-              wsStatus === "connected" ? "bg-success" :
-              wsStatus === "connecting" ? "bg-info animate-pulse" :
-              "bg-error"
-            }`}
-            aria-label={
-              wsStatus === "connected" ? "Connected" :
-              wsStatus === "connecting" ? "Connecting" :
-              "Disconnected"
-            }
-            role="status"
-          />
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-text-muted">
+          <div className="flex items-center gap-2">
+            <TerminalIcon className="h-4 w-4" />
+            {t("playground:acp.workspace.title", "Workspace Terminal")}
+            <span
+              className={`h-2 w-2 rounded-full ${
+                wsStatus === "connected" ? "bg-success" :
+                wsStatus === "connecting" ? "bg-info animate-pulse" :
+                "bg-error"
+              }`}
+              aria-label={
+                wsStatus === "connected" ? "Connected" :
+                wsStatus === "connecting" ? "Connecting" :
+                "Disconnected"
+              }
+              role="status"
+            />
+          </div>
+          <div
+            data-testid="acp-session-workspace-context"
+            className="flex min-w-0 flex-wrap items-center gap-1.5 rounded border border-border bg-surface2 px-2 py-0.5 text-xs"
+          >
+            <span className="font-medium text-text">
+              {t("playground:acp.workspace.sessionWorkspace", "Session Workspace")}
+            </span>
+            <span className="rounded bg-surface px-1.5 py-0.5 text-text">
+              {t(
+                `playground:acp.workspace.${sessionWorkspaceStateLabel.replace(/\s+/g, "")}`,
+                sessionWorkspaceStateLabel
+              )}
+            </span>
+            {(sessionWorkspaceContext.sessionWorkspaceId ||
+              sessionWorkspaceContext.activeWorkspaceId) && (
+              <span className="rounded bg-surface px-1.5 py-0.5 font-mono text-[11px] text-text">
+                {sessionWorkspaceContext.sessionWorkspaceId ||
+                  sessionWorkspaceContext.activeWorkspaceId}
+              </span>
+            )}
+            {sessionWorkspaceContext.activeWorkspaceId &&
+              sessionWorkspaceContext.activeWorkspaceId !==
+                sessionWorkspaceContext.sessionWorkspaceId && (
+                <span className="rounded bg-surface px-1.5 py-0.5 font-mono text-[11px] text-text">
+                  {sessionWorkspaceContext.activeWorkspaceId}
+                </span>
+              )}
+            <span className="min-w-0 max-w-[22rem] truncate">
+              {sessionWorkspaceMessage}
+            </span>
+            {showWorkspaceRecovery && (
+              <a
+                href={sessionWorkspaceContext.recovery.nextStepHref || WORKSPACES_MANAGER_HREF}
+                className="font-medium text-primary hover:text-primary/80"
+              >
+                {sessionWorkspaceContext.recovery.nextStepLabel}
+              </a>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <a

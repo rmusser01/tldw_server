@@ -47,7 +47,7 @@
 - Create: `apps/packages/ui/src/services/workspace-context/index.ts`
 - Test: `apps/packages/ui/src/services/workspace-context/__tests__/normalizers.test.ts`
 
-- [ ] **Step 1: Write failing normalizer tests**
+- [x] **Step 1: Write failing normalizer tests**
 
 Add tests for:
 
@@ -133,7 +133,7 @@ it("detects ACP session and active workspace mismatch without mutating either si
 })
 ```
 
-- [ ] **Step 2: Run test to verify RED**
+- [x] **Step 2: Run test to verify RED**
 
 Run:
 
@@ -144,7 +144,7 @@ npx vitest run src/services/workspace-context/__tests__/normalizers.test.ts --ma
 
 Expected: fail because `services/workspace-context` does not exist.
 
-- [ ] **Step 3: Implement minimal contract types and normalizers**
+- [x] **Step 3: Implement minimal contract types and normalizers**
 
 Implement:
 
@@ -156,11 +156,11 @@ Implement:
 
 Keep server enum values visible in the returned contracts. Add display labels only as derived fields.
 
-- [ ] **Step 4: Run test to verify GREEN**
+- [x] **Step 4: Run test to verify GREEN**
 
 Run the same focused Vitest command. Expected: pass.
 
-- [ ] **Step 5: Refactor**
+- [x] **Step 5: Refactor**
 
 Remove duplicated copy branches inside `normalizers.ts`. Do not add hooks or UI in this task.
 
@@ -171,7 +171,7 @@ Remove duplicated copy branches inside `normalizers.ts`. Do not add hooks or UI 
 - Test: `apps/packages/ui/src/services/workspace-context/__tests__/hooks.test.tsx`
 - Modify: `apps/packages/ui/src/services/workspace-context/index.ts`
 
-- [ ] **Step 1: Write failing hook tests**
+- [x] **Step 1: Write failing hook tests**
 
 Add tests that mount a small component using `useActiveWorkspaceContext` with a mocked client:
 
@@ -202,7 +202,7 @@ it("surfaces failed server resolution as degraded context", async () => {
 })
 ```
 
-- [ ] **Step 2: Run test to verify RED**
+- [x] **Step 2: Run test to verify RED**
 
 Run:
 
@@ -213,7 +213,7 @@ npx vitest run src/services/workspace-context/__tests__/hooks.test.tsx --maxWork
 
 Expected: fail because hook file does not exist.
 
-- [ ] **Step 3: Implement minimal hook**
+- [x] **Step 3: Implement minimal hook**
 
 Implement `useActiveWorkspaceContext({ workspaceId, client })`.
 
@@ -226,7 +226,7 @@ Rules:
 - Return `{ context, loading, error, refresh }`.
 - Default the client to the existing Tldw API client only after checking the local import pattern.
 
-- [ ] **Step 4: Run hook tests**
+- [x] **Step 4: Run hook tests**
 
 Expected: pass.
 
@@ -236,7 +236,7 @@ Expected: pass.
 - Modify: `apps/packages/ui/src/components/Option/ResearchWorkspace/WorkspaceHeader.tsx`
 - Test: `apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/WorkspaceHeader.test.tsx`
 
-- [ ] **Step 1: Write failing rendering tests**
+- [x] **Step 1: Write failing rendering tests**
 
 Add tests for:
 
@@ -252,7 +252,7 @@ expect(screen.getByText(/Server context ready/i)).toBeInTheDocument()
 expect(screen.getByRole("link", { name: /open Workspaces/i })).toHaveAttribute("href", "#/workspaces")
 ```
 
-- [ ] **Step 2: Run test to verify RED**
+- [x] **Step 2: Run test to verify RED**
 
 Run:
 
@@ -263,7 +263,7 @@ npx vitest run src/components/Option/ResearchWorkspace/__tests__/WorkspaceHeader
 
 Expected: fail because the header does not render the server-context contract.
 
-- [ ] **Step 3: Implement compact server context indicator**
+- [x] **Step 3: Implement compact server context indicator**
 
 Use `useWorkspaceStore((s) => s.workspaceId)` as the server Workspace ID candidate, then call `useActiveWorkspaceContext`.
 
@@ -275,7 +275,7 @@ Render a small unframed inline indicator near existing header status controls:
 
 Keep copy concise. Do not add a new Workspace browser or index.
 
-- [ ] **Step 4: Run Research Workspace test**
+- [x] **Step 4: Run Research Workspace test**
 
 Expected: pass.
 
@@ -285,7 +285,7 @@ Expected: pass.
 - Modify: `apps/packages/ui/src/components/Option/ACPPlayground/ACPWorkspacePanel.tsx`
 - Test: `apps/packages/ui/src/components/Option/ACPPlayground/__tests__/ACPWorkspacePanel.test.tsx`
 
-- [ ] **Step 1: Write failing ACP panel tests**
+- [x] **Step 1: Write failing ACP panel tests**
 
 Add tests for:
 
@@ -296,7 +296,7 @@ Add tests for:
 
 Use the existing ACP session store test setup and add `workspaceId` to the active session fixture.
 
-- [ ] **Step 2: Run test to verify RED**
+- [x] **Step 2: Run test to verify RED**
 
 Run:
 
@@ -307,7 +307,7 @@ npx vitest run src/components/Option/ACPPlayground/__tests__/ACPWorkspacePanel.t
 
 Expected: fail because the ACP panel does not render alignment/mismatch contract copy.
 
-- [ ] **Step 3: Implement ACP session comparison**
+- [x] **Step 3: Implement ACP session comparison**
 
 Use `compareACPWorkspaceContext` with:
 
@@ -316,7 +316,7 @@ Use `compareACPWorkspaceContext` with:
 
 Render a compact notice in the panel header or empty-state copy. Do not mutate either store and do not auto-switch Workspaces.
 
-- [ ] **Step 4: Run ACP panel test**
+- [x] **Step 4: Run ACP panel test**
 
 Expected: pass.
 
@@ -327,7 +327,7 @@ Expected: pass.
 - Modify: `backlog/tasks/task-2386 - Implement-Workspace-Phase-2-frontend-context-contracts-pilot.md`
 - Modify: `Docs/superpowers/specs/2026-06-18-workspace-frontend-server-context-contract-design.md` only if needed
 
-- [ ] **Step 1: Write global visibility guard test**
+- [x] **Step 1: Write global visibility guard test**
 
 Add a focused test proving active Workspace context does not filter global browse/search/list rows. The test can be pure if the existing global search utility is pure:
 
@@ -346,15 +346,15 @@ it("does not filter global rows by active workspace context unless an explicit w
 
 If no shared utility exists, assert the invariant through the closest existing global search/list rendering test and do not introduce a fake product API.
 
-- [ ] **Step 2: Run guard test to verify RED or baseline**
+- [x] **Step 2: Run guard test to verify RED or baseline**
 
 If the behavior already exists, the test may pass on first run. In that case, note it as a characterization guard in the Backlog task.
 
-- [ ] **Step 3: Implement only if needed**
+- [x] **Step 3: Implement only if needed**
 
 If the guard exposes accidental filtering, fix only that filtering path. Do not build Workspace filter UI in this task.
 
-- [ ] **Step 4: Run focused verification**
+- [x] **Step 4: Run focused verification**
 
 Run:
 
@@ -370,11 +370,11 @@ npx vitest run \
 
 Also run the global guard test if it is in a separate file.
 
-- [ ] **Step 5: Record Bandit skip**
+- [x] **Step 5: Record Bandit skip**
 
 Because this slice is frontend/docs only, record in `TASK-2386` that Bandit is not applicable unless Python files were touched.
 
-- [ ] **Step 6: Finalize Backlog task**
+- [x] **Step 6: Finalize Backlog task**
 
 Update `TASK-2386` with:
 
@@ -384,7 +384,7 @@ Update `TASK-2386` with:
 - known skips or blockers;
 - final summary.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 Run:
 
