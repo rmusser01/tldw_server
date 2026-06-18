@@ -4,7 +4,7 @@ title: Add Claude-style governed Bash and PowerShell runtime tools
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-18 14:31'
+updated_date: '2026-06-18 15:02'
 labels:
   - mcp
   - command-runtime
@@ -67,6 +67,8 @@ Eighth slice implemented: added PowerShell-specific fail-closed guardrails for t
 PR #2391 review pass: rebased against latest origin/dev (already up to date) and addressed still-valid PowerShell scanner review items. Changes: narrowed script-block rejection to unquoted opening braces that are token-shaped like PowerShell script blocks so rg patterns such as foo{2} remain allowed; made PowerShell backtick handling quote-aware so single-quoted backticks are literals while outside/double-quoted backticks escape the next character for preflight scanning; and stopped classifying 2>&1 redirection ampersands as invocation operators so the generic redirection guard reports the denial. Verification recorded below.
 
 PR #2391 review verification: targeted review regressions passed (3 passed); full run-command pytest passed (86 passed, 4 warnings); Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_powershell_guardrails_review.json had results=0 errors=0 skipped=0; git diff --check passed.
+
+Ninth slice implemented: added nested tool-use telemetry metadata for governed run-command backend calls. Run-command temporarily marks nested backend MCP calls with mcp_tool_use_nested and a safe correlation id derived from the request id, then restores caller metadata before the outer run event is recorded. Protocol tool-use events now preserve the nested flag, so reports can distinguish backend fs/sandbox calls from the top-level run invocation without storing raw command arguments. Verification: targeted nested telemetry regression passed; focused run-command + tool-use reporting + protocol hook pytest 120 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_hook_telemetry.json had results=0 errors=0 skipped=0; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -42,6 +42,11 @@ _RUN_TOOL_NAMES = frozenset((_RUN_TOOL_NAME, *_RUN_TOOL_ALIASES))
 _RUN_ENV_FILE_MAX_BYTES = 64 * 1024
 _RUN_SHELL_NAME_CHOICES = ("bash", "shell", "powershell", "pwsh")
 _RUN_PINNED_ALIAS_SHELLS = {"bash": "bash", "powershell": "powershell", "pwsh": "pwsh"}
+_RUN_NESTED_TOOL_USE_METADATA_KEYS = (
+    "mcp_tool_use_nested",
+    "mcp_tool_use_safe_correlation_id",
+    "correlation_id",
+)
 
 
 class RunEnvFileValidationError(ValidationError):
@@ -207,10 +212,14 @@ class RunCommandModule(BaseModule):
 
         try:
             try:
-                if timeout_seconds is None:
-                    result = await _execute_chain()
-                else:
-                    result = await asyncio.wait_for(_execute_chain(), timeout=timeout_seconds)
+                nested_metadata = self._apply_nested_tool_use_metadata(context)
+                try:
+                    if timeout_seconds is None:
+                        result = await _execute_chain()
+                    else:
+                        result = await asyncio.wait_for(_execute_chain(), timeout=timeout_seconds)
+                finally:
+                    self._restore_nested_tool_use_metadata(context, nested_metadata)
             except PreflightCommandError as exc:
                 result = CommandExecutionResult(
                     stdout="",
@@ -804,6 +813,44 @@ class RunCommandModule(BaseModule):
         if isinstance(allowed, list):
             return [str(pattern).strip() for pattern in allowed if str(pattern).strip()]
         return []
+
+    @staticmethod
+    def _apply_nested_tool_use_metadata(context: Any | None) -> dict[str, tuple[bool, Any]] | None:
+        """Mark nested backend calls for tool-use reporting while preserving caller metadata."""
+
+        metadata = getattr(context, "metadata", None)
+        if not isinstance(metadata, dict):
+            return None
+
+        previous = {
+            key: (key in metadata, metadata.get(key))
+            for key in _RUN_NESTED_TOOL_USE_METADATA_KEYS
+        }
+        metadata["mcp_tool_use_nested"] = True
+        metadata["mcp_tool_use_safe_correlation_id"] = True
+        if not str(metadata.get("correlation_id") or "").strip():
+            request_id = getattr(context, "request_id", None)
+            if request_id is not None:
+                metadata["correlation_id"] = str(request_id)
+        return previous
+
+    @staticmethod
+    def _restore_nested_tool_use_metadata(
+        context: Any | None,
+        previous: dict[str, tuple[bool, Any]] | None,
+    ) -> None:
+        """Restore request metadata after nested run-command backend calls complete."""
+
+        if previous is None:
+            return
+        metadata = getattr(context, "metadata", None)
+        if not isinstance(metadata, dict):
+            return
+        for key, (existed, value) in previous.items():
+            if existed:
+                metadata[key] = value
+            else:
+                metadata.pop(key, None)
 
     @staticmethod
     def _policy_patterns(policy: dict[str, Any] | None, key: str) -> list[str]:

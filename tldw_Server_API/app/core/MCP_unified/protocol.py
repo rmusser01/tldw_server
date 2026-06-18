@@ -860,6 +860,7 @@ class MCPProtocol:
         """Build a metadata-only tool-use event."""
         metadata = getattr(context, "metadata", {})
         dimensions = extract_safe_context_dimensions(metadata if isinstance(metadata, dict) else None)
+        nested = bool(metadata.get("mcp_tool_use_nested") is True) if isinstance(metadata, dict) else False
         hook_results = self._tool_use_hook_results(metadata if isinstance(metadata, dict) else None)
         eval_metadata = self._tool_use_eval_metadata(payload=payload, tool_def=tool_def)
         safe_requested_name = self._safe_tool_use_name(requested_tool_name)
@@ -892,6 +893,7 @@ class MCPProtocol:
         return ToolUseEvent(
             runtime_surface="protocol",
             execution_origin=execution_origin,  # type: ignore[arg-type]
+            nested=nested,
             requested_tool_name=safe_requested_name,
             effective_tool_name=safe_effective_name,
             module_id=module_id,
