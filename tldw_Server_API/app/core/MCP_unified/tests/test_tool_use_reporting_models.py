@@ -10,7 +10,7 @@ from mcp_unified.tool_use_reporting.builders import (
     classify_tool_use_exception,
     extract_safe_context_dimensions,
 )
-from mcp_unified.tool_use_reporting.models import ToolUseEvent
+from mcp_unified.tool_use_reporting.models import MAX_TOOL_HOOK_RESULTS, ToolUseEvent
 from mcp_unified.tool_use_reporting.recorder import NoopToolUseRecorder
 from mcp_unified.tool_use_reporting.sanitization import sanitize_safe_id
 
@@ -97,6 +97,76 @@ def test_tool_use_event_sanitizes_file_policy_decisions() -> None:
     assert event.file_policy_sha256_before_present is True
     assert event.file_policy_sha256_after_present is True
     assert event.file_policy_lock_lease_present is True
+
+
+def test_tool_use_event_sanitizes_tool_hook_results() -> None:
+    event = ToolUseEvent(
+        runtime_surface="protocol",
+        requested_tool_name="fs.patch",
+        status="denied",
+        tool_hook_results=[
+            {
+                "phase": "pre",
+                "hook_id": "profile-policy",
+                "hook_order": 10,
+                "action": "deny",
+                "status": "deny",
+                "reason_code": "blocked_by_policy",
+                "message": "do not persist /Users/example/private.txt",
+                "metadata": {"path": "/Users/example/private.txt"},
+                "redacted": False,
+            },
+            {
+                "phase": "post",
+                "hook_id": "person@example.com",
+                "hook_order": "20",
+                "action": "allow",
+                "status": "error",
+                "error_type": "RuntimeError",
+                "reason_code": "/Users/example/private.txt",
+            },
+        ],
+    )
+
+    assert len(event.tool_hook_results) == 2
+    first = event.tool_hook_results[0]
+    assert first.phase == "pre"
+    assert first.hook_id == "profile-policy"
+    assert first.hook_order == 10
+    assert first.action == "deny"
+    assert first.status == "deny"
+    assert first.reason_code == "blocked_by_policy"
+    assert first.error_type is None
+    assert first.redacted is True
+
+    second = event.tool_hook_results[1]
+    assert second.phase == "post"
+    assert second.hook_id is None
+    assert second.hook_order == 20
+    assert second.action == "allow"
+    assert second.status == "error"
+    assert second.reason_code == "unknown"
+    assert second.error_type == "RuntimeError"
+
+    dumped = event.model_dump_json()
+    assert "/Users/example" not in dumped
+    assert "do not persist" not in dumped
+    assert "metadata" not in dumped
+
+
+def test_tool_use_event_bounds_tool_hook_results() -> None:
+    event = ToolUseEvent(
+        runtime_surface="protocol",
+        requested_tool_name="fs.patch",
+        status="success",
+        tool_hook_results=[
+            {"phase": "pre", "hook_id": f"hook-{index}", "action": "allow"}
+            for index in range(MAX_TOOL_HOOK_RESULTS + 3)
+        ],
+    )
+
+    assert len(event.tool_hook_results) == MAX_TOOL_HOOK_RESULTS
+    assert event.tool_hook_results[-1].hook_id == f"hook-{MAX_TOOL_HOOK_RESULTS - 1}"
 
 
 def test_tool_use_event_rejects_uri_like_file_policy_paths_before_normalization() -> None:

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable, Mapping
+import asyncio
+import time
+from collections import deque
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
@@ -13,12 +16,19 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from mcp_unified.storage.models import CredentialGrant, ExternalServerDefinition
+from mcp_unified.interfaces.storage import AuditStore
+from mcp_unified.profiles import MCPProfile
 
 from .admin_auth import (
+    DefaultGatewayAdminPermissionChecker,
     GatewayAdminAuthConfig,
     GatewayAdminAuthError,
+    GatewayAdminIdentity,
+    GatewayAdminPermissionChecker,
+    GatewayAdminPermissionError,
     gateway_admin_auth_dependencies,
     gateway_admin_auth_error_response,
+    gateway_admin_identity_dependency,
     normalize_gateway_admin_auth_config,
 )
 from .bootstrap import GatewayProfileBootstrap
@@ -68,7 +78,16 @@ from .lifecycle import (
     normalize_external_runtime_lifecycle_config,
 )
 from .profiles import GatewayProfileManagementError, GatewayProfileManager
-from .runtime import GatewayRuntime
+from .policy_explain import (
+    GatewayPolicyExplainError,
+    GatewayPolicyExplainService,
+    PolicyExplainErrorResponse,
+    PolicyExplainResponse,
+    ProfileToolPreviewResponse,
+    parse_policy_explain_request,
+    parse_profile_tool_preview_request,
+)
+from .runtime import GatewayRequestContext, GatewayRuntime
 
 _PROFILE_HEADER_NAMES = ("x-mcp-profile", "x-mcp-profile-id")
 _PROFILE_QUERY_NAMES = ("profile_id", "profileId")
@@ -123,6 +142,17 @@ _CREDENTIAL_GRANT_STATUS_CODES = {
     "invalid_credential_grant_patch": 422,
     CREDENTIAL_GRANT_SENSITIVE_MATERIAL_REJECTED_REASON: 422,
 }
+_POLICY_EXPLAIN_STATUS_CODES = {
+    "profile_not_found": 404,
+    "invalid_policy_explain_request": 422,
+    "invalid_policy_preview_request": 422,
+    "audit_store_unavailable": 503,
+    "profile_resolution_failed": 503,
+    "policy_evaluation_failed": 422,
+}
+POLICY_EXPLAIN_RATE_LIMIT_MAX_REQUESTS = 120
+POLICY_EXPLAIN_RATE_LIMIT_WINDOW_SECONDS = 60.0
+_POLICY_EXPLAIN_RATE_LIMIT_MAX_KEYS = 2048
 _EXTERNAL_SERVER_RESERVED_IDS = frozenset({"runtime", "refresh", "reconcile"})
 _PROFILE_MANAGEMENT_PUBLIC_ERRORS = {
     "permission_change_denied": "Permission change denied",
@@ -382,10 +412,83 @@ class _GatewayAdminAuthHandlingRoute(APIRoute):
         return route_handler
 
 
+class _GatewayAdminRouteRateLimiter:
+    """Small in-memory rate limiter for standalone admin route surfaces."""
+
+    def __init__(
+        self,
+        *,
+        max_requests: int,
+        window_seconds: float,
+        max_keys: int = _POLICY_EXPLAIN_RATE_LIMIT_MAX_KEYS,
+    ) -> None:
+        self.max_requests = max(1, int(max_requests))
+        self.window_seconds = max(1.0, float(window_seconds))
+        self.max_keys = max(1, int(max_keys))
+        self._hits_by_key: dict[str, deque[float]] = {}
+        self._lock = asyncio.Lock()
+
+    async def allow(self, key: str) -> bool:
+        """Return whether one request is within this limiter's window."""
+
+        now = time.monotonic()
+        cutoff = now - self.window_seconds
+        async with self._lock:
+            self._prune_locked(cutoff)
+            hits = self._hits_by_key.setdefault(key, deque())
+            while hits and hits[0] <= cutoff:
+                hits.popleft()
+            if len(hits) >= self.max_requests:
+                return False
+            hits.append(now)
+            if len(self._hits_by_key) > self.max_keys:
+                self._prune_oldest_key_locked()
+            return True
+
+    def _prune_locked(self, cutoff: float) -> None:
+        empty_keys: list[str] = []
+        for key, hits in self._hits_by_key.items():
+            while hits and hits[0] <= cutoff:
+                hits.popleft()
+            if not hits:
+                empty_keys.append(key)
+        for key in empty_keys:
+            del self._hits_by_key[key]
+
+    def _prune_oldest_key_locked(self) -> None:
+        oldest_key: str | None = None
+        oldest_hit: float | None = None
+        for key, hits in self._hits_by_key.items():
+            if not hits:
+                oldest_key = key
+                break
+            if oldest_hit is None or hits[0] < oldest_hit:
+                oldest_key = key
+                oldest_hit = hits[0]
+        if oldest_key is not None:
+            del self._hits_by_key[oldest_key]
+
+
 async def _parse_json_body(request: Request) -> Any:
     """Parse raw JSON so malformed bodies return JSON-RPC parse errors."""
 
     return _parse_json_payload(await request.body())
+
+
+async def _parse_policy_explain_json_body(
+    request: Request,
+    *,
+    reason_code: str,
+) -> Any:
+    """Parse a policy-explain JSON body without exposing raw invalid input."""
+
+    try:
+        return await request.json()
+    except ValueError:
+        raise GatewayPolicyExplainError(
+            "Invalid JSON request",
+            reason_code=reason_code,
+        ) from None
 
 
 def _client_host(request: Request | WebSocket) -> str | None:
@@ -394,6 +497,15 @@ def _client_host(request: Request | WebSocket) -> str | None:
     if request.client is None:
         return None
     return request.client.host
+
+
+def _policy_explain_rate_limit_key(
+    request: Request,
+    identity: GatewayAdminIdentity,
+) -> str:
+    """Return the admin identity/IP key used for policy explain throttling."""
+
+    return f"{identity.actor_id}:{_client_host(request) or 'unknown'}"
 
 
 def _request_metadata(request: Request | WebSocket) -> dict[str, Any]:
@@ -503,6 +615,63 @@ def _credential_grant_error_response(
     return JSONResponse(
         status_code=_CREDENTIAL_GRANT_STATUS_CODES.get(exc.reason_code, 500),
         content=_credential_grant_error_payload(exc),
+    )
+
+
+def _policy_explain_error_response(exc: GatewayPolicyExplainError) -> JSONResponse:
+    """Translate expected policy-explain errors into HTTP JSON responses."""
+
+    return JSONResponse(
+        status_code=_POLICY_EXPLAIN_STATUS_CODES.get(exc.reason_code, 500),
+        content=exc.to_payload().model_dump(mode="json"),
+    )
+
+
+def _policy_explain_permission_error_response(
+    exc: GatewayAdminPermissionError,
+) -> JSONResponse:
+    """Return the policy-explain error envelope for admin permission failures."""
+
+    payload = PolicyExplainErrorResponse(
+        message=exc.payload["error"],
+        reason_code=exc.reason_code,
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=payload.model_dump(mode="json"),
+    )
+
+
+def _policy_explain_rate_limit_error_response() -> JSONResponse:
+    """Return the policy-explain error envelope for rate-limit denials."""
+
+    payload = PolicyExplainErrorResponse(
+        message="Policy explain rate limit exceeded",
+        reason_code="policy_explain_rate_limited",
+    )
+    return JSONResponse(
+        status_code=429,
+        content=payload.model_dump(mode="json"),
+    )
+
+
+def _profile_tool_preview_payload_for_path(
+    payload: Any,
+    *,
+    profile_id: str,
+) -> Any:
+    """Return preview payload with a validated path-canonical profile id."""
+
+    if not isinstance(payload, Mapping):
+        return payload
+    body_profile_id = payload.get("profile_id")
+    if body_profile_id is None:
+        return {**payload, "profile_id": profile_id}
+    if body_profile_id == profile_id:
+        return payload
+    raise GatewayPolicyExplainError(
+        "Invalid policy preview request",
+        reason_code="invalid_policy_preview_request",
     )
 
 
@@ -1292,6 +1461,152 @@ def _mount_credential_grant_routes(
             return _credential_grant_error_response(exc)
 
 
+def _mount_policy_explain_routes(
+    router: APIRouter,
+    runtime: GatewayRuntime,
+    *,
+    admin_auth: GatewayAdminAuthConfig,
+    policy_explain_service: GatewayPolicyExplainService | None = None,
+    policy_explain_profile_resolver: (
+        Callable[[str], MCPProfile | Awaitable[MCPProfile | None]] | None
+    ) = None,
+    policy_explain_audit_store: AuditStore | None = None,
+    policy_explain_permission_checker: GatewayAdminPermissionChecker | None = None,
+) -> None:
+    """Mount read-only policy explanation endpoints on the gateway router."""
+
+    if policy_explain_service is None and policy_explain_profile_resolver is None:
+        raise ValueError(
+            "policy explain management requires policy_explain_service "
+            "or policy_explain_profile_resolver"
+        )
+
+    identity_dependency = gateway_admin_identity_dependency(admin_auth)
+    permission_checker = (
+        policy_explain_permission_checker
+        or DefaultGatewayAdminPermissionChecker()
+    )
+
+    async def installed_tool_catalog() -> list[dict[str, Any]]:
+        context = GatewayRequestContext(request_id="policy-explain-tool-catalog")
+        admin_catalog = getattr(
+            runtime,
+            "list_backend_tools_for_admin_catalog",
+            None,
+        )
+        if callable(admin_catalog):
+            return await admin_catalog(context)
+        return await runtime.list_tools(context)
+
+    def service_for_identity(
+        identity: GatewayAdminIdentity,
+    ) -> GatewayPolicyExplainService:
+        if policy_explain_service is not None:
+            return policy_explain_service.with_request_context(
+                actor_id=identity.actor_id,
+                installed_tool_catalog=installed_tool_catalog,
+            )
+        return GatewayPolicyExplainService(
+            profile_resolver=policy_explain_profile_resolver,
+            audit_store=policy_explain_audit_store,
+            actor_id=identity.actor_id,
+            installed_tool_catalog=installed_tool_catalog,
+        )
+
+    route_rate_limiter = _GatewayAdminRouteRateLimiter(
+        max_requests=POLICY_EXPLAIN_RATE_LIMIT_MAX_REQUESTS,
+        window_seconds=POLICY_EXPLAIN_RATE_LIMIT_WINDOW_SECONDS,
+    )
+
+    async def policy_explain_rate_limit_response(
+        request: Request,
+        identity: GatewayAdminIdentity,
+    ) -> JSONResponse | None:
+        key = _policy_explain_rate_limit_key(request, identity)
+        if await route_rate_limiter.allow(key):
+            return None
+        logger.warning(
+            "Gateway policy explain route rate limit exceeded "
+            "(actor_id={}, client_host={})",
+            identity.actor_id,
+            _client_host(request) or "unknown",
+        )
+        return _policy_explain_rate_limit_error_response()
+
+    @router.post(
+        "/policy/explain",
+        response_model=PolicyExplainResponse,
+        response_model_exclude_none=True,
+    )
+    async def explain_policy(
+        request: Request,
+        identity: GatewayAdminIdentity = Depends(identity_dependency),
+    ) -> PolicyExplainResponse | JSONResponse:
+        """Return a redacted explanation for one profile/tool policy decision."""
+
+        try:
+            await permission_checker.require_permission(
+                identity,
+                "mcp.policy.explain",
+            )
+            rate_limit_response = await policy_explain_rate_limit_response(
+                request,
+                identity,
+            )
+            if rate_limit_response is not None:
+                return rate_limit_response
+            payload = await _parse_policy_explain_json_body(
+                request,
+                reason_code="invalid_policy_explain_request",
+            )
+            return await service_for_identity(identity).explain_tool_call(
+                parse_policy_explain_request(payload)
+            )
+        except GatewayAdminPermissionError as exc:
+            return _policy_explain_permission_error_response(exc)
+        except GatewayPolicyExplainError as exc:
+            return _policy_explain_error_response(exc)
+
+    @router.post(
+        "/profiles/{profile_id}/tool-preview",
+        response_model=ProfileToolPreviewResponse,
+        response_model_exclude_none=True,
+    )
+    async def preview_profile_tools(
+        profile_id: str,
+        request: Request,
+        identity: GatewayAdminIdentity = Depends(identity_dependency),
+    ) -> ProfileToolPreviewResponse | JSONResponse:
+        """Return a redacted profile preview across installed gateway tools."""
+
+        try:
+            await permission_checker.require_permission(
+                identity,
+                "mcp.policy.explain",
+            )
+            rate_limit_response = await policy_explain_rate_limit_response(
+                request,
+                identity,
+            )
+            if rate_limit_response is not None:
+                return rate_limit_response
+            payload = await _parse_policy_explain_json_body(
+                request,
+                reason_code="invalid_policy_preview_request",
+            )
+            payload = _profile_tool_preview_payload_for_path(
+                payload,
+                profile_id=profile_id,
+            )
+            return await service_for_identity(identity).preview_profile_tools(
+                parse_profile_tool_preview_request(payload)
+            )
+        except GatewayAdminPermissionError as exc:
+            return _policy_explain_permission_error_response(exc)
+        except GatewayPolicyExplainError as exc:
+            return _policy_explain_error_response(exc)
+
+
 def create_gateway_router(
     runtime: GatewayRuntime,
     *,
@@ -1305,6 +1620,13 @@ def create_gateway_router(
     admin_auth: GatewayAdminAuthConfig | Mapping[str, Any] | None = None,
     credential_grant_manager: GatewayCredentialGrantManager | None = None,
     enable_credential_grant_management: bool = False,
+    enable_policy_explain_management: bool = False,
+    policy_explain_service: GatewayPolicyExplainService | None = None,
+    policy_explain_profile_resolver: (
+        Callable[[str], MCPProfile | Awaitable[MCPProfile | None]] | None
+    ) = None,
+    policy_explain_audit_store: AuditStore | None = None,
+    policy_explain_permission_checker: GatewayAdminPermissionChecker | None = None,
 ) -> APIRouter:
     """Create a package-owned FastAPI router for a standalone MCP runtime."""
 
@@ -1357,6 +1679,16 @@ def create_gateway_router(
             router,
             resolved_credential_grant_manager,
             admin_dependencies=admin_dependencies,
+        )
+    if enable_policy_explain_management:
+        _mount_policy_explain_routes(
+            router,
+            runtime,
+            admin_auth=resolved_admin_auth,
+            policy_explain_service=policy_explain_service,
+            policy_explain_profile_resolver=policy_explain_profile_resolver,
+            policy_explain_audit_store=policy_explain_audit_store,
+            policy_explain_permission_checker=policy_explain_permission_checker,
         )
 
     @router.get("/status")
@@ -1437,6 +1769,13 @@ def create_gateway_app(
     admin_auth: GatewayAdminAuthConfig | Mapping[str, Any] | None = None,
     credential_grant_manager: GatewayCredentialGrantManager | None = None,
     enable_credential_grant_management: bool = False,
+    enable_policy_explain_management: bool = False,
+    policy_explain_service: GatewayPolicyExplainService | None = None,
+    policy_explain_profile_resolver: (
+        Callable[[str], MCPProfile | Awaitable[MCPProfile | None]] | None
+    ) = None,
+    policy_explain_audit_store: AuditStore | None = None,
+    policy_explain_permission_checker: GatewayAdminPermissionChecker | None = None,
 ) -> FastAPI:
     """Create a minimal FastAPI app exposing the standalone MCP gateway router."""
 
@@ -1480,6 +1819,11 @@ def create_gateway_app(
             admin_auth=admin_auth,
             credential_grant_manager=credential_grant_manager,
             enable_credential_grant_management=enable_credential_grant_management,
+            enable_policy_explain_management=enable_policy_explain_management,
+            policy_explain_service=policy_explain_service,
+            policy_explain_profile_resolver=policy_explain_profile_resolver,
+            policy_explain_audit_store=policy_explain_audit_store,
+            policy_explain_permission_checker=policy_explain_permission_checker,
         ),
         prefix=prefix,
     )

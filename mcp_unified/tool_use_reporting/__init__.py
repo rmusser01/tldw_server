@@ -11,6 +11,7 @@ from mcp_unified.tool_use_reporting.models import (
     MAX_REPORT_EVENT_LIMIT,
     MAX_REPORT_GROUP_LIMIT,
     MAX_REPORT_REASON_CODE_LIMIT,
+    MAX_TOOL_HOOK_RESULTS,
     RuntimeSurface,
     SourceKind,
     ToolUseEvent,
@@ -21,6 +22,7 @@ from mcp_unified.tool_use_reporting.models import (
     ToolUseReportQuery,
     ToolUseReportRow,
     ToolUseStatus,
+    ToolHookResultMetadata,
 )
 from mcp_unified.tool_use_reporting.reporting import ToolUseReportService
 from mcp_unified.tool_use_reporting.recorder import (
@@ -50,6 +52,7 @@ __all__ = [
     "MAX_REPORT_EVENT_LIMIT",
     "MAX_REPORT_GROUP_LIMIT",
     "MAX_REPORT_REASON_CODE_LIMIT",
+    "MAX_TOOL_HOOK_RESULTS",
     "RuntimeSurface",
     "SourceKind",
     "NoopToolUseRecorder",
@@ -62,6 +65,7 @@ __all__ = [
     "ToolUseReportGroupBy",
     "ToolUseReportQuery",
     "ToolUseReportRow",
+    "ToolHookResultMetadata",
     "ToolUseReportService",
     "ToolUseRecorder",
     "ToolUseStatus",

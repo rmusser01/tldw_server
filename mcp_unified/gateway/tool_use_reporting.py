@@ -72,6 +72,21 @@ class ToolUseReportingGatewayRuntime:
 
         return await self._runtime.list_tools(context)
 
+    async def list_backend_tools_for_admin_catalog(
+        self,
+        context: GatewayRequestContext,
+    ) -> list[Any]:
+        """Delegate unfiltered admin catalog discovery when supported."""
+
+        admin_catalog = getattr(
+            self._runtime,
+            "list_backend_tools_for_admin_catalog",
+            None,
+        )
+        if callable(admin_catalog):
+            return await admin_catalog(context)
+        return await self._runtime.list_tools(context)
+
     async def call_tool(
         self,
         name: str,

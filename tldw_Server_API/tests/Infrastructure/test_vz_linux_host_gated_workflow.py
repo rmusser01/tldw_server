@@ -201,6 +201,21 @@ def test_vz_linux_host_gated_workflow_uses_minimal_permissions_and_uploads_logs(
     assert "${{ runner.temp }}/tldw-vz-helper-ci/**" in upload_steps[0]["with"]["path"]  # nosec B101
 
 
+def test_vz_linux_host_gated_policy_tracks_structured_evidence_bundle() -> None:
+    """The policy should describe the structured evidence retained by the runtime upload."""
+    policy = POLICY_PATH.read_text(encoding="utf-8")
+
+    for evidence_file in (
+        "host-smoke-evidence.json",
+        "source-bundle-hashes-before.txt",
+        "source-bundle-hashes-after.txt",
+        "run-bundle-hashes.txt",
+        "runtime-paths.txt",
+        "cleanup-status.txt",
+    ):
+        assert evidence_file in policy  # nosec B101
+
+
 def test_vz_linux_host_gated_acceptance_policy_doc_exists_and_references_workflow() -> None:
     """The host-gated workflow should have an operator-facing acceptance policy."""
     policy = POLICY_PATH.read_text(encoding="utf-8")

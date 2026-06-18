@@ -235,6 +235,14 @@ class ProfileAwareGatewayRuntime:
             ),
         ]
 
+    async def list_backend_tools_for_admin_catalog(
+        self,
+        context: GatewayRequestContext,
+    ) -> list[Any]:
+        """Return unfiltered backend discovery data for admin policy preview."""
+
+        return await self._safe_backend_tools(context)
+
     async def call_tool(
         self,
         name: str,

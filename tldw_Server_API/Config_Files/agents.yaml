@@ -39,9 +39,24 @@ agents:
       - "npm install -g @anthropic-ai/claude-code"
       - "npm install -g @agentclientprotocol/claude-agent-acp@0.40.0"
     docs_url: "https://docs.anthropic.com/en/docs/claude-code"
-    support_state: documented_unverified
-    verification_level: documented_only
-    compatibility_notes: "Claude Code 2.1.142 exposes MCP management/server commands but no native ACP stdio command. The current certifiable path is the external @agentclientprotocol/claude-agent-acp 0.40.0 adapter, which is documented but not installed or live-E2E certified in this environment."
+    support_state: supported_with_caveats
+    verification_level: live_e2e_tested
+    compatibility_notes: >-
+      Claude Code 2.1.177 via the external @agentclientprotocol/claude-agent-acp
+      0.40.0 adapter is supported with caveats after June 17, 2026 backend live
+      E2E on the verified macOS host runner profile with tldw-agent runner
+      0.1.0. Repro command shape: PATH=<adapter node_modules/.bin>:$PATH
+      TLDW_E2E_SERVER_URL=<loopback server> TLDW_E2E_API_KEY=<redacted>
+      ACP_AGENT_PROFILE=claude_code ACP_BACKEND_E2E_TIMEOUT_SECONDS=180
+      python Helper_Scripts/Testing-related/acp_certification_smoke.py
+      --profile live-e2e --run. Runtime setup used Claude Code CLI auth
+      delegated through the external adapter, adapter present on both server
+      and runner PATH, and runner env HOME pointed at the host Claude auth HOME.
+      Verified health/setup-guide, session-new, prompt, redacted support views,
+      diagnostics endpoint, cancel, and close. Claude Code still requires the
+      external adapter; sandbox, non-empty MCP injection, artifact-producing
+      workflows, and reviewer-loop behavior remain unverified. Full
+      branch/commit/session evidence is recorded in the ACP compatibility matrix.
     compatibility_docs_url: "/docs-static/Development/ACP_Compatibility_Matrix.md"
     entrypoint_strategy: external_acp_adapter
     acp_command: claude-agent-acp

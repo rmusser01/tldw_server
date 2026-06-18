@@ -6,6 +6,12 @@ status projection, and traceable artifact export. The broader workspace CRUD API
 and persistence live in endpoint and ChaChaNotes database layers; this package
 holds focused core helpers used by those flows.
 
+The Phase 2 domain contract for Workspace as the durable single-user operating
+context is documented in
+`Docs/Design/Workspace_Container_Contract_2026_06.md`. New Workspace adapters,
+runtime bindings, eligibility operations, activity/index surfaces, and frontend
+context work should start from that contract.
+
 ## Start Here
 
 - `models.py` defines canonical Workspace Core literals and fail-closed helpers.
@@ -16,6 +22,8 @@ holds focused core helpers used by those flows.
 - `file_inventory_models.py`, `file_inventory_ignore.py`, `file_inventory_scanner.py`,
   and `file_inventory_jobs.py` implement metadata-only project-root inventory
   scanning and Jobs enqueue helpers.
+- `eligibility.py` checks whether a resource can be used by an active Workspace
+  operation without changing global resource visibility.
 - `workspace_artifact_exports.py` prepares traceable workspace artifact exports.
 - Related API surface: `app/api/v1/endpoints/workspaces.py` and `app/api/v1/endpoints/workspace_migrations.py`.
 - Related tests: `tests/Workspaces/`.
@@ -38,6 +46,7 @@ holds focused core helpers used by those flows.
 - `service_capabilities.py` - readiness and capability projection.
 - `source_jobs.py` - workspace source job payload and enqueue helpers.
 - `status_projection.py` - source status derivation.
+- `eligibility.py` - active Workspace operation eligibility and recovery actions.
 - `file_inventory_*` - ignore policy, metadata scanner, durable status models,
   and Jobs enqueue helpers for project-root file inventory.
 - `workspace_artifact_exports.py` - artifact export helpers and traceability checks.
@@ -69,10 +78,54 @@ adapter before linking or resolving a resource. Unsupported resource types must
 fail closed, and summaries/provenance should avoid exposing secrets, absolute
 paths, sandbox mount paths, prompts, model output contents, or file contents.
 
+## Active Context Eligibility
+
+Global browse, search, open, and edit visibility remains owned by each resource
+domain. Workspace eligibility does not hide resources from those global surfaces;
+it only decides whether a resource may be used inside the currently selected
+Workspace context.
+
+`eligibility.py` and `POST /api/v1/workspace-eligibility/check` expose the
+shared contract. Visibility operations (`browse`, `search`, `open`, `edit`) are
+allowed when normal ownership/permission checks have already passed, even when
+no active workspace exists. Active-context operations require a selected,
+non-archived workspace and a membership row that links the resource to that
+workspace. API callers must explicitly send `runtime_state` and
+`permission_state`; the endpoint does not default either field to an allowed
+state. Active-context operations are:
+
+- `stage`
+- `rag_ground`
+- `prompt_use`
+- `tool_use`
+- `agent_manipulate`
+- `acp_run`
+- `sandbox_operation`
+- `workflow_launch`
+- `watchlist_run`
+
+Runtime-bound operations (`tool_use`, `agent_manipulate`, `acp_run`,
+`sandbox_operation`, `workflow_launch`, `watchlist_run`) also fail closed when
+the caller does not report `runtime_state="ready"`. Stable denial reasons are
+`no_active_workspace`, `workspace_not_found`, `workspace_archived`,
+`unsupported_resource_type`, `resource_not_linked`,
+`cross_workspace_resource`, `missing_runtime`, and `permission_denied`.
+Responses include recovery actions such as selecting or creating a workspace,
+linking/copying the resource into the active workspace, switching to the
+workspace that already contains the resource, unarchiving the workspace, or
+configuring the workspace runtime.
+
+Eligibility checks intentionally do not make membership a trust source for MCP,
+ACP, Sandbox path admission, or file access. Those systems must continue to use
+their own policy, root binding, and runtime admission checks after eligibility
+passes.
+
 ## How It Connects
 
 - `app/api/v1/endpoints/workspaces.py` exposes workspace CRUD, sources, status, preview, sub-resource routes, and read-only Workspace Core contract surfaces.
 - `app/api/v1/endpoints/workspace_migrations.py` exposes workspace migration routes.
+- `app/api/v1/endpoints/workspace_eligibility.py` exposes the active-context
+  eligibility contract.
 - `app/api/v1/schemas/workspace_schemas.py` defines workspace request and response models.
 - ChaChaNotes workspace tables store workspace metadata, persisted `workspace_profile`, project roots, sources, notes, and artifact references.
 - Jobs, Media DB, and RAG/indexing state feed `status_projection.py`.
@@ -145,6 +198,9 @@ paths, sandbox mount paths, prompts, model output contents, or file contents.
 - Generic membership rows are a read-model association layer over domain-owned
   resources. Domain tables and adapters remain responsible for ownership,
   visibility, and access validation.
+- Active-context eligibility is a read-only decision layer over workspace state,
+  runtime state supplied by callers, and generic membership rows. It does not
+  mutate memberships or replace domain-specific permission checks.
 
 ### Follow-Up Slices
 
@@ -171,6 +227,8 @@ paths, sandbox mount paths, prompts, model output contents, or file contents.
 - New membership resource type: add a fail-closed domain adapter, validate
   resource access through the owning domain API, update schemas/tests, and keep
   MCP/root/path trust decisions outside generic membership.
+- New active-context operation: update `eligibility.py`,
+  `workspace_schemas.py`, eligibility API tests, and this operation matrix.
 
 ## Extension Points
 
@@ -193,6 +251,8 @@ paths, sandbox mount paths, prompts, model output contents, or file contents.
 - `tests/Workspaces/test_workspace_sub_resources_api.py`
 - `tests/Workspaces/test_workspace_membership_adapters.py`
 - `tests/Workspaces/test_workspace_memberships_api.py`
+- `tests/Workspaces/test_workspace_eligibility.py`
+- `tests/Workspaces/test_workspace_eligibility_api.py`
 - `tests/Workspaces/test_workspace_context_membership_summary.py`
 - `tests/Workspaces/test_workspace_migration_api.py`
 - `tests/Workspaces/test_workspace_rate_limit_contract.py`

@@ -322,6 +322,65 @@ runtime approvals. Runtime integrations for governed shell execution, WebFetch,
 WebSearch, LSP diagnostics, hooks, and admin policy simulation are separate
 follow-up tasks.
 
+### Explain Policy Decisions And Tool Previews
+
+Use `explain-policy` when you need to understand one effective profile/tool
+decision before execution. It returns the final `allow`, `ask`, or `deny`
+outcome, reason code, visibility, call state, relevant policy contributors, and
+redacted subjects for the hypothetical call.
+
+Use `preview-profile-tools` when you need to review a profile's effective tool
+surface. It previews installed tools and profile recommendations, including
+whether tools are visible, deferred, denied, or unavailable. Include a
+`session_id` when runtime-effective preview should account for session-scoped
+approval grants.
+
+Local CLI examples:
+
+```bash
+mcp-unified-gateway explain-policy --profile researcher --tool fs.patch \
+  --args-json-file ./patch-args.json --config ./gateway.json
+
+mcp-unified-gateway preview-profile-tools --profile researcher \
+  --category filesystem --config ./gateway.json
+```
+
+Remote CLI example:
+
+```bash
+export MCP_UNIFIED_GATEWAY_URL=http://127.0.0.1:8000/mcp
+export MCP_UNIFIED_GATEWAY_ADMIN_KEY=replace-with-admin-key
+
+printf '{"path":"src/app.py"}' | mcp-unified-gateway explain-policy \
+  --remote --profile researcher --tool fs.read --args-stdin
+
+mcp-unified-gateway preview-profile-tools --remote --profile researcher \
+  --category filesystem --session-id "$MCP_SESSION_ID" --exclude-denied
+```
+
+Direct admin API examples:
+
+```bash
+curl -sS -X POST "$MCP_UNIFIED_GATEWAY_URL/policy/explain" \
+  -H "X-MCP-Gateway-Admin-Key: $MCP_UNIFIED_GATEWAY_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"profile_id":"researcher","tool_name":"fs.read","arguments":{"path":"src/app.py"}}'
+
+curl -sS -X POST "$MCP_UNIFIED_GATEWAY_URL/profiles/researcher/tool-preview" \
+  -H "X-MCP-Gateway-Admin-Key: $MCP_UNIFIED_GATEWAY_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"category":"filesystem","include_denied":true,"session_id":"session-1"}'
+```
+
+Security notes:
+
+- These calls require the gateway admin policy-explain permission remotely.
+- Calls are audited when audit storage is configured.
+- Responses redact or sanitize sensitive subjects and do not echo raw arguments.
+- Prefer `--args-json-file` or `--args-stdin` over inline `--args-json` for
+  sensitive arguments so values are not exposed in shell history or process
+  listings.
+
 ### Git Inspection Tools
 
 The `tldw-server` MCP host can expose optional native Git inspection tools when
@@ -622,18 +681,63 @@ Each event is one attempted MCP tool call. The stored metadata can include:
   and action family.
 - Grant, approval, installation, runtime availability, path-filter, truncation,
   idempotency replay, and nested-call indicators.
+- Bounded tool-call hook summaries: phase, hook id, hook order, action, status,
+  sanitized reason code, and sanitized error type.
 - UTC timestamp and integer epoch microseconds for stable ordering.
 
 This lets operators compare, for example, whether one profile mode has a higher
 tool-call success rate, whether a model is repeatedly denied a tool, or whether
 a new tool prompt version changes latency or reason-code distribution.
 
+### Package-Level Tool-Call Hooks
+
+Embedders can provide ordered pre/post hooks by constructing a
+`ConfiguredToolCallHookManager` and passing it through `MCPRuntimeDependencies`
+as `tool_call_hook_manager`.
+
+```python
+from mcp_unified.tool_hooks import (
+    ConfiguredToolCallHookManager,
+    ToolHookRegistration,
+)
+
+hook_manager = ConfiguredToolCallHookManager(
+    [
+        ToolHookRegistration(
+            hook_id="profile-policy",
+            before=check_profile_policy,
+            after=record_profile_observation,
+            order=10,
+        ),
+        ToolHookRegistration(
+            hook_id="approval-gate",
+            before=request_approval_if_needed,
+            phases=("pre",),
+            order=20,
+        ),
+    ]
+)
+```
+
+Pre-hooks run in ascending `order` and then by `hook_id`. The first pre-hook
+decision with `deny`, `ask`, or `approval_required` stops evaluation and is
+enforced by the protocol. If a pre-hook raises, the protocol fails closed and
+the tool is not executed. Post-hooks run after success or failure; individual
+post-hook failures are recorded as hook metadata and do not suppress the
+original tool result or error.
+
+Hook reporting is metadata-only. Stored events do not include hook messages,
+raw callback metadata, tool arguments, result payloads, raw exception messages,
+or absolute paths. Gateway JSON/admin configuration for hook registries is a
+future surface; this slice exposes the package API for hosts and tests.
+
 ### What Reporting Does Not Capture
 
 The metadata-only recorder does not capture tool arguments, tool result payloads,
-secret values, raw exception text, conversation messages, files, screenshots, or
-browser/page contents. The `capture_ref` field is only a future-safe reference
-slot; this slice does not create or store raw captures.
+secret values, raw exception text, hook messages, raw hook metadata,
+conversation messages, files, screenshots, or browser/page contents. The
+`capture_ref` field is only a future-safe reference slot; this slice does not
+create or store raw captures.
 
 ### Privacy, Retention, And Evaluations
 

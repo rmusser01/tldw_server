@@ -12,6 +12,13 @@ from tldw_Server_API.app.core.Workspaces.membership_models import (
     WORKSPACE_MEMBERSHIP_MAX_PROVENANCE_BYTES,
     normalize_membership_json_object,
 )
+from tldw_Server_API.app.core.Workspaces.eligibility import (
+    WorkspaceEligibilityOperation,
+    WorkspaceEligibilityOperationCategory,
+    WorkspaceEligibilityPermissionState,
+    WorkspaceEligibilityReasonCode,
+    WorkspaceEligibilityRuntimeState,
+)
 
 WORKSPACE_MIGRATION_MAX_MANIFEST_BYTES = 256 * 1024
 WORKSPACE_MIGRATION_MAX_DIAGNOSTICS_BYTES = 64 * 1024
@@ -312,6 +319,48 @@ class WorkspaceContextMembershipSummary(BaseModel):
     total: int = 0
     by_resource_type: dict[str, int] = Field(default_factory=dict)
     by_role: dict[str, int] = Field(default_factory=dict)
+
+
+# --- Eligibility schemas ---
+
+class WorkspaceEligibilityCheckRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation: WorkspaceEligibilityOperation
+    resource_type: str = Field(..., min_length=1, max_length=80)
+    resource_id: str = Field(..., min_length=1, max_length=512)
+    active_workspace_id: str | None = Field(default=None, min_length=1, max_length=128)
+    runtime_state: WorkspaceEligibilityRuntimeState
+    permission_state: WorkspaceEligibilityPermissionState
+
+
+class WorkspaceEligibilityRecoveryActionResponse(BaseModel):
+    action: str
+    label: str
+    href: str | None = None
+
+
+class WorkspaceEligibilityMembershipResponse(BaseModel):
+    workspace_id: str
+    resource_type: str
+    resource_id: str
+    role: str = "member"
+    label: str | None = None
+
+
+class WorkspaceEligibilityCheckResponse(BaseModel):
+    allowed: bool
+    reason_code: WorkspaceEligibilityReasonCode
+    message: str
+    operation: WorkspaceEligibilityOperation
+    operation_category: WorkspaceEligibilityOperationCategory
+    active_workspace_id: str | None = None
+    resource_type: str
+    resource_id: str
+    global_visibility_preserved: bool = True
+    recovery_actions: list[WorkspaceEligibilityRecoveryActionResponse] = Field(default_factory=list)
+    membership: WorkspaceEligibilityMembershipResponse | None = None
+    resource_workspace_ids: list[str] = Field(default_factory=list)
 
 
 # --- Source schemas ---
