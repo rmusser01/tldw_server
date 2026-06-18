@@ -24,6 +24,7 @@ class AdapterContext:
     visible_commands: Mapping[str, CommandDescriptor]
     parent_idempotency_key: str | None = None
     cwd: str | None = None
+    sandbox_session_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -332,9 +333,14 @@ class PhaseOneCommandAdapters:
         if command == "sandbox":
             if len(argv) < 2:
                 return _UsageError("usage: sandbox <command...>")
+            arguments: dict[str, Any] = {"command": argv[1:]}
+            if self.context.sandbox_session_id:
+                arguments["session_id"] = self.context.sandbox_session_id
+            else:
+                arguments["base_image"] = "python:3.11"
             return _GovernedCallPlan(
                 tool_name="sandbox.run",
-                arguments={"base_image": "python:3.11", "command": argv[1:]},
+                arguments=arguments,
                 renderer=self._render_json_payload,
             )
         return _UsageError(self._unknown_command_message(command), exit_code=127)

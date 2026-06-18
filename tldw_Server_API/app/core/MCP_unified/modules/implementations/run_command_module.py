@@ -99,6 +99,7 @@ class RunCommandModule(BaseModule):
         timeout_seconds = self._timeout_seconds(args)
         cwd = self._cwd(args)
         retain_output_artifacts = self._retain_output_artifacts(args)
+        sandbox_session_id = self._sandbox_session_id(args)
         visible = await self._visible_commands_for_context(context)
         if command_text in {"help", "--help"}:
             return present_command_execution_result(
@@ -145,8 +146,10 @@ class RunCommandModule(BaseModule):
             parent_idempotency_key=self._scoped_parent_idempotency_key(
                 self._parent_idempotency_key(context, arguments),
                 cwd,
+                sandbox_session_id,
             ),
             cwd=cwd,
+            sandbox_session_id=sandbox_session_id,
         )
         adapters = PhaseOneCommandAdapters(adapter_context)
         executor = CommandRuntimeExecutor(
@@ -214,6 +217,8 @@ class RunCommandModule(BaseModule):
                 "idempotency_key",
                 "retainOutputArtifacts",
                 "retain_output_artifacts",
+                "sandboxSessionId",
+                "sandbox_session_id",
                 "timeoutSeconds",
                 "timeout_seconds",
                 "workingDirectory",
@@ -241,6 +246,7 @@ class RunCommandModule(BaseModule):
         self._validate_timeout_arguments(arguments)
         self._validate_cwd_arguments(arguments)
         self._validate_retain_output_artifact_arguments(arguments)
+        self._validate_sandbox_session_arguments(arguments)
 
     def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
         """Sanitize input while allowing CLI flags like `--help` and shell-like tokens."""
@@ -333,6 +339,14 @@ class RunCommandModule(BaseModule):
                     "retainOutputArtifacts": {
                         "type": "boolean",
                         "description": "Retain oversized output spill files and include redacted artifact handles.",
+                    },
+                    "sandbox_session_id": {
+                        "type": "string",
+                        "description": "Legacy alias for sandboxSessionId.",
+                    },
+                    "sandboxSessionId": {
+                        "type": "string",
+                        "description": "Sandbox session id for governed sandbox command steps.",
                     },
                     "timeout_seconds": {
                         "type": "number",
@@ -588,11 +602,50 @@ class RunCommandModule(BaseModule):
         return f"{value:g}"
 
     @staticmethod
-    def _scoped_parent_idempotency_key(parent_key: str | None, cwd: str | None) -> str | None:
-        if not parent_key or not cwd:
+    def _scoped_parent_idempotency_key(
+        parent_key: str | None,
+        cwd: str | None,
+        sandbox_session_id: str | None,
+    ) -> str | None:
+        if not parent_key:
             return parent_key
-        digest = hashlib.sha256(cwd.encode("utf-8")).hexdigest()[:16]
-        return f"{parent_key}:cwd:{digest}"
+        scope_parts: list[str] = []
+        if cwd:
+            scope_parts.append(f"cwd={cwd}")
+        if sandbox_session_id:
+            scope_parts.append(f"sandbox_session_id={sandbox_session_id}")
+        if not scope_parts:
+            return parent_key
+        digest = hashlib.sha256("\n".join(scope_parts).encode("utf-8")).hexdigest()[:16]
+        return f"{parent_key}:scope:{digest}"
+
+    @classmethod
+    def _validate_sandbox_session_arguments(cls, arguments: dict[str, Any]) -> None:
+        sandbox_session_id = arguments.get("sandbox_session_id")
+        sandbox_session_id_camel = arguments.get("sandboxSessionId")
+        if sandbox_session_id is not None:
+            cls._normalize_sandbox_session_id(sandbox_session_id, "sandbox_session_id")
+        if sandbox_session_id_camel is not None:
+            cls._normalize_sandbox_session_id(sandbox_session_id_camel, "sandboxSessionId")
+        if sandbox_session_id is not None and sandbox_session_id_camel is not None:
+            legacy_value = cls._normalize_sandbox_session_id(sandbox_session_id, "sandbox_session_id")
+            camel_value = cls._normalize_sandbox_session_id(sandbox_session_id_camel, "sandboxSessionId")
+            if legacy_value != camel_value:
+                raise ValueError("sandboxSessionId and sandbox_session_id must match when both are provided")
+
+    @classmethod
+    def _sandbox_session_id(cls, arguments: dict[str, Any]) -> str | None:
+        for key in ("sandboxSessionId", "sandbox_session_id"):
+            value = arguments.get(key)
+            if value is not None:
+                return cls._normalize_sandbox_session_id(value, key)
+        return None
+
+    @staticmethod
+    def _normalize_sandbox_session_id(value: Any, key: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{key} must be a non-empty string")
+        return value.strip()
 
     @classmethod
     def _validate_cwd_arguments(cls, arguments: dict[str, Any]) -> None:

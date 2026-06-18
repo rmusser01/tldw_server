@@ -429,6 +429,8 @@ Phase-1 adds a governed virtual CLI foundation to MCP Unified.
 
 `retainOutputArtifacts` / `retain_output_artifacts` may be set to keep oversized output spill files after rendering. Retained outputs are shown with redacted `mcp-run-output://...` handles rather than absolute filesystem paths; by default, spill files are deleted after the preview is rendered.
 
+`sandboxSessionId` / `sandbox_session_id` may be set when a command chain uses the governed `sandbox` command. Sandbox steps then call `sandbox.run` with that session id instead of the default base image, so session ownership and sandbox policy still remain enforced by the backing sandbox module.
+
 Phase-1 command families:
 
 - Pure transforms (no MCP backend call): `grep`, `head`, `tail`, `json`

@@ -206,6 +206,8 @@ async def test_run_module_exposes_governed_bash_and_shell_alias_tools() -> None:
         assert "workingDirectory" in alias["inputSchema"]["properties"]
         assert "retainOutputArtifacts" in alias["inputSchema"]["properties"]
         assert "retain_output_artifacts" in alias["inputSchema"]["properties"]
+        assert "sandboxSessionId" in alias["inputSchema"]["properties"]
+        assert "sandbox_session_id" in alias["inputSchema"]["properties"]
 
 
 @pytest.mark.asyncio
@@ -338,6 +340,106 @@ async def test_run_cwd_participates_in_nested_idempotency_keys() -> None:
     assert protocol.prepare_calls[0].idempotency_key != protocol.prepare_calls[1].idempotency_key
     assert protocol.prepare_calls[0].idempotency_key.startswith("parent-idem-cwd:")
     assert protocol.prepare_calls[1].idempotency_key.startswith("parent-idem-cwd:")
+
+
+@pytest.mark.asyncio
+async def test_run_sandbox_session_id_uses_session_backed_sandbox_run() -> None:
+    class _SandboxProtocolStub(_ProtocolStub):
+        async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
+            del params, context
+            return {"tools": [{"name": "sandbox.run", "module": "sandbox", "canExecute": True}]}
+
+        async def execute_prepared_tool_call(self, prepared: _PreparedCall) -> dict[str, Any]:
+            self.execute_calls.append(prepared)
+            return {
+                "content": [
+                    {
+                        "type": "json",
+                        "json": {
+                            "status": "completed",
+                            "session_id": prepared.params["arguments"].get("session_id"),
+                        },
+                    }
+                ],
+                "tool": "sandbox.run",
+            }
+
+    protocol = _SandboxProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-sandbox-session", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool(
+        "run",
+        {"command": "sandbox python -V", "sandboxSessionId": "sandbox-session-1"},
+        context=context,
+    )
+
+    assert "sandbox-session-1" in rendered
+    assert protocol.prepare_calls[0].params["name"] == "sandbox.run"
+    assert protocol.prepare_calls[0].params["arguments"] == {
+        "session_id": "sandbox-session-1",
+        "command": ["python", "-V"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_sandbox_session_id_participates_in_nested_idempotency_keys() -> None:
+    class _SandboxProtocolStub(_ProtocolStub):
+        async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
+            del params, context
+            return {"tools": [{"name": "sandbox.run", "module": "sandbox", "canExecute": True}]}
+
+        async def execute_prepared_tool_call(self, prepared: _PreparedCall) -> dict[str, Any]:
+            self.execute_calls.append(prepared)
+            return {"content": [{"type": "json", "json": {"ok": True}}], "tool": "sandbox.run"}
+
+    protocol = _SandboxProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-sandbox-session-idem", user_id="1", client_id="unit")
+
+    await module.execute_tool(
+        "run",
+        {
+            "command": "sandbox python -V",
+            "idempotencyKey": "parent-idem-sandbox",
+            "sandboxSessionId": "sandbox-session-1",
+        },
+        context=context,
+    )
+    await module.execute_tool(
+        "run",
+        {
+            "command": "sandbox python -V",
+            "idempotencyKey": "parent-idem-sandbox",
+            "sandboxSessionId": "sandbox-session-2",
+        },
+        context=context,
+    )
+
+    assert protocol.prepare_calls[0].idempotency_key != protocol.prepare_calls[1].idempotency_key
+    assert protocol.prepare_calls[0].idempotency_key.startswith("parent-idem-sandbox:")
+    assert protocol.prepare_calls[1].idempotency_key.startswith("parent-idem-sandbox:")
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"command": "sandbox python -V", "sandboxSessionId": ""},
+        {"command": "sandbox python -V", "sandboxSessionId": 123},
+        {
+            "command": "sandbox python -V",
+            "sandboxSessionId": "sandbox-session-1",
+            "sandbox_session_id": "sandbox-session-2",
+        },
+    ],
+)
+@pytest.mark.asyncio
+async def test_run_rejects_invalid_sandbox_session_arguments(arguments: dict[str, Any]) -> None:
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+
+    with pytest.raises(ValueError, match="sandboxSessionId|sandbox_session_id"):
+        await module.execute_tool("run", arguments, context=RequestContext(request_id="run-sandbox-session-invalid"))
 
 
 @pytest.mark.parametrize(
