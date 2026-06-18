@@ -96,4 +96,4 @@ def _role_for_path(relative_path: str) -> str:
         return "schema"
     if relative_path.startswith("content/"):
         return "payload"
-    return "other"
+    return "payload"

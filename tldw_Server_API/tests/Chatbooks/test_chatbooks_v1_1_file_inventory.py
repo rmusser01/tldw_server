@@ -58,6 +58,17 @@ def test_build_file_inventory_sorts_paths_and_assigns_roles(tmp_path):
     ]
 
 
+def test_build_file_inventory_uses_payload_role_for_uncategorized_paths(tmp_path):
+    payload = tmp_path / "metadata.json"
+    payload.write_text("{}", encoding="utf-8")
+
+    inventory = build_file_inventory(tmp_path)
+
+    assert [(item["path"], item["role"]) for item in inventory] == [
+        ("metadata.json", "payload"),
+    ]
+
+
 def test_ensure_known_features_reports_unknown_tokens():
     report = ensure_known_features(["content_envelopes", "future_feature"])
 
