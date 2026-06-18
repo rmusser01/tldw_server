@@ -939,95 +939,353 @@ Notes
 
 ## Architecture Diagram
 
+Two views are provided: a **high-level overview** of how clients, the FastAPI app, the core
+module layers, and external providers fit together; and a detailed **module → database map** that
+shows every backend datastore as its own node (no single icon stands in for multiple databases).
+
+### High-Level Overview
+
 ```mermaid
-```mermaid
-flowchart LR
-  subgraph CLIENTS ["Clients"]
-    WebUI["Next.js WebUI (primary web client)"]:::client
-    MCPClients["MCP Clients (IDE/tools)"]:::client
-    APIClients["CLI/HTTP Clients"]:::client
+flowchart TB
+  subgraph CLIENTS["Clients"]
+    direction LR
+    WebUI["Next.js WebUI"]:::client
+    AdminUI["Admin UI"]:::client
+    MCPClients["MCP Clients (IDE / tools)"]:::client
+    ACPClients["ACP Clients (agents)"]:::client
+    APIClients["CLI / HTTP Clients"]:::client
   end
 
-  subgraph API_STACK ["FastAPI App"]
+  subgraph API_STACK["FastAPI Application"]
+    direction LR
     API["FastAPI App /api/v1"]:::api
     Endpoints["Endpoints + Schemas"]:::module
-    Dependencies["API Deps (Auth, DB, rate limits, resource governor)"]:::module
-    Services["Background Services/Jobs"]:::module
+    Deps["API Deps: Auth, DB, Rate Limits, Resource Governor"]:::module
+    Workers["Background Services / Jobs Workers"]:::module
+    Streaming["Streaming / SSE / WebSocket"]:::module
   end
 
-  subgraph CORE ["Core Modules"]
+  subgraph SEC["Auth & Security"]
+    direction LR
     AuthNZ["AuthNZ"]:::core
-    RAG["RAG"]:::core
-    LLM["LLM Calls"]:::core
-    Embeddings["Embeddings"]:::core
-    Media["Ingestion & Media Processing"]:::core
+    Security["Security"]:::core
+    ResourceGov["Resource Governance"]:::core
+    Moderation["Moderation / Guardian"]:::core
+    Governance["Governance"]:::core
+    PrivilegeMaps["Privilege Maps"]:::core
+  end
+
+  subgraph ING["Ingestion & Media"]
+    direction LR
+    Ingestion["Ingestion & Media Processing"]:::core
+    IngestionSources["Ingestion Sources"]:::core
     Chunking["Chunking"]:::core
-    Chat["Chat/Characters"]:::core
-    Audio["Audio STT/TTS"]:::core
+    WebScraping["Web Scraping"]:::core
+    WebClipper["Web Clipper"]:::core
+    ExternalSources["External Sources"]:::core
+  end
+
+  subgraph LLMLAYER["LLM & Conversation"]
+    direction LR
+    LLMCalls["LLM Calls"]:::core
+    LocalLLM["Local LLM"]:::core
+    Chat["Chat"]:::core
+    ChatWorkflows["Chat Workflows"]:::core
+    CharacterChat["Character Chat"]:::core
+    Persona["Persona"]:::core
+  end
+
+  subgraph KNOW["Knowledge & RAG"]
+    direction LR
+    RAG["RAG"]:::core
+    Embeddings["Embeddings"]:::core
+    Notes["Notes"]:::core
+    Collections["Collections"]:::core
+    PromptMgmt["Prompt Management"]:::core
+    Chatbooks["Chatbooks"]:::core
+  end
+
+  subgraph AUD["Audio & Speech"]
+    direction LR
+    Audio["Audio (STT)"]:::core
+    TTS["TTS"]:::core
+    Audiobooks["Audiobooks"]:::core
+    VoiceAssistant["Voice Assistant"]:::core
+    Meetings["Meetings"]:::core
+  end
+
+  subgraph EVAL["Evaluation & Study"]
+    direction LR
     Evaluations["Evaluations"]:::core
-    PromptStudio["Prompt Studio"]:::core
-    Knowledge["Notes/Prompts/Chatbooks"]:::core
+    Flashcards["Flashcards"]:::core
+    StudyPacks["Study Packs"]:::core
+    Explainer["Explainer"]:::core
+    Claims["Claims Extraction"]:::core
+    Text2SQL["Text2SQL"]:::core
+  end
+
+  subgraph AG["Agents & Automation"]
+    direction LR
+    AgentOrch["Agent Orchestration"]:::core
+    ACP["Agent Client Protocol"]:::core
     MCP["MCP Unified"]:::core
-    Research["Research/Web Search"]:::core
+    Tools["Tools"]:::core
+    Skills["Skills"]:::core
+    Workflows["Workflows"]:::core
+    Scheduler["Scheduler"]:::core
+    Sandbox["Sandbox"]:::core
+    CodeGraph["Code Graph"]:::core
   end
 
-  subgraph STORAGE ["Storage"]
-    UsersDB[("AuthNZ DB: SQLite/PostgreSQL")]:::db
-    ContentDB[("Content DBs: Media/Notes/Chats")]:::db
-    EvalsDB[("Evaluations DB: SQLite/PostgreSQL")]:::db
-    VectorDB[("Vector DB: ChromaDB/pgvector")]:::db
+  subgraph RES["Research & Monitoring"]
+    direction LR
+    Research["Research"]:::core
+    WebSearch["Web Search"]:::core
+    Watchlists["Watchlists"]:::core
+    Calendar["Calendar"]:::core
+    Reminders["Reminders"]:::core
+    Monitoring["Monitoring"]:::core
   end
 
-  subgraph EXTERNAL ["External Providers"]
-    LLMCloud["LLM APIs (OpenAI, Anthropic, etc.)"]:::ext
-    LLMOnPrem["Local LLMs (vLLM, Ollama, llama.cpp, ...)"]:::ext
-    AudioProv["STT/TTS Providers"]:::ext
-    OCRVLM["OCR/VLM (tesseract, dots, points)"]:::ext
+  subgraph OUT["Outputs & Artifacts"]
+    direction LR
+    FileArtifacts["File Artifacts"]:::core
+    Slides["Slides"]:::core
+    ImageGen["Image Generation"]:::core
+    VN["VN Assets / Play"]:::core
+    Writing["Writing"]:::core
+  end
+
+  subgraph INFRA["Platform & Infrastructure"]
+    direction LR
+    DBM["DB Management"]:::core
+    Jobs["Jobs"]:::core
+    Storage["Storage"]:::core
+    Notifications["Notifications"]:::core
+    Metrics["Metrics"]:::core
+    Billing["Billing"]:::core
+    Usage["Usage"]:::core
+    Sync["Sync"]:::core
+    Infrastructure["Infrastructure"]:::core
+  end
+
+  DATA[("Datastores — see Module → Database map below")]:::db
+
+  subgraph EXT["External Providers"]
+    direction LR
+    LLMCloud["LLM APIs (OpenAI, Anthropic, ...)"]:::ext
+    LLMOnPrem["Local LLMs (vLLM, Ollama, llama.cpp)"]:::ext
+    AudioProv["STT / TTS Providers"]:::ext
+    OCRVLM["OCR / VLM"]:::ext
     MediaDL["yt-dlp / ffmpeg"]:::ext
-    WebSearch["Web Search/Scrapers"]:::ext
+    WebProv["Web Search / Scrapers"]:::ext
   end
 
-  WebUI -->|HTTP| API
-  MCPClients -->|HTTP/WebSocket| API
-  APIClients -->|HTTP/WebSocket| API
+  %% Clients to API
+  WebUI --> API
+  AdminUI --> API
+  MCPClients --> API
+  ACPClients --> API
+  APIClients --> API
 
+  %% Inside API stack
   API --> Endpoints
-  API --> Dependencies
-  API --> Services
+  API --> Deps
+  API --> Workers
+  API --> Streaming
 
-  Endpoints --> AuthNZ
-  Endpoints --> RAG
-  Endpoints --> LLM
-  Endpoints --> Embeddings
-  Endpoints --> Media
-  Endpoints --> Chunking
-  Endpoints --> Chat
-  Endpoints --> Audio
-  Endpoints --> Evaluations
-  Endpoints --> PromptStudio
-  Endpoints --> Knowledge
-  Endpoints --> MCP
-  Endpoints --> Research
+  %% Endpoints to module layers
+  Endpoints --> SEC
+  Endpoints --> ING
+  Endpoints --> LLMLAYER
+  Endpoints --> KNOW
+  Endpoints --> AUD
+  Endpoints --> EVAL
+  Endpoints --> AG
+  Endpoints --> RES
+  Endpoints --> OUT
+  Endpoints --> INFRA
 
-  AuthNZ --> UsersDB
-  Media --> ContentDB
-  Knowledge --> ContentDB
-  Chat --> ContentDB
-  Evaluations --> EvalsDB
-  RAG --> ContentDB
-  RAG --> VectorDB
-  Embeddings --> VectorDB
+  %% Module layers to storage
+  SEC --> DATA
+  ING --> DATA
+  LLMLAYER --> DATA
+  KNOW --> DATA
+  AUD --> DATA
+  EVAL --> DATA
+  AG --> DATA
+  RES --> DATA
+  OUT --> DATA
+  INFRA --> DATA
 
-  LLM --> LLMCloud
-  LLM --> LLMOnPrem
-  Audio --> AudioProv
-  Media --> MediaDL
-  Media --> OCRVLM
-  Research --> WebSearch
+  %% Module layers to external providers
+  LLMLAYER --> EXT
+  AUD --> EXT
+  ING --> EXT
+  RES --> EXT
 
   classDef client fill:#e8f3ff,stroke:#5b8def,color:#1f3b6e;
   classDef api fill:#fff4e6,stroke:#ff9800,color:#5d3d00;
   classDef module fill:#f4f6f8,stroke:#9aa5b1,color:#2d3748;
+  classDef core fill:#eefbea,stroke:#34a853,color:#1e4620;
+  classDef db fill:#f0eaff,stroke:#8e6cf1,color:#3a2a87;
+  classDef ext fill:#fff0f0,stroke:#e57373,color:#7b1f1f;
+```
+
+### Core Modules → Databases
+
+Each backend datastore is a separate node. Content DBs are **per-user** (under
+`Databases/user_databases/<user_id>/`); platform DBs are **shared/global** (under `Databases/`).
+SQLite is the default; PostgreSQL is supported for AuthNZ, Jobs, and the Scheduler, and Redis is an
+optional backend for caching, queues, and rate limiting.
+
+> Note: Collections, Watchlists, and Meetings persist **inside `Media_DB_v2.db`**, and VN Assets /
+> VN Play persist **inside `ChaChaNotes.db`** — they are modules that write to those DBs, not
+> separate database files.
+
+```mermaid
+flowchart LR
+  %% ---- Modules ----
+  AuthNZ["AuthNZ"]:::core
+  Audit["Audit"]:::core
+  Ingestion["Ingestion & Media"]:::core
+  Collections["Collections"]:::core
+  Watchlists["Watchlists"]:::core
+  Meetings["Meetings"]:::core
+  SearchRes["Search & Research"]:::core
+  RAG["RAG"]:::core
+  Embeddings["Embeddings"]:::core
+  Chat["Chat"]:::core
+  CharChat["Character Chat"]:::core
+  Notes["Notes"]:::core
+  Persona["Persona"]:::core
+  Research["Research"]:::core
+  Chatbooks["Chatbooks"]:::core
+  VNAssets["VN Assets"]:::core
+  VNPlay["VN Play"]:::core
+  PromptMgmt["Prompt Management"]:::core
+  Evaluations["Evaluations"]:::core
+  Personalization["Personalization"]:::core
+  Moderation["Moderation"]:::core
+  Monitoring["Monitoring"]:::core
+  Workflows["Workflows"]:::core
+  ChatWF["Chat Workflows"]:::core
+  KanbanM["Notes Tasks / Kanban"]:::core
+  SlidesM["Slides"]:::core
+  ExplainerM["Explainer"]:::core
+  AgentOrch["Agent Orchestration"]:::core
+  TTS["TTS"]:::core
+  CalendarM["Calendar"]:::core
+  ACP["Agent Client Protocol"]:::core
+  Sandbox["Sandbox"]:::core
+  Infra["Infrastructure"]:::core
+  Jobs["Jobs"]:::core
+  Scheduler["Scheduler"]:::core
+  ResourceGov["Resource Governance"]:::core
+
+  subgraph PERUSER["Per-user SQLite (Databases/user_databases/&lt;user_id&gt;/)"]
+    dbMedia[("Media_DB_v2.db")]:::db
+    dbChaCha[("ChaChaNotes.db")]:::db
+    dbPrompts[("prompts_user_dbs/user_prompts_v2.sqlite")]:::db
+    dbPromptStudio[("prompt_studio_dbs/prompt_studio.db")]:::db
+    dbEval[("evaluations/evaluations.db")]:::db
+    dbAuditUser[("audit/unified_audit.db")]:::db
+    dbPers[("Personalization.db")]:::db
+    dbGuardian[("Guardian.db")]:::db
+    dbWF[("workflows/workflows.db")]:::db
+    dbWFSched[("workflows/workflows_scheduler.db")]:::db
+    dbResSess[("ResearchSessions.db")]:::db
+    dbKanban[("Kanban.db")]:::db
+    dbSlides[("Slides.db")]:::db
+    dbExplainer[("Explainer.db")]:::db
+    dbOrch[("orchestration.db")]:::db
+    dbVoice[("voices/voice_registry.db")]:::db
+    dbCalendar[("calendar.db")]:::db
+  end
+
+  subgraph VECTOR["Vector Store (per-user)"]
+    dbVec[("chroma_storage/ — ChromaDB / pgvector")]:::db
+  end
+
+  subgraph SHARED["Shared / Global SQLite (Databases/)"]
+    dbUsers[("users.db — AuthNZ")]:::db
+    dbAuditShared[("audit_shared.db")]:::db
+    dbJobs[("jobs.db")]:::db
+    dbJobsAudit[("jobs_audit.db")]:::db
+    dbSched[("scheduler.db")]:::db
+    dbAcpAudit[("acp_audit.db")]:::db
+    dbAcpSess[("acp_sessions.db")]:::db
+    dbSandbox[("sandbox_store.db")]:::db
+    dbCircuit[("circuit_breaker_registry.db")]:::db
+    dbMonAlerts[("monitoring_alerts.db")]:::db
+    dbAnalytics[("Analytics.db — RAG")]:::db
+  end
+
+  subgraph BACKENDS["Optional Backends"]
+    dbRedis[("Redis")]:::ext
+    dbPostgres[("PostgreSQL")]:::ext
+  end
+
+  %% ---- Per-user mappings ----
+  AuthNZ --> dbUsers
+  Audit --> dbAuditUser
+  Audit --> dbAuditShared
+  Ingestion --> dbMedia
+  Collections --> dbMedia
+  Watchlists --> dbMedia
+  Watchlists --> dbPers
+  Meetings --> dbMedia
+  SearchRes --> dbMedia
+  RAG --> dbMedia
+  RAG --> dbVec
+  RAG --> dbAnalytics
+  Embeddings --> dbVec
+  Chat --> dbChaCha
+  CharChat --> dbChaCha
+  Notes --> dbChaCha
+  Persona --> dbChaCha
+  Persona --> dbPers
+  Research --> dbChaCha
+  Research --> dbResSess
+  Chatbooks --> dbChaCha
+  Chatbooks --> dbPrompts
+  Chatbooks --> dbExplainer
+  Chatbooks --> dbJobs
+  VNAssets --> dbChaCha
+  VNPlay --> dbChaCha
+  PromptMgmt --> dbPrompts
+  PromptMgmt --> dbPromptStudio
+  Evaluations --> dbEval
+  Personalization --> dbPers
+  Moderation --> dbGuardian
+  Monitoring --> dbGuardian
+  Monitoring --> dbMonAlerts
+  Workflows --> dbWF
+  Workflows --> dbWFSched
+  ChatWF --> dbWF
+  KanbanM --> dbKanban
+  SlidesM --> dbSlides
+  ExplainerM --> dbExplainer
+  AgentOrch --> dbOrch
+  TTS --> dbVoice
+  CalendarM --> dbCalendar
+
+  %% ---- Shared mappings ----
+  ACP --> dbAcpAudit
+  ACP --> dbAcpSess
+  Sandbox --> dbSandbox
+  Infra --> dbCircuit
+  Jobs --> dbJobs
+  Jobs --> dbJobsAudit
+  Scheduler --> dbSched
+
+  %% ---- Optional backends ----
+  AuthNZ -.-> dbPostgres
+  Jobs -.-> dbPostgres
+  Scheduler -.-> dbPostgres
+  Jobs -.-> dbRedis
+  ResourceGov -.-> dbRedis
+
   classDef core fill:#eefbea,stroke:#34a853,color:#1e4620;
   classDef db fill:#f0eaff,stroke:#8e6cf1,color:#3a2a87;
   classDef ext fill:#fff0f0,stroke:#e57373,color:#7b1f1f;
