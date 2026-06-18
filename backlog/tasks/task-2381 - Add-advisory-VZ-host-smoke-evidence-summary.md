@@ -40,6 +40,8 @@ Add an advisory-first host-gated evidence summary path for VZ Linux smoke runs. 
 - Follow-up spec review found and addressed two masking risks: `if: always()` can run after checkout/setup failure when the script or interpreter is missing, and `$GITHUB_STEP_SUMMARY` write failures could otherwise make the advisory step fail. The spec now requires shell guards, stdout/stderr fallback, advisory exit `0`, Markdown sanitization, non-directory evidence path handling, and tests for these cases.
 - Subagent spec review was not spawned because the available multi-agent tool requires explicit user authorization for delegation.
 - Planning verification: `git diff --check`; Bandit not run for the design-only docs/backlog commit.
+- Implementation plan drafted at `Docs/superpowers/plans/2026-06-17-vz-host-gated-evidence-summary-advisory.md`.
+- Local plan review tightened the handoff by replacing an implicit evidence-directory probe with exact `lstat` handling for missing, symlinked, non-directory, and unreadable evidence roots. Plan reviewer subagent was not spawned because delegation requires explicit user authorization in this environment.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
