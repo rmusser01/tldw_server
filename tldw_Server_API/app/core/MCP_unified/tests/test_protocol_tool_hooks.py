@@ -106,6 +106,36 @@ class _ToolModuleStub:
         return {"ok": True, "tool": tool_name, "arguments": arguments}
 
 
+class _SandboxModuleStub(_ToolModuleStub):
+    """Sandbox-like module stub used to verify secret-bearing hook metadata."""
+
+    name = "sandbox"
+
+    async def get_tools(self) -> list[dict[str, Any]]:
+        """Return a minimal sandbox.run tool definition."""
+
+        return [
+            {
+                "name": "sandbox.run",
+                "description": "Run a sandbox command.",
+                "inputSchema": {"type": "object"},
+                "metadata": {"category": "write"},
+            }
+        ]
+
+    def is_write_tool_call(
+        self,
+        _tool_name: str,
+        _arguments: dict[str, Any],
+        *,
+        tool_def: dict[str, Any] | None = None,
+    ) -> bool:
+        """Classify sandbox.run as write-capable for protocol governance."""
+
+        del tool_def
+        return True
+
+
 class _RegistryStub:
     def __init__(self, module: _ToolModuleStub) -> None:
         self.module = module
@@ -238,6 +268,36 @@ async def test_hook_context_mutation_cannot_mutate_prepared_tool_arguments() -> 
     assert len(hooks.before_contexts) == 1
     assert hooks.before_contexts[0].tool_args == {"nested": {"value": "mutated-by-hook"}}
     assert hooks.before_contexts[0].metadata == {"nested": {"value": "mutated-by-hook"}}
+
+
+@pytest.mark.unit
+async def test_sandbox_run_env_is_redacted_in_hook_context_but_preserved_for_execution() -> None:
+    """Hook contexts should redact sandbox env values without mutating execution args."""
+
+    hooks = _RecordingToolHookManager()
+    protocol, module, _ = _protocol(module=_SandboxModuleStub(), hook_manager=hooks)
+
+    result = await protocol._handle_tools_call(
+        {
+            "name": "sandbox.run",
+            "arguments": {
+                "command": ["python", "-V"],
+                "env": {"API_TOKEN": "super-secret", "PUBLIC_FLAG": "enabled"},
+            },
+        },
+        _context(),
+    )
+
+    assert module.executions == 1
+    assert result["content"][0]["json"]["arguments"]["env"] == {
+        "API_TOKEN": "super-secret",
+        "PUBLIC_FLAG": "enabled",
+    }
+    assert hooks.before_contexts[0].tool_args == {
+        "command": ["python", "-V"],
+        "env": {"API_TOKEN": "[redacted]", "PUBLIC_FLAG": "[redacted]"},
+    }
+    assert hooks.after_contexts[0].tool_args == hooks.before_contexts[0].tool_args
 
 
 @pytest.mark.unit

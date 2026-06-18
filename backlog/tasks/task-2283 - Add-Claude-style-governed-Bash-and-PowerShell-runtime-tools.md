@@ -4,7 +4,7 @@ title: Add Claude-style governed Bash and PowerShell runtime tools
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-18 01:07'
+updated_date: '2026-06-18 04:49'
 labels:
   - mcp
   - command-runtime
@@ -51,6 +51,14 @@ Fourth slice implemented: added opt-in retainOutputArtifacts / retain_output_art
 Fifth slice implemented: added sandboxSessionId / sandbox_session_id support for governed sandbox command steps. When set, sandbox steps call sandbox.run with session_id instead of the default base_image, validation rejects empty/non-string/conflicting aliases, and nested idempotency keys are salted by sandbox session scope. Remaining broader TASK-2283 areas include env-file, shell selection, and telemetry parity if desired in later slices. Verification: focused command runtime pytest 112 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_shell_sandbox_session_2283.json had results=0 errors=0; git diff --check passed.
 
 PR review hardening implemented: addressed Qodo, Gemini, and CodeRabbit comments by adding docstrings to newly added helpers/tests, replacing the sleep-based timeout test with deterministic cancellation, preserving whitespace in cwd-rewritten file path tokens, hashing idempotency scope with structured JSON serialization, and using per-invocation spill directories so timeout cleanup removes spills even when execution is cancelled before a result is returned. Verification: focused command runtime pytest 115 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_shell_pr2384_review.json had results=0 errors=0; git diff --check passed.
+
+Sixth slice implemented: added envFile / env_file support for governed sandbox command steps. Env files are validated as workspace-relative paths, resolved under the active workspace root with symlink target containment, bounded to 65536 bytes, parsed as simple UTF-8 .env KEY=value entries without expansion, forwarded only to sandbox.run, and salted into nested idempotency scope by path/content digest without exposing secret values. Non-sandbox command chains fail closed instead of silently loading env files. Verification: focused run command pytest 69 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_env_file.json had results=0 errors=0 skipped=0.
+
+Sixth-slice hardening added: sandbox.run env values are redacted from tool hook contexts while preserving the real prepared/executed sandbox arguments and argument hash behavior. Verification rerun after hardening: run-command plus protocol hook pytest 78 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_env_file.json had results=0 errors=0 skipped=0.
+
+PR #2386 review pass: rebased branch onto latest origin/dev (already up to date) and addressed still-valid review items. Changes: introduced RunEnvFileValidationError for envFile failures, replaced path.stat/read_bytes with os.open/os.fstat/os.fdopen bounded descriptor reads using O_NOFOLLOW/O_CLOEXEC where available, accepted UTF-8 BOM via utf-8-sig, restricted env variable names to ASCII [A-Za-z_][A-Za-z0-9_]*, removed redundant env-file alias normalization, added docstrings to new sandbox hook test helpers, and added focused regression tests for BOM/unicode-key rejection, descriptor reads, and OSError mapping. The marker-policy finding was handled for the newly added env-file tests by marking them unit and relying on repo-configured pytest asyncio auto mode; existing pre-existing asyncio markers were left unchanged. Verification: run-command plus protocol hook pytest 81 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_env_file_review.json had results=0 errors=0 skipped=0; git diff --check passed.
+
+PR #2386 follow-up refinement: changed RunEnvFileValidationError to inherit the project ValidationError base while preserving ValueError-compatible behavior through the existing exception hierarchy. Verification rerun after refinement: run-command plus protocol hook pytest 81 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_env_file_review.json had results=0 errors=0 skipped=0; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

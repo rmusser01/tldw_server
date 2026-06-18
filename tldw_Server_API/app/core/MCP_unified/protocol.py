@@ -1600,12 +1600,27 @@ class MCPProtocol:
         }
 
     @staticmethod
-    def _hook_safe_tool_args(tool_args: Any) -> dict[str, Any] | None:
+    def _hook_safe_tool_args(tool_args: Any, *, tool_name: str | None = None) -> dict[str, Any] | None:
         """Return detached sanitized tool arguments for hook evaluation."""
         if not isinstance(tool_args, dict):
             return None
         copied = MCPProtocol._hook_safe_copy(tool_args)
-        return copied if isinstance(copied, dict) else None
+        if not isinstance(copied, dict):
+            return None
+        return MCPProtocol._redact_hook_visible_tool_args(copied, tool_name=tool_name)
+
+    @staticmethod
+    def _redact_hook_visible_tool_args(tool_args: dict[str, Any], *, tool_name: str | None = None) -> dict[str, Any]:
+        """Redact secret-bearing argument values from hook-visible metadata."""
+
+        if str(tool_name or "") != "sandbox.run":
+            return tool_args
+        env = tool_args.get("env")
+        if not isinstance(env, dict):
+            return tool_args
+        redacted = dict(tool_args)
+        redacted["env"] = {str(key): "[redacted]" for key in env}
+        return redacted
 
     @staticmethod
     def _hook_safe_scope_payload(scope_payload: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1644,7 +1659,7 @@ class MCPProtocol:
             client_id=context.client_id,
             session_id=context.session_id,
             metadata=self._hook_safe_metadata(context),
-            tool_args=self._hook_safe_tool_args(tool_args),
+            tool_args=self._hook_safe_tool_args(tool_args, tool_name=tool_name),
             status=status,
             duration_ms=duration_ms,
             error_type=error.__class__.__name__ if error is not None else None,

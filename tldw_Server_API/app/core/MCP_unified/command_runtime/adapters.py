@@ -25,6 +25,7 @@ class AdapterContext:
     parent_idempotency_key: str | None = None
     cwd: str | None = None
     sandbox_session_id: str | None = None
+    sandbox_env: Mapping[str, str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,6 +335,8 @@ class PhaseOneCommandAdapters:
             if len(argv) < 2:
                 return _UsageError("usage: sandbox <command...>")
             arguments: dict[str, Any] = {"command": argv[1:]}
+            if self.context.sandbox_env:
+                arguments["env"] = dict(self.context.sandbox_env)
             if self.context.sandbox_session_id:
                 arguments["session_id"] = self.context.sandbox_session_id
             else:

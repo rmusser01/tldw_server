@@ -431,6 +431,8 @@ Phase-1 adds a governed virtual CLI foundation to MCP Unified.
 
 `sandboxSessionId` / `sandbox_session_id` may be set when a command chain uses the governed `sandbox` command. Sandbox steps then call `sandbox.run` with that session id instead of the default base image, so session ownership and sandbox policy still remain enforced by the backing sandbox module.
 
+`envFile` / `env_file` may be set when a command chain uses the governed `sandbox` command. The file must be UTF-8, workspace-relative, bounded in size, and remain inside the resolved workspace root after symlink resolution. Values are parsed as simple `.env` `KEY=value` entries without shell expansion and are forwarded only to `sandbox.run`; they are not injected into the host process environment or rendered back in command output.
+
 Phase-1 command families:
 
 - Pure transforms (no MCP backend call): `grep`, `head`, `tail`, `json`
