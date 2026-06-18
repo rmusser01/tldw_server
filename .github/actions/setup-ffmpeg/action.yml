@@ -17,8 +17,8 @@ runs:
       shell: bash
       run: |
         if [ -d /etc/apt/sources.list.d ]; then
-          grep -rl 'packages.microsoft.com' /etc/apt/sources.list.d | xargs -r sudo rm -f
-          grep -rl 'azure.archive.ubuntu.com' /etc/apt/sources.list.d | xargs -r sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g'
+          grep -rl 'packages.microsoft.com' /etc/apt/sources.list.d | xargs -r sudo rm -f || true
+          grep -rl 'azure.archive.ubuntu.com' /etc/apt/sources.list.d | xargs -r sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' || true
         fi
         if [ -f /etc/apt/sources.list ]; then
           sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list

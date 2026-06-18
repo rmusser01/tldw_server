@@ -329,6 +329,19 @@ def test_setup_ffmpeg_action_can_skip_ffmpeg_but_keep_portaudio() -> None:
     linux_script = linux_step["run"]
     assert 'inputs.install-ffmpeg' in linux_script
     assert "azure.archive.ubuntu.com" in linux_script
+    assert (
+        "grep -rl 'packages.microsoft.com' /etc/apt/sources.list.d | xargs -r sudo rm -f || true"
+        in linux_script
+    )
+    assert (
+        "grep -rl 'azure.archive.ubuntu.com' /etc/apt/sources.list.d | xargs -r sudo sed -i"
+        in linux_script
+    )
+    assert (
+        "grep -rl 'azure.archive.ubuntu.com' /etc/apt/sources.list.d | xargs -r sudo sed -i "
+        "'s|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' || true"
+        in linux_script
+    )
     assert "Acquire::http::Timeout=20" in linux_script
     assert (
         '"${{ inputs.install-ffmpeg }}" = "true" ] || [ "${{ inputs.install-portaudio }}" = "true"'
