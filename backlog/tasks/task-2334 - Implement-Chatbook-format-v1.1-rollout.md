@@ -1,7 +1,7 @@
 ---
 id: TASK-2334
 title: Implement Chatbook format v1.1 rollout
-status: In Progress
+status: Done
 labels:
 - chatbooks
 - implementation
@@ -10,9 +10,15 @@ documentation:
 - Docs/superpowers/plans/2026-06-18-chatbooks-format-v1-1-implementation-plan.md
 modified_files:
 - Docs/Schemas/chatbooks_manifest_v1_1.json
+- Docs/API-related/Chatbook_API_Documentation.md
+- Docs/Code_Documentation/Chatbook_Developer_Guide.md
+- Docs/Product/Chatbooks_Format_v1_1_SPEC.md
 - tldw_Server_API/app/core/Chatbooks/chatbook_models.py
 - tldw_Server_API/app/core/Chatbooks/chatbook_format_v1_1.py
 - tldw_Server_API/app/core/Chatbooks/chatbook_service.py
+- tldw_Server_API/app/core/Chatbooks/services/jobs_worker.py
+- tldw_Server_API/app/core/Chatbooks/README.md
+- tldw_Server_API/app/services/core_jobs_worker.py
 - tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py
 - tldw_Server_API/app/api/v1/endpoints/chatbooks.py
 - tldw_Server_API/app/core/Explainer/chatbook_adapter.py
@@ -22,6 +28,7 @@ modified_files:
 - tldw_Server_API/tests/Chatbooks/test_explainer_session_content_type.py
 - tldw_Server_API/tests/Chatbooks/test_chatbooks_import_validation.py
 - tldw_Server_API/tests/Chatbooks/test_chatbook_service_preview_import_safety.py
+- tldw_Server_API/tests/Chatbooks/test_chatbooks_api_error_and_preview_mapping.py
 ---
 
 ## Description
@@ -60,14 +67,28 @@ Task 7 conversation attachment review fix: validation now reads verified convers
 Task 8 slice: updated Chatbook API docs, developer guide, module README, and v1.1 product spec for the opt-in format_version path, v1.1 preview report fields, import validation behavior, helper module responsibilities, future content-type extension points, and implementation status. Verification: docs-scoped git diff --check on touched docs/backlog files exited 0 with no output; rg confirmed format_version, preview report, file_inventory, validate_v1_1_before_import, and chatbook_format_v1_1.py in the expected docs. Bandit skipped because this slice is docs-only.
 
 Task 8 review fix: corrected Chatbook import API examples so they no longer advertise `import_media=true`, and documented that media/embedding import requests are currently rejected. Verification: `rg` found no remaining `import_media=true` or `"import_media": true` examples in the Chatbook API docs; docs-scoped `git diff --check` exited 0 with no output.
+
+Task 9 final verification: focused v1.1 Chatbook test command passed with 46 tests and 6 warnings:
+`source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_manifest_contract.py tldw_Server_API/tests/Chatbooks/test_chatbooks_manifest_v1_1_contract.py tldw_Server_API/tests/Chatbooks/test_chatbooks_v1_1_file_inventory.py tldw_Server_API/tests/Chatbooks/test_chatbooks_v1_1_preview.py tldw_Server_API/tests/Chatbooks/test_explainer_session_content_type.py tldw_Server_API/tests/Chatbooks/test_chatbooks_import_validation.py -v`.
+Endpoint mapping coverage passed with 14 tests and 7 warnings:
+`source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_api_error_and_preview_mapping.py -v`.
+Bandit touched-scope command wrote `/tmp/bandit_chatbook_v1_1_final.json` with 0 results and 0 errors:
+`source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Chatbooks/chatbook_models.py tldw_Server_API/app/core/Chatbooks/chatbook_format_v1_1.py tldw_Server_API/app/core/Chatbooks/chatbook_service.py tldw_Server_API/app/core/Chatbooks/services/jobs_worker.py tldw_Server_API/app/services/core_jobs_worker.py tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py tldw_Server_API/app/api/v1/endpoints/chatbooks.py tldw_Server_API/app/core/Explainer/chatbook_adapter.py -f json -o /tmp/bandit_chatbook_v1_1_final.json`.
+Schema parse passed:
+`source .venv/bin/activate && python -m json.tool Docs/Schemas/chatbooks_manifest_v1_1.json >/tmp/chatbooks_manifest_v1_1.pretty.json`.
+Task-scoped `git diff --check` on touched Chatbook files exited 0 with no output.
+Known blocker: the combined endpoint preview command
+`source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_api_preview.py tldw_Server_API/tests/Chatbooks/test_chatbooks_api_error_and_preview_mapping.py -v`
+hung after `test_preview_manifest_version_coercion_legacy` passed and made no progress on `test_preview_manifest_version_ok`; it was interrupted after 101.76 seconds. A reduced run of `test_chatbooks_api_preview.py -k 'not test_preview_manifest_version_ok' --timeout=60 -v` also timed out while setting up the next TestClient. This matches the pre-existing full-app TestClient lifecycle hang documented during Task 6.
+Known unrelated workspace blocker: full `git diff --check` exits 2 because `Docs/Design/Agents.md:175` has trailing whitespace outside the touched Chatbook scope.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
