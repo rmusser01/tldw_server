@@ -42,6 +42,7 @@ class ChatbookVersion(str, Enum):
     """
     V1 = "1.0.0"  # Primary V1 format using semantic versioning
     V1_LEGACY = "1.0"  # Legacy format for backward compatibility
+    V1_1 = "1.1.0"  # Backward-compatible format with manifest metadata additions
     V2 = "2.0.0"  # Future version with enhanced features
 
 
