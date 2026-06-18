@@ -223,15 +223,41 @@ bundle contract.
 
 ## Artifact And Log Expectations
 
-The workflow must upload helper logs from:
+The workflow must upload structured smoke evidence from:
 
 ```text
-${{ runner.temp }}/tldw-vz-helper-ci/**
+${{ runner.temp }}/tldw-vz-helper-ci/evidence/**
 ```
 
-The upload step must run with `if: always()` and `if-no-files-found: ignore` so
-failed early setup still preserves available logs without creating noisy
-secondary failures.
+The artifact must be named:
+
+```text
+vz-linux-host-gated-evidence
+```
+
+Inspect `vz-linux-host-gated-evidence` first. It is the primary run packet for
+phase outcomes, bundle hashes, runtime paths, cleanup state, and redacted log
+pointers.
+
+The workflow must also upload raw helper logs from:
+
+```text
+${{ runner.temp }}/tldw-vz-helper-ci/serial/**
+```
+
+The raw log artifact must be named:
+
+```text
+vz-linux-host-gated-helper-logs
+```
+
+Inspect `vz-linux-host-gated-helper-logs` when the evidence artifact is missing
+or when raw helper logs are needed for boot/readiness debugging. The helper-log
+artifact must not include disposable image-store bundles or rootfs clones.
+
+Both upload steps must run with `if: always()` and `if-no-files-found: ignore`
+so failed early setup still preserves available artifacts without creating
+noisy secondary failures.
 
 The delegated smoke wrapper writes structured evidence under the uploaded
 runtime directory's `evidence/` subdirectory by default. Expected evidence files
