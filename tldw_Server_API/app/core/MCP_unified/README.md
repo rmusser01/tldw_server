@@ -423,6 +423,8 @@ Phase-1 adds a governed virtual CLI foundation to MCP Unified.
 
 `bash`, `shell`, `powershell`, and `pwsh` may also appear as compatibility aliases for `run`. They use the same `command` argument and the same governed runtime; they are not host shell execution surfaces. Unsupported raw-shell features such as redirection, command substitution, environment expansion, environment assignment prefixes, and background execution fail before any backend MCP tool call is prepared.
 
+`run` and its shell-facing aliases also accept optional `timeoutSeconds` / `timeout_seconds` values. The timeout covers the governed command chain, including policy preflight and nested MCP tool execution, and returns exit code `124` when exceeded.
+
 Phase-1 command families:
 
 - Pure transforms (no MCP backend call): `grep`, `head`, `tail`, `json`

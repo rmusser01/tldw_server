@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -199,6 +200,8 @@ async def test_run_module_exposes_governed_bash_and_shell_alias_tools() -> None:
         assert alias["metadata"]["canonical_tool"] == "run"
         assert "not a raw host shell" in alias["description"]
         assert alias["inputSchema"]["properties"] == by_name["run"]["inputSchema"]["properties"]
+        assert "timeout_seconds" in alias["inputSchema"]["properties"]
+        assert "timeoutSeconds" in alias["inputSchema"]["properties"]
 
 
 @pytest.mark.asyncio
@@ -244,6 +247,45 @@ async def test_powershell_alias_uses_governed_run_implementation_without_raw_she
     assert "[exit:0 |" in rendered
     assert [call.params["name"] for call in protocol.prepare_calls] == ["fs.list"]
     assert [call.params["arguments"] for call in protocol.prepare_calls] == [{"path": "."}]
+
+
+@pytest.mark.asyncio
+async def test_run_timeout_seconds_cancels_slow_governed_execution() -> None:
+    class _SlowProtocolStub(_ProtocolStub):
+        async def execute_prepared_tool_call(self, prepared: _PreparedCall) -> dict[str, Any]:
+            self.execute_calls.append(prepared)
+            await asyncio.sleep(0.1)
+            return await super().execute_prepared_tool_call(prepared)
+
+    protocol = _SlowProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-timeout", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("bash", {"command": "ls", "timeout_seconds": 0.01}, context=context)
+
+    assert "Command timed out after 0.01s" in rendered
+    assert "[exit:124 |" in rendered
+    assert [call.params["name"] for call in protocol.prepare_calls] == ["fs.list"]
+    assert len(protocol.execute_calls) == 1
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"command": "ls", "timeout_seconds": 0},
+        {"command": "ls", "timeout_seconds": "soon"},
+        {"command": "ls", "timeout_seconds": float("inf")},
+        {"command": "ls", "timeout_seconds": float("nan")},
+        {"command": "ls", "timeout_seconds": 5, "timeoutSeconds": 6},
+    ],
+)
+@pytest.mark.asyncio
+async def test_run_rejects_invalid_timeout_arguments(arguments: dict[str, Any]) -> None:
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+
+    with pytest.raises(ValueError, match="timeout"):
+        await module.execute_tool("run", arguments, context=RequestContext(request_id="run-timeout-invalid"))
 
 
 @pytest.mark.parametrize(

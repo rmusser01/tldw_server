@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -94,6 +95,7 @@ class RunCommandModule(BaseModule):
         self.validate_tool_arguments(tool_name, args)
 
         command_text = str(args.get("command") or "").strip()
+        timeout_seconds = self._timeout_seconds(args)
         visible = await self._visible_commands_for_context(context)
         if command_text in {"help", "--help"}:
             return present_command_execution_result(
@@ -146,15 +148,30 @@ class RunCommandModule(BaseModule):
             spill_threshold_bytes=spill_threshold_bytes,
             preview_bytes=preview_byte_limit,
         )
-        try:
+
+        async def _execute_chain() -> CommandExecutionResult:
             if adapters.requires_whole_chain_preflight(chain):
                 await adapters.preflight_chain(chain)
-            result = await executor.execute(chain)
+            return await executor.execute(chain)
+
+        try:
+            if timeout_seconds is None:
+                result = await _execute_chain()
+            else:
+                result = await asyncio.wait_for(_execute_chain(), timeout=timeout_seconds)
         except PreflightCommandError as exc:
             result = CommandExecutionResult(
                 stdout="",
                 stderr=exc.result.stderr,
                 exit_code=exc.result.exit_code,
+                duration_ms=max(0.0, (time.perf_counter() - start) * 1000.0),
+            )
+        except TimeoutError:
+            timeout_text = self._format_seconds(timeout_seconds if timeout_seconds is not None else 0.0)
+            result = CommandExecutionResult(
+                stdout="",
+                stderr=f"Command timed out after {timeout_text}s",
+                exit_code=124,
                 duration_ms=max(0.0, (time.perf_counter() - start) * 1000.0),
             )
         except (OSError, ValueError) as exc:
@@ -179,7 +196,10 @@ class RunCommandModule(BaseModule):
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
         if tool_name not in _RUN_TOOL_NAMES:
             raise ValueError(f"Unknown tool: {tool_name}")
-        unknown = sorted(set(arguments) - {"command", "idempotencyKey", "idempotency_key"})
+        unknown = sorted(
+            set(arguments)
+            - {"command", "idempotencyKey", "idempotency_key", "timeoutSeconds", "timeout_seconds"}
+        )
         if unknown:
             raise ValueError(f"unknown arguments: {', '.join(unknown)}")
         command = arguments.get("command")
@@ -199,6 +219,7 @@ class RunCommandModule(BaseModule):
             and idempotency_key.strip() != legacy_idempotency_key.strip()
         ):
             raise ValueError("idempotencyKey and idempotency_key must match when both are provided")
+        self._validate_timeout_arguments(arguments)
 
     def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
         """Sanitize input while allowing CLI flags like `--help` and shell-like tokens."""
@@ -275,6 +296,16 @@ class RunCommandModule(BaseModule):
                     "idempotencyKey": {
                         "type": "string",
                         "description": "Optional parent idempotency key for nested governed steps.",
+                    },
+                    "timeout_seconds": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "description": "Legacy alias for timeoutSeconds.",
+                    },
+                    "timeoutSeconds": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "description": "Optional wall-clock timeout for the governed command chain.",
                     },
                 },
                 "required": ["command"],
@@ -483,6 +514,41 @@ class RunCommandModule(BaseModule):
             if isinstance(value, str) and value.strip():
                 return value.strip()
         return None
+
+    @classmethod
+    def _validate_timeout_arguments(cls, arguments: dict[str, Any]) -> None:
+        timeout_seconds = arguments.get("timeout_seconds")
+        timeout_seconds_camel = arguments.get("timeoutSeconds")
+        if timeout_seconds is not None:
+            cls._coerce_timeout_seconds(timeout_seconds, "timeout_seconds")
+        if timeout_seconds_camel is not None:
+            cls._coerce_timeout_seconds(timeout_seconds_camel, "timeoutSeconds")
+        if timeout_seconds is not None and timeout_seconds_camel is not None:
+            legacy_value = cls._coerce_timeout_seconds(timeout_seconds, "timeout_seconds")
+            camel_value = cls._coerce_timeout_seconds(timeout_seconds_camel, "timeoutSeconds")
+            if legacy_value != camel_value:
+                raise ValueError("timeoutSeconds and timeout_seconds must match when both are provided")
+
+    @classmethod
+    def _timeout_seconds(cls, arguments: dict[str, Any]) -> float | None:
+        for key in ("timeoutSeconds", "timeout_seconds"):
+            value = arguments.get(key)
+            if value is not None:
+                return cls._coerce_timeout_seconds(value, key)
+        return None
+
+    @staticmethod
+    def _coerce_timeout_seconds(value: Any, key: str) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{key} must be a positive number")
+        coerced = float(value)
+        if not math.isfinite(coerced) or coerced <= 0:
+            raise ValueError(f"{key} must be greater than 0")
+        return coerced
+
+    @staticmethod
+    def _format_seconds(value: float) -> str:
+        return f"{value:g}"
 
     @staticmethod
     def _unsupported_shell_feature_message(command_text: str) -> str | None:

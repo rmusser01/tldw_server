@@ -40,13 +40,15 @@ First slice: harden the existing virtual CLI shell facade rather than adding raw
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-First slice implemented: expanded governed run aliases to include powershell and pwsh, added token-aware fail-closed detection for unsupported raw shell features before backend MCP preparation, and documented that the aliases remain virtual CLI facades rather than raw host shells. Remaining broader TASK-2283 areas include richer timeout/env-file/cwd/session semantics if desired in later slices. Verification: focused command runtime pytest 91 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_shell_facade_2283.json had results=0 errors=0; git diff --check passed.
+First slice implemented: expanded governed run aliases to include powershell and pwsh, added token-aware fail-closed detection for unsupported raw shell features before backend MCP preparation, and documented that the aliases remain virtual CLI facades rather than raw host shells. Verification: focused command runtime pytest 91 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_shell_facade_2283.json had results=0 errors=0; git diff --check passed.
+
+Second slice implemented: added optional timeoutSeconds / timeout_seconds support for run, bash, shell, powershell, and pwsh. The timeout wraps the governed command chain including preflight and nested MCP execution, validates positive finite numeric values, rejects conflicting snake/camel timeout aliases, and returns exit code 124 on timeout. Remaining broader TASK-2283 areas include richer output artifact, cwd carry-over, env-file, shell selection, session, and telemetry parity if desired in later slices. Verification: focused command runtime pytest 97 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_shell_timeout_2283.json had results=0 errors=0; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-First governed shell facade slice complete: bash, shell, powershell, and pwsh now share the virtual CLI runtime, and unsupported raw-shell syntax fails before nested MCP tool calls are prepared. The broader TASK-2283 remains open for future richer shell-runtime parity work.
+Governed shell facade slices complete so far: bash, shell, powershell, and pwsh share the virtual CLI runtime; unsupported raw-shell syntax fails before nested MCP tool calls are prepared; and optional governed-chain timeouts now return exit code 124 when exceeded. The broader TASK-2283 remains open for future richer shell-runtime parity work.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
