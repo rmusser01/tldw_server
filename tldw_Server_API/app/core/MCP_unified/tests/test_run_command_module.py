@@ -374,6 +374,105 @@ async def test_run_cwd_preserves_whitespace_in_relative_file_arguments() -> None
     ]
 
 
+@pytest.mark.unit
+async def test_run_cd_carries_virtual_cwd_to_later_governed_steps() -> None:
+    """Virtual cd should scope later governed file commands in the same run chain."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-cd-carry", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": "cd docs ; cat notes.txt"}, context=context)
+
+    assert "hello" in rendered
+    assert "[exit:0 |" in rendered
+    assert [call.params["name"] for call in protocol.prepare_calls] == ["fs.read"]
+    assert protocol.prepare_calls[0].params["arguments"] == {"path": "docs/notes.txt"}
+
+
+@pytest.mark.unit
+async def test_run_pwd_reports_carried_virtual_cwd() -> None:
+    """Virtual pwd should report the current workspace-relative cwd."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-pwd-carry", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": "cd docs/sub ; pwd"}, context=context)
+
+    assert rendered.split("\n[exit:0 |", 1)[0] == "docs/sub\n"
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
+
+
+@pytest.mark.unit
+async def test_run_cd_parent_segments_stay_bounded_to_workspace_root() -> None:
+    """Virtual cd parent traversal should work only inside the workspace root."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-cd-parent", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": "cd docs/sub ; cd .. ; pwd"}, context=context)
+
+    assert rendered.split("\n[exit:0 |", 1)[0] == "docs\n"
+
+    denied = await module.execute_tool("run", {"command": "cd .."}, context=context)
+
+    assert "cd path must stay within the workspace root" in denied
+    assert "[exit:2 |" in denied
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
+
+
+@pytest.mark.unit
+async def test_run_cd_participates_in_nested_idempotency_keys() -> None:
+    """Dynamic cwd changes should avoid nested idempotency collisions."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-cd-idempotency", user_id="1", client_id="unit")
+
+    await module.execute_tool(
+        "run",
+        {"command": "cd docs ; cat notes.txt", "idempotencyKey": "parent-idem-cd"},
+        context=context,
+    )
+    await module.execute_tool(
+        "run",
+        {"command": "cd src ; cat notes.txt", "idempotencyKey": "parent-idem-cd"},
+        context=context,
+    )
+
+    assert protocol.prepare_calls[0].idempotency_key != protocol.prepare_calls[1].idempotency_key
+    assert protocol.prepare_calls[0].idempotency_key.startswith("parent-idem-cd:")
+    assert protocol.prepare_calls[1].idempotency_key.startswith("parent-idem-cd:")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd docs | pwd",
+        "cat missing.txt && cd docs ; cat notes.txt",
+        "cat missing.txt || cd docs ; cat notes.txt",
+    ],
+)
+@pytest.mark.unit
+async def test_run_cd_fails_closed_for_ambiguous_control_flow(command: str) -> None:
+    """Stateful cd should not be allowed where preflight cannot model control flow."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-cd-invalid-flow", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": command}, context=context)
+
+    assert "cd is only supported as a semicolon-separated command" in rendered
+    assert "[exit:2 |" in rendered
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
+
+
 @pytest.mark.asyncio
 async def test_run_cwd_participates_in_nested_idempotency_keys() -> None:
     """Cwd scopes should salt nested idempotency keys."""
