@@ -1,7 +1,7 @@
 ---
 id: TASK-2332
 title: Upload VZ host-gated smoke evidence artifact
-status: In Progress
+status: In Review
 labels:
 - sandbox
 - vz_linux
@@ -11,6 +11,8 @@ priority: Medium
 documentation:
 - Docs/superpowers/specs/2026-06-17-vz-host-gated-evidence-artifact-design.md
 - Docs/superpowers/plans/2026-06-17-vz-host-gated-evidence-artifact-plan.md
+references:
+- https://github.com/rmusser01/tldw_server/pull/2382
 ---
 
 ## Description
@@ -46,6 +48,8 @@ Implemented workflow/docs/tests. RED verification: `python -m pytest tldw_Server
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Host-gated VZ Linux CI now passes an explicit smoke evidence directory, uploads `vz-linux-host-gated-evidence` as a separate always-run artifact, and narrows `vz-linux-host-gated-helper-logs` to serial/helper logs so disposable image-store/rootfs clones are not uploaded through the raw-log artifact. Operator docs and policy now direct maintainers to inspect structured evidence first and raw logs only as fallback debugging.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2382
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
