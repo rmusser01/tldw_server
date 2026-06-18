@@ -1,3 +1,4 @@
+import asyncio
 import json
 import shutil
 import zipfile
@@ -7,6 +8,7 @@ import jsonschema
 import pytest
 
 from tldw_Server_API.app.api.v1.schemas.chatbook_schemas import CreateChatbookRequest
+from tldw_Server_API.app.services import core_jobs_worker as active_core_jobs_worker
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import ChatbookVersion
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.Chatbooks.services.jobs_worker import _handle_export
@@ -148,7 +150,7 @@ async def test_core_jobs_worker_forwards_format_version_to_archive_creation():
 
         async def _create_chatbook_sync_wrapper(self, **kwargs):
             captured_kwargs.update(kwargs)
-            return True, "ok", "/tmp/export.chatbook"
+            return True, "ok", "export.chatbook"
 
         def _get_export_job(self, job_id):
             return None
@@ -164,8 +166,87 @@ async def test_core_jobs_worker_forwards_format_version_to_archive_creation():
         "job-1",
     )
 
-    assert result == {"path": "/tmp/export.chatbook", "download_url": None}
+    assert result == {"path": "export.chatbook", "download_url": None}
     assert captured_kwargs["format_version"] == ChatbookVersion.V1_1
+
+
+async def _run_active_core_jobs_worker_export_once(monkeypatch, payload):
+    captured_kwargs = {}
+    stop_event = asyncio.Event()
+
+    class _JobManager:
+        def acquire_next_job(self, **_kwargs):
+            return {
+                "id": 42,
+                "owner_user_id": "1",
+                "payload": {"action": "export", "chatbooks_job_id": "job-1", **payload},
+                "lease_id": "lease-1",
+            }
+
+        def get_job(self, _job_id):
+            return {"status": "processing"}
+
+        def complete_job(self, *_args, **_kwargs):
+            stop_event.set()
+
+        def fail_job(self, *_args, **_kwargs):
+            stop_event.set()
+
+        def finalize_cancelled(self, *_args, **_kwargs):
+            stop_event.set()
+
+        def renew_job_lease(self, *_args, **_kwargs):
+            return None
+
+    class _Service:
+        export_dir = Path("/")
+
+        def __init__(self, *_args, **_kwargs):
+            return None
+
+        def _get_export_job(self, _job_id):
+            return None
+
+        async def _create_chatbook_sync_wrapper(self, **kwargs):
+            captured_kwargs.update(kwargs)
+            return True, "ok", "export.chatbook"
+
+    monkeypatch.setattr(active_core_jobs_worker, "JobManager", _JobManager)
+    monkeypatch.setattr(active_core_jobs_worker, "_build_chacha_db_for_user", lambda _owner: object())
+    monkeypatch.setattr(active_core_jobs_worker, "ChatbookService", _Service)
+    monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.01")
+
+    await active_core_jobs_worker.run_chatbooks_core_jobs_worker(stop_event)
+    return captured_kwargs
+
+
+@pytest.mark.asyncio
+async def test_active_core_jobs_worker_forwards_format_version_to_archive_creation(monkeypatch):
+    captured_kwargs = await _run_active_core_jobs_worker_export_once(
+        monkeypatch,
+        {
+            "name": "v1.1 active queued",
+            "description": "v1.1 active queued",
+            "content_selections": {},
+            "format_version": "1.1.0",
+        },
+    )
+
+    assert captured_kwargs["format_version"] == ChatbookVersion.V1_1
+
+
+@pytest.mark.asyncio
+async def test_active_core_jobs_worker_defaults_format_version_to_v1(monkeypatch):
+    captured_kwargs = await _run_active_core_jobs_worker_export_once(
+        monkeypatch,
+        {
+            "name": "v1 active queued",
+            "description": "v1 active queued",
+            "content_selections": {},
+        },
+    )
+
+    assert captured_kwargs["format_version"] == ChatbookVersion.V1
 
 
 def test_minimal_v1_1_manifest_matches_schema():

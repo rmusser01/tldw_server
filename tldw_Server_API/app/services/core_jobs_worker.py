@@ -9,6 +9,7 @@ from pathlib import Path
 from loguru import logger
 
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
+    ChatbookVersion,
     ConflictResolution,
     ContentType,
     ExportStatus,
@@ -125,7 +126,7 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                             except _CORE_JOBS_WORKER_NONCRITICAL_EXCEPTIONS:
                                 logger.debug("metrics increment failed for lease_renew_failed")
                         # Apply jitter to renewal interval to avoid thundering herd
-                        slp = _renew_interval + random.uniform(-float(_renew_jitter), float(_renew_jitter))
+                        slp = _renew_interval + random.uniform(-float(_renew_jitter), float(_renew_jitter))  # nosec B311
                         await asyncio.sleep(max(1.0, slp))
                 return asyncio.create_task(_loop())
 
@@ -178,6 +179,7 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                     for k, v in (payload.get("content_selections") or {}).items():
                         with contextlib.suppress(_CORE_JOBS_WORKER_NONCRITICAL_EXCEPTIONS):
                             cs[ContentType(k)] = v
+                    format_version = ChatbookVersion(str(payload.get("format_version", ChatbookVersion.V1.value)))
                     # Start periodic lease renewal during heavy processing
                     _renew_task = await _start_renewal(int(job["id"]))
                     ok, msg, file_path = await svc._create_chatbook_sync_wrapper(
@@ -191,6 +193,7 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                         include_generated_content=bool(payload.get("include_generated_content", True)),
                         tags=payload.get("tags") or [],
                         categories=payload.get("categories") or [],
+                        format_version=format_version,
                     )
                     if ok:
                         # Mid-flight cancel check (honor cancellation request or terminal state)
