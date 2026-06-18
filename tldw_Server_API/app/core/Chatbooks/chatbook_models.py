@@ -256,6 +256,13 @@ class ChatbookManifest:
     binary_limits: dict[str, int] = field(default_factory=dict)
     truncation: dict[str, Any] = field(default_factory=dict)
 
+    # v1.1 manifest metadata
+    features_used: list[str] = field(default_factory=list)
+    producer: dict[str, Any] = field(default_factory=dict)
+    source_instance: dict[str, Any] = field(default_factory=dict)
+    compatibility: dict[str, Any] = field(default_factory=dict)
+    file_inventory: list[dict[str, Any]] = field(default_factory=list)
+
     def to_dict(self) -> dict:
         """Convert manifest to dictionary for JSON serialization."""
         metadata: dict[str, Any] = {
@@ -308,6 +315,16 @@ class ChatbookManifest:
         }
         if self.truncation:
             payload["truncation"] = self.truncation
+        if self.version == ChatbookVersion.V1_1 or self.features_used:
+            payload["features_used"] = self.features_used
+        if self.version == ChatbookVersion.V1_1 or self.producer:
+            payload["producer"] = self.producer
+        if self.version == ChatbookVersion.V1_1 or self.source_instance:
+            payload["source_instance"] = self.source_instance
+        if self.version == ChatbookVersion.V1_1 or self.compatibility:
+            payload["compatibility"] = self.compatibility
+        if self.version == ChatbookVersion.V1_1 or self.file_inventory:
+            payload["file_inventory"] = self.file_inventory
         return payload
 
     @classmethod
@@ -358,7 +375,12 @@ class ChatbookManifest:
             metadata=extra_metadata,
             binary_limits=binary_limits,
             truncation=truncation,
-            user_id=user.get("user_id")
+            user_id=user.get("user_id"),
+            features_used=data.get("features_used", []),
+            producer=data.get("producer", {}),
+            source_instance=data.get("source_instance", {}),
+            compatibility=data.get("compatibility", {}),
+            file_inventory=data.get("file_inventory", []),
         )
 
 

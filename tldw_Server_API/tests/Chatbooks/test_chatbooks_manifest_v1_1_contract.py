@@ -9,7 +9,12 @@ import pytest
 
 from tldw_Server_API.app.api.v1.schemas.chatbook_schemas import CreateChatbookRequest
 from tldw_Server_API.app.services import core_jobs_worker as active_core_jobs_worker
-from tldw_Server_API.app.core.Chatbooks.chatbook_models import ChatbookVersion, ExportJob, ExportStatus
+from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
+    ChatbookManifest,
+    ChatbookVersion,
+    ExportJob,
+    ExportStatus,
+)
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.Chatbooks.services.jobs_worker import ChatbooksJobError, _handle_export
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -134,6 +139,16 @@ async def test_create_chatbook_export_writes_requested_v1_1_manifest_version(cha
         manifest = json.loads(zf.read("manifest.json"))
 
     assert manifest["version"] == "1.1.0"
+    assert set(manifest["features_used"]) == {
+        "content_envelopes",
+        "file_inventory",
+        "integrity_metadata",
+        "representations",
+        "lossiness_metadata",
+    }
+    assert "file_inventory" in manifest
+    assert all(entry["path"] != "manifest.json" for entry in manifest["file_inventory"])
+    jsonschema.validate(manifest, _load_v1_1_schema())
 
 
 @pytest.mark.asyncio
@@ -374,6 +389,31 @@ async def test_active_core_jobs_worker_fails_unsupported_format_version_nonretry
 
 def test_minimal_v1_1_manifest_matches_schema():
     jsonschema.validate(_minimal_v1_1_manifest(), _load_v1_1_schema())
+
+
+def test_chatbook_manifest_parses_v1_1_metadata_fields():
+    manifest_data = _minimal_v1_1_manifest()
+    manifest_data["features_used"] = ["file_inventory"]
+    manifest_data["producer"] = {"name": "tldw_server"}
+    manifest_data["source_instance"] = {"kind": "local"}
+    manifest_data["compatibility"] = {"min_reader_version": "1.1.0"}
+    manifest_data["file_inventory"] = [
+        {
+            "path": "README.md",
+            "media_type": "text/markdown",
+            "size_bytes": 10,
+            "integrity": {"algorithm": "sha256", "value": "sha256:example"},
+            "role": "readme",
+        }
+    ]
+
+    manifest = ChatbookManifest.from_dict(manifest_data)
+
+    assert manifest.features_used == ["file_inventory"]
+    assert manifest.producer == {"name": "tldw_server"}
+    assert manifest.source_instance == {"kind": "local"}
+    assert manifest.compatibility == {"min_reader_version": "1.1.0"}
+    assert manifest.file_inventory == manifest_data["file_inventory"]
 
 
 def test_v1_1_manifest_allows_content_item_metadata_envelope():

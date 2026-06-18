@@ -63,6 +63,7 @@ from .chatbook_models import (
     ImportStatusData,
     coerce_chatbook_export_version,
 )
+from .chatbook_format_v1_1 import build_file_inventory
 
 # Unified audit logging is handled at the API layer. The service no longer
 # imports or depends on legacy audit loggers.
@@ -1631,6 +1632,28 @@ class ChatbookService:
                 metadata=self._default_chatbook_template_metadata(),
             )
             manifest.binary_limits = self._get_binary_limits_bytes()
+            if manifest.version == ChatbookVersion.V1_1:
+                manifest.features_used = [
+                    "content_envelopes",
+                    "file_inventory",
+                    "integrity_metadata",
+                    "representations",
+                    "lossiness_metadata",
+                ]
+                manifest.producer = {"name": "tldw_server"}
+                manifest.source_instance = {}
+                manifest.compatibility = {
+                    "min_reader_version": "1.1.0",
+                    "recommended_reader_version": "1.1.0",
+                    "unsupported_feature_behavior": "warn_lossy_import",
+                    "v1_compatibility": {
+                        "fallback": (
+                            "Readers that only support v1.0 may use the core manifest fields "
+                            "and ignore v1.1 metadata, with possible loss of representation "
+                            "and integrity details."
+                        )
+                    },
+                }
 
             # Collect content
             content = ChatbookContent()
@@ -1720,6 +1743,9 @@ class ChatbookService:
 
             # Create README asynchronously
             await self._create_readme_async(work_dir, manifest)
+            if manifest.version == ChatbookVersion.V1_1:
+                manifest.file_inventory = build_file_inventory(work_dir)
+                await _write_manifest()
 
             # Create archive in secure export directory
             output_filename = self._build_export_filename(name, timestamp)
