@@ -12,6 +12,7 @@ import stat
 import tempfile
 import time
 from collections.abc import Mapping
+from copy import copy
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
@@ -42,6 +43,7 @@ _RUN_TOOL_NAMES = frozenset((_RUN_TOOL_NAME, *_RUN_TOOL_ALIASES))
 _RUN_ENV_FILE_MAX_BYTES = 64 * 1024
 _RUN_SHELL_NAME_CHOICES = ("bash", "shell", "powershell", "pwsh")
 _RUN_PINNED_ALIAS_SHELLS = {"bash": "bash", "powershell": "powershell", "pwsh": "pwsh"}
+_RUN_NESTED_CORRELATION_ID_PREFIX = "run-"
 
 
 class RunEnvFileValidationError(ValidationError):
@@ -174,9 +176,10 @@ class RunCommandModule(BaseModule):
         spill_threshold_bytes = self._setting_int("spill_threshold_bytes", default=65_536)
         preview_line_limit = self._setting_int("preview_line_limit", default=200)
         preview_byte_limit = self._setting_int("preview_byte_limit", default=51_200)
+        nested_tool_use_context = self._nested_tool_use_context(context)
         adapter_context = AdapterContext(
             protocol=protocol,
-            request_context=context,
+            request_context=nested_tool_use_context,
             visible_commands=visible,
             parent_idempotency_key=self._scoped_parent_idempotency_key(
                 self._parent_idempotency_key(context, arguments),
@@ -804,6 +807,39 @@ class RunCommandModule(BaseModule):
         if isinstance(allowed, list):
             return [str(pattern).strip() for pattern in allowed if str(pattern).strip()]
         return []
+
+    @classmethod
+    def _nested_tool_use_context(cls, context: Any | None) -> Any | None:
+        """Return a child request context carrying nested tool-use metadata."""
+
+        if context is None:
+            return None
+        metadata = getattr(context, "metadata", None)
+        if not isinstance(metadata, dict):
+            return context
+
+        nested_metadata = dict(metadata)
+        nested_metadata["mcp_tool_use_nested"] = True
+        nested_metadata["mcp_tool_use_safe_correlation_id"] = True
+        if not str(nested_metadata.get("correlation_id") or "").strip():
+            request_id = getattr(context, "request_id", None)
+            correlation_id = cls._nested_correlation_id(request_id)
+            if correlation_id is not None:
+                nested_metadata["correlation_id"] = correlation_id
+
+        nested_context = copy(context)
+        nested_context.metadata = nested_metadata
+        return nested_context
+
+    @staticmethod
+    def _nested_correlation_id(request_id: Any) -> str | None:
+        """Derive a sanitizer-safe correlation id from an arbitrary request id."""
+
+        text = str(request_id or "").strip()
+        if not text:
+            return None
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
+        return f"{_RUN_NESTED_CORRELATION_ID_PREFIX}{digest}"
 
     @staticmethod
     def _policy_patterns(policy: dict[str, Any] | None, key: str) -> list[str]:

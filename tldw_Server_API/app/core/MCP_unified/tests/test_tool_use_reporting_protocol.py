@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,6 +13,8 @@ from mcp_unified.tool_hooks import ConfiguredToolCallHookManager, ToolHookRegist
 from mcp_unified.tool_use_reporting.models import MAX_FILE_POLICY_DECISIONS, ToolUseEvent
 
 from tldw_Server_API.app.core.MCP_unified.auth.rate_limiter import RateLimitExceeded
+from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
+from tldw_Server_API.app.core.MCP_unified.modules.implementations.run_command_module import RunCommandModule
 from tldw_Server_API.app.core.MCP_unified.protocol import (
     ErrorCode,
     GovernanceDeniedError,
@@ -308,6 +311,78 @@ class _Registry:
     def get_module_id_for_tool(self, _tool_name: str) -> str:
         return self.module.name
 
+    async def get_all_modules(self) -> dict[str, Any]:
+        return {self.module.name: self.module}
+
+
+class _FilesystemListModule(_ToolModule):
+    """Minimal fs.list test double used by governed run-command telemetry tests."""
+
+    name = "filesystem"
+
+    async def get_tools(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": "fs.list",
+                "description": "List files.",
+                "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}},
+                "metadata": {
+                    "category": "read",
+                    "eval": {
+                        "tool_prompt_id": "mcp.fs.list.v1",
+                        "tool_prompt_version": "2026.06.06",
+                        "action_family": "filesystem_read",
+                        "result_kind": "json",
+                        "prompt_variant": "builtin",
+                    },
+                },
+            }
+        ]
+
+    async def get_tool_def(self, tool_name: str) -> dict[str, Any]:
+        return (await self.get_tools())[0] if tool_name == "fs.list" else await super().get_tool_def(tool_name)
+
+    async def execute_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: RequestContext | None = None,
+    ) -> dict[str, Any]:
+        del tool_name, context
+        self.calls += 1
+        return {
+            "path": arguments.get("path") or ".",
+            "entries": [{"name": "notes.txt", "type": "file"}],
+        }
+
+
+class _RunCommandRegistry:
+    """Registry test double that routes run-command and fs.list tools."""
+
+    def __init__(self, run_module: RunCommandModule, fs_module: _FilesystemListModule) -> None:
+        self.run_module = run_module
+        self.fs_module = fs_module
+
+    async def find_module_for_tool(self, tool_name: str) -> Any:
+        if tool_name in {"run", "bash", "shell", "powershell", "pwsh"}:
+            return self.run_module
+        if tool_name == "fs.list":
+            return self.fs_module
+        return None
+
+    def get_module_id_for_tool(self, tool_name: str) -> str | None:
+        if tool_name in {"run", "bash", "shell", "powershell", "pwsh"}:
+            return "run_command"
+        if tool_name == "fs.list":
+            return "filesystem"
+        return None
+
+    async def get_all_modules(self) -> dict[str, Any]:
+        return {
+            "run_command": self.run_module,
+            "filesystem": self.fs_module,
+        }
+
 
 def _protocol(
     *,
@@ -338,9 +413,41 @@ def _protocol(
     return protocol, recorder
 
 
-def _request_context(metadata: dict[str, Any] | None = None) -> RequestContext:
+def _run_command_protocol() -> tuple[MCPProtocol, _RecordingToolUseRecorder]:
+    """Build a protocol wired to run-command plus a filesystem backend double."""
+
+    recorder = _RecordingToolUseRecorder()
+    run_module = RunCommandModule(ModuleConfig(name="run", settings={}))
+    fs_module = _FilesystemListModule()
+    registry = _RunCommandRegistry(run_module, fs_module)
+    deps = SimpleNamespace(
+        module_registry=registry,
+        rbac_policy=_AllowAllRbac(),
+        rate_limiter=_NoopRateLimiter(),
+        metrics_collector=_NoopMetrics(),
+        telemetry_provider=_Telemetry(),
+        tool_catalog_provider=object(),
+        effective_policy_resolver=_StaticEffectivePolicyResolver(None),
+        approval_evaluator=_AllowApprovalEvaluator(),
+        path_scope_enforcer=_FilePolicyPathScopeEnforcer(),
+        redis_client_factory=lambda **kwargs: None,
+        tool_use_recorder=recorder,
+        tool_call_hook_manager=None,
+    )
+    protocol = MCPProtocol(dependencies=deps)
+    run_module.config.settings["protocol"] = protocol
+    return protocol, recorder
+
+
+def _request_context(
+    metadata: dict[str, Any] | None = None,
+    *,
+    request_id: str = "tool-use-reporting",
+) -> RequestContext:
+    """Build a request context with stable defaults for reporting assertions."""
+
     return RequestContext(
-        request_id="tool-use-reporting",
+        request_id=request_id,
         user_id="user-1",
         client_id="client-1",
         metadata=metadata or {},
@@ -505,6 +612,37 @@ async def test_protocol_records_successful_tool_use_event() -> None:
     assert event.model_id == "gpt-4.1"
     assert event.tool_prompt_id == "mcp.test.read.v1"
     assert event.status == "success"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_run_command_nested_backend_events_are_correlated_and_marked_nested() -> None:
+    protocol, recorder = _run_command_protocol()
+    unsafe_request_id = "run/request id @ unsafe " + ("x" * 128)
+    expected_correlation_id = f"run-{hashlib.sha256(unsafe_request_id.encode('utf-8')).hexdigest()[:32]}"
+
+    response = await protocol._handle_tools_call(
+        {"name": "run", "arguments": {"command": "ls"}},
+        _request_context(metadata={"profile_id": "architect"}, request_id=unsafe_request_id),
+    )
+
+    assert response["tool"] == "run"
+    assert [event.requested_tool_name for event in recorder.events] == ["fs.list", "run"]
+
+    nested_event = recorder.events[0]
+    assert nested_event.requested_tool_name == "fs.list"
+    assert nested_event.nested is True
+    assert nested_event.correlation_id == expected_correlation_id
+    assert nested_event.profile_id == "architect"
+    assert nested_event.tool_prompt_id == "mcp.fs.list.v1"
+
+    outer_event = recorder.events[1]
+    assert outer_event.requested_tool_name == "run"
+    assert outer_event.nested is False
+    assert outer_event.correlation_id is None
+    dumped = "\n".join(event.model_dump_json() for event in recorder.events)
+    assert '"command":"ls"' not in dumped
+    assert unsafe_request_id not in dumped
 
 
 @pytest.mark.asyncio
