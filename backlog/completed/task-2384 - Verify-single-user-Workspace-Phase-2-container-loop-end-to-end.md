@@ -1,7 +1,7 @@
 ---
 id: TASK-2384
 title: Verify single-user Workspace Phase 2 container loop end-to-end
-status: In Progress
+status: Done
 labels:
 - workspace
 - phase2
@@ -12,6 +12,9 @@ priority: High
 references:
 - https://github.com/rmusser01/tldw_server/issues/1995
 - https://github.com/rmusser01/tldw_server/issues/1984
+- https://github.com/rmusser01/tldw_server/pull/2387
+- https://github.com/rmusser01/tldw_server/issues/1995#issuecomment-4738013294
+- https://github.com/rmusser01/tldw_server/issues/1984#issuecomment-4738013358
 ---
 
 ## Description
@@ -26,7 +29,7 @@ Track #1995 release evidence for the single-user Workspace Phase 2 container loo
 - [x] #2 Backend Workspace suite passes after reconciling stale ACP session eligibility expectations.
 - [x] #3 Focused frontend Workspace/ACP/route contract tests pass.
 - [x] #4 Live browser smoke verifies the canonical Workspaces manager and Research Workspace handoff in single-user mode.
-- [ ] #5 Final evidence is posted to GitHub issues #1995 and #1984.
+- [x] #5 Final evidence is posted to GitHub issues #1995 and #1984.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -45,12 +48,13 @@ Track #1995 release evidence for the single-user Workspace Phase 2 container loo
 - Backend verification: `python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_eligibility.py -q` passed with `16 passed, 6 warnings`; `python -m pytest tldw_Server_API/tests/Workspaces -q` passed with `461 passed, 8 warnings`.
 - Frontend verification: focused Vitest Workspace/Research Workspace/MCPHub/ACP/route suite passed with `10 passed (10 files), 79 passed (79 tests)`.
 - Browser verification: `workspaces-manager.spec.ts` passed against a local single-user API server with `2 passed`.
+- GitHub evidence comments posted to #1995 and #1984, and PR #2387 opened for review.
 - Remaining gaps are explicitly documented: Research Workspace source/chat/studio browser E2E and parity specs were not rerun in this slice; workflow/watchlist/sandbox frontend evidence remains backend/API-only or partial.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip

@@ -40,4 +40,4 @@ GitHub: [#1995](https://github.com/rmusser01/tldw_server/issues/1995)
 **Success Criteria**: Backlog task includes verification results and limitations, #1995 has a PR/evidence comment, and #1984 receives the final evidence summary required by #1995.
 **Tests**:
 - Bandit on touched backend paths, or document non-code/touched-test-only scope.
-**Status**: In Progress
+**Status**: Complete

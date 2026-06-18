@@ -79,7 +79,7 @@ Deferred from the agreed Phase 2 evidence set:
 | W2E-017 | Missing runtime and archived workspace behavior | Runtime-bound operations require `runtime_state="ready"`; archived workspaces block active operations and membership mutation | `test_workspace_eligibility.py`, `test_workspace_runtime_bindings.py`, `test_workspaces_api.py`; backend suite `461 passed` | Manager/project-root focused Vitest `79 passed`; detailed archive browser flow not rerun | Backend verified; frontend partial |
 | W2E-018 | Docs/API/frontend contracts match implementation | Canonical contract lists current supported adapters and public API routes; matrix names current deferrals | This document plus `Workspace_Container_Contract_2026_06.md`; `git diff --check` passed | Focused Vitest `79 passed`; browser manager smoke `2 passed` | Verified |
 | W2E-019 | Visible single-user loop | User can open manager, move to Research Workspace, and return to manager in single-user mode | Backend suite `461 passed`; local API server single-user mode passed health/auth-dependent UI calls during browser smoke | `workspaces-manager.spec.ts` passed with `2 passed`; create/select specifics are covered by focused manager tests and backend API tests | Verified for branch smoke |
-| W2E-020 | Final epic evidence | Final evidence summary with limitations is posted to #1984 and #1995 | Not applicable | Not applicable | Pending issue comments |
+| W2E-020 | Final epic evidence | Final evidence summary with limitations is posted to #1984 and #1995 | [#1995 evidence comment](https://github.com/rmusser01/tldw_server/issues/1995#issuecomment-4738013294) | [#1984 evidence comment](https://github.com/rmusser01/tldw_server/issues/1984#issuecomment-4738013358) | Verified |
 
 ## Verification Commands
 
