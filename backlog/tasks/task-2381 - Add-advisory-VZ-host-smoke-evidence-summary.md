@@ -9,6 +9,16 @@ labels:
 - ci
 - diagnostics
 priority: Medium
+documentation:
+- Docs/superpowers/specs/2026-06-17-vz-host-gated-evidence-summary-advisory-design.md
+- Docs/superpowers/plans/2026-06-17-vz-host-gated-evidence-summary-advisory.md
+- Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md
+modified_files:
+- .github/workflows/vz-linux-host-gated.yml
+- tools/vz-linux-image/scripts/summarize-host-e2e-evidence.py
+- tools/vz-linux-image/tests/test_summarize_host_e2e_evidence.py
+- tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_workflow.py
+- backlog/tasks/task-2381 - Add-advisory-VZ-host-smoke-evidence-summary.md
 ---
 
 ## Description
@@ -57,7 +67,7 @@ Add an advisory-first host-gated evidence summary path for VZ Linux smoke runs. 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added an advisory VZ host smoke evidence summarizer, wired it into the host-gated workflow, and documented the operator contract. The summarizer is read-only, exits 0 for missing/malformed evidence, appends to GitHub step summary when available, and uses descriptor-safe path handling plus allowlisted JSON rendering to avoid symlink traversal or raw log leakage.
+Added PR #2388 review follow-up fixes after rebasing onto origin/dev: concise summarizer docstrings, macOS root temp alias handling for /tmp and /var without allowing final/arbitrary symlink traversal, explicit workflow warning when the advisory summarizer exits non-zero, and focused regression tests for those cases. Verification: focused pytest suite passed with 42 tests; Bandit on the summarizer reported 0 findings; git diff --check passed; advisory missing-evidence smoke command succeeded with venv Python.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

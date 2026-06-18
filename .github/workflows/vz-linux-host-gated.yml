@@ -145,7 +145,11 @@ jobs:
             exit 0
           fi
 
-          "${python_bin}" "${summary_script}" --evidence-dir "${evidence_dir}" || true
+          "${python_bin}" "${summary_script}" --evidence-dir "${evidence_dir}"
+          summary_status=$?
+          if [[ ${summary_status} -ne 0 ]]; then
+            append_summary_warning "evidence summary failed with exit ${summary_status}; inspect uploaded artifacts/logs when present"
+          fi
           exit 0
 
       - name: Upload smoke evidence

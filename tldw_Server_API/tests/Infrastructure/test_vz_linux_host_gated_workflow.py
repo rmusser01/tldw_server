@@ -200,7 +200,9 @@ def test_vz_linux_host_gated_workflow_summary_step_is_guarded() -> None:
     assert "command -v python3" in run_block  # nosec B101
     assert "[[ -f" in run_block  # nosec B101
     assert "exit 0" in run_block  # nosec B101
-    assert "|| true" in run_block  # nosec B101
+    assert '"${python_bin}" "${summary_script}" --evidence-dir "${evidence_dir}" || true' not in run_block  # nosec B101
+    assert "summary_status=$?" in run_block  # nosec B101
+    assert "append_summary_warning \"evidence summary failed" in run_block  # nosec B101
     assert "pip install" not in run_block  # nosec B101
     assert "${{ runner.temp }}/tldw-vz-helper-ci/**" not in run_block  # nosec B101
 

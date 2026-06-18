@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import os
+import shutil
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -142,6 +145,44 @@ def test_summary_reports_complete_evidence(tmp_path: Path) -> None:
     assert "vz-linux-host-gated-helper-logs" in result.stdout
     for evidence_file in EXPECTED_EVIDENCE_FILES:
         assert evidence_file in result.stdout
+
+
+def test_summary_module_defines_docstrings_for_helpers() -> None:
+    module = _load_summary_module()
+
+    assert inspect.getdoc(module)
+    for name, value in vars(module).items():
+        if name.startswith("__"):
+            continue
+        is_module_object = getattr(value, "__module__", None) == module.__name__
+        if (inspect.isclass(value) or inspect.isfunction(value)) and is_module_object:
+            assert inspect.getdoc(value), name
+
+
+def test_summary_reads_evidence_under_macos_tmp_symlink_prefix() -> None:
+    tmp_alias = Path("/tmp")
+    if not tmp_alias.is_symlink():
+        pytest.skip("/tmp is not a symlink on this host")
+    try:
+        physical_tmp = tmp_alias.resolve(strict=True)
+    except OSError as exc:
+        pytest.skip(f"/tmp cannot be resolved: {exc}")
+    if physical_tmp == tmp_alias:
+        pytest.skip("/tmp does not resolve to a distinct physical path")
+
+    evidence_dir = physical_tmp / f"tldw-vz-evidence-{uuid.uuid4().hex}"
+    try:
+        _write_complete_evidence(evidence_dir)
+        alias_evidence_dir = tmp_alias / evidence_dir.relative_to(physical_tmp)
+
+        result = _run_summary(alias_evidence_dir)
+    finally:
+        shutil.rmtree(evidence_dir, ignore_errors=True)
+
+    _assert_advisory_success(result)
+    assert "VZ Linux Host Smoke Evidence Summary" in result.stdout
+    assert "ci-123" in result.stdout
+    assert "evidence directory is a symlink" not in result.stdout
 
 
 def test_missing_evidence_directory_warns_and_lists_expected_files(tmp_path: Path) -> None:
