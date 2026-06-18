@@ -325,7 +325,7 @@ def _hf_connectivity_ok() -> bool:
 
 
 @pytest.fixture(scope="session")
-def hf_or_deterministic_embeddings():
+def hf_or_deterministic_embeddings(pytestconfig):
     """
     Provide an embedding function that uses a lightweight HF model if internet
     is available; otherwise returns deterministic numeric embeddings.
@@ -337,7 +337,8 @@ def hf_or_deterministic_embeddings():
     )
 
     hf_model_id = "sentence-transformers/all-MiniLM-L6-v2"
-    is_online = _hf_connectivity_ok()
+    run_models = pytestconfig.getoption("--run-model-tests") or os.getenv("RUN_MODEL_TESTS") == "1"
+    is_online = run_models and _hf_connectivity_ok()
 
     if is_online:
         try:

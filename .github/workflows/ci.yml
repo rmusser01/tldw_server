@@ -1688,17 +1688,13 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ (env.RUN_MODEL_TESTS == '1' || env.RUN_REAL_HF_EMBEDDING_TESTS == '1' || env.RUN_REAL_HF_EMBEDDING_TESTS == 'true') && matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install huggingface_hub
-          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]; then
-            python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
-          else
-            python Helper_Scripts/download_embedding_models.py --target models/embeddings
-          fi
+          python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
           echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
 
       - name: Run shard tests
@@ -2928,17 +2924,13 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ (env.RUN_MODEL_TESTS == '1' || env.RUN_REAL_HF_EMBEDDING_TESTS == '1' || env.RUN_REAL_HF_EMBEDDING_TESTS == 'true') && matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install huggingface_hub
-          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]; then
-            python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
-          else
-            python Helper_Scripts/download_embedding_models.py --target models/embeddings
-          fi
+          python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
           echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
 
       - name: Run shard tests
@@ -4096,17 +4088,13 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ (env.RUN_MODEL_TESTS == '1' || env.RUN_REAL_HF_EMBEDDING_TESTS == '1' || env.RUN_REAL_HF_EMBEDDING_TESTS == 'true') && matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install huggingface_hub
-          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]; then
-            python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
-          else
-            python Helper_Scripts/download_embedding_models.py --target models/embeddings
-          fi
+          python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
           echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
 
       - name: Run OS shard tests
@@ -5263,17 +5251,13 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ (env.RUN_MODEL_TESTS == '1' || env.RUN_REAL_HF_EMBEDDING_TESTS == '1' || env.RUN_REAL_HF_EMBEDDING_TESTS == 'true') && matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install huggingface_hub
-          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]; then
-            python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
-          else
-            python Helper_Scripts/download_embedding_models.py --target models/embeddings
-          fi
+          python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
           echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
 
       - name: Run OS shard tests
@@ -6432,17 +6416,13 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
+        if: ${{ (env.RUN_MODEL_TESTS == '1' || env.RUN_REAL_HF_EMBEDDING_TESTS == '1' || env.RUN_REAL_HF_EMBEDDING_TESTS == 'true') && matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install huggingface_hub
-          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]; then
-            python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
-          else
-            python Helper_Scripts/download_embedding_models.py --target models/embeddings
-          fi
+          python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
           echo "TLDW_EMBEDDING_MODELS_DIR=models/embeddings" >> "$GITHUB_ENV"
 
       - name: Run release OS shard tests

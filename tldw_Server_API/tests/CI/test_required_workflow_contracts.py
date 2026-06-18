@@ -298,9 +298,17 @@ def test_embedding_model_predownload_skips_backpressure_shard() -> None:
         assert "matrix.shard.name != 'ai-embeddings-dlq-config'" in condition
         assert "matrix.shard.name != 'ai-embeddings-media-validation'" in condition
         assert "matrix.shard.name != 'ai-embeddings-policy'" in condition
+        assert "env.RUN_MODEL_TESTS == '1'" in condition
+        assert "env.RUN_REAL_HF_EMBEDDING_TESTS == '1'" in condition
+        assert "env.RUN_REAL_HF_EMBEDDING_TESTS == 'true'" in condition
         assert "startsWith(matrix.shard.name, 'rag-new-')" not in condition
-        assert '[[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]' in run_script
+        assert '[[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]' not in run_script
+        assert run_script.count("download_embedding_models.py") == 1
         assert "--skip-defaults --model sentence-transformers/all-MiniLM-L6-v2" in run_script
+        assert (
+            "python Helper_Scripts/download_embedding_models.py --target models/embeddings\n"
+            not in run_script
+        )
 
 
 def test_setup_ffmpeg_action_can_skip_ffmpeg_but_keep_portaudio() -> None:
