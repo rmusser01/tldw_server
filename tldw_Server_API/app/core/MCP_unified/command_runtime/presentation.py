@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shlex
 import stat
 import tempfile
 from pathlib import Path
@@ -20,6 +19,7 @@ def present_command_execution_result(
     byte_limit: int | None = None,
     line_limit: int = 200,
     spill_dir: Path | str | None = None,
+    include_artifact_handles: bool = False,
 ) -> str:
     """Format a raw execution result for model consumption."""
 
@@ -46,13 +46,21 @@ def present_command_execution_result(
                     byte_limit=byte_limit,
                     line_limit=line_limit,
                     spill_dir=spill_dir,
+                    include_artifact_handles=include_artifact_handles,
                 )
             )
         lines.append(footer)
         return "\n".join(lines)
 
     body_lines: list[str] = []
-    stdout_block = _render_stdout(stdout_text, result.stdout_spill, byte_limit, line_limit, spill_dir)
+    stdout_block = _render_stdout(
+        stdout_text,
+        result.stdout_spill,
+        byte_limit,
+        line_limit,
+        spill_dir,
+        include_artifact_handles=include_artifact_handles,
+    )
     if stdout_block:
         body_lines.append(stdout_block)
 
@@ -65,6 +73,7 @@ def present_command_execution_result(
             byte_limit=byte_limit,
             line_limit=line_limit,
             spill_dir=spill_dir,
+            include_artifact_handles=include_artifact_handles,
         )
         if stderr_block:
             if body_lines:
@@ -81,6 +90,8 @@ def _render_stdout(
     byte_limit: int,
     line_limit: int,
     spill_dir: Path | str | None,
+    *,
+    include_artifact_handles: bool,
 ) -> str:
     active_spill = spill
     if active_spill is not None:
@@ -92,9 +103,16 @@ def _render_stdout(
         line_count = _count_lines(stdout_text)
         byte_count = len(stdout_text.encode("utf-8"))
     if truncated:
+        notice = _overflow_notice(
+            "stdout",
+            line_count=line_count,
+            byte_count=byte_count,
+            spill=active_spill,
+            include_artifact_handles=include_artifact_handles,
+        )
         if preview:
-            return "\n".join([preview, "", _overflow_notice("stdout", line_count=line_count, byte_count=byte_count)])
-        return _overflow_notice("stdout", line_count=line_count, byte_count=byte_count)
+            return "\n".join([preview, "", notice])
+        return notice
     return preview
 
 
@@ -104,6 +122,8 @@ def _render_stderr(
     byte_limit: int,
     line_limit: int,
     spill_dir: Path | str | None,
+    *,
+    include_artifact_handles: bool,
 ) -> str:
     active_spills = list(spills)
     if stderr_text:
@@ -128,12 +148,27 @@ def _render_stderr(
         lines = [preview] if preview else []
         if lines:
             lines.append("")
-        lines.append(_overflow_notice("stderr", line_count=line_count, byte_count=byte_count))
+        lines.append(
+            _overflow_notice(
+                "stderr",
+                line_count=line_count,
+                byte_count=byte_count,
+                spill=active_spills[0],
+                include_artifact_handles=include_artifact_handles,
+            )
+        )
         return "\n".join(lines)
     if truncated:
+        notice = _overflow_notice(
+            "stderr",
+            line_count=line_count,
+            byte_count=byte_count,
+            spill=active_spills[0] if active_spills else None,
+            include_artifact_handles=include_artifact_handles,
+        )
         if preview:
-            return "\n".join([preview, "", _overflow_notice("stderr", line_count=line_count, byte_count=byte_count)])
-        return _overflow_notice("stderr", line_count=line_count, byte_count=byte_count)
+            return "\n".join([preview, "", notice])
+        return notice
     return preview
 
 
@@ -146,13 +181,23 @@ def _render_stderr_block(
     byte_limit: int,
     line_limit: int,
     spill_dir: Path | str | None,
+    include_artifact_handles: bool,
 ) -> list[str]:
     if not (stderr_text or text_spills or has_binary):
         return []
 
     lines = ["stderr:"]
     if stderr_text or text_spills:
-        lines.append(_render_stderr(stderr_text, text_spills, byte_limit, line_limit, spill_dir))
+        lines.append(
+            _render_stderr(
+                stderr_text,
+                text_spills,
+                byte_limit,
+                line_limit,
+                spill_dir,
+                include_artifact_handles=include_artifact_handles,
+            )
+        )
     if has_binary:
         if len(lines) > 1:
             lines.append("")
@@ -162,14 +207,24 @@ def _render_stderr_block(
     return lines
 
 
-def _overflow_notice(stream_name: str, *, line_count: int, byte_count: int) -> str:
-    return "\n".join(
-        [
-            f"--- {stream_name} truncated ({line_count} lines, {byte_count} bytes) ---",
-            f"Full {stream_name} was stored internally because it exceeded the preview limit.",
-            "Refine and rerun with: | grep <pattern>, | head <n>, or | tail <n>",
-        ]
-    )
+def _overflow_notice(
+    stream_name: str,
+    *,
+    line_count: int,
+    byte_count: int,
+    spill: CommandSpillReference | None = None,
+    include_artifact_handles: bool = False,
+) -> str:
+    """Render the truncation notice and optional redacted artifact handle."""
+
+    lines = [
+        f"--- {stream_name} truncated ({line_count} lines, {byte_count} bytes) ---",
+        f"Full {stream_name} was stored internally because it exceeded the preview limit.",
+    ]
+    if include_artifact_handles and spill is not None:
+        lines.append(f"artifact: mcp-run-output://{stream_name}/{Path(spill.path).name}")
+    lines.append("Refine and rerun with: | grep <pattern>, | head <n>, or | tail <n>")
+    return "\n".join(lines)
 
 
 def _binary_spill_notice(stream_name: str, spill: CommandSpillReference) -> str:
@@ -295,11 +350,11 @@ def _resolve_spill_root(spill_dir: Path | str | None) -> Path:
 
     try:
         spill_root.mkdir(parents=True, mode=0o700)
-    except FileExistsError:
+    except FileExistsError as exc:
         if spill_root.is_symlink():
-            raise PermissionError(f"Refusing to use symlink spill directory: {spill_root}")
+            raise PermissionError(f"Refusing to use symlink spill directory: {spill_root}") from exc
         if not spill_root.is_dir():
-            raise PermissionError(f"Refusing to use non-directory spill path: {spill_root}")
+            raise PermissionError(f"Refusing to use non-directory spill path: {spill_root}") from exc
     _validate_spill_root_permissions(spill_root)
     return spill_root
 

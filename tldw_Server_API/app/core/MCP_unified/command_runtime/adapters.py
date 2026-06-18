@@ -7,7 +7,7 @@ import hashlib
 import json
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from .executor import HandlerInvocationContext
@@ -23,6 +23,8 @@ class AdapterContext:
     request_context: Any
     visible_commands: Mapping[str, CommandDescriptor]
     parent_idempotency_key: str | None = None
+    cwd: str | None = None
+    sandbox_session_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,7 +241,9 @@ class PhaseOneCommandAdapters:
         if command == "ls":
             if len(argv) > 2:
                 return _UsageError("usage: ls [path]")
-            path = argv[1] if len(argv) == 2 else "."
+            path = self._path_with_cwd(argv[1] if len(argv) == 2 else ".")
+            if isinstance(path, _UsageError):
+                return path
             return _GovernedCallPlan(
                 tool_name="fs.list",
                 arguments={"path": path},
@@ -251,41 +255,56 @@ class PhaseOneCommandAdapters:
             tool_name = self._visible_backend_tool("cat", ("fs.read", "fs.read_text"))
             if tool_name is None:
                 return _UsageError(self._unknown_command_message(command), exit_code=127)
+            path = self._path_with_cwd(argv[1])
+            if isinstance(path, _UsageError):
+                return path
             return _GovernedCallPlan(
                 tool_name=tool_name,
-                arguments={"path": argv[1]},
+                arguments={"path": path},
                 renderer=self._render_cat,
             )
         if command == "write":
             if len(argv) < 3:
                 return _UsageError("usage: write <path> <content>")
+            path = self._path_with_cwd(argv[1])
+            if isinstance(path, _UsageError):
+                return path
             return _GovernedCallPlan(
                 tool_name="fs.write_text",
-                arguments={"path": argv[1], "content": " ".join(argv[2:])},
+                arguments={"path": path, "content": " ".join(argv[2:])},
                 renderer=self._render_write,
             )
         if command == "write-create":
             if len(argv) < 3:
                 return _UsageError("usage: write-create <path> <content>")
+            path = self._path_with_cwd(argv[1])
+            if isinstance(path, _UsageError):
+                return path
             return _GovernedCallPlan(
                 tool_name="fs.write",
-                arguments={"path": argv[1], "content": " ".join(argv[2:]), "mode": "create"},
+                arguments={"path": path, "content": " ".join(argv[2:]), "mode": "create"},
                 renderer=self._render_write,
             )
         if command == "stat":
             if len(argv) != 2:
                 return _UsageError("usage: stat <path>")
+            path = self._path_with_cwd(argv[1])
+            if isinstance(path, _UsageError):
+                return path
             return _GovernedCallPlan(
                 tool_name="fs.stat",
-                arguments={"path": argv[1]},
+                arguments={"path": path},
                 renderer=self._render_json_payload,
             )
         if command in {"glob", "find"}:
             if len(argv) not in {2, 3}:
                 return _UsageError(f"usage: {command} <pattern> [base_path]")
             arguments = {"pattern": argv[1]}
-            if len(argv) == 3:
-                arguments["base_path"] = argv[2]
+            base_path = self._path_with_cwd(argv[2]) if len(argv) == 3 else self.context.cwd
+            if isinstance(base_path, _UsageError):
+                return base_path
+            if base_path:
+                arguments["base_path"] = base_path
             return _GovernedCallPlan(
                 tool_name="fs.glob",
                 arguments=arguments,
@@ -295,8 +314,11 @@ class PhaseOneCommandAdapters:
             if len(argv) not in {2, 3}:
                 return _UsageError(f"usage: {command} <pattern> [base_path]")
             arguments = {"pattern": argv[1]}
-            if len(argv) == 3:
-                arguments["base_path"] = argv[2]
+            base_path = self._path_with_cwd(argv[2]) if len(argv) == 3 else self.context.cwd
+            if isinstance(base_path, _UsageError):
+                return base_path
+            if base_path:
+                arguments["base_path"] = base_path
             return _GovernedCallPlan(
                 tool_name="fs.grep",
                 arguments=arguments,
@@ -311,9 +333,14 @@ class PhaseOneCommandAdapters:
         if command == "sandbox":
             if len(argv) < 2:
                 return _UsageError("usage: sandbox <command...>")
+            arguments: dict[str, Any] = {"command": argv[1:]}
+            if self.context.sandbox_session_id:
+                arguments["session_id"] = self.context.sandbox_session_id
+            else:
+                arguments["base_image"] = "python:3.11"
             return _GovernedCallPlan(
                 tool_name="sandbox.run",
-                arguments={"base_image": "python:3.11", "command": argv[1:]},
+                arguments=arguments,
                 renderer=self._render_json_payload,
             )
         return _UsageError(self._unknown_command_message(command), exit_code=127)
@@ -334,6 +361,48 @@ class PhaseOneCommandAdapters:
     @staticmethod
     def _unavailable_backend_error(tool_name: str) -> _UsageError:
         return _UsageError(f"{tool_name} unavailable in this context")
+
+    def _path_with_cwd(self, path: str) -> str | _UsageError:
+        """Apply the current cwd to relative path tokens without mutating token text."""
+
+        cwd = self.context.cwd
+        text = "." if path is None or path == "" else str(path)
+        if not cwd or self._is_anchored_path(text):
+            return text
+        normalized = self._normalize_relative_path(text)
+        if isinstance(normalized, _UsageError):
+            return normalized
+        if normalized == ".":
+            return cwd
+        return f"{cwd}/{normalized}"
+
+    @classmethod
+    def _normalize_relative_path(cls, path: str) -> str | _UsageError:
+        """Normalize relative separators while preserving literal path segment text."""
+
+        text = "." if path is None or path == "" else str(path)
+        if cls._is_anchored_path(text):
+            return text
+        if text.startswith("~"):
+            return _UsageError("path must be workspace-relative when cwd is set")
+        parts: list[str] = []
+        for raw_part in text.replace("\\", "/").split("/"):
+            if not raw_part or raw_part == ".":
+                continue
+            if raw_part == "..":
+                return _UsageError("path traversal is not supported when cwd is set")
+            parts.append(raw_part)
+        return "/".join(parts) if parts else "."
+
+    @staticmethod
+    def _is_anchored_path(path: str) -> bool:
+        """Return whether a token is already absolute or drive-anchored."""
+
+        text = "" if path is None else str(path)
+        if not text:
+            return False
+        windows_path = PureWindowsPath(text)
+        return bool(PurePosixPath(text).is_absolute() or windows_path.is_absolute() or windows_path.drive)
 
     def _knowledge_plan(self, argv: list[str]) -> _GovernedCallPlan | _UsageError:
         if len(argv) < 2:
