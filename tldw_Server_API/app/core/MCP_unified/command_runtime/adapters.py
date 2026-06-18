@@ -26,6 +26,7 @@ class AdapterContext:
     cwd: str | None = None
     sandbox_session_id: str | None = None
     sandbox_env: Mapping[str, str] | None = None
+    shell_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
