@@ -1558,12 +1558,17 @@ describe("WorkspaceHeader workspace browser modal", () => {
     ).toBeInTheDocument()
 
     fireEvent.click(within(modal).getByRole("button", { name: "Open diagnostics" }))
-    expect(mockNavigate).toHaveBeenCalledWith(
+    expect(mockNavigate).toHaveBeenNthCalledWith(
+      1,
       "/acp-playground?session=sess-alpha&view=diagnostics"
     )
 
     fireEvent.click(within(modal).getByRole("button", { name: "Open Agent Tasks" }))
-    expect(mockNavigate).toHaveBeenCalledWith("/agent-tasks?workspace=workspace-alpha")
+    expect(mockNavigate).toHaveBeenNthCalledWith(
+      2,
+      "/agent-tasks?workspace=workspace-alpha"
+    )
+    expect(mockNavigate).toHaveBeenCalledTimes(2)
   })
 
   it("shows direct workspace ACP sessions when Agent Tasks history has no runs", async () => {
