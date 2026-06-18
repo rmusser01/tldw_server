@@ -399,6 +399,17 @@ def test_setup_ffmpeg_action_can_skip_ffmpeg_but_keep_portaudio() -> None:
     assert "inputs.install-ffmpeg == 'true'" in windows_step["if"]
 
 
+def test_wait_for_postgres_action_bounds_linux_client_install() -> None:
+    action = _load(".github/actions/wait-for-postgres/action.yml")
+    install_step = _get_step(action["runs"]["steps"], "Install client (Linux)")
+    install_script = install_step["run"]
+    assert "command -v pg_isready" in install_script
+    assert "azure.archive.ubuntu.com" in install_script
+    assert "Acquire::http::Timeout=20" in install_script
+    assert "Acquire::https::Timeout=20" in install_script
+    assert "sudo apt-get install -y --no-install-recommends postgresql-client" in install_script
+
+
 def test_full_suite_ffmpeg_setup_scopes_heavy_install_to_media_runtime_shards() -> None:
     workflow = _load(".github/workflows/ci.yml")
     matrix_jobs = [

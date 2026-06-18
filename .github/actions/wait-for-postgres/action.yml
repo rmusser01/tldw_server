@@ -22,8 +22,18 @@ runs:
       if: runner.os == 'Linux' && inputs.install-client == 'true'
       shell: bash
       run: |
-        sudo apt-get update
-        sudo apt-get install -y postgresql-client
+        if command -v pg_isready >/dev/null 2>&1; then
+          exit 0
+        fi
+        if [ -d /etc/apt/sources.list.d ]; then
+          grep -rl 'packages.microsoft.com' /etc/apt/sources.list.d | xargs -r sudo rm -f || true
+          grep -rl 'azure.archive.ubuntu.com' /etc/apt/sources.list.d | xargs -r sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' || true
+        fi
+        if [ -f /etc/apt/sources.list ]; then
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
+        fi
+        sudo apt-get update -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20
+        sudo apt-get install -y --no-install-recommends postgresql-client
 
     - name: Wait for Postgres
       shell: bash
