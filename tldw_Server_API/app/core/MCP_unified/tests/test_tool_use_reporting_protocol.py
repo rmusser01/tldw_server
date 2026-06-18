@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 from types import SimpleNamespace
 from typing import Any
 
@@ -315,6 +316,8 @@ class _Registry:
 
 
 class _FilesystemListModule(_ToolModule):
+    """Minimal fs.list test double used by governed run-command telemetry tests."""
+
     name = "filesystem"
 
     async def get_tools(self) -> list[dict[str, Any]]:
@@ -354,6 +357,8 @@ class _FilesystemListModule(_ToolModule):
 
 
 class _RunCommandRegistry:
+    """Registry test double that routes run-command and fs.list tools."""
+
     def __init__(self, run_module: RunCommandModule, fs_module: _FilesystemListModule) -> None:
         self.run_module = run_module
         self.fs_module = fs_module
@@ -409,6 +414,8 @@ def _protocol(
 
 
 def _run_command_protocol() -> tuple[MCPProtocol, _RecordingToolUseRecorder]:
+    """Build a protocol wired to run-command plus a filesystem backend double."""
+
     recorder = _RecordingToolUseRecorder()
     run_module = RunCommandModule(ModuleConfig(name="run", settings={}))
     fs_module = _FilesystemListModule()
@@ -432,9 +439,15 @@ def _run_command_protocol() -> tuple[MCPProtocol, _RecordingToolUseRecorder]:
     return protocol, recorder
 
 
-def _request_context(metadata: dict[str, Any] | None = None) -> RequestContext:
+def _request_context(
+    metadata: dict[str, Any] | None = None,
+    *,
+    request_id: str = "tool-use-reporting",
+) -> RequestContext:
+    """Build a request context with stable defaults for reporting assertions."""
+
     return RequestContext(
-        request_id="tool-use-reporting",
+        request_id=request_id,
         user_id="user-1",
         client_id="client-1",
         metadata=metadata or {},
@@ -601,13 +614,16 @@ async def test_protocol_records_successful_tool_use_event() -> None:
     assert event.status == "success"
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_run_command_nested_backend_events_are_correlated_and_marked_nested() -> None:
     protocol, recorder = _run_command_protocol()
+    unsafe_request_id = "run/request id @ unsafe " + ("x" * 128)
+    expected_correlation_id = f"run-{hashlib.sha256(unsafe_request_id.encode('utf-8')).hexdigest()[:32]}"
 
     response = await protocol._handle_tools_call(
         {"name": "run", "arguments": {"command": "ls"}},
-        _request_context(metadata={"profile_id": "architect"}),
+        _request_context(metadata={"profile_id": "architect"}, request_id=unsafe_request_id),
     )
 
     assert response["tool"] == "run"
@@ -616,7 +632,7 @@ async def test_run_command_nested_backend_events_are_correlated_and_marked_neste
     nested_event = recorder.events[0]
     assert nested_event.requested_tool_name == "fs.list"
     assert nested_event.nested is True
-    assert nested_event.correlation_id == "tool-use-reporting"
+    assert nested_event.correlation_id == expected_correlation_id
     assert nested_event.profile_id == "architect"
     assert nested_event.tool_prompt_id == "mcp.fs.list.v1"
 
@@ -626,6 +642,7 @@ async def test_run_command_nested_backend_events_are_correlated_and_marked_neste
     assert outer_event.correlation_id is None
     dumped = "\n".join(event.model_dump_json() for event in recorder.events)
     assert '"command":"ls"' not in dumped
+    assert unsafe_request_id not in dumped
 
 
 @pytest.mark.asyncio
