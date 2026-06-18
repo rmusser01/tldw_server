@@ -17,6 +17,8 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import ValidationError
+
 from ...command_runtime.adapters import (
     AdapterContext,
     PhaseOneCommandAdapters,
@@ -40,7 +42,7 @@ _RUN_TOOL_NAMES = frozenset((_RUN_TOOL_NAME, *_RUN_TOOL_ALIASES))
 _RUN_ENV_FILE_MAX_BYTES = 64 * 1024
 
 
-class RunEnvFileValidationError(ValueError):
+class RunEnvFileValidationError(ValidationError):
     """Raised when run env-file input fails validation or safe loading."""
 
 

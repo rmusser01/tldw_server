@@ -4,7 +4,7 @@ title: Add Claude-style governed Bash and PowerShell runtime tools
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-18 04:45'
+updated_date: '2026-06-18 04:49'
 labels:
   - mcp
   - command-runtime
@@ -57,6 +57,8 @@ Sixth slice implemented: added envFile / env_file support for governed sandbox c
 Sixth-slice hardening added: sandbox.run env values are redacted from tool hook contexts while preserving the real prepared/executed sandbox arguments and argument hash behavior. Verification rerun after hardening: run-command plus protocol hook pytest 78 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_env_file.json had results=0 errors=0 skipped=0.
 
 PR #2386 review pass: rebased branch onto latest origin/dev (already up to date) and addressed still-valid review items. Changes: introduced RunEnvFileValidationError for envFile failures, replaced path.stat/read_bytes with os.open/os.fstat/os.fdopen bounded descriptor reads using O_NOFOLLOW/O_CLOEXEC where available, accepted UTF-8 BOM via utf-8-sig, restricted env variable names to ASCII [A-Za-z_][A-Za-z0-9_]*, removed redundant env-file alias normalization, added docstrings to new sandbox hook test helpers, and added focused regression tests for BOM/unicode-key rejection, descriptor reads, and OSError mapping. The marker-policy finding was handled for the newly added env-file tests by marking them unit and relying on repo-configured pytest asyncio auto mode; existing pre-existing asyncio markers were left unchanged. Verification: run-command plus protocol hook pytest 81 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_env_file_review.json had results=0 errors=0 skipped=0; git diff --check passed.
+
+PR #2386 follow-up refinement: changed RunEnvFileValidationError to inherit the project ValidationError base while preserving ValueError-compatible behavior through the existing exception hierarchy. Verification rerun after refinement: run-command plus protocol hook pytest 81 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_env_file_review.json had results=0 errors=0 skipped=0; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
