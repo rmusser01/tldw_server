@@ -202,6 +202,8 @@ async def test_run_module_exposes_governed_bash_and_shell_alias_tools() -> None:
         assert alias["inputSchema"]["properties"] == by_name["run"]["inputSchema"]["properties"]
         assert "timeout_seconds" in alias["inputSchema"]["properties"]
         assert "timeoutSeconds" in alias["inputSchema"]["properties"]
+        assert "cwd" in alias["inputSchema"]["properties"]
+        assert "workingDirectory" in alias["inputSchema"]["properties"]
 
 
 @pytest.mark.asyncio
@@ -286,6 +288,72 @@ async def test_run_rejects_invalid_timeout_arguments(arguments: dict[str, Any]) 
 
     with pytest.raises(ValueError, match="timeout"):
         await module.execute_tool("run", arguments, context=RequestContext(request_id="run-timeout-invalid"))
+
+
+@pytest.mark.asyncio
+async def test_run_applies_cwd_to_relative_workspace_file_arguments() -> None:
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-cwd", user_id="1", client_id="unit")
+
+    await module.execute_tool(
+        "run",
+        {"command": "cat notes.txt ; write out.txt hello ; ls . ; rg TODO .", "cwd": "docs"},
+        context=context,
+    )
+
+    assert [call.params["name"] for call in protocol.prepare_calls] == [
+        "fs.read",
+        "fs.write_text",
+        "fs.list",
+        "fs.grep",
+    ]
+    assert [call.params["arguments"] for call in protocol.prepare_calls] == [
+        {"path": "docs/notes.txt"},
+        {"path": "docs/out.txt", "content": "hello"},
+        {"path": "docs"},
+        {"pattern": "TODO", "base_path": "docs"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_cwd_participates_in_nested_idempotency_keys() -> None:
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-cwd-idempotency", user_id="1", client_id="unit")
+
+    await module.execute_tool(
+        "run",
+        {"command": "cat notes.txt", "cwd": "docs", "idempotencyKey": "parent-idem-cwd"},
+        context=context,
+    )
+    await module.execute_tool(
+        "run",
+        {"command": "cat notes.txt", "cwd": "src", "idempotencyKey": "parent-idem-cwd"},
+        context=context,
+    )
+
+    assert protocol.prepare_calls[0].idempotency_key != protocol.prepare_calls[1].idempotency_key
+    assert protocol.prepare_calls[0].idempotency_key.startswith("parent-idem-cwd:")
+    assert protocol.prepare_calls[1].idempotency_key.startswith("parent-idem-cwd:")
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"command": "ls", "cwd": "/tmp"},
+        {"command": "ls", "cwd": "../private"},
+        {"command": "ls", "cwd": "C:\\Users\\example"},
+        {"command": "ls", "cwd": "docs", "workingDirectory": "src"},
+    ],
+)
+@pytest.mark.asyncio
+async def test_run_rejects_unsafe_cwd_arguments(arguments: dict[str, Any]) -> None:
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+
+    with pytest.raises(ValueError, match="cwd|workingDirectory"):
+        await module.execute_tool("run", arguments, context=RequestContext(request_id="run-cwd-invalid"))
 
 
 @pytest.mark.parametrize(

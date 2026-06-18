@@ -425,6 +425,8 @@ Phase-1 adds a governed virtual CLI foundation to MCP Unified.
 
 `run` and its shell-facing aliases also accept optional `timeoutSeconds` / `timeout_seconds` values. The timeout covers the governed command chain, including policy preflight and nested MCP tool execution, and returns exit code `124` when exceeded.
 
+`cwd` / `workingDirectory` may be set to a workspace-relative directory for a single governed command chain. Relative file paths and search base paths are evaluated beneath that cwd, while absolute paths and final read/write decisions still flow through the backing MCP tools and profile policy. The cwd value rejects absolute paths, Windows drive roots, home-relative paths, and `..` traversal.
+
 Phase-1 command families:
 
 - Pure transforms (no MCP backend call): `grep`, `head`, `tail`, `json`

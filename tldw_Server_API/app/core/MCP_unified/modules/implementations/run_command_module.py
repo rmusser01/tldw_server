@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import math
 import time
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from loguru import logger
@@ -96,6 +97,7 @@ class RunCommandModule(BaseModule):
 
         command_text = str(args.get("command") or "").strip()
         timeout_seconds = self._timeout_seconds(args)
+        cwd = self._cwd(args)
         visible = await self._visible_commands_for_context(context)
         if command_text in {"help", "--help"}:
             return present_command_execution_result(
@@ -139,7 +141,11 @@ class RunCommandModule(BaseModule):
             protocol=protocol,
             request_context=context,
             visible_commands=visible,
-            parent_idempotency_key=self._parent_idempotency_key(context, arguments),
+            parent_idempotency_key=self._scoped_parent_idempotency_key(
+                self._parent_idempotency_key(context, arguments),
+                cwd,
+            ),
+            cwd=cwd,
         )
         adapters = PhaseOneCommandAdapters(adapter_context)
         executor = CommandRuntimeExecutor(
@@ -198,7 +204,15 @@ class RunCommandModule(BaseModule):
             raise ValueError(f"Unknown tool: {tool_name}")
         unknown = sorted(
             set(arguments)
-            - {"command", "idempotencyKey", "idempotency_key", "timeoutSeconds", "timeout_seconds"}
+            - {
+                "command",
+                "cwd",
+                "idempotencyKey",
+                "idempotency_key",
+                "timeoutSeconds",
+                "timeout_seconds",
+                "workingDirectory",
+            }
         )
         if unknown:
             raise ValueError(f"unknown arguments: {', '.join(unknown)}")
@@ -220,6 +234,7 @@ class RunCommandModule(BaseModule):
         ):
             raise ValueError("idempotencyKey and idempotency_key must match when both are provided")
         self._validate_timeout_arguments(arguments)
+        self._validate_cwd_arguments(arguments)
 
     def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
         """Sanitize input while allowing CLI flags like `--help` and shell-like tokens."""
@@ -296,6 +311,14 @@ class RunCommandModule(BaseModule):
                     "idempotencyKey": {
                         "type": "string",
                         "description": "Optional parent idempotency key for nested governed steps.",
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Workspace-relative current directory for relative command paths.",
+                    },
+                    "workingDirectory": {
+                        "type": "string",
+                        "description": "Alias for cwd.",
                     },
                     "timeout_seconds": {
                         "type": "number",
@@ -549,6 +572,61 @@ class RunCommandModule(BaseModule):
     @staticmethod
     def _format_seconds(value: float) -> str:
         return f"{value:g}"
+
+    @staticmethod
+    def _scoped_parent_idempotency_key(parent_key: str | None, cwd: str | None) -> str | None:
+        if not parent_key or not cwd:
+            return parent_key
+        digest = hashlib.sha256(cwd.encode("utf-8")).hexdigest()[:16]
+        return f"{parent_key}:cwd:{digest}"
+
+    @classmethod
+    def _validate_cwd_arguments(cls, arguments: dict[str, Any]) -> None:
+        cwd = arguments.get("cwd")
+        working_directory = arguments.get("workingDirectory")
+        if cwd is not None:
+            cls._normalize_cwd(cwd, "cwd")
+        if working_directory is not None:
+            cls._normalize_cwd(working_directory, "workingDirectory")
+        if cwd is not None and working_directory is not None:
+            cwd_value = cls._normalize_cwd(cwd, "cwd")
+            working_directory_value = cls._normalize_cwd(working_directory, "workingDirectory")
+            if cwd_value != working_directory_value:
+                raise ValueError("cwd and workingDirectory must match when both are provided")
+
+    @classmethod
+    def _cwd(cls, arguments: dict[str, Any]) -> str | None:
+        for key in ("workingDirectory", "cwd"):
+            value = arguments.get(key)
+            if value is not None:
+                normalized = cls._normalize_cwd(value, key)
+                return None if normalized == "." else normalized
+        return None
+
+    @classmethod
+    def _normalize_cwd(cls, value: Any, key: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{key} must be a non-empty workspace-relative path")
+        text = value.strip()
+        if cls._is_anchored_path(text) or text.startswith("~"):
+            raise ValueError(f"{key} must be workspace-relative")
+        parts: list[str] = []
+        for raw_part in text.replace("\\", "/").split("/"):
+            part = raw_part.strip()
+            if not part or part == ".":
+                continue
+            if part == "..":
+                raise ValueError(f"{key} must not contain path traversal")
+            parts.append(part)
+        return "/".join(parts) if parts else "."
+
+    @staticmethod
+    def _is_anchored_path(path: str) -> bool:
+        text = str(path or "").strip()
+        if not text:
+            return False
+        windows_path = PureWindowsPath(text)
+        return bool(PurePosixPath(text).is_absolute() or windows_path.is_absolute() or windows_path.drive)
 
     @staticmethod
     def _unsupported_shell_feature_message(command_text: str) -> str | None:
