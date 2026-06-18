@@ -4,10 +4,14 @@ import type {
   WorkspaceApiResponse,
   WorkspaceCapabilitiesResponse,
   WorkspaceContextResponse,
+  WorkspaceListApiResponse,
   WorkspaceProjectRoot,
   WorkspaceSourceStatusSummary
 } from "@/services/tldw/domains/workspace-api"
-import { useActiveWorkspaceContext } from "../hooks"
+import {
+  useActiveWorkspaceContext,
+  useWorkspaceMembershipLookup
+} from "../hooks"
 
 const workspaceFixture = (
   overrides: Partial<WorkspaceApiResponse> = {}
@@ -267,5 +271,54 @@ describe("useActiveWorkspaceContext", () => {
     })
 
     expect(result.current.context.workspace?.label).toBe("Second")
+  })
+})
+
+describe("useWorkspaceMembershipLookup", () => {
+  it("fetches the server workspace list and resolves membership labels", async () => {
+    const listWorkspaces = vi.fn(async (): Promise<WorkspaceListApiResponse> => ({
+      items: [
+        workspaceFixture({ id: "ws-1", name: "Alpha Workspace" }),
+        workspaceFixture({
+          id: "ws-2",
+          name: "Archived Workspace",
+          archived: true
+        })
+      ],
+      total: 2
+    }))
+
+    const { result } = renderHook(() =>
+      useWorkspaceMembershipLookup({
+        client: { listWorkspaces }
+      })
+    )
+
+    expect(result.current.loading).toBe(true)
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false)
+    })
+
+    expect(listWorkspaces).toHaveBeenCalledTimes(1)
+    expect(result.current.resolveMembership("ws-1")).toMatchObject({
+      workspaceId: "ws-1",
+      workspaceLabel: "Alpha Workspace",
+      membershipLabel: "Workspace: Alpha Workspace",
+      isAuthoritative: true,
+      reasonCode: null
+    })
+    expect(result.current.resolveMembership("ws-2")).toMatchObject({
+      workspaceId: "ws-2",
+      membershipLabel: "Archived Workspace: Archived Workspace",
+      tone: "warning",
+      reasonCode: "workspace_archived"
+    })
+    expect(result.current.resolveMembership("missing")).toMatchObject({
+      workspaceId: "missing",
+      membershipLabel: "Unknown Workspace",
+      isAuthoritative: false,
+      reasonCode: "workspace_missing"
+    })
   })
 })

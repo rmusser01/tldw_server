@@ -355,6 +355,7 @@ export const ACPWorkspacePanel: React.FC = () => {
               </span>
             )}
             {sessionWorkspaceContext.activeWorkspaceId &&
+              sessionWorkspaceContext.sessionWorkspaceId &&
               sessionWorkspaceContext.activeWorkspaceId !==
                 sessionWorkspaceContext.sessionWorkspaceId && (
                 <span className="rounded bg-surface px-1.5 py-0.5 font-mono text-[11px] text-text">

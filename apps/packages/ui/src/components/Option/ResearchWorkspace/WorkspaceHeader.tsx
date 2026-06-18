@@ -155,10 +155,18 @@ const WORKSPACE_ROLLOUT_CONTROL_ORDER: WorkspaceRolloutControlKey[] = [
 const WORKSPACE_ROLLOUT_PRESET_PERCENTAGES = [0, 10, 50, 100] as const
 
 const getServerWorkspaceContextStatusLabel = (
-  state: ReturnType<typeof useActiveWorkspaceContext>["context"]["state"],
+  context: ReturnType<typeof useActiveWorkspaceContext>["context"],
   loading: boolean
 ): string => {
   if (loading) return "Server context loading"
+  if (
+    context.attentionState === "archived" ||
+    context.workspace?.archived ||
+    context.recovery.reasonCode === "workspace_archived"
+  ) {
+    return "Server context archived"
+  }
+  const state = context.state
   if (state === "partial") return "Server context partial"
   if (state === "error") return "Server context unavailable"
   if (state === "missing") return "Server context missing"
@@ -1410,7 +1418,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     [workspaceCollections]
   )
   const serverWorkspaceContextStatusLabel = getServerWorkspaceContextStatusLabel(
-    serverWorkspaceContext.state,
+    serverWorkspaceContext,
     serverWorkspaceContextLoading
   )
   const serverWorkspaceContextLabel =

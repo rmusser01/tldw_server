@@ -8,6 +8,7 @@ import type {
   ACPWorkspaceContextInput,
   ActiveWorkspaceContextContract,
   WorkspaceEligibilityDecision,
+  WorkspaceMembershipLabel,
   WorkspaceRecoveryContract,
   WorkspaceRecoverySeverity,
   WorkspaceSummaryContract
@@ -48,6 +49,90 @@ export const normalizeWorkspaceSummary = (
   version: workspace.version,
   lastModified: workspace.last_modified
 })
+
+export const normalizeWorkspaceMembershipLabel = (
+  workspaceId?: string | null,
+  options: {
+    workspace?: WorkspaceApiResponse | null
+  } = {}
+): WorkspaceMembershipLabel => {
+  const normalizedWorkspaceId = normalizeOptionalId(workspaceId)
+
+  if (!normalizedWorkspaceId) {
+    return {
+      workspaceId: null,
+      workspaceLabel: "Global",
+      membershipLabel: "Global",
+      tone: "neutral",
+      isAuthoritative: true,
+      reasonCode: null
+    }
+  }
+
+  const workspace =
+    options.workspace?.id === normalizedWorkspaceId ? options.workspace : null
+
+  if (!workspace) {
+    return {
+      workspaceId: normalizedWorkspaceId,
+      workspaceLabel: fallbackWorkspaceLabel(normalizedWorkspaceId),
+      membershipLabel: "Unknown Workspace",
+      tone: "warning",
+      isAuthoritative: false,
+      reasonCode: "workspace_missing"
+    }
+  }
+
+  const summary = normalizeWorkspaceSummary(workspace)
+
+  if (summary.deleted) {
+    return {
+      workspaceId: summary.id,
+      workspaceLabel: summary.label,
+      membershipLabel: `Deleted Workspace: ${summary.label}`,
+      tone: "error",
+      isAuthoritative: true,
+      reasonCode: "workspace_deleted"
+    }
+  }
+
+  if (summary.archived) {
+    return {
+      workspaceId: summary.id,
+      workspaceLabel: summary.label,
+      membershipLabel: `Archived Workspace: ${summary.label}`,
+      tone: "warning",
+      isAuthoritative: true,
+      reasonCode: "workspace_archived"
+    }
+  }
+
+  return {
+    workspaceId: summary.id,
+    workspaceLabel: summary.label,
+    membershipLabel: `Workspace: ${summary.label}`,
+    tone: "neutral",
+    isAuthoritative: true,
+    reasonCode: null
+  }
+}
+
+export const createWorkspaceMembershipLookup = (
+  workspaces: WorkspaceApiResponse[] = []
+): ((workspaceId?: string | null) => WorkspaceMembershipLabel) => {
+  const workspaceById = new Map(
+    workspaces.map((workspace) => [workspace.id, workspace])
+  )
+
+  return (workspaceId?: string | null) => {
+    const normalizedWorkspaceId = normalizeOptionalId(workspaceId)
+    return normalizeWorkspaceMembershipLabel(normalizedWorkspaceId, {
+      workspace: normalizedWorkspaceId
+        ? workspaceById.get(normalizedWorkspaceId) ?? null
+        : null
+    })
+  }
+}
 
 const recoveryMap: Record<string, WorkspaceRecoveryContract> = {
   allowed: {

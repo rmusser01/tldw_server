@@ -38,6 +38,17 @@ In scope:
 - Tests proving active Workspace selection does not silently filter global browse/search or list rendering.
 - Adoption guidance for later surfaces to reuse the same contracts.
 
+Workspace tag/status display rules for later surfaces:
+
+- Notes, Media, Sources, Artifacts, Chats, Prompts, Workflows, and Watchlists should render Workspace membership as a display badge derived from the shared membership contract, not from ad hoc local tag strings.
+- Rows with no server `workspace_id` render a neutral `Global` badge when a membership badge is needed. The badge is informational and must not imply the row is unavailable in global browse/search.
+- Rows with a known active server Workspace render `Workspace: {workspace label}`. The label comes from the server Workspace list/context response; the server Workspace ID remains the identity key.
+- Rows whose server Workspace is archived render `Archived Workspace: {workspace label}` with a warning tone. Rows whose server Workspace is deleted render `Deleted Workspace: {workspace label}` with an error tone.
+- Rows whose `workspace_id` cannot be resolved from the current server Workspace list render `Unknown Workspace` with a warning tone and preserve the unresolved ID for diagnostics.
+- Surface-specific lifecycle state remains separate from membership. For example, Sources keep source readiness/status, Artifacts keep artifact status/review state, Workflows/Watchlists keep run state, and Chats/Prompts keep their own availability state alongside the Workspace badge.
+- Active Workspace selection must never silently hide global rows or rows from other Workspaces. Any filtering must be user-selected and visibly represented as a filter, not inferred from active context.
+- These display rules are defined in this contract slice so later migrations can adopt the same labels and tones incrementally. Full UI adoption across every listed surface remains staged work.
+
 Out of scope:
 
 - #1994 contained-resource index, activity feed, or Workspace dashboard UI.

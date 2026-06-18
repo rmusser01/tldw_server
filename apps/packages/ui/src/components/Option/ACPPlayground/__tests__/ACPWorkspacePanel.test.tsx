@@ -86,4 +86,20 @@ describe("ACPWorkspacePanel canonical Workspace handoff", () => {
       screen.getByRole("link", { name: "Open Workspaces" })
     ).toHaveAttribute("href", "#/workspaces")
   })
+
+  it("does not duplicate the active workspace id when the ACP session has no workspace id", () => {
+    const store = useACPSessionsStore.getState()
+    const sessionId = store.createSession({
+      cwd: "/workspace/alpha",
+      name: "Unattached Session"
+    })
+    store.updateSessionMetadata(sessionId, {
+      sshWsUrl: "/api/v1/acp/sessions/unattached/ssh"
+    })
+
+    render(<ACPWorkspacePanel />)
+
+    expect(screen.getByText("Active Workspace only")).toBeInTheDocument()
+    expect(screen.getAllByText("workspace-alpha")).toHaveLength(1)
+  })
 })

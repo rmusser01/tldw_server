@@ -8,7 +8,9 @@ import type {
 } from "@/services/tldw/domains/workspace-api"
 import {
   compareACPWorkspaceContext,
+  createWorkspaceMembershipLookup,
   normalizeActiveWorkspaceContext,
+  normalizeWorkspaceMembershipLabel,
   normalizeWorkspaceSummary,
   resolveWorkspaceActionEligibility,
   resolveWorkspaceRecovery
@@ -190,6 +192,63 @@ describe("workspace context normalizers", () => {
 
     expect(decision.allowed).toBe(true)
     expect(decision.recovery.reasonCode).toBe("allowed")
+  })
+
+  it("builds membership labels from the server workspace list", () => {
+    const lookupMembership = createWorkspaceMembershipLookup([
+      workspaceFixture({ id: "ws-active", name: "Alpha" }),
+      workspaceFixture({ id: "ws-archived", name: "Archive", archived: true })
+    ])
+
+    expect(lookupMembership("ws-active")).toMatchObject({
+      workspaceId: "ws-active",
+      workspaceLabel: "Alpha",
+      membershipLabel: "Workspace: Alpha",
+      tone: "neutral",
+      isAuthoritative: true,
+      reasonCode: null
+    })
+    expect(lookupMembership("ws-archived")).toMatchObject({
+      workspaceId: "ws-archived",
+      workspaceLabel: "Archive",
+      membershipLabel: "Archived Workspace: Archive",
+      tone: "warning",
+      isAuthoritative: true,
+      reasonCode: "workspace_archived"
+    })
+    expect(lookupMembership("ws-missing")).toMatchObject({
+      workspaceId: "ws-missing",
+      workspaceLabel: "Workspace ws-missing",
+      membershipLabel: "Unknown Workspace",
+      tone: "warning",
+      isAuthoritative: false,
+      reasonCode: "workspace_missing"
+    })
+    expect(lookupMembership(null)).toMatchObject({
+      workspaceId: null,
+      workspaceLabel: "Global",
+      membershipLabel: "Global",
+      tone: "neutral",
+      isAuthoritative: true,
+      reasonCode: null
+    })
+  })
+
+  it("normalizes direct membership lookups without silently granting authority", () => {
+    expect(
+      normalizeWorkspaceMembershipLabel("ws-deleted", {
+        workspace: workspaceFixture({
+          id: "ws-deleted",
+          name: "Deleted Workspace",
+          deleted: true
+        })
+      })
+    ).toMatchObject({
+      membershipLabel: "Deleted Workspace: Deleted Workspace",
+      tone: "error",
+      isAuthoritative: true,
+      reasonCode: "workspace_deleted"
+    })
   })
 
   it("returns missing context when no server workspace id exists", () => {

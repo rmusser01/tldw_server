@@ -48,8 +48,11 @@ Track #1993 implementation for server-authoritative frontend Workspace context c
   - `apps/packages/ui/src/components/Option/ACPPlayground/ACPWorkspacePanel.tsx`
   - `apps/packages/ui/src/components/Option/ACPPlayground/__tests__/ACPWorkspacePanel.test.tsx`
 - Verification:
-  - `./node_modules/.bin/vitest run src/services/workspace-context/__tests__/normalizers.test.ts src/services/workspace-context/__tests__/hooks.test.tsx src/components/Option/ResearchWorkspace/__tests__/WorkspaceHeader.test.tsx src/components/Option/ACPPlayground/__tests__/ACPWorkspacePanel.test.tsx --maxWorkers=1` passed: 4 files, 61 tests.
+  - `./node_modules/.bin/vitest run src/services/workspace-context/__tests__/normalizers.test.ts src/services/workspace-context/__tests__/hooks.test.tsx src/components/Option/ResearchWorkspace/__tests__/WorkspaceHeader.test.tsx src/components/Option/ACPPlayground/__tests__/ACPWorkspacePanel.test.tsx --maxWorkers=1` passed: 4 files, 67 tests.
   - `git diff --check` passed.
+- Visible UI evidence:
+  - Testing Library render assertions cover the Research Workspace server-context indicator for ready, failed, archived, and global-browser-list states, and cover ACP Workspace panel aligned, mismatch, no-session, and active-only ID-chip states.
+  - Browser attempt: `../node_modules/.bin/playwright test e2e/workflows/research-workspace.parity.spec.ts --project=chromium --reporter=line --workers=1` from `apps/tldw-frontend` failed before browser launch because the worktree frontend app has no local `next` binary (`next: command not found`). The main checkout has `next`, but its workspace `@tldw/ui` symlink resolves to the main checkout package, so it was not used as evidence for this PR worktree.
 - Bandit: not applicable; this slice touched frontend TypeScript/tests/docs/Backlog only and no Python production paths.
 - Typecheck: skipped because no `tsc` binary is exposed in this worktree or the linked frontend dependency roots; focused Vitest transpilation and behavior checks passed.
 - Local test environment note: added ignored symlink `apps/node_modules -> /Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules` so existing package symlinks resolve in this worktree. This is not tracked by git.

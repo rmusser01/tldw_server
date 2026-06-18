@@ -653,6 +653,39 @@ describe("WorkspaceHeader workspace browser modal", () => {
     ).toHaveAttribute("href", "#/workspaces")
   })
 
+  it("labels archived server workspace context explicitly", async () => {
+    workspaceContextMocks.useActiveWorkspaceContext.mockReturnValue(
+      makeActiveWorkspaceHookResult({
+        state: "ready",
+        attentionState: "archived",
+        workspace: {
+          ...(makeActiveWorkspaceContext().workspace as Record<string, unknown>),
+          archived: true,
+          statusLabel: "Archived"
+        },
+        recovery: {
+          reasonCode: "workspace_archived",
+          severity: "warning",
+          message: "This server Workspace is archived. Restore it before making changes.",
+          nextStepLabel: "Open Workspaces",
+          nextStepHref: "#/workspaces"
+        }
+      })
+    )
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    expect(await screen.findByText("Server context archived")).toBeInTheDocument()
+    expect(screen.queryByText("Server context ready")).not.toBeInTheDocument()
+  })
+
   it("does not filter the workspace browser list by active server context", async () => {
     workspaceContextMocks.useActiveWorkspaceContext.mockReturnValue(
       makeActiveWorkspaceHookResult({
