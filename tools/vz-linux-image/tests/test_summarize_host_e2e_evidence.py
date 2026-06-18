@@ -457,6 +457,67 @@ def test_summary_does_not_render_raw_nested_malformed_values(tmp_path: Path) -> 
     assert "128" in result.stdout
 
 
+def test_summary_replaces_container_values_in_expected_scalar_fields(tmp_path: Path) -> None:
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    for evidence_file in EXPECTED_EVIDENCE_FILES - {"host-smoke-evidence.json"}:
+        (evidence_dir / evidence_file).write_text(f"{evidence_file}\n", encoding="utf-8")
+    raw_sentinel = "RAW-SCALAR-CONTAINER-CONTENT-SHOULD-NOT-RENDER"
+    (evidence_dir / "host-smoke-evidence.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "created_at": "2026-06-17T00:00:00Z",
+                "smoke_run_id": {"raw_guest_output": raw_sentinel},
+                "final_exit_code": 0,
+                "source_bundle_path": ["raw", raw_sentinel],
+                "run_bundle_path": "/private/run/bundle",
+                "phases": {
+                    "real_host_smoke": {
+                        "status": {"raw_guest_output": raw_sentinel},
+                        "exit_code": 0,
+                        "timestamp": "2026-06-17T00:00:01Z",
+                    }
+                },
+                "cleanup": {
+                    "status": {"raw_guest_output": raw_sentinel},
+                    "helper_pid": "123",
+                    "helper_running_after_cleanup": False,
+                    "socket_present_after_cleanup": False,
+                },
+                "evidence_files": {
+                    "host-smoke-evidence.json": {"raw_guest_output": raw_sentinel},
+                    "cleanup-status.txt": str(evidence_dir / "cleanup-status.txt"),
+                },
+                "log_artifacts": [
+                    {
+                        "path": {"raw_guest_output": raw_sentinel},
+                        "size_bytes": 128,
+                        "sha256": "c" * 64,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = _run_summary(evidence_dir)
+
+    _assert_advisory_success(result)
+    assert raw_sentinel not in result.stdout
+    assert "invalid or unavailable" in result.stdout
+    assert "final_exit_code" in result.stdout
+    assert "0" in result.stdout
+    assert "created_at" in result.stdout
+    assert "2026-06-17T00:00:00Z" in result.stdout
+    assert "real_host_smoke" in result.stdout
+    assert "helper_pid" in result.stdout
+    assert "123" in result.stdout
+    assert "/private/run/bundle" in result.stdout
+    assert "cleanup-status.txt" in result.stdout
+    assert "128" in result.stdout
+
+
 def test_valid_github_step_summary_path_appends_markdown(tmp_path: Path) -> None:
     evidence_dir = tmp_path / "evidence"
     _write_complete_evidence(evidence_dir)

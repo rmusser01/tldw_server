@@ -23,6 +23,7 @@ EXPECTED_EVIDENCE_FILES = (
 )
 JSON_MAX_BYTES = 1024 * 1024
 DISPLAY_MAX_CHARS = 240
+INVALID_METADATA_VALUE = "invalid or unavailable"
 RUNTIME_POINTER_KEYS = (
     "source_bundle_path",
     "run_bundle_path",
@@ -81,6 +82,12 @@ def _display(value: object, *, max_chars: int = DISPLAY_MAX_CHARS) -> str:
     if len(text) > max_chars:
         return text[: max_chars - 1] + "..."
     return text
+
+
+def _metadata_scalar(value: Any) -> object:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return INVALID_METADATA_VALUE
 
 
 def _table(headers: tuple[str, ...], rows: list[tuple[object, ...]]) -> str:
@@ -431,7 +438,7 @@ def _render_run_overview(payload: dict[str, Any] | None) -> str:
     rows: list[tuple[object, object]] = []
     for key in ("smoke_run_id", "final_exit_code", "created_at", "schema_version"):
         if key in payload:
-            rows.append((key, payload[key]))
+            rows.append((key, _metadata_scalar(payload[key])))
     if not rows:
         return "## Structured Run Metadata\n\nStructured metadata was parsed, but no known run overview fields were present."
     return "## Structured Run Metadata\n\n" + _table(("Field", "Value"), rows)
@@ -450,13 +457,13 @@ def _render_phase_outcomes(payload: dict[str, Any] | None) -> str:
             rows.append(
                 (
                     phase,
-                    details.get("status", ""),
-                    details.get("exit_code", ""),
-                    details.get("timestamp", ""),
+                    _metadata_scalar(details.get("status", "")),
+                    _metadata_scalar(details.get("exit_code", "")),
+                    _metadata_scalar(details.get("timestamp", "")),
                 )
             )
         else:
-            rows.append((phase, "invalid or unavailable", "", ""))
+            rows.append((phase, INVALID_METADATA_VALUE, "", ""))
     return "## Phase Outcomes\n\n" + _table(("Phase", "Status", "Exit code", "Timestamp"), rows)
 
 
@@ -466,7 +473,7 @@ def _render_cleanup(payload: dict[str, Any] | None) -> str:
     cleanup = payload.get("cleanup")
     if not isinstance(cleanup, dict) or not cleanup:
         return ""
-    rows = [(key, cleanup[key]) for key in CLEANUP_KEYS if key in cleanup]
+    rows = [(key, _metadata_scalar(cleanup[key])) for key in CLEANUP_KEYS if key in cleanup]
     if not rows:
         return ""
     return "## Cleanup Status\n\n" + _table(("Field", "Value"), rows)
@@ -475,7 +482,7 @@ def _render_cleanup(payload: dict[str, Any] | None) -> str:
 def _render_runtime_pointers(payload: dict[str, Any] | None) -> str:
     if not payload:
         return ""
-    rows = [(key, payload[key]) for key in RUNTIME_POINTER_KEYS if key in payload]
+    rows = [(key, _metadata_scalar(payload[key])) for key in RUNTIME_POINTER_KEYS if key in payload]
     if not rows:
         return ""
     return "## Runtime And Artifact Pointers\n\n" + _table(("Field", "Value"), rows)
@@ -487,7 +494,11 @@ def _render_recorded_evidence_paths(payload: dict[str, Any] | None) -> str:
     evidence_files = payload.get("evidence_files")
     if not isinstance(evidence_files, dict) or not evidence_files:
         return ""
-    rows = [(name, evidence_files.get(name, "")) for name in EXPECTED_EVIDENCE_FILES if name in evidence_files]
+    rows = [
+        (name, _metadata_scalar(evidence_files.get(name, "")))
+        for name in EXPECTED_EVIDENCE_FILES
+        if name in evidence_files
+    ]
     if not rows:
         return ""
     return "## Recorded Evidence File Paths\n\n" + _table(("File", "Recorded path"), rows)
@@ -505,9 +516,9 @@ def _render_log_artifacts(payload: dict[str, Any] | None) -> str:
         if isinstance(artifact, dict):
             rows.append(
                 (
-                    artifact.get("path", ""),
-                    artifact.get("size_bytes", ""),
-                    artifact.get("sha256", ""),
+                    _metadata_scalar(artifact.get("path", "")),
+                    _metadata_scalar(artifact.get("size_bytes", "")),
+                    _metadata_scalar(artifact.get("sha256", "")),
                 )
             )
     if not rows:
