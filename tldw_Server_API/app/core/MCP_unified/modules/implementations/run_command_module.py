@@ -1228,13 +1228,19 @@ class RunCommandModule(BaseModule):
                 position += 1
                 continue
 
+            if quote == "'":
+                if char == "'":
+                    quote = None
+                position += 1
+                continue
+
             if char == "`":
                 escaped = True
                 position += 1
                 continue
 
-            if quote is not None:
-                if char == quote:
+            if quote == '"':
+                if char == '"':
                     quote = None
                 position += 1
                 continue
@@ -1244,13 +1250,13 @@ class RunCommandModule(BaseModule):
                 position += 1
                 continue
 
-            if char in {"{", "}"}:
+            if char == "{" and RunCommandModule._looks_like_powershell_script_block_start(command_text, position):
                 return "Unsupported PowerShell feature: script blocks are not supported by the governed shell facade"
 
             if char == "&":
                 next_char = command_text[position + 1] if position + 1 < length else ""
                 previous_char = command_text[position - 1] if position > 0 else ""
-                if next_char != "&" and previous_char != "&":
+                if next_char != "&" and previous_char not in {"&", ">"}:
                     return (
                         "Unsupported PowerShell feature: invocation operator is not supported by "
                         "the governed shell facade"
@@ -1259,6 +1265,25 @@ class RunCommandModule(BaseModule):
             position += 1
 
         return None
+
+    @staticmethod
+    def _looks_like_powershell_script_block_start(command_text: str, position: int) -> bool:
+        """Return whether an unquoted ``{`` is token-shaped like a PowerShell script block."""
+
+        if position <= 0:
+            return True
+
+        previous_char = command_text[position - 1]
+        if previous_char.isspace():
+            return True
+
+        previous_nonspace_position = position - 1
+        while previous_nonspace_position >= 0 and command_text[previous_nonspace_position].isspace():
+            previous_nonspace_position -= 1
+        if previous_nonspace_position < 0:
+            return True
+
+        return command_text[previous_nonspace_position] in {"|", ";", "&", "=", "(", "[", ","}
 
     @staticmethod
     def _shell_expansion_message(command_text: str, position: int) -> str:

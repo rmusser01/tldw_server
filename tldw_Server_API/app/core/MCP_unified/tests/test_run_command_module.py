@@ -943,6 +943,56 @@ async def test_powershell_shell_selection_rejects_unsupported_platform_syntax_be
     assert protocol.execute_calls == []
 
 
+@pytest.mark.unit
+async def test_powershell_shell_selection_allows_brace_quantifier_search_pattern() -> None:
+    """Brace quantifiers in virtual CLI arguments are not PowerShell script blocks."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-powershell-brace-pattern", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool(
+        "run",
+        {"command": "rg foo{2} src", "shellName": "powershell"},
+        context=context,
+    )
+
+    assert "[exit:0 |" in rendered
+    assert [call.params["name"] for call in protocol.prepare_calls] == ["fs.grep"]
+    assert protocol.prepare_calls[0].params["arguments"] == {"pattern": "foo{2}", "base_path": "src"}
+
+
+@pytest.mark.unit
+async def test_powershell_redirection_is_not_reported_as_invocation_operator() -> None:
+    """PowerShell redirection containing & should keep the generic redirection diagnostic."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-powershell-redirection", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool(
+        "run",
+        {"command": "cat notes.txt 2>&1", "shellName": "powershell"},
+        context=context,
+    )
+
+    assert "Unsupported shell feature: redirection" in rendered
+    assert "Unsupported PowerShell feature: invocation operator" not in rendered
+    assert "[exit:2 |" in rendered
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
+
+
+@pytest.mark.unit
+def test_powershell_single_quoted_backtick_does_not_escape_closing_quote() -> None:
+    """PowerShell treats backticks as literals inside single-quoted strings."""
+
+    message = RunCommandModule._unsupported_powershell_feature_message("rg '`' & src")
+
+    assert message is not None
+    assert "Unsupported PowerShell feature: invocation operator" in message
+
+
 @pytest.mark.asyncio
 async def test_run_filesystem_aliases_route_to_backing_tools() -> None:
     protocol = _ProtocolStub()
