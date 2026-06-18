@@ -932,7 +932,7 @@ Examples
 
 Notes
 - The primary UI is the Next.js WebUI in `apps/tldw-frontend/` (run separately).
-- SQLite is default for local dev; PostgreSQL supported for AuthNZ and content DBs.
+- SQLite is default for local dev; PostgreSQL is supported for AuthNZ, the content DBs (Media/ChaCha), Jobs, and the Scheduler.
 - `mock_openai_server/` is handy for local OpenAI-compatible API testing.
 
 </details>
@@ -1136,8 +1136,9 @@ flowchart TB
 
 Each backend datastore is a separate node. Content DBs are **per-user** (under
 `Databases/user_databases/<user_id>/`); platform DBs are **shared/global** (under `Databases/`).
-SQLite is the default; PostgreSQL is supported for AuthNZ, Jobs, and the Scheduler, and Redis is an
-optional backend for caching, queues, and rate limiting.
+SQLite is the default; PostgreSQL is supported for AuthNZ, the content DBs (Media/ChaCha, via
+`TLDW_CONTENT_DB_BACKEND=postgresql`), Jobs, and the Scheduler. Redis is an optional backend for
+caching, queues, and rate limiting.
 
 > Note: Collections, Watchlists, and Meetings persist **inside `Media_DB_v2.db`**, and VN Assets /
 > VN Play persist **inside `ChaChaNotes.db`** — they are modules that write to those DBs, not
@@ -1280,7 +1281,11 @@ flowchart LR
   Scheduler --> dbSched
 
   %% ---- Optional backends ----
+  %% AuthNZ, Jobs, and the Scheduler can run on PostgreSQL instead of their SQLite files;
+  %% the content DBs (Media/ChaCha) can too via TLDW_CONTENT_DB_BACKEND=postgresql.
   AuthNZ -.-> dbPostgres
+  dbMedia -.-> dbPostgres
+  dbChaCha -.-> dbPostgres
   Jobs -.-> dbPostgres
   Scheduler -.-> dbPostgres
   Jobs -.-> dbRedis
