@@ -67,8 +67,23 @@ Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
   ```
 - Key Components:
   - `chatbook_service.py` (export/import/preview, job state, signed URLs)
+  - `chatbook_format_v1_1.py` (v1.1 feature registry, `file_inventory`
+    hashing, content envelopes, preview report, and pre-import validation)
   - `chatbook_validators.py` (file/ZIP/manifest validation), `quota_manager.py` (tier limits)
   - `chatbook_models.py` (content types, job models)
+- Chatbook v1.1:
+  - Export is opt-in through `format_version: "1.1.0"`; omitted requests keep
+    the default v1.0.0/legacy-compatible manifest.
+  - v1.1 exports add manifest metadata, feature tokens, compatibility data, and
+    a top-level `file_inventory` built from bundled files.
+  - The first v1.1 producer is Explainer sessions. They keep the structured
+    restore JSON and add a rendered Markdown representation with a content
+    envelope.
+  - Preview exposes a v1.1 preview report with compatibility, feature,
+    integrity, lossiness, source reference, warning, and error summaries.
+  - Import runs v1.1 validation before writes, including checksum validation,
+    required payload inventory coverage, and bundled conversation attachment
+    inventory coverage.
 - Configuration:
   - Core Jobs only; `CHATBOOKS_JOBS_BACKEND`/`TLDW_JOBS_BACKEND` overrides are ignored for Chatbooks.
   - `CHATBOOKS_CORE_WORKER_ENABLED`: `true|false` controls starting the core worker (default true).
@@ -178,6 +193,12 @@ Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
 **Testing**
 - Run tests from repo root: `python -m pytest -v`
 - Jobs metrics/health tests live under `tldw_Server_API/tests` and target domain `chatbooks`.
+- Focused v1.1 checks:
+  - `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_manifest_v1_1_contract.py -v`
+  - `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_v1_1_file_inventory.py -v`
+  - `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_v1_1_preview.py -v`
+  - `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_import_validation.py -v`
+  - `python -m pytest tldw_Server_API/tests/Chatbooks/test_explainer_session_content_type.py -v`
 - When adding features, mirror existing test patterns and add:
   - Unit tests for validators and service behavior
   - Integration tests for endpoints (`export`, `import`, `download`, `preview`)

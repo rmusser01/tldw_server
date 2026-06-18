@@ -6,6 +6,31 @@
 - **Last Updated:** 2026-06-18
 - **Related:** `Docs/Product/Chatbooks_PRD.md`, `Docs/Schemas/chatbooks_manifest_v1.json`, `tldw_Server_API/app/core/Chatbooks/chatbook_models.py`
 
+## Implementation Status
+
+The current rollout implements this spec as an opt-in v1.1 path while keeping
+v1.0.0 as the default export format. Completed implementation stages include:
+
+- v1.1 manifest version support and `Docs/Schemas/chatbooks_manifest_v1_1.json`.
+- Shared `chatbook_format_v1_1.py` helpers for the feature registry,
+  `file_inventory` hashing, content envelopes, preview report generation, and
+  pre-import validation.
+- API/service `format_version` handling so clients must request `"1.1.0"` to
+  produce v1.1 output.
+- v1.1 manifest metadata, producer/source/compatibility data, and archive file
+  inventory generation.
+- Explainer session envelopes as the first v1.1 producer, including structured
+  restore JSON and rendered Markdown representation.
+- v1.1 preview report fields for compatibility, features, integrity, lossiness,
+  source references, warnings, and errors.
+- v1.1 import validation before writes, including checksum mismatches, missing
+  inventory entries for import payloads, and bundled conversation attachment
+  inventory coverage.
+
+The rollout intentionally does not make every content type a full v1.1 producer
+yet. Future content-type work should add envelopes and validation coverage
+incrementally while preserving v1-compatible fields.
+
 ## 1. Purpose
 
 Chatbook v1.1 is a backward-compatible format update for making Chatbook

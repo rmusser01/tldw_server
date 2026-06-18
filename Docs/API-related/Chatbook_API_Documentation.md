@@ -114,11 +114,17 @@ Authorization: Bearer <your-jwt-token>
   "media_quality": "compressed",
   "include_embeddings": false,
   "include_generated_content": true,
+  "format_version": "1.0.0",
   "tags": ["backup", "weekly"],
   "categories": ["work"],
   "async_mode": false
 }
 ```
+
+`format_version` is optional and defaults to `"1.0.0"`. Chatbook v1.1 export
+is opt-in: clients must request `"format_version": "1.1.0"` to receive the
+v1.1 manifest additions, file inventory, and any v1.1 content envelopes. If the
+field is omitted, export remains v1.0.0/legacy-compatible.
 
 **Response (Synchronous)**:
 ```json
@@ -134,6 +140,10 @@ Implementation notes:
 - Sync mode persists a completed export job and returns its `job_id` plus a `download_url` that uses this UUID.
 - For robust automation, prefer async mode and then poll job status to obtain the canonical `download_url` by `job_id`.
 - When evaluation exports exceed row caps, export job metadata can include continuation tokens and the manifest can include `truncation.evaluations.continuations` so clients can resume the same chatbook export.
+- v1.1 export currently uses the shared format helpers for manifest metadata,
+  `file_inventory` hashing, and Explainer session content envelopes. Other
+  content types keep their v1-compatible payload layout until their v1.1
+  producer work is added.
 
 **Response (Asynchronous)**:
 ```json
@@ -234,6 +244,18 @@ OpenWebUI webui.db database import supports uploaded SQLite databases copied fro
 }
 ```
 
+**v1.1 Import Behavior**:
+- v1.1 archives are validated before any content writes.
+- `file_inventory` checksum failures, missing listed files, unsafe inventory
+  paths, and missing inventory coverage for import payloads fail the import
+  before writes.
+- Conversation image attachments referenced by bundled conversation payloads
+  must also be covered by verified inventory entries before import proceeds.
+- Unknown feature behavior follows `manifest.compatibility.unsupported_feature_behavior`:
+  `reject_import` fails before writes; `warn_and_skip` and
+  `warn_lossy_import` continue where safe and surface warnings in the sync
+  import response or job warnings.
+
 ### 3. Preview Chatbook
 
 **Endpoint**: `POST /api/v1/chatbooks/preview`
@@ -316,6 +338,48 @@ OpenWebUI webui.db database import supports uploaded SQLite databases copied fro
   }
 }
 ```
+
+For v1.1 archives the preview response may also include a deterministic preview
+report. These fields are optional so v1.0 preview clients can continue reading
+the existing `manifest` shape:
+
+```json
+{
+  "manifest": {
+    "version": "1.1.0",
+    "name": "My Chatbook",
+    "content_items": []
+  },
+  "compatibility": {
+    "status": "compatible",
+    "reader_version": "1.1.0",
+    "manifest_version": "1.1.0"
+  },
+  "features": {
+    "supported": ["content_envelopes", "file_inventory"],
+    "unsupported": []
+  },
+  "integrity": {
+    "verified_files": 3,
+    "failed_files": []
+  },
+  "lossiness": {
+    "lossless": 1
+  },
+  "source_refs": {
+    "external": 2
+  },
+  "warnings": [],
+  "errors": []
+}
+```
+
+`compatibility` reports reader and manifest compatibility. `features` splits
+manifest feature tokens into supported and unsupported sets. `integrity`
+summarizes file inventory verification. `lossiness` counts content-envelope
+lossiness modes, and `source_refs` counts source reference resolution statuses.
+`warnings` and `errors` are report-level messages; integrity errors in preview
+become blocking validation errors during v1.1 import.
 
 ### 4. Preview OpenWebUI Attachment Hydration
 
@@ -669,6 +733,9 @@ OpenWebUI JSON and database imports support `skip` and `rename` in v1.
 ### Manifest Metadata (selected fields)
 - `metadata.binary_limits`: Per content-type max bundled bytes applied during export.
 - `truncation.evaluations.continuations`: Continuation tokens for resumable evaluation exports.
+- v1.1 manifests may add `features_used`, `producer`, `source_instance`,
+  `compatibility`, and `file_inventory`. These are produced only for opt-in
+  v1.1 exports.
 
 ## Error Handling
 
