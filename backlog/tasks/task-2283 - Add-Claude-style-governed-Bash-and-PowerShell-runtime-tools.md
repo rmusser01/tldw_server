@@ -4,7 +4,7 @@ title: Add Claude-style governed Bash and PowerShell runtime tools
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-18 14:12'
+updated_date: '2026-06-18 14:20'
 labels:
   - mcp
   - command-runtime
@@ -61,6 +61,8 @@ PR #2386 review pass: rebased branch onto latest origin/dev (already up to date)
 PR #2386 follow-up refinement: changed RunEnvFileValidationError to inherit the project ValidationError base while preserving ValueError-compatible behavior through the existing exception hierarchy. Verification rerun after refinement: run-command plus protocol hook pytest 81 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_env_file_review.json had results=0 errors=0 skipped=0; git diff --check passed.
 
 Seventh slice implemented: added explicit shellName / shell_name selection for the governed virtual CLI. The selector accepts bash, shell, powershell, and pwsh labels, validates alias consistency, pins bash/powershell/pwsh tool aliases to their matching selector, carries the selected label in AdapterContext for future adapter behavior, and salts nested idempotency keys by shell selection without enabling raw host shell execution. Verification: focused run-command pytest 80 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_shell_selection.json had results=0 errors=0 skipped=0; git diff --check passed.
+
+Eighth slice implemented: added PowerShell-specific fail-closed guardrails for the governed virtual CLI. When shellName is powershell/pwsh or the powershell alias is used, raw PowerShell invocation operator syntax (&) and unquoted script blocks ({ ... }) are rejected before parsing or backend MCP preparation, with PowerShell-specific diagnostics. Verification: focused run-command pytest 83 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_powershell_guardrails.json had results=0 errors=0 skipped=0; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

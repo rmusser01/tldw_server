@@ -128,7 +128,7 @@ class RunCommandModule(BaseModule):
             )
 
         start = time.perf_counter()
-        unsupported_feature = self._unsupported_shell_feature_message(command_text)
+        unsupported_feature = self._unsupported_shell_feature_message(command_text, shell_name=shell_name)
         if unsupported_feature is not None:
             return present_command_execution_result(
                 CommandExecutionResult(
@@ -1141,8 +1141,13 @@ class RunCommandModule(BaseModule):
         return value
 
     @staticmethod
-    def _unsupported_shell_feature_message(command_text: str) -> str | None:
+    def _unsupported_shell_feature_message(command_text: str, *, shell_name: str | None = None) -> str | None:
         """Detect raw-shell syntax that the governed facade intentionally rejects."""
+
+        if shell_name in {"powershell", "pwsh"}:
+            powershell_message = RunCommandModule._unsupported_powershell_feature_message(command_text)
+            if powershell_message is not None:
+                return powershell_message
 
         first_token = RunCommandModule._first_unquoted_token(command_text)
         if first_token and RunCommandModule._looks_like_env_assignment(first_token):
@@ -1202,6 +1207,54 @@ class RunCommandModule(BaseModule):
 
             if char == "`":
                 return "Unsupported shell feature: command substitution is not supported by the governed shell facade"
+
+            position += 1
+
+        return None
+
+    @staticmethod
+    def _unsupported_powershell_feature_message(command_text: str) -> str | None:
+        """Detect PowerShell-only raw syntax that the virtual CLI does not emulate."""
+
+        quote: str | None = None
+        escaped = False
+        position = 0
+        length = len(command_text)
+        while position < length:
+            char = command_text[position]
+
+            if escaped:
+                escaped = False
+                position += 1
+                continue
+
+            if char == "`":
+                escaped = True
+                position += 1
+                continue
+
+            if quote is not None:
+                if char == quote:
+                    quote = None
+                position += 1
+                continue
+
+            if char in {'"', "'"}:
+                quote = char
+                position += 1
+                continue
+
+            if char in {"{", "}"}:
+                return "Unsupported PowerShell feature: script blocks are not supported by the governed shell facade"
+
+            if char == "&":
+                next_char = command_text[position + 1] if position + 1 < length else ""
+                previous_char = command_text[position - 1] if position > 0 else ""
+                if next_char != "&" and previous_char != "&":
+                    return (
+                        "Unsupported PowerShell feature: invocation operator is not supported by "
+                        "the governed shell facade"
+                    )
 
             position += 1
 

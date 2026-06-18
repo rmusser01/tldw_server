@@ -903,6 +903,46 @@ async def test_shell_alias_rejects_unsupported_raw_shell_syntax_before_backend_c
     assert protocol.execute_calls == []
 
 
+@pytest.mark.parametrize(
+    ("tool_name", "arguments", "expected_message"),
+    [
+        (
+            "powershell",
+            {"command": "& ./script.ps1"},
+            "Unsupported PowerShell feature: invocation operator",
+        ),
+        (
+            "pwsh",
+            {"command": "& ./script.ps1"},
+            "Unsupported PowerShell feature: invocation operator",
+        ),
+        (
+            "run",
+            {"command": "ForEach-Object { Get-ChildItem }", "shellName": "powershell"},
+            "Unsupported PowerShell feature: script blocks",
+        ),
+    ],
+)
+@pytest.mark.unit
+async def test_powershell_shell_selection_rejects_unsupported_platform_syntax_before_backend_calls(
+    tool_name: str,
+    arguments: dict[str, Any],
+    expected_message: str,
+) -> None:
+    """PowerShell-only raw shell syntax must fail before any governed backend call."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-powershell-unsupported", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool(tool_name, arguments, context=context)
+
+    assert expected_message in rendered
+    assert "[exit:2 |" in rendered
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
+
+
 @pytest.mark.asyncio
 async def test_run_filesystem_aliases_route_to_backing_tools() -> None:
     protocol = _ProtocolStub()
