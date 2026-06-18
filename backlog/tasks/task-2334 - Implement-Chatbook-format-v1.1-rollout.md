@@ -1,0 +1,57 @@
+---
+id: TASK-2334
+title: Implement Chatbook format v1.1 rollout
+status: In Progress
+labels:
+- chatbooks
+- implementation
+documentation:
+- Docs/Product/Chatbooks_Format_v1_1_SPEC.md
+- Docs/superpowers/plans/2026-06-18-chatbooks-format-v1-1-implementation-plan.md
+modified_files:
+- Docs/Schemas/chatbooks_manifest_v1_1.json
+- tldw_Server_API/app/core/Chatbooks/chatbook_models.py
+- tldw_Server_API/app/core/Chatbooks/chatbook_format_v1_1.py
+- tldw_Server_API/app/core/Chatbooks/chatbook_service.py
+- tldw_Server_API/app/api/v1/schemas/chatbook_schemas.py
+- tldw_Server_API/app/api/v1/endpoints/chatbooks.py
+- tldw_Server_API/app/core/Explainer/chatbook_adapter.py
+- tldw_Server_API/tests/Chatbooks/test_chatbooks_manifest_v1_1_contract.py
+- tldw_Server_API/tests/Chatbooks/test_chatbooks_v1_1_file_inventory.py
+- tldw_Server_API/tests/Chatbooks/test_chatbooks_v1_1_preview.py
+- tldw_Server_API/tests/Chatbooks/test_explainer_session_content_type.py
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Implement the approved Chatbook v1.1 format rollout from the implementation plan: schema, helper module, opt-in export versioning, v1.1 manifest metadata and file inventory, Explainer envelopes, preview report, import integrity enforcement, docs, tests, and Bandit verification.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Task 5 slice: added v1.1 Explainer content envelope export support without changing v1 export behavior. Changed chatbook_format_v1_1.py, chatbook_service.py, and test_explainer_session_content_type.py. Red test first failed with KeyError: 'envelope'; green and verification passed. Commit: d5f399d28c feat: add v1.1 explainer chatbook envelopes. Verification: Explainer suites 16 passed; manifest/file-inventory suites 24 passed; Bandit on touched app files reported 0 results.
+
+Task 6 slice: added v1.1 preview report API support while preserving the existing preview_chatbook two-tuple and endpoint fallback for legacy service doubles. Changed chatbook_schemas.py, chatbooks.py, chatbook_service.py, chatbook_format_v1_1.py, and test_chatbooks_v1_1_preview.py. Red test first failed with KeyError: 'compatibility'; focused green test passed. Verification: service preview safety/API mapping suite 19 passed; Bandit on touched app files reported 0 results. Required combined preview API command is blocked by an existing full-app TestClient teardown hang in test_chatbooks_api_preview.py after its first test, reproduced when that file is run alone.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->

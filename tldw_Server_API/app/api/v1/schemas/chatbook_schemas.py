@@ -514,6 +514,32 @@ class PreviewChatbookResponse(BaseModel):
     openwebui_preview: Optional[OpenWebUIImportPreview] = None
     openwebui_db_preview: Optional[OpenWebUIDatabasePreview] = None
     error: Optional[str] = None
+    compatibility: Optional["ChatbookPreviewCompatibility"] = None
+    features: Optional["ChatbookPreviewFeatures"] = None
+    integrity: Optional["ChatbookPreviewIntegrity"] = None
+    lossiness: Optional[dict[str, int]] = None
+    source_refs: Optional[dict[str, int]] = None
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
+class ChatbookPreviewCompatibility(BaseModel):
+    """Chatbook reader compatibility preview details."""
+    status: str
+    reader_version: str = "1.1.0"
+    manifest_version: Optional[str] = None
+
+
+class ChatbookPreviewFeatures(BaseModel):
+    """Supported and unsupported v1.1 feature tokens."""
+    supported: list[str] = Field(default_factory=list)
+    unsupported: list[str] = Field(default_factory=list)
+
+
+class ChatbookPreviewIntegrity(BaseModel):
+    """File inventory integrity summary for preview."""
+    verified_files: int = 0
+    failed_files: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ListExportJobsResponse(BaseModel):

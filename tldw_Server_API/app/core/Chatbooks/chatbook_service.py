@@ -65,6 +65,7 @@ from .chatbook_models import (
 )
 from .chatbook_format_v1_1 import (
     build_file_inventory,
+    build_preview_report,
 )
 
 # Unified audit logging is handled at the API layer. The service no longer
@@ -3354,13 +3355,35 @@ class ChatbookService:
         Returns:
             Tuple of (manifest, error_message)
         """
+        manifest, error, _report = self._preview_chatbook_internal(file_path, include_report=False)
+        return manifest, error
+
+    def preview_chatbook_with_report(
+        self,
+        file_path: str,
+    ) -> tuple[ChatbookManifest | None, str | None, dict[str, Any] | None]:
+        """
+        Preview a chatbook and return a v1.1 report when the manifest loads.
+
+        The original preview_chatbook two-tuple is intentionally preserved for
+        existing callers.
+        """
+        return self._preview_chatbook_internal(file_path, include_report=True)
+
+    def _preview_chatbook_internal(
+        self,
+        file_path: str,
+        *,
+        include_report: bool,
+    ) -> tuple[ChatbookManifest | None, str | None, dict[str, Any] | None]:
+        """Shared safe extraction flow for chatbook preview variants."""
         extract_dir: Path | None = None
         try:
             try:
                 resolved_path = self._resolve_import_archive_path(file_path)
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
                 logger.warning(f"Chatbooks preview rejected file path: {exc}")
-                return None, "Invalid or potentially malicious archive file"
+                return None, "Invalid or potentially malicious archive file", None
             file_path = str(resolved_path)
 
             # Defense-in-depth: validate the archive before extraction.
@@ -3368,7 +3391,7 @@ class ChatbookService:
             from .chatbook_validators import ChatbookValidator
             ok, err = ChatbookValidator.validate_zip_file(file_path)
             if not ok:
-                return None, err or "Invalid archive"
+                return None, err or "Invalid archive", None
             # Extract to temporary directory with UUID to prevent collisions
             extract_dir = self.temp_dir / f"preview_{uuid4().hex}"
 
@@ -3382,7 +3405,7 @@ class ChatbookService:
                 for member in zf.namelist():
                     # Validate path using path-component aware check
                     if self._is_unsafe_archive_path(member):
-                        return None, "Unsafe path in archive detected"
+                        return None, "Unsafe path in archive detected", None
 
                     # Additional check: ensure the normalized target stays within extract_dir
                     os.path.normpath(member)
@@ -3391,10 +3414,10 @@ class ChatbookService:
                     try:
                         common = os.path.commonpath([extract_dir_resolved, target_path])
                         if common != extract_dir_resolved:
-                            return None, "Path traversal attempt detected"
+                            return None, "Path traversal attempt detected", None
                     except ValueError:
                         # commonpath raises ValueError if paths are on different drives (Windows)
-                        return None, "Path traversal attempt detected"
+                        return None, "Path traversal attempt detected", None
 
                 # Safe to extract after validation
                 zf.extractall(extract_dir)
@@ -3402,19 +3425,20 @@ class ChatbookService:
             # Load manifest
             manifest_path = extract_dir / "manifest.json"
             if not manifest_path.exists():
-                return None, "Invalid chatbook: manifest.json not found"
+                return None, "Invalid chatbook: manifest.json not found", None
 
             try:
                 with open(manifest_path, encoding='utf-8') as f:
                     manifest_data = json.load(f)
                 manifest = ChatbookManifest.from_dict(manifest_data)
             except (json.JSONDecodeError, KeyError, TypeError, ValueError, ValidationError):
-                return None, "Invalid chatbook manifest"
+                return None, "Invalid chatbook manifest", None
 
-            return manifest, None
+            report = build_preview_report(manifest, extract_dir) if include_report else None
+            return manifest, None, report
 
         except zipfile.BadZipFile:
-            return None, "Invalid archive"
+            return None, "Invalid archive", None
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error previewing chatbook: {e}")
             raise

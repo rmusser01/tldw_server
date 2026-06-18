@@ -45,6 +45,85 @@ def ensure_known_features(features: list[str]) -> dict[str, list[str]]:
     }
 
 
+def build_preview_report(manifest: Any, extract_dir: Path) -> dict[str, Any]:
+    """Build a non-blocking v1.1 compatibility and integrity preview report."""
+    manifest_version = _version_value(getattr(manifest, "version", None))
+    features = ensure_known_features(list(getattr(manifest, "features_used", []) or []))
+    failed_files: list[dict[str, Any]] = []
+    verified_files = 0
+
+    for entry in getattr(manifest, "file_inventory", []) or []:
+        relative_path = entry.get("path") if isinstance(entry, dict) else None
+        if not relative_path:
+            failed_files.append({"path": None, "reason": "missing_path"})
+            continue
+        target_path = extract_dir / relative_path
+        try:
+            target_path.resolve().relative_to(extract_dir.resolve())
+        except ValueError:
+            failed_files.append({"path": relative_path, "reason": "unsafe_path"})
+            continue
+        if not target_path.is_file():
+            failed_files.append({"path": relative_path, "reason": "missing_file"})
+            continue
+
+        expected_hash = _inventory_hash_value(entry)
+        if not expected_hash or not _is_sha256_integrity(expected_hash):
+            failed_files.append({"path": relative_path, "reason": "invalid_integrity"})
+            continue
+
+        actual_hash = sha256_file(target_path)
+        if actual_hash != expected_hash:
+            failed_files.append({"path": relative_path, "reason": "hash_mismatch"})
+            continue
+        verified_files += 1
+
+    lossiness: dict[str, int] = {}
+    source_refs: dict[str, int] = {}
+    for content_item in getattr(manifest, "content_items", []) or []:
+        envelope = _content_item_envelope(content_item)
+        if not envelope:
+            continue
+
+        mode = _lossiness_mode(envelope)
+        lossiness[mode] = lossiness.get(mode, 0) + 1
+
+        refs = envelope.get("source_refs", []) if isinstance(envelope, dict) else []
+        if not isinstance(refs, list):
+            continue
+        for source_ref in refs:
+            status = "unknown"
+            if isinstance(source_ref, dict):
+                status_value = source_ref.get("resolution_status")
+                if isinstance(status_value, str) and status_value:
+                    status = status_value
+            source_refs[status] = source_refs.get(status, 0) + 1
+
+    warnings: list[str] = []
+    errors: list[str] = []
+    if features["unsupported"]:
+        warnings.append("Unsupported chatbook features detected")
+    if failed_files:
+        errors.append("File inventory integrity failures detected")
+
+    return {
+        "compatibility": {
+            "status": "compatible" if not features["unsupported"] else "partial",
+            "reader_version": "1.1.0",
+            "manifest_version": manifest_version,
+        },
+        "features": features,
+        "integrity": {
+            "verified_files": verified_files,
+            "failed_files": failed_files,
+        },
+        "lossiness": lossiness,
+        "source_refs": source_refs,
+        "warnings": warnings,
+        "errors": errors,
+    }
+
+
 def build_content_envelope(
     *,
     format_id: str,
@@ -139,3 +218,48 @@ def _role_for_path(relative_path: str) -> str:
     if relative_path.startswith("content/"):
         return "payload"
     return "payload"
+
+
+def _version_value(version: Any) -> str | None:
+    if version is None:
+        return None
+    value = getattr(version, "value", version)
+    return str(value)
+
+
+def _inventory_hash_value(entry: dict[str, Any]) -> str | None:
+    integrity = entry.get("integrity")
+    if isinstance(integrity, dict):
+        value = integrity.get("value")
+        return value if isinstance(value, str) else None
+    return None
+
+
+def _is_sha256_integrity(value: str) -> bool:
+    prefix = "sha256:"
+    if not value.startswith(prefix):
+        return False
+    digest = value[len(prefix):]
+    return len(digest) == 64 and all(char in "0123456789abcdefABCDEF" for char in digest)
+
+
+def _content_item_envelope(content_item: Any) -> dict[str, Any] | None:
+    metadata = getattr(content_item, "metadata", None)
+    if isinstance(metadata, dict):
+        envelope = metadata.get("envelope")
+        return envelope if isinstance(envelope, dict) else None
+    if isinstance(content_item, dict):
+        item_metadata = content_item.get("metadata")
+        if isinstance(item_metadata, dict):
+            envelope = item_metadata.get("envelope")
+            return envelope if isinstance(envelope, dict) else None
+    return None
+
+
+def _lossiness_mode(envelope: dict[str, Any]) -> str:
+    lossiness = envelope.get("lossiness")
+    if isinstance(lossiness, dict):
+        mode = lossiness.get("mode")
+        if isinstance(mode, str) and mode:
+            return mode
+    return "unknown"
