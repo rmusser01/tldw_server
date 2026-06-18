@@ -138,6 +138,7 @@ def test_missing_evidence_directory_warns_and_lists_expected_files(tmp_path: Pat
     _assert_advisory_success(result)
     assert "warning" in result.stdout.lower()
     assert "missing" in result.stdout.lower()
+    assert "early setup/preflight failure" in result.stdout
     for evidence_file in EXPECTED_EVIDENCE_FILES:
         assert evidence_file in result.stdout
 

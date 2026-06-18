@@ -67,7 +67,12 @@ def _probe_evidence_dir(evidence_dir: Path) -> tuple[bool, list[str]]:
     try:
         metadata = evidence_dir.lstat()
     except FileNotFoundError:
-        return False, [f"warning: evidence directory is missing: {evidence_dir}"]
+        return False, [
+            (
+                f"warning: evidence directory is missing: {evidence_dir}. "
+                "This may indicate an early setup/preflight failure."
+            )
+        ]
     except OSError as exc:
         return False, [f"warning: evidence directory cannot be inspected: {type(exc).__name__}: {exc}"]
     if stat.S_ISLNK(metadata.st_mode):
