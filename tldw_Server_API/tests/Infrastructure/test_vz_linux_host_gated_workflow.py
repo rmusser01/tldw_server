@@ -50,8 +50,19 @@ def _workflow_step_run(steps: list[dict[str, Any]], step_name: str) -> str:
     """Return the run block for a named workflow step."""
     for step in steps:
         if step.get("name") == step_name:
-            return str(step.get("run", ""))
+            run_block = step.get("run")
+            _require(isinstance(run_block, str) and bool(run_block), f"Workflow step has no run block: {step_name}")
+            return run_block
     pytest.fail(f"Workflow step not found: {step_name}")
+
+
+def _workflow_run_blocks(steps: list[dict[str, Any]]) -> str:
+    """Return all non-empty workflow run blocks joined for broad contract assertions."""
+    return "\n".join(
+        step["run"]
+        for step in steps
+        if isinstance(step.get("run"), str) and step["run"]
+    )
 
 
 def _normalized_text(path: Path) -> str:
@@ -134,7 +145,7 @@ def test_vz_linux_host_gated_workflow_uses_operator_smoke_script() -> None:
     """The workflow should delegate real VM work to the repo's operator smoke script."""
     workflow = _load_workflow()
     steps = workflow["jobs"]["vz-linux-host-gated-smoke"]["steps"]
-    run_blocks = "\n".join(str(step.get("run", "")) for step in steps)
+    run_blocks = _workflow_run_blocks(steps)
 
     assert "tools/vz-linux-image/scripts/run-host-e2e-smoke.sh" in run_blocks  # nosec B101
     assert "--bundle" in run_blocks  # nosec B101
@@ -158,7 +169,7 @@ def test_vz_linux_host_gated_workflow_failure_drills_are_manual_opt_in() -> None
     workflow = _load_workflow()
     job = workflow["jobs"]["vz-linux-host-gated-smoke"]
     steps = job["steps"]
-    run_blocks = "\n".join(str(step.get("run", "")) for step in steps)
+    run_blocks = _workflow_run_blocks(steps)
 
     assert "include_failure_drills" in _workflow_triggers(workflow)["workflow_dispatch"]["inputs"]  # nosec B101
     assert "TLDW_SANDBOX_VZ_INCLUDE_FAILURE_DRILLS" not in job["env"]  # nosec B101
