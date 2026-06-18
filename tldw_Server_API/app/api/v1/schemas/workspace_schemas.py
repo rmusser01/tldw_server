@@ -5,12 +5,15 @@ import json
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationInfo, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, ValidationInfo, field_validator, model_validator
 
 from tldw_Server_API.app.core.Workspaces.membership_models import (
     WORKSPACE_MEMBERSHIP_MAX_METADATA_BYTES,
     WORKSPACE_MEMBERSHIP_MAX_PROVENANCE_BYTES,
     normalize_membership_json_object,
+)
+from tldw_Server_API.app.core.Workspaces.runtime_bindings import (
+    normalize_runtime_binding_payload,
 )
 from tldw_Server_API.app.core.Workspaces.eligibility import (
     WorkspaceEligibilityOperation,
@@ -642,6 +645,129 @@ class WorkspaceRuntimeBinding(BaseModel):
     state: WorkspaceCapabilityServiceState
     reason_code: str | None = None
     management_surface: str | None = None
+
+
+WorkspaceRuntimeBindingKind = Literal[
+    "repo",
+    "git_worktree",
+    "local_path",
+    "workspace_project_root",
+    "acp_execution_workspace",
+    "acp_session",
+    "acp_run",
+    "sandbox_root",
+    "sandbox_session",
+    "mcp_workspace_set",
+    "remote_runtime",
+]
+WorkspaceRuntimeBindingOwnerDomain = Literal[
+    "workspaces",
+    "acp",
+    "sandbox",
+    "mcp",
+    "jobs",
+    "workflows",
+    "watchlists",
+    "external",
+]
+WorkspaceRuntimeBindingStatus = Literal[
+    "ready",
+    "missing",
+    "inspect-only",
+    "blocked",
+    "provisioning",
+    "unavailable",
+    "detached",
+    "conflict",
+    "runtime-missing",
+    "archived",
+    "unsupported",
+]
+WorkspaceRuntimeBindingPortability = Literal[
+    "reference",
+    "metadata-only",
+    "local-only",
+    "copy",
+]
+
+
+class WorkspaceRuntimeBindingRedactionReport(BaseModel):
+    redacted: bool = False
+    redacted_fields: list[str] = Field(default_factory=list)
+    rejected_fields: list[str] = Field(default_factory=list)
+
+
+class WorkspaceRuntimeBindingDescriptorUpsertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    _normalized_payload: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _persistence_payload: dict[str, Any] = PrivateAttr(default_factory=dict)
+
+    binding_id: str = Field(..., min_length=1, max_length=128)
+    binding_kind: str = Field(..., min_length=1, max_length=80)
+    owner_domain: str = Field(..., min_length=1, max_length=80)
+    locator_ref: str = Field(..., min_length=1, max_length=512)
+    label: str | None = Field(default=None, max_length=512)
+    status: str = Field(..., min_length=1, max_length=80)
+    path_hint: str | None = Field(default=None, max_length=1024)
+    portability: str = Field(..., min_length=1, max_length=80)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_runtime_binding_contract(self) -> "WorkspaceRuntimeBindingDescriptorUpsertRequest":
+        persistence_payload = self.model_dump()
+        try:
+            normalized = normalize_runtime_binding_payload(persistence_payload)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        self.binding_id = normalized["binding_id"]
+        self.binding_kind = normalized["binding_kind"]
+        self.owner_domain = normalized["owner_domain"]
+        self.locator_ref = normalized["locator_ref"]
+        self.label = normalized["label"]
+        self.status = normalized["status"]
+        self.path_hint = normalized["path_hint"]
+        self.portability = normalized["portability"]
+        self.metadata = normalized["metadata"]
+        self._normalized_payload = normalized
+        self._persistence_payload = persistence_payload
+        return self
+
+    def normalized_payload(self) -> dict[str, Any]:
+        """Return the server-normalized runtime binding request fields."""
+        return dict(self._normalized_payload)
+
+    def persistence_payload(self) -> dict[str, Any]:
+        """Return the original validated payload so persistence can derive redactions."""
+        return dict(self._persistence_payload)
+
+
+class WorkspaceRuntimeBindingDescriptorResponse(BaseModel):
+    workspace_id: str
+    binding_id: str
+    binding_kind: WorkspaceRuntimeBindingKind
+    owner_domain: WorkspaceRuntimeBindingOwnerDomain
+    locator_ref: str
+    label: str | None = None
+    status: WorkspaceRuntimeBindingStatus
+    path_hint: str | None = None
+    portability: WorkspaceRuntimeBindingPortability
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    redaction_report: WorkspaceRuntimeBindingRedactionReport = Field(
+        default_factory=WorkspaceRuntimeBindingRedactionReport
+    )
+    created_by_user_id: str | None = None
+    updated_by_user_id: str | None = None
+    created_at: str
+    updated_at: str
+    deleted: bool = False
+    version: int
+
+
+class WorkspaceRuntimeBindingDescriptorListResponse(BaseModel):
+    workspace_id: str
+    items: list[WorkspaceRuntimeBindingDescriptorResponse]
+    total: int
 
 
 WorkspaceOperationStatus = Literal[

@@ -9146,6 +9146,41 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "CREATE INDEX IF NOT EXISTS idx_ws_resource_memberships_updated "
                 "ON workspace_resource_memberships(workspace_id, updated_at)"
             )
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_runtime_bindings (
+                    workspace_id          TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                    binding_id            TEXT NOT NULL,
+                    binding_kind          TEXT NOT NULL,
+                    owner_domain          TEXT NOT NULL,
+                    locator_ref           TEXT NOT NULL,
+                    label                 TEXT,
+                    status                TEXT NOT NULL,
+                    path_hint             TEXT,
+                    portability           TEXT NOT NULL,
+                    metadata_json         TEXT NOT NULL DEFAULT '{}',
+                    redaction_report_json TEXT NOT NULL DEFAULT '{}',
+                    created_by_user_id    TEXT,
+                    updated_by_user_id    TEXT,
+                    created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    deleted               BOOLEAN NOT NULL DEFAULT 0,
+                    client_id             TEXT NOT NULL DEFAULT 'unknown',
+                    version               INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY (workspace_id, binding_id)
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_runtime_bindings_workspace "
+                "ON workspace_runtime_bindings(workspace_id, deleted, binding_kind, owner_domain)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_runtime_bindings_locator "
+                "ON workspace_runtime_bindings(owner_domain, locator_ref, deleted)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ws_runtime_bindings_updated "
+                "ON workspace_runtime_bindings(workspace_id, updated_at)"
+            )
         except sqlite3.Error as exc:
             raise SchemaError(f"Failed ensuring SQLite workspace sub-resource schema: {exc}") from exc  # noqa: TRY003
 
@@ -9353,6 +9388,35 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "ON workspace_resource_memberships(resource_type, resource_id, deleted)",
             "CREATE INDEX IF NOT EXISTS idx_ws_resource_memberships_updated "
             "ON workspace_resource_memberships(workspace_id, updated_at)",
+            """
+            CREATE TABLE IF NOT EXISTS workspace_runtime_bindings (
+                workspace_id          TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                binding_id            TEXT NOT NULL,
+                binding_kind          TEXT NOT NULL,
+                owner_domain          TEXT NOT NULL,
+                locator_ref           TEXT NOT NULL,
+                label                 TEXT,
+                status                TEXT NOT NULL,
+                path_hint             TEXT,
+                portability           TEXT NOT NULL,
+                metadata_json         TEXT NOT NULL DEFAULT '{}',
+                redaction_report_json TEXT NOT NULL DEFAULT '{}',
+                created_by_user_id    TEXT,
+                updated_by_user_id    TEXT,
+                created_at            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                deleted               BOOLEAN NOT NULL DEFAULT false,
+                client_id             TEXT NOT NULL DEFAULT 'unknown',
+                version               INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (workspace_id, binding_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_ws_runtime_bindings_workspace "
+            "ON workspace_runtime_bindings(workspace_id, deleted, binding_kind, owner_domain)",
+            "CREATE INDEX IF NOT EXISTS idx_ws_runtime_bindings_locator "
+            "ON workspace_runtime_bindings(owner_domain, locator_ref, deleted)",
+            "CREATE INDEX IF NOT EXISTS idx_ws_runtime_bindings_updated "
+            "ON workspace_runtime_bindings(workspace_id, updated_at)",
         ]
         for statement in statements:
             self.backend.execute(statement, connection=conn)
@@ -18344,6 +18408,436 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     "UPDATE workspace_sources SET position = ?, version = version + 1 WHERE workspace_id = ? AND id = ?",
                     (idx, workspace_id, source_id),
                 )
+
+    # --- Workspace Runtime Binding Methods ---
+
+    @staticmethod
+    def _normalize_workspace_runtime_binding_actor(user_id: str | None) -> str | None:
+        if user_id is None:
+            return None
+        normalized = str(user_id).strip()
+        return normalized or None
+
+    @staticmethod
+    def _workspace_runtime_binding_is_constraint_error(exc: Exception) -> bool:
+        message = str(exc).lower()
+        return any(
+            token in message
+            for token in (
+                "unique",
+                "duplicate",
+                "constraint",
+                "foreign key",
+            )
+        )
+
+    def _workspace_runtime_binding_write_error(self, exc: Exception) -> CharactersRAGDBError:
+        if self._workspace_runtime_binding_is_constraint_error(exc):
+            return ConflictError(
+                f"Workspace runtime binding write conflicted: {exc}",
+                entity="workspace_runtime_bindings",
+            )
+        return CharactersRAGDBError(f"Workspace runtime binding write failed: {exc}")  # noqa: TRY003
+
+    @staticmethod
+    def _normalize_runtime_binding_limit(limit: int) -> int:
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise InputError("limit must be an integer.")  # noqa: TRY003
+        if limit < 1 or limit > 1000:
+            raise InputError("limit must be between 1 and 1000.")  # noqa: TRY003
+        return limit
+
+    @staticmethod
+    def _normalize_workspace_runtime_binding_required_string(value: Any, field_name: str) -> str:
+        normalized = str(value if value is not None else "").strip()
+        if not normalized:
+            raise InputError(f"{field_name} is required.")  # noqa: TRY003
+        return normalized
+
+    @staticmethod
+    def _workspace_runtime_binding_filter_value(value: Any, field_name: str) -> str:
+        normalized = str(value if value is not None else "").strip().lower()
+        if not normalized:
+            raise InputError(f"{field_name} is required.")  # noqa: TRY003
+        return normalized
+
+    def _normalize_workspace_runtime_binding_input(self, data: Mapping[str, Any]) -> dict[str, Any]:
+        from tldw_Server_API.app.core.Workspaces.runtime_bindings import (
+            normalize_runtime_binding_payload,
+        )
+
+        return normalize_runtime_binding_payload(data)
+
+    def _normalize_workspace_runtime_binding_row(self, row: Mapping[str, Any] | None) -> dict[str, Any] | None:
+        if not row:
+            return None
+        from tldw_Server_API.app.core.Workspaces.runtime_bindings import (
+            runtime_binding_response_payload,
+        )
+
+        return runtime_binding_response_payload(row)
+
+    @staticmethod
+    def _workspace_runtime_binding_fields_match(
+        existing: Mapping[str, Any],
+        requested: Mapping[str, Any],
+    ) -> bool:
+        return all(
+            existing.get(field_name) == requested.get(field_name)
+            for field_name in (
+                "binding_kind",
+                "owner_domain",
+                "locator_ref",
+                "label",
+                "status",
+                "path_hint",
+                "portability",
+                "metadata",
+                "redaction_report",
+            )
+        )
+
+    def _require_workspace_runtime_binding_workspace(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        workspace_id: str,
+    ) -> None:
+        row = conn.execute(
+            "SELECT id FROM workspaces WHERE id = ? AND deleted = ?",
+            (workspace_id, self._workspace_active_deleted_value()),
+        ).fetchone()
+        if row is None:
+            raise ConflictError(
+                "Workspace not found or deleted.",
+                entity="workspaces",
+                entity_id=workspace_id,
+            )
+
+    def _get_workspace_runtime_binding_with_conn(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        workspace_id: str,
+        binding_id: str,
+        *,
+        include_deleted: bool,
+    ) -> dict[str, Any] | None:
+        include_deleted_flag = 1 if include_deleted else 0
+        row = conn.execute(
+            """
+            SELECT *
+              FROM workspace_runtime_bindings
+             WHERE workspace_id = ?
+               AND binding_id = ?
+               AND (? = 1 OR deleted = ?)
+            """,
+            (
+                workspace_id,
+                binding_id,
+                include_deleted_flag,
+                self._workspace_active_deleted_value(),
+            ),
+        ).fetchone()
+        return self._normalize_workspace_runtime_binding_row(row)
+
+    def upsert_workspace_runtime_binding(
+        self,
+        workspace_id: str,
+        data: Mapping[str, Any],
+        *,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create, update, or restore a Workspace runtime binding descriptor."""
+        normalized_workspace_id = self._normalize_workspace_runtime_binding_required_string(
+            workspace_id,
+            "workspace_id",
+        )
+        values = self._normalize_workspace_runtime_binding_input(data)
+        actor = self._normalize_workspace_runtime_binding_actor(user_id)
+        now = self._get_current_utc_timestamp_iso()
+        active_deleted_value = self._workspace_active_deleted_value()
+
+        try:
+            with self.transaction() as conn:
+                self._require_workspace_runtime_binding_workspace(conn, normalized_workspace_id)
+                existing = self._get_workspace_runtime_binding_with_conn(
+                    conn,
+                    normalized_workspace_id,
+                    values["binding_id"],
+                    include_deleted=True,
+                )
+                if existing is not None:
+                    if (
+                        existing.get("deleted") not in (True, 1)
+                        and self._workspace_runtime_binding_fields_match(existing, values)
+                    ):
+                        return existing
+                    cursor = conn.execute(
+                        """
+                        UPDATE workspace_runtime_bindings
+                           SET binding_kind = ?,
+                               owner_domain = ?,
+                               locator_ref = ?,
+                               label = ?,
+                               status = ?,
+                               path_hint = ?,
+                               portability = ?,
+                               metadata_json = ?,
+                               redaction_report_json = ?,
+                               updated_by_user_id = ?,
+                               updated_at = ?,
+                               deleted = ?,
+                               client_id = ?,
+                               version = version + 1
+                         WHERE workspace_id = ?
+                           AND binding_id = ?
+                        """,
+                        (
+                            values["binding_kind"],
+                            values["owner_domain"],
+                            values["locator_ref"],
+                            values["label"],
+                            values["status"],
+                            values["path_hint"],
+                            values["portability"],
+                            values["metadata_json"],
+                            values["redaction_report_json"],
+                            actor,
+                            now,
+                            active_deleted_value,
+                            self.client_id or "unknown",
+                            normalized_workspace_id,
+                            values["binding_id"],
+                        ),
+                    )
+                    if cursor.rowcount == 1:
+                        updated = self._get_workspace_runtime_binding_with_conn(
+                            conn,
+                            normalized_workspace_id,
+                            values["binding_id"],
+                            include_deleted=False,
+                        )
+                        if updated is None:
+                            raise CharactersRAGDBError("Updated runtime binding row could not be reloaded.")  # noqa: TRY003
+                        return updated
+                    raise CharactersRAGDBError("Runtime binding update changed no rows.")  # noqa: TRY003
+
+                conn.execute(
+                    """
+                    INSERT INTO workspace_runtime_bindings (
+                        workspace_id,
+                        binding_id,
+                        binding_kind,
+                        owner_domain,
+                        locator_ref,
+                        label,
+                        status,
+                        path_hint,
+                        portability,
+                        metadata_json,
+                        redaction_report_json,
+                        created_by_user_id,
+                        updated_by_user_id,
+                        created_at,
+                        updated_at,
+                        deleted,
+                        client_id,
+                        version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    """,
+                    (
+                        normalized_workspace_id,
+                        values["binding_id"],
+                        values["binding_kind"],
+                        values["owner_domain"],
+                        values["locator_ref"],
+                        values["label"],
+                        values["status"],
+                        values["path_hint"],
+                        values["portability"],
+                        values["metadata_json"],
+                        values["redaction_report_json"],
+                        actor,
+                        actor,
+                        now,
+                        now,
+                        active_deleted_value,
+                        self.client_id or "unknown",
+                    ),
+                )
+                created = self._get_workspace_runtime_binding_with_conn(
+                    conn,
+                    normalized_workspace_id,
+                    values["binding_id"],
+                    include_deleted=False,
+                )
+                if created is None:
+                    raise CharactersRAGDBError("Created runtime binding row could not be reloaded.")  # noqa: TRY003
+                return created
+        except ConflictError:
+            raise
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
+            raise self._workspace_runtime_binding_write_error(exc) from exc
+
+    def get_workspace_runtime_binding(
+        self,
+        workspace_id: str,
+        binding_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        """Fetch one Workspace runtime binding descriptor."""
+        normalized_workspace_id = self._normalize_workspace_runtime_binding_required_string(
+            workspace_id,
+            "workspace_id",
+        )
+        normalized_binding_id = self._normalize_workspace_runtime_binding_required_string(
+            binding_id,
+            "binding_id",
+        )
+        try:
+            if include_deleted:
+                cursor = self.execute_query(
+                    "SELECT * FROM workspace_runtime_bindings WHERE workspace_id = ? AND binding_id = ?",
+                    (normalized_workspace_id, normalized_binding_id),
+                )
+                return self._normalize_workspace_runtime_binding_row(cursor.fetchone())
+            cursor = self.execute_query(
+                "SELECT * FROM workspace_runtime_bindings WHERE workspace_id = ? AND binding_id = ? AND deleted = ?",
+                (
+                    normalized_workspace_id,
+                    normalized_binding_id,
+                    self._workspace_active_deleted_value(),
+                ),
+            )
+            return self._normalize_workspace_runtime_binding_row(cursor.fetchone())
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed fetching workspace runtime binding: {exc}") from exc  # noqa: TRY003
+
+    def list_workspace_runtime_bindings(
+        self,
+        workspace_id: str,
+        *,
+        binding_kind: str | None = None,
+        owner_domain: str | None = None,
+        include_deleted: bool = False,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """List runtime binding descriptors for one Workspace."""
+        normalized_workspace_id = self._normalize_workspace_runtime_binding_required_string(
+            workspace_id,
+            "workspace_id",
+        )
+        normalized_limit = self._normalize_runtime_binding_limit(limit)
+        normalized_kind = (
+            self._workspace_runtime_binding_filter_value(binding_kind, "binding_kind")
+            if binding_kind is not None
+            else None
+        )
+        normalized_owner = (
+            self._workspace_runtime_binding_filter_value(owner_domain, "owner_domain")
+            if owner_domain is not None
+            else None
+        )
+        include_deleted_flag = 1 if include_deleted else 0
+        cursor = self.execute_query(
+            """
+            SELECT *
+              FROM workspace_runtime_bindings
+             WHERE workspace_id = ?
+               AND (? = 1 OR deleted = ?)
+               AND (? IS NULL OR binding_kind = ?)
+               AND (? IS NULL OR owner_domain = ?)
+             ORDER BY updated_at DESC, binding_id ASC
+             LIMIT ?
+            """,
+            (
+                normalized_workspace_id,
+                include_deleted_flag,
+                self._workspace_active_deleted_value(),
+                normalized_kind,
+                normalized_kind,
+                normalized_owner,
+                normalized_owner,
+                normalized_limit,
+            ),
+        )
+        return [
+            normalized
+            for row in cursor.fetchall()
+            if (normalized := self._normalize_workspace_runtime_binding_row(row)) is not None
+        ]
+
+    def archive_workspace_runtime_binding(
+        self,
+        workspace_id: str,
+        binding_id: str,
+        *,
+        user_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Soft-delete one Workspace runtime binding descriptor."""
+        normalized_workspace_id = self._normalize_workspace_runtime_binding_required_string(
+            workspace_id,
+            "workspace_id",
+        )
+        normalized_binding_id = self._normalize_workspace_runtime_binding_required_string(
+            binding_id,
+            "binding_id",
+        )
+        actor = self._normalize_workspace_runtime_binding_actor(user_id)
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                existing = self._get_workspace_runtime_binding_with_conn(
+                    conn,
+                    normalized_workspace_id,
+                    normalized_binding_id,
+                    include_deleted=True,
+                )
+                if existing is None or existing.get("deleted") in (True, 1):
+                    return None
+                deleted_value = True if self.backend_type == BackendType.POSTGRESQL else 1
+                cursor = conn.execute(
+                    """
+                    UPDATE workspace_runtime_bindings
+                       SET deleted = ?,
+                           status = ?,
+                           updated_at = ?,
+                           updated_by_user_id = ?,
+                           client_id = ?,
+                           version = version + 1
+                     WHERE workspace_id = ?
+                       AND binding_id = ?
+                       AND deleted = ?
+                    """,
+                    (
+                        deleted_value,
+                        "archived",
+                        now,
+                        actor,
+                        self.client_id or "unknown",
+                        normalized_workspace_id,
+                        normalized_binding_id,
+                        self._workspace_active_deleted_value(),
+                    ),
+                )
+                if cursor.rowcount == 1:
+                    return self._get_workspace_runtime_binding_with_conn(
+                        conn,
+                        normalized_workspace_id,
+                        normalized_binding_id,
+                        include_deleted=True,
+                    )
+                raced = self._get_workspace_runtime_binding_with_conn(
+                    conn,
+                    normalized_workspace_id,
+                    normalized_binding_id,
+                    include_deleted=True,
+                )
+                if raced is None or raced.get("deleted") in (True, 1):
+                    return raced
+                raise CharactersRAGDBError("Archive race left runtime binding active.")  # noqa: TRY003
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
+            raise self._workspace_runtime_binding_write_error(exc) from exc
 
     # --- Workspace Resource Membership Methods ---
 
