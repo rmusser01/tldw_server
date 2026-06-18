@@ -44,6 +44,8 @@ Implement the approved Chatbook v1.1 format rollout from the implementation plan
 Task 5 slice: added v1.1 Explainer content envelope export support without changing v1 export behavior. Changed chatbook_format_v1_1.py, chatbook_service.py, and test_explainer_session_content_type.py. Red test first failed with KeyError: 'envelope'; green and verification passed. Commit: d5f399d28c feat: add v1.1 explainer chatbook envelopes. Verification: Explainer suites 16 passed; manifest/file-inventory suites 24 passed; Bandit on touched app files reported 0 results.
 
 Task 6 slice: added v1.1 preview report API support while preserving the existing preview_chatbook two-tuple and endpoint fallback for legacy service doubles. Changed chatbook_schemas.py, chatbooks.py, chatbook_service.py, chatbook_format_v1_1.py, and test_chatbooks_v1_1_preview.py. Red test first failed with KeyError: 'compatibility'; focused green test passed. Verification: service preview safety/API mapping suite 19 passed; Bandit on touched app files reported 0 results. Required combined preview API command is blocked by an existing full-app TestClient teardown hang in test_chatbooks_api_preview.py after its first test, reproduced when that file is run alone.
+
+Task 6 review fix: hardened preview report handling for malformed-but-parseable features_used and file_inventory manifest data. Added regression tests for non-string feature tokens, non-list inventory, and non-string inventory paths. RED failed with TypeError for all three malformed inputs; GREEN passed focused v1.1 preview suite (4 passed), service preview safety/API mapping suite (19 passed), and Bandit on chatbook_format_v1_1.py reported 0 results.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

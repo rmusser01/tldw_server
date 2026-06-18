@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import chatbooks as chatbooks_endpoints
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Chatbooks.chatbook_format_v1_1 import build_preview_report
+from tldw_Server_API.app.core.Chatbooks.chatbook_models import ChatbookManifest, ChatbookVersion
 from tldw_Server_API.app.main import app
 
 
@@ -142,3 +144,55 @@ def test_preview_v1_1_returns_compatibility_feature_and_integrity_report(monkeyp
     assert body["compatibility"]["manifest_version"] == "1.1.0"
     assert "file_inventory" in body["features"]["supported"]
     assert body["integrity"]["verified_files"] >= 1
+
+
+def test_preview_report_treats_non_string_feature_tokens_as_unsupported(tmp_path):
+    manifest = ChatbookManifest(
+        version=ChatbookVersion.V1_1,
+        name="malformed features",
+        description="malformed-but-parseable preview",
+        features_used=["file_inventory", {}],
+        file_inventory=[],
+    )
+
+    report = build_preview_report(manifest, tmp_path)
+
+    assert report["features"]["supported"] == ["file_inventory"]
+    assert report["features"]["unsupported"] == ["{}"]
+    assert report["warnings"]
+
+
+def test_preview_report_treats_non_list_file_inventory_as_failed_item(tmp_path):
+    manifest = ChatbookManifest(
+        version=ChatbookVersion.V1_1,
+        name="malformed inventory",
+        description="malformed-but-parseable preview",
+        features_used=[],
+        file_inventory=123,
+    )
+
+    report = build_preview_report(manifest, tmp_path)
+
+    assert report["integrity"]["verified_files"] == 0
+    assert report["integrity"]["failed_files"] == [
+        {"path": None, "reason": "invalid_inventory"}
+    ]
+    assert report["errors"]
+
+
+def test_preview_report_treats_non_string_inventory_path_as_failed_item(tmp_path):
+    manifest = ChatbookManifest(
+        version=ChatbookVersion.V1_1,
+        name="malformed inventory path",
+        description="malformed-but-parseable preview",
+        features_used=[],
+        file_inventory=[{"path": 123}],
+    )
+
+    report = build_preview_report(manifest, tmp_path)
+
+    assert report["integrity"]["verified_files"] == 0
+    assert report["integrity"]["failed_files"] == [
+        {"path": None, "reason": "invalid_path"}
+    ]
+    assert report["errors"]

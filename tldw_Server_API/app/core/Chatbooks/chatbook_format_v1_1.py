@@ -48,14 +48,23 @@ def ensure_known_features(features: list[str]) -> dict[str, list[str]]:
 def build_preview_report(manifest: Any, extract_dir: Path) -> dict[str, Any]:
     """Build a non-blocking v1.1 compatibility and integrity preview report."""
     manifest_version = _version_value(getattr(manifest, "version", None))
-    features = ensure_known_features(list(getattr(manifest, "features_used", []) or []))
+    features = ensure_known_features(_normalize_feature_tokens(getattr(manifest, "features_used", [])))
     failed_files: list[dict[str, Any]] = []
     verified_files = 0
 
-    for entry in getattr(manifest, "file_inventory", []) or []:
-        relative_path = entry.get("path") if isinstance(entry, dict) else None
-        if not relative_path:
-            failed_files.append({"path": None, "reason": "missing_path"})
+    inventory = getattr(manifest, "file_inventory", []) or []
+    if not isinstance(inventory, list):
+        failed_files.append({"path": None, "reason": "invalid_inventory"})
+        inventory = []
+
+    for entry in inventory:
+        if not isinstance(entry, dict):
+            failed_files.append({"path": None, "reason": "invalid_entry"})
+            continue
+
+        relative_path = entry.get("path")
+        if not isinstance(relative_path, str) or not relative_path:
+            failed_files.append({"path": None, "reason": "invalid_path"})
             continue
         target_path = extract_dir / relative_path
         try:
@@ -225,6 +234,24 @@ def _version_value(version: Any) -> str | None:
         return None
     value = getattr(version, "value", version)
     return str(value)
+
+
+def _normalize_feature_tokens(features: Any) -> list[str]:
+    if features is None:
+        return []
+    if not isinstance(features, list):
+        return [_stringify_malformed_token(features)]
+    return [
+        feature if isinstance(feature, str) else _stringify_malformed_token(feature)
+        for feature in features
+    ]
+
+
+def _stringify_malformed_token(value: Any) -> str:
+    try:
+        return str(value)
+    except Exception:
+        return f"<malformed:{type(value).__name__}>"
 
 
 def _inventory_hash_value(entry: dict[str, Any]) -> str | None:
