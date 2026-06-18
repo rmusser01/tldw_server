@@ -57,6 +57,9 @@ class WorkspaceMembershipService:
         *,
         user_id: str | None = None,
         media_db: Any | None = None,
+        prompts_db: Any | None = None,
+        workflows_db: Any | None = None,
+        watchlists_db: Any | None = None,
         request_metadata: Mapping[str, Any] | None = None,
         resolve: bool = True,
     ) -> dict[str, Any]:
@@ -69,6 +72,9 @@ class WorkspaceMembershipService:
             workspace_id,
             user_id=user_id,
             media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
             request_metadata=request_metadata,
         )
         ref = self._validate_access(adapter, data["resource_id"], context)
@@ -103,6 +109,10 @@ class WorkspaceMembershipService:
         *,
         user_id: str | None = None,
         media_db: Any | None = None,
+        prompts_db: Any | None = None,
+        workflows_db: Any | None = None,
+        watchlists_db: Any | None = None,
+        request_metadata: Mapping[str, Any] | None = None,
         resolve: bool = True,
     ) -> dict[str, Any] | None:
         """Fetch one active membership row for a Workspace."""
@@ -116,8 +126,11 @@ class WorkspaceMembershipService:
             workspace_id=workspace_id,
             user_id=user_id,
             media_db=media_db,
-            request_metadata=None,
-            validate=False,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
+            request_metadata=request_metadata,
+            validate=canonical_resource_type in {"prompt", "workflow", "watchlist"},
         )
         row = self.chacha_db.get_workspace_resource_membership(
             workspace_id,
@@ -127,7 +140,15 @@ class WorkspaceMembershipService:
         )
         if row is None:
             return None
-        context = self._context(workspace_id, user_id=user_id, media_db=media_db)
+        context = self._context(
+            workspace_id,
+            user_id=user_id,
+            media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
+            request_metadata=request_metadata,
+        )
         return self._serialize_membership(row, context=context, resolve=resolve)
 
     def list_workspace_memberships(
@@ -141,6 +162,10 @@ class WorkspaceMembershipService:
         cursor: str | WorkspaceMembershipCursor | tuple[str, str, str] | None = None,
         user_id: str | None = None,
         media_db: Any | None = None,
+        prompts_db: Any | None = None,
+        workflows_db: Any | None = None,
+        watchlists_db: Any | None = None,
+        request_metadata: Mapping[str, Any] | None = None,
         resolve: bool = True,
     ) -> dict[str, Any]:
         """List memberships for one Workspace."""
@@ -159,7 +184,15 @@ class WorkspaceMembershipService:
             cursor=normalized_cursor,
         )
         page_rows, next_cursor = self._trim_workspace_page(rows, normalized_limit)
-        context = self._context(workspace_id, user_id=user_id, media_db=media_db)
+        context = self._context(
+            workspace_id,
+            user_id=user_id,
+            media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
+            request_metadata=request_metadata,
+        )
         items = [self._serialize_membership(row, context=context, resolve=resolve) for row in page_rows]
         return {
             "workspace_id": workspace_id,
@@ -179,6 +212,10 @@ class WorkspaceMembershipService:
         cursor: str | WorkspaceResourceMembershipCursor | tuple[str, str] | None = None,
         user_id: str | None = None,
         media_db: Any | None = None,
+        prompts_db: Any | None = None,
+        workflows_db: Any | None = None,
+        watchlists_db: Any | None = None,
+        request_metadata: Mapping[str, Any] | None = None,
         resolve: bool = True,
     ) -> dict[str, Any]:
         """List Workspace memberships for one canonical resource."""
@@ -191,8 +228,11 @@ class WorkspaceMembershipService:
             workspace_id="",
             user_id=user_id,
             media_db=media_db,
-            request_metadata=None,
-            validate=canonical_resource_type == "media",
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
+            request_metadata=request_metadata,
+            validate=canonical_resource_type in {"media", "prompt", "workflow", "watchlist"},
         )
         normalized_limit = self._normalize_limit(limit)
         normalized_cursor = self._resource_cursor_tuple(cursor)
@@ -207,7 +247,15 @@ class WorkspaceMembershipService:
         items = [
             self._serialize_membership(
                 row,
-                context=self._context(str(row.get("workspace_id") or ""), user_id=user_id, media_db=media_db),
+                context=self._context(
+                    str(row.get("workspace_id") or ""),
+                    user_id=user_id,
+                    media_db=media_db,
+                    prompts_db=prompts_db,
+                    workflows_db=workflows_db,
+                    watchlists_db=watchlists_db,
+                    request_metadata=request_metadata,
+                ),
                 resolve=resolve,
             )
             for row in page_rows
@@ -229,12 +277,24 @@ class WorkspaceMembershipService:
         *,
         user_id: str | None = None,
         media_db: Any | None = None,
+        prompts_db: Any | None = None,
+        workflows_db: Any | None = None,
+        watchlists_db: Any | None = None,
+        request_metadata: Mapping[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """Soft-delete one Workspace membership."""
         workspace = self._require_workspace(workspace_id)
         self._require_writable_workspace(workspace)
         adapter = self._get_adapter(resource_type)
-        context = self._context(workspace_id, user_id=user_id, media_db=media_db)
+        context = self._context(
+            workspace_id,
+            user_id=user_id,
+            media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
+            request_metadata=request_metadata,
+        )
         canonical_resource_id = self._canonical_resource_id(
             adapter,
             adapter.resource_type,
@@ -242,9 +302,29 @@ class WorkspaceMembershipService:
             workspace_id=workspace_id,
             user_id=user_id,
             media_db=media_db,
-            request_metadata=None,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
+            request_metadata=request_metadata,
             validate=False,
         )
+        if adapter.resource_type == "prompt" and prompts_db is not None:
+            try:
+                canonical_resource_id = self._canonical_resource_id(
+                    adapter,
+                    adapter.resource_type,
+                    resource_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    media_db=media_db,
+                    prompts_db=prompts_db,
+                    workflows_db=workflows_db,
+                    watchlists_db=watchlists_db,
+                    request_metadata=request_metadata,
+                    validate=True,
+                )
+            except WorkspaceMembershipServiceError:
+                canonical_resource_id = self._non_empty_string(resource_id, "resource_id")
         row = self.chacha_db.delete_workspace_resource_membership(
             workspace_id,
             adapter.resource_type,
@@ -368,6 +448,9 @@ class WorkspaceMembershipService:
         *,
         user_id: str | None,
         media_db: Any | None,
+        prompts_db: Any | None = None,
+        workflows_db: Any | None = None,
+        watchlists_db: Any | None = None,
         request_metadata: Mapping[str, Any] | None = None,
     ) -> WorkspaceMembershipContext:
         return WorkspaceMembershipContext(
@@ -375,6 +458,9 @@ class WorkspaceMembershipService:
             user_id=user_id,
             chacha_db=self.chacha_db,
             media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
             request_metadata=dict(request_metadata or {}),
         )
 
@@ -609,6 +695,9 @@ class WorkspaceMembershipService:
         workspace_id: str,
         user_id: str | None,
         media_db: Any | None,
+        prompts_db: Any | None,
+        workflows_db: Any | None,
+        watchlists_db: Any | None,
         request_metadata: Mapping[str, Any] | None,
         validate: bool,
     ) -> str:
@@ -617,11 +706,14 @@ class WorkspaceMembershipService:
                 workspace_id,
                 user_id=user_id,
                 media_db=media_db,
+                prompts_db=prompts_db,
+                workflows_db=workflows_db,
+                watchlists_db=watchlists_db,
                 request_metadata=request_metadata,
             )
             return self._validate_access(adapter, resource_id, context).resource_id
         normalized_resource_id = self._non_empty_string(resource_id, "resource_id")
-        if resource_type in {"media", "workspace_note"}:
+        if resource_type in {"media", "workspace_note", "workflow", "watchlist"}:
             try:
                 parsed = int(normalized_resource_id)
             except (TypeError, ValueError) as exc:

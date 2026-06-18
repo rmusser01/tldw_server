@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 from typing import Any
 
@@ -9,6 +10,8 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import try_get_prompts_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import try_get_watchlists_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.endpoints import workspace_memberships as workspace_memberships_endpoint
 from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
@@ -185,6 +188,66 @@ class FakeMembershipDB:
         return dict(row)
 
 
+class FakePromptsDB:
+    def __init__(self) -> None:
+        self.prompts = {
+            7: {
+                "id": 7,
+                "uuid": "11111111-1111-4111-8111-111111111111",
+                "name": "Research Prompt",
+                "author": "analyst",
+                "details": "do not expose",
+                "last_modified": "2026-06-07T12:00:00Z",
+                "deleted": 0,
+            }
+        }
+
+    def fetch_prompt_details(self, prompt_id_or_name_or_uuid: object, include_deleted: bool = False) -> dict[str, object] | None:
+        identifier = str(prompt_id_or_name_or_uuid)
+        for row in self.prompts.values():
+            if not include_deleted and row.get("deleted"):
+                continue
+            if identifier in {str(row["id"]), str(row["uuid"]), str(row["name"])}:
+                return dict(row)
+        return None
+
+
+class FakeWorkflowsDB:
+    def get_definition(self, workflow_id: int) -> SimpleNamespace | None:
+        if workflow_id != 9:
+            return None
+        return SimpleNamespace(
+            id=9,
+            tenant_id="tenant-a",
+            owner_id="user-1",
+            name="Investigation",
+            version=2,
+            description="Workflow description",
+            tags='["research"]',
+            definition_json='{"secret":"do not expose"}',
+            is_active=1,
+            updated_at="2026-06-07T12:00:00Z",
+        )
+
+
+class FakeWatchlistsDB:
+    def get_watchlist(self, watchlist_id: int, include_deleted: bool = False) -> SimpleNamespace:
+        if watchlist_id != 12:
+            raise KeyError("watchlist_not_found")
+        return SimpleNamespace(
+            id=12,
+            name="Claims Monitor",
+            domain="claims",
+            status="active",
+            priority="high",
+            tags=["claims"],
+            objective="do not expose",
+            deleted_at=None,
+            archived_at=None,
+            updated_at="2026-06-07T12:00:00Z",
+        )
+
+
 @pytest.fixture
 def db() -> FakeMembershipDB:
     return FakeMembershipDB()
@@ -199,9 +262,13 @@ def membership_app(db: FakeMembershipDB) -> FastAPI:
     async def _allow_rate_limit() -> None:
         return None
 
-    app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id="user-1")
+    app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id="user-1", tenant_id="tenant-a")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     app.dependency_overrides[try_get_media_db_for_user] = lambda: object()
+    app.dependency_overrides[try_get_prompts_db_for_user] = lambda: FakePromptsDB()
+    app.dependency_overrides[try_get_watchlists_db_for_user] = lambda: FakeWatchlistsDB()
+    app.dependency_overrides[workspaces_endpoint.try_get_workflows_db_for_user] = lambda: FakeWorkflowsDB()
+    app.dependency_overrides[workspace_memberships_endpoint.try_get_workflows_db_for_user] = lambda: FakeWorkflowsDB()
     app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
     app.dependency_overrides[WORKSPACES_WRITE_RATE_LIMIT] = _allow_rate_limit
     app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
@@ -375,6 +442,127 @@ def test_reverse_resource_route_default_omits_resolved_summaries(client: TestCli
     body = response.json()
     assert body["total"] == 1
     assert body["items"][0]["summary"] is None
+
+
+def test_prompt_membership_route_uses_optional_prompts_db(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/workspaces/workspace-1/memberships",
+        json=_membership_payload(
+            resource_type="prompt",
+            resource_id="11111111-1111-4111-8111-111111111111",
+            role="reference",
+        ),
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["resource_type"] == "prompt"
+    assert body["resource_id"] == "7"
+    assert body["summary"]["title"] == "Research Prompt"
+    assert "do not expose" not in response.text
+
+
+def test_workflow_membership_route_passes_request_tenant_metadata(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/workspaces/workspace-1/memberships",
+        json=_membership_payload(resource_type="workflow", resource_id="9", role="runtime"),
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["resource_type"] == "workflow"
+    assert body["summary"]["title"] == "Investigation"
+    assert body["summary"]["metadata"]["version"] == 2
+    assert "do not expose" not in response.text
+
+
+def test_workflow_membership_route_allows_owner_without_tenant_id(membership_app: FastAPI) -> None:
+    membership_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id="user-1", tenant_id=None)
+    with TestClient(membership_app, raise_server_exceptions=False) as test_client:
+        response = test_client.post(
+            "/api/v1/workspaces/workspace-1/memberships",
+            json=_membership_payload(resource_type="workflow", resource_id="9", role="runtime"),
+        )
+
+    assert response.status_code == 201
+    assert response.json()["resource_id"] == "9"
+
+
+def test_optional_workflows_db_dependency_is_sync_and_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.api.v1.API_Deps import Workflows_DB_Deps as workflows_db_deps
+
+    class FakeWorkflowsDependencyDB:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    created: list[FakeWorkflowsDependencyDB] = []
+
+    def _create_workflows_database(*, backend: object | None = None) -> FakeWorkflowsDependencyDB:
+        _ = backend
+        db = FakeWorkflowsDependencyDB()
+        created.append(db)
+        return db
+
+    workflows_db_deps.close_cached_workflows_db_for_user()
+    monkeypatch.setattr(workflows_db_deps, "get_content_backend_instance", lambda: object())
+    monkeypatch.setattr(workflows_db_deps, "create_workflows_database", _create_workflows_database)
+
+    try:
+        first = workflows_db_deps.try_get_workflows_db_for_user()
+        second = workflows_db_deps.try_get_workflows_db_for_user()
+
+        assert not inspect.isawaitable(first)
+        assert first is second
+        assert len(created) == 1
+    finally:
+        workflows_db_deps.close_cached_workflows_db_for_user()
+    assert created[0].closed is True
+
+
+def test_watchlist_membership_route_uses_optional_watchlists_db(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/workspaces/workspace-1/memberships",
+        json=_membership_payload(resource_type="watchlist", resource_id="12", role="runtime"),
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["resource_type"] == "watchlist"
+    assert body["summary"]["title"] == "Claims Monitor"
+    assert body["summary"]["metadata"]["priority"] == "high"
+    assert "do not expose" not in response.text
+
+
+def test_reverse_prompt_route_canonicalizes_with_optional_prompts_db(client: TestClient) -> None:
+    client.post(
+        "/api/v1/workspaces/workspace-1/memberships",
+        json=_membership_payload(resource_type="prompt", resource_id="Research Prompt", role="reference"),
+    )
+
+    response = client.get(
+        "/api/v1/workspace-memberships/resources/prompt/11111111-1111-4111-8111-111111111111",
+        params={"resolve": "false"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["resource_type"] == "prompt"
+    assert body["resource_id"] == "7"
+    assert body["total"] == 1
+
+
+def test_unrelated_chat_membership_does_not_require_optional_domain_dbs(membership_app: FastAPI) -> None:
+    membership_app.dependency_overrides[try_get_prompts_db_for_user] = lambda: None
+    membership_app.dependency_overrides[try_get_watchlists_db_for_user] = lambda: None
+    membership_app.dependency_overrides[workspaces_endpoint.try_get_workflows_db_for_user] = lambda: None
+    with TestClient(membership_app, raise_server_exceptions=False) as test_client:
+        response = test_client.post("/api/v1/workspaces/workspace-1/memberships", json=_membership_payload())
+
+    assert response.status_code == 201
+    assert response.json()["resource_type"] == "chat"
 
 
 def test_unsupported_resource_type_returns_stable_400_code(client: TestClient) -> None:

@@ -15,6 +15,9 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import try_get_prompts_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import try_get_watchlists_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.Workflows_DB_Deps import try_get_workflows_db_for_user
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
     WORKSPACES_DELETE_RATE_LIMIT,
@@ -67,6 +70,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -78,6 +82,9 @@ from tldw_Server_API.app.core.Workspaces.file_inventory_jobs import (
     enqueue_workspace_file_inventory_scan_job,
 )
 from tldw_Server_API.app.core.Workspaces.context import build_workspace_core_context
+from tldw_Server_API.app.core.Workspaces.membership_request_metadata import (
+    build_workspace_membership_request_metadata,
+)
 from tldw_Server_API.app.core.Workspaces.membership_service import (
     WorkspaceMembershipService,
     WorkspaceMembershipServiceError,
@@ -1173,6 +1180,9 @@ async def list_workspace_memberships(
     cursor: str | None = Query(default=None),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     media_db: Any | None = Depends(try_get_media_db_for_user),
+    prompts_db: Any | None = Depends(try_get_prompts_db_for_user),
+    workflows_db: WorkflowsDatabase | None = Depends(try_get_workflows_db_for_user),
+    watchlists_db: Any | None = Depends(try_get_watchlists_db_for_user),
     current_user: User = Depends(get_request_user),
 ) -> WorkspaceMembershipListResponse:
     """List memberships for one workspace."""
@@ -1186,7 +1196,11 @@ async def list_workspace_memberships(
             limit=limit,
             cursor=cursor,
             media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
             user_id=_request_user_id(current_user),
+            request_metadata=build_workspace_membership_request_metadata(current_user),
         )
     except WorkspaceMembershipServiceError as exc:
         raise _membership_service_error_to_http(exc) from exc
@@ -1207,6 +1221,9 @@ async def create_workspace_membership(
     body: WorkspaceMembershipCreateRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     media_db: Any | None = Depends(try_get_media_db_for_user),
+    prompts_db: Any | None = Depends(try_get_prompts_db_for_user),
+    workflows_db: WorkflowsDatabase | None = Depends(try_get_workflows_db_for_user),
+    watchlists_db: Any | None = Depends(try_get_watchlists_db_for_user),
     current_user: User = Depends(get_request_user),
 ) -> WorkspaceMembershipResponse:
     """Link a resource to a workspace, idempotently for matching active rows."""
@@ -1215,7 +1232,11 @@ async def create_workspace_membership(
             workspace_id,
             body,
             media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
             user_id=_request_user_id(current_user),
+            request_metadata=build_workspace_membership_request_metadata(current_user),
             resolve=True,
         )
     except WorkspaceMembershipServiceError as exc:
@@ -1238,6 +1259,9 @@ async def get_workspace_membership(
     resolve: bool = Query(default=True),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     media_db: Any | None = Depends(try_get_media_db_for_user),
+    prompts_db: Any | None = Depends(try_get_prompts_db_for_user),
+    workflows_db: WorkflowsDatabase | None = Depends(try_get_workflows_db_for_user),
+    watchlists_db: Any | None = Depends(try_get_watchlists_db_for_user),
     current_user: User = Depends(get_request_user),
 ) -> WorkspaceMembershipResponse:
     """Fetch one active workspace membership by resource."""
@@ -1247,7 +1271,11 @@ async def get_workspace_membership(
             resource_type,
             resource_id,
             media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
             user_id=_request_user_id(current_user),
+            request_metadata=build_workspace_membership_request_metadata(current_user),
             resolve=resolve,
         )
     except WorkspaceMembershipServiceError as exc:
@@ -1271,6 +1299,9 @@ async def delete_workspace_membership(
     resource_id: str,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     media_db: Any | None = Depends(try_get_media_db_for_user),
+    prompts_db: Any | None = Depends(try_get_prompts_db_for_user),
+    workflows_db: WorkflowsDatabase | None = Depends(try_get_workflows_db_for_user),
+    watchlists_db: Any | None = Depends(try_get_watchlists_db_for_user),
     current_user: User = Depends(get_request_user),
 ) -> Response:
     """Soft-delete a workspace membership; missing rows are idempotent no-ops."""
@@ -1280,7 +1311,11 @@ async def delete_workspace_membership(
             resource_type,
             resource_id,
             media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
             user_id=_request_user_id(current_user),
+            request_metadata=build_workspace_membership_request_metadata(current_user),
         )
     except WorkspaceMembershipServiceError as exc:
         raise _membership_service_error_to_http(exc) from exc

@@ -59,7 +59,8 @@ context work should start from that contract.
 does not transfer ownership, hide or move global records, or make `/workspaces`
 the global filter for Library, Notes, Chat, or search surfaces. The first slice
 supports explicit links for `workspace_note`, `media`, `workspace_source`,
-`workspace_artifact`, and `chat`.
+`workspace_artifact`, `chat`, `prompt`, `workflow`, `watchlist`,
+`acp_session`, and `sandbox_session`.
 
 `workspace_sources` remains the Research Workspace source-selection and
 readiness table. A `workspace_source` membership can associate that source row
@@ -74,11 +75,14 @@ they want existing rows represented in the generic membership table.
 MCP effective permission preview and path admission continue to use MCP policy
 and root bindings. Generic Workspace membership is not a trust source for MCP
 tool execution, file access, ACP execution, or Sandbox path admission.
+`acp_session` and `sandbox_session` memberships validate against Workspace
+runtime binding descriptors and expose only redacted descriptor metadata.
 
-Future membership adapters must validate access through the owning domain
-adapter before linking or resolving a resource. Unsupported resource types must
-fail closed, and summaries/provenance should avoid exposing secrets, absolute
-paths, sandbox mount paths, prompts, model output contents, or file contents.
+Future membership adapters, including deferred `note` and `acp_run` support,
+must validate access through the owning domain adapter before linking or
+resolving a resource. Unsupported resource types must fail closed, and
+summaries/provenance should avoid exposing secrets, absolute paths, sandbox
+mount paths, prompts, model output contents, or file contents.
 
 ## Runtime Bindings
 
