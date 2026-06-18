@@ -7,6 +7,23 @@ import { ACPWorkspacePanel } from "../ACPWorkspacePanel"
 const workspaceStoreMock = vi.hoisted(() => ({
   workspaceId: "workspace-alpha"
 }))
+const workspaceContextMock = vi.hoisted(() => ({
+  compareOverride: null as null | (() => {
+    state: "active_only"
+    sessionWorkspaceId: null
+    activeWorkspaceId: string
+    sessionWorkspaceLabel: null
+    activeWorkspaceLabel: string
+    message: string
+    recovery: {
+      reasonCode: string
+      severity: "warning"
+      message: string
+      nextStepLabel: string
+      nextStepHref: null
+    }
+  })
+}))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -26,10 +43,26 @@ vi.mock("@/store/workspace", () => ({
   ) => selector({ workspaceId: workspaceStoreMock.workspaceId })
 }))
 
+vi.mock("@/services/workspace-context", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/services/workspace-context")>(
+      "@/services/workspace-context"
+    )
+  return {
+    ...actual,
+    compareACPWorkspaceContext: (
+      input: Parameters<typeof actual.compareACPWorkspaceContext>[0]
+    ) =>
+      workspaceContextMock.compareOverride?.() ??
+      actual.compareACPWorkspaceContext(input)
+  }
+})
+
 describe("ACPWorkspacePanel canonical Workspace handoff", () => {
   beforeEach(() => {
     useACPSessionsStore.getState().reset()
     workspaceStoreMock.workspaceId = "workspace-alpha"
+    workspaceContextMock.compareOverride = null
   })
 
   it("links no-session users to the canonical Workspaces manager", () => {
@@ -101,5 +134,37 @@ describe("ACPWorkspacePanel canonical Workspace handoff", () => {
 
     expect(screen.getByText("Active Workspace only")).toBeInTheDocument()
     expect(screen.getAllByText("workspace-alpha")).toHaveLength(1)
+  })
+
+  it("uses the Workspaces fallback href when recovery copy omits a href", () => {
+    workspaceContextMock.compareOverride = () => ({
+      state: "active_only",
+      sessionWorkspaceId: null,
+      activeWorkspaceId: "workspace-alpha",
+      sessionWorkspaceLabel: null,
+      activeWorkspaceLabel: "workspace-alpha",
+      message: "Active server Workspace is not attached.",
+      recovery: {
+        reasonCode: "active_workspace_only",
+        severity: "warning",
+        message: "Active server Workspace is not attached.",
+        nextStepLabel: "Open Workspaces",
+        nextStepHref: null
+      }
+    })
+    const store = useACPSessionsStore.getState()
+    const sessionId = store.createSession({
+      cwd: "/workspace/alpha",
+      name: "Unattached Session"
+    })
+    store.updateSessionMetadata(sessionId, {
+      sshWsUrl: "/api/v1/acp/sessions/unattached/ssh"
+    })
+
+    render(<ACPWorkspacePanel />)
+
+    expect(
+      screen.getByRole("link", { name: "Open Workspaces" })
+    ).toHaveAttribute("href", "#/workspaces")
   })
 })

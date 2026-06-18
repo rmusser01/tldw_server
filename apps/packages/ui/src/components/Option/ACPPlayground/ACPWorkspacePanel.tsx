@@ -103,7 +103,6 @@ export const ACPWorkspacePanel: React.FC = () => {
       : sessionWorkspaceContext.message
   const showWorkspaceRecovery =
     sessionWorkspaceContext.recovery.reasonCode !== "aligned" &&
-    Boolean(sessionWorkspaceContext.recovery.nextStepHref) &&
     Boolean(sessionWorkspaceContext.recovery.nextStepLabel)
 
   const [wsStatus, setWsStatus] = React.useState<"connecting" | "connected" | "disconnected">("disconnected")

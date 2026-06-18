@@ -43,6 +43,9 @@ const mockResetResearchWorkspaceTelemetryState = vi.fn()
 const workspaceContextMocks = vi.hoisted(() => ({
   useActiveWorkspaceContext: vi.fn()
 }))
+const translationMock = vi.hoisted(() => ({
+  keys: [] as string[]
+}))
 
 const now = new Date("2026-02-18T12:00:00.000Z")
 
@@ -245,6 +248,7 @@ vi.mock("react-i18next", () => ({
             defaultValue?: string
           }
     ) => {
+      translationMock.keys.push(key)
       if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
       if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
       return key
@@ -363,6 +367,7 @@ if (!(globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver) {
 describe("WorkspaceHeader workspace browser modal", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    translationMock.keys = []
     workspaceContextMocks.useActiveWorkspaceContext.mockReturnValue(
       makeActiveWorkspaceHookResult()
     )
@@ -615,6 +620,12 @@ describe("WorkspaceHeader workspace browser modal", () => {
     ).toBeInTheDocument()
     expect(screen.getByText("Canonical Alpha")).toBeInTheDocument()
     expect(screen.getByText("Server context ready")).toBeInTheDocument()
+    expect(translationMock.keys).toContain(
+      "playground:workspace.serverContextReady"
+    )
+    expect(translationMock.keys).not.toContain(
+      "playground:workspace.Servercontextready"
+    )
     expect(workspaceContextMocks.useActiveWorkspaceContext).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceId: "workspace-alpha" })
     )

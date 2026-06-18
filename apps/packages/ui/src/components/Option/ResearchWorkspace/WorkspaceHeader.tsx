@@ -154,24 +154,55 @@ const WORKSPACE_ROLLOUT_CONTROL_ORDER: WorkspaceRolloutControlKey[] = [
 ]
 const WORKSPACE_ROLLOUT_PRESET_PERCENTAGES = [0, 10, 50, 100] as const
 
-const getServerWorkspaceContextStatusLabel = (
+const getServerWorkspaceContextStatusCopy = (
   context: ReturnType<typeof useActiveWorkspaceContext>["context"],
   loading: boolean
-): string => {
-  if (loading) return "Server context loading"
+): { key: string; fallback: string } => {
+  if (loading) {
+    return {
+      key: "playground:workspace.serverContextLoading",
+      fallback: "Server context loading"
+    }
+  }
   if (
     context.attentionState === "archived" ||
     context.workspace?.archived ||
     context.recovery.reasonCode === "workspace_archived"
   ) {
-    return "Server context archived"
+    return {
+      key: "playground:workspace.serverContextArchived",
+      fallback: "Server context archived"
+    }
   }
   const state = context.state
-  if (state === "partial") return "Server context partial"
-  if (state === "error") return "Server context unavailable"
-  if (state === "missing") return "Server context missing"
-  if (state === "none") return "No server context"
-  return "Server context ready"
+  if (state === "partial") {
+    return {
+      key: "playground:workspace.serverContextPartial",
+      fallback: "Server context partial"
+    }
+  }
+  if (state === "error") {
+    return {
+      key: "playground:workspace.serverContextUnavailable",
+      fallback: "Server context unavailable"
+    }
+  }
+  if (state === "missing") {
+    return {
+      key: "playground:workspace.serverContextMissing",
+      fallback: "Server context missing"
+    }
+  }
+  if (state === "none") {
+    return {
+      key: "playground:workspace.noServerContext",
+      fallback: "No server context"
+    }
+  }
+  return {
+    key: "playground:workspace.serverContextReady",
+    fallback: "Server context ready"
+  }
 }
 
 export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
@@ -1417,12 +1448,14 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       })),
     [workspaceCollections]
   )
-  const serverWorkspaceContextStatusLabel = getServerWorkspaceContextStatusLabel(
+  const serverWorkspaceContextStatusCopy = getServerWorkspaceContextStatusCopy(
     serverWorkspaceContext,
     serverWorkspaceContextLoading
   )
   const serverWorkspaceContextLabel =
-    serverWorkspaceContext.workspace?.label || workspaceId || "No server Workspace"
+    serverWorkspaceContext.workspace?.label ||
+    workspaceId ||
+    t("playground:workspace.noServerWorkspace", "No server Workspace")
   const serverWorkspaceRecovery = serverWorkspaceContext.recovery
   const showServerWorkspaceRecovery =
     !serverWorkspaceContextLoading &&
@@ -1753,8 +1786,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           </span>
           <span className="rounded bg-surface2 px-1.5 py-0.5">
             {t(
-              `playground:workspace.${serverWorkspaceContextStatusLabel.replace(/\s+/g, "")}`,
-              serverWorkspaceContextStatusLabel
+              serverWorkspaceContextStatusCopy.key,
+              serverWorkspaceContextStatusCopy.fallback
             )}
           </span>
           {showServerWorkspaceRecovery && (
