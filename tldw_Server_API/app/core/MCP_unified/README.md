@@ -425,6 +425,8 @@ Phase-1 adds a governed virtual CLI foundation to MCP Unified.
 
 `shellName` / `shell_name` may be set to `bash`, `shell`, `powershell`, or `pwsh` to label the intended virtual shell dialect for a `run` invocation. The selector is validated, included in nested idempotency scope, and never enables raw host shell execution. The `bash`, `powershell`, and `pwsh` aliases are pinned to their matching `shellName` values; conflicting selectors fail before backend MCP calls are prepared.
 
+PowerShell-facing invocations also fail closed on raw PowerShell syntax that the virtual CLI does not emulate, including the invocation operator (`&`) and unquoted script blocks (`{ ... }`). Use curated virtual CLI commands such as `ls`, `cat`, `rg`, and `sandbox` instead of shell scripts.
+
 `run` and its shell-facing aliases also accept optional `timeoutSeconds` / `timeout_seconds` values. The timeout covers the governed command chain, including policy preflight and nested MCP tool execution, and returns exit code `124` when exceeded.
 
 `cwd` / `workingDirectory` may be set to a workspace-relative directory for a single governed command chain. Relative file paths and search base paths are evaluated beneath that cwd, while absolute paths and final read/write decisions still flow through the backing MCP tools and profile policy. The cwd value rejects absolute paths, Windows drive roots, home-relative paths, and `..` traversal.
