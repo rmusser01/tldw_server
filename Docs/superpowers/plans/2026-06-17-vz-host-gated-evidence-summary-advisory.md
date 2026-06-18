@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3 standard library, pytest, GitHub Actions YAML, Bash workflow shell, Markdown operator docs, Backlog.md task tracking.
 
+**Status:** Complete. Implemented, reviewed, verified, and recorded in `TASK-2381`.
+
 ---
 
 ## File Structure
@@ -37,7 +39,7 @@ Do not modify `tools/vz-linux-image/scripts/run-host-e2e-smoke.sh` in this slice
 - Read: `tools/vz-linux-image/scripts/run-host-e2e-smoke.sh`
 - Read: `Docs/superpowers/specs/2026-06-17-vz-host-gated-evidence-summary-advisory-design.md`
 
-- [ ] **Step 1: Create test scaffolding**
+- [x] **Step 1: Create test scaffolding**
 
 Create the test file with helpers that run the future script through `subprocess.run`:
 
@@ -87,7 +89,7 @@ def _run_summary(
     )
 ```
 
-- [ ] **Step 2: Add complete evidence test**
+- [x] **Step 2: Add complete evidence test**
 
 Add a test that creates all expected files and writes representative JSON:
 
@@ -163,7 +165,7 @@ def test_summary_reports_complete_evidence(tmp_path: Path) -> None:
         assert evidence_file in result.stdout
 ```
 
-- [ ] **Step 3: Add missing and partial evidence tests**
+- [x] **Step 3: Add missing and partial evidence tests**
 
 Add tests for:
 
@@ -178,7 +180,7 @@ Expected assertions:
 - output contains expected file names
 - no traceback is printed
 
-- [ ] **Step 4: Add malformed, oversized, and symlink tests**
+- [x] **Step 4: Add malformed, oversized, and symlink tests**
 
 Add tests for:
 
@@ -194,7 +196,7 @@ Expected assertions:
 - symlink target content is not included in output
 - no traceback is printed
 
-- [ ] **Step 5: Add summary output fallback tests**
+- [x] **Step 5: Add summary output fallback tests**
 
 Add tests for:
 
@@ -203,7 +205,7 @@ Add tests for:
 
 Use a directory path as `GITHUB_STEP_SUMMARY` for the unwritable target case, because opening a directory for append should fail portably.
 
-- [ ] **Step 6: Run tests to verify RED**
+- [x] **Step 6: Run tests to verify RED**
 
 Run:
 
@@ -222,7 +224,7 @@ Expected: FAIL because `tools/vz-linux-image/scripts/summarize-host-e2e-evidence
 - Create: `tools/vz-linux-image/scripts/summarize-host-e2e-evidence.py`
 - Test: `tools/vz-linux-image/tests/test_summarize_host_e2e_evidence.py`
 
-- [ ] **Step 1: Add constants and dataclasses**
+- [x] **Step 1: Add constants and dataclasses**
 
 Create the script with standard-library-only imports:
 
@@ -262,7 +264,7 @@ class EvidenceFileStatus:
     size_bytes: int | None = None
 ```
 
-- [ ] **Step 2: Implement safe rendering helpers**
+- [x] **Step 2: Implement safe rendering helpers**
 
 Add helpers:
 
@@ -279,7 +281,7 @@ def _display(value: object, *, max_chars: int = DISPLAY_MAX_CHARS) -> str:
 
 Also add a helper that renders Markdown tables from rows and applies `_display` to every cell.
 
-- [ ] **Step 3: Implement direct-child evidence probing**
+- [x] **Step 3: Implement direct-child evidence probing**
 
 Implement:
 
@@ -322,7 +324,7 @@ If `_probe_evidence_dir` returns `False`, render the warning plus a missing
 checklist for all expected files and do not call `_probe_expected_file`. Use
 `lstat`; do not use recursive globbing; do not resolve or read through symlinks.
 
-- [ ] **Step 4: Implement bounded JSON loading**
+- [x] **Step 4: Implement bounded JSON loading**
 
 Implement:
 
@@ -348,7 +350,7 @@ def _load_evidence_json(
 
 Do not include raw JSON content in warnings.
 
-- [ ] **Step 5: Implement Markdown report generation**
+- [x] **Step 5: Implement Markdown report generation**
 
 Build `render_summary(evidence_dir: Path) -> str` with these sections:
 
@@ -373,7 +375,7 @@ Build `render_summary(evidence_dir: Path) -> str` with these sections:
 
 Every dynamic value must pass through `_display`.
 
-- [ ] **Step 6: Implement output and advisory CLI boundary**
+- [x] **Step 6: Implement output and advisory CLI boundary**
 
 Implement:
 
@@ -413,7 +415,7 @@ def main(argv: list[str] | None = None) -> int:
 
 Keep the broad `Exception` catch only at the CLI boundary. Do not use broad catches inside core helpers when narrower exceptions are available.
 
-- [ ] **Step 7: Run focused GREEN tests**
+- [x] **Step 7: Run focused GREEN tests**
 
 Run:
 
@@ -425,7 +427,7 @@ python tools/vz-linux-image/scripts/summarize-host-e2e-evidence.py --evidence-di
 
 Expected: tests pass; the CLI exits `0` and writes an advisory missing-evidence summary.
 
-- [ ] **Step 8: Commit summarizer and tests**
+- [x] **Step 8: Commit summarizer and tests**
 
 ```bash
 git add tools/vz-linux-image/scripts/summarize-host-e2e-evidence.py \
@@ -441,7 +443,7 @@ git commit -m "tools: summarize VZ host smoke evidence"
 - Modify: `tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_workflow.py`
 - Modify: `.github/workflows/vz-linux-host-gated.yml`
 
-- [ ] **Step 1: Add failing workflow contract tests**
+- [x] **Step 1: Add failing workflow contract tests**
 
 Add helper if needed:
 
@@ -489,7 +491,7 @@ def test_vz_linux_host_gated_workflow_summary_step_is_guarded() -> None:
     assert "${{ runner.temp }}/tldw-vz-helper-ci/**" not in run_block
 ```
 
-- [ ] **Step 2: Run workflow tests to verify RED**
+- [x] **Step 2: Run workflow tests to verify RED**
 
 Run:
 
@@ -500,7 +502,7 @@ python -m pytest tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_w
 
 Expected: FAIL because the workflow has no summary step yet.
 
-- [ ] **Step 3: Add workflow step**
+- [x] **Step 3: Add workflow step**
 
 Insert after `Run managed host smoke` and before `Upload smoke evidence`:
 
@@ -546,7 +548,7 @@ Insert after `Run managed host smoke` and before `Upload smoke evidence`:
 
 Do not install dependencies. Keep `set +e`, explicit `exit 0`, and `|| true` so this advisory step cannot become the job's primary failure.
 
-- [ ] **Step 4: Run workflow GREEN tests**
+- [x] **Step 4: Run workflow GREEN tests**
 
 Run:
 
@@ -557,7 +559,7 @@ python -m pytest tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_w
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit workflow wiring**
+- [x] **Step 5: Commit workflow wiring**
 
 ```bash
 git add .github/workflows/vz-linux-host-gated.yml \
@@ -575,7 +577,7 @@ git commit -m "ci: summarize VZ host smoke evidence"
 - Read: `Docs/superpowers/specs/2026-06-17-vz-host-gated-evidence-summary-advisory-design.md`
 - Read: `Docs/superpowers/plans/2026-06-17-vz-host-gated-evidence-summary-advisory.md`
 
-- [ ] **Step 1: Add policy docs test if not already covered**
+- [x] **Step 1: Add policy docs test if not already covered**
 
 If the existing workflow policy tests do not cover the summary, add an assertion to `test_vz_linux_host_gated_policy_prioritizes_evidence_artifact` or a new focused test requiring:
 
@@ -585,7 +587,7 @@ If the existing workflow policy tests do not cover the summary, add an assertion
 - `vz-linux-host-gated-helper-logs`
 - evidence summary does not replace artifacts
 
-- [ ] **Step 2: Update host-gated policy**
+- [x] **Step 2: Update host-gated policy**
 
 In `Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md`, document the operator order:
 
@@ -595,7 +597,7 @@ In `Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md`, document the oper
 
 State that missing/malformed summary output in this first slice is advisory and should not change the smoke step result.
 
-- [ ] **Step 3: Run focused verification**
+- [x] **Step 3: Run focused verification**
 
 Run:
 
@@ -616,7 +618,7 @@ Expected:
 - missing evidence CLI smoke exits `0`
 - diff check is clean
 
-- [ ] **Step 4: Run Bandit on touched production Python**
+- [x] **Step 4: Run Bandit on touched production Python**
 
 Run:
 
@@ -627,7 +629,7 @@ python -m bandit -r tools/vz-linux-image/scripts/summarize-host-e2e-evidence.py 
 
 Expected: no new security findings in the touched script. If Bandit is not installed, install/use the repo dev environment only if that is already the project pattern; otherwise record the exact skip reason in Backlog.
 
-- [ ] **Step 5: Update Backlog task**
+- [x] **Step 5: Update Backlog task**
 
 Update `TASK-2381`:
 
@@ -638,7 +640,7 @@ Update `TASK-2381`:
 - record real VZ smoke as not run because this is host-independent workflow/reporting only
 - add final summary
 
-- [ ] **Step 6: Commit docs/backlog/final verification**
+- [x] **Step 6: Commit docs/backlog/final verification**
 
 ```bash
 git add Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md \
@@ -648,7 +650,7 @@ git add Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md \
 git commit -m "docs: document VZ evidence summary workflow"
 ```
 
-- [ ] **Step 7: Final branch review**
+- [x] **Step 7: Final branch review**
 
 Run:
 

@@ -1,7 +1,7 @@
 ---
 id: TASK-2381
 title: Add advisory VZ host smoke evidence summary
-status: In Progress
+status: Done
 labels:
 - sandbox
 - vz_linux
