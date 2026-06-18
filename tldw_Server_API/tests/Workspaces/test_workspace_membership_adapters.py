@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -365,6 +366,7 @@ class FakeChaChaDB:
         self.sources: dict[tuple[str, str], dict[str, object]] = {}
         self.artifacts: dict[tuple[str, str], dict[str, object]] = {}
         self.conversations: dict[str, dict[str, object]] = {}
+        self.runtime_bindings: dict[tuple[str, str], dict[str, object]] = {}
         self.memberships: dict[tuple[str, str, str], dict[str, object]] = {}
         self.last_add_data: dict[str, object] | None = None
         self.last_list_resource_key: tuple[str, str] | None = None
@@ -413,6 +415,18 @@ class FakeChaChaDB:
         include_deleted: bool = False,
     ) -> dict[str, object] | None:
         return self.conversations.get(conversation_id)
+
+    def get_workspace_runtime_binding(
+        self,
+        workspace_id: str,
+        binding_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, object] | None:
+        row = self.runtime_bindings.get((workspace_id, binding_id))
+        if row is None or (row.get("deleted") and not include_deleted):
+            return None
+        return dict(row)
 
     def add_workspace_resource_membership(
         self,
@@ -588,6 +602,39 @@ def _context(db: FakeChaChaDB, *, media_db: object | None = None) -> WorkspaceMe
     )
 
 
+class FakePromptsDB:
+    def __init__(self) -> None:
+        self.prompts: dict[int, dict[str, object]] = {}
+
+    def fetch_prompt_details(self, prompt_id_or_name_or_uuid: object, include_deleted: bool = False) -> dict[str, object] | None:
+        identifier = str(prompt_id_or_name_or_uuid)
+        for row in self.prompts.values():
+            if not include_deleted and row.get("deleted"):
+                continue
+            if identifier in {str(row.get("id")), str(row.get("uuid")), str(row.get("name"))}:
+                return dict(row)
+        return None
+
+
+class FakeWorkflowsDB:
+    def __init__(self) -> None:
+        self.definitions: dict[int, SimpleNamespace] = {}
+
+    def get_definition(self, workflow_id: int) -> SimpleNamespace | None:
+        return self.definitions.get(workflow_id)
+
+
+class FakeWatchlistsDB:
+    def __init__(self) -> None:
+        self.watchlists: dict[int, SimpleNamespace] = {}
+
+    def get_watchlist(self, watchlist_id: int, include_deleted: bool = False) -> SimpleNamespace:
+        row = self.watchlists.get(watchlist_id)
+        if row is None or (getattr(row, "deleted_at", None) and not include_deleted):
+            raise KeyError("watchlist_not_found")
+        return row
+
+
 def test_unsupported_resource_type_fails_closed() -> None:
     service = WorkspaceMembershipService(FakeChaChaDB())
 
@@ -602,6 +649,19 @@ def test_unsupported_resource_type_fails_closed() -> None:
     assert exc_info.value.status_code == 400
     with pytest.raises(WorkspaceMembershipAdapterError):
         get_workspace_membership_adapter("note")
+
+
+@pytest.mark.parametrize("resource_type", ["prompt", "workflow", "watchlist", "acp_session", "sandbox_session"])
+def test_remaining_phase2_resource_types_have_membership_adapters(resource_type: str) -> None:
+    assert get_workspace_membership_adapter(resource_type).resource_type == resource_type
+
+
+@pytest.mark.parametrize("resource_type", ["note", "acp_run"])
+def test_explicitly_deferred_resource_types_still_fail_closed(resource_type: str) -> None:
+    with pytest.raises(WorkspaceMembershipAdapterError) as exc_info:
+        get_workspace_membership_adapter(resource_type)
+
+    assert exc_info.value.code == "unsupported_resource_type"
 
 
 def test_workspace_note_adapter_validates_same_workspace_note() -> None:
@@ -966,6 +1026,193 @@ def test_deleted_media_summary_reports_deleted_state(monkeypatch: pytest.MonkeyP
     assert summary["state"] == "deleted"
     assert summary["title"] == "Deleted media"
     assert calls == [(42, True, True)]
+
+
+def test_prompt_membership_canonicalizes_to_numeric_id_and_omits_prompt_content() -> None:
+    db = FakeChaChaDB()
+    prompts_db = FakePromptsDB()
+    prompts_db.prompts[7] = {
+        "id": 7,
+        "uuid": "11111111-1111-4111-8111-111111111111",
+        "name": "Research Prompt",
+        "author": "analyst",
+        "details": "secret prompt body",
+        "system_prompt": "hidden system prompt",
+        "last_modified": "2026-06-07T12:05:00Z",
+        "deleted": 0,
+    }
+    service = WorkspaceMembershipService(db)
+
+    payload = service.link_membership(
+        "workspace-1",
+        {"resource_type": "prompt", "resource_id": "11111111-1111-4111-8111-111111111111"},
+        user_id="user-1",
+        prompts_db=prompts_db,
+    )
+
+    assert payload["resource_type"] == "prompt"
+    assert payload["resource_id"] == "7"
+    assert payload["summary"]["title"] == "Research Prompt"
+    assert payload["summary"]["metadata"]["author"] == "analyst"
+    assert "secret prompt body" not in json.dumps(payload)
+    assert "hidden system prompt" not in json.dumps(payload)
+
+
+def test_prompt_membership_requires_prompts_db() -> None:
+    service = WorkspaceMembershipService(FakeChaChaDB())
+
+    with pytest.raises(WorkspaceMembershipServiceError) as exc_info:
+        service.link_membership(
+            "workspace-1",
+            {"resource_type": "prompt", "resource_id": "7"},
+            user_id="user-1",
+        )
+
+    assert exc_info.value.code == "prompts_db_unavailable"
+    assert exc_info.value.status_code == 503
+
+
+def test_workflow_membership_requires_same_tenant_and_owner_unless_admin() -> None:
+    db = FakeChaChaDB()
+    workflows_db = FakeWorkflowsDB()
+    workflows_db.definitions[9] = SimpleNamespace(
+        id=9,
+        tenant_id="tenant-a",
+        owner_id="user-2",
+        name="Investigation",
+        version=3,
+        description="Runnable workflow",
+        tags='["research"]',
+        is_active=1,
+        updated_at="2026-06-07T12:05:00Z",
+        definition_json='{"secret":"do not expose"}',
+    )
+    service = WorkspaceMembershipService(db)
+
+    with pytest.raises(WorkspaceMembershipServiceError) as exc_info:
+        service.link_membership(
+            "workspace-1",
+            {"resource_type": "workflow", "resource_id": "9"},
+            user_id="user-1",
+            workflows_db=workflows_db,
+            request_metadata={"tenant_id": "tenant-a", "is_workflows_admin": False},
+        )
+
+    assert exc_info.value.code == "resource_not_found"
+
+    payload = service.link_membership(
+        "workspace-1",
+        {"resource_type": "workflow", "resource_id": "9"},
+        user_id="user-1",
+        workflows_db=workflows_db,
+        request_metadata={"tenant_id": "tenant-a", "is_workflows_admin": True},
+    )
+
+    assert payload["resource_id"] == "9"
+    assert payload["summary"]["title"] == "Investigation"
+    assert payload["summary"]["metadata"]["version"] == 3
+    assert "do not expose" not in json.dumps(payload)
+
+
+def test_watchlist_membership_validates_current_user_watchlist_and_deleted_summary() -> None:
+    db = FakeChaChaDB()
+    watchlists_db = FakeWatchlistsDB()
+    watchlists_db.watchlists[12] = SimpleNamespace(
+        id=12,
+        name="Claims Monitor",
+        domain="claims",
+        status="active",
+        priority="high",
+        tags=["claims", "policy"],
+        objective="long private objective",
+        deleted_at=None,
+        archived_at=None,
+        updated_at="2026-06-07T12:05:00Z",
+    )
+    service = WorkspaceMembershipService(db)
+
+    payload = service.link_membership(
+        "workspace-1",
+        {"resource_type": "watchlist", "resource_id": "12"},
+        user_id="user-1",
+        watchlists_db=watchlists_db,
+    )
+
+    assert payload["resource_id"] == "12"
+    assert payload["summary"]["title"] == "Claims Monitor"
+    assert payload["summary"]["metadata"]["priority"] == "high"
+    assert "long private objective" not in json.dumps(payload)
+
+    watchlists_db.watchlists[12].deleted_at = "2026-06-07T12:30:00Z"
+    listed = service.list_workspace_memberships("workspace-1", watchlists_db=watchlists_db)
+
+    assert listed["items"][0]["summary"]["state"] == "deleted"
+
+
+@pytest.mark.parametrize(
+    "resource_type,binding_kind,owner_domain",
+    [
+        ("acp_session", "acp_session", "acp"),
+        ("sandbox_session", "sandbox_session", "sandbox"),
+    ],
+)
+def test_runtime_session_membership_validates_workspace_runtime_binding(
+    resource_type: str,
+    binding_kind: str,
+    owner_domain: str,
+) -> None:
+    db = FakeChaChaDB()
+    db.runtime_bindings[("workspace-1", "session-1")] = {
+        "workspace_id": "workspace-1",
+        "binding_id": "session-1",
+        "binding_kind": binding_kind,
+        "owner_domain": owner_domain,
+        "locator_ref": "opaque-runtime-ref",
+        "label": "Runtime Session",
+        "status": "ready",
+        "path_hint": "repo",
+        "portability": "metadata-only",
+        "metadata": {"safe": "value", "absolute_root": "repo"},
+        "redaction_report": {"redacted": True, "redacted_fields": ["path_hint"], "rejected_fields": []},
+        "updated_at": "2026-06-07T12:05:00Z",
+        "deleted": False,
+    }
+    service = WorkspaceMembershipService(db)
+
+    payload = service.link_membership(
+        "workspace-1",
+        {"resource_type": resource_type, "resource_id": "session-1", "role": "runtime"},
+        user_id="user-1",
+    )
+
+    assert payload["resource_id"] == "session-1"
+    assert payload["summary"]["title"] == "Runtime Session"
+    assert payload["summary"]["metadata"]["binding_kind"] == binding_kind
+    assert payload["summary"]["metadata"]["status"] == "ready"
+
+
+def test_runtime_session_membership_rejects_wrong_binding_kind_or_domain() -> None:
+    db = FakeChaChaDB()
+    db.runtime_bindings[("workspace-1", "session-1")] = {
+        "workspace_id": "workspace-1",
+        "binding_id": "session-1",
+        "binding_kind": "sandbox_session",
+        "owner_domain": "sandbox",
+        "locator_ref": "opaque-runtime-ref",
+        "label": "Wrong Runtime Session",
+        "status": "ready",
+        "deleted": False,
+    }
+    service = WorkspaceMembershipService(db)
+
+    with pytest.raises(WorkspaceMembershipServiceError) as exc_info:
+        service.link_membership(
+            "workspace-1",
+            {"resource_type": "acp_session", "resource_id": "session-1", "role": "runtime"},
+            user_id="user-1",
+        )
+
+    assert exc_info.value.code == "resource_not_found"
 
 
 class RecordingAdapter:

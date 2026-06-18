@@ -15,6 +15,8 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import try_get_prompts_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import try_get_watchlists_db_for_user
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
     WORKSPACES_DELETE_RATE_LIMIT,
@@ -67,6 +69,12 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.AuthNZ.permissions import WORKFLOWS_ADMIN
+from tldw_Server_API.app.core.DB_Management.DB_Manager import (
+    create_workflows_database,
+    get_content_backend_instance,
+)
+from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -490,6 +498,46 @@ def _membership_service(db: CharactersRAGDB) -> WorkspaceMembershipService:
 
 def _request_user_id(current_user: User) -> str:
     return str(current_user.id)
+
+
+def _normalize_claim_values(values: Any) -> list[str]:
+    raw_values = values if isinstance(values, (list, tuple, set)) else ([values] if values is not None else [])
+    normalized: list[str] = []
+    for value in raw_values:
+        text = str(value).strip().lower()
+        if text:
+            normalized.append(text)
+    return normalized
+
+
+def _is_workflows_admin_user(current_user: User) -> bool:
+    try:
+        if "admin" in _normalize_claim_values(getattr(current_user, "roles", [])):
+            return True
+        permission_values = _normalize_claim_values(getattr(current_user, "permissions", []))
+        return (
+            WORKFLOWS_ADMIN.lower() in permission_values
+            or "*" in permission_values
+            or "system.configure" in permission_values
+        )
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
+def _membership_request_metadata(current_user: User) -> dict[str, Any]:
+    return {
+        "tenant_id": str(getattr(current_user, "tenant_id", "default")),
+        "is_workflows_admin": _is_workflows_admin_user(current_user),
+    }
+
+
+async def try_get_workflows_db_for_user() -> WorkflowsDatabase | None:
+    """Optional Workflows DB dependency for routes that support mixed resource types."""
+    try:
+        return create_workflows_database(backend=get_content_backend_instance())
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning("Optional Workflows DB unavailable ({})", type(exc).__name__)
+        return None
 
 
 def _membership_service_error_to_http(exc: WorkspaceMembershipServiceError) -> HTTPException:
@@ -1173,6 +1221,9 @@ async def list_workspace_memberships(
     cursor: str | None = Query(default=None),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     media_db: Any | None = Depends(try_get_media_db_for_user),
+    prompts_db: Any | None = Depends(try_get_prompts_db_for_user),
+    workflows_db: WorkflowsDatabase | None = Depends(try_get_workflows_db_for_user),
+    watchlists_db: Any | None = Depends(try_get_watchlists_db_for_user),
     current_user: User = Depends(get_request_user),
 ) -> WorkspaceMembershipListResponse:
     """List memberships for one workspace."""
@@ -1186,7 +1237,11 @@ async def list_workspace_memberships(
             limit=limit,
             cursor=cursor,
             media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
             user_id=_request_user_id(current_user),
+            request_metadata=_membership_request_metadata(current_user),
         )
     except WorkspaceMembershipServiceError as exc:
         raise _membership_service_error_to_http(exc) from exc
@@ -1207,6 +1262,9 @@ async def create_workspace_membership(
     body: WorkspaceMembershipCreateRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     media_db: Any | None = Depends(try_get_media_db_for_user),
+    prompts_db: Any | None = Depends(try_get_prompts_db_for_user),
+    workflows_db: WorkflowsDatabase | None = Depends(try_get_workflows_db_for_user),
+    watchlists_db: Any | None = Depends(try_get_watchlists_db_for_user),
     current_user: User = Depends(get_request_user),
 ) -> WorkspaceMembershipResponse:
     """Link a resource to a workspace, idempotently for matching active rows."""
@@ -1215,7 +1273,11 @@ async def create_workspace_membership(
             workspace_id,
             body,
             media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
             user_id=_request_user_id(current_user),
+            request_metadata=_membership_request_metadata(current_user),
             resolve=True,
         )
     except WorkspaceMembershipServiceError as exc:
@@ -1238,6 +1300,9 @@ async def get_workspace_membership(
     resolve: bool = Query(default=True),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     media_db: Any | None = Depends(try_get_media_db_for_user),
+    prompts_db: Any | None = Depends(try_get_prompts_db_for_user),
+    workflows_db: WorkflowsDatabase | None = Depends(try_get_workflows_db_for_user),
+    watchlists_db: Any | None = Depends(try_get_watchlists_db_for_user),
     current_user: User = Depends(get_request_user),
 ) -> WorkspaceMembershipResponse:
     """Fetch one active workspace membership by resource."""
@@ -1247,7 +1312,11 @@ async def get_workspace_membership(
             resource_type,
             resource_id,
             media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
             user_id=_request_user_id(current_user),
+            request_metadata=_membership_request_metadata(current_user),
             resolve=resolve,
         )
     except WorkspaceMembershipServiceError as exc:
@@ -1271,6 +1340,9 @@ async def delete_workspace_membership(
     resource_id: str,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     media_db: Any | None = Depends(try_get_media_db_for_user),
+    prompts_db: Any | None = Depends(try_get_prompts_db_for_user),
+    workflows_db: WorkflowsDatabase | None = Depends(try_get_workflows_db_for_user),
+    watchlists_db: Any | None = Depends(try_get_watchlists_db_for_user),
     current_user: User = Depends(get_request_user),
 ) -> Response:
     """Soft-delete a workspace membership; missing rows are idempotent no-ops."""
@@ -1280,7 +1352,11 @@ async def delete_workspace_membership(
             resource_type,
             resource_id,
             media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
             user_id=_request_user_id(current_user),
+            request_metadata=_membership_request_metadata(current_user),
         )
     except WorkspaceMembershipServiceError as exc:
         raise _membership_service_error_to_http(exc) from exc

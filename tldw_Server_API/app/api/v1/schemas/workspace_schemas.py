@@ -71,6 +71,11 @@ WorkspaceMembershipResourceType = Literal[
     "workspace_source",
     "workspace_artifact",
     "chat",
+    "prompt",
+    "workflow",
+    "watchlist",
+    "acp_session",
+    "sandbox_session",
 ]
 WorkspaceMembershipRole = Literal[
     "member",

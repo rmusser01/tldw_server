@@ -10,16 +10,23 @@ from typing import Any
 
 
 WORKSPACE_MEMBERSHIP_RESOURCE_TYPES = frozenset(
-    {"workspace_note", "media", "workspace_source", "workspace_artifact", "chat"}
-)
-WORKSPACE_MEMBERSHIP_FUTURE_RESOURCE_TYPES = frozenset(
     {
-        "note",
+        "workspace_note",
+        "media",
+        "workspace_source",
+        "workspace_artifact",
+        "chat",
         "prompt",
         "workflow",
         "watchlist",
         "acp_session",
         "sandbox_session",
+    }
+)
+WORKSPACE_MEMBERSHIP_FUTURE_RESOURCE_TYPES = frozenset(
+    {
+        "note",
+        "acp_run",
         "project_file",
         "study_deck",
         "quiz",

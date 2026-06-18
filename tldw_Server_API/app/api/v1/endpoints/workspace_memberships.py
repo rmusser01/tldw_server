@@ -8,6 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import try_get_prompts_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import try_get_watchlists_db_for_user
+from tldw_Server_API.app.api.v1.endpoints.workspaces import (
+    _membership_request_metadata,
+    try_get_workflows_db_for_user,
+)
 from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import WORKSPACES_READ_RATE_LIMIT
 from tldw_Server_API.app.api.v1.schemas.workspace_schemas import WorkspaceResourceMembershipListResponse
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
@@ -59,6 +65,9 @@ async def list_resource_workspace_memberships(
     cursor: str | None = Query(default=None),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     media_db: Any | None = Depends(try_get_media_db_for_user),
+    prompts_db: Any | None = Depends(try_get_prompts_db_for_user),
+    workflows_db: Any | None = Depends(try_get_workflows_db_for_user),
+    watchlists_db: Any | None = Depends(try_get_watchlists_db_for_user),
     current_user: User = Depends(get_request_user),
 ) -> WorkspaceResourceMembershipListResponse:
     """List memberships that connect the current user's workspaces to one resource."""
@@ -71,7 +80,11 @@ async def list_resource_workspace_memberships(
             limit=limit,
             cursor=cursor,
             media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
             user_id=_request_user_id(current_user),
+            request_metadata=_membership_request_metadata(current_user),
         )
     except WorkspaceMembershipServiceError as exc:
         raise _membership_service_error_to_http(exc) from exc

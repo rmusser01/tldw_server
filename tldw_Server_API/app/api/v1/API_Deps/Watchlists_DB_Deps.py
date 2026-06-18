@@ -43,3 +43,19 @@ async def get_watchlists_db_for_user(
             type(e).__name__,
         )
         raise HTTPException(status_code=500, detail="Watchlists DB unavailable") from e
+
+
+async def try_get_watchlists_db_for_user(
+    current_user: User = Depends(get_request_user)
+) -> WatchlistsDatabase | None:
+    """Optional Watchlists DB dependency for routes that support mixed resource types."""
+    try:
+        return await get_watchlists_db_for_user(current_user)
+    except HTTPException as exc:
+        if exc.status_code in {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN}:
+            raise
+        logger.warning("Optional Watchlists DB unavailable (status_code={})", exc.status_code)
+        return None
+    except (DatabaseError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning("Optional Watchlists DB unexpected error ({})", type(exc).__name__)
+        return None

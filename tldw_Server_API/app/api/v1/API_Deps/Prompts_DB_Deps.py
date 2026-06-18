@@ -413,6 +413,23 @@ async def get_prompts_db_for_user(
         user_specific_lock.release()
 
 
+async def try_get_prompts_db_for_user(
+        request: Request,
+        current_user: User = Depends(get_request_user),
+) -> Optional[PromptsDatabase]:
+    """Optional Prompts DB dependency for routes that support mixed resource types."""
+    try:
+        return await get_prompts_db_for_user(request, current_user)
+    except HTTPException as exc:
+        if exc.status_code in {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN}:
+            raise
+        logger.warning("Optional Prompts DB unavailable (status_code={})", exc.status_code)
+        return None
+    except (DatabaseError, SchemaError, InputError, ConflictError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        logger.warning("Optional Prompts DB unexpected error ({})", type(exc).__name__)
+        return None
+
+
 async def close_all_cached_prompts_db_instances() -> None:
     """Closes all cached PromptsDatabase connections. Useful for application shutdown."""
     if _user_db_instances is None or _user_db_locks is None:
