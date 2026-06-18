@@ -278,8 +278,11 @@ class ChatbookManifest:
         if self.binary_limits:
             metadata["binary_limits"] = self.binary_limits
 
+        version_value = self.version.value if hasattr(self.version, 'value') else str(self.version)
+        is_v1_1_manifest = version_value == ChatbookVersion.V1_1.value
+
         payload = {
-            "version": self.version.value if hasattr(self.version, 'value') else str(self.version),
+            "version": version_value,
             "name": self.name,
             "description": self.description,
             "author": self.author,
@@ -315,15 +318,11 @@ class ChatbookManifest:
         }
         if self.truncation:
             payload["truncation"] = self.truncation
-        if self.version == ChatbookVersion.V1_1 or self.features_used:
+        if is_v1_1_manifest:
             payload["features_used"] = self.features_used
-        if self.version == ChatbookVersion.V1_1 or self.producer:
             payload["producer"] = self.producer
-        if self.version == ChatbookVersion.V1_1 or self.source_instance:
             payload["source_instance"] = self.source_instance
-        if self.version == ChatbookVersion.V1_1 or self.compatibility:
             payload["compatibility"] = self.compatibility
-        if self.version == ChatbookVersion.V1_1 or self.file_inventory:
             payload["file_inventory"] = self.file_inventory
         return payload
 

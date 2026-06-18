@@ -416,6 +416,51 @@ def test_chatbook_manifest_parses_v1_1_metadata_fields():
     assert manifest.file_inventory == manifest_data["file_inventory"]
 
 
+def test_v1_manifest_to_dict_excludes_populated_v1_1_metadata_fields():
+    manifest = ChatbookManifest(
+        version=ChatbookVersion.V1,
+        name="v1 boundary",
+        description="v1 boundary",
+        features_used=["file_inventory"],
+        producer={"name": "tldw_server"},
+        source_instance={"kind": "local"},
+        compatibility={"min_reader_version": "1.1.0"},
+        file_inventory=[
+            {
+                "path": "README.md",
+                "media_type": "text/markdown",
+                "size_bytes": 10,
+                "integrity": {"algorithm": "sha256", "value": "sha256:example"},
+                "role": "readme",
+            }
+        ],
+    )
+
+    manifest_dict = manifest.to_dict()
+
+    assert "features_used" not in manifest_dict
+    assert "producer" not in manifest_dict
+    assert "source_instance" not in manifest_dict
+    assert "compatibility" not in manifest_dict
+    assert "file_inventory" not in manifest_dict
+
+
+def test_v1_1_manifest_to_dict_includes_default_v1_1_metadata_fields():
+    manifest = ChatbookManifest(
+        version="1.1.0",
+        name="v1.1 defaults",
+        description="v1.1 defaults",
+    )
+
+    manifest_dict = manifest.to_dict()
+
+    assert manifest_dict["features_used"] == []
+    assert manifest_dict["producer"] == {}
+    assert manifest_dict["source_instance"] == {}
+    assert manifest_dict["compatibility"] == {}
+    assert manifest_dict["file_inventory"] == []
+
+
 def test_v1_1_manifest_allows_content_item_metadata_envelope():
     manifest = _minimal_v1_1_manifest()
     manifest["features_used"] = ["content_envelopes"]
