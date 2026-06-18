@@ -133,6 +133,16 @@ def test_vz_linux_host_gated_workflow_uses_operator_smoke_script() -> None:
     assert "TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH" in run_blocks  # nosec B101
 
 
+def test_vz_linux_host_gated_workflow_passes_explicit_evidence_dir() -> None:
+    """The workflow should make structured smoke evidence a named runtime path."""
+    workflow = _load_workflow()
+    steps = workflow["jobs"]["vz-linux-host-gated-smoke"]["steps"]
+    run_blocks = "\n".join(str(step.get("run", "")) for step in steps)
+
+    assert 'evidence_dir="${runtime_dir}/evidence"' in run_blocks  # nosec B101
+    assert '--evidence-dir "${evidence_dir}"' in run_blocks  # nosec B101
+
+
 def test_vz_linux_host_gated_workflow_failure_drills_are_manual_opt_in() -> None:
     """Failure drills should only run when manual dispatch opts in."""
     workflow = _load_workflow()
@@ -195,10 +205,22 @@ def test_vz_linux_host_gated_workflow_uses_minimal_permissions_and_uploads_logs(
     ]
 
     assert workflow["permissions"] == {"contents": "read"}  # nosec B101
-    assert len(upload_steps) == 1  # nosec B101
-    assert upload_steps[0]["if"] == "always()"  # nosec B101
-    assert upload_steps[0]["with"]["if-no-files-found"] == "ignore"  # nosec B101
-    assert "${{ runner.temp }}/tldw-vz-helper-ci/**" in upload_steps[0]["with"]["path"]  # nosec B101
+    assert len(upload_steps) == 2  # nosec B101
+    upload_by_name = {step["with"]["name"]: step for step in upload_steps}
+    assert set(upload_by_name) == {  # nosec B101
+        "vz-linux-host-gated-evidence",
+        "vz-linux-host-gated-helper-logs",
+    }
+    for upload_step in upload_by_name.values():
+        assert upload_step["if"] == "always()"  # nosec B101
+        assert upload_step["with"]["if-no-files-found"] == "ignore"  # nosec B101
+    assert (  # nosec B101
+        "${{ runner.temp }}/tldw-vz-helper-ci/evidence/**"
+        in upload_by_name["vz-linux-host-gated-evidence"]["with"]["path"]
+    )
+    helper_log_path = upload_by_name["vz-linux-host-gated-helper-logs"]["with"]["path"]
+    assert "${{ runner.temp }}/tldw-vz-helper-ci/serial/**" in helper_log_path  # nosec B101
+    assert "${{ runner.temp }}/tldw-vz-helper-ci/**" not in helper_log_path  # nosec B101
 
 
 def test_vz_linux_host_gated_policy_tracks_structured_evidence_bundle() -> None:
@@ -214,6 +236,23 @@ def test_vz_linux_host_gated_policy_tracks_structured_evidence_bundle() -> None:
         "cleanup-status.txt",
     ):
         assert evidence_file in policy  # nosec B101
+
+
+def test_vz_linux_host_gated_policy_prioritizes_evidence_artifact() -> None:
+    """The policy should tell operators to inspect evidence before raw logs."""
+    policy = _normalized_text(POLICY_PATH)
+
+    for required_term in (
+        "vz-linux-host-gated-evidence",
+        "vz-linux-host-gated-helper-logs",
+        "Inspect `vz-linux-host-gated-evidence` first",
+        "raw helper logs",
+        "must not include disposable image-store bundles or rootfs clones",
+    ):
+        _require(
+            required_term in policy,
+            f"Policy should define evidence artifact contract term: {required_term}",
+        )
 
 
 def test_vz_linux_host_gated_acceptance_policy_doc_exists_and_references_workflow() -> None:

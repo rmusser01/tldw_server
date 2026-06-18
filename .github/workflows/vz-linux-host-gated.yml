@@ -79,6 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           runtime_dir="${RUNNER_TEMP}/tldw-vz-helper-ci"
+          evidence_dir="${runtime_dir}/evidence"
           rm -rf "${runtime_dir}"
           mkdir -p "${runtime_dir}/serial"
           chmod 700 "${runtime_dir}"
@@ -88,6 +89,7 @@ jobs:
             --bundle "${TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH}"
             --socket "${runtime_dir}/helper.sock"
             --serial-log-dir "${runtime_dir}/serial"
+            --evidence-dir "${evidence_dir}"
             --python "$(command -v python)"
           )
           if [[ -n "${TLDW_SANDBOX_VZ_HELPER_ENTITLEMENTS_PATH:-}" ]]; then
@@ -106,10 +108,18 @@ jobs:
 
           bash tools/vz-linux-image/scripts/run-host-e2e-smoke.sh "${args[@]}"
 
+      - name: Upload smoke evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: vz-linux-host-gated-evidence
+          path: ${{ runner.temp }}/tldw-vz-helper-ci/evidence/**
+          if-no-files-found: ignore
+
       - name: Upload helper logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: vz-linux-host-gated-helper-logs
-          path: ${{ runner.temp }}/tldw-vz-helper-ci/**
+          path: ${{ runner.temp }}/tldw-vz-helper-ci/serial/**
           if-no-files-found: ignore
