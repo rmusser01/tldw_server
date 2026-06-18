@@ -33,6 +33,12 @@ RUNTIME_POINTER_KEYS = (
     "evidence_dir",
 )
 MARKDOWN_ESCAPE_CHARS = frozenset("\\`[]()!|")
+CLEANUP_KEYS = (
+    "status",
+    "helper_pid",
+    "helper_running_after_cleanup",
+    "socket_present_after_cleanup",
+)
 
 
 @dataclass(frozen=True)
@@ -277,7 +283,7 @@ def _render_phase_outcomes(payload: dict[str, Any] | None) -> str:
                 )
             )
         else:
-            rows.append((phase, details, "", ""))
+            rows.append((phase, "invalid or unavailable", "", ""))
     return "## Phase Outcomes\n\n" + _table(("Phase", "Status", "Exit code", "Timestamp"), rows)
 
 
@@ -287,7 +293,9 @@ def _render_cleanup(payload: dict[str, Any] | None) -> str:
     cleanup = payload.get("cleanup")
     if not isinstance(cleanup, dict) or not cleanup:
         return ""
-    rows = [(key, value) for key, value in cleanup.items()]
+    rows = [(key, cleanup[key]) for key in CLEANUP_KEYS if key in cleanup]
+    if not rows:
+        return ""
     return "## Cleanup Status\n\n" + _table(("Field", "Value"), rows)
 
 
@@ -329,8 +337,8 @@ def _render_log_artifacts(payload: dict[str, Any] | None) -> str:
                     artifact.get("sha256", ""),
                 )
             )
-        else:
-            rows.append((artifact, "", ""))
+    if not rows:
+        return ""
     return "## Log Artifact Metadata\n\n" + _table(("Path", "Size bytes", "SHA-256"), rows)
 
 

@@ -341,6 +341,58 @@ def test_summary_sanitizes_dynamic_markdown_metadata(tmp_path: Path) -> None:
     assert "`inline-code`" not in result.stdout
 
 
+def test_summary_does_not_render_raw_nested_malformed_values(tmp_path: Path) -> None:
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    for evidence_file in EXPECTED_EVIDENCE_FILES - {"host-smoke-evidence.json"}:
+        (evidence_dir / evidence_file).write_text(f"{evidence_file}\n", encoding="utf-8")
+    raw_sentinel = "RAW-GUEST-LOG-CONTENT-SHOULD-NOT-RENDER"
+    (evidence_dir / "host-smoke-evidence.json").write_text(
+        json.dumps(
+            {
+                "smoke_run_id": "ci-valid",
+                "final_exit_code": 0,
+                "phases": {
+                    "real_host_smoke": {
+                        "status": "ok",
+                        "exit_code": 0,
+                        "timestamp": "2026-06-17T00:00:01Z",
+                    },
+                    "malformed_phase": raw_sentinel,
+                },
+                "cleanup": {
+                    "status": 0,
+                    "helper_pid": "123",
+                    "helper_running_after_cleanup": False,
+                    "socket_present_after_cleanup": False,
+                    "raw_guest_output": raw_sentinel,
+                },
+                "log_artifacts": [
+                    {
+                        "path": "/private/runtime/serial/vm.log",
+                        "size_bytes": 128,
+                        "sha256": "b" * 64,
+                    },
+                    raw_sentinel,
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = _run_summary(evidence_dir)
+
+    _assert_advisory_success(result)
+    assert raw_sentinel not in result.stdout
+    assert "real_host_smoke" in result.stdout
+    assert "ok" in result.stdout
+    assert "helper_pid" in result.stdout
+    assert "123" in result.stdout
+    assert "raw_guest_output" not in result.stdout
+    assert "/private/runtime/serial/vm.log" in result.stdout
+    assert "128" in result.stdout
+
+
 def test_valid_github_step_summary_path_appends_markdown(tmp_path: Path) -> None:
     evidence_dir = tmp_path / "evidence"
     _write_complete_evidence(evidence_dir)
