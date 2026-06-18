@@ -242,6 +242,16 @@ async def _handle_export(service: ChatbookService, payload: dict[str, Any], job_
     try:
         format_version = coerce_chatbook_export_version(payload.get("format_version"))
     except ValueError as exc:
+        ej = None
+        try:
+            ej = service._get_export_job(job_id)
+        except Exception as lookup_err:
+            logger.debug(f"Chatbooks Jobs worker: failed to load export job {job_id}: {lookup_err}")
+        if ej:
+            ej.status = ExportStatus.FAILED
+            ej.completed_at = datetime.now(timezone.utc)
+            ej.error_message = str(exc)
+            service._save_export_job(ej)
         raise ChatbooksJobError(str(exc), retryable=False) from exc
     ok, msg, file_path = await service._create_chatbook_sync_wrapper(
         name=payload.get("name"),

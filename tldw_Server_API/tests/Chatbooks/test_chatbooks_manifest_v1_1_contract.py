@@ -9,7 +9,7 @@ import pytest
 
 from tldw_Server_API.app.api.v1.schemas.chatbook_schemas import CreateChatbookRequest
 from tldw_Server_API.app.services import core_jobs_worker as active_core_jobs_worker
-from tldw_Server_API.app.core.Chatbooks.chatbook_models import ChatbookVersion
+from tldw_Server_API.app.core.Chatbooks.chatbook_models import ChatbookVersion, ExportJob, ExportStatus
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.Chatbooks.services.jobs_worker import ChatbooksJobError, _handle_export
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -228,6 +228,45 @@ async def test_core_jobs_worker_rejects_unsupported_format_version_nonretryably(
         )
 
     assert exc_info.value.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_core_jobs_worker_marks_export_job_failed_for_unsupported_format_version():
+    saved_jobs = []
+    export_job = ExportJob(
+        job_id="job-1",
+        user_id="user-1",
+        status=ExportStatus.IN_PROGRESS,
+        chatbook_name="v2 queued",
+    )
+
+    class _Service:
+        def _claim_export_job(self, job_id):
+            return True
+
+        def _get_export_job(self, job_id):
+            return export_job
+
+        def _save_export_job(self, job):
+            saved_jobs.append(job)
+
+    with pytest.raises(ChatbooksJobError, match="Unsupported chatbook export format_version") as exc_info:
+        await _handle_export(
+            _Service(),
+            {
+                "name": "v2 queued",
+                "description": "v2 queued",
+                "content_selections": {},
+                "format_version": "2.0.0",
+            },
+            "job-1",
+        )
+
+    assert exc_info.value.retryable is False
+    assert len(saved_jobs) == 1
+    assert saved_jobs[0].status is ExportStatus.FAILED
+    assert saved_jobs[0].completed_at is not None
+    assert "Unsupported chatbook export format_version" in saved_jobs[0].error_message
 
 
 async def _run_active_core_jobs_worker_export_once(monkeypatch, payload, *, service_captures: bool = True):
