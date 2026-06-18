@@ -4,7 +4,7 @@ title: Add Claude-style governed Bash and PowerShell runtime tools
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-18 04:17'
+updated_date: '2026-06-18 04:45'
 labels:
   - mcp
   - command-runtime
@@ -55,6 +55,8 @@ PR review hardening implemented: addressed Qodo, Gemini, and CodeRabbit comments
 Sixth slice implemented: added envFile / env_file support for governed sandbox command steps. Env files are validated as workspace-relative paths, resolved under the active workspace root with symlink target containment, bounded to 65536 bytes, parsed as simple UTF-8 .env KEY=value entries without expansion, forwarded only to sandbox.run, and salted into nested idempotency scope by path/content digest without exposing secret values. Non-sandbox command chains fail closed instead of silently loading env files. Verification: focused run command pytest 69 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_env_file.json had results=0 errors=0 skipped=0.
 
 Sixth-slice hardening added: sandbox.run env values are redacted from tool hook contexts while preserving the real prepared/executed sandbox arguments and argument hash behavior. Verification rerun after hardening: run-command plus protocol hook pytest 78 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_env_file.json had results=0 errors=0 skipped=0.
+
+PR #2386 review pass: rebased branch onto latest origin/dev (already up to date) and addressed still-valid review items. Changes: introduced RunEnvFileValidationError for envFile failures, replaced path.stat/read_bytes with os.open/os.fstat/os.fdopen bounded descriptor reads using O_NOFOLLOW/O_CLOEXEC where available, accepted UTF-8 BOM via utf-8-sig, restricted env variable names to ASCII [A-Za-z_][A-Za-z0-9_]*, removed redundant env-file alias normalization, added docstrings to new sandbox hook test helpers, and added focused regression tests for BOM/unicode-key rejection, descriptor reads, and OSError mapping. The marker-policy finding was handled for the newly added env-file tests by marking them unit and relying on repo-configured pytest asyncio auto mode; existing pre-existing asyncio markers were left unchanged. Verification: run-command plus protocol hook pytest 81 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_env_file_review.json had results=0 errors=0 skipped=0; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

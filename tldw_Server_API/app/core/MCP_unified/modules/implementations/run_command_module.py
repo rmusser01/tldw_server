@@ -40,6 +40,10 @@ _RUN_TOOL_NAMES = frozenset((_RUN_TOOL_NAME, *_RUN_TOOL_ALIASES))
 _RUN_ENV_FILE_MAX_BYTES = 64 * 1024
 
 
+class RunEnvFileValidationError(ValueError):
+    """Raised when run env-file input fails validation or safe loading."""
+
+
 class _AdapterBackend(CommandBackend):
     def __init__(self, adapters: PhaseOneCommandAdapters) -> None:
         self._adapters = adapters
@@ -149,7 +153,7 @@ class RunCommandModule(BaseModule):
                 visible=visible,
                 context=context,
             )
-        except ValueError as exc:
+        except RunEnvFileValidationError as exc:
             return present_command_execution_result(
                 CommandExecutionResult(
                     stdout="",
@@ -605,7 +609,7 @@ class RunCommandModule(BaseModule):
         if env_file is None:
             return None, None
         if not self._chain_includes_visible_sandbox(chain, visible):
-            raise ValueError("envFile is only supported for command chains that include sandbox")
+            raise RunEnvFileValidationError("envFile is only supported for command chains that include sandbox")
         relative_path = self._env_file_relative_path(env_file, cwd)
         env_file_path = await self._resolve_env_file_path(relative_path, context)
         payload = await asyncio.to_thread(self._read_env_file_bytes, env_file_path)
@@ -648,21 +652,21 @@ class RunCommandModule(BaseModule):
 
         workspace_root = await self._resolve_workspace_root(context)
         if workspace_root is None:
-            raise ValueError("envFile requires a resolved workspace root")
+            raise RunEnvFileValidationError("envFile requires a resolved workspace root")
         workspace_root = workspace_root.resolve(strict=False)
         lexical_path = workspace_root / relative_path
         if not self._path_is_relative_to(lexical_path, workspace_root):
-            raise ValueError("envFile must stay within the workspace root")
+            raise RunEnvFileValidationError("envFile must stay within the workspace root")
         try:
             resolved_path = await asyncio.to_thread(lexical_path.resolve, strict=True)
         except FileNotFoundError as exc:
-            raise ValueError("envFile was not found") from exc
+            raise RunEnvFileValidationError("envFile was not found") from exc
         except (OSError, RuntimeError) as exc:
-            raise ValueError("envFile could not be resolved") from exc
+            raise RunEnvFileValidationError("envFile could not be resolved") from exc
         if not self._path_is_relative_to(resolved_path, workspace_root):
-            raise ValueError("envFile symlink target must stay within the workspace root")
+            raise RunEnvFileValidationError("envFile symlink target must stay within the workspace root")
         if not await asyncio.to_thread(resolved_path.is_file):
-            raise ValueError("envFile must reference a regular file")
+            raise RunEnvFileValidationError("envFile must reference a regular file")
         return resolved_path
 
     @staticmethod
@@ -679,17 +683,30 @@ class RunCommandModule(BaseModule):
     def _read_env_file_bytes(path: Path) -> bytes:
         """Read a bounded env file payload."""
 
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        if hasattr(os, "O_CLOEXEC"):
+            flags |= os.O_CLOEXEC
+        fd: int | None = None
         try:
-            info = path.stat(follow_symlinks=False)
+            fd = os.open(path, flags)
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise RunEnvFileValidationError("envFile must reference a regular file")
+            if info.st_size > _RUN_ENV_FILE_MAX_BYTES:
+                raise RunEnvFileValidationError(f"envFile exceeds {_RUN_ENV_FILE_MAX_BYTES} bytes")
+            handle = os.fdopen(fd, "rb", closefd=True)
+            fd = None
+            with handle:
+                payload = handle.read(_RUN_ENV_FILE_MAX_BYTES + 1)
         except OSError as exc:
-            raise ValueError("envFile could not be inspected") from exc
-        if not stat.S_ISREG(info.st_mode):
-            raise ValueError("envFile must reference a regular file")
-        if info.st_size > _RUN_ENV_FILE_MAX_BYTES:
-            raise ValueError(f"envFile exceeds {_RUN_ENV_FILE_MAX_BYTES} bytes")
-        payload = path.read_bytes()
+            raise RunEnvFileValidationError("envFile could not be read") from exc
+        finally:
+            if fd is not None:
+                os.close(fd)
         if len(payload) > _RUN_ENV_FILE_MAX_BYTES:
-            raise ValueError(f"envFile exceeds {_RUN_ENV_FILE_MAX_BYTES} bytes")
+            raise RunEnvFileValidationError(f"envFile exceeds {_RUN_ENV_FILE_MAX_BYTES} bytes")
         return payload
 
     @staticmethod
@@ -697,9 +714,9 @@ class RunCommandModule(BaseModule):
         """Parse a minimal .env file without expansion or host environment access."""
 
         try:
-            text = payload.decode("utf-8")
+            text = payload.decode("utf-8-sig")
         except UnicodeDecodeError as exc:
-            raise ValueError("envFile must be UTF-8") from exc
+            raise RunEnvFileValidationError("envFile must be UTF-8") from exc
 
         env: dict[str, str] = {}
         for line_number, raw_line in enumerate(text.splitlines(), start=1):
@@ -709,11 +726,11 @@ class RunCommandModule(BaseModule):
             if line.startswith("export "):
                 line = line[len("export ") :].lstrip()
             if "=" not in line:
-                raise ValueError(f"envFile line {line_number} must be KEY=value")
+                raise RunEnvFileValidationError(f"envFile line {line_number} must be KEY=value")
             key, value = line.split("=", 1)
             key = key.strip()
             if not RunCommandModule._is_valid_env_key(key):
-                raise ValueError(f"envFile line {line_number} has invalid variable name")
+                raise RunEnvFileValidationError(f"envFile line {line_number} has invalid variable name")
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
                 value = value[1:-1]
@@ -724,9 +741,21 @@ class RunCommandModule(BaseModule):
     def _is_valid_env_key(key: str) -> bool:
         """Return whether a key is a portable environment variable name."""
 
-        if not key or not (key[0] == "_" or key[0].isalpha()):
+        if not key or not (key[0] == "_" or RunCommandModule._is_ascii_alpha(key[0])):
             return False
-        return all(ch == "_" or ch.isalnum() for ch in key[1:])
+        return all(ch == "_" or RunCommandModule._is_ascii_alnum(ch) for ch in key[1:])
+
+    @staticmethod
+    def _is_ascii_alpha(char: str) -> bool:
+        """Return whether one character is in the ASCII alpha range."""
+
+        return ("A" <= char <= "Z") or ("a" <= char <= "z")
+
+    @staticmethod
+    def _is_ascii_alnum(char: str) -> bool:
+        """Return whether one character is in the ASCII alphanumeric range."""
+
+        return RunCommandModule._is_ascii_alpha(char) or ("0" <= char <= "9")
 
     @staticmethod
     def _first_nonempty(*values: Any) -> str | None:
@@ -915,15 +944,10 @@ class RunCommandModule(BaseModule):
 
         env_file = arguments.get("env_file")
         env_file_camel = arguments.get("envFile")
-        if env_file is not None:
-            cls._normalize_env_file(env_file, "env_file")
-        if env_file_camel is not None:
-            cls._normalize_env_file(env_file_camel, "envFile")
-        if env_file is not None and env_file_camel is not None:
-            legacy_value = cls._normalize_env_file(env_file, "env_file")
-            camel_value = cls._normalize_env_file(env_file_camel, "envFile")
-            if legacy_value != camel_value:
-                raise ValueError("envFile and env_file must match when both are provided")
+        legacy_value = cls._normalize_env_file(env_file, "env_file") if env_file is not None else None
+        camel_value = cls._normalize_env_file(env_file_camel, "envFile") if env_file_camel is not None else None
+        if legacy_value is not None and camel_value is not None and legacy_value != camel_value:
+            raise RunEnvFileValidationError("envFile and env_file must match when both are provided")
 
     @classmethod
     def _env_file(cls, arguments: dict[str, Any]) -> str | None:
@@ -940,20 +964,20 @@ class RunCommandModule(BaseModule):
         """Normalize env-file paths as workspace-relative file references."""
 
         if not isinstance(value, str) or not value.strip():
-            raise ValueError(f"{key} must be a non-empty workspace-relative path")
+            raise RunEnvFileValidationError(f"{key} must be a non-empty workspace-relative path")
         text = value.strip()
         if cls._is_anchored_path(text) or text.startswith("~"):
-            raise ValueError(f"{key} must be workspace-relative")
+            raise RunEnvFileValidationError(f"{key} must be workspace-relative")
         parts: list[str] = []
         for raw_part in text.replace("\\", "/").split("/"):
             part = raw_part.strip()
             if not part or part == ".":
                 continue
             if part == "..":
-                raise ValueError(f"{key} must not contain path traversal")
+                raise RunEnvFileValidationError(f"{key} must not contain path traversal")
             parts.append(part)
         if not parts:
-            raise ValueError(f"{key} must reference a workspace-relative file")
+            raise RunEnvFileValidationError(f"{key} must reference a workspace-relative file")
         return "/".join(parts)
 
     @classmethod

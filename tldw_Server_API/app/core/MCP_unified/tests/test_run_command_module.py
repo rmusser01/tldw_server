@@ -455,7 +455,7 @@ async def test_run_sandbox_session_id_uses_session_backed_sandbox_run() -> None:
     }
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_run_env_file_is_forwarded_only_to_sandbox_run_without_rendering_values(tmp_path: Path) -> None:
     """envFile should load workspace env values into sandbox.run without rendering secrets."""
 
@@ -516,7 +516,7 @@ async def test_run_env_file_is_forwarded_only_to_sandbox_run_without_rendering_v
     }
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_run_env_file_uses_cwd_to_resolve_workspace_relative_file(tmp_path: Path) -> None:
     """envFile should resolve beneath cwd without escaping the workspace root."""
 
@@ -553,7 +553,7 @@ async def test_run_env_file_uses_cwd_to_resolve_workspace_relative_file(tmp_path
     assert protocol.prepare_calls[0].params["arguments"]["env"] == {"APP_ENV": "test"}
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_run_env_file_participates_in_nested_idempotency_keys_without_secret_values(tmp_path: Path) -> None:
     """Env-file content changes should alter nested idempotency without exposing values in keys."""
 
@@ -603,7 +603,6 @@ async def test_run_env_file_participates_in_nested_idempotency_keys_without_secr
     assert "second-secret" not in second_key
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "arguments",
     [
@@ -615,6 +614,7 @@ async def test_run_env_file_participates_in_nested_idempotency_keys_without_secr
         {"command": "sandbox python -V", "envFile": ".env", "env_file": "other.env"},
     ],
 )
+@pytest.mark.unit
 async def test_run_rejects_invalid_env_file_arguments(arguments: dict[str, Any]) -> None:
     """envFile aliases must be safe, relative, and consistent."""
 
@@ -625,7 +625,7 @@ async def test_run_rejects_invalid_env_file_arguments(arguments: dict[str, Any])
         await module.execute_tool("run", arguments, context=RequestContext(request_id="run-env-file-invalid"))
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_run_env_file_rejects_non_sandbox_command_chains(tmp_path: Path) -> None:
     """envFile should fail closed instead of being silently ignored outside sandbox steps."""
 
@@ -654,7 +654,7 @@ async def test_run_env_file_rejects_non_sandbox_command_chains(tmp_path: Path) -
     assert protocol.execute_calls == []
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_run_env_file_rejects_malformed_files(tmp_path: Path) -> None:
     """Malformed env files should fail before any sandbox tool call is prepared."""
 
@@ -686,6 +686,53 @@ async def test_run_env_file_rejects_malformed_files(tmp_path: Path) -> None:
     assert "envFile line 2 must be KEY=value" in rendered
     assert protocol.prepare_calls == []
     assert protocol.execute_calls == []
+
+
+@pytest.mark.unit
+def test_run_env_file_parser_accepts_bom_and_rejects_unicode_keys() -> None:
+    """Env parser should handle UTF-8 BOMs but enforce ASCII variable names."""
+
+    parsed = RunCommandModule._parse_env_file_bytes(b"\xef\xbb\xbfAPI_TOKEN=ok\n")
+
+    assert parsed == {"API_TOKEN": "ok"}
+    with pytest.raises(run_command_module_module.RunEnvFileValidationError, match="invalid variable name"):
+        RunCommandModule._parse_env_file_bytes("ÄPI_TOKEN=bad\n".encode())
+    with pytest.raises(run_command_module_module.RunEnvFileValidationError, match="invalid variable name"):
+        RunCommandModule._parse_env_file_bytes("ＡPI_TOKEN=bad\n".encode())
+
+
+@pytest.mark.unit
+def test_run_env_file_reader_uses_descriptor_read_without_path_read_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Env reader should not re-open the path after descriptor validation."""
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("API_TOKEN=ok\n", encoding="utf-8")
+
+    def _fail_read_bytes(_path: Path) -> bytes:
+        raise AssertionError("Path.read_bytes must not be used for envFile reads")
+
+    monkeypatch.setattr(Path, "read_bytes", _fail_read_bytes)
+
+    assert RunCommandModule._read_env_file_bytes(env_file) == b"API_TOKEN=ok\n"
+
+
+@pytest.mark.unit
+def test_run_env_file_reader_maps_open_errors(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Env reader should surface OSError as a structured env-file validation error."""
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("API_TOKEN=ok\n", encoding="utf-8")
+
+    def _raise_open(*_args: Any, **_kwargs: Any) -> int:
+        raise PermissionError("blocked")
+
+    monkeypatch.setattr(run_command_module_module.os, "open", _raise_open)
+
+    with pytest.raises(run_command_module_module.RunEnvFileValidationError, match="could not be read"):
+        RunCommandModule._read_env_file_bytes(env_file)
 
 
 @pytest.mark.asyncio

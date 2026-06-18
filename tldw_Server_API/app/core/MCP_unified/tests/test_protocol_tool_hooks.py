@@ -107,9 +107,13 @@ class _ToolModuleStub:
 
 
 class _SandboxModuleStub(_ToolModuleStub):
+    """Sandbox-like module stub used to verify secret-bearing hook metadata."""
+
     name = "sandbox"
 
     async def get_tools(self) -> list[dict[str, Any]]:
+        """Return a minimal sandbox.run tool definition."""
+
         return [
             {
                 "name": "sandbox.run",
@@ -126,6 +130,8 @@ class _SandboxModuleStub(_ToolModuleStub):
         *,
         tool_def: dict[str, Any] | None = None,
     ) -> bool:
+        """Classify sandbox.run as write-capable for protocol governance."""
+
         del tool_def
         return True
 
@@ -265,8 +271,9 @@ async def test_hook_context_mutation_cannot_mutate_prepared_tool_arguments() -> 
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
 async def test_sandbox_run_env_is_redacted_in_hook_context_but_preserved_for_execution() -> None:
+    """Hook contexts should redact sandbox env values without mutating execution args."""
+
     hooks = _RecordingToolHookManager()
     protocol, module, _ = _protocol(module=_SandboxModuleStub(), hook_manager=hooks)
 
