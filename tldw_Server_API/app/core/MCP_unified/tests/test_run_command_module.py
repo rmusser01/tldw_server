@@ -192,9 +192,9 @@ async def test_run_module_exposes_governed_bash_and_shell_alias_tools() -> None:
     tools = await module.get_tools()
 
     by_name = {tool["name"]: tool for tool in tools}
-    assert list(by_name) == ["run", "bash", "shell"]
+    assert list(by_name) == ["run", "bash", "shell", "powershell", "pwsh"]
     assert by_name["run"]["metadata"].get("canonical_tool") is None
-    for alias_name in ("bash", "shell"):
+    for alias_name in ("bash", "shell", "powershell", "pwsh"):
         alias = by_name[alias_name]
         assert alias["metadata"]["canonical_tool"] == "run"
         assert "not a raw host shell" in alias["description"]
@@ -227,6 +227,48 @@ async def test_shell_alias_uses_governed_run_implementation_without_raw_shell_de
 
     assert "Unknown command: echo" in rendered
     assert "[exit:127 |" in rendered
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
+
+
+@pytest.mark.asyncio
+async def test_powershell_alias_uses_governed_run_implementation_without_raw_shell_delegation() -> None:
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-powershell-alias", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("powershell", {"command": "ls"}, context=context)
+
+    assert "alpha.txt" in rendered
+    assert "docs/" in rendered
+    assert "[exit:0 |" in rendered
+    assert [call.params["name"] for call in protocol.prepare_calls] == ["fs.list"]
+    assert [call.params["arguments"] for call in protocol.prepare_calls] == [{"path": "."}]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected_message"),
+    [
+        ("cat notes.txt > out.txt", "Unsupported shell feature: redirection"),
+        ("cat $(cat secret.txt)", "Unsupported shell feature: command substitution"),
+        ("cat $HOME/.ssh/id_rsa", "Unsupported shell feature: environment expansion"),
+        ("TOKEN=secret cat notes.txt", "Unsupported shell feature: environment assignment"),
+        ("ls &", "Unsupported shell feature: background execution"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_shell_alias_rejects_unsupported_raw_shell_syntax_before_backend_calls(
+    command: str,
+    expected_message: str,
+) -> None:
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-shell-unsupported", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("bash", {"command": command}, context=context)
+
+    assert expected_message in rendered
+    assert "[exit:2 |" in rendered
     assert protocol.prepare_calls == []
     assert protocol.execute_calls == []
 

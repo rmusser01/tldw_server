@@ -28,7 +28,7 @@ RUN_PARENT_IDEMPOTENCY_KEY_METADATA_KEY = "run_parent_idempotency_key"
 
 _RUN_WRITE_BACKEND_TOOLS = {"fs.write", "fs.write_text", "sandbox.run"}
 _RUN_TOOL_NAME = "run"
-_RUN_TOOL_ALIASES = ("bash", "shell")
+_RUN_TOOL_ALIASES = ("bash", "shell", "powershell", "pwsh")
 _RUN_TOOL_NAMES = frozenset((_RUN_TOOL_NAME, *_RUN_TOOL_ALIASES))
 
 
@@ -106,6 +106,16 @@ class RunCommandModule(BaseModule):
             )
 
         start = time.perf_counter()
+        unsupported_feature = self._unsupported_shell_feature_message(command_text)
+        if unsupported_feature is not None:
+            return present_command_execution_result(
+                CommandExecutionResult(
+                    stdout="",
+                    stderr=unsupported_feature,
+                    exit_code=2,
+                    duration_ms=max(0.0, (time.perf_counter() - start) * 1000.0),
+                )
+            )
         try:
             chain = parse_command(command_text)
         except ValueError as exc:
@@ -473,6 +483,130 @@ class RunCommandModule(BaseModule):
             if isinstance(value, str) and value.strip():
                 return value.strip()
         return None
+
+    @staticmethod
+    def _unsupported_shell_feature_message(command_text: str) -> str | None:
+        first_token = RunCommandModule._first_unquoted_token(command_text)
+        if first_token and RunCommandModule._looks_like_env_assignment(first_token):
+            return (
+                "Unsupported shell feature: environment assignment prefixes are not supported by "
+                "the governed shell facade"
+            )
+
+        quote: str | None = None
+        escaped = False
+        position = 0
+        length = len(command_text)
+        while position < length:
+            char = command_text[position]
+
+            if escaped:
+                escaped = False
+                position += 1
+                continue
+
+            if char == "\\":
+                escaped = True
+                position += 1
+                continue
+
+            if quote is not None:
+                if char == quote:
+                    quote = None
+                    position += 1
+                    continue
+                if quote != "'" and char == "$":
+                    return RunCommandModule._shell_expansion_message(command_text, position)
+                if quote != "'" and char == "`":
+                    return "Unsupported shell feature: command substitution is not supported by the governed shell facade"
+                position += 1
+                continue
+
+            if char in {'"', "'"}:
+                quote = char
+                position += 1
+                continue
+
+            if char in {"<", ">"}:
+                return "Unsupported shell feature: redirection is not supported by the governed shell facade"
+
+            if char == "&":
+                next_char = command_text[position + 1] if position + 1 < length else ""
+                previous_char = command_text[position - 1] if position > 0 else ""
+                if next_char != "&" and previous_char != "&":
+                    return (
+                        "Unsupported shell feature: background execution is not supported by "
+                        "the governed shell facade"
+                    )
+
+            if char == "$":
+                return RunCommandModule._shell_expansion_message(command_text, position)
+
+            if char == "`":
+                return "Unsupported shell feature: command substitution is not supported by the governed shell facade"
+
+            position += 1
+
+        return None
+
+    @staticmethod
+    def _shell_expansion_message(command_text: str, position: int) -> str:
+        next_char = command_text[position + 1] if position + 1 < len(command_text) else ""
+        if next_char in {"(", "`"}:
+            return "Unsupported shell feature: command substitution is not supported by the governed shell facade"
+        if next_char == "{":
+            return "Unsupported shell feature: environment expansion is not supported by the governed shell facade"
+        if next_char and (next_char == "_" or next_char.isalpha()):
+            return "Unsupported shell feature: environment expansion is not supported by the governed shell facade"
+        return "Unsupported shell feature: shell expansion is not supported by the governed shell facade"
+
+    @staticmethod
+    def _first_unquoted_token(command_text: str) -> str | None:
+        token: list[str] = []
+        quote: str | None = None
+        escaped = False
+        seen_token = False
+        for char in command_text.lstrip():
+            if escaped:
+                token.append(char)
+                escaped = False
+                seen_token = True
+                continue
+            if char == "\\":
+                escaped = True
+                seen_token = True
+                continue
+            if quote is not None:
+                if char == quote:
+                    quote = None
+                    continue
+                token.append(char)
+                seen_token = True
+                continue
+            if char in {'"', "'"}:
+                quote = char
+                seen_token = True
+                continue
+            if char.isspace():
+                if seen_token:
+                    break
+                continue
+            token.append(char)
+            seen_token = True
+        if not token:
+            return None
+        return "".join(token)
+
+    @staticmethod
+    def _looks_like_env_assignment(token: str) -> bool:
+        if "=" not in token:
+            return False
+        name, value = token.split("=", 1)
+        if not name or value == "":
+            return False
+        if not (name[0] == "_" or name[0].isalpha()):
+            return False
+        return all(ch == "_" or ch.isalnum() for ch in name[1:])
 
     @staticmethod
     async def _cleanup_spill_artifacts(result: CommandExecutionResult) -> None:

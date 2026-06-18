@@ -421,7 +421,7 @@ Phase-1 adds a governed virtual CLI foundation to MCP Unified.
 
 `run` is not a raw host shell. It compiles command steps into policy-checked MCP tool calls (`prepare_tool_call` / `execute_prepared_tool_call`) so approvals, RBAC, path scope, validation, and idempotency all still apply.
 
-`bash` and `shell` may also appear as compatibility aliases for `run`. They use the same `command` argument and the same governed runtime; they are not host shell execution surfaces.
+`bash`, `shell`, `powershell`, and `pwsh` may also appear as compatibility aliases for `run`. They use the same `command` argument and the same governed runtime; they are not host shell execution surfaces. Unsupported raw-shell features such as redirection, command substitution, environment expansion, environment assignment prefixes, and background execution fail before any backend MCP tool call is prepared.
 
 Phase-1 command families:
 
