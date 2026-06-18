@@ -38,6 +38,7 @@ def _write_v1_1_note_chatbook(
     inventory_hash: str | None = None,
     inventory_entries: list[dict] | None = None,
     extra_files: dict[str, bytes] | None = None,
+    content_item_file_path: str | None = "content/notes/note_1.md",
     features_used: list[str] | None = None,
     unsupported_feature_behavior: str | None = None,
 ) -> Path:
@@ -86,7 +87,7 @@ def _write_v1_1_note_chatbook(
                 "updated_at": None,
                 "tags": [],
                 "metadata": {},
-                "file_path": note_path,
+                "file_path": content_item_file_path,
                 "checksum": expected_hash,
             }
         ],
@@ -233,6 +234,51 @@ def test_v1_1_import_rejects_missing_payload_inventory_entry_before_writes(servi
     readme_hash = f"sha256:{hashlib.sha256(readme_payload).hexdigest()}"
     archive_path = _write_v1_1_note_chatbook(
         service.import_dir / "missing_payload_inventory.chatbook",
+        inventory_entries=[
+            {
+                "path": "README.md",
+                "media_type": "text/markdown",
+                "size_bytes": len(readme_payload),
+                "integrity": {
+                    "status": "verified",
+                    "algorithm": "sha256",
+                    "value": readme_hash,
+                },
+                "role": "readme",
+                "content_item_ids": [],
+            }
+        ],
+        extra_files={"README.md": readme_payload},
+    )
+    import_notes = MagicMock()
+    service._import_notes = import_notes
+    service.db.add_note = MagicMock(return_value=1)
+
+    success, message, details = service._import_chatbook_sync(
+        file_path=str(archive_path),
+        content_selections=None,
+        conflict_resolution=ConflictResolution.SKIP,
+        prefix_imported=False,
+        import_media=False,
+        import_embeddings=False,
+    )
+
+    assert success is False
+    assert "inventory" in message.lower() or "validation" in message.lower()
+    assert details is not None
+    assert any("content/notes/note_1.md" in error for error in details["errors"])
+    assert any("missing inventory entry" in error.lower() for error in details["errors"])
+    assert details["imported_items"] == {}
+    import_notes.assert_not_called()
+    service.db.add_note.assert_not_called()
+
+
+def test_v1_1_import_rejects_null_file_path_missing_fallback_inventory_before_writes(service):
+    readme_payload = b"# Import Validation\n"
+    readme_hash = f"sha256:{hashlib.sha256(readme_payload).hexdigest()}"
+    archive_path = _write_v1_1_note_chatbook(
+        service.import_dir / "null_file_path_missing_fallback.chatbook",
+        content_item_file_path=None,
         inventory_entries=[
             {
                 "path": "README.md",

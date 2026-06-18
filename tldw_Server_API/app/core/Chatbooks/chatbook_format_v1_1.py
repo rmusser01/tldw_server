@@ -169,7 +169,7 @@ def validate_v1_1_before_import(manifest: Any, extract_dir: Path) -> tuple[bool,
         errors.append(_inventory_failure_error(failed_file))
 
     inventory_paths = _inventory_paths(getattr(manifest, "file_inventory", []))
-    for payload_path in _content_item_file_paths(getattr(manifest, "content_items", [])):
+    for payload_path in _required_import_payload_paths(getattr(manifest, "content_items", [])):
         if payload_path not in inventory_paths:
             errors.append(
                 f"File inventory validation failed for {payload_path}: missing inventory entry"
@@ -368,17 +368,58 @@ def _inventory_paths(inventory: Any) -> set[str]:
     return paths
 
 
-def _content_item_file_paths(content_items: Any) -> list[str]:
+def _required_import_payload_paths(content_items: Any) -> list[str]:
     if not isinstance(content_items, list):
         return []
+
+    fallback_templates = {
+        "note": "content/notes/note_{id}.md",
+        "conversation": "content/conversations/conversation_{id}.json",
+        "character": "content/characters/character_{id}.json",
+        "world_book": "content/world_books/world_book_{id}.json",
+        "dictionary": "content/dictionaries/dictionary_{id}.json",
+    }
+
     paths: list[str] = []
     for item in content_items:
-        path = getattr(item, "file_path", None)
-        if path is None and isinstance(item, dict):
-            path = item.get("file_path")
-        if isinstance(path, str) and path:
+        item_id = _content_item_field(item, "id")
+        if item_id is None or str(item_id) == "":
+            continue
+
+        item_type = _content_type_value(_content_item_field(item, "type"))
+        path: str | None = None
+        if item_type in fallback_templates:
+            path = fallback_templates[item_type].format(id=str(item_id))
+        elif item_type == "explainer_session":
+            path = _content_item_file_path(item) or f"content/explainer_sessions/session_{item_id}.json"
+        elif item_type == "generated_document":
+            path = _content_item_file_path(item) or f"content/generated_documents/document_{item_id}.json"
+
+        if path and path not in paths:
             paths.append(path)
     return paths
+
+
+def _content_item_field(content_item: Any, field_name: str) -> Any:
+    if isinstance(content_item, dict):
+        return content_item.get(field_name)
+    return getattr(content_item, field_name, None)
+
+
+def _content_item_file_path(content_item: Any) -> str | None:
+    path = _content_item_field(content_item, "file_path")
+    return path if isinstance(path, str) and path else None
+
+
+def _content_type_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    raw_value = getattr(value, "value", value)
+    if not isinstance(raw_value, str):
+        raw_value = str(raw_value)
+    if raw_value.startswith("ContentType."):
+        raw_value = raw_value.rsplit(".", 1)[-1].lower()
+    return raw_value
 
 
 def _append_unique(items: list[str], value: str) -> None:
