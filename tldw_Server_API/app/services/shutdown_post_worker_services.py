@@ -25,7 +25,13 @@ async def run_shutdown_post_worker_non_worker_cleanup(
         )
     except guard_exceptions as exc:
         logger.bind(error_type=type(exc).__name__).debug(
-            "Post-worker non-worker cleanup skipped after guarded exception"
+            "Post-worker personalization cleanup skipped after guarded exception"
+        )
+    try:
+        _close_cached_optional_workflows_db()
+    except guard_exceptions as exc:
+        logger.bind(error_type=type(exc).__name__).debug(
+            "Post-worker optional Workflows DB cleanup skipped after guarded exception"
         )
     return PostWorkerNonWorkerCleanupHandles()
 
@@ -36,3 +42,11 @@ async def _shutdown_personalization_consolidation(**kwargs):
     )
 
     await shutdown_personalization_consolidation(**kwargs)
+
+
+def _close_cached_optional_workflows_db() -> None:
+    from tldw_Server_API.app.api.v1.API_Deps.Workflows_DB_Deps import (
+        close_cached_workflows_db_for_user,
+    )
+
+    close_cached_workflows_db_for_user()

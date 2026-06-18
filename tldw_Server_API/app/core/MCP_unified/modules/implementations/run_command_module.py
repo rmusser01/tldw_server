@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import math
+import os
+import shutil
+import stat
+import tempfile
 import time
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from loguru import logger
@@ -28,7 +35,7 @@ RUN_PARENT_IDEMPOTENCY_KEY_METADATA_KEY = "run_parent_idempotency_key"
 
 _RUN_WRITE_BACKEND_TOOLS = {"fs.write", "fs.write_text", "sandbox.run"}
 _RUN_TOOL_NAME = "run"
-_RUN_TOOL_ALIASES = ("bash", "shell")
+_RUN_TOOL_ALIASES = ("bash", "shell", "powershell", "pwsh")
 _RUN_TOOL_NAMES = frozenset((_RUN_TOOL_NAME, *_RUN_TOOL_ALIASES))
 
 
@@ -94,6 +101,10 @@ class RunCommandModule(BaseModule):
         self.validate_tool_arguments(tool_name, args)
 
         command_text = str(args.get("command") or "").strip()
+        timeout_seconds = self._timeout_seconds(args)
+        cwd = self._cwd(args)
+        retain_output_artifacts = self._retain_output_artifacts(args)
+        sandbox_session_id = self._sandbox_session_id(args)
         visible = await self._visible_commands_for_context(context)
         if command_text in {"help", "--help"}:
             return present_command_execution_result(
@@ -106,6 +117,16 @@ class RunCommandModule(BaseModule):
             )
 
         start = time.perf_counter()
+        unsupported_feature = self._unsupported_shell_feature_message(command_text)
+        if unsupported_feature is not None:
+            return present_command_execution_result(
+                CommandExecutionResult(
+                    stdout="",
+                    stderr=unsupported_feature,
+                    exit_code=2,
+                    duration_ms=max(0.0, (time.perf_counter() - start) * 1000.0),
+                )
+            )
         try:
             chain = parse_command(command_text)
         except ValueError as exc:
@@ -119,7 +140,8 @@ class RunCommandModule(BaseModule):
             )
 
         protocol = await self._resolve_protocol()
-        spill_dir = await self._resolve_spill_dir(context)
+        spill_parent_dir = await self._resolve_spill_dir(context)
+        invocation_spill_dir = await self._create_invocation_spill_dir(spill_parent_dir, context)
         spill_threshold_bytes = self._setting_int("spill_threshold_bytes", default=65_536)
         preview_line_limit = self._setting_int("preview_line_limit", default=200)
         preview_byte_limit = self._setting_int("preview_byte_limit", default=51_200)
@@ -127,49 +149,89 @@ class RunCommandModule(BaseModule):
             protocol=protocol,
             request_context=context,
             visible_commands=visible,
-            parent_idempotency_key=self._parent_idempotency_key(context, arguments),
+            parent_idempotency_key=self._scoped_parent_idempotency_key(
+                self._parent_idempotency_key(context, arguments),
+                cwd,
+                sandbox_session_id,
+            ),
+            cwd=cwd,
+            sandbox_session_id=sandbox_session_id,
         )
         adapters = PhaseOneCommandAdapters(adapter_context)
         executor = CommandRuntimeExecutor(
             backend=_AdapterBackend(adapters),
-            spill_dir=spill_dir,
+            spill_dir=invocation_spill_dir,
             spill_threshold_bytes=spill_threshold_bytes,
             preview_bytes=preview_byte_limit,
         )
-        try:
+
+        async def _execute_chain() -> CommandExecutionResult:
+            """Preflight and execute the parsed command chain."""
+
             if adapters.requires_whole_chain_preflight(chain):
                 await adapters.preflight_chain(chain)
-            result = await executor.execute(chain)
-        except PreflightCommandError as exc:
-            result = CommandExecutionResult(
-                stdout="",
-                stderr=exc.result.stderr,
-                exit_code=exc.result.exit_code,
-                duration_ms=max(0.0, (time.perf_counter() - start) * 1000.0),
-            )
-        except (OSError, ValueError) as exc:
-            if self._is_passthrough_runtime_exception(exc):
-                raise
-            result = CommandExecutionResult(
-                stdout="",
-                stderr=str(exc),
-                exit_code=2 if isinstance(exc, ValueError) else 1,
-                duration_ms=max(0.0, (time.perf_counter() - start) * 1000.0),
-            )
+            return await executor.execute(chain)
+
         try:
+            try:
+                if timeout_seconds is None:
+                    result = await _execute_chain()
+                else:
+                    result = await asyncio.wait_for(_execute_chain(), timeout=timeout_seconds)
+            except PreflightCommandError as exc:
+                result = CommandExecutionResult(
+                    stdout="",
+                    stderr=exc.result.stderr,
+                    exit_code=exc.result.exit_code,
+                    duration_ms=max(0.0, (time.perf_counter() - start) * 1000.0),
+                )
+            except TimeoutError:
+                timeout_text = self._format_seconds(timeout_seconds if timeout_seconds is not None else 0.0)
+                result = CommandExecutionResult(
+                    stdout="",
+                    stderr=f"Command timed out after {timeout_text}s",
+                    exit_code=124,
+                    duration_ms=max(0.0, (time.perf_counter() - start) * 1000.0),
+                )
+            except (OSError, ValueError) as exc:
+                if self._is_passthrough_runtime_exception(exc):
+                    raise
+                result = CommandExecutionResult(
+                    stdout="",
+                    stderr=str(exc),
+                    exit_code=2 if isinstance(exc, ValueError) else 1,
+                    duration_ms=max(0.0, (time.perf_counter() - start) * 1000.0),
+                )
             return present_command_execution_result(
                 result,
-                spill_dir=spill_dir,
+                spill_dir=invocation_spill_dir,
                 byte_limit=preview_byte_limit,
                 line_limit=preview_line_limit,
+                include_artifact_handles=retain_output_artifacts,
             )
         finally:
-            await self._cleanup_spill_artifacts(result)
+            if not retain_output_artifacts:
+                await self._cleanup_invocation_spill_dir(invocation_spill_dir)
 
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
         if tool_name not in _RUN_TOOL_NAMES:
             raise ValueError(f"Unknown tool: {tool_name}")
-        unknown = sorted(set(arguments) - {"command", "idempotencyKey", "idempotency_key"})
+        unknown = sorted(
+            set(arguments)
+            - {
+                "command",
+                "cwd",
+                "idempotencyKey",
+                "idempotency_key",
+                "retainOutputArtifacts",
+                "retain_output_artifacts",
+                "sandboxSessionId",
+                "sandbox_session_id",
+                "timeoutSeconds",
+                "timeout_seconds",
+                "workingDirectory",
+            }
+        )
         if unknown:
             raise ValueError(f"unknown arguments: {', '.join(unknown)}")
         command = arguments.get("command")
@@ -189,6 +251,10 @@ class RunCommandModule(BaseModule):
             and idempotency_key.strip() != legacy_idempotency_key.strip()
         ):
             raise ValueError("idempotencyKey and idempotency_key must match when both are provided")
+        self._validate_timeout_arguments(arguments)
+        self._validate_cwd_arguments(arguments)
+        self._validate_retain_output_artifact_arguments(arguments)
+        self._validate_sandbox_session_arguments(arguments)
 
     def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
         """Sanitize input while allowing CLI flags like `--help` and shell-like tokens."""
@@ -265,6 +331,40 @@ class RunCommandModule(BaseModule):
                     "idempotencyKey": {
                         "type": "string",
                         "description": "Optional parent idempotency key for nested governed steps.",
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Workspace-relative current directory for relative command paths.",
+                    },
+                    "workingDirectory": {
+                        "type": "string",
+                        "description": "Alias for cwd.",
+                    },
+                    "retain_output_artifacts": {
+                        "type": "boolean",
+                        "description": "Legacy alias for retainOutputArtifacts.",
+                    },
+                    "retainOutputArtifacts": {
+                        "type": "boolean",
+                        "description": "Retain oversized output spill files and include redacted artifact handles.",
+                    },
+                    "sandbox_session_id": {
+                        "type": "string",
+                        "description": "Legacy alias for sandboxSessionId.",
+                    },
+                    "sandboxSessionId": {
+                        "type": "string",
+                        "description": "Sandbox session id for governed sandbox command steps.",
+                    },
+                    "timeout_seconds": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "description": "Legacy alias for timeoutSeconds.",
+                    },
+                    "timeoutSeconds": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "description": "Optional wall-clock timeout for the governed command chain.",
                     },
                 },
                 "required": ["command"],
@@ -347,6 +447,8 @@ class RunCommandModule(BaseModule):
             return default
 
     async def _resolve_spill_dir(self, context: Any | None) -> Path | None:
+        """Resolve the configured spill parent directory for the current workspace context."""
+
         raw_value = self.config.settings.get("spill_dir")
         if raw_value is None:
             return None
@@ -361,7 +463,62 @@ class RunCommandModule(BaseModule):
             return workspace_root / candidate
         return Path.cwd() / candidate
 
+    async def _create_invocation_spill_dir(self, spill_parent_dir: Path | None, context: Any | None) -> Path:
+        """Create a private spill directory for one run invocation."""
+
+        return await asyncio.to_thread(self._make_invocation_spill_dir, spill_parent_dir, context)
+
+    @staticmethod
+    def _make_invocation_spill_dir(spill_parent_dir: Path | None, context: Any | None) -> Path:
+        """Create the concrete invocation spill directory under a validated parent."""
+
+        prefix = RunCommandModule._safe_spill_prefix(context)
+        if spill_parent_dir is None:
+            return Path(tempfile.mkdtemp(prefix=prefix))
+
+        RunCommandModule._ensure_spill_parent_dir(spill_parent_dir)
+        return Path(tempfile.mkdtemp(prefix=prefix, dir=str(spill_parent_dir)))
+
+    @staticmethod
+    def _ensure_spill_parent_dir(spill_parent_dir: Path) -> None:
+        """Create and validate the configured spill parent directory."""
+
+        try:
+            spill_parent_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+        except FileExistsError:
+            pass
+        if spill_parent_dir.is_symlink():
+            raise PermissionError(f"Refusing to use symlink spill directory: {spill_parent_dir}")
+        if not spill_parent_dir.is_dir():
+            raise PermissionError(f"Refusing to use non-directory spill path: {spill_parent_dir}")
+
+        try:
+            info = spill_parent_dir.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise PermissionError(f"Unable to inspect spill directory: {spill_parent_dir}") from exc
+
+        getuid = getattr(os, "getuid", None)
+        if callable(getuid) and info.st_uid != getuid():
+            raise PermissionError(f"Refusing to use spill directory owned by another user: {spill_parent_dir}")
+        if os.name != "nt" and stat.S_IMODE(info.st_mode) & 0o077:
+            raise PermissionError(f"Refusing to use spill directory with non-private permissions: {spill_parent_dir}")
+
+    @staticmethod
+    def _safe_spill_prefix(context: Any | None) -> str:
+        """Build a filesystem-safe temp prefix from the request id."""
+
+        raw_request_id = str(getattr(context, "request_id", "") or "run")
+        safe_request_id = "".join(
+            char if char.isalnum() or char in {"-", "_", "."} else "-"
+            for char in raw_request_id
+        ).strip("-._")
+        if not safe_request_id:
+            safe_request_id = "run"
+        return f"mcp-run-{safe_request_id[:40]}-"
+
     async def _resolve_workspace_root(self, context: Any | None) -> Path | None:
+        """Resolve the workspace root used for relative spill parent settings."""
+
         if context is None:
             return None
         resolver = self.config.settings.get("workspace_root_resolver")
@@ -474,38 +631,349 @@ class RunCommandModule(BaseModule):
                 return value.strip()
         return None
 
+    @classmethod
+    def _validate_timeout_arguments(cls, arguments: dict[str, Any]) -> None:
+        """Validate timeout aliases before command execution starts."""
+
+        timeout_seconds = arguments.get("timeout_seconds")
+        timeout_seconds_camel = arguments.get("timeoutSeconds")
+        if timeout_seconds is not None:
+            cls._coerce_timeout_seconds(timeout_seconds, "timeout_seconds")
+        if timeout_seconds_camel is not None:
+            cls._coerce_timeout_seconds(timeout_seconds_camel, "timeoutSeconds")
+        if timeout_seconds is not None and timeout_seconds_camel is not None:
+            legacy_value = cls._coerce_timeout_seconds(timeout_seconds, "timeout_seconds")
+            camel_value = cls._coerce_timeout_seconds(timeout_seconds_camel, "timeoutSeconds")
+            if legacy_value != camel_value:
+                raise ValueError("timeoutSeconds and timeout_seconds must match when both are provided")
+
+    @classmethod
+    def _timeout_seconds(cls, arguments: dict[str, Any]) -> float | None:
+        """Return the normalized timeout value from either supported alias."""
+
+        for key in ("timeoutSeconds", "timeout_seconds"):
+            value = arguments.get(key)
+            if value is not None:
+                return cls._coerce_timeout_seconds(value, key)
+        return None
+
     @staticmethod
-    async def _cleanup_spill_artifacts(result: CommandExecutionResult) -> None:
-        spill_paths: set[Path] = set()
+    def _coerce_timeout_seconds(value: Any, key: str) -> float:
+        """Coerce one timeout argument to a positive finite float."""
 
-        def _record(spill: Any) -> None:
-            path_value = getattr(spill, "path", None)
-            if isinstance(path_value, str) and path_value.strip():
-                spill_paths.add(Path(path_value))
-
-        _record(result.stdout_spill)
-        _record(result.stderr_spill)
-        for spill in result.stderr_spills:
-            _record(spill)
-        for step in result.steps:
-            _record(step.stdout_spill)
-            _record(step.stderr_spill)
-
-        if not spill_paths:
-            return
-
-        await asyncio.to_thread(RunCommandModule._unlink_spills, spill_paths)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{key} must be a positive number")
+        coerced = float(value)
+        if not math.isfinite(coerced) or coerced <= 0:
+            raise ValueError(f"{key} must be greater than 0")
+        return coerced
 
     @staticmethod
-    def _unlink_spills(spill_paths: set[Path]) -> None:
-        for spill_path in spill_paths:
-            try:
-                spill_path.unlink(missing_ok=True)
-            except OSError:
+    def _format_seconds(value: float) -> str:
+        """Format a timeout value for CLI-style status output."""
+
+        return f"{value:g}"
+
+    @staticmethod
+    def _scoped_parent_idempotency_key(
+        parent_key: str | None,
+        cwd: str | None,
+        sandbox_session_id: str | None,
+    ) -> str | None:
+        """Salt a parent idempotency key with unambiguous execution scope data."""
+
+        if not parent_key:
+            return parent_key
+        scope_payload: dict[str, str] = {}
+        if cwd:
+            scope_payload["cwd"] = cwd
+        if sandbox_session_id:
+            scope_payload["sandbox_session_id"] = sandbox_session_id
+        if not scope_payload:
+            return parent_key
+        serialized_scope = json.dumps(
+            scope_payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        digest = hashlib.sha256(serialized_scope.encode("utf-8")).hexdigest()[:16]
+        return f"{parent_key}:scope:{digest}"
+
+    @classmethod
+    def _validate_sandbox_session_arguments(cls, arguments: dict[str, Any]) -> None:
+        """Validate sandbox session aliases before command execution starts."""
+
+        sandbox_session_id = arguments.get("sandbox_session_id")
+        sandbox_session_id_camel = arguments.get("sandboxSessionId")
+        if sandbox_session_id is not None:
+            cls._normalize_sandbox_session_id(sandbox_session_id, "sandbox_session_id")
+        if sandbox_session_id_camel is not None:
+            cls._normalize_sandbox_session_id(sandbox_session_id_camel, "sandboxSessionId")
+        if sandbox_session_id is not None and sandbox_session_id_camel is not None:
+            legacy_value = cls._normalize_sandbox_session_id(sandbox_session_id, "sandbox_session_id")
+            camel_value = cls._normalize_sandbox_session_id(sandbox_session_id_camel, "sandboxSessionId")
+            if legacy_value != camel_value:
+                raise ValueError("sandboxSessionId and sandbox_session_id must match when both are provided")
+
+    @classmethod
+    def _sandbox_session_id(cls, arguments: dict[str, Any]) -> str | None:
+        """Return the normalized sandbox session id from either supported alias."""
+
+        for key in ("sandboxSessionId", "sandbox_session_id"):
+            value = arguments.get(key)
+            if value is not None:
+                return cls._normalize_sandbox_session_id(value, key)
+        return None
+
+    @staticmethod
+    def _normalize_sandbox_session_id(value: Any, key: str) -> str:
+        """Normalize a sandbox session id without accepting empty or non-string values."""
+
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{key} must be a non-empty string")
+        return value.strip()
+
+    @classmethod
+    def _validate_cwd_arguments(cls, arguments: dict[str, Any]) -> None:
+        """Validate cwd aliases before command execution starts."""
+
+        cwd = arguments.get("cwd")
+        working_directory = arguments.get("workingDirectory")
+        if cwd is not None:
+            cls._normalize_cwd(cwd, "cwd")
+        if working_directory is not None:
+            cls._normalize_cwd(working_directory, "workingDirectory")
+        if cwd is not None and working_directory is not None:
+            cwd_value = cls._normalize_cwd(cwd, "cwd")
+            working_directory_value = cls._normalize_cwd(working_directory, "workingDirectory")
+            if cwd_value != working_directory_value:
+                raise ValueError("cwd and workingDirectory must match when both are provided")
+
+    @classmethod
+    def _cwd(cls, arguments: dict[str, Any]) -> str | None:
+        """Return the normalized cwd from either supported alias."""
+
+        for key in ("workingDirectory", "cwd"):
+            value = arguments.get(key)
+            if value is not None:
+                normalized = cls._normalize_cwd(value, key)
+                return None if normalized == "." else normalized
+        return None
+
+    @classmethod
+    def _normalize_cwd(cls, value: Any, key: str) -> str:
+        """Normalize the run-level cwd as a workspace-relative directory."""
+
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{key} must be a non-empty workspace-relative path")
+        text = value.strip()
+        if cls._is_anchored_path(text) or text.startswith("~"):
+            raise ValueError(f"{key} must be workspace-relative")
+        parts: list[str] = []
+        for raw_part in text.replace("\\", "/").split("/"):
+            part = raw_part.strip()
+            if not part or part == ".":
                 continue
+            if part == "..":
+                raise ValueError(f"{key} must not contain path traversal")
+            parts.append(part)
+        return "/".join(parts) if parts else "."
+
+    @staticmethod
+    def _is_anchored_path(path: str) -> bool:
+        """Return whether a path token is absolute or drive-anchored."""
+
+        text = str(path or "").strip()
+        if not text:
+            return False
+        windows_path = PureWindowsPath(text)
+        return bool(PurePosixPath(text).is_absolute() or windows_path.is_absolute() or windows_path.drive)
+
+    @classmethod
+    def _validate_retain_output_artifact_arguments(cls, arguments: dict[str, Any]) -> None:
+        """Validate retained-output artifact aliases before command execution starts."""
+
+        retain_output_artifacts = arguments.get("retain_output_artifacts")
+        retain_output_artifacts_camel = arguments.get("retainOutputArtifacts")
+        if retain_output_artifacts is not None:
+            cls._coerce_retain_output_artifacts(retain_output_artifacts, "retain_output_artifacts")
+        if retain_output_artifacts_camel is not None:
+            cls._coerce_retain_output_artifacts(retain_output_artifacts_camel, "retainOutputArtifacts")
+        if retain_output_artifacts is not None and retain_output_artifacts_camel is not None:
+            legacy_value = cls._coerce_retain_output_artifacts(
+                retain_output_artifacts,
+                "retain_output_artifacts",
+            )
+            camel_value = cls._coerce_retain_output_artifacts(
+                retain_output_artifacts_camel,
+                "retainOutputArtifacts",
+            )
+            if legacy_value != camel_value:
+                raise ValueError(
+                    "retainOutputArtifacts and retain_output_artifacts must match when both are provided"
+                )
+
+    @classmethod
+    def _retain_output_artifacts(cls, arguments: dict[str, Any]) -> bool:
+        """Return whether oversized output spill files should be retained."""
+
+        for key in ("retainOutputArtifacts", "retain_output_artifacts"):
+            value = arguments.get(key)
+            if value is not None:
+                return cls._coerce_retain_output_artifacts(value, key)
+        return False
+
+    @staticmethod
+    def _coerce_retain_output_artifacts(value: Any, key: str) -> bool:
+        """Coerce one retained-output flag without accepting truthy non-bools."""
+
+        if not isinstance(value, bool):
+            raise ValueError(f"{key} must be a boolean")
+        return value
+
+    @staticmethod
+    def _unsupported_shell_feature_message(command_text: str) -> str | None:
+        """Detect raw-shell syntax that the governed facade intentionally rejects."""
+
+        first_token = RunCommandModule._first_unquoted_token(command_text)
+        if first_token and RunCommandModule._looks_like_env_assignment(first_token):
+            return (
+                "Unsupported shell feature: environment assignment prefixes are not supported by "
+                "the governed shell facade"
+            )
+
+        quote: str | None = None
+        escaped = False
+        position = 0
+        length = len(command_text)
+        while position < length:
+            char = command_text[position]
+
+            if escaped:
+                escaped = False
+                position += 1
+                continue
+
+            if char == "\\":
+                escaped = True
+                position += 1
+                continue
+
+            if quote is not None:
+                if char == quote:
+                    quote = None
+                    position += 1
+                    continue
+                if quote != "'" and char == "$":
+                    return RunCommandModule._shell_expansion_message(command_text, position)
+                if quote != "'" and char == "`":
+                    return "Unsupported shell feature: command substitution is not supported by the governed shell facade"
+                position += 1
+                continue
+
+            if char in {'"', "'"}:
+                quote = char
+                position += 1
+                continue
+
+            if char in {"<", ">"}:
+                return "Unsupported shell feature: redirection is not supported by the governed shell facade"
+
+            if char == "&":
+                next_char = command_text[position + 1] if position + 1 < length else ""
+                previous_char = command_text[position - 1] if position > 0 else ""
+                if next_char != "&" and previous_char != "&":
+                    return (
+                        "Unsupported shell feature: background execution is not supported by "
+                        "the governed shell facade"
+                    )
+
+            if char == "$":
+                return RunCommandModule._shell_expansion_message(command_text, position)
+
+            if char == "`":
+                return "Unsupported shell feature: command substitution is not supported by the governed shell facade"
+
+            position += 1
+
+        return None
+
+    @staticmethod
+    def _shell_expansion_message(command_text: str, position: int) -> str:
+        """Return the specific unsupported expansion diagnostic for a dollar token."""
+
+        next_char = command_text[position + 1] if position + 1 < len(command_text) else ""
+        if next_char in {"(", "`"}:
+            return "Unsupported shell feature: command substitution is not supported by the governed shell facade"
+        if next_char == "{":
+            return "Unsupported shell feature: environment expansion is not supported by the governed shell facade"
+        if next_char and (next_char == "_" or next_char.isalpha()):
+            return "Unsupported shell feature: environment expansion is not supported by the governed shell facade"
+        return "Unsupported shell feature: shell expansion is not supported by the governed shell facade"
+
+    @staticmethod
+    def _first_unquoted_token(command_text: str) -> str | None:
+        """Extract the first shell-like token while respecting simple quoting."""
+
+        token: list[str] = []
+        quote: str | None = None
+        escaped = False
+        seen_token = False
+        for char in command_text.lstrip():
+            if escaped:
+                token.append(char)
+                escaped = False
+                seen_token = True
+                continue
+            if char == "\\":
+                escaped = True
+                seen_token = True
+                continue
+            if quote is not None:
+                if char == quote:
+                    quote = None
+                    continue
+                token.append(char)
+                seen_token = True
+                continue
+            if char in {'"', "'"}:
+                quote = char
+                seen_token = True
+                continue
+            if char.isspace():
+                if seen_token:
+                    break
+                continue
+            token.append(char)
+            seen_token = True
+        if not token:
+            return None
+        return "".join(token)
+
+    @staticmethod
+    def _looks_like_env_assignment(token: str) -> bool:
+        """Return whether a token resembles a shell environment assignment prefix."""
+
+        if "=" not in token:
+            return False
+        name, value = token.split("=", 1)
+        if not name or value == "":
+            return False
+        if not (name[0] == "_" or name[0].isalpha()):
+            return False
+        return all(ch == "_" or ch.isalnum() for ch in name[1:])
+
+    @staticmethod
+    async def _cleanup_invocation_spill_dir(spill_dir: Path) -> None:
+        """Delete the private spill directory for a completed run invocation."""
+
+        await asyncio.to_thread(shutil.rmtree, spill_dir, ignore_errors=True)
 
     @staticmethod
     def _is_passthrough_runtime_exception(exc: BaseException) -> bool:
+        """Return whether governance exceptions should propagate unchanged."""
+
         try:
             from ...protocol import ApprovalRequiredError, GovernanceDeniedError
         except ImportError:

@@ -9,11 +9,15 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from loguru import logger
+from starlette.concurrency import run_in_threadpool
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import try_get_prompts_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import try_get_watchlists_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.Workflows_DB_Deps import try_get_workflows_db_for_user
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
     WORKSPACES_DELETE_RATE_LIMIT,
@@ -46,6 +50,9 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceResponse,
     WorkspaceRootResponse,
     WorkspaceRootsResponse,
+    WorkspaceRuntimeBindingDescriptorListResponse,
+    WorkspaceRuntimeBindingDescriptorResponse,
+    WorkspaceRuntimeBindingDescriptorUpsertRequest,
     WorkspaceSandboxRootProvisionRequest,
     WorkspaceSandboxRootProvisionResponse,
     WorkspaceSourceCreateRequest,
@@ -63,6 +70,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -74,6 +82,9 @@ from tldw_Server_API.app.core.Workspaces.file_inventory_jobs import (
     enqueue_workspace_file_inventory_scan_job,
 )
 from tldw_Server_API.app.core.Workspaces.context import build_workspace_core_context
+from tldw_Server_API.app.core.Workspaces.membership_request_metadata import (
+    build_workspace_membership_request_metadata,
+)
 from tldw_Server_API.app.core.Workspaces.membership_service import (
     WorkspaceMembershipService,
     WorkspaceMembershipServiceError,
@@ -93,6 +104,11 @@ from tldw_Server_API.app.core.Workspaces.root_binding_service import (
     attach_primary_workspace_root,
 )
 from tldw_Server_API.app.core.Workspaces.operations import workspace_operation_response_payload
+from tldw_Server_API.app.core.Workspaces.runtime_bindings import (
+    WORKSPACE_RUNTIME_BINDING_KINDS,
+    WORKSPACE_RUNTIME_BINDING_OWNER_DOMAINS,
+    runtime_binding_response_payload,
+)
 from tldw_Server_API.app.core.Workspaces.sandbox_root_provisioning import (
     provision_and_attach_sandbox_root,
 )
@@ -196,6 +212,10 @@ def _workspace_roots_response(
 
 def _operation_to_response(operation: dict[str, Any]) -> WorkspaceOperationResponse:
     return WorkspaceOperationResponse(**workspace_operation_response_payload(operation))
+
+
+def _runtime_binding_to_response(binding: dict[str, Any]) -> WorkspaceRuntimeBindingDescriptorResponse:
+    return WorkspaceRuntimeBindingDescriptorResponse(**runtime_binding_response_payload(binding))
 
 
 def _root_path_hint(root: dict[str, Any]) -> str | None:
@@ -502,6 +522,123 @@ def _workspace_membership_not_found(resource_type: str, resource_id: str) -> HTT
             },
         },
     )
+
+
+def _workspace_runtime_binding_not_found(binding_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={
+            "code": "workspace_runtime_binding_not_found",
+            "message": "Workspace runtime binding was not found.",
+            "details": {"binding_id": binding_id},
+        },
+    )
+
+
+def _workspace_runtime_binding_archived_conflict(workspace_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "workspace_archived",
+            "message": "Archived workspaces cannot be modified.",
+            "details": {"workspace_id": workspace_id},
+        },
+    )
+
+
+def _validate_runtime_binding_query_filter(
+    value: str | None,
+    field_name: str,
+    allowed: frozenset[str],
+) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "workspace_runtime_binding_filter_invalid",
+                "message": f"{field_name} is not supported.",
+                "details": {
+                    "field": field_name,
+                    "allowed": sorted(allowed),
+                },
+            },
+        )
+    return normalized
+
+
+def _list_workspace_runtime_bindings_sync(
+    db: CharactersRAGDB,
+    workspace_id: str,
+    *,
+    binding_kind: str | None,
+    owner_domain: str | None,
+    include_archived: bool,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """List runtime bindings with synchronous DB work isolated for threadpool use."""
+    _require_workspace(db, workspace_id)
+    return db.list_workspace_runtime_bindings(
+        workspace_id,
+        binding_kind=binding_kind,
+        owner_domain=owner_domain,
+        include_deleted=include_archived,
+        limit=limit,
+    )
+
+
+def _upsert_workspace_runtime_binding_sync(
+    db: CharactersRAGDB,
+    workspace_id: str,
+    body: WorkspaceRuntimeBindingDescriptorUpsertRequest,
+    user_id: str,
+) -> dict[str, Any]:
+    """Create or update a runtime binding using synchronous DB APIs."""
+    workspace = _require_workspace(db, workspace_id)
+    if bool(workspace.get("archived", False)):
+        raise _workspace_runtime_binding_archived_conflict(workspace_id)
+    return db.upsert_workspace_runtime_binding(
+        workspace_id,
+        body.persistence_payload(),
+        user_id=user_id,
+    )
+
+
+def _get_workspace_runtime_binding_sync(
+    db: CharactersRAGDB,
+    workspace_id: str,
+    binding_id: str,
+) -> dict[str, Any] | None:
+    """Fetch one runtime binding using synchronous DB APIs."""
+    _require_workspace(db, workspace_id)
+    return db.get_workspace_runtime_binding(workspace_id, binding_id)
+
+
+def _archive_workspace_runtime_binding_sync(
+    db: CharactersRAGDB,
+    workspace_id: str,
+    binding_id: str,
+    user_id: str,
+) -> None:
+    """Archive one runtime binding using synchronous DB APIs."""
+    workspace = _require_workspace(db, workspace_id)
+    if bool(workspace.get("archived", False)):
+        raise _workspace_runtime_binding_archived_conflict(workspace_id)
+    archived = db.archive_workspace_runtime_binding(
+        workspace_id,
+        binding_id,
+        user_id=user_id,
+    )
+    if archived is None:
+        existing = db.get_workspace_runtime_binding(
+            workspace_id,
+            binding_id,
+            include_deleted=True,
+        )
+        if existing is None:
+            raise _workspace_runtime_binding_not_found(binding_id)
 
 
 def _workspace_with_primary_root(
@@ -1043,6 +1180,9 @@ async def list_workspace_memberships(
     cursor: str | None = Query(default=None),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     media_db: Any | None = Depends(try_get_media_db_for_user),
+    prompts_db: Any | None = Depends(try_get_prompts_db_for_user),
+    workflows_db: WorkflowsDatabase | None = Depends(try_get_workflows_db_for_user),
+    watchlists_db: Any | None = Depends(try_get_watchlists_db_for_user),
     current_user: User = Depends(get_request_user),
 ) -> WorkspaceMembershipListResponse:
     """List memberships for one workspace."""
@@ -1056,7 +1196,11 @@ async def list_workspace_memberships(
             limit=limit,
             cursor=cursor,
             media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
             user_id=_request_user_id(current_user),
+            request_metadata=build_workspace_membership_request_metadata(current_user),
         )
     except WorkspaceMembershipServiceError as exc:
         raise _membership_service_error_to_http(exc) from exc
@@ -1077,6 +1221,9 @@ async def create_workspace_membership(
     body: WorkspaceMembershipCreateRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     media_db: Any | None = Depends(try_get_media_db_for_user),
+    prompts_db: Any | None = Depends(try_get_prompts_db_for_user),
+    workflows_db: WorkflowsDatabase | None = Depends(try_get_workflows_db_for_user),
+    watchlists_db: Any | None = Depends(try_get_watchlists_db_for_user),
     current_user: User = Depends(get_request_user),
 ) -> WorkspaceMembershipResponse:
     """Link a resource to a workspace, idempotently for matching active rows."""
@@ -1085,7 +1232,11 @@ async def create_workspace_membership(
             workspace_id,
             body,
             media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
             user_id=_request_user_id(current_user),
+            request_metadata=build_workspace_membership_request_metadata(current_user),
             resolve=True,
         )
     except WorkspaceMembershipServiceError as exc:
@@ -1108,6 +1259,9 @@ async def get_workspace_membership(
     resolve: bool = Query(default=True),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     media_db: Any | None = Depends(try_get_media_db_for_user),
+    prompts_db: Any | None = Depends(try_get_prompts_db_for_user),
+    workflows_db: WorkflowsDatabase | None = Depends(try_get_workflows_db_for_user),
+    watchlists_db: Any | None = Depends(try_get_watchlists_db_for_user),
     current_user: User = Depends(get_request_user),
 ) -> WorkspaceMembershipResponse:
     """Fetch one active workspace membership by resource."""
@@ -1117,7 +1271,11 @@ async def get_workspace_membership(
             resource_type,
             resource_id,
             media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
             user_id=_request_user_id(current_user),
+            request_metadata=build_workspace_membership_request_metadata(current_user),
             resolve=resolve,
         )
     except WorkspaceMembershipServiceError as exc:
@@ -1141,6 +1299,9 @@ async def delete_workspace_membership(
     resource_id: str,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     media_db: Any | None = Depends(try_get_media_db_for_user),
+    prompts_db: Any | None = Depends(try_get_prompts_db_for_user),
+    workflows_db: WorkflowsDatabase | None = Depends(try_get_workflows_db_for_user),
+    watchlists_db: Any | None = Depends(try_get_watchlists_db_for_user),
     current_user: User = Depends(get_request_user),
 ) -> Response:
     """Soft-delete a workspace membership; missing rows are idempotent no-ops."""
@@ -1150,12 +1311,171 @@ async def delete_workspace_membership(
             resource_type,
             resource_id,
             media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
             user_id=_request_user_id(current_user),
+            request_metadata=build_workspace_membership_request_metadata(current_user),
         )
     except WorkspaceMembershipServiceError as exc:
         raise _membership_service_error_to_http(exc) from exc
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to delete workspace membership") from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── Runtime Bindings ─────────────────────────────────────────────────
+
+@router.get(
+    "/{workspace_id}/runtime-bindings",
+    response_model=WorkspaceRuntimeBindingDescriptorListResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="List workspace runtime binding descriptors",
+)
+async def list_workspace_runtime_bindings(
+    workspace_id: str,
+    binding_kind: str | None = Query(default=None),
+    owner_domain: str | None = Query(default=None),
+    include_archived: bool = Query(default=False),
+    limit: int = Query(default=100, ge=1, le=1000),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceRuntimeBindingDescriptorListResponse:
+    """List descriptor-only runtime bindings for a workspace."""
+    _ = current_user
+    try:
+        _require_workspace(db, workspace_id)
+        normalized_kind = _validate_runtime_binding_query_filter(
+            binding_kind,
+            "binding_kind",
+            WORKSPACE_RUNTIME_BINDING_KINDS,
+        )
+        normalized_owner = _validate_runtime_binding_query_filter(
+            owner_domain,
+            "owner_domain",
+            WORKSPACE_RUNTIME_BINDING_OWNER_DOMAINS,
+        )
+        bindings = await run_in_threadpool(
+            _list_workspace_runtime_bindings_sync,
+            db,
+            workspace_id,
+            binding_kind=normalized_kind,
+            owner_domain=normalized_owner,
+            include_archived=include_archived,
+            limit=limit,
+        )
+    except HTTPException:
+        raise
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            input_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            default_detail="Failed to fetch workspace runtime bindings",
+        ) from exc
+    items = [_runtime_binding_to_response(binding) for binding in bindings]
+    return WorkspaceRuntimeBindingDescriptorListResponse(
+        workspace_id=workspace_id,
+        items=items,
+        total=len(items),
+    )
+
+
+@router.post(
+    "/{workspace_id}/runtime-bindings",
+    response_model=WorkspaceRuntimeBindingDescriptorResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    summary="Create or update a workspace runtime binding descriptor",
+)
+async def upsert_workspace_runtime_binding(
+    workspace_id: str,
+    body: WorkspaceRuntimeBindingDescriptorUpsertRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceRuntimeBindingDescriptorResponse:
+    """Persist descriptor metadata for an external runtime binding."""
+    try:
+        binding = await run_in_threadpool(
+            _upsert_workspace_runtime_binding_sync,
+            db,
+            workspace_id,
+            body,
+            _request_user_id(current_user),
+        )
+    except HTTPException:
+        raise
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            input_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            default_detail="Failed to create workspace runtime binding",
+        ) from exc
+    return _runtime_binding_to_response(binding)
+
+
+@router.get(
+    "/{workspace_id}/runtime-bindings/{binding_id}",
+    response_model=WorkspaceRuntimeBindingDescriptorResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="Get a workspace runtime binding descriptor",
+)
+async def get_workspace_runtime_binding(
+    workspace_id: str,
+    binding_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceRuntimeBindingDescriptorResponse:
+    """Fetch one active runtime binding descriptor."""
+    _ = current_user
+    try:
+        binding = await run_in_threadpool(
+            _get_workspace_runtime_binding_sync,
+            db,
+            workspace_id,
+            binding_id,
+        )
+    except HTTPException:
+        raise
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            input_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            default_detail="Failed to fetch workspace runtime binding",
+        ) from exc
+    if binding is None:
+        raise _workspace_runtime_binding_not_found(binding_id)
+    return _runtime_binding_to_response(binding)
+
+
+@router.delete(
+    "/{workspace_id}/runtime-bindings/{binding_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(WORKSPACES_DELETE_RATE_LIMIT)],
+    summary="Archive a workspace runtime binding descriptor",
+)
+async def archive_workspace_runtime_binding(
+    workspace_id: str,
+    binding_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> Response:
+    """Archive one runtime binding descriptor without affecting the runtime itself."""
+    try:
+        await run_in_threadpool(
+            _archive_workspace_runtime_binding_sync,
+            db,
+            workspace_id,
+            binding_id,
+            _request_user_id(current_user),
+        )
+    except HTTPException:
+        raise
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            input_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            default_detail="Failed to archive workspace runtime binding",
+        ) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

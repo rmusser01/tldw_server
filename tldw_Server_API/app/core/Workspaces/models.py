@@ -25,6 +25,48 @@ ProjectRootState = Literal[
     "archived",
 ]
 ResolutionStatus = Literal["complete", "partial", "failed"]
+RuntimeBindingKind = Literal[
+    "repo",
+    "git_worktree",
+    "local_path",
+    "workspace_project_root",
+    "acp_execution_workspace",
+    "acp_session",
+    "acp_run",
+    "sandbox_root",
+    "sandbox_session",
+    "mcp_workspace_set",
+    "remote_runtime",
+]
+RuntimeBindingOwnerDomain = Literal[
+    "workspaces",
+    "acp",
+    "sandbox",
+    "mcp",
+    "jobs",
+    "workflows",
+    "watchlists",
+    "external",
+]
+RuntimeBindingStatus = Literal[
+    "ready",
+    "missing",
+    "inspect-only",
+    "blocked",
+    "provisioning",
+    "unavailable",
+    "detached",
+    "conflict",
+    "runtime-missing",
+    "archived",
+    "unsupported",
+]
+RuntimeBindingPortability = Literal[
+    "reference",
+    "metadata-only",
+    "local-only",
+    "copy",
+]
 
 _WORKING_INVENTORY_STATES = frozenset(
     {
@@ -47,6 +89,56 @@ _SAFE_INVENTORY_STATES = frozenset(
 )
 _PROJECT_ROOT_BACKENDS = frozenset({"host_local", "sandbox_volume"})
 _READY_SANDBOX_MOUNT_STATES = frozenset({"ready", "mounted"})
+WORKSPACE_RUNTIME_BINDING_KINDS = frozenset(
+    {
+        "repo",
+        "git_worktree",
+        "local_path",
+        "workspace_project_root",
+        "acp_execution_workspace",
+        "acp_session",
+        "acp_run",
+        "sandbox_root",
+        "sandbox_session",
+        "mcp_workspace_set",
+        "remote_runtime",
+    }
+)
+WORKSPACE_RUNTIME_BINDING_OWNER_DOMAINS = frozenset(
+    {
+        "workspaces",
+        "acp",
+        "sandbox",
+        "mcp",
+        "jobs",
+        "workflows",
+        "watchlists",
+        "external",
+    }
+)
+WORKSPACE_RUNTIME_BINDING_STATUSES = frozenset(
+    {
+        "ready",
+        "missing",
+        "inspect-only",
+        "blocked",
+        "provisioning",
+        "unavailable",
+        "detached",
+        "conflict",
+        "runtime-missing",
+        "archived",
+        "unsupported",
+    }
+)
+WORKSPACE_RUNTIME_BINDING_PORTABILITY = frozenset(
+    {
+        "reference",
+        "metadata-only",
+        "local-only",
+        "copy",
+    }
+)
 
 
 class AllowedAction(TypedDict):

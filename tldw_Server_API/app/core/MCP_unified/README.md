@@ -421,7 +421,15 @@ Phase-1 adds a governed virtual CLI foundation to MCP Unified.
 
 `run` is not a raw host shell. It compiles command steps into policy-checked MCP tool calls (`prepare_tool_call` / `execute_prepared_tool_call`) so approvals, RBAC, path scope, validation, and idempotency all still apply.
 
-`bash` and `shell` may also appear as compatibility aliases for `run`. They use the same `command` argument and the same governed runtime; they are not host shell execution surfaces.
+`bash`, `shell`, `powershell`, and `pwsh` may also appear as compatibility aliases for `run`. They use the same `command` argument and the same governed runtime; they are not host shell execution surfaces. Unsupported raw-shell features such as redirection, command substitution, environment expansion, environment assignment prefixes, and background execution fail before any backend MCP tool call is prepared.
+
+`run` and its shell-facing aliases also accept optional `timeoutSeconds` / `timeout_seconds` values. The timeout covers the governed command chain, including policy preflight and nested MCP tool execution, and returns exit code `124` when exceeded.
+
+`cwd` / `workingDirectory` may be set to a workspace-relative directory for a single governed command chain. Relative file paths and search base paths are evaluated beneath that cwd, while absolute paths and final read/write decisions still flow through the backing MCP tools and profile policy. The cwd value rejects absolute paths, Windows drive roots, home-relative paths, and `..` traversal.
+
+`retainOutputArtifacts` / `retain_output_artifacts` may be set to keep oversized output spill files after rendering. Retained outputs are shown with redacted `mcp-run-output://...` handles rather than absolute filesystem paths; by default, spill files are deleted after the preview is rendered.
+
+`sandboxSessionId` / `sandbox_session_id` may be set when a command chain uses the governed `sandbox` command. Sandbox steps then call `sandbox.run` with that session id instead of the default base image, so session ownership and sandbox policy still remain enforced by the backing sandbox module.
 
 Phase-1 command families:
 

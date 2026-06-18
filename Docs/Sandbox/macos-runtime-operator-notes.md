@@ -738,13 +738,16 @@ The workflow calls the same operator smoke script documented above:
 bash tools/vz-linux-image/scripts/run-host-e2e-smoke.sh \
   --bundle "$TLDW_SANDBOX_VZ_LINUX_BUNDLE_PATH" \
   --socket "$RUNNER_TEMP/tldw-vz-helper-ci/helper.sock" \
-  --serial-log-dir "$RUNNER_TEMP/tldw-vz-helper-ci/serial"
+  --serial-log-dir "$RUNNER_TEMP/tldw-vz-helper-ci/serial" \
+  --evidence-dir "$RUNNER_TEMP/tldw-vz-helper-ci/evidence"
 ```
 
 That keeps CI aligned with local operator behavior instead of creating a second
-helper lifecycle path. The job uploads helper logs and the disposable
-image-store run bundle from the runner temp directory even when the smoke
-fails.
+helper lifecycle path. The job uploads `vz-linux-host-gated-evidence` as the
+primary structured run artifact and `vz-linux-host-gated-helper-logs` as a
+narrowed raw-log fallback. The helper-log artifact should contain serial/helper
+logs only; it should not upload disposable image-store run bundles or rootfs
+clones from the runtime directory.
 
 ## Helper Daemon Smoke
 
