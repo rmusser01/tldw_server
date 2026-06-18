@@ -1271,6 +1271,7 @@ class ChatbookService:
         include_generated_content: bool = True,
         tags: list[str] | None = None,
         categories: list[str] | None = None,
+        format_version: ChatbookVersion = ChatbookVersion.V1,
         async_mode: bool = False,
         request_id: str | None = None
     ) -> tuple[bool, str, str | None]:
@@ -1288,6 +1289,7 @@ class ChatbookService:
             include_generated_content: Include generated documents
             tags: Chatbook tags
             categories: Chatbook categories
+            format_version: Chatbook manifest format version to produce
             async_mode: Run as background job
 
         Returns:
@@ -1350,6 +1352,7 @@ class ChatbookService:
                         "include_generated_content": include_generated_content,
                         "tags": tags or [],
                         "categories": categories or [],
+                        "format_version": format_version.value if hasattr(format_version, "value") else str(format_version),
                     }
                     job_created = self._core_jobs.create_job(
                         domain="chatbooks",
@@ -1385,7 +1388,8 @@ class ChatbookService:
             return await self._create_chatbook_sync_wrapper(
                 name, description, content_selections,
                 author, include_media, media_quality, include_embeddings,
-                include_generated_content, tags, categories
+                include_generated_content, tags, categories,
+                format_version=format_version,
             )
 
     def _with_transaction(self, func, *args, **kwargs):
@@ -1585,7 +1589,8 @@ class ChatbookService:
         include_embeddings: bool = False,
         include_generated_content: bool = True,
         tags: list[str] | None = None,
-        categories: list[str] | None = None
+        categories: list[str] | None = None,
+        format_version: ChatbookVersion = ChatbookVersion.V1
     ) -> tuple[bool, str, str | None]:
         """
         Wrapper for synchronous chatbook creation.
@@ -1754,7 +1759,8 @@ class ChatbookService:
         include_embeddings: bool,
         include_generated_content: bool,
         tags: list[str],
-        categories: list[str]
+        categories: list[str],
+        format_version: ChatbookVersion = ChatbookVersion.V1
     ):
         """
         Asynchronously create a chatbook with job tracking.
@@ -1780,7 +1786,8 @@ class ChatbookService:
             success, message, file_path = await self._create_chatbook_sync_wrapper(
                 name, description, content_selections,
                 author, include_media, media_quality, include_embeddings,
-                include_generated_content, tags, categories
+                include_generated_content, tags, categories,
+                format_version=format_version,
             )
 
             if success:

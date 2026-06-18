@@ -3,6 +3,7 @@ from pathlib import Path
 
 import jsonschema
 
+from tldw_Server_API.app.api.v1.schemas.chatbook_schemas import CreateChatbookRequest
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import ChatbookVersion
 
 
@@ -60,6 +61,17 @@ def _minimal_v1_1_manifest() -> dict:
 
 def test_chatbook_version_accepts_v1_1():
     assert ChatbookVersion("1.1.0") is ChatbookVersion.V1_1
+
+
+def test_create_chatbook_request_accepts_format_version_v1_1():
+    request = CreateChatbookRequest(
+        name="v1.1",
+        description="v1.1",
+        content_selections={},
+        format_version="1.1.0",
+    )
+
+    assert request.format_version is ChatbookVersion.V1_1
 
 
 def test_minimal_v1_1_manifest_matches_schema():

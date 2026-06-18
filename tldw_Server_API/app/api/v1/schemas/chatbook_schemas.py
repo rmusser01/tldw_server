@@ -95,6 +95,10 @@ class CreateChatbookRequest(BaseModel):
     include_generated_content: bool = Field(True, description="Include generated documents")
     tags: list[str] = Field(default_factory=list, max_length=50, description="Chatbook tags")
     categories: list[str] = Field(default_factory=list, max_length=20, description="Chatbook categories")
+    format_version: ChatbookVersion = Field(
+        ChatbookVersion.V1,
+        description="Chatbook manifest format version to produce"
+    )
     async_mode: bool = Field(False, description="Run as background job")
 
     @field_validator('tags', 'categories', mode='before')
@@ -125,6 +129,7 @@ class CreateChatbookRequest(BaseModel):
             "include_generated_content": True,
             "tags": ["research", "AI"],
             "categories": ["Work"],
+            "format_version": ChatbookVersion.V1.value,
             "async_mode": False
         }
     })

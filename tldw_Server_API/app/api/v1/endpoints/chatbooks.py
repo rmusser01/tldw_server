@@ -447,6 +447,7 @@ async def create_chatbook(
             include_generated_content=request_data.include_generated_content,
             tags=request_data.tags,
             categories=request_data.categories,
+            format_version=request_data.format_version,
             async_mode=request_data.async_mode,
             request_id=rid,
         )
