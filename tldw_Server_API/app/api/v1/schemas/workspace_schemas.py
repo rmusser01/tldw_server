@@ -5,7 +5,7 @@ import json
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationInfo, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, ValidationInfo, field_validator, model_validator
 
 from tldw_Server_API.app.core.Workspaces.membership_models import (
     WORKSPACE_MEMBERSHIP_MAX_METADATA_BYTES,
@@ -700,6 +700,9 @@ class WorkspaceRuntimeBindingRedactionReport(BaseModel):
 class WorkspaceRuntimeBindingDescriptorUpsertRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    _normalized_payload: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _persistence_payload: dict[str, Any] = PrivateAttr(default_factory=dict)
+
     binding_id: str = Field(..., min_length=1, max_length=128)
     binding_kind: str = Field(..., min_length=1, max_length=80)
     owner_domain: str = Field(..., min_length=1, max_length=80)
@@ -709,15 +712,34 @@ class WorkspaceRuntimeBindingDescriptorUpsertRequest(BaseModel):
     path_hint: str | None = Field(default=None, max_length=1024)
     portability: str = Field(..., min_length=1, max_length=80)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    redaction_report: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_runtime_binding_contract(self) -> "WorkspaceRuntimeBindingDescriptorUpsertRequest":
+        persistence_payload = self.model_dump()
         try:
-            normalize_runtime_binding_payload(self.model_dump())
+            normalized = normalize_runtime_binding_payload(persistence_payload)
         except ValueError as exc:
             raise ValueError(str(exc)) from exc
+        self.binding_id = normalized["binding_id"]
+        self.binding_kind = normalized["binding_kind"]
+        self.owner_domain = normalized["owner_domain"]
+        self.locator_ref = normalized["locator_ref"]
+        self.label = normalized["label"]
+        self.status = normalized["status"]
+        self.path_hint = normalized["path_hint"]
+        self.portability = normalized["portability"]
+        self.metadata = normalized["metadata"]
+        self._normalized_payload = normalized
+        self._persistence_payload = persistence_payload
         return self
+
+    def normalized_payload(self) -> dict[str, Any]:
+        """Return the server-normalized runtime binding request fields."""
+        return dict(self._normalized_payload)
+
+    def persistence_payload(self) -> dict[str, Any]:
+        """Return the original validated payload so persistence can derive redactions."""
+        return dict(self._persistence_payload)
 
 
 class WorkspaceRuntimeBindingDescriptorResponse(BaseModel):

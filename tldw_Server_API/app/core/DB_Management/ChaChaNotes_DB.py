@@ -18521,17 +18521,21 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         *,
         include_deleted: bool,
     ) -> dict[str, Any] | None:
-        clauses = [
-            "workspace_id = ?",
-            "binding_id = ?",
-        ]
-        params: list[Any] = [workspace_id, binding_id]
-        if not include_deleted:
-            clauses.append("deleted = ?")
-            params.append(self._workspace_active_deleted_value())
+        include_deleted_flag = 1 if include_deleted else 0
         row = conn.execute(
-            f"SELECT * FROM workspace_runtime_bindings WHERE {' AND '.join(clauses)}",  # nosec B608
-            tuple(params),
+            """
+            SELECT *
+              FROM workspace_runtime_bindings
+             WHERE workspace_id = ?
+               AND binding_id = ?
+               AND (? = 1 OR deleted = ?)
+            """,
+            (
+                workspace_id,
+                binding_id,
+                include_deleted_flag,
+                self._workspace_active_deleted_value(),
+            ),
         ).fetchone()
         return self._normalize_workspace_runtime_binding_row(row)
 
@@ -18724,22 +18728,38 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "workspace_id",
         )
         normalized_limit = self._normalize_runtime_binding_limit(limit)
-        clauses = ["workspace_id = ?"]
-        params: list[Any] = [normalized_workspace_id]
-        if binding_kind is not None:
-            clauses.append("binding_kind = ?")
-            params.append(self._workspace_runtime_binding_filter_value(binding_kind, "binding_kind"))
-        if owner_domain is not None:
-            clauses.append("owner_domain = ?")
-            params.append(self._workspace_runtime_binding_filter_value(owner_domain, "owner_domain"))
-        if not include_deleted:
-            clauses.append("deleted = ?")
-            params.append(self._workspace_active_deleted_value())
-        params.append(normalized_limit)
+        normalized_kind = (
+            self._workspace_runtime_binding_filter_value(binding_kind, "binding_kind")
+            if binding_kind is not None
+            else None
+        )
+        normalized_owner = (
+            self._workspace_runtime_binding_filter_value(owner_domain, "owner_domain")
+            if owner_domain is not None
+            else None
+        )
+        include_deleted_flag = 1 if include_deleted else 0
         cursor = self.execute_query(
-            f"SELECT * FROM workspace_runtime_bindings WHERE {' AND '.join(clauses)} "  # nosec B608
-            "ORDER BY updated_at DESC, binding_id ASC LIMIT ?",
-            tuple(params),
+            """
+            SELECT *
+              FROM workspace_runtime_bindings
+             WHERE workspace_id = ?
+               AND (? = 1 OR deleted = ?)
+               AND (? IS NULL OR binding_kind = ?)
+               AND (? IS NULL OR owner_domain = ?)
+             ORDER BY updated_at DESC, binding_id ASC
+             LIMIT ?
+            """,
+            (
+                normalized_workspace_id,
+                include_deleted_flag,
+                self._workspace_active_deleted_value(),
+                normalized_kind,
+                normalized_kind,
+                normalized_owner,
+                normalized_owner,
+                normalized_limit,
+            ),
         )
         return [
             normalized

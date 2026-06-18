@@ -32,7 +32,7 @@ _SECRET_KEY_RE = re.compile(
     r"(^|[_\-.])("
     r"api[_\-.]?key|access[_\-.]?key|secret|token|password|passwd|pwd|"
     r"credential|credentials|private[_\-.]?key|client[_\-.]?secret|"
-    r"bearer|authorization|auth[_\-.]?header|env|environment"
+    r"bearer|authorization|auth[_\-.]?header|env[_\-.]?vars?|environment[_\-.]?variables?"
     r")($|[_\-.])",
     re.IGNORECASE,
 )
@@ -49,9 +49,11 @@ _PATH_METADATA_KEY_RE = re.compile(
     r")($|[_\-.])",
     re.IGNORECASE,
 )
+_WRITE_STATUSES = WORKSPACE_RUNTIME_BINDING_STATUSES - {"archived"}
 
 
 def _input_error(message: str) -> ValueError:
+    """Return the DB-layer input exception without importing it at module load."""
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
 
     return InputError(message)
@@ -75,8 +77,9 @@ def normalize_runtime_binding_payload(data: Mapping[str, Any]) -> dict[str, Any]
     status = _enum_value(
         data.get("status"),
         "status",
-        WORKSPACE_RUNTIME_BINDING_STATUSES,
+        _WRITE_STATUSES,
         aliases=_STATUS_ALIASES,
+        extra_guidance="Use DELETE to archive a runtime binding.",
     )
     portability = _enum_value(
         data.get("portability"),
@@ -86,20 +89,20 @@ def normalize_runtime_binding_payload(data: Mapping[str, Any]) -> dict[str, Any]
     )
     raw_path_hint = _optional_string(data.get("path_hint"), "path_hint", max_length=1024)
     path_hint = redacted_path_hint(raw_path_hint) if raw_path_hint is not None else None
-    metadata = normalize_runtime_binding_json_object(
+    metadata, _metadata_json = normalize_runtime_binding_json_object(
         data.get("metadata", data.get("metadata_json")),
         field_name="metadata",
         max_bytes=WORKSPACE_RUNTIME_BINDING_MAX_METADATA_BYTES,
         reject_secrets=True,
     )
     metadata, metadata_redacted_fields = _redact_path_like_metadata(metadata, "metadata")
-    metadata, metadata_json = dump_runtime_binding_json_object(
+    metadata, metadata_json = normalize_runtime_binding_json_object(
         metadata,
         field_name="metadata",
         max_bytes=WORKSPACE_RUNTIME_BINDING_MAX_METADATA_BYTES,
         reject_secrets=True,
     )
-    redaction_report = _redaction_report(data.get("redaction_report", data.get("redaction_report_json")))
+    redaction_report = _default_redaction_report()
     redacted_fields = list(redaction_report.get("redacted_fields") or [])
     for field_name in metadata_redacted_fields:
         if field_name not in redacted_fields:
@@ -108,7 +111,7 @@ def normalize_runtime_binding_payload(data: Mapping[str, Any]) -> dict[str, Any]
         redacted_fields.append("path_hint")
     redaction_report["redacted_fields"] = redacted_fields
     redaction_report["redacted"] = bool(redacted_fields or redaction_report.get("rejected_fields"))
-    redaction_report, redaction_report_json = dump_runtime_binding_json_object(
+    redaction_report, redaction_report_json = normalize_runtime_binding_json_object(
         redaction_report,
         field_name="redaction_report",
         max_bytes=WORKSPACE_RUNTIME_BINDING_MAX_REDACTION_BYTES,
@@ -164,42 +167,14 @@ def redacted_path_hint(value: Any) -> str:
     return raw_value
 
 
-def dump_runtime_binding_json_object(
-    value: Any,
-    *,
-    field_name: str,
-    max_bytes: int,
-    reject_secrets: bool,
-) -> tuple[dict[str, Any], str]:
-    """Normalize, validate, and serialize a bounded descriptor JSON object."""
-    normalized = normalize_runtime_binding_json_object(
-        value,
-        field_name=field_name,
-        max_bytes=max_bytes,
-        reject_secrets=reject_secrets,
-    )
-    try:
-        dumped = json.dumps(
-            normalized,
-            ensure_ascii=True,
-            allow_nan=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-    except (TypeError, ValueError) as exc:
-        raise _input_error(f"{field_name} must be JSON serializable.") from exc
-    if len(dumped.encode("utf-8")) > max_bytes:
-        raise _input_error(f"{field_name} exceeds {max_bytes} bytes.")
-    return normalized, dumped
-
-
 def normalize_runtime_binding_json_object(
     value: Any,
     *,
     field_name: str,
     max_bytes: int,
     reject_secrets: bool,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], str]:
+    """Normalize and serialize a bounded descriptor JSON object once."""
     if value is None:
         normalized: dict[str, Any] = {}
     elif isinstance(value, str):
@@ -232,7 +207,7 @@ def normalize_runtime_binding_json_object(
         raise _input_error(f"{field_name} must be JSON serializable.") from exc
     if len(dumped.encode("utf-8")) > max_bytes:
         raise _input_error(f"{field_name} exceeds {max_bytes} bytes.")
-    return normalized
+    return normalized, dumped
 
 
 def load_runtime_binding_json_object(raw: Any, *, field_name: str) -> dict[str, Any]:
@@ -247,12 +222,10 @@ def load_runtime_binding_json_object(raw: Any, *, field_name: str) -> dict[str, 
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError:
-            preview = raw[:120].replace("\n", "\\n")
             logger.warning(
-                "Failed to decode workspace runtime binding JSON field {} ({} chars): {}",
+                "Failed to decode workspace runtime binding JSON field {} ({} chars); raw value omitted.",
                 field_name,
                 len(raw),
-                preview,
             )
             return {}
         return dict(parsed) if isinstance(parsed, Mapping) else {}
@@ -260,7 +233,8 @@ def load_runtime_binding_json_object(raw: Any, *, field_name: str) -> dict[str, 
 
 
 def _redaction_report(value: Any) -> dict[str, Any]:
-    report = normalize_runtime_binding_json_object(
+    """Normalize a stored redaction report into the public report shape."""
+    report, _report_json = normalize_runtime_binding_json_object(
         value,
         field_name="redaction_report",
         max_bytes=WORKSPACE_RUNTIME_BINDING_MAX_REDACTION_BYTES,
@@ -276,10 +250,12 @@ def _redaction_report(value: Any) -> dict[str, Any]:
 
 
 def _default_redaction_report() -> dict[str, Any]:
+    """Return the default server-generated redaction report."""
     return {"redacted": False, "redacted_fields": [], "rejected_fields": []}
 
 
 def _string_list(value: Any) -> list[str]:
+    """Return a de-duplicated list of non-empty string values."""
     if value is None:
         return []
     if isinstance(value, str):
@@ -295,6 +271,7 @@ def _string_list(value: Any) -> list[str]:
 
 
 def _reject_secret_like_json(value: Any, field_path: str) -> None:
+    """Reject secret-looking keys or values in a JSON-like structure."""
     if isinstance(value, Mapping):
         for key, item in value.items():
             key_text = str(key)
@@ -317,16 +294,18 @@ def _redact_path_like_metadata(
     *,
     path_context: bool = False,
 ) -> tuple[Any, list[str]]:
+    """Redact path-like metadata values and report the fields changed."""
     if isinstance(value, Mapping):
         result: dict[str, Any] = {}
         redacted_fields: list[str] = []
         for key, item in value.items():
             key_text = str(key)
             child_path = f"{field_path}.{key_text}"
+            child_path_context = bool(_PATH_METADATA_KEY_RE.search(key_text))
             redacted_item, child_fields = _redact_path_like_metadata(
                 item,
                 child_path,
-                path_context=path_context or bool(_PATH_METADATA_KEY_RE.search(key_text)),
+                path_context=child_path_context,
             )
             result[key_text] = redacted_item
             redacted_fields.extend(child_fields)
@@ -351,6 +330,7 @@ def _redact_path_like_metadata(
 
 
 def _required_identifier(value: Any, field_name: str) -> str:
+    """Return a required bounded identifier or raise a contract error."""
     normalized = _required_string(value, field_name, max_length=128)
     if not _IDENTIFIER_RE.fullmatch(normalized):
         raise _input_error(f"{field_name} contains unsupported characters.")
@@ -358,6 +338,7 @@ def _required_identifier(value: Any, field_name: str) -> str:
 
 
 def _required_string(value: Any, field_name: str, *, max_length: int) -> str:
+    """Return a required bounded string or raise a contract error."""
     normalized = str(value if value is not None else "").strip()
     if not normalized:
         raise _input_error(f"{field_name} is required.")
@@ -367,6 +348,7 @@ def _required_string(value: Any, field_name: str, *, max_length: int) -> str:
 
 
 def _optional_string(value: Any, field_name: str, *, max_length: int) -> str | None:
+    """Return an optional bounded string or None."""
     if value is None:
         return None
     normalized = str(value).strip()
@@ -383,11 +365,16 @@ def _enum_value(
     allowed: frozenset[str],
     *,
     aliases: Mapping[str, str] | None = None,
+    extra_guidance: str | None = None,
 ) -> str:
+    """Normalize a string enum value, applying aliases before validation."""
     normalized = str(value if value is not None else "").strip().lower()
     if aliases:
         normalized = aliases.get(normalized, normalized)
     if normalized not in allowed:
         allowed_values = ", ".join(sorted(allowed))
-        raise _input_error(f"{field_name} must be one of: {allowed_values}.")
+        message = f"{field_name} must be one of: {allowed_values}."
+        if extra_guidance:
+            message = f"{message} {extra_guidance}"
+        raise _input_error(message)
     return normalized

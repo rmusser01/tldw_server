@@ -151,6 +151,36 @@ def test_workspace_runtime_binding_api_rejects_secret_metadata_key(
     assert response.status_code == 422
 
 
+def test_workspace_runtime_binding_api_rejects_client_redaction_report(
+    workspace_client: TestClient,
+    db: CharactersRAGDB,
+) -> None:
+    db.upsert_workspace("ws-runtime", "Runtime Workspace")
+
+    response = workspace_client.post(
+        "/api/v1/workspaces/ws-runtime/runtime-bindings",
+        json=_descriptor_payload(
+            redaction_report={"redacted": True, "redacted_fields": ["metadata.agent"]},
+        ),
+    )
+
+    assert response.status_code == 422
+
+
+def test_workspace_runtime_binding_api_rejects_archived_status_on_upsert(
+    workspace_client: TestClient,
+    db: CharactersRAGDB,
+) -> None:
+    db.upsert_workspace("ws-runtime", "Runtime Workspace")
+
+    response = workspace_client.post(
+        "/api/v1/workspaces/ws-runtime/runtime-bindings",
+        json=_descriptor_payload(status="archived"),
+    )
+
+    assert response.status_code == 422
+
+
 def test_workspace_runtime_binding_api_returns_404_for_missing_workspace(
     workspace_client: TestClient,
 ) -> None:

@@ -9,6 +9,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from loguru import logger
+from starlette.concurrency import run_in_threadpool
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -559,6 +560,78 @@ def _validate_runtime_binding_query_filter(
             },
         )
     return normalized
+
+
+def _list_workspace_runtime_bindings_sync(
+    db: CharactersRAGDB,
+    workspace_id: str,
+    *,
+    binding_kind: str | None,
+    owner_domain: str | None,
+    include_archived: bool,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """List runtime bindings with synchronous DB work isolated for threadpool use."""
+    _require_workspace(db, workspace_id)
+    return db.list_workspace_runtime_bindings(
+        workspace_id,
+        binding_kind=binding_kind,
+        owner_domain=owner_domain,
+        include_deleted=include_archived,
+        limit=limit,
+    )
+
+
+def _upsert_workspace_runtime_binding_sync(
+    db: CharactersRAGDB,
+    workspace_id: str,
+    body: WorkspaceRuntimeBindingDescriptorUpsertRequest,
+    user_id: str,
+) -> dict[str, Any]:
+    """Create or update a runtime binding using synchronous DB APIs."""
+    workspace = _require_workspace(db, workspace_id)
+    if bool(workspace.get("archived", False)):
+        raise _workspace_runtime_binding_archived_conflict(workspace_id)
+    return db.upsert_workspace_runtime_binding(
+        workspace_id,
+        body.persistence_payload(),
+        user_id=user_id,
+    )
+
+
+def _get_workspace_runtime_binding_sync(
+    db: CharactersRAGDB,
+    workspace_id: str,
+    binding_id: str,
+) -> dict[str, Any] | None:
+    """Fetch one runtime binding using synchronous DB APIs."""
+    _require_workspace(db, workspace_id)
+    return db.get_workspace_runtime_binding(workspace_id, binding_id)
+
+
+def _archive_workspace_runtime_binding_sync(
+    db: CharactersRAGDB,
+    workspace_id: str,
+    binding_id: str,
+    user_id: str,
+) -> None:
+    """Archive one runtime binding using synchronous DB APIs."""
+    workspace = _require_workspace(db, workspace_id)
+    if bool(workspace.get("archived", False)):
+        raise _workspace_runtime_binding_archived_conflict(workspace_id)
+    archived = db.archive_workspace_runtime_binding(
+        workspace_id,
+        binding_id,
+        user_id=user_id,
+    )
+    if archived is None:
+        existing = db.get_workspace_runtime_binding(
+            workspace_id,
+            binding_id,
+            include_deleted=True,
+        )
+        if existing is None:
+            raise _workspace_runtime_binding_not_found(binding_id)
 
 
 def _workspace_with_primary_root(
@@ -1247,11 +1320,13 @@ async def list_workspace_runtime_bindings(
             "owner_domain",
             WORKSPACE_RUNTIME_BINDING_OWNER_DOMAINS,
         )
-        bindings = db.list_workspace_runtime_bindings(
+        bindings = await run_in_threadpool(
+            _list_workspace_runtime_bindings_sync,
+            db,
             workspace_id,
             binding_kind=normalized_kind,
             owner_domain=normalized_owner,
-            include_deleted=include_archived,
+            include_archived=include_archived,
             limit=limit,
         )
     except HTTPException:
@@ -1285,13 +1360,12 @@ async def upsert_workspace_runtime_binding(
 ) -> WorkspaceRuntimeBindingDescriptorResponse:
     """Persist descriptor metadata for an external runtime binding."""
     try:
-        workspace = _require_workspace(db, workspace_id)
-        if bool(workspace.get("archived", False)):
-            raise _workspace_runtime_binding_archived_conflict(workspace_id)
-        binding = db.upsert_workspace_runtime_binding(
+        binding = await run_in_threadpool(
+            _upsert_workspace_runtime_binding_sync,
+            db,
             workspace_id,
-            body.model_dump(),
-            user_id=_request_user_id(current_user),
+            body,
+            _request_user_id(current_user),
         )
     except HTTPException:
         raise
@@ -1319,8 +1393,12 @@ async def get_workspace_runtime_binding(
     """Fetch one active runtime binding descriptor."""
     _ = current_user
     try:
-        _require_workspace(db, workspace_id)
-        binding = db.get_workspace_runtime_binding(workspace_id, binding_id)
+        binding = await run_in_threadpool(
+            _get_workspace_runtime_binding_sync,
+            db,
+            workspace_id,
+            binding_id,
+        )
     except HTTPException:
         raise
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
@@ -1348,13 +1426,12 @@ async def archive_workspace_runtime_binding(
 ) -> Response:
     """Archive one runtime binding descriptor without affecting the runtime itself."""
     try:
-        workspace = _require_workspace(db, workspace_id)
-        if bool(workspace.get("archived", False)):
-            raise _workspace_runtime_binding_archived_conflict(workspace_id)
-        archived = db.archive_workspace_runtime_binding(
+        await run_in_threadpool(
+            _archive_workspace_runtime_binding_sync,
+            db,
             workspace_id,
             binding_id,
-            user_id=_request_user_id(current_user),
+            _request_user_id(current_user),
         )
     except HTTPException:
         raise
@@ -1364,14 +1441,6 @@ async def archive_workspace_runtime_binding(
             input_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             default_detail="Failed to archive workspace runtime binding",
         ) from exc
-    if archived is None:
-        existing = db.get_workspace_runtime_binding(
-            workspace_id,
-            binding_id,
-            include_deleted=True,
-        )
-        if existing is None:
-            raise _workspace_runtime_binding_not_found(binding_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
