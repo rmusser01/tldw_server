@@ -193,6 +193,10 @@ OpenWebUI JSON import supports normal OpenWebUI "Export Chats" JSON files. It im
 
 OpenWebUI webui.db database import supports uploaded SQLite databases copied from an OpenWebUI instance. Preview first, choose exactly one `selected_openwebui_user_id`, then import with `source_format=openwebui_db`. The import reads only chats owned by the selected source user. Source folders are mirrored into tldw folders under `OpenWebUI / <selected user> / ...`, and folder links are attached to imported conversations. Duplicate detection uses `source=openwebui` and a deterministic external reference for both JSON and DB imports. `skip` is the default duplicate behavior; `rename` creates an intentional second copy with a unique imported title and external reference. OpenWebUI v1 does not support `overwrite`, `merge`, admin export import, live OpenWebUI server import, embeddings import, content selections, or unreferenced attachment import. Files, images, and artifacts import as metadata references first; use the OpenWebUI attachment hydration endpoints after import to copy referenced images and register supported files from a server-local OpenWebUI data root.
 
+Media and embedding import paths are not currently implemented. Leave
+`import_media=false` and `import_embeddings=false`; requests that enable either
+option are rejected before content is imported.
+
 **Response**:
 ```json
 {
