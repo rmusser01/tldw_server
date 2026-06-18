@@ -669,13 +669,17 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "media-core-api",
             "media-ingestion-new-ocr",
             "media-ingestion-new-integration",
-            "media-ingestion-new-unit",
+            "media-ingestion-new-unit-core",
+            "media-ingestion-new-unit-mediawiki",
+            "media-ingestion-new-unit-persistence",
+            "media-ingestion-new-unit-processing",
             "media-ingestion-modification",
         }
         assert ({"media-audio", "media-legacy-free"} | media_ingestion_shards).issubset(
             shard_names
         )
         assert "media-ingestion" not in shard_names
+        assert "media-ingestion-new-unit" not in shard_names
         assert shard_path_sets["media-audio"] == {
             "tldw_Server_API/tests/Audio",
             "tldw_Server_API/tests/AudioJobs",
@@ -706,8 +710,41 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         assert shard_path_sets["media-ingestion-new-integration"] == {
             "tldw_Server_API/tests/MediaIngestion_NEW/integration"
         }
-        assert shard_path_sets["media-ingestion-new-unit"] == {
-            "tldw_Server_API/tests/MediaIngestion_NEW/unit"
+        assert shard_path_sets["media-ingestion-new-unit-core"] == {
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_archive_and_sanitization.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_*.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_auto_chunking_*.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_filename_and_mime_and_archive.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ingest_jobs_batch_lookup.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_add_deps_error_mapping.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_canonical_helpers.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py",
+        }
+        assert shard_path_sets["media-ingestion-new-unit-mediawiki"] == {
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ms_g_eval_validation.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_safe_paths.py",
+        }
+        assert shard_path_sets["media-ingestion-new-unit-persistence"] == {
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_*.py",
+        }
+        assert shard_path_sets["media-ingestion-new-unit-processing"] == {
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_*.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_*.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_batch_media_*.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_*.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_transcription_models_endpoint.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py",
         }
         assert shard_path_sets["media-ingestion-modification"] == {
             "tldw_Server_API/tests/Media_Ingestion_Modification"

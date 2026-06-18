@@ -970,9 +970,42 @@ jobs:
           - name: media-ingestion-new-integration
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/integration
-          - name: media-ingestion-new-unit
+          - name: media-ingestion-new-unit-core
             paths: >-
-              tldw_Server_API/tests/MediaIngestion_NEW/unit
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_archive_and_sanitization.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_auto_chunking_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_filename_and_mime_and_archive.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ingest_jobs_batch_lookup.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_add_deps_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_canonical_helpers.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+          - name: media-ingestion-new-unit-mediawiki
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ms_g_eval_validation.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_safe_paths.py
+          - name: media-ingestion-new-unit-persistence
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_*.py
+          - name: media-ingestion-new-unit-processing
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_batch_media_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_transcription_models_endpoint.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
           - name: media-ingestion-modification
             paths: >-
               tldw_Server_API/tests/Media_Ingestion_Modification
@@ -2233,9 +2266,42 @@ jobs:
           - name: media-ingestion-new-integration
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/integration
-          - name: media-ingestion-new-unit
+          - name: media-ingestion-new-unit-core
             paths: >-
-              tldw_Server_API/tests/MediaIngestion_NEW/unit
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_archive_and_sanitization.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_auto_chunking_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_filename_and_mime_and_archive.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ingest_jobs_batch_lookup.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_add_deps_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_canonical_helpers.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+          - name: media-ingestion-new-unit-mediawiki
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ms_g_eval_validation.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_safe_paths.py
+          - name: media-ingestion-new-unit-persistence
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_*.py
+          - name: media-ingestion-new-unit-processing
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_batch_media_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_transcription_models_endpoint.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
           - name: media-ingestion-modification
             paths: >-
               tldw_Server_API/tests/Media_Ingestion_Modification
@@ -3441,9 +3507,42 @@ jobs:
           - name: media-ingestion-new-integration
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/integration
-          - name: media-ingestion-new-unit
+          - name: media-ingestion-new-unit-core
             paths: >-
-              tldw_Server_API/tests/MediaIngestion_NEW/unit
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_archive_and_sanitization.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_auto_chunking_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_filename_and_mime_and_archive.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ingest_jobs_batch_lookup.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_add_deps_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_canonical_helpers.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+          - name: media-ingestion-new-unit-mediawiki
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ms_g_eval_validation.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_safe_paths.py
+          - name: media-ingestion-new-unit-persistence
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_*.py
+          - name: media-ingestion-new-unit-processing
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_batch_media_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_transcription_models_endpoint.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
           - name: media-ingestion-modification
             paths: >-
               tldw_Server_API/tests/Media_Ingestion_Modification
@@ -4575,9 +4674,42 @@ jobs:
           - name: media-ingestion-new-integration
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/integration
-          - name: media-ingestion-new-unit
+          - name: media-ingestion-new-unit-core
             paths: >-
-              tldw_Server_API/tests/MediaIngestion_NEW/unit
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_archive_and_sanitization.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_auto_chunking_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_filename_and_mime_and_archive.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ingest_jobs_batch_lookup.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_add_deps_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_canonical_helpers.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+          - name: media-ingestion-new-unit-mediawiki
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ms_g_eval_validation.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_safe_paths.py
+          - name: media-ingestion-new-unit-persistence
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_*.py
+          - name: media-ingestion-new-unit-processing
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_batch_media_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_transcription_models_endpoint.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
           - name: media-ingestion-modification
             paths: >-
               tldw_Server_API/tests/Media_Ingestion_Modification
@@ -5711,9 +5843,42 @@ jobs:
           - name: media-ingestion-new-integration
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/integration
-          - name: media-ingestion-new-unit
+          - name: media-ingestion-new-unit-core
             paths: >-
-              tldw_Server_API/tests/MediaIngestion_NEW/unit
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_archive_and_sanitization.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_auto_chunking_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_filename_and_mime_and_archive.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ingest_jobs_batch_lookup.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_add_deps_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_canonical_helpers.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_ingest*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_list_no_slash_redirect.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py
+          - name: media-ingestion-new-unit-mediawiki
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ms_g_eval_validation.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_safe_paths.py
+          - name: media-ingestion-new-unit-persistence
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_*.py
+          - name: media-ingestion-new-unit-processing
+            paths: >-
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_playlist_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_batch_media_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_transcription_models_endpoint.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
           - name: media-ingestion-modification
             paths: >-
               tldw_Server_API/tests/Media_Ingestion_Modification

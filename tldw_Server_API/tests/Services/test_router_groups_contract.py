@@ -11017,6 +11017,11 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     )
     _install_fake_router_module(
         monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.workspace_eligibility",
+        path="/workspace-eligibility/check",
+    )
+    _install_fake_router_module(
+        monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions",
         path="/character-chat-sessions/list",
     )
@@ -11348,8 +11353,12 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     assert by_first_path["/api/v1/prompt-studio/ws"].prefix == ""
     assert by_first_path["/api/v1/prompt-studio/ws"].tags == ("prompt-studio",)
     assert by_first_path["/api/v1/prompt-studio/ws"].route_key == "prompt-studio"
-    assert by_key["workspaces"].prefix == "/api/v1/workspaces"
-    assert by_key["workspaces"].tags == ("workspaces",)
+    assert by_first_path["/workspaces/list"].prefix == "/api/v1/workspaces"
+    assert by_first_path["/workspaces/list"].tags == ("workspaces",)
+    assert by_first_path["/workspaces/list"].route_key == "workspaces"
+    assert by_first_path["/workspace-eligibility/check"].prefix == "/api/v1/workspace-eligibility"
+    assert by_first_path["/workspace-eligibility/check"].tags == ("workspaces",)
+    assert by_first_path["/workspace-eligibility/check"].route_key == "workspaces"
     assert by_key["character-chat-sessions"].prefix == "/api/v1/chats"
     assert by_key["character-chat-sessions"].tags == ("character-chat-sessions",)
     assert by_key["character-memory"].prefix == "/api/v1/characters"
