@@ -67,6 +67,7 @@ jobs:
       - name: Install FFmpeg and PortAudio deps
         uses: ./.github/actions/setup-ffmpeg
         with:
+          install-ffmpeg: 'false'
           install-portaudio: 'true'
 
       - name: Install dependencies

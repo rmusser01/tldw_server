@@ -75,6 +75,18 @@ def _assert_portaudio_installed_before_python_setup(path: str, job_name: str) ->
     assert steps.index(install_step) < steps.index(setup_step)
 
 
+def _assert_setup_skips_ffmpeg_but_keeps_portaudio(
+    path: str,
+    job_name: str,
+    step_name: str = "Install FFmpeg and PortAudio (Linux)",
+) -> None:
+    workflow = _load(path)
+    install_step = _get_step(workflow["jobs"][job_name]["steps"], step_name)
+    assert install_step["uses"] == "./.github/actions/setup-ffmpeg"
+    assert install_step["with"]["install-ffmpeg"] == "false"
+    assert install_step["with"]["install-portaudio"] == "true"
+
+
 def test_backend_required_has_noop_and_execute_paths() -> None:
     workflow = _load(".github/workflows/backend-required.yml")
     jobs = workflow["jobs"]
@@ -170,6 +182,10 @@ def test_e2e_required_lane_exists_and_is_conditional() -> None:
 
 def test_e2e_required_installs_portaudio_for_pyaudio_builds() -> None:
     _assert_ffmpeg_portaudio_setup(".github/workflows/e2e-required.yml", "e2e-required")
+    _assert_setup_skips_ffmpeg_but_keeps_portaudio(
+        ".github/workflows/e2e-required.yml",
+        "e2e-required",
+    )
 
 
 def test_e2e_required_explicitly_loads_pytest_asyncio_plugin() -> None:
@@ -193,6 +209,29 @@ def test_frontend_e2e_tiers_install_portaudio_before_backend_dependency_setup() 
             "Install FFmpeg and PortAudio (Linux)",
         )
         assert install_step["with"]["install-ffmpeg"] == "false"
+
+
+def test_frontend_ux_gates_skip_ffmpeg_but_keep_portaudio() -> None:
+    for job_name in ("onboarding-gate", "smoke-gate"):
+        _assert_setup_skips_ffmpeg_but_keeps_portaudio(
+            ".github/workflows/frontend-ux-gates.yml",
+            job_name,
+        )
+
+
+def test_onboarding_docs_gate_skips_ffmpeg_but_keeps_portaudio() -> None:
+    _assert_setup_skips_ffmpeg_but_keeps_portaudio(
+        ".github/workflows/onboarding-docs-gate.yml",
+        "onboarding-docs-gate",
+    )
+
+
+def test_e2e_smoke_skips_ffmpeg_but_keeps_portaudio() -> None:
+    _assert_setup_skips_ffmpeg_but_keeps_portaudio(
+        ".github/workflows/e2e-smoke.yml",
+        "e2e-smoke",
+        step_name="Install FFmpeg and PortAudio deps",
+    )
 
 
 def test_security_required_lane_exists_and_uses_threshold_policy() -> None:
