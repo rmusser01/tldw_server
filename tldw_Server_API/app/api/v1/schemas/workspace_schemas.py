@@ -329,6 +329,67 @@ class WorkspaceContextMembershipSummary(BaseModel):
     by_role: dict[str, int] = Field(default_factory=dict)
 
 
+# --- Activity/index schemas ---
+
+WorkspaceIndexWarningSeverity = Literal["info", "warning", "error"]
+
+
+class WorkspaceIndexOwnerSurface(BaseModel):
+    label: str
+    href: str
+
+
+class WorkspaceIndexResourceGroup(BaseModel):
+    resource_type: WorkspaceMembershipResourceType
+    count: int = 0
+    owner_surface: WorkspaceIndexOwnerSurface
+    items: list[WorkspaceMembershipResponse] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
+class WorkspaceActivityEventResponse(BaseModel):
+    workspace_id: str
+    event_id: str
+    event_type: str
+    category: str
+    actor_user_id: str | None = None
+    resource_type: str | None = None
+    resource_id: str | None = None
+    summary: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+    version: int = 1
+
+
+class WorkspaceIndexRuntimeSummary(BaseModel):
+    total: int = 0
+    by_kind: dict[str, int] = Field(default_factory=dict)
+    by_status: dict[str, int] = Field(default_factory=dict)
+    bindings: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class WorkspaceIndexWarning(BaseModel):
+    severity: WorkspaceIndexWarningSeverity = "warning"
+    reason_code: str
+    message: str
+    resource_type: str | None = None
+    resource_id: str | None = None
+    action_href: str | None = None
+
+
+class WorkspaceIndexResponse(BaseModel):
+    workspace_id: str
+    schema_version: int = 1
+    generated_at: str
+    workspace: WorkspaceResponse
+    membership_summary: WorkspaceMembershipListSummary = Field(default_factory=WorkspaceMembershipListSummary)
+    resource_groups: list[WorkspaceIndexResourceGroup] = Field(default_factory=list)
+    runtime_summary: WorkspaceIndexRuntimeSummary = Field(default_factory=WorkspaceIndexRuntimeSummary)
+    warnings: list[WorkspaceIndexWarning] = Field(default_factory=list)
+    recent_activity: list[WorkspaceActivityEventResponse] = Field(default_factory=list)
+    partial_errors: list[dict[str, Any]] = Field(default_factory=list)
+
+
 # --- Eligibility schemas ---
 
 class WorkspaceEligibilityCheckRequest(BaseModel):

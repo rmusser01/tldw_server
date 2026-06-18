@@ -99,6 +99,13 @@ class WorkspaceMembershipService:
             },
             user_id=user_id,
         )
+        if existing is None or restore_deleted:
+            self._record_membership_activity_event(
+                workspace_id,
+                "membership.restored" if restore_deleted else "membership.linked",
+                row,
+                user_id=user_id,
+            )
         return self._serialize_membership(row, context=context, summary_ref=ref if resolve else None, resolve=resolve)
 
     def get_membership(
@@ -342,6 +349,12 @@ class WorkspaceMembershipService:
                 adapter.resource_type,
                 canonical_resource_id,
             )
+        self._record_membership_activity_event(
+            workspace_id,
+            "membership.unlinked",
+            row,
+            user_id=user_id,
+        )
         return self._serialize_membership(row, context=context, resolve=False)
 
     def workspace_membership_summary(self, workspace_id: str) -> dict[str, Any]:
@@ -998,3 +1011,43 @@ class WorkspaceMembershipService:
             "by_resource_type": dict(sorted(by_resource_type.items())),
             "by_role": dict(sorted(by_role.items())),
         }
+
+    def _record_membership_activity_event(
+        self,
+        workspace_id: str,
+        event_type: str,
+        row: Mapping[str, Any],
+        *,
+        user_id: str | None,
+    ) -> None:
+        recorder = getattr(self.chacha_db, "record_workspace_activity_event", None)
+        if not callable(recorder):
+            return
+        resource_type = str(row.get("resource_type") or "")
+        resource_id = str(row.get("resource_id") or "")
+        role = str(row.get("role") or "member")
+        transfer_policy = str(row.get("transfer_policy") or "link")
+        try:
+            recorder(
+                workspace_id,
+                {
+                    "event_type": event_type,
+                    "category": "membership",
+                    "resource_type": resource_type,
+                    "resource_id": resource_id,
+                    "summary": f"{event_type.removeprefix('membership.').title()} {resource_type} resource",
+                    "metadata": {
+                        "role": role,
+                        "transfer_policy": transfer_policy,
+                    },
+                },
+                user_id=user_id,
+            )
+        except Exception:  # noqa: BLE001 - activity recording must not fail membership writes.
+            logger.opt(exception=True).warning(
+                "Failed to record Workspace membership activity event workspace={} event_type={} resource_type={} resource_id={}",
+                workspace_id,
+                event_type,
+                resource_type,
+                resource_id,
+            )

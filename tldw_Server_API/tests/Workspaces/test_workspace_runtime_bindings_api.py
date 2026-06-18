@@ -97,6 +97,9 @@ def test_workspace_runtime_binding_api_upserts_lists_gets_and_archives(
         "path_hint",
     ]
     assert "absolute_root" not in created
+    assert [event["event_type"] for event in db.list_workspace_activity_events("ws-runtime", limit=5)] == [
+        "runtime_binding.upserted"
+    ]
 
     listed = workspace_client.get(
         "/api/v1/workspaces/ws-runtime/runtime-bindings?binding_kind=acp_session"
@@ -115,6 +118,18 @@ def test_workspace_runtime_binding_api_upserts_lists_gets_and_archives(
         "/api/v1/workspaces/ws-runtime/runtime-bindings/acp-session-1"
     )
     assert deleted.status_code == 204
+    events = db.list_workspace_activity_events("ws-runtime", limit=5)
+    assert [event["event_type"] for event in events] == [
+        "runtime_binding.archived",
+        "runtime_binding.upserted",
+    ]
+    assert events[0]["resource_type"] == "workspace_runtime_binding"
+    assert events[0]["resource_id"] == "acp-session-1"
+    assert events[0]["metadata"] == {
+        "binding_kind": "acp_session",
+        "owner_domain": "acp",
+        "status": "archived",
+    }
     assert (
         workspace_client.get(
             "/api/v1/workspaces/ws-runtime/runtime-bindings/acp-session-1"

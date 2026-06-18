@@ -36,6 +36,7 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceFileInventoryItemsResponse,
     WorkspaceFileInventoryScanRequest,
     WorkspaceFileInventoryStatusResponse,
+    WorkspaceIndexResponse,
     WorkspaceListResponse,
     WorkspaceMembershipCreateRequest,
     WorkspaceMembershipListResponse,
@@ -81,6 +82,7 @@ from tldw_Server_API.app.core.Workspaces.file_inventory_jobs import (
     WorkspaceFileInventoryEnqueueError,
     enqueue_workspace_file_inventory_scan_job,
 )
+from tldw_Server_API.app.core.Workspaces.activity_index import WorkspaceActivityIndexService
 from tldw_Server_API.app.core.Workspaces.context import build_workspace_core_context
 from tldw_Server_API.app.core.Workspaces.membership_request_metadata import (
     build_workspace_membership_request_metadata,
@@ -589,6 +591,41 @@ def _list_workspace_runtime_bindings_sync(
     )
 
 
+def _record_runtime_binding_activity_event(
+    db: CharactersRAGDB,
+    workspace_id: str,
+    event_type: str,
+    binding: dict[str, Any],
+    *,
+    user_id: str,
+) -> None:
+    """Record runtime binding activity without making descriptor writes depend on it."""
+    try:
+        db.record_workspace_activity_event(
+            workspace_id,
+            {
+                "event_type": event_type,
+                "category": "runtime_binding",
+                "resource_type": "workspace_runtime_binding",
+                "resource_id": str(binding.get("binding_id") or ""),
+                "summary": "Updated workspace runtime binding",
+                "metadata": {
+                    "binding_kind": str(binding.get("binding_kind") or ""),
+                    "owner_domain": str(binding.get("owner_domain") or ""),
+                    "status": str(binding.get("status") or ""),
+                },
+            },
+            user_id=user_id,
+        )
+    except Exception:  # noqa: BLE001 - activity is an inspection aid, not write-path authority.
+        logger.opt(exception=True).warning(
+            "Failed to record Workspace runtime binding activity workspace={} event_type={} binding_id={}",
+            workspace_id,
+            event_type,
+            binding.get("binding_id"),
+        )
+
+
 def _upsert_workspace_runtime_binding_sync(
     db: CharactersRAGDB,
     workspace_id: str,
@@ -599,11 +636,26 @@ def _upsert_workspace_runtime_binding_sync(
     workspace = _require_workspace(db, workspace_id)
     if bool(workspace.get("archived", False)):
         raise _workspace_runtime_binding_archived_conflict(workspace_id)
-    return db.upsert_workspace_runtime_binding(
+    payload = body.persistence_payload()
+    before = db.get_workspace_runtime_binding(
         workspace_id,
-        body.persistence_payload(),
+        str(payload.get("binding_id") or ""),
+        include_deleted=True,
+    )
+    binding = db.upsert_workspace_runtime_binding(
+        workspace_id,
+        payload,
         user_id=user_id,
     )
+    if before != binding:
+        _record_runtime_binding_activity_event(
+            db,
+            workspace_id,
+            "runtime_binding.upserted",
+            binding,
+            user_id=user_id,
+        )
+    return binding
 
 
 def _get_workspace_runtime_binding_sync(
@@ -631,6 +683,14 @@ def _archive_workspace_runtime_binding_sync(
         binding_id,
         user_id=user_id,
     )
+    if archived is not None:
+        _record_runtime_binding_activity_event(
+            db,
+            workspace_id,
+            "runtime_binding.archived",
+            archived,
+            user_id=user_id,
+        )
     if archived is None:
         existing = db.get_workspace_runtime_binding(
             workspace_id,
@@ -1163,6 +1223,43 @@ async def delete_workspace(
 
 
 # ── Memberships ─────────────────────────────────────────────────
+
+@router.get(
+    "/{workspace_id}/index",
+    response_model=WorkspaceIndexResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="Get workspace contained-resource index",
+)
+async def get_workspace_index(
+    workspace_id: str,
+    group_limit: int = Query(default=5, ge=1, le=25),
+    activity_limit: int = Query(default=25, ge=1, le=100),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    media_db: Any | None = Depends(try_get_media_db_for_user),
+    prompts_db: Any | None = Depends(try_get_prompts_db_for_user),
+    workflows_db: WorkflowsDatabase | None = Depends(try_get_workflows_db_for_user),
+    watchlists_db: Any | None = Depends(try_get_watchlists_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceIndexResponse:
+    """Return a lightweight inspection/navigation index for one workspace."""
+    try:
+        payload = WorkspaceActivityIndexService(db).build_index(
+            workspace_id,
+            group_limit=group_limit,
+            activity_limit=activity_limit,
+            media_db=media_db,
+            prompts_db=prompts_db,
+            workflows_db=workflows_db,
+            watchlists_db=watchlists_db,
+            user_id=_request_user_id(current_user),
+            request_metadata=build_workspace_membership_request_metadata(current_user),
+        )
+    except WorkspaceMembershipServiceError as exc:
+        raise _membership_service_error_to_http(exc) from exc
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace index") from exc
+    return WorkspaceIndexResponse(**payload)
+
 
 @router.get(
     "/{workspace_id}/memberships",

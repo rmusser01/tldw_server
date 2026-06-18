@@ -42,6 +42,7 @@ import re  # noqa: E402
 import sqlite3  # noqa: E402
 import tempfile  # noqa: E402
 import threading  # noqa: E402
+import time  # noqa: E402
 import uuid  # noqa: E402
 from collections.abc import Mapping
 from configparser import ConfigParser  # noqa: E402
@@ -601,7 +602,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 49  # Schema v49 adds Workspace Assistant Defaults storage
+    _CURRENT_SCHEMA_VERSION = 50  # Schema v50 adds Workspace activity/index event storage
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _ALLOWED_CONVERSATION_STATES: tuple[str, ...] = ("in-progress", "resolved", "backlog", "non-viable")
     _ALLOWED_CONVERSATION_CHARACTER_SCOPES: tuple[str, ...] = ("all", "character", "non_character")
@@ -620,6 +621,28 @@ class CharactersRAGDB:
     _ALLOWED_PERSONA_SESSION_STATUSES: tuple[str, ...] = ("active", "paused", "closed", "archived")
     _ALLOWED_CONVERSATION_ASSISTANT_KINDS: tuple[str, ...] = ("character", "persona")
     _ALLOWED_PERSONA_MEMORY_MODES: tuple[str, ...] = ("read_only", "read_write")
+    _WORKSPACE_ACTIVITY_MAX_METADATA_BYTES = 16 * 1024
+    _WORKSPACE_ACTIVITY_SECRET_KEY_RE = re.compile(
+        r"(^|[_\-.])("
+        r"api[_\-.]?key|access[_\-.]?key|secret|token|password|passwd|pwd|"
+        r"credential|credentials|private[_\-.]?key|client[_\-.]?secret|"
+        r"bearer|authorization|auth[_\-.]?header"
+        r")($|[_\-.])",
+        re.IGNORECASE,
+    )
+    _WORKSPACE_ACTIVITY_SECRET_VALUE_RE = re.compile(
+        r"(-----BEGIN [A-Z ]*PRIVATE KEY-----|"
+        r"\bsk-[A-Za-z0-9_\-]{8,}|"
+        r"\b(?:ghp|github_pat|xox[baprs])_[A-Za-z0-9_\-]{8,})",
+        re.IGNORECASE,
+    )
+    _WORKSPACE_ACTIVITY_PATH_KEY_RE = re.compile(
+        r"(^|[_\-.])("
+        r"absolute[_\-.]?root|root|paths?|mount[_\-.]?path|workspace[_\-.]?path|"
+        r"repo[_\-.]?path|local[_\-.]?path|project[_\-.]?root|dir|directory"
+        r")($|[_\-.])",
+        re.IGNORECASE,
+    )
     _ALLOWED_PERSONA_EXEMPLAR_KINDS: tuple[str, ...] = (
         "style",
         "catchphrase",
@@ -5600,6 +5623,37 @@ UPDATE db_schema_version
    AND version < 49;
 """
 
+    _MIGRATION_SQL_V49_TO_V50 = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 50 — Workspace activity event storage (2026-06-18)
+───────────────────────────────────────────────────────────────*/
+CREATE TABLE IF NOT EXISTS workspace_activity_events (
+  workspace_id   TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  event_id       TEXT NOT NULL,
+  event_type     TEXT NOT NULL,
+  category       TEXT NOT NULL,
+  actor_user_id  TEXT,
+  resource_type  TEXT,
+  resource_id    TEXT,
+  summary        TEXT,
+  metadata_json  TEXT NOT NULL DEFAULT '{}',
+  created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  client_id      TEXT NOT NULL DEFAULT 'unknown',
+  version        INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (workspace_id, event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ws_activity_events_created
+  ON workspace_activity_events(workspace_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_ws_activity_events_category
+  ON workspace_activity_events(workspace_id, category, created_at);
+
+UPDATE db_schema_version
+   SET version = 50
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 50;
+"""
+
     _MIGRATION_SQL_V47_TO_V48_POSTGRES = """
 /*───────────────────────────────────────────────────────────────
   Migration to Version 48 — Notes task-backed checklist storage (2026-06-05) [Postgres]
@@ -5717,6 +5771,37 @@ UPDATE db_schema_version
    SET version = 49
  WHERE schema_name = 'rag_char_chat_schema'
    AND version < 49;
+"""
+
+    _MIGRATION_SQL_V49_TO_V50_POSTGRES = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 50 — Workspace activity event storage (2026-06-18) [Postgres]
+───────────────────────────────────────────────────────────────*/
+CREATE TABLE IF NOT EXISTS workspace_activity_events (
+  workspace_id   TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  event_id       TEXT NOT NULL,
+  event_type     TEXT NOT NULL,
+  category       TEXT NOT NULL,
+  actor_user_id  TEXT,
+  resource_type  TEXT,
+  resource_id    TEXT,
+  summary        TEXT,
+  metadata_json  TEXT NOT NULL DEFAULT '{}',
+  created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  client_id      TEXT NOT NULL DEFAULT 'unknown',
+  version        INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (workspace_id, event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ws_activity_events_created
+  ON workspace_activity_events(workspace_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_ws_activity_events_category
+  ON workspace_activity_events(workspace_id, category, created_at);
+
+UPDATE db_schema_version
+   SET version = 50
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 50;
 """
 
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
@@ -7938,6 +8023,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V48->V49: {e}", exc_info=True)
             raise SchemaError(f"Unexpected error migrating to V49 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
 
+    def _migrate_from_v49_to_v50(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V49 to V50 (Workspace activity event storage)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V49 to V50 for DB: {self.db_path_str}...")
+        try:
+            self._ensure_workspace_activity_events_schema_sqlite(conn)
+            conn.executescript(self._MIGRATION_SQL_V49_TO_V50)
+            final_version = self._get_db_version(conn)
+            if final_version != 50:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V49->V50 failed version check. Expected 50, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V50 completed.")
+        except sqlite3.Error as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V49->V50 failed: {e}", exc_info=True)
+            raise SchemaError(f"Migration V49->V50 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V49->V50: {e}", exc_info=True)
+            raise SchemaError(f"Unexpected error migrating to V50 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+
     def _ensure_persona_persistence_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure persona persistence tables and columns exist for drifted SQLite schemas."""
         try:
@@ -9181,8 +9287,37 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "CREATE INDEX IF NOT EXISTS idx_ws_runtime_bindings_updated "
                 "ON workspace_runtime_bindings(workspace_id, updated_at)"
             )
+            self._ensure_workspace_activity_events_schema_sqlite(conn)
         except sqlite3.Error as exc:
             raise SchemaError(f"Failed ensuring SQLite workspace sub-resource schema: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_workspace_activity_events_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure Workspace activity event storage exists for SQLite."""
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS workspace_activity_events (
+                workspace_id   TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                event_id       TEXT NOT NULL,
+                event_type     TEXT NOT NULL,
+                category       TEXT NOT NULL,
+                actor_user_id  TEXT,
+                resource_type  TEXT,
+                resource_id    TEXT,
+                summary        TEXT,
+                metadata_json  TEXT NOT NULL DEFAULT '{}',
+                created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                client_id      TEXT NOT NULL DEFAULT 'unknown',
+                version        INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (workspace_id, event_id)
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ws_activity_events_created "
+            "ON workspace_activity_events(workspace_id, created_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ws_activity_events_category "
+            "ON workspace_activity_events(workspace_id, category, created_at)"
+        )
 
     def _ensure_workspace_assistant_defaults_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure Workspace Assistant Defaults storage exists for SQLite."""
@@ -9417,6 +9552,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "ON workspace_runtime_bindings(owner_domain, locator_ref, deleted)",
             "CREATE INDEX IF NOT EXISTS idx_ws_runtime_bindings_updated "
             "ON workspace_runtime_bindings(workspace_id, updated_at)",
+            """
+            CREATE TABLE IF NOT EXISTS workspace_activity_events (
+                workspace_id   TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+                event_id       TEXT NOT NULL,
+                event_type     TEXT NOT NULL,
+                category       TEXT NOT NULL,
+                actor_user_id  TEXT,
+                resource_type  TEXT,
+                resource_id    TEXT,
+                summary        TEXT,
+                metadata_json  TEXT NOT NULL DEFAULT '{}',
+                created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                client_id      TEXT NOT NULL DEFAULT 'unknown',
+                version        INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (workspace_id, event_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_ws_activity_events_created "
+            "ON workspace_activity_events(workspace_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_ws_activity_events_category "
+            "ON workspace_activity_events(workspace_id, category, created_at)",
         ]
         for statement in statements:
             self.backend.execute(statement, connection=conn)
@@ -10013,6 +10169,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 49 and current_db_version == 48:
                         self._migrate_from_v48_to_v49(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 50 and current_db_version == 49:
+                        self._migrate_from_v49_to_v50(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -10489,6 +10648,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 49 and current_db_version == 48:
                     self._migrate_from_v48_to_v49(conn)
                     current_db_version = self._get_db_version(conn)
+                if target_version >= 50 and current_db_version == 49:
+                    self._migrate_from_v49_to_v50(conn)
+                    current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
                 self._ensure_recent_voice_command_schema_sqlite(conn)
@@ -10496,6 +10658,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._ensure_note_studio_schema_sqlite(conn)
                 self._ensure_web_clipper_schema_sqlite(conn)
                 self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
+                self._ensure_workspace_activity_events_schema_sqlite(conn)
 
                 final_version_check = self._get_db_version(conn)
                 if final_version_check != target_version:
@@ -14328,6 +14491,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 49:
                 self._apply_postgres_migration_script(self._MIGRATION_SQL_V48_TO_V49_POSTGRES, conn, expected_version=49)
                 current_version = 49
+            if current_version < 50:
+                self._apply_postgres_migration_script(self._MIGRATION_SQL_V49_TO_V50_POSTGRES, conn, expected_version=50)
+                current_version = 50
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -18330,6 +18496,206 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (workspace_id,),
         )
         return [dict(row) for row in cursor.fetchall()]
+
+    @classmethod
+    def _redact_workspace_activity_metadata(cls, value: Any, *, key: str | None = None) -> Any:
+        if isinstance(value, Mapping):
+            redacted: dict[str, Any] = {}
+            for raw_key, raw_value in value.items():
+                item_key = str(raw_key)
+                if cls._WORKSPACE_ACTIVITY_SECRET_KEY_RE.search(item_key):
+                    continue
+                redacted[item_key] = cls._redact_workspace_activity_metadata(raw_value, key=item_key)
+            return redacted
+        if isinstance(value, list):
+            return [cls._redact_workspace_activity_metadata(item, key=key) for item in value]
+        if isinstance(value, tuple):
+            return [cls._redact_workspace_activity_metadata(item, key=key) for item in value]
+        if isinstance(value, str):
+            if cls._WORKSPACE_ACTIVITY_SECRET_VALUE_RE.search(value):
+                return "[redacted]"
+            if key and cls._WORKSPACE_ACTIVITY_PATH_KEY_RE.search(key):
+                from tldw_Server_API.app.core.Workspaces.runtime_bindings import redacted_path_hint
+
+                return redacted_path_hint(value)
+        return value
+
+    @classmethod
+    def _workspace_activity_metadata_json(cls, value: Any) -> tuple[dict[str, Any], str]:
+        if value is None:
+            normalized: dict[str, Any] = {}
+        elif isinstance(value, str):
+            if not value.strip():
+                normalized = {}
+            else:
+                try:
+                    parsed = json.loads(value)
+                except json.JSONDecodeError as exc:
+                    raise InputError("metadata must be valid JSON.") from exc  # noqa: TRY003
+                if not isinstance(parsed, Mapping):
+                    raise InputError("metadata must be a JSON object.")  # noqa: TRY003
+                normalized = dict(parsed)
+        elif isinstance(value, Mapping):
+            normalized = dict(value)
+        else:
+            raise InputError("metadata must be a JSON object.")  # noqa: TRY003
+
+        redacted = cls._redact_workspace_activity_metadata(normalized)
+        try:
+            dumped = json.dumps(
+                redacted,
+                ensure_ascii=True,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        except (TypeError, ValueError) as exc:
+            raise InputError("metadata must be JSON serializable.") from exc  # noqa: TRY003
+        if len(dumped.encode("utf-8")) > cls._WORKSPACE_ACTIVITY_MAX_METADATA_BYTES:
+            raise InputError(
+                f"metadata exceeds {cls._WORKSPACE_ACTIVITY_MAX_METADATA_BYTES} bytes."
+            ) from None  # noqa: TRY003
+        return redacted, dumped
+
+    @staticmethod
+    def _normalize_workspace_activity_required_string(value: Any, field_name: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise InputError(f"{field_name} is required.")  # noqa: TRY003
+        return normalized
+
+    @staticmethod
+    def _normalize_workspace_activity_optional_string(value: Any, *, max_length: int) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        if not normalized:
+            return None
+        return normalized[:max_length]
+
+    @staticmethod
+    def _normalize_workspace_activity_limit(limit: int) -> int:
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise InputError("limit must be an integer.")  # noqa: TRY003
+        if limit < 1 or limit > 100:
+            raise InputError("limit must be between 1 and 100.")  # noqa: TRY003
+        return limit
+
+    def _normalize_workspace_activity_row(self, row: Mapping[str, Any] | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        item = dict(row)
+        raw_metadata = item.pop("metadata_json", None)
+        if isinstance(raw_metadata, Mapping):
+            metadata = dict(raw_metadata)
+        elif isinstance(raw_metadata, str) and raw_metadata.strip():
+            try:
+                parsed = json.loads(raw_metadata)
+                metadata = dict(parsed) if isinstance(parsed, Mapping) else {}
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Failed to decode workspace activity metadata_json for workspace={} event={} ({} chars); raw value omitted.",
+                    item.get("workspace_id"),
+                    item.get("event_id"),
+                    len(raw_metadata),
+                )
+                metadata = {}
+        else:
+            metadata = {}
+        item["metadata"] = metadata
+        item["version"] = int(item.get("version") or 1)
+        return item
+
+    def record_workspace_activity_event(
+        self,
+        workspace_id: str,
+        data: Mapping[str, Any],
+        *,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Append a bounded, secret-safe activity event for a workspace."""
+        normalized_workspace_id = self._normalize_workspace_activity_required_string(workspace_id, "workspace_id")
+        event_type = self._normalize_workspace_activity_required_string(data.get("event_type"), "event_type")
+        category = self._normalize_workspace_activity_required_string(data.get("category"), "category")
+        event_id = self._normalize_workspace_activity_optional_string(data.get("event_id"), max_length=128)
+        if event_id is None:
+            event_id = f"wae_{time.time_ns():020d}_{uuid.uuid4().hex}"
+        actor = self._normalize_workspace_membership_actor(user_id)
+        resource_type = self._normalize_workspace_activity_optional_string(data.get("resource_type"), max_length=80)
+        resource_id = self._normalize_workspace_activity_optional_string(data.get("resource_id"), max_length=512)
+        summary = self._normalize_workspace_activity_optional_string(data.get("summary"), max_length=512)
+        metadata, metadata_json = self._workspace_activity_metadata_json(data.get("metadata"))
+        _ = metadata
+        now = self._get_current_utc_timestamp_iso()
+
+        try:
+            with self.transaction() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO workspace_activity_events (
+                        workspace_id,
+                        event_id,
+                        event_type,
+                        category,
+                        actor_user_id,
+                        resource_type,
+                        resource_id,
+                        summary,
+                        metadata_json,
+                        created_at,
+                        client_id,
+                        version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    """,
+                    (
+                        normalized_workspace_id,
+                        event_id,
+                        event_type,
+                        category,
+                        actor,
+                        resource_type,
+                        resource_id,
+                        summary,
+                        metadata_json,
+                        now,
+                        self.client_id or "unknown",
+                    ),
+                )
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError(f"Workspace activity event write failed: {exc}") from exc  # noqa: TRY003
+
+        rows = self.list_workspace_activity_events(normalized_workspace_id, limit=100)
+        for row in rows:
+            if row.get("event_id") == event_id:
+                return row
+        raise CharactersRAGDBError("Created workspace activity event could not be reloaded.")  # noqa: TRY003
+
+    def list_workspace_activity_events(
+        self,
+        workspace_id: str,
+        *,
+        limit: int = 50,
+        category: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List recent workspace activity events in deterministic newest-first order."""
+        normalized_workspace_id = self._normalize_workspace_activity_required_string(workspace_id, "workspace_id")
+        normalized_limit = self._normalize_workspace_activity_limit(limit)
+        clauses = ["workspace_id = ?"]
+        params: list[Any] = [normalized_workspace_id]
+        if category is not None:
+            clauses.append("category = ?")
+            params.append(self._normalize_workspace_activity_required_string(category, "category"))
+        params.append(normalized_limit)
+        cursor = self.execute_query(
+            f"SELECT * FROM workspace_activity_events WHERE {' AND '.join(clauses)} "  # nosec B608
+            "ORDER BY created_at DESC, event_id DESC LIMIT ?",
+            tuple(params),
+        )
+        return [
+            item
+            for row in cursor.fetchall()
+            if (item := self._normalize_workspace_activity_row(row)) is not None
+        ]
 
     def update_workspace_source(
         self,

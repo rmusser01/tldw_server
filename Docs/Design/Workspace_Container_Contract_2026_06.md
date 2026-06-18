@@ -359,27 +359,57 @@ Secret handling:
 
 ## Activity And Index Contract
 
-The Workspace activity/index view should be an inspection surface, not a clone
-of every owner domain UI.
+`GET /api/v1/workspaces/{workspace_id}/index` is the concrete #1994
+inspection/navigation contract. It is a server-owned read model over existing
+Workspace registry data and owner-domain membership summaries. It is not a new
+Workspace dashboard and must not implement edit/detail behavior that belongs to
+Media, Notes, Chat, Prompts, Workflows, Watchlists, ACP, Sandbox, MCP, or Jobs.
 
-It should expose:
+The response shape is versioned with `schema_version: 1` and includes:
 
-- workspace identity, profile, authority/status, archive/delete state.
-- membership counts and membership pages by resource type/role/state.
-- runtime binding descriptors and readiness.
-- recent membership changes, imports, root changes, runtime binding changes,
-  active-context denials, and recovery actions.
-- links back to owning domain routes for full edit/detail behavior.
+- `workspace`: workspace identity, profile, archive/delete state, and version.
+- `membership_summary`: active membership totals by resource type and role.
+- `resource_groups`: bounded resolved membership previews grouped by resource
+  type. Each group includes an `owner_surface` `{label, href}` supplied by the
+  server so clients can navigate back to the owning UI.
+- `runtime_summary`: descriptor-only runtime binding totals, status counts, and
+  redacted binding payloads.
+- `warnings`: recovery/navigation hints for archived/deleted workspaces,
+  unresolved resource previews, and missing/degraded runtime bindings.
+- `recent_activity`: bounded newest-first activity rows.
+- `partial_errors`: reserved list for future dependency-specific partial read
+  failures.
 
-It should not:
+Current activity categories and event types:
 
-- duplicate Media, Notes, Chat, Prompts, Workflows, Watchlists, ACP, Sandbox, or
-  Jobs management UIs.
-- expose secret metadata, raw filesystem paths, file contents, prompt bodies, or
-  model outputs.
-- treat activity/index membership as an authorization grant.
+| Category | Event types | Source |
+| --- | --- | --- |
+| `membership` | `membership.linked`, `membership.restored`, `membership.unlinked` | Workspace membership service write paths. |
+| `runtime_binding` | `runtime_binding.upserted`, `runtime_binding.archived` | Runtime binding endpoint helper write paths. |
 
-Child issue #1994 owns the concrete activity/index API and UI contract.
+Current warning reason codes:
+
+| Reason code | Meaning |
+| --- | --- |
+| `workspace_archived` | Workspace is inspectable but write/active-context actions are blocked. |
+| `workspace_deleted` | Deleted workspace state is exposed only for recovery-safe inspection. |
+| `resource_unresolved` | A linked owner-domain resource could not be resolved for preview. |
+| `resource_<state>` | A resolved resource preview reported a non-available state. |
+| `runtime_binding_missing` | A runtime binding points at a missing runtime/path/session. |
+| `runtime_binding_<status>` | A runtime binding reported another degraded status such as blocked, detached, conflict, unavailable, or unsupported. |
+
+Security constraints:
+
+- Activity metadata is bounded JSON and must omit secret-shaped keys, API keys,
+  tokens, passwords, private keys, raw env values, prompt bodies, model outputs,
+  file contents, and unredacted absolute paths.
+- Runtime binding rows in the index use the same redacted descriptor contract as
+  `/runtime-bindings`; the index must not become a secret store or runtime
+  admission authority.
+- Resource previews are summaries only. Clients must open the owner `href` for
+  full content, editing, execution, or recovery actions.
+- Unknown warning reason codes are forward-compatible and should be displayed as
+  generic warnings by clients rather than rejected.
 
 ## Open Questions And Assigned Follow-Ups
 
