@@ -46,6 +46,9 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceResponse,
     WorkspaceRootResponse,
     WorkspaceRootsResponse,
+    WorkspaceRuntimeBindingDescriptorListResponse,
+    WorkspaceRuntimeBindingDescriptorResponse,
+    WorkspaceRuntimeBindingDescriptorUpsertRequest,
     WorkspaceSandboxRootProvisionRequest,
     WorkspaceSandboxRootProvisionResponse,
     WorkspaceSourceCreateRequest,
@@ -93,6 +96,11 @@ from tldw_Server_API.app.core.Workspaces.root_binding_service import (
     attach_primary_workspace_root,
 )
 from tldw_Server_API.app.core.Workspaces.operations import workspace_operation_response_payload
+from tldw_Server_API.app.core.Workspaces.runtime_bindings import (
+    WORKSPACE_RUNTIME_BINDING_KINDS,
+    WORKSPACE_RUNTIME_BINDING_OWNER_DOMAINS,
+    runtime_binding_response_payload,
+)
 from tldw_Server_API.app.core.Workspaces.sandbox_root_provisioning import (
     provision_and_attach_sandbox_root,
 )
@@ -196,6 +204,10 @@ def _workspace_roots_response(
 
 def _operation_to_response(operation: dict[str, Any]) -> WorkspaceOperationResponse:
     return WorkspaceOperationResponse(**workspace_operation_response_payload(operation))
+
+
+def _runtime_binding_to_response(binding: dict[str, Any]) -> WorkspaceRuntimeBindingDescriptorResponse:
+    return WorkspaceRuntimeBindingDescriptorResponse(**runtime_binding_response_payload(binding))
 
 
 def _root_path_hint(root: dict[str, Any]) -> str | None:
@@ -502,6 +514,51 @@ def _workspace_membership_not_found(resource_type: str, resource_id: str) -> HTT
             },
         },
     )
+
+
+def _workspace_runtime_binding_not_found(binding_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={
+            "code": "workspace_runtime_binding_not_found",
+            "message": "Workspace runtime binding was not found.",
+            "details": {"binding_id": binding_id},
+        },
+    )
+
+
+def _workspace_runtime_binding_archived_conflict(workspace_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "workspace_archived",
+            "message": "Archived workspaces cannot be modified.",
+            "details": {"workspace_id": workspace_id},
+        },
+    )
+
+
+def _validate_runtime_binding_query_filter(
+    value: str | None,
+    field_name: str,
+    allowed: frozenset[str],
+) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "workspace_runtime_binding_filter_invalid",
+                "message": f"{field_name} is not supported.",
+                "details": {
+                    "field": field_name,
+                    "allowed": sorted(allowed),
+                },
+            },
+        )
+    return normalized
 
 
 def _workspace_with_primary_root(
@@ -1156,6 +1213,165 @@ async def delete_workspace_membership(
         raise _membership_service_error_to_http(exc) from exc
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to delete workspace membership") from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── Runtime Bindings ─────────────────────────────────────────────────
+
+@router.get(
+    "/{workspace_id}/runtime-bindings",
+    response_model=WorkspaceRuntimeBindingDescriptorListResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="List workspace runtime binding descriptors",
+)
+async def list_workspace_runtime_bindings(
+    workspace_id: str,
+    binding_kind: str | None = Query(default=None),
+    owner_domain: str | None = Query(default=None),
+    include_archived: bool = Query(default=False),
+    limit: int = Query(default=100, ge=1, le=1000),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceRuntimeBindingDescriptorListResponse:
+    """List descriptor-only runtime bindings for a workspace."""
+    _ = current_user
+    try:
+        _require_workspace(db, workspace_id)
+        normalized_kind = _validate_runtime_binding_query_filter(
+            binding_kind,
+            "binding_kind",
+            WORKSPACE_RUNTIME_BINDING_KINDS,
+        )
+        normalized_owner = _validate_runtime_binding_query_filter(
+            owner_domain,
+            "owner_domain",
+            WORKSPACE_RUNTIME_BINDING_OWNER_DOMAINS,
+        )
+        bindings = db.list_workspace_runtime_bindings(
+            workspace_id,
+            binding_kind=normalized_kind,
+            owner_domain=normalized_owner,
+            include_deleted=include_archived,
+            limit=limit,
+        )
+    except HTTPException:
+        raise
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            input_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            default_detail="Failed to fetch workspace runtime bindings",
+        ) from exc
+    items = [_runtime_binding_to_response(binding) for binding in bindings]
+    return WorkspaceRuntimeBindingDescriptorListResponse(
+        workspace_id=workspace_id,
+        items=items,
+        total=len(items),
+    )
+
+
+@router.post(
+    "/{workspace_id}/runtime-bindings",
+    response_model=WorkspaceRuntimeBindingDescriptorResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    summary="Create or update a workspace runtime binding descriptor",
+)
+async def upsert_workspace_runtime_binding(
+    workspace_id: str,
+    body: WorkspaceRuntimeBindingDescriptorUpsertRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceRuntimeBindingDescriptorResponse:
+    """Persist descriptor metadata for an external runtime binding."""
+    try:
+        workspace = _require_workspace(db, workspace_id)
+        if bool(workspace.get("archived", False)):
+            raise _workspace_runtime_binding_archived_conflict(workspace_id)
+        binding = db.upsert_workspace_runtime_binding(
+            workspace_id,
+            body.model_dump(),
+            user_id=_request_user_id(current_user),
+        )
+    except HTTPException:
+        raise
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            input_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            default_detail="Failed to create workspace runtime binding",
+        ) from exc
+    return _runtime_binding_to_response(binding)
+
+
+@router.get(
+    "/{workspace_id}/runtime-bindings/{binding_id}",
+    response_model=WorkspaceRuntimeBindingDescriptorResponse,
+    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="Get a workspace runtime binding descriptor",
+)
+async def get_workspace_runtime_binding(
+    workspace_id: str,
+    binding_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> WorkspaceRuntimeBindingDescriptorResponse:
+    """Fetch one active runtime binding descriptor."""
+    _ = current_user
+    try:
+        _require_workspace(db, workspace_id)
+        binding = db.get_workspace_runtime_binding(workspace_id, binding_id)
+    except HTTPException:
+        raise
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            input_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            default_detail="Failed to fetch workspace runtime binding",
+        ) from exc
+    if binding is None:
+        raise _workspace_runtime_binding_not_found(binding_id)
+    return _runtime_binding_to_response(binding)
+
+
+@router.delete(
+    "/{workspace_id}/runtime-bindings/{binding_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(WORKSPACES_DELETE_RATE_LIMIT)],
+    summary="Archive a workspace runtime binding descriptor",
+)
+async def archive_workspace_runtime_binding(
+    workspace_id: str,
+    binding_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+) -> Response:
+    """Archive one runtime binding descriptor without affecting the runtime itself."""
+    try:
+        workspace = _require_workspace(db, workspace_id)
+        if bool(workspace.get("archived", False)):
+            raise _workspace_runtime_binding_archived_conflict(workspace_id)
+        archived = db.archive_workspace_runtime_binding(
+            workspace_id,
+            binding_id,
+            user_id=_request_user_id(current_user),
+        )
+    except HTTPException:
+        raise
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            input_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            default_detail="Failed to archive workspace runtime binding",
+        ) from exc
+    if archived is None:
+        existing = db.get_workspace_runtime_binding(
+            workspace_id,
+            binding_id,
+            include_deleted=True,
+        )
+        if existing is None:
+            raise _workspace_runtime_binding_not_found(binding_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

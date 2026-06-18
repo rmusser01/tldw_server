@@ -42,6 +42,8 @@ context work should start from that contract.
 ## Module Map
 
 - `models.py` - canonical profiles, kinds, root states, and allowed-action helpers.
+- `runtime_bindings.py` - runtime binding descriptor normalization and
+  secret-safe metadata handling.
 - `context.py` - Workspace Core context and runtime capability envelope builder.
 - `service_capabilities.py` - readiness and capability projection.
 - `source_jobs.py` - workspace source job payload and enqueue helpers.
@@ -77,6 +79,29 @@ Future membership adapters must validate access through the owning domain
 adapter before linking or resolving a resource. Unsupported resource types must
 fail closed, and summaries/provenance should avoid exposing secrets, absolute
 paths, sandbox mount paths, prompts, model output contents, or file contents.
+
+## Runtime Bindings
+
+`workspace_runtime_bindings` stores descriptor metadata for runtimes associated
+with a workspace. Runtime bindings are not trust grants, root admissions,
+resumable sessions, or secret stores. ACP, Sandbox, MCP, Jobs, Workflows, and
+other owner domains remain responsible for their own runtime admission and
+lifecycle decisions.
+
+The public API surface is
+`/api/v1/workspaces/{workspace_id}/runtime-bindings`. Responses expose
+descriptor fields, normalized status, `path_hint`, metadata, and
+`redaction_report`. They must not expose raw absolute roots, environment
+variables, API keys, bearer tokens, credentials, prompt text, model output, or
+file contents. Path-like hints are reduced to display basenames before storage
+or response.
+
+Supported descriptor kinds include repository, worktree, local path,
+Workspace-owned project root, ACP session/run/workspace, Sandbox root/session,
+MCP workspace set, and remote-runtime placeholders. Missing or unavailable
+runtimes should be represented with explicit statuses such as `missing`,
+`runtime-missing`, `inspect-only`, `unavailable`, `blocked`, or `unsupported`
+instead of causing workspace reads to fail.
 
 ## Active Context Eligibility
 

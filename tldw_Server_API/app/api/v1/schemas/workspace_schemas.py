@@ -12,6 +12,9 @@ from tldw_Server_API.app.core.Workspaces.membership_models import (
     WORKSPACE_MEMBERSHIP_MAX_PROVENANCE_BYTES,
     normalize_membership_json_object,
 )
+from tldw_Server_API.app.core.Workspaces.runtime_bindings import (
+    normalize_runtime_binding_payload,
+)
 from tldw_Server_API.app.core.Workspaces.eligibility import (
     WorkspaceEligibilityOperation,
     WorkspaceEligibilityOperationCategory,
@@ -642,6 +645,107 @@ class WorkspaceRuntimeBinding(BaseModel):
     state: WorkspaceCapabilityServiceState
     reason_code: str | None = None
     management_surface: str | None = None
+
+
+WorkspaceRuntimeBindingKind = Literal[
+    "repo",
+    "git_worktree",
+    "local_path",
+    "workspace_project_root",
+    "acp_execution_workspace",
+    "acp_session",
+    "acp_run",
+    "sandbox_root",
+    "sandbox_session",
+    "mcp_workspace_set",
+    "remote_runtime",
+]
+WorkspaceRuntimeBindingOwnerDomain = Literal[
+    "workspaces",
+    "acp",
+    "sandbox",
+    "mcp",
+    "jobs",
+    "workflows",
+    "watchlists",
+    "external",
+]
+WorkspaceRuntimeBindingStatus = Literal[
+    "ready",
+    "missing",
+    "inspect-only",
+    "blocked",
+    "provisioning",
+    "unavailable",
+    "detached",
+    "conflict",
+    "runtime-missing",
+    "archived",
+    "unsupported",
+]
+WorkspaceRuntimeBindingPortability = Literal[
+    "reference",
+    "metadata-only",
+    "local-only",
+    "copy",
+]
+
+
+class WorkspaceRuntimeBindingRedactionReport(BaseModel):
+    redacted: bool = False
+    redacted_fields: list[str] = Field(default_factory=list)
+    rejected_fields: list[str] = Field(default_factory=list)
+
+
+class WorkspaceRuntimeBindingDescriptorUpsertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    binding_id: str = Field(..., min_length=1, max_length=128)
+    binding_kind: str = Field(..., min_length=1, max_length=80)
+    owner_domain: str = Field(..., min_length=1, max_length=80)
+    locator_ref: str = Field(..., min_length=1, max_length=512)
+    label: str | None = Field(default=None, max_length=512)
+    status: str = Field(..., min_length=1, max_length=80)
+    path_hint: str | None = Field(default=None, max_length=1024)
+    portability: str = Field(..., min_length=1, max_length=80)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    redaction_report: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_runtime_binding_contract(self) -> "WorkspaceRuntimeBindingDescriptorUpsertRequest":
+        try:
+            normalize_runtime_binding_payload(self.model_dump())
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        return self
+
+
+class WorkspaceRuntimeBindingDescriptorResponse(BaseModel):
+    workspace_id: str
+    binding_id: str
+    binding_kind: WorkspaceRuntimeBindingKind
+    owner_domain: WorkspaceRuntimeBindingOwnerDomain
+    locator_ref: str
+    label: str | None = None
+    status: WorkspaceRuntimeBindingStatus
+    path_hint: str | None = None
+    portability: WorkspaceRuntimeBindingPortability
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    redaction_report: WorkspaceRuntimeBindingRedactionReport = Field(
+        default_factory=WorkspaceRuntimeBindingRedactionReport
+    )
+    created_by_user_id: str | None = None
+    updated_by_user_id: str | None = None
+    created_at: str
+    updated_at: str
+    deleted: bool = False
+    version: int
+
+
+class WorkspaceRuntimeBindingDescriptorListResponse(BaseModel):
+    workspace_id: str
+    items: list[WorkspaceRuntimeBindingDescriptorResponse]
+    total: int
 
 
 WorkspaceOperationStatus = Literal[
