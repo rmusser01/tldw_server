@@ -95,6 +95,7 @@ import { WorkspaceAgentTaskHandoffModal } from "./WorkspaceAgentTaskHandoffModal
 import { WorkspaceACPHistoryModal } from "./WorkspaceACPHistoryModal"
 import { WorkspaceSandboxDiagnosticsPanel } from "./WorkspaceSandboxDiagnosticsPanel"
 import { WORKSPACES_PATH } from "@/routes/route-paths"
+import { useActiveWorkspaceContext } from "@/services/workspace-context"
 
 interface WorkspaceHeaderProps {
   leftPaneOpen: boolean
@@ -152,6 +153,57 @@ const WORKSPACE_ROLLOUT_CONTROL_ORDER: WorkspaceRolloutControlKey[] = [
   "research_workspace_status_guardrails_v1"
 ]
 const WORKSPACE_ROLLOUT_PRESET_PERCENTAGES = [0, 10, 50, 100] as const
+
+const getServerWorkspaceContextStatusCopy = (
+  context: ReturnType<typeof useActiveWorkspaceContext>["context"],
+  loading: boolean
+): { key: string; fallback: string } => {
+  if (loading) {
+    return {
+      key: "playground:workspace.serverContextLoading",
+      fallback: "Server context loading"
+    }
+  }
+  if (
+    context.attentionState === "archived" ||
+    context.workspace?.archived ||
+    context.recovery.reasonCode === "workspace_archived"
+  ) {
+    return {
+      key: "playground:workspace.serverContextArchived",
+      fallback: "Server context archived"
+    }
+  }
+  const state = context.state
+  if (state === "partial") {
+    return {
+      key: "playground:workspace.serverContextPartial",
+      fallback: "Server context partial"
+    }
+  }
+  if (state === "error") {
+    return {
+      key: "playground:workspace.serverContextUnavailable",
+      fallback: "Server context unavailable"
+    }
+  }
+  if (state === "missing") {
+    return {
+      key: "playground:workspace.serverContextMissing",
+      fallback: "Server context missing"
+    }
+  }
+  if (state === "none") {
+    return {
+      key: "playground:workspace.noServerContext",
+      fallback: "No server context"
+    }
+  }
+  return {
+    key: "playground:workspace.serverContextReady",
+    fallback: "Server context ready"
+  }
+}
 
 export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   leftPaneOpen,
@@ -436,6 +488,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   const workspaceName = useWorkspaceStore((s) => s.workspaceName)
   const workspaceId = useWorkspaceStore((s) => s.workspaceId)
   const workspaceTag = useWorkspaceStore((s) => s.workspaceTag)
+  const {
+    context: serverWorkspaceContext,
+    loading: serverWorkspaceContextLoading
+  } = useActiveWorkspaceContext({ workspaceId })
   const workspaceBanner = useWorkspaceStore((s) => s.workspaceBanner) || {
     title: "",
     subtitle: "",
@@ -1392,6 +1448,19 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       })),
     [workspaceCollections]
   )
+  const serverWorkspaceContextStatusCopy = getServerWorkspaceContextStatusCopy(
+    serverWorkspaceContext,
+    serverWorkspaceContextLoading
+  )
+  const serverWorkspaceContextLabel =
+    serverWorkspaceContext.workspace?.label ||
+    workspaceId ||
+    t("playground:workspace.noServerWorkspace", "No server Workspace")
+  const serverWorkspaceRecovery = serverWorkspaceContext.recovery
+  const showServerWorkspaceRecovery =
+    !serverWorkspaceContextLoading &&
+    serverWorkspaceRecovery.reasonCode !== "allowed" &&
+    Boolean(serverWorkspaceRecovery.message)
 
   // ── Workspace Switcher dropdown: recent/pinned workspaces + navigation ──
   const workspaceSwitcherItems: MenuProps["items"] = [
@@ -1704,6 +1773,38 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
               </Tooltip>
             </div>
           )}
+        </div>
+        <div
+          data-testid="workspace-server-context-indicator"
+          className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5 rounded-md border border-border bg-surface/80 px-2 py-1 text-xs text-text-muted"
+        >
+          <span className="font-medium text-text">
+            {t("playground:workspace.serverWorkspace", "Server Workspace")}
+          </span>
+          <span className="max-w-[14rem] truncate">
+            {serverWorkspaceContextLabel}
+          </span>
+          <span className="rounded bg-surface2 px-1.5 py-0.5">
+            {t(
+              serverWorkspaceContextStatusCopy.key,
+              serverWorkspaceContextStatusCopy.fallback
+            )}
+          </span>
+          {showServerWorkspaceRecovery && (
+            <span className="min-w-0">
+              {serverWorkspaceRecovery.message}
+            </span>
+          )}
+          {showServerWorkspaceRecovery &&
+            serverWorkspaceRecovery.nextStepHref &&
+            serverWorkspaceRecovery.nextStepLabel && (
+              <a
+                href={serverWorkspaceRecovery.nextStepHref}
+                className="font-medium text-primary hover:text-primary/80"
+              >
+                {serverWorkspaceRecovery.nextStepLabel}
+              </a>
+            )}
         </div>
       </div>
 
