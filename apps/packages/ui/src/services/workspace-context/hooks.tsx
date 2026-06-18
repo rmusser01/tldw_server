@@ -36,6 +36,8 @@ export const useActiveWorkspaceContext = ({
   const defaultClient = useTldwApiClient() as WorkspaceContextClient
   const resolvedClient = client ?? defaultClient
   const clientRef = React.useRef(resolvedClient)
+  const mountedRef = React.useRef(false)
+  const requestIdRef = React.useRef(0)
   const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId)
 
   clientRef.current = resolvedClient
@@ -47,75 +49,57 @@ export const useActiveWorkspaceContext = ({
   const [error, setError] = React.useState<Error | null>(null)
 
   const loadContext = React.useCallback(async () => {
-    if (!normalizedWorkspaceId) {
-      setLoading(false)
-      setError(null)
-      setContext(normalizeActiveWorkspaceContext(null))
+    const currentWorkspaceId = normalizedWorkspaceId
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
+    const isCurrentRequest = () =>
+      mountedRef.current && requestIdRef.current === requestId
+
+    if (!currentWorkspaceId) {
+      if (isCurrentRequest()) {
+        setLoading(false)
+        setError(null)
+        setContext(normalizeActiveWorkspaceContext(null))
+      }
       return
     }
 
-    setLoading(true)
-    setError(null)
+    if (isCurrentRequest()) {
+      setLoading(true)
+      setError(null)
+    }
     try {
-      const response = await clientRef.current.getWorkspaceContext(normalizedWorkspaceId)
-      setContext(normalizeActiveWorkspaceContext(response))
+      const response = await clientRef.current.getWorkspaceContext(currentWorkspaceId)
+      if (isCurrentRequest()) {
+        setContext(normalizeActiveWorkspaceContext(response))
+      }
     } catch (err) {
-      const normalizedError = toError(err)
-      setError(normalizedError)
-      setContext(
-        normalizeActiveWorkspaceContext(null, {
-          state: "error",
-          reasonCode: "workspace_context_error"
-        })
-      )
+      if (isCurrentRequest()) {
+        const normalizedError = toError(err)
+        setError(normalizedError)
+        setContext(
+          normalizeActiveWorkspaceContext(null, {
+            state: "error",
+            reasonCode: "workspace_context_error"
+          })
+        )
+      }
     } finally {
-      setLoading(false)
+      if (isCurrentRequest()) {
+        setLoading(false)
+      }
     }
   }, [normalizedWorkspaceId])
 
   React.useEffect(() => {
-    let disposed = false
-
-    const run = async () => {
-      if (!normalizedWorkspaceId) {
-        if (!disposed) {
-          setLoading(false)
-          setError(null)
-          setContext(normalizeActiveWorkspaceContext(null))
-        }
-        return
-      }
-
-      setLoading(true)
-      setError(null)
-      try {
-        const response = await clientRef.current.getWorkspaceContext(normalizedWorkspaceId)
-        if (!disposed) {
-          setContext(normalizeActiveWorkspaceContext(response))
-        }
-      } catch (err) {
-        if (!disposed) {
-          setError(toError(err))
-          setContext(
-            normalizeActiveWorkspaceContext(null, {
-              state: "error",
-              reasonCode: "workspace_context_error"
-            })
-          )
-        }
-      } finally {
-        if (!disposed) {
-          setLoading(false)
-        }
-      }
-    }
-
-    void run()
+    mountedRef.current = true
+    void loadContext()
 
     return () => {
-      disposed = true
+      mountedRef.current = false
+      requestIdRef.current += 1
     }
-  }, [normalizedWorkspaceId])
+  }, [loadContext])
 
   return {
     context,

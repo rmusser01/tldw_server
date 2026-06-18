@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import type {
   WorkspaceApiResponse,
@@ -114,6 +114,17 @@ const contextFixture = (
   }
 }
 
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+
+  return { promise, resolve, reject }
+}
+
 describe("useActiveWorkspaceContext", () => {
   it("does not fetch when no active server workspace id exists", () => {
     const getWorkspaceContext = vi.fn()
@@ -204,5 +215,57 @@ describe("useActiveWorkspaceContext", () => {
     await waitFor(() => {
       expect(result.current.context.workspace?.label).toBe("Second")
     })
+  })
+
+  it("keeps the latest refresh result when workspace requests overlap", async () => {
+    const firstRequest = deferred<WorkspaceContextResponse>()
+    const secondRequest = deferred<WorkspaceContextResponse>()
+    const getWorkspaceContext = vi.fn()
+      .mockReturnValueOnce(firstRequest.promise)
+      .mockReturnValueOnce(secondRequest.promise)
+
+    const { result } = renderHook(() =>
+      useActiveWorkspaceContext({
+        workspaceId: "ws-1",
+        client: { getWorkspaceContext }
+      })
+    )
+
+    await waitFor(() => {
+      expect(getWorkspaceContext).toHaveBeenCalledTimes(1)
+    })
+
+    let refreshPromise!: Promise<void>
+    act(() => {
+      refreshPromise = result.current.refresh()
+    })
+
+    await waitFor(() => {
+      expect(getWorkspaceContext).toHaveBeenCalledTimes(2)
+    })
+
+    await act(async () => {
+      secondRequest.resolve(
+        contextFixture({
+          workspace: workspaceFixture({ id: "ws-1", name: "Second" })
+        })
+      )
+      await refreshPromise
+    })
+
+    await waitFor(() => {
+      expect(result.current.context.workspace?.label).toBe("Second")
+    })
+
+    await act(async () => {
+      firstRequest.resolve(
+        contextFixture({
+          workspace: workspaceFixture({ id: "ws-1", name: "First" })
+        })
+      )
+      await firstRequest.promise
+    })
+
+    expect(result.current.context.workspace?.label).toBe("Second")
   })
 })
