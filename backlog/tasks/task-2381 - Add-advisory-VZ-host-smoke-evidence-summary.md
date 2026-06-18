@@ -19,11 +19,11 @@ Add an advisory-first host-gated evidence summary path for VZ Linux smoke runs. 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A design spec captures advisory-only summary behavior, malformed/missing evidence handling, and non-goals before implementation.
-- [ ] #2 The host-gated workflow can run an always-run advisory evidence summary step after smoke/evidence generation.
-- [ ] #3 The summary reports evidence present/missing, required file presence, phase outcomes, final exit code, cleanup status, and artifact/log pointers when available.
-- [ ] #4 Malformed or missing evidence produces warnings and exit 0 in this first advisory slice.
-- [ ] #5 Focused tests cover complete evidence, missing evidence, malformed JSON, and workflow wiring without requiring a real VZ host.
+- [x] #1 A design spec captures advisory-only summary behavior, malformed/missing evidence handling, and non-goals before implementation.
+- [x] #2 The host-gated workflow can run an always-run advisory evidence summary step after smoke/evidence generation.
+- [x] #3 The summary reports evidence present/missing, required file presence, phase outcomes, final exit code, cleanup status, and artifact/log pointers when available.
+- [x] #4 Malformed or missing evidence produces warnings and exit 0 in this first advisory slice.
+- [x] #5 Focused tests cover complete evidence, missing evidence, malformed JSON, and workflow wiring without requiring a real VZ host.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -42,20 +42,30 @@ Add an advisory-first host-gated evidence summary path for VZ Linux smoke runs. 
 - Planning verification: `git diff --check`; Bandit not run for the design-only docs/backlog commit.
 - Implementation plan drafted at `Docs/superpowers/plans/2026-06-17-vz-host-gated-evidence-summary-advisory.md`.
 - Local plan review tightened the handoff by replacing an implicit evidence-directory probe with exact `lstat` handling for missing, symlinked, non-directory, and unreadable evidence roots. Plan reviewer subagent was not spawned because delegation requires explicit user authorization in this environment.
+- Implemented `tools/vz-linux-image/scripts/summarize-host-e2e-evidence.py` and `tools/vz-linux-image/tests/test_summarize_host_e2e_evidence.py`. Review loops hardened descriptor-safe evidence reads, intermediate symlink handling, malformed nested metadata filtering, and scalar-only JSON rendering.
+- Wired `.github/workflows/vz-linux-host-gated.yml` to run `Summarize smoke evidence` with `if: always()` after managed smoke and before artifact uploads. Updated `tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_workflow.py` to cover ordering, guards, advisory behavior, and docs policy terms.
+- Updated `Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md` to document the advisory GitHub step summary as the first inline diagnostic surface without replacing smoke results or artifacts.
+- Verification: `python -m pytest tools/vz-linux-image/tests/test_summarize_host_e2e_evidence.py tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_workflow.py -q` passed with 40 tests and 6 existing warnings.
+- Verification: `bash -n tools/vz-linux-image/scripts/run-host-e2e-smoke.sh` passed.
+- Verification: `python tools/vz-linux-image/scripts/summarize-host-e2e-evidence.py --evidence-dir /private/tmp/tldw-vz-evidence-missing >/tmp/tldw-vz-evidence-summary-smoke.md` exited 0 and wrote the advisory missing-evidence summary.
+- Verification: `python -m bandit -r tools/vz-linux-image/scripts/summarize-host-e2e-evidence.py -f json -o /tmp/bandit_vz_evidence_summary_final_docs.json` completed with 0 findings.
+- Verification: `git diff --check` passed.
+- Discarded check: `bash -n .github/workflows/vz-linux-host-gated.yml` is not a valid YAML validation command and failed on workflow syntax; workflow YAML is parsed by the contract tests.
+- Real VZ VM smoke was not run for this slice because the change is host-independent advisory reporting and workflow contract wiring.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Added an advisory VZ host smoke evidence summarizer, wired it into the host-gated workflow, and documented the operator contract. The summarizer is read-only, exits 0 for missing/malformed evidence, appends to GitHub step summary when available, and uses descriptor-safe path handling plus allowlisted JSON rendering to avoid symlink traversal or raw log leakage.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

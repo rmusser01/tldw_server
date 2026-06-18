@@ -305,8 +305,11 @@ def test_vz_linux_host_gated_policy_prioritizes_evidence_artifact() -> None:
     policy = _normalized_text(POLICY_PATH)
 
     for required_term in (
+        "GitHub step summary",
+        "advisory",
         "vz-linux-host-gated-evidence",
         "vz-linux-host-gated-helper-logs",
+        "does not replace artifacts",
         "Inspect `vz-linux-host-gated-evidence` first",
         "raw helper logs",
         "must not include disposable image-store bundles or rootfs clones",

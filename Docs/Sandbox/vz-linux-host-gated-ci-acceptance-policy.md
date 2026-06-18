@@ -223,6 +223,13 @@ bundle contract.
 
 ## Artifact And Log Expectations
 
+The workflow writes an advisory GitHub step summary after the smoke wrapper has
+had a chance to finalize evidence. Inspect the GitHub step summary first for a
+quick overview of evidence availability, final exit code, phase outcomes,
+cleanup state, and artifact pointers. The summary is advisory: missing or
+malformed summary output in this first slice should not replace the smoke step
+result and does not replace artifacts.
+
 The workflow must upload structured smoke evidence from:
 
 ```text
