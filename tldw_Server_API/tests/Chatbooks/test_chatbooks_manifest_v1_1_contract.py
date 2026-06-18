@@ -1,10 +1,31 @@
 import json
+import shutil
+import zipfile
 from pathlib import Path
 
 import jsonschema
+import pytest
 
 from tldw_Server_API.app.api.v1.schemas.chatbook_schemas import CreateChatbookRequest
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import ChatbookVersion
+from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+from tldw_Server_API.app.core.Chatbooks.services.jobs_worker import _handle_export
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+
+@pytest.fixture
+def chatbook_v1_1_service(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test")
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+
+    db_path = tmp_path / "chatbook_v1_1.db"
+    db = CharactersRAGDB(db_path=str(db_path), client_id="chatbook-v1-1")
+    service = ChatbookService(user_id="test_user", db=db)
+
+    yield service
+
+    if hasattr(service, "temp_dir") and service.temp_dir.exists():
+        shutil.rmtree(service.temp_dir, ignore_errors=True)
 
 
 def _load_v1_1_schema() -> dict:
@@ -72,6 +93,79 @@ def test_create_chatbook_request_accepts_format_version_v1_1():
     )
 
     assert request.format_version is ChatbookVersion.V1_1
+
+
+@pytest.mark.asyncio
+async def test_create_chatbook_export_writes_requested_v1_1_manifest_version(chatbook_v1_1_service):
+    success, _message, archive_path = await chatbook_v1_1_service.create_chatbook(
+        name="v1.1",
+        description="v1.1",
+        content_selections={},
+        format_version=ChatbookVersion.V1_1,
+    )
+
+    assert success is True
+    assert archive_path is not None
+
+    with zipfile.ZipFile(archive_path, "r") as zf:
+        manifest = json.loads(zf.read("manifest.json"))
+
+    assert manifest["version"] == "1.1.0"
+
+
+@pytest.mark.asyncio
+async def test_prompt_studio_export_payload_includes_format_version(chatbook_v1_1_service):
+    captured_payload = {}
+
+    class _PromptStudioAdapter:
+        def create_export_job(self, payload, request_id=None):
+            captured_payload.update(payload)
+            return {"id": 123}
+
+    chatbook_v1_1_service._jobs_backend = "prompt_studio"
+    chatbook_v1_1_service._ps_job_adapter = _PromptStudioAdapter()
+
+    success, _message, job_id = await chatbook_v1_1_service.create_chatbook(
+        name="v1.1 async",
+        description="v1.1 async",
+        content_selections={},
+        format_version=ChatbookVersion.V1_1,
+        async_mode=True,
+    )
+
+    assert success is True
+    assert job_id == "123"
+    assert captured_payload["format_version"] == "1.1.0"
+
+
+@pytest.mark.asyncio
+async def test_core_jobs_worker_forwards_format_version_to_archive_creation():
+    captured_kwargs = {}
+
+    class _Service:
+        def _claim_export_job(self, job_id):
+            return True
+
+        async def _create_chatbook_sync_wrapper(self, **kwargs):
+            captured_kwargs.update(kwargs)
+            return True, "ok", "/tmp/export.chatbook"
+
+        def _get_export_job(self, job_id):
+            return None
+
+    result = await _handle_export(
+        _Service(),
+        {
+            "name": "v1.1 queued",
+            "description": "v1.1 queued",
+            "content_selections": {},
+            "format_version": "1.1.0",
+        },
+        "job-1",
+    )
+
+    assert result == {"path": "/tmp/export.chatbook", "download_url": None}
+    assert captured_kwargs["format_version"] == ChatbookVersion.V1_1
 
 
 def test_minimal_v1_1_manifest_matches_schema():

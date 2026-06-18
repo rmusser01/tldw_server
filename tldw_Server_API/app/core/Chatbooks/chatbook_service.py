@@ -326,6 +326,15 @@ class ChatbookService:
         return None
 
     @staticmethod
+    def _coerce_format_version(format_version: ChatbookVersion | str | None) -> ChatbookVersion:
+        """Normalize service callers to the canonical ChatbookVersion enum."""
+        if format_version is None:
+            return ChatbookVersion.V1
+        if isinstance(format_version, ChatbookVersion):
+            return format_version
+        return ChatbookVersion(str(format_version))
+
+    @staticmethod
     def _truthy_env(name: str, default: bool = False) -> bool:
         raw = os.getenv(name)
         if raw is None:
@@ -1295,6 +1304,7 @@ class ChatbookService:
         Returns:
             Tuple of (success, message, job_id or file_path)
         """
+        format_version = self._coerce_format_version(format_version)
         if async_mode:
             # Create job and run asynchronously
             # If using Prompt Studio backend, create PS job first and reuse its id
@@ -1310,6 +1320,7 @@ class ChatbookService:
                     "include_generated_content": include_generated_content,
                     "tags": tags or [],
                     "categories": categories or [],
+                    "format_version": format_version.value,
                 }
                 try:
                     ps_job = self._ps_job_adapter.create_export_job(payload, request_id=request_id)
@@ -1608,7 +1619,7 @@ class ChatbookService:
 
             # Initialize manifest
             manifest = ChatbookManifest(
-                version=ChatbookVersion.V1,
+                version=self._coerce_format_version(format_version),
                 name=name,
                 description=description,
                 author=author,
