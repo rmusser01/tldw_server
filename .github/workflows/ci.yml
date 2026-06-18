@@ -1655,13 +1655,13 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install huggingface_hub
-          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" || "$SHARD_NAME" == rag-new-unit-* ]]; then
+          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]; then
             python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
           else
             python Helper_Scripts/download_embedding_models.py --target models/embeddings
@@ -2862,13 +2862,13 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install huggingface_hub
-          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" || "$SHARD_NAME" == rag-new-unit-* ]]; then
+          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]; then
             python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
           else
             python Helper_Scripts/download_embedding_models.py --target models/embeddings
@@ -3997,13 +3997,13 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install huggingface_hub
-          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" || "$SHARD_NAME" == rag-new-unit-* ]]; then
+          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]; then
             python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
           else
             python Helper_Scripts/download_embedding_models.py --target models/embeddings
@@ -5131,13 +5131,13 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install huggingface_hub
-          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" || "$SHARD_NAME" == rag-new-unit-* ]]; then
+          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]; then
             python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
           else
             python Helper_Scripts/download_embedding_models.py --target models/embeddings
@@ -6267,13 +6267,13 @@ jobs:
             ${{ runner.os }}-embeddings-
 
       - name: Pre-download embedding models
-        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && matrix.shard.name != 'rag-new-unit-rag-contracts' && matrix.shard.name != 'rag-new-integration-research' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || startsWith(matrix.shard.name, 'rag-new-') || matrix.shard.name == 'research-websearch') }}
+        if: ${{ matrix.shard.name != 'ai-embeddings-backpressure' && matrix.shard.name != 'ai-embeddings-dlq-config' && matrix.shard.name != 'ai-embeddings-media-validation' && matrix.shard.name != 'ai-embeddings-policy' && (matrix.shard.name == 'ai-chromadb' || matrix.shard.name == 'ai-chunking-core' || matrix.shard.name == 'ai-chunking-semantic-security' || startsWith(matrix.shard.name, 'ai-embeddings-') || startsWith(matrix.shard.name, 'vector-stores') || matrix.shard.name == 'rag-legacy' || matrix.shard.name == 'research-websearch') }}
         continue-on-error: true
         shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install huggingface_hub
-          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" || "$SHARD_NAME" == rag-new-unit-* ]]; then
+          if [[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]; then
             python Helper_Scripts/download_embedding_models.py --target models/embeddings --skip-defaults --model sentence-transformers/all-MiniLM-L6-v2
           else
             python Helper_Scripts/download_embedding_models.py --target models/embeddings

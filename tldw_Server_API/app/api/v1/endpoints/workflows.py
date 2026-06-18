@@ -2482,7 +2482,7 @@ async def get_run(
         run_id=run.run_id,
         workflow_id=run.workflow_id,
         user_id=str(run.user_id) if getattr(run, 'user_id', None) is not None else None,
-        status=run.status,
+        status=getattr(run, "status", None) or "queued",
         status_reason=run.status_reason,
         inputs=json.loads(run.inputs_json or "{}"),
         outputs=json.loads(run.outputs_json or "null") if run.outputs_json else None,

@@ -199,6 +199,37 @@ def test_create_and_run_saved_workflow(client_with_workflows_db: TestClient):
     assert "run_completed" in types
 
 
+def test_get_run_normalizes_falsey_status(
+    client_with_workflows_db: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A transient falsey DB status should not break response validation."""
+    client = client_with_workflows_db
+
+    definition = {
+        "name": "status-normalization",
+        "version": 1,
+        "steps": [{"id": "s1", "type": "log", "config": {"message": "status"}}],
+    }
+    wid = client.post("/api/v1/workflows", json=definition).json()["id"]
+    run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
+
+    db: WorkflowsDatabase = client.app.dependency_overrides[wf_mod._get_db]()
+    original_get_run = db.get_run
+
+    def patched_get_run(rid: str):
+        run = original_get_run(rid)
+        if run and run.run_id == run_id:
+            run.status = None  # type: ignore[assignment]
+        return run
+
+    monkeypatch.setattr(db, "get_run", patched_get_run, raising=False)
+
+    response = client.get(f"/api/v1/workflows/runs/{run_id}")
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "queued"
+
+
 def test_run_adhoc_requires_workflows_scope_like_saved_run(tmp_path):
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))
     workflow_id = db.create_definition(

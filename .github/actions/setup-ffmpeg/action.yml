@@ -21,11 +21,11 @@ runs:
         fi
         sudo apt-get update -o Acquire::Retries=3
         if [ "${{ inputs.install-ffmpeg }}" = "true" ] && [ "${{ inputs.install-portaudio }}" = "true" ]; then
-          sudo apt-get install -y ffmpeg portaudio19-dev python3-all-dev
+          sudo apt-get install -y --no-install-recommends ffmpeg portaudio19-dev python3-all-dev
         elif [ "${{ inputs.install-ffmpeg }}" = "true" ]; then
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y --no-install-recommends ffmpeg
         elif [ "${{ inputs.install-portaudio }}" = "true" ]; then
-          sudo apt-get install -y portaudio19-dev python3-all-dev
+          sudo apt-get install -y --no-install-recommends portaudio19-dev python3-all-dev
         fi
     - name: Install FFmpeg (macOS)
       if: runner.os == 'macOS'

@@ -104,7 +104,12 @@ def test_coverage_required_is_path_conditional() -> None:
 
 
 def test_coverage_required_installs_portaudio_for_pyaudio_builds() -> None:
-    _assert_ffmpeg_portaudio_setup(".github/workflows/coverage-required.yml", "coverage-required")
+    workflow = _load(".github/workflows/coverage-required.yml")
+    steps = workflow["jobs"]["coverage-required"]["steps"]
+    install_step = _get_step(steps, "Install FFmpeg and PortAudio (Linux)")
+    assert install_step["uses"] == "./.github/actions/setup-ffmpeg"
+    assert install_step["with"]["install-ffmpeg"] == "false"
+    assert install_step["with"]["install-portaudio"] == "true"
 
 
 def test_coverage_required_uses_documented_global_floor() -> None:
@@ -293,9 +298,8 @@ def test_embedding_model_predownload_skips_backpressure_shard() -> None:
         assert "matrix.shard.name != 'ai-embeddings-dlq-config'" in condition
         assert "matrix.shard.name != 'ai-embeddings-media-validation'" in condition
         assert "matrix.shard.name != 'ai-embeddings-policy'" in condition
-        assert "matrix.shard.name != 'rag-new-unit-rag-contracts'" in condition
-        assert "matrix.shard.name != 'rag-new-integration-research'" in condition
-        assert '[[ "$SHARD_NAME" == "ai-embeddings-v5-core" || "$SHARD_NAME" == rag-new-unit-* ]]' in run_script
+        assert "startsWith(matrix.shard.name, 'rag-new-')" not in condition
+        assert '[[ "$SHARD_NAME" == "ai-embeddings-v5-core" ]]' in run_script
         assert "--skip-defaults --model sentence-transformers/all-MiniLM-L6-v2" in run_script
 
 
@@ -306,8 +310,14 @@ def test_setup_ffmpeg_action_can_skip_ffmpeg_but_keep_portaudio() -> None:
     linux_step = _get_step(action["runs"]["steps"], "Install FFmpeg (Linux)")
     linux_script = linux_step["run"]
     assert 'inputs.install-ffmpeg' in linux_script
-    assert "sudo apt-get install -y ffmpeg portaudio19-dev python3-all-dev" in linux_script
-    assert "sudo apt-get install -y portaudio19-dev python3-all-dev" in linux_script
+    assert (
+        "sudo apt-get install -y --no-install-recommends ffmpeg portaudio19-dev python3-all-dev"
+        in linux_script
+    )
+    assert (
+        "sudo apt-get install -y --no-install-recommends portaudio19-dev python3-all-dev"
+        in linux_script
+    )
 
     windows_step = _get_step(action["runs"]["steps"], "Install FFmpeg (Windows)")
     assert "inputs.install-ffmpeg == 'true'" in windows_step["if"]
