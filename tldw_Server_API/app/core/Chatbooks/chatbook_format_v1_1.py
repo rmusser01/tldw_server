@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import mimetypes
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -169,10 +170,25 @@ def validate_v1_1_before_import(manifest: Any, extract_dir: Path) -> tuple[bool,
         errors.append(_inventory_failure_error(failed_file))
 
     inventory_paths = _inventory_paths(getattr(manifest, "file_inventory", []))
+    failed_inventory_paths = _failed_inventory_paths(failed_files)
     for payload_path in _required_import_payload_paths(getattr(manifest, "content_items", [])):
         if payload_path not in inventory_paths:
             errors.append(
                 f"File inventory validation failed for {payload_path}: missing inventory entry"
+            )
+    for attachment_path, reason in _conversation_attachment_inventory_requirements(
+        getattr(manifest, "content_items", []),
+        extract_dir,
+        inventory_paths,
+        failed_inventory_paths,
+    ):
+        if reason == "unsafe_attachment_path":
+            errors.append(
+                f"File inventory validation failed for {attachment_path}: unsafe attachment path"
+            )
+        elif attachment_path not in inventory_paths:
+            errors.append(
+                f"File inventory validation failed for {attachment_path}: missing inventory entry"
             )
 
     for report_error in report.get("errors") or []:
@@ -368,6 +384,17 @@ def _inventory_paths(inventory: Any) -> set[str]:
     return paths
 
 
+def _failed_inventory_paths(failed_files: list[Any]) -> set[str]:
+    paths: set[str] = set()
+    for failed_file in failed_files:
+        if not isinstance(failed_file, dict):
+            continue
+        path = failed_file.get("path")
+        if isinstance(path, str) and path:
+            paths.add(path)
+    return paths
+
+
 def _required_import_payload_paths(content_items: Any) -> list[str]:
     if not isinstance(content_items, list):
         return []
@@ -398,6 +425,89 @@ def _required_import_payload_paths(content_items: Any) -> list[str]:
         if path and path not in paths:
             paths.append(path)
     return paths
+
+
+def _conversation_attachment_inventory_requirements(
+    content_items: Any,
+    extract_dir: Path,
+    inventory_paths: set[str],
+    failed_inventory_paths: set[str],
+) -> list[tuple[str, str]]:
+    if not isinstance(content_items, list):
+        return []
+
+    requirements: list[tuple[str, str]] = []
+    for item in content_items:
+        item_id = _content_item_field(item, "id")
+        if item_id is None or str(item_id) == "":
+            continue
+        item_type = _content_type_value(_content_item_field(item, "type"))
+        if item_type != "conversation":
+            continue
+
+        conversation_path = f"content/conversations/conversation_{item_id}.json"
+        if conversation_path not in inventory_paths or conversation_path in failed_inventory_paths:
+            continue
+
+        conversation_file = _safe_extract_file_path(extract_dir, conversation_path)
+        if conversation_file is None:
+            continue
+
+        try:
+            conversation_data = json.loads(conversation_file.read_text(encoding="utf-8"))
+        except (OSError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(conversation_data, dict):
+            continue
+
+        messages = conversation_data.get("messages")
+        if not isinstance(messages, list):
+            continue
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            attachments = message.get("attachments") or []
+            if not isinstance(attachments, list):
+                continue
+            for attachment in attachments:
+                if not isinstance(attachment, dict):
+                    continue
+                if str(attachment.get("type", "")).lower() != "image":
+                    continue
+                raw_path = attachment.get("file_path")
+                if not isinstance(raw_path, str) or not raw_path:
+                    continue
+                attachment_path = _normalize_archive_relative_path(raw_path)
+                if attachment_path is None:
+                    requirements.append((raw_path, "unsafe_attachment_path"))
+                    continue
+                if (attachment_path, "missing_inventory") not in requirements:
+                    requirements.append((attachment_path, "missing_inventory"))
+    return requirements
+
+
+def _safe_extract_file_path(extract_dir: Path, relative_path: str) -> Path | None:
+    safe_path = _normalize_archive_relative_path(relative_path)
+    if safe_path is None:
+        return None
+    target_path = extract_dir / safe_path
+    try:
+        target_path.resolve().relative_to(extract_dir.resolve())
+    except (OSError, ValueError):
+        return None
+    if not target_path.is_file():
+        return None
+    return target_path
+
+
+def _normalize_archive_relative_path(path: str) -> str | None:
+    normalized = path.replace("\\", "/")
+    pure_path = PurePosixPath(normalized)
+    if pure_path.is_absolute():
+        return None
+    if any(part in {"", ".", ".."} for part in pure_path.parts):
+        return None
+    return pure_path.as_posix()
 
 
 def _content_item_field(content_item: Any, field_name: str) -> Any:

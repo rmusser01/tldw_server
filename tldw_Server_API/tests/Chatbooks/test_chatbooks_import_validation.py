@@ -130,6 +130,111 @@ def _write_v1_1_note_chatbook(
     return archive_path
 
 
+def _write_v1_1_conversation_chatbook_with_missing_attachment_inventory(
+    archive_path: Path,
+) -> Path:
+    conversation_path = "content/conversations/conversation_1.json"
+    attachment_path = "content/conversations/conversation_1_assets/image.png"
+    attachment_payload = b"\x89PNG\r\n\x1a\n"
+    conversation_payload = json.dumps(
+        {
+            "id": "1",
+            "name": "Conversation With Attachment",
+            "character_id": 1,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "See attached image",
+                    "attachments": [
+                        {
+                            "type": "image",
+                            "file_path": attachment_path,
+                            "mime_type": "image/png",
+                            "primary": True,
+                        }
+                    ],
+                }
+            ],
+        }
+    ).encode("utf-8")
+    conversation_hash = f"sha256:{hashlib.sha256(conversation_payload).hexdigest()}"
+
+    manifest = {
+        "version": "1.1.0",
+        "name": "Conversation Attachment Validation",
+        "description": "v1.1 conversation attachment inventory fixture",
+        "author": None,
+        "created_at": "2026-06-18T12:00:00+00:00",
+        "updated_at": "2026-06-18T12:00:00+00:00",
+        "export_id": "conversation-attachment-validation",
+        "content_items": [
+            {
+                "id": "1",
+                "type": "conversation",
+                "title": "Conversation With Attachment",
+                "description": None,
+                "created_at": None,
+                "updated_at": None,
+                "tags": [],
+                "metadata": {},
+                "file_path": conversation_path,
+                "checksum": conversation_hash,
+            }
+        ],
+        "relationships": [],
+        "configuration": {
+            "include_media": False,
+            "include_embeddings": False,
+            "include_generated_content": True,
+            "media_quality": "compressed",
+            "max_file_size_mb": 100,
+        },
+        "statistics": {
+            "total_conversations": 1,
+            "total_notes": 0,
+            "total_characters": 0,
+            "total_media_items": 0,
+            "total_prompts": 0,
+            "total_evaluations": 0,
+            "total_embeddings": 0,
+            "total_world_books": 0,
+            "total_dictionaries": 0,
+            "total_documents": 0,
+            "total_explainer_sessions": 0,
+            "total_size_bytes": len(conversation_payload) + len(attachment_payload),
+        },
+        "metadata": {"tags": [], "categories": [], "language": "en", "license": None},
+        "user_info": {"user_id": "test_user"},
+        "features_used": ["file_inventory", "integrity_metadata"],
+        "producer": {"name": "tldw_server"},
+        "source_instance": {},
+        "compatibility": {
+            "min_reader_version": "1.0.0",
+            "recommended_reader_version": "1.1.0",
+        },
+        "file_inventory": [
+            {
+                "path": conversation_path,
+                "media_type": "application/json",
+                "size_bytes": len(conversation_payload),
+                "integrity": {
+                    "status": "verified",
+                    "algorithm": "sha256",
+                    "value": conversation_hash,
+                },
+                "role": "payload",
+                "content_item_ids": ["1"],
+            }
+        ],
+    }
+
+    with zipfile.ZipFile(archive_path, "w") as zf:
+        zf.writestr(conversation_path, conversation_payload)
+        zf.writestr(attachment_path, attachment_payload)
+        zf.writestr("manifest.json", json.dumps(manifest))
+    return archive_path
+
+
 @pytest.mark.parametrize(
     ("archive_bytes", "expected_error"),
     [
@@ -316,6 +421,33 @@ def test_v1_1_import_rejects_null_file_path_missing_fallback_inventory_before_wr
     assert details["imported_items"] == {}
     import_notes.assert_not_called()
     service.db.add_note.assert_not_called()
+
+
+def test_v1_1_import_rejects_missing_conversation_attachment_inventory_before_writes(service):
+    archive_path = _write_v1_1_conversation_chatbook_with_missing_attachment_inventory(
+        service.import_dir / "missing_conversation_attachment_inventory.chatbook"
+    )
+    import_conversations = MagicMock()
+    service._import_conversations = import_conversations
+    service.db.add_message = MagicMock()
+
+    success, message, details = service._import_chatbook_sync(
+        file_path=str(archive_path),
+        content_selections=None,
+        conflict_resolution=ConflictResolution.SKIP,
+        prefix_imported=False,
+        import_media=False,
+        import_embeddings=False,
+    )
+
+    assert success is False
+    assert "inventory" in message.lower() or "validation" in message.lower()
+    assert details is not None
+    assert any("content/conversations/conversation_1_assets/image.png" in error for error in details["errors"])
+    assert any("missing inventory entry" in error.lower() for error in details["errors"])
+    assert details["imported_items"] == {}
+    import_conversations.assert_not_called()
+    service.db.add_message.assert_not_called()
 
 
 def test_v1_1_import_rejects_unknown_feature_policy_before_writes(service):
