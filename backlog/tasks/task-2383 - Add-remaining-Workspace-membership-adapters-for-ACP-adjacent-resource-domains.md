@@ -4,7 +4,7 @@ title: Add remaining Workspace membership adapters for ACP-adjacent resource dom
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-18 03:34'
+updated_date: '2026-06-18 03:50'
 labels:
   - workspace
   - acp
@@ -49,12 +49,27 @@ Optional Prompts/Workflows/Watchlists DB handles now flow through forward and re
 Runtime session adapters validate Workspace runtime binding kind/domain and expose only redacted descriptor metadata.
 
 Deferred note and acp_run support remains fail-closed.
+
+PR #2385 review pass:
+- Rebased on origin/dev; branch was already up to date.
+- Moved workflow admin/tenant metadata derivation into core Workspaces helper and normalized missing tenant_id to an empty string.
+- Replaced per-request WorkflowsDatabase construction with a cached optional dependency and shutdown cleanup hook.
+- Switched ACP/Sandbox session adapters from concrete inheritance to composition.
+- Made unlink cleanup independent of live prompt/workflow/watchlist domain adapter availability, with best-effort prompt canonicalization when Prompts DB is available.
+- Addressed Gemini status-code comments with raw 401/403 checks despite existing imports.
+
+Review-pass verification:
+- RED tests failed for the expected review issues before implementation.
+- Focused suite: 125 passed, 6 warnings.
+- compileall on touched modules passed.
+- git diff --check passed.
+- Bandit touched scope: 0 findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Supported ACP-adjacent Workspace membership adapters are implemented and documented. Focused verification passed: 119 Workspace membership/context tests, plus Bandit on touched backend/API scope with 0 findings.
+Supported ACP-adjacent Workspace membership adapters are implemented, documented, and updated for PR #2385 review feedback. Focused verification passed: 125 Workspace membership/context tests, compileall on touched modules, git diff --check, and Bandit on touched backend/API/service scope with 0 findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

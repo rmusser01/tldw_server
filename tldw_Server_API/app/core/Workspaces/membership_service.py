@@ -306,8 +306,25 @@ class WorkspaceMembershipService:
             workflows_db=workflows_db,
             watchlists_db=watchlists_db,
             request_metadata=request_metadata,
-            validate=adapter.resource_type in {"prompt", "workflow", "watchlist"},
+            validate=False,
         )
+        if adapter.resource_type == "prompt" and prompts_db is not None:
+            try:
+                canonical_resource_id = self._canonical_resource_id(
+                    adapter,
+                    adapter.resource_type,
+                    resource_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    media_db=media_db,
+                    prompts_db=prompts_db,
+                    workflows_db=workflows_db,
+                    watchlists_db=watchlists_db,
+                    request_metadata=request_metadata,
+                    validate=True,
+                )
+            except WorkspaceMembershipServiceError:
+                canonical_resource_id = self._non_empty_string(resource_id, "resource_id")
         row = self.chacha_db.delete_workspace_resource_membership(
             workspace_id,
             adapter.resource_type,

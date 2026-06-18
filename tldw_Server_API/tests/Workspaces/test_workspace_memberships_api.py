@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 from typing import Any
 
@@ -473,6 +474,52 @@ def test_workflow_membership_route_passes_request_tenant_metadata(client: TestCl
     assert body["summary"]["title"] == "Investigation"
     assert body["summary"]["metadata"]["version"] == 2
     assert "do not expose" not in response.text
+
+
+def test_workflow_membership_route_allows_owner_without_tenant_id(membership_app: FastAPI) -> None:
+    membership_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id="user-1", tenant_id=None)
+    with TestClient(membership_app, raise_server_exceptions=False) as test_client:
+        response = test_client.post(
+            "/api/v1/workspaces/workspace-1/memberships",
+            json=_membership_payload(resource_type="workflow", resource_id="9", role="runtime"),
+        )
+
+    assert response.status_code == 201
+    assert response.json()["resource_id"] == "9"
+
+
+def test_optional_workflows_db_dependency_is_sync_and_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.api.v1.API_Deps import Workflows_DB_Deps as workflows_db_deps
+
+    class FakeWorkflowsDependencyDB:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    created: list[FakeWorkflowsDependencyDB] = []
+
+    def _create_workflows_database(*, backend: object | None = None) -> FakeWorkflowsDependencyDB:
+        _ = backend
+        db = FakeWorkflowsDependencyDB()
+        created.append(db)
+        return db
+
+    workflows_db_deps.close_cached_workflows_db_for_user()
+    monkeypatch.setattr(workflows_db_deps, "get_content_backend_instance", lambda: object())
+    monkeypatch.setattr(workflows_db_deps, "create_workflows_database", _create_workflows_database)
+
+    try:
+        first = workflows_db_deps.try_get_workflows_db_for_user()
+        second = workflows_db_deps.try_get_workflows_db_for_user()
+
+        assert not inspect.isawaitable(first)
+        assert first is second
+        assert len(created) == 1
+    finally:
+        workflows_db_deps.close_cached_workflows_db_for_user()
+    assert created[0].closed is True
 
 
 def test_watchlist_membership_route_uses_optional_watchlists_db(client: TestClient) -> None:

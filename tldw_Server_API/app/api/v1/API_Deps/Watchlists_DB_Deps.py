@@ -52,7 +52,7 @@ async def try_get_watchlists_db_for_user(
     try:
         return await get_watchlists_db_for_user(current_user)
     except HTTPException as exc:
-        if exc.status_code in {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN}:
+        if exc.status_code in {401, 403}:
             raise
         logger.warning("Optional Watchlists DB unavailable (status_code={})", exc.status_code)
         return None

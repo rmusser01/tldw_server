@@ -10,10 +10,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import try_get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import try_get_watchlists_db_for_user
-from tldw_Server_API.app.api.v1.endpoints.workspaces import (
-    _membership_request_metadata,
-    try_get_workflows_db_for_user,
-)
+from tldw_Server_API.app.api.v1.API_Deps.Workflows_DB_Deps import try_get_workflows_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import WORKSPACES_READ_RATE_LIMIT
 from tldw_Server_API.app.api.v1.schemas.workspace_schemas import WorkspaceResourceMembershipListResponse
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
@@ -26,6 +23,9 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.Workspaces.membership_service import (
     WorkspaceMembershipService,
     WorkspaceMembershipServiceError,
+)
+from tldw_Server_API.app.core.Workspaces.membership_request_metadata import (
+    build_workspace_membership_request_metadata,
 )
 
 router = APIRouter()
@@ -84,7 +84,7 @@ async def list_resource_workspace_memberships(
             workflows_db=workflows_db,
             watchlists_db=watchlists_db,
             user_id=_request_user_id(current_user),
-            request_metadata=_membership_request_metadata(current_user),
+            request_metadata=build_workspace_membership_request_metadata(current_user),
         )
     except WorkspaceMembershipServiceError as exc:
         raise _membership_service_error_to_http(exc) from exc

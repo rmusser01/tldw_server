@@ -656,6 +656,11 @@ def test_remaining_phase2_resource_types_have_membership_adapters(resource_type:
     assert get_workspace_membership_adapter(resource_type).resource_type == resource_type
 
 
+def test_runtime_session_adapters_use_composition_not_concrete_inheritance() -> None:
+    assert membership_adapters.AcpSessionMembershipAdapter.__bases__ == (object,)
+    assert membership_adapters.SandboxSessionMembershipAdapter.__bases__ == (object,)
+
+
 @pytest.mark.parametrize("resource_type", ["note", "acp_run"])
 def test_explicitly_deferred_resource_types_still_fail_closed(resource_type: str) -> None:
     with pytest.raises(WorkspaceMembershipAdapterError) as exc_info:
@@ -1361,6 +1366,26 @@ def test_unlink_membership_returns_deleted_row_when_adapter_hook_fails() -> None
     assert payload is not None
     assert payload["deleted"] is True
     assert db.memberships[("workspace-1", "media", "42")]["deleted"] is True
+
+
+@pytest.mark.parametrize(
+    "resource_type,resource_id",
+    [("prompt", "7"), ("workflow", "9"), ("watchlist", "12")],
+)
+def test_unlink_membership_does_not_require_live_domain_adapter(resource_type: str, resource_id: str) -> None:
+    db = FakeChaChaDB()
+    db.memberships[("workspace-1", resource_type, resource_id)] = _membership_row(
+        resource_type=resource_type,
+        resource_id=resource_id,
+        role="reference",
+    )
+    service = WorkspaceMembershipService(db)
+
+    payload = service.unlink_membership("workspace-1", resource_type, resource_id, user_id="user-1")
+
+    assert payload is not None
+    assert payload["deleted"] is True
+    assert db.memberships[("workspace-1", resource_type, resource_id)]["deleted"] is True
 
 
 def test_workspace_membership_summary_uses_db_aggregate_for_active_compact_totals() -> None:

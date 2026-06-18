@@ -537,10 +537,11 @@ class WatchlistMembershipAdapter:
         return None
 
 
-class RuntimeBindingSessionMembershipAdapter:
-    resource_type = ""
-    binding_kind = ""
-    owner_domain = ""
+@dataclass(frozen=True)
+class _RuntimeBindingSessionResolver:
+    resource_type: str
+    binding_kind: str
+    owner_domain: str
 
     def validate_access(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
         binding_id = _require_resource_id(resource_id)
@@ -610,6 +611,23 @@ class RuntimeBindingSessionMembershipAdapter:
             state=state,
         )
 
+
+class AcpSessionMembershipAdapter:
+    resource_type = "acp_session"
+
+    def __init__(self, resolver: _RuntimeBindingSessionResolver | None = None) -> None:
+        self._resolver = resolver or _RuntimeBindingSessionResolver(
+            resource_type=self.resource_type,
+            binding_kind="acp_session",
+            owner_domain="acp",
+        )
+
+    def validate_access(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
+        return self._resolver.validate_access(resource_id, context)
+
+    def summarize(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
+        return self._resolver.summarize(resource_id, context)
+
     def on_link(self, membership: Mapping[str, Any], context: WorkspaceMembershipContext) -> None:
         return None
 
@@ -617,16 +635,27 @@ class RuntimeBindingSessionMembershipAdapter:
         return None
 
 
-class AcpSessionMembershipAdapter(RuntimeBindingSessionMembershipAdapter):
-    resource_type = "acp_session"
-    binding_kind = "acp_session"
-    owner_domain = "acp"
-
-
-class SandboxSessionMembershipAdapter(RuntimeBindingSessionMembershipAdapter):
+class SandboxSessionMembershipAdapter:
     resource_type = "sandbox_session"
-    binding_kind = "sandbox_session"
-    owner_domain = "sandbox"
+
+    def __init__(self, resolver: _RuntimeBindingSessionResolver | None = None) -> None:
+        self._resolver = resolver or _RuntimeBindingSessionResolver(
+            resource_type=self.resource_type,
+            binding_kind="sandbox_session",
+            owner_domain="sandbox",
+        )
+
+    def validate_access(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
+        return self._resolver.validate_access(resource_id, context)
+
+    def summarize(self, resource_id: str, context: WorkspaceMembershipContext) -> WorkspaceResourceRef:
+        return self._resolver.summarize(resource_id, context)
+
+    def on_link(self, membership: Mapping[str, Any], context: WorkspaceMembershipContext) -> None:
+        return None
+
+    def on_unlink(self, membership: Mapping[str, Any], context: WorkspaceMembershipContext) -> None:
+        return None
 
 
 def default_workspace_membership_adapters() -> dict[str, WorkspaceMembershipAdapter]:
