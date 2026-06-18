@@ -63,7 +63,9 @@ from .chatbook_models import (
     ImportStatusData,
     coerce_chatbook_export_version,
 )
-from .chatbook_format_v1_1 import build_file_inventory
+from .chatbook_format_v1_1 import (
+    build_file_inventory,
+)
 
 # Unified audit logging is handled at the API layer. The service no longer
 # imports or depends on legacy audit loggers.

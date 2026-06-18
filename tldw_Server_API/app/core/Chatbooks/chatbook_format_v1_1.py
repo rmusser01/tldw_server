@@ -45,6 +45,48 @@ def ensure_known_features(features: list[str]) -> dict[str, list[str]]:
     }
 
 
+def build_content_envelope(
+    *,
+    format_id: str,
+    schema_version: int | str,
+    media_type: str,
+    structured_path: str,
+    integrity_value: str | None,
+    lossiness_mode: str = "lossless",
+    rendered: list[dict[str, Any]] | None = None,
+    source_refs: list[dict[str, Any]] | None = None,
+    redaction_profile: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    representations = [
+        {
+            "kind": "structured",
+            "path": structured_path,
+            "media_type": media_type,
+            "primary": True,
+            "role": "restore_payload",
+        }
+    ]
+    representations.extend(rendered or [])
+
+    return {
+        "format": format_id,
+        "schema_version": schema_version,
+        "media_type": media_type,
+        "representations": representations,
+        "integrity": {
+            "status": "verified" if integrity_value else "unsupported",
+            "algorithm": "sha256" if integrity_value else None,
+            "value": integrity_value,
+            "scope": "primary_payload",
+        },
+        "lossiness": {"mode": lossiness_mode, "reasons": []},
+        "provenance": {},
+        "source_refs": source_refs or [],
+        "attachments": [],
+        "redaction_profile": redaction_profile,
+    }
+
+
 def build_file_inventory(work_dir: Path) -> list[dict[str, Any]]:
     inventory: list[dict[str, Any]] = []
 
