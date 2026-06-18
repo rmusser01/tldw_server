@@ -11,7 +11,7 @@ from tldw_Server_API.app.api.v1.schemas.chatbook_schemas import CreateChatbookRe
 from tldw_Server_API.app.services import core_jobs_worker as active_core_jobs_worker
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import ChatbookVersion
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
-from tldw_Server_API.app.core.Chatbooks.services.jobs_worker import _handle_export
+from tldw_Server_API.app.core.Chatbooks.services.jobs_worker import ChatbooksJobError, _handle_export
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -97,6 +97,27 @@ def test_create_chatbook_request_accepts_format_version_v1_1():
     assert request.format_version is ChatbookVersion.V1_1
 
 
+def test_create_chatbook_request_rejects_future_format_version_v2():
+    with pytest.raises(ValueError, match="Unsupported chatbook export format_version"):
+        CreateChatbookRequest(
+            name="v2",
+            description="v2",
+            content_selections={},
+            format_version="2.0.0",
+        )
+
+
+def test_create_chatbook_request_canonicalizes_legacy_v1_format_version():
+    request = CreateChatbookRequest(
+        name="legacy v1",
+        description="legacy v1",
+        content_selections={},
+        format_version="1.0",
+    )
+
+    assert request.format_version is ChatbookVersion.V1
+
+
 @pytest.mark.asyncio
 async def test_create_chatbook_export_writes_requested_v1_1_manifest_version(chatbook_v1_1_service):
     success, _message, archive_path = await chatbook_v1_1_service.create_chatbook(
@@ -113,6 +134,24 @@ async def test_create_chatbook_export_writes_requested_v1_1_manifest_version(cha
         manifest = json.loads(zf.read("manifest.json"))
 
     assert manifest["version"] == "1.1.0"
+
+
+@pytest.mark.asyncio
+async def test_create_chatbook_export_canonicalizes_legacy_v1_manifest_version(chatbook_v1_1_service):
+    success, _message, archive_path = await chatbook_v1_1_service.create_chatbook(
+        name="legacy v1",
+        description="legacy v1",
+        content_selections={},
+        format_version=ChatbookVersion.V1_LEGACY,
+    )
+
+    assert success is True
+    assert archive_path is not None
+
+    with zipfile.ZipFile(archive_path, "r") as zf:
+        manifest = json.loads(zf.read("manifest.json"))
+
+    assert manifest["version"] == "1.0.0"
 
 
 @pytest.mark.asyncio
@@ -170,8 +209,30 @@ async def test_core_jobs_worker_forwards_format_version_to_archive_creation():
     assert captured_kwargs["format_version"] == ChatbookVersion.V1_1
 
 
-async def _run_active_core_jobs_worker_export_once(monkeypatch, payload):
+@pytest.mark.asyncio
+async def test_core_jobs_worker_rejects_unsupported_format_version_nonretryably():
+    class _Service:
+        def _claim_export_job(self, job_id):
+            return True
+
+    with pytest.raises(ChatbooksJobError, match="Unsupported chatbook export format_version") as exc_info:
+        await _handle_export(
+            _Service(),
+            {
+                "name": "v2 queued",
+                "description": "v2 queued",
+                "content_selections": {},
+                "format_version": "2.0.0",
+            },
+            "job-1",
+        )
+
+    assert exc_info.value.retryable is False
+
+
+async def _run_active_core_jobs_worker_export_once(monkeypatch, payload, *, service_captures: bool = True):
     captured_kwargs = {}
+    fail_calls = []
     stop_event = asyncio.Event()
 
     class _JobManager:
@@ -189,7 +250,8 @@ async def _run_active_core_jobs_worker_export_once(monkeypatch, payload):
         def complete_job(self, *_args, **_kwargs):
             stop_event.set()
 
-        def fail_job(self, *_args, **_kwargs):
+        def fail_job(self, *args, **kwargs):
+            fail_calls.append({"args": args, "kwargs": kwargs})
             stop_event.set()
 
         def finalize_cancelled(self, *_args, **_kwargs):
@@ -208,6 +270,8 @@ async def _run_active_core_jobs_worker_export_once(monkeypatch, payload):
             return None
 
         async def _create_chatbook_sync_wrapper(self, **kwargs):
+            if not service_captures:
+                raise AssertionError("archive creation should not run")
             captured_kwargs.update(kwargs)
             return True, "ok", "export.chatbook"
 
@@ -216,13 +280,13 @@ async def _run_active_core_jobs_worker_export_once(monkeypatch, payload):
     monkeypatch.setattr(active_core_jobs_worker, "ChatbookService", _Service)
     monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.01")
 
-    await active_core_jobs_worker.run_chatbooks_core_jobs_worker(stop_event)
-    return captured_kwargs
+    await asyncio.wait_for(active_core_jobs_worker.run_chatbooks_core_jobs_worker(stop_event), timeout=2)
+    return captured_kwargs, fail_calls
 
 
 @pytest.mark.asyncio
 async def test_active_core_jobs_worker_forwards_format_version_to_archive_creation(monkeypatch):
-    captured_kwargs = await _run_active_core_jobs_worker_export_once(
+    captured_kwargs, _fail_calls = await _run_active_core_jobs_worker_export_once(
         monkeypatch,
         {
             "name": "v1.1 active queued",
@@ -237,7 +301,7 @@ async def test_active_core_jobs_worker_forwards_format_version_to_archive_creati
 
 @pytest.mark.asyncio
 async def test_active_core_jobs_worker_defaults_format_version_to_v1(monkeypatch):
-    captured_kwargs = await _run_active_core_jobs_worker_export_once(
+    captured_kwargs, _fail_calls = await _run_active_core_jobs_worker_export_once(
         monkeypatch,
         {
             "name": "v1 active queued",
@@ -247,6 +311,26 @@ async def test_active_core_jobs_worker_defaults_format_version_to_v1(monkeypatch
     )
 
     assert captured_kwargs["format_version"] == ChatbookVersion.V1
+
+
+@pytest.mark.asyncio
+async def test_active_core_jobs_worker_fails_unsupported_format_version_nonretryably(monkeypatch):
+    captured_kwargs, fail_calls = await _run_active_core_jobs_worker_export_once(
+        monkeypatch,
+        {
+            "name": "v2 active queued",
+            "description": "v2 active queued",
+            "content_selections": {},
+            "format_version": "2.0.0",
+        },
+        service_captures=False,
+    )
+
+    assert captured_kwargs == {}
+    assert len(fail_calls) == 1
+    assert fail_calls[0]["kwargs"]["retryable"] is False
+    assert fail_calls[0]["kwargs"]["completion_token"] == "lease-1"
+    assert "Unsupported chatbook export format_version" in fail_calls[0]["kwargs"]["error"]
 
 
 def test_minimal_v1_1_manifest_matches_schema():

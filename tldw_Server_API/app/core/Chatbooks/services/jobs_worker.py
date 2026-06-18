@@ -36,11 +36,11 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
-    ChatbookVersion,
     ConflictResolution,
     ContentType,
     ExportStatus,
     ImportStatus,
+    coerce_chatbook_export_version,
 )
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.Chatbooks.openwebui_hydration_jobs import (
@@ -239,7 +239,10 @@ async def _handle_export(service: ChatbookService, payload: dict[str, Any], job_
         raise ChatbooksJobError("export job already claimed", retryable=True, backoff_seconds=5)
 
     selections = _map_content_selections(payload.get("content_selections") or {})
-    format_version = ChatbookVersion(str(payload.get("format_version", ChatbookVersion.V1.value)))
+    try:
+        format_version = coerce_chatbook_export_version(payload.get("format_version"))
+    except ValueError as exc:
+        raise ChatbooksJobError(str(exc), retryable=False) from exc
     ok, msg, file_path = await service._create_chatbook_sync_wrapper(
         name=payload.get("name"),
         description=payload.get("description"),

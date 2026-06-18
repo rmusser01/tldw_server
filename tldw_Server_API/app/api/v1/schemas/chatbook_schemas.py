@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ContentType,
     ExportStatus,
     ImportStatus,
+    coerce_chatbook_export_version,
 )
 
 
@@ -112,6 +113,12 @@ class CreateChatbookRequest(BaseModel):
                 if isinstance(item, str) and len(item) > 50:
                     raise ValueError(f"Item '{item[:20]}...' exceeds maximum length of 50 characters")
         return v
+
+    @field_validator('format_version', mode='before')
+    @classmethod
+    def validate_format_version(cls, v):
+        """Validate and canonicalize the requested export format version."""
+        return coerce_chatbook_export_version(v)
 
     model_config = ConfigDict(json_schema_extra={
         "example": {

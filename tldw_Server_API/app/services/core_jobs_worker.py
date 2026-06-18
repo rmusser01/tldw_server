@@ -9,11 +9,11 @@ from pathlib import Path
 from loguru import logger
 
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
-    ChatbookVersion,
     ConflictResolution,
     ContentType,
     ExportStatus,
     ImportStatus,
+    coerce_chatbook_export_version,
 )
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -179,7 +179,24 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                     for k, v in (payload.get("content_selections") or {}).items():
                         with contextlib.suppress(_CORE_JOBS_WORKER_NONCRITICAL_EXCEPTIONS):
                             cs[ContentType(k)] = v
-                    format_version = ChatbookVersion(str(payload.get("format_version", ChatbookVersion.V1.value)))
+                    try:
+                        format_version = coerce_chatbook_export_version(payload.get("format_version"))
+                    except ValueError as exc:
+                        err_msg = str(exc)
+                        if ej:
+                            ej.status = ExportStatus.FAILED
+                            ej.completed_at = datetime.utcnow()
+                            ej.error_message = err_msg
+                            svc._save_export_job(ej)
+                        jm.fail_job(
+                            int(job["id"]),
+                            error=err_msg,
+                            retryable=False,
+                            worker_id=worker_id,
+                            lease_id=str(lease_id),
+                            completion_token=str(lease_id),
+                        )
+                        continue
                     # Start periodic lease renewal during heavy processing
                     _renew_task = await _start_renewal(int(job["id"]))
                     ok, msg, file_path = await svc._create_chatbook_sync_wrapper(

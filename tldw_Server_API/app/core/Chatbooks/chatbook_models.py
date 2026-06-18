@@ -46,6 +46,30 @@ class ChatbookVersion(str, Enum):
     V2 = "2.0.0"  # Future version with enhanced features
 
 
+def coerce_chatbook_export_version(format_version: ChatbookVersion | str | None) -> ChatbookVersion:
+    """Return the canonical ChatbookVersion currently supported for produced exports."""
+    if format_version is None:
+        return ChatbookVersion.V1
+
+    try:
+        version = format_version if isinstance(format_version, ChatbookVersion) else ChatbookVersion(str(format_version))
+    except ValueError as exc:
+        raise ValueError(
+            f"Unsupported chatbook export format_version: {format_version!r}. "
+            "Supported export versions are 1.0.0 and 1.1.0."
+        ) from exc
+
+    if version is ChatbookVersion.V1_LEGACY:
+        return ChatbookVersion.V1
+    if version in {ChatbookVersion.V1, ChatbookVersion.V1_1}:
+        return version
+
+    raise ValueError(
+        f"Unsupported chatbook export format_version: {version.value!r}. "
+        "Supported export versions are 1.0.0 and 1.1.0."
+    )
+
+
 class ContentType(str, Enum):
     """Types of content that can be included in a chatbook."""
     CONVERSATION = "conversation"
@@ -493,6 +517,7 @@ class ImportConflict:
 __all__ = [
     'ChatbookVersion',
     'ContentType',
+    'coerce_chatbook_export_version',
     'ExportStatus',
     'ImportStatus',
     'ConflictResolution',

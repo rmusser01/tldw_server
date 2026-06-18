@@ -61,6 +61,7 @@ from .chatbook_models import (
     ImportJob,
     ImportStatus,
     ImportStatusData,
+    coerce_chatbook_export_version,
 )
 
 # Unified audit logging is handled at the API layer. The service no longer
@@ -328,11 +329,7 @@ class ChatbookService:
     @staticmethod
     def _coerce_format_version(format_version: ChatbookVersion | str | None) -> ChatbookVersion:
         """Normalize service callers to the canonical ChatbookVersion enum."""
-        if format_version is None:
-            return ChatbookVersion.V1
-        if isinstance(format_version, ChatbookVersion):
-            return format_version
-        return ChatbookVersion(str(format_version))
+        return coerce_chatbook_export_version(format_version)
 
     @staticmethod
     def _truthy_env(name: str, default: bool = False) -> bool:
