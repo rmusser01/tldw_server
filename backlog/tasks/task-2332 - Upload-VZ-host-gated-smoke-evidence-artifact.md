@@ -37,6 +37,7 @@ Make the structured evidence bundle emitted by the VZ Linux host smoke wrapper f
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created approved design spec for the host-gated evidence artifact slice. Subagent spec review was not spawned because the available multi-agent tool policy requires explicit user authorization for subagents in this turn; performing local spec risk review instead.
+Spec review found that preserving the broad runtime-tree helper-log upload would now risk uploading disposable image-store/rootfs clones after the image-store smoke bundle work. Updated the spec so the helper-log artifact remains but is narrowed to raw serial/helper logs while structured evidence becomes the primary artifact.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
