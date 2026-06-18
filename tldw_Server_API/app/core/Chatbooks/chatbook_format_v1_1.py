@@ -168,6 +168,13 @@ def validate_v1_1_before_import(manifest: Any, extract_dir: Path) -> tuple[bool,
     for failed_file in failed_files:
         errors.append(_inventory_failure_error(failed_file))
 
+    inventory_paths = _inventory_paths(getattr(manifest, "file_inventory", []))
+    for payload_path in _content_item_file_paths(getattr(manifest, "content_items", [])):
+        if payload_path not in inventory_paths:
+            errors.append(
+                f"File inventory validation failed for {payload_path}: missing inventory entry"
+            )
+
     for report_error in report.get("errors") or []:
         if isinstance(report_error, str):
             _append_unique(errors, report_error)
@@ -346,6 +353,32 @@ def _unsupported_feature_behavior(compatibility: Any) -> str:
         if behavior in {"warn_and_skip", "warn_lossy_import", "reject_import"}:
             return behavior
     return "warn_and_skip"
+
+
+def _inventory_paths(inventory: Any) -> set[str]:
+    if not isinstance(inventory, list):
+        return set()
+    paths: set[str] = set()
+    for entry in inventory:
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path")
+        if isinstance(path, str) and path:
+            paths.add(path)
+    return paths
+
+
+def _content_item_file_paths(content_items: Any) -> list[str]:
+    if not isinstance(content_items, list):
+        return []
+    paths: list[str] = []
+    for item in content_items:
+        path = getattr(item, "file_path", None)
+        if path is None and isinstance(item, dict):
+            path = item.get("file_path")
+        if isinstance(path, str) and path:
+            paths.append(path)
+    return paths
 
 
 def _append_unique(items: list[str], value: str) -> None:

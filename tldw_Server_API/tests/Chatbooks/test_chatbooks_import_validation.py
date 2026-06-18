@@ -36,6 +36,8 @@ def _write_v1_1_note_chatbook(
     archive_path: Path,
     *,
     inventory_hash: str | None = None,
+    inventory_entries: list[dict] | None = None,
+    extra_files: dict[str, bytes] | None = None,
     features_used: list[str] | None = None,
     unsupported_feature_behavior: str | None = None,
 ) -> Path:
@@ -50,6 +52,21 @@ def _write_v1_1_note_chatbook(
     }
     if unsupported_feature_behavior is not None:
         compatibility["unsupported_feature_behavior"] = unsupported_feature_behavior
+    if inventory_entries is None:
+        inventory_entries = [
+            {
+                "path": note_path,
+                "media_type": "text/markdown",
+                "size_bytes": len(note_payload),
+                "integrity": {
+                    "status": "verified",
+                    "algorithm": "sha256",
+                    "value": expected_hash,
+                },
+                "role": "payload",
+                "content_item_ids": ["1"],
+            }
+        ]
 
     manifest = {
         "version": "1.1.0",
@@ -101,24 +118,13 @@ def _write_v1_1_note_chatbook(
         "producer": {"name": "tldw_server"},
         "source_instance": {},
         "compatibility": compatibility,
-        "file_inventory": [
-            {
-                "path": note_path,
-                "media_type": "text/markdown",
-                "size_bytes": len(note_payload),
-                "integrity": {
-                    "status": "verified",
-                    "algorithm": "sha256",
-                    "value": expected_hash,
-                },
-                "role": "payload",
-                "content_item_ids": ["1"],
-            }
-        ],
+        "file_inventory": inventory_entries,
     }
 
     with zipfile.ZipFile(archive_path, "w") as zf:
         zf.writestr(note_path, note_payload)
+        for path, payload in (extra_files or {}).items():
+            zf.writestr(path, payload)
         zf.writestr("manifest.json", json.dumps(manifest))
     return archive_path
 
@@ -190,6 +196,77 @@ def test_v1_1_import_rejects_checksum_mismatch_before_writes(service):
     assert "checksum" in message.lower() or "validation" in message.lower()
     assert details is not None
     assert any("checksum" in error.lower() or "validation" in error.lower() for error in details["errors"])
+    assert details["imported_items"] == {}
+    import_notes.assert_not_called()
+    service.db.add_note.assert_not_called()
+
+
+def test_v1_1_import_rejects_empty_inventory_before_writes(service):
+    archive_path = _write_v1_1_note_chatbook(
+        service.import_dir / "empty_inventory.chatbook",
+        inventory_entries=[],
+    )
+    import_notes = MagicMock()
+    service._import_notes = import_notes
+    service.db.add_note = MagicMock(return_value=1)
+
+    success, message, details = service._import_chatbook_sync(
+        file_path=str(archive_path),
+        content_selections=None,
+        conflict_resolution=ConflictResolution.SKIP,
+        prefix_imported=False,
+        import_media=False,
+        import_embeddings=False,
+    )
+
+    assert success is False
+    assert "inventory" in message.lower() or "validation" in message.lower()
+    assert details is not None
+    assert any("missing inventory entry" in error.lower() for error in details["errors"])
+    assert details["imported_items"] == {}
+    import_notes.assert_not_called()
+    service.db.add_note.assert_not_called()
+
+
+def test_v1_1_import_rejects_missing_payload_inventory_entry_before_writes(service):
+    readme_payload = b"# Import Validation\n"
+    readme_hash = f"sha256:{hashlib.sha256(readme_payload).hexdigest()}"
+    archive_path = _write_v1_1_note_chatbook(
+        service.import_dir / "missing_payload_inventory.chatbook",
+        inventory_entries=[
+            {
+                "path": "README.md",
+                "media_type": "text/markdown",
+                "size_bytes": len(readme_payload),
+                "integrity": {
+                    "status": "verified",
+                    "algorithm": "sha256",
+                    "value": readme_hash,
+                },
+                "role": "readme",
+                "content_item_ids": [],
+            }
+        ],
+        extra_files={"README.md": readme_payload},
+    )
+    import_notes = MagicMock()
+    service._import_notes = import_notes
+    service.db.add_note = MagicMock(return_value=1)
+
+    success, message, details = service._import_chatbook_sync(
+        file_path=str(archive_path),
+        content_selections=None,
+        conflict_resolution=ConflictResolution.SKIP,
+        prefix_imported=False,
+        import_media=False,
+        import_embeddings=False,
+    )
+
+    assert success is False
+    assert "inventory" in message.lower() or "validation" in message.lower()
+    assert details is not None
+    assert any("content/notes/note_1.md" in error for error in details["errors"])
+    assert any("missing inventory entry" in error.lower() for error in details["errors"])
     assert details["imported_items"] == {}
     import_notes.assert_not_called()
     service.db.add_note.assert_not_called()
