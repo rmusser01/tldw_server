@@ -50,6 +50,26 @@ class EvidenceFileStatus:
     size_bytes: int | None = None
 
 
+@dataclass
+class EvidenceDirHandle:
+    path: Path
+    fd: int | None
+    warnings: list[str]
+
+    def __enter__(self) -> "EvidenceDirHandle":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self.fd is None:
+            return
+        fd = self.fd
+        self.fd = None
+        os.close(fd)
+
+
 def _display(value: object, *, max_chars: int = DISPLAY_MAX_CHARS) -> str:
     text = "" if value is None else str(value)
     text = " ".join(text.replace("\r", "\n").splitlines())
@@ -75,24 +95,91 @@ def _table(headers: tuple[str, ...], rows: list[tuple[object, ...]]) -> str:
 
 
 def _probe_evidence_dir(evidence_dir: Path) -> tuple[bool, list[str]]:
+    with _open_evidence_dir(evidence_dir) as evidence_root:
+        return evidence_root.fd is not None, evidence_root.warnings
+
+
+def _dir_fd_operations_available() -> bool:
+    supports_dir_fd = getattr(os, "supports_dir_fd", set())
+    supports_follow_symlinks = getattr(os, "supports_follow_symlinks", set())
+    return (
+        os.open in supports_dir_fd
+        and os.stat in supports_dir_fd
+        and os.access in supports_dir_fd
+        and os.stat in supports_follow_symlinks
+        and os.access in supports_follow_symlinks
+        and hasattr(os, "O_NOFOLLOW")
+    )
+
+
+def _open_dir_flags() -> int:
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_DIRECTORY", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    return flags
+
+
+def _missing_evidence_dir_warning(evidence_dir: Path) -> str:
+    return (
+        f"warning: evidence directory is missing: {evidence_dir}. "
+        "This may indicate an early setup/preflight failure."
+    )
+
+
+def _classify_evidence_dir_open_error(evidence_dir: Path, exc: OSError) -> str:
+    if isinstance(exc, FileNotFoundError):
+        return _missing_evidence_dir_warning(evidence_dir)
+    if exc.errno == errno.ELOOP:
+        return f"warning: evidence directory is a symlink and was not read: {evidence_dir}"
     try:
         metadata = evidence_dir.lstat()
     except FileNotFoundError:
-        return False, [
-            (
-                f"warning: evidence directory is missing: {evidence_dir}. "
-                "This may indicate an early setup/preflight failure."
-            )
-        ]
-    except OSError as exc:
-        return False, [f"warning: evidence directory cannot be inspected: {type(exc).__name__}: {exc}"]
+        return _missing_evidence_dir_warning(evidence_dir)
+    except OSError:
+        return f"warning: evidence directory cannot be safely opened: {type(exc).__name__}: {exc}"
     if stat.S_ISLNK(metadata.st_mode):
-        return False, [f"warning: evidence directory is a symlink and was not read: {evidence_dir}"]
+        return f"warning: evidence directory is a symlink and was not read: {evidence_dir}"
     if not stat.S_ISDIR(metadata.st_mode):
-        return False, [f"warning: evidence path is not a directory and was not read: {evidence_dir}"]
-    if not os.access(evidence_dir, os.R_OK | os.X_OK):
-        return False, [f"warning: evidence directory is unreadable and was not read: {evidence_dir}"]
-    return True, []
+        return f"warning: evidence path is not a directory and was not read: {evidence_dir}"
+    if exc.errno in {errno.EACCES, errno.EPERM}:
+        return f"warning: evidence directory is unreadable and was not read: {evidence_dir}"
+    return f"warning: evidence directory cannot be safely opened: {type(exc).__name__}: {exc}"
+
+
+def _open_evidence_dir(evidence_dir: Path) -> EvidenceDirHandle:
+    if not _dir_fd_operations_available():
+        return EvidenceDirHandle(
+            path=evidence_dir,
+            fd=None,
+            warnings=[
+                (
+                    "warning: evidence directory was not read because safe directory "
+                    "file descriptor operations are unavailable on this platform"
+                )
+            ],
+        )
+
+    fd: int | None = None
+    try:
+        fd = os.open(evidence_dir, _open_dir_flags())
+        metadata = os.fstat(fd)
+    except OSError as exc:
+        if fd is not None:
+            os.close(fd)
+        return EvidenceDirHandle(
+            path=evidence_dir,
+            fd=None,
+            warnings=[_classify_evidence_dir_open_error(evidence_dir, exc)],
+        )
+    if not stat.S_ISDIR(metadata.st_mode):
+        os.close(fd)
+        return EvidenceDirHandle(
+            path=evidence_dir,
+            fd=None,
+            warnings=[f"warning: evidence path is not a directory and was not read: {evidence_dir}"],
+        )
+    return EvidenceDirHandle(path=evidence_dir, fd=fd, warnings=[])
 
 
 def _missing_file_statuses(reason: str) -> dict[str, EvidenceFileStatus]:
@@ -107,10 +194,16 @@ def _missing_file_statuses(reason: str) -> dict[str, EvidenceFileStatus]:
     }
 
 
-def _probe_expected_file(evidence_dir: Path, name: str) -> EvidenceFileStatus:
-    path = evidence_dir / name
+def _probe_expected_file(evidence_root: EvidenceDirHandle, name: str) -> EvidenceFileStatus:
+    if evidence_root.fd is None:
+        return EvidenceFileStatus(
+            name=name,
+            present=False,
+            readable=False,
+            reason="missing: evidence directory was not inspected",
+        )
     try:
-        metadata = path.lstat()
+        metadata = os.stat(name, dir_fd=evidence_root.fd, follow_symlinks=False)
     except FileNotFoundError:
         return EvidenceFileStatus(name=name, present=False, readable=False, reason="missing")
     except OSError as exc:
@@ -136,7 +229,7 @@ def _probe_expected_file(evidence_dir: Path, name: str) -> EvidenceFileStatus:
             reason="non-regular file skipped",
             size_bytes=metadata.st_size,
         )
-    if not os.access(path, os.R_OK):
+    if not _can_read_child(evidence_root, name):
         return EvidenceFileStatus(
             name=name,
             present=True,
@@ -153,21 +246,33 @@ def _probe_expected_file(evidence_dir: Path, name: str) -> EvidenceFileStatus:
     )
 
 
-def _probe_expected_files(evidence_dir: Path) -> dict[str, EvidenceFileStatus]:
-    return {name: _probe_expected_file(evidence_dir, name) for name in EXPECTED_EVIDENCE_FILES}
+def _probe_expected_files(evidence_root: EvidenceDirHandle) -> dict[str, EvidenceFileStatus]:
+    return {name: _probe_expected_file(evidence_root, name) for name in EXPECTED_EVIDENCE_FILES}
 
 
 def _open_json_flags() -> int:
     flags = os.O_RDONLY
     flags |= getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
     return flags
 
 
-def _read_json_bytes_from_descriptor(path: Path) -> tuple[bytes | None, list[str]]:
+def _can_read_child(evidence_root: EvidenceDirHandle, name: str) -> bool:
+    if evidence_root.fd is None:
+        return False
+    try:
+        return os.access(name, os.R_OK, dir_fd=evidence_root.fd, follow_symlinks=False)
+    except (NotImplementedError, OSError):
+        return False
+
+
+def _read_json_bytes_from_descriptor(evidence_root: EvidenceDirHandle) -> tuple[bytes | None, list[str]]:
+    if evidence_root.fd is None:
+        return None, ["warning: structured metadata unavailable: evidence directory was not inspected"]
     fd: int | None = None
     try:
-        fd = os.open(path, _open_json_flags())
+        fd = os.open("host-smoke-evidence.json", _open_json_flags(), dir_fd=evidence_root.fd)
         metadata = os.fstat(fd)
         if not stat.S_ISREG(metadata.st_mode):
             return None, ["warning: structured metadata skipped: opened path is not a regular file"]
@@ -193,7 +298,7 @@ def _read_json_bytes_from_descriptor(path: Path) -> tuple[bytes | None, list[str
 
 
 def _load_evidence_json(
-    evidence_dir: Path,
+    evidence_root: EvidenceDirHandle,
     file_statuses: dict[str, EvidenceFileStatus],
 ) -> tuple[dict[str, Any] | None, list[str]]:
     json_status = file_statuses["host-smoke-evidence.json"]
@@ -202,7 +307,7 @@ def _load_evidence_json(
     if json_status.size_bytes is not None and json_status.size_bytes > JSON_MAX_BYTES:
         return None, [f"warning: structured metadata skipped: exceeds {JSON_MAX_BYTES} bytes"]
 
-    raw_bytes, read_warnings = _read_json_bytes_from_descriptor(evidence_dir / "host-smoke-evidence.json")
+    raw_bytes, read_warnings = _read_json_bytes_from_descriptor(evidence_root)
     if read_warnings:
         return None, read_warnings
     if raw_bytes is None:
@@ -344,17 +449,16 @@ def _render_log_artifacts(payload: dict[str, Any] | None) -> str:
 
 def render_summary(evidence_dir: Path) -> str:
     warnings: list[str] = []
-    evidence_dir_ok, dir_warnings = _probe_evidence_dir(evidence_dir)
-    warnings.extend(dir_warnings)
-
-    if evidence_dir_ok:
-        file_statuses = _probe_expected_files(evidence_dir)
-        warnings.extend(_file_status_warnings(file_statuses))
-        payload, json_warnings = _load_evidence_json(evidence_dir, file_statuses)
-        warnings.extend(json_warnings)
-    else:
-        file_statuses = _missing_file_statuses("missing: evidence directory was not inspected")
-        payload = None
+    with _open_evidence_dir(evidence_dir) as evidence_root:
+        warnings.extend(evidence_root.warnings)
+        if evidence_root.fd is not None:
+            file_statuses = _probe_expected_files(evidence_root)
+            warnings.extend(_file_status_warnings(file_statuses))
+            payload, json_warnings = _load_evidence_json(evidence_root, file_statuses)
+            warnings.extend(json_warnings)
+        else:
+            file_statuses = _missing_file_statuses("missing: evidence directory was not inspected")
+            payload = None
 
     sections = [
         "# VZ Linux Host Smoke Evidence Summary",

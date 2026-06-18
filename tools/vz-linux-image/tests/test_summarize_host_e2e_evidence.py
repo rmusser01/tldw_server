@@ -259,33 +259,71 @@ def test_json_loader_rejects_path_swapped_to_symlink_after_probe(tmp_path: Path)
     if not hasattr(os, "O_NOFOLLOW"):
         pytest.skip("descriptor-level symlink rejection requires os.O_NOFOLLOW")
     module = _load_summary_module()
+    if not module._dir_fd_operations_available():
+        pytest.skip("directory file descriptor operations are unavailable")
     evidence_dir = tmp_path / "evidence"
     evidence_dir.mkdir()
     json_path = evidence_dir / "host-smoke-evidence.json"
     original_json = json.dumps({"smoke_run_id": "original"})
     json_path.write_text(original_json, encoding="utf-8")
-    file_statuses = {
-        "host-smoke-evidence.json": module.EvidenceFileStatus(
-            name="host-smoke-evidence.json",
-            present=True,
-            readable=True,
-            reason="ok",
-            size_bytes=len(original_json.encode("utf-8")),
-        )
-    }
-    target_secret = "swapped-symlink-target-should-not-appear"
-    target = tmp_path / "target.json"
-    target.write_text(json.dumps({"smoke_run_id": target_secret}), encoding="utf-8")
-    json_path.unlink()
-    json_path.symlink_to(target)
+    with module._open_evidence_dir(evidence_dir) as evidence_root:
+        file_statuses = {
+            "host-smoke-evidence.json": module.EvidenceFileStatus(
+                name="host-smoke-evidence.json",
+                present=True,
+                readable=True,
+                reason="ok",
+                size_bytes=len(original_json.encode("utf-8")),
+            )
+        }
+        target_secret = "swapped-symlink-target-should-not-appear"
+        target = tmp_path / "target.json"
+        target.write_text(json.dumps({"smoke_run_id": target_secret}), encoding="utf-8")
+        json_path.unlink()
+        json_path.symlink_to(target)
 
-    payload, warnings = module._load_evidence_json(evidence_dir, file_statuses)
+        payload, warnings = module._load_evidence_json(evidence_root, file_statuses)
 
     assert payload is None
     warning_text = "\n".join(warnings)
     assert "structured metadata" in warning_text
     assert "symlink" in warning_text.lower() or "open" in warning_text.lower()
     assert target_secret not in warning_text
+
+
+def test_pinned_evidence_directory_fd_ignores_root_symlink_swap(tmp_path: Path) -> None:
+    module = _load_summary_module()
+    if not module._dir_fd_operations_available():
+        pytest.skip("directory file descriptor operations are unavailable")
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    original_marker = "original-pinned-evidence"
+    (evidence_dir / "host-smoke-evidence.json").write_text(
+        json.dumps({"smoke_run_id": original_marker}),
+        encoding="utf-8",
+    )
+    with module._open_evidence_dir(evidence_dir) as evidence_root:
+        pinned_fd = evidence_root.fd
+        assert pinned_fd is not None
+        moved_evidence_dir = tmp_path / "moved-evidence"
+        evidence_dir.rename(moved_evidence_dir)
+        target_dir = tmp_path / "target-evidence"
+        target_dir.mkdir()
+        target_secret = "swapped-root-symlink-target-should-not-render"
+        (target_dir / "host-smoke-evidence.json").write_text(
+            json.dumps({"smoke_run_id": target_secret}),
+            encoding="utf-8",
+        )
+        evidence_dir.symlink_to(target_dir, target_is_directory=True)
+
+        file_statuses = module._probe_expected_files(evidence_root)
+        payload, warnings = module._load_evidence_json(evidence_root, file_statuses)
+
+        assert warnings == []
+        assert payload == {"smoke_run_id": original_marker}
+        assert target_secret not in json.dumps(payload)
+    with pytest.raises(OSError):
+        os.fstat(pinned_fd)
 
 
 def test_expected_evidence_file_that_is_directory_is_warned_and_skipped(tmp_path: Path) -> None:
