@@ -213,6 +213,8 @@ async def test_run_module_exposes_governed_bash_and_shell_alias_tools() -> None:
         assert "retain_output_artifacts" in alias["inputSchema"]["properties"]
         assert "sandboxSessionId" in alias["inputSchema"]["properties"]
         assert "sandbox_session_id" in alias["inputSchema"]["properties"]
+        assert "envFile" in alias["inputSchema"]["properties"]
+        assert "env_file" in alias["inputSchema"]["properties"]
 
 
 @pytest.mark.asyncio
@@ -451,6 +453,239 @@ async def test_run_sandbox_session_id_uses_session_backed_sandbox_run() -> None:
         "session_id": "sandbox-session-1",
         "command": ["python", "-V"],
     }
+
+
+@pytest.mark.asyncio
+async def test_run_env_file_is_forwarded_only_to_sandbox_run_without_rendering_values(tmp_path: Path) -> None:
+    """envFile should load workspace env values into sandbox.run without rendering secrets."""
+
+    class _SandboxProtocolStub(_ProtocolStub):
+        async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
+            del params, context
+            return {"tools": [{"name": "sandbox.run", "module": "sandbox", "canExecute": True}]}
+
+        async def execute_prepared_tool_call(self, prepared: _PreparedCall) -> dict[str, Any]:
+            self.execute_calls.append(prepared)
+            return {"content": [{"type": "json", "json": {"status": "completed"}}], "tool": "sandbox.run"}
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    env_file = workspace_root / ".env.sandbox"
+    env_file.write_text(
+        "\n".join(
+            [
+                "# comment",
+                "API_TOKEN=super-secret",
+                "export FEATURE_FLAG=enabled",
+                "QUOTED=\"two words\"",
+                "SINGLE='single quoted'",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    protocol = _SandboxProtocolStub()
+    module = RunCommandModule(
+        ModuleConfig(
+            name="run",
+            settings={
+                "protocol": protocol,
+                "workspace_root_resolver": _WorkspaceRootResolverStub(workspace_root),
+            },
+        )
+    )
+    context = RequestContext(request_id="run-env-file", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool(
+        "run",
+        {"command": "sandbox python app.py", "envFile": ".env.sandbox"},
+        context=context,
+    )
+
+    assert "[exit:0 |" in rendered
+    assert "super-secret" not in rendered
+    assert protocol.prepare_calls[0].params["name"] == "sandbox.run"
+    assert protocol.prepare_calls[0].params["arguments"] == {
+        "base_image": "python:3.11",
+        "command": ["python", "app.py"],
+        "env": {
+            "API_TOKEN": "super-secret",
+            "FEATURE_FLAG": "enabled",
+            "QUOTED": "two words",
+            "SINGLE": "single quoted",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_env_file_uses_cwd_to_resolve_workspace_relative_file(tmp_path: Path) -> None:
+    """envFile should resolve beneath cwd without escaping the workspace root."""
+
+    class _SandboxProtocolStub(_ProtocolStub):
+        async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
+            del params, context
+            return {"tools": [{"name": "sandbox.run", "module": "sandbox", "canExecute": True}]}
+
+        async def execute_prepared_tool_call(self, prepared: _PreparedCall) -> dict[str, Any]:
+            self.execute_calls.append(prepared)
+            return {"content": [{"type": "json", "json": {"ok": True}}], "tool": "sandbox.run"}
+
+    workspace_root = tmp_path / "workspace"
+    (workspace_root / "apps" / "api").mkdir(parents=True)
+    (workspace_root / "apps" / "api" / ".env").write_text("APP_ENV=test\n", encoding="utf-8")
+    protocol = _SandboxProtocolStub()
+    module = RunCommandModule(
+        ModuleConfig(
+            name="run",
+            settings={
+                "protocol": protocol,
+                "workspace_root_resolver": _WorkspaceRootResolverStub(workspace_root),
+            },
+        )
+    )
+    context = RequestContext(request_id="run-env-file-cwd", user_id="1", client_id="unit")
+
+    await module.execute_tool(
+        "run",
+        {"command": "sandbox python app.py", "cwd": "apps/api", "envFile": ".env"},
+        context=context,
+    )
+
+    assert protocol.prepare_calls[0].params["arguments"]["env"] == {"APP_ENV": "test"}
+
+
+@pytest.mark.asyncio
+async def test_run_env_file_participates_in_nested_idempotency_keys_without_secret_values(tmp_path: Path) -> None:
+    """Env-file content changes should alter nested idempotency without exposing values in keys."""
+
+    class _SandboxProtocolStub(_ProtocolStub):
+        async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
+            del params, context
+            return {"tools": [{"name": "sandbox.run", "module": "sandbox", "canExecute": True}]}
+
+        async def execute_prepared_tool_call(self, prepared: _PreparedCall) -> dict[str, Any]:
+            self.execute_calls.append(prepared)
+            return {"content": [{"type": "json", "json": {"ok": True}}], "tool": "sandbox.run"}
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    env_file = workspace_root / ".env"
+    env_file.write_text("TOKEN=first-secret\n", encoding="utf-8")
+    protocol = _SandboxProtocolStub()
+    module = RunCommandModule(
+        ModuleConfig(
+            name="run",
+            settings={
+                "protocol": protocol,
+                "workspace_root_resolver": _WorkspaceRootResolverStub(workspace_root),
+            },
+        )
+    )
+    context = RequestContext(request_id="run-env-file-idem", user_id="1", client_id="unit")
+
+    await module.execute_tool(
+        "run",
+        {"command": "sandbox python -V", "envFile": ".env", "idempotencyKey": "parent-idem-env"},
+        context=context,
+    )
+    env_file.write_text("TOKEN=second-secret\n", encoding="utf-8")
+    await module.execute_tool(
+        "run",
+        {"command": "sandbox python -V", "envFile": ".env", "idempotencyKey": "parent-idem-env"},
+        context=context,
+    )
+
+    first_key = protocol.prepare_calls[0].idempotency_key
+    second_key = protocol.prepare_calls[1].idempotency_key
+    assert first_key != second_key
+    assert first_key is not None and first_key.startswith("parent-idem-env:")
+    assert second_key is not None and second_key.startswith("parent-idem-env:")
+    assert "first-secret" not in first_key
+    assert "second-secret" not in second_key
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"command": "sandbox python -V", "envFile": ""},
+        {"command": "sandbox python -V", "envFile": 123},
+        {"command": "sandbox python -V", "envFile": "/tmp/.env"},
+        {"command": "sandbox python -V", "envFile": "../.env"},
+        {"command": "sandbox python -V", "envFile": "~/.env"},
+        {"command": "sandbox python -V", "envFile": ".env", "env_file": "other.env"},
+    ],
+)
+async def test_run_rejects_invalid_env_file_arguments(arguments: dict[str, Any]) -> None:
+    """envFile aliases must be safe, relative, and consistent."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+
+    with pytest.raises(ValueError, match="envFile|env_file"):
+        await module.execute_tool("run", arguments, context=RequestContext(request_id="run-env-file-invalid"))
+
+
+@pytest.mark.asyncio
+async def test_run_env_file_rejects_non_sandbox_command_chains(tmp_path: Path) -> None:
+    """envFile should fail closed instead of being silently ignored outside sandbox steps."""
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
+    protocol = _ProtocolStub()
+    module = RunCommandModule(
+        ModuleConfig(
+            name="run",
+            settings={
+                "protocol": protocol,
+                "workspace_root_resolver": _WorkspaceRootResolverStub(workspace_root),
+            },
+        )
+    )
+
+    rendered = await module.execute_tool(
+        "run",
+        {"command": "ls", "envFile": ".env"},
+        context=RequestContext(request_id="run-env-file-non-sandbox"),
+    )
+
+    assert "envFile is only supported for command chains that include sandbox" in rendered
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
+
+
+@pytest.mark.asyncio
+async def test_run_env_file_rejects_malformed_files(tmp_path: Path) -> None:
+    """Malformed env files should fail before any sandbox tool call is prepared."""
+
+    class _SandboxProtocolStub(_ProtocolStub):
+        async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
+            del params, context
+            return {"tools": [{"name": "sandbox.run", "module": "sandbox", "canExecute": True}]}
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / ".env").write_text("GOOD=value\nNO_EQUALS\n", encoding="utf-8")
+    protocol = _SandboxProtocolStub()
+    module = RunCommandModule(
+        ModuleConfig(
+            name="run",
+            settings={
+                "protocol": protocol,
+                "workspace_root_resolver": _WorkspaceRootResolverStub(workspace_root),
+            },
+        )
+    )
+
+    rendered = await module.execute_tool(
+        "run",
+        {"command": "sandbox python -V", "envFile": ".env"},
+        context=RequestContext(request_id="run-env-file-malformed"),
+    )
+
+    assert "envFile line 2 must be KEY=value" in rendered
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
 
 
 @pytest.mark.asyncio

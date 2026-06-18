@@ -37,6 +37,7 @@ _RUN_WRITE_BACKEND_TOOLS = {"fs.write", "fs.write_text", "sandbox.run"}
 _RUN_TOOL_NAME = "run"
 _RUN_TOOL_ALIASES = ("bash", "shell", "powershell", "pwsh")
 _RUN_TOOL_NAMES = frozenset((_RUN_TOOL_NAME, *_RUN_TOOL_ALIASES))
+_RUN_ENV_FILE_MAX_BYTES = 64 * 1024
 
 
 class _AdapterBackend(CommandBackend):
@@ -105,6 +106,7 @@ class RunCommandModule(BaseModule):
         cwd = self._cwd(args)
         retain_output_artifacts = self._retain_output_artifacts(args)
         sandbox_session_id = self._sandbox_session_id(args)
+        env_file = self._env_file(args)
         visible = await self._visible_commands_for_context(context)
         if command_text in {"help", "--help"}:
             return present_command_execution_result(
@@ -139,6 +141,24 @@ class RunCommandModule(BaseModule):
                 )
             )
 
+        try:
+            sandbox_env, env_file_scope = await self._sandbox_env_for_chain(
+                env_file=env_file,
+                cwd=cwd,
+                chain=chain,
+                visible=visible,
+                context=context,
+            )
+        except ValueError as exc:
+            return present_command_execution_result(
+                CommandExecutionResult(
+                    stdout="",
+                    stderr=str(exc),
+                    exit_code=2,
+                    duration_ms=max(0.0, (time.perf_counter() - start) * 1000.0),
+                )
+            )
+
         protocol = await self._resolve_protocol()
         spill_parent_dir = await self._resolve_spill_dir(context)
         invocation_spill_dir = await self._create_invocation_spill_dir(spill_parent_dir, context)
@@ -153,9 +173,11 @@ class RunCommandModule(BaseModule):
                 self._parent_idempotency_key(context, arguments),
                 cwd,
                 sandbox_session_id,
+                env_file_scope,
             ),
             cwd=cwd,
             sandbox_session_id=sandbox_session_id,
+            sandbox_env=sandbox_env,
         )
         adapters = PhaseOneCommandAdapters(adapter_context)
         executor = CommandRuntimeExecutor(
@@ -221,6 +243,8 @@ class RunCommandModule(BaseModule):
             - {
                 "command",
                 "cwd",
+                "envFile",
+                "env_file",
                 "idempotencyKey",
                 "idempotency_key",
                 "retainOutputArtifacts",
@@ -255,6 +279,7 @@ class RunCommandModule(BaseModule):
         self._validate_cwd_arguments(arguments)
         self._validate_retain_output_artifact_arguments(arguments)
         self._validate_sandbox_session_arguments(arguments)
+        self._validate_env_file_arguments(arguments)
 
     def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
         """Sanitize input while allowing CLI flags like `--help` and shell-like tokens."""
@@ -331,6 +356,16 @@ class RunCommandModule(BaseModule):
                     "idempotencyKey": {
                         "type": "string",
                         "description": "Optional parent idempotency key for nested governed steps.",
+                    },
+                    "env_file": {
+                        "type": "string",
+                        "description": "Legacy alias for envFile.",
+                    },
+                    "envFile": {
+                        "type": "string",
+                        "description": (
+                            "Workspace-relative .env-style file to pass only to governed sandbox steps."
+                        ),
                     },
                     "cwd": {
                         "type": "string",
@@ -556,6 +591,143 @@ class RunCommandModule(BaseModule):
             return None
         return Path(workspace_root_raw).expanduser().resolve(strict=False)
 
+    async def _sandbox_env_for_chain(
+        self,
+        *,
+        env_file: str | None,
+        cwd: str | None,
+        chain: Any,
+        visible: Mapping[str, CommandDescriptor],
+        context: Any | None,
+    ) -> tuple[dict[str, str] | None, str | None]:
+        """Load env-file values for sandbox-backed command chains only."""
+
+        if env_file is None:
+            return None, None
+        if not self._chain_includes_visible_sandbox(chain, visible):
+            raise ValueError("envFile is only supported for command chains that include sandbox")
+        relative_path = self._env_file_relative_path(env_file, cwd)
+        env_file_path = await self._resolve_env_file_path(relative_path, context)
+        payload = await asyncio.to_thread(self._read_env_file_bytes, env_file_path)
+        env = self._parse_env_file_bytes(payload)
+        env_file_digest = hashlib.sha256(payload).hexdigest()
+        scope = json.dumps(
+            {"path": relative_path, "sha256": env_file_digest},
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return env, scope
+
+    @staticmethod
+    def _chain_includes_visible_sandbox(
+        chain: Any,
+        visible: Mapping[str, CommandDescriptor],
+    ) -> bool:
+        """Return True when the parsed chain contains a sandbox step visible in policy."""
+
+        if "sandbox" not in visible:
+            return False
+        for segment in getattr(chain, "segments", []) or []:
+            for invocation in getattr(segment, "commands", []) or []:
+                argv = list(getattr(invocation, "argv", []) or [])
+                if argv and argv[0] == "sandbox":
+                    return True
+        return False
+
+    @staticmethod
+    def _env_file_relative_path(env_file: str, cwd: str | None) -> str:
+        """Apply cwd to a normalized env-file path."""
+
+        if not cwd:
+            return env_file
+        return f"{cwd}/{env_file}"
+
+    async def _resolve_env_file_path(self, relative_path: str, context: Any | None) -> Path:
+        """Resolve an env file under the active workspace root with symlink containment."""
+
+        workspace_root = await self._resolve_workspace_root(context)
+        if workspace_root is None:
+            raise ValueError("envFile requires a resolved workspace root")
+        workspace_root = workspace_root.resolve(strict=False)
+        lexical_path = workspace_root / relative_path
+        if not self._path_is_relative_to(lexical_path, workspace_root):
+            raise ValueError("envFile must stay within the workspace root")
+        try:
+            resolved_path = await asyncio.to_thread(lexical_path.resolve, strict=True)
+        except FileNotFoundError as exc:
+            raise ValueError("envFile was not found") from exc
+        except (OSError, RuntimeError) as exc:
+            raise ValueError("envFile could not be resolved") from exc
+        if not self._path_is_relative_to(resolved_path, workspace_root):
+            raise ValueError("envFile symlink target must stay within the workspace root")
+        if not await asyncio.to_thread(resolved_path.is_file):
+            raise ValueError("envFile must reference a regular file")
+        return resolved_path
+
+    @staticmethod
+    def _path_is_relative_to(path: Path, parent: Path) -> bool:
+        """Compatibility wrapper for Path.relative_to containment checks."""
+
+        try:
+            path.relative_to(parent)
+        except ValueError:
+            return False
+        return True
+
+    @staticmethod
+    def _read_env_file_bytes(path: Path) -> bytes:
+        """Read a bounded env file payload."""
+
+        try:
+            info = path.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise ValueError("envFile could not be inspected") from exc
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("envFile must reference a regular file")
+        if info.st_size > _RUN_ENV_FILE_MAX_BYTES:
+            raise ValueError(f"envFile exceeds {_RUN_ENV_FILE_MAX_BYTES} bytes")
+        payload = path.read_bytes()
+        if len(payload) > _RUN_ENV_FILE_MAX_BYTES:
+            raise ValueError(f"envFile exceeds {_RUN_ENV_FILE_MAX_BYTES} bytes")
+        return payload
+
+    @staticmethod
+    def _parse_env_file_bytes(payload: bytes) -> dict[str, str]:
+        """Parse a minimal .env file without expansion or host environment access."""
+
+        try:
+            text = payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("envFile must be UTF-8") from exc
+
+        env: dict[str, str] = {}
+        for line_number, raw_line in enumerate(text.splitlines(), start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export ") :].lstrip()
+            if "=" not in line:
+                raise ValueError(f"envFile line {line_number} must be KEY=value")
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if not RunCommandModule._is_valid_env_key(key):
+                raise ValueError(f"envFile line {line_number} has invalid variable name")
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                value = value[1:-1]
+            env[key] = value
+        return env
+
+    @staticmethod
+    def _is_valid_env_key(key: str) -> bool:
+        """Return whether a key is a portable environment variable name."""
+
+        if not key or not (key[0] == "_" or key[0].isalpha()):
+            return False
+        return all(ch == "_" or ch.isalnum() for ch in key[1:])
+
     @staticmethod
     def _first_nonempty(*values: Any) -> str | None:
         for value in values:
@@ -679,6 +851,7 @@ class RunCommandModule(BaseModule):
         parent_key: str | None,
         cwd: str | None,
         sandbox_session_id: str | None,
+        env_file_scope: str | None = None,
     ) -> str | None:
         """Salt a parent idempotency key with unambiguous execution scope data."""
 
@@ -689,6 +862,8 @@ class RunCommandModule(BaseModule):
             scope_payload["cwd"] = cwd
         if sandbox_session_id:
             scope_payload["sandbox_session_id"] = sandbox_session_id
+        if env_file_scope:
+            scope_payload["env_file"] = env_file_scope
         if not scope_payload:
             return parent_key
         serialized_scope = json.dumps(
@@ -733,6 +908,53 @@ class RunCommandModule(BaseModule):
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{key} must be a non-empty string")
         return value.strip()
+
+    @classmethod
+    def _validate_env_file_arguments(cls, arguments: dict[str, Any]) -> None:
+        """Validate env-file aliases before command execution starts."""
+
+        env_file = arguments.get("env_file")
+        env_file_camel = arguments.get("envFile")
+        if env_file is not None:
+            cls._normalize_env_file(env_file, "env_file")
+        if env_file_camel is not None:
+            cls._normalize_env_file(env_file_camel, "envFile")
+        if env_file is not None and env_file_camel is not None:
+            legacy_value = cls._normalize_env_file(env_file, "env_file")
+            camel_value = cls._normalize_env_file(env_file_camel, "envFile")
+            if legacy_value != camel_value:
+                raise ValueError("envFile and env_file must match when both are provided")
+
+    @classmethod
+    def _env_file(cls, arguments: dict[str, Any]) -> str | None:
+        """Return the normalized env-file path from either supported alias."""
+
+        for key in ("envFile", "env_file"):
+            value = arguments.get(key)
+            if value is not None:
+                return cls._normalize_env_file(value, key)
+        return None
+
+    @classmethod
+    def _normalize_env_file(cls, value: Any, key: str) -> str:
+        """Normalize env-file paths as workspace-relative file references."""
+
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{key} must be a non-empty workspace-relative path")
+        text = value.strip()
+        if cls._is_anchored_path(text) or text.startswith("~"):
+            raise ValueError(f"{key} must be workspace-relative")
+        parts: list[str] = []
+        for raw_part in text.replace("\\", "/").split("/"):
+            part = raw_part.strip()
+            if not part or part == ".":
+                continue
+            if part == "..":
+                raise ValueError(f"{key} must not contain path traversal")
+            parts.append(part)
+        if not parts:
+            raise ValueError(f"{key} must reference a workspace-relative file")
+        return "/".join(parts)
 
     @classmethod
     def _validate_cwd_arguments(cls, arguments: dict[str, Any]) -> None:
