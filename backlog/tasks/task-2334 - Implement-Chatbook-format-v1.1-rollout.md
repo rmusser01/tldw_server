@@ -20,6 +20,8 @@ modified_files:
 - tldw_Server_API/tests/Chatbooks/test_chatbooks_v1_1_file_inventory.py
 - tldw_Server_API/tests/Chatbooks/test_chatbooks_v1_1_preview.py
 - tldw_Server_API/tests/Chatbooks/test_explainer_session_content_type.py
+- tldw_Server_API/tests/Chatbooks/test_chatbooks_import_validation.py
+- tldw_Server_API/tests/Chatbooks/test_chatbook_service_preview_import_safety.py
 ---
 
 ## Description
@@ -46,6 +48,8 @@ Task 5 slice: added v1.1 Explainer content envelope export support without chang
 Task 6 slice: added v1.1 preview report API support while preserving the existing preview_chatbook two-tuple and endpoint fallback for legacy service doubles. Changed chatbook_schemas.py, chatbooks.py, chatbook_service.py, chatbook_format_v1_1.py, and test_chatbooks_v1_1_preview.py. Red test first failed with KeyError: 'compatibility'; focused green test passed. Verification: service preview safety/API mapping suite 19 passed; Bandit on touched app files reported 0 results. Required combined preview API command is blocked by an existing full-app TestClient teardown hang in test_chatbooks_api_preview.py after its first test, reproduced when that file is run alone.
 
 Task 6 review fix: hardened preview report handling for malformed-but-parseable features_used and file_inventory manifest data. Added regression tests for non-string feature tokens, non-list inventory, and non-string inventory paths. RED failed with TypeError for all three malformed inputs; GREEN passed focused v1.1 preview suite (4 passed), service preview safety/API mapping suite (19 passed), and Bandit on chatbook_format_v1_1.py reported 0 results.
+
+Task 7 slice: enforced v1.1 pre-import validation immediately after manifest parsing and before content selections/import writes. Added validate_v1_1_before_import(), checksum mismatch rejection, reject_import unknown-feature handling, and warning propagation for non-reject unknown-feature policy. RED targeted tests failed because import ignored checksum/feature policy and returned normal import messages; GREEN targeted tests passed (3 passed). Required verification passed: test_chatbooks_import_validation.py + test_chatbook_service_preview_import_safety.py (12 passed), test_chatbooks_v1_1_preview.py (4 passed), Bandit on chatbook_format_v1_1.py and chatbook_service.py reported 0 results/errors. Full git diff --check is blocked by unrelated trailing whitespace in Docs/Design/Agents.md:175; task-scoped git diff --check passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

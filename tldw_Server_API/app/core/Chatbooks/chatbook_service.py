@@ -66,6 +66,7 @@ from .chatbook_models import (
 from .chatbook_format_v1_1 import (
     build_file_inventory,
     build_preview_report,
+    validate_v1_1_before_import,
 )
 
 # Unified audit logging is handled at the API layer. The service no longer
@@ -2186,9 +2187,24 @@ class ChatbookService:
                 manifest_data = json.load(f)
 
             manifest = ChatbookManifest.from_dict(manifest_data)
+            import_warnings: list[str] = []
+
+            if manifest.version == ChatbookVersion.V1_1:
+                ok, v1_1_warnings, v1_1_errors = validate_v1_1_before_import(
+                    manifest,
+                    extract_dir,
+                )
+                import_warnings.extend(v1_1_warnings)
+                if not ok:
+                    first_error = v1_1_errors[0] if v1_1_errors else "validation failed"
+                    return False, f"Chatbook v1.1 validation failed: {first_error}", {
+                        "imported_items": {},
+                        "warnings": import_warnings,
+                        "errors": v1_1_errors,
+                    }
 
             # Check version compatibility (V1 and V1_LEGACY are both compatible)
-            compatible_versions = {ChatbookVersion.V1, ChatbookVersion.V1_LEGACY}
+            compatible_versions = {ChatbookVersion.V1, ChatbookVersion.V1_LEGACY, ChatbookVersion.V1_1}
             if manifest.version not in compatible_versions:
                 logger.warning(f"Chatbook version {manifest.version.value} may not be fully compatible")
 
@@ -2209,6 +2225,7 @@ class ChatbookService:
                 status=ImportStatus.IN_PROGRESS,
                 chatbook_path=file_path
             )
+            import_status.warnings.extend(import_warnings)
 
             import_status.total_items = sum(len(ids) for ids in content_selections.values())
 

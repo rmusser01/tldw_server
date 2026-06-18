@@ -133,6 +133,48 @@ def build_preview_report(manifest: Any, extract_dir: Path) -> dict[str, Any]:
     }
 
 
+def validate_v1_1_before_import(manifest: Any, extract_dir: Path) -> tuple[bool, list[str], list[str]]:
+    """Validate v1.1 compatibility and integrity before any import writes."""
+    report = build_preview_report(manifest, extract_dir)
+    warnings = list(report.get("warnings") or [])
+    errors: list[str] = []
+
+    features_report = report.get("features") if isinstance(report, dict) else {}
+    if not isinstance(features_report, dict):
+        features_report = {}
+    unsupported_features = _string_list(features_report.get("unsupported"))
+    unsupported_behavior = _unsupported_feature_behavior(getattr(manifest, "compatibility", {}))
+
+    if unsupported_features:
+        feature_list = ", ".join(unsupported_features)
+        if unsupported_behavior == "reject_import":
+            errors.append(
+                "Unsupported chatbook features rejected before import: "
+                f"{feature_list}"
+            )
+        else:
+            _append_unique(
+                warnings,
+                "Unsupported chatbook features detected before import "
+                f"({unsupported_behavior}): {feature_list}",
+            )
+
+    integrity_report = report.get("integrity") if isinstance(report, dict) else {}
+    failed_files: list[Any] = []
+    if isinstance(integrity_report, dict):
+        raw_failed_files = integrity_report.get("failed_files")
+        if isinstance(raw_failed_files, list):
+            failed_files = raw_failed_files
+    for failed_file in failed_files:
+        errors.append(_inventory_failure_error(failed_file))
+
+    for report_error in report.get("errors") or []:
+        if isinstance(report_error, str):
+            _append_unique(errors, report_error)
+
+    return not errors, warnings, errors
+
+
 def build_content_envelope(
     *,
     format_id: str,
@@ -290,3 +332,37 @@ def _lossiness_mode(envelope: dict[str, Any]) -> str:
         if isinstance(mode, str) and mode:
             return mode
     return "unknown"
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _unsupported_feature_behavior(compatibility: Any) -> str:
+    if isinstance(compatibility, dict):
+        behavior = compatibility.get("unsupported_feature_behavior")
+        if behavior in {"warn_and_skip", "warn_lossy_import", "reject_import"}:
+            return behavior
+    return "warn_and_skip"
+
+
+def _append_unique(items: list[str], value: str) -> None:
+    if value not in items:
+        items.append(value)
+
+
+def _inventory_failure_error(failed_file: Any) -> str:
+    path = None
+    reason = "invalid_entry"
+    if isinstance(failed_file, dict):
+        path = failed_file.get("path")
+        raw_reason = failed_file.get("reason")
+        if isinstance(raw_reason, str) and raw_reason:
+            reason = raw_reason
+    path_label = path if isinstance(path, str) and path else "<unknown>"
+    reason_label = reason.replace("_", " ")
+    if reason == "hash_mismatch":
+        return f"Checksum validation failed for {path_label}: hash mismatch"
+    return f"File inventory validation failed for {path_label}: {reason_label}"
