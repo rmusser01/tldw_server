@@ -40,6 +40,8 @@ _RUN_TOOL_NAME = "run"
 _RUN_TOOL_ALIASES = ("bash", "shell", "powershell", "pwsh")
 _RUN_TOOL_NAMES = frozenset((_RUN_TOOL_NAME, *_RUN_TOOL_ALIASES))
 _RUN_ENV_FILE_MAX_BYTES = 64 * 1024
+_RUN_SHELL_NAME_CHOICES = ("bash", "shell", "powershell", "pwsh")
+_RUN_PINNED_ALIAS_SHELLS = {"bash": "bash", "powershell": "powershell", "pwsh": "pwsh"}
 
 
 class RunEnvFileValidationError(ValidationError):
@@ -113,6 +115,7 @@ class RunCommandModule(BaseModule):
         retain_output_artifacts = self._retain_output_artifacts(args)
         sandbox_session_id = self._sandbox_session_id(args)
         env_file = self._env_file(args)
+        shell_name = self._shell_name(tool_name, args)
         visible = await self._visible_commands_for_context(context)
         if command_text in {"help", "--help"}:
             return present_command_execution_result(
@@ -180,10 +183,12 @@ class RunCommandModule(BaseModule):
                 cwd,
                 sandbox_session_id,
                 env_file_scope,
+                shell_name,
             ),
             cwd=cwd,
             sandbox_session_id=sandbox_session_id,
             sandbox_env=sandbox_env,
+            shell_name=shell_name,
         )
         adapters = PhaseOneCommandAdapters(adapter_context)
         executor = CommandRuntimeExecutor(
@@ -257,6 +262,8 @@ class RunCommandModule(BaseModule):
                 "retain_output_artifacts",
                 "sandboxSessionId",
                 "sandbox_session_id",
+                "shellName",
+                "shell_name",
                 "timeoutSeconds",
                 "timeout_seconds",
                 "workingDirectory",
@@ -286,6 +293,7 @@ class RunCommandModule(BaseModule):
         self._validate_retain_output_artifact_arguments(arguments)
         self._validate_sandbox_session_arguments(arguments)
         self._validate_env_file_arguments(arguments)
+        self._validate_shell_name_arguments(tool_name, arguments)
 
     def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
         """Sanitize input while allowing CLI flags like `--help` and shell-like tokens."""
@@ -396,6 +404,18 @@ class RunCommandModule(BaseModule):
                     "sandboxSessionId": {
                         "type": "string",
                         "description": "Sandbox session id for governed sandbox command steps.",
+                    },
+                    "shell_name": {
+                        "type": "string",
+                        "enum": list(_RUN_SHELL_NAME_CHOICES),
+                        "description": "Legacy alias for shellName.",
+                    },
+                    "shellName": {
+                        "type": "string",
+                        "enum": list(_RUN_SHELL_NAME_CHOICES),
+                        "description": (
+                            "Optional virtual shell dialect label; does not enable raw host shell execution."
+                        ),
                     },
                     "timeout_seconds": {
                         "type": "number",
@@ -883,6 +903,7 @@ class RunCommandModule(BaseModule):
         cwd: str | None,
         sandbox_session_id: str | None,
         env_file_scope: str | None = None,
+        shell_name: str | None = None,
     ) -> str | None:
         """Salt a parent idempotency key with unambiguous execution scope data."""
 
@@ -895,6 +916,8 @@ class RunCommandModule(BaseModule):
             scope_payload["sandbox_session_id"] = sandbox_session_id
         if env_file_scope:
             scope_payload["env_file"] = env_file_scope
+        if shell_name:
+            scope_payload["shell_name"] = shell_name
         if not scope_payload:
             return parent_key
         serialized_scope = json.dumps(
@@ -939,6 +962,43 @@ class RunCommandModule(BaseModule):
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{key} must be a non-empty string")
         return value.strip()
+
+    @classmethod
+    def _validate_shell_name_arguments(cls, tool_name: str, arguments: dict[str, Any]) -> None:
+        """Validate explicit shell selection aliases before execution starts."""
+
+        shell_name = arguments.get("shell_name")
+        shell_name_camel = arguments.get("shellName")
+        legacy_value = cls._normalize_shell_name(shell_name, "shell_name") if shell_name is not None else None
+        camel_value = cls._normalize_shell_name(shell_name_camel, "shellName") if shell_name_camel is not None else None
+        if legacy_value is not None and camel_value is not None and legacy_value != camel_value:
+            raise ValueError("shellName and shell_name must match when both are provided")
+
+        selected = camel_value if camel_value is not None else legacy_value
+        pinned = _RUN_PINNED_ALIAS_SHELLS.get(tool_name)
+        if selected is not None and pinned is not None and selected != pinned:
+            raise ValueError(f"{tool_name} alias requires shellName={pinned}")
+
+    @classmethod
+    def _shell_name(cls, tool_name: str, arguments: dict[str, Any]) -> str | None:
+        """Return the selected virtual shell label, including pinned aliases."""
+
+        for key in ("shellName", "shell_name"):
+            value = arguments.get(key)
+            if value is not None:
+                return cls._normalize_shell_name(value, key)
+        return _RUN_PINNED_ALIAS_SHELLS.get(tool_name)
+
+    @staticmethod
+    def _normalize_shell_name(value: Any, key: str) -> str:
+        """Normalize one virtual shell selection value."""
+
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{key} must be one of: {', '.join(_RUN_SHELL_NAME_CHOICES)}")
+        normalized = value.strip().lower()
+        if normalized not in _RUN_SHELL_NAME_CHOICES:
+            raise ValueError(f"{key} must be one of: {', '.join(_RUN_SHELL_NAME_CHOICES)}")
+        return normalized
 
     @classmethod
     def _validate_env_file_arguments(cls, arguments: dict[str, Any]) -> None:

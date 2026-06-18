@@ -190,7 +190,7 @@ def _build_module(protocol: _ProtocolStub) -> RunCommandModule:
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_run_module_exposes_governed_bash_and_shell_alias_tools() -> None:
     protocol = _ProtocolStub()
     module = _build_module(protocol)
@@ -215,6 +215,8 @@ async def test_run_module_exposes_governed_bash_and_shell_alias_tools() -> None:
         assert "sandbox_session_id" in alias["inputSchema"]["properties"]
         assert "envFile" in alias["inputSchema"]["properties"]
         assert "env_file" in alias["inputSchema"]["properties"]
+        assert "shellName" in alias["inputSchema"]["properties"]
+        assert "shell_name" in alias["inputSchema"]["properties"]
 
 
 @pytest.mark.asyncio
@@ -411,6 +413,59 @@ def test_scoped_parent_idempotency_key_uses_unambiguous_scope_serialization() ->
     )
 
     assert newline_encoded_key != component_key
+
+
+@pytest.mark.unit
+async def test_run_shell_name_participates_in_nested_idempotency_scope() -> None:
+    """Explicit shell selection should scope nested idempotency without changing backend routing."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-shell-name-idem", user_id="1", client_id="unit")
+
+    await module.execute_tool(
+        "run",
+        {"command": "cat notes.txt", "shellName": "bash", "idempotencyKey": "parent-idem-shell"},
+        context=context,
+    )
+    await module.execute_tool(
+        "run",
+        {"command": "cat notes.txt", "shellName": "powershell", "idempotencyKey": "parent-idem-shell"},
+        context=context,
+    )
+
+    first_key = protocol.prepare_calls[0].idempotency_key
+    second_key = protocol.prepare_calls[1].idempotency_key
+    assert first_key != second_key
+    assert first_key is not None and first_key.startswith("parent-idem-shell:")
+    assert second_key is not None and second_key.startswith("parent-idem-shell:")
+    assert [call.params["name"] for call in protocol.prepare_calls] == ["fs.read", "fs.read"]
+
+
+@pytest.mark.parametrize(
+    "tool_name, arguments",
+    [
+        ("run", {"command": "ls", "shellName": ""}),
+        ("run", {"command": "ls", "shellName": "zsh"}),
+        ("run", {"command": "ls", "shellName": 123}),
+        ("run", {"command": "ls", "shellName": "bash", "shell_name": "powershell"}),
+        ("bash", {"command": "ls", "shellName": "powershell"}),
+        ("powershell", {"command": "ls", "shell_name": "bash"}),
+        ("pwsh", {"command": "ls", "shellName": "powershell"}),
+    ],
+)
+@pytest.mark.unit
+async def test_run_rejects_invalid_or_conflicting_shell_name_arguments(
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> None:
+    """Shell selection must be explicit, known, and compatible with pinned aliases."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+
+    with pytest.raises(ValueError, match="shellName|shell_name"):
+        await module.execute_tool(tool_name, arguments, context=RequestContext(request_id="run-shell-name-invalid"))
 
 
 @pytest.mark.asyncio
