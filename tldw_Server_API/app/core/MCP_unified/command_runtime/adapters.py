@@ -363,8 +363,10 @@ class PhaseOneCommandAdapters:
         return _UsageError(f"{tool_name} unavailable in this context")
 
     def _path_with_cwd(self, path: str) -> str | _UsageError:
+        """Apply the current cwd to relative path tokens without mutating token text."""
+
         cwd = self.context.cwd
-        text = str(path or ".").strip() or "."
+        text = "." if path is None or path == "" else str(path)
         if not cwd or self._is_anchored_path(text):
             return text
         normalized = self._normalize_relative_path(text)
@@ -376,24 +378,27 @@ class PhaseOneCommandAdapters:
 
     @classmethod
     def _normalize_relative_path(cls, path: str) -> str | _UsageError:
-        text = str(path or ".").strip()
+        """Normalize relative separators while preserving literal path segment text."""
+
+        text = "." if path is None or path == "" else str(path)
         if cls._is_anchored_path(text):
             return text
         if text.startswith("~"):
             return _UsageError("path must be workspace-relative when cwd is set")
         parts: list[str] = []
         for raw_part in text.replace("\\", "/").split("/"):
-            part = raw_part.strip()
-            if not part or part == ".":
+            if not raw_part or raw_part == ".":
                 continue
-            if part == "..":
+            if raw_part == "..":
                 return _UsageError("path traversal is not supported when cwd is set")
-            parts.append(part)
+            parts.append(raw_part)
         return "/".join(parts) if parts else "."
 
     @staticmethod
     def _is_anchored_path(path: str) -> bool:
-        text = str(path or "").strip()
+        """Return whether a token is already absolute or drive-anchored."""
+
+        text = "" if path is None else str(path)
         if not text:
             return False
         windows_path = PureWindowsPath(text)

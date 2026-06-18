@@ -215,6 +215,8 @@ def _overflow_notice(
     spill: CommandSpillReference | None = None,
     include_artifact_handles: bool = False,
 ) -> str:
+    """Render the truncation notice and optional redacted artifact handle."""
+
     lines = [
         f"--- {stream_name} truncated ({line_count} lines, {byte_count} bytes) ---",
         f"Full {stream_name} was stored internally because it exceeded the preview limit.",

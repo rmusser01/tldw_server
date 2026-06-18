@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,7 +12,11 @@ import pytest
 from tldw_Server_API.app.core.MCP_unified.command_runtime.adapters import (
     derive_step_idempotency_key,
 )
+from tldw_Server_API.app.core.MCP_unified.command_runtime.executor import CommandRuntimeExecutor
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
+from tldw_Server_API.app.core.MCP_unified.modules.implementations import (
+    run_command_module as run_command_module_module,
+)
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.run_command_module import (
     RunCommandModule,
 )
@@ -242,6 +247,8 @@ async def test_shell_alias_uses_governed_run_implementation_without_raw_shell_de
 
 @pytest.mark.asyncio
 async def test_powershell_alias_uses_governed_run_implementation_without_raw_shell_delegation() -> None:
+    """PowerShell aliases must stay governed virtual CLI facades."""
+
     protocol = _ProtocolStub()
     module = _build_module(protocol)
     context = RequestContext(request_id="run-powershell-alias", user_id="1", client_id="unit")
@@ -256,14 +263,32 @@ async def test_powershell_alias_uses_governed_run_implementation_without_raw_she
 
 
 @pytest.mark.asyncio
-async def test_run_timeout_seconds_cancels_slow_governed_execution() -> None:
-    class _SlowProtocolStub(_ProtocolStub):
+async def test_run_timeout_seconds_cancels_slow_governed_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Timeout handling should cancel an in-flight governed backend call deterministically."""
+
+    class _BlockedProtocolStub(_ProtocolStub):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+
         async def execute_prepared_tool_call(self, prepared: _PreparedCall) -> dict[str, Any]:
             self.execute_calls.append(prepared)
-            await asyncio.sleep(0.1)
-            return await super().execute_prepared_tool_call(prepared)
+            self.started.set()
+            await asyncio.Future()
+            raise AssertionError("blocked backend call should be cancelled")
 
-    protocol = _SlowProtocolStub()
+    protocol = _BlockedProtocolStub()
+
+    async def _deterministic_wait_for(awaitable: Any, *, timeout: float | None = None) -> Any:
+        assert timeout == 0.01
+        task = asyncio.create_task(awaitable)
+        await protocol.started.wait()
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        raise TimeoutError
+
+    monkeypatch.setattr(run_command_module_module.asyncio, "wait_for", _deterministic_wait_for)
     module = _build_module(protocol)
     context = RequestContext(request_id="run-timeout", user_id="1", client_id="unit")
 
@@ -287,6 +312,8 @@ async def test_run_timeout_seconds_cancels_slow_governed_execution() -> None:
 )
 @pytest.mark.asyncio
 async def test_run_rejects_invalid_timeout_arguments(arguments: dict[str, Any]) -> None:
+    """Timeout arguments must be finite positive numbers with matching aliases."""
+
     protocol = _ProtocolStub()
     module = _build_module(protocol)
 
@@ -296,6 +323,8 @@ async def test_run_rejects_invalid_timeout_arguments(arguments: dict[str, Any]) 
 
 @pytest.mark.asyncio
 async def test_run_applies_cwd_to_relative_workspace_file_arguments() -> None:
+    """Relative filesystem arguments should be scoped under the requested cwd."""
+
     protocol = _ProtocolStub()
     module = _build_module(protocol)
     context = RequestContext(request_id="run-cwd", user_id="1", client_id="unit")
@@ -321,7 +350,30 @@ async def test_run_applies_cwd_to_relative_workspace_file_arguments() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_cwd_preserves_whitespace_in_relative_file_arguments() -> None:
+    """Cwd path rewriting must not trim valid whitespace in path tokens."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-cwd-whitespace", user_id="1", client_id="unit")
+
+    await module.execute_tool(
+        "run",
+        {"command": 'cat " notes.txt " ; write " out.txt " hello ; ls " sub dir "', "cwd": "docs"},
+        context=context,
+    )
+
+    assert [call.params["arguments"] for call in protocol.prepare_calls] == [
+        {"path": "docs/ notes.txt "},
+        {"path": "docs/ out.txt ", "content": "hello"},
+        {"path": "docs/ sub dir "},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_run_cwd_participates_in_nested_idempotency_keys() -> None:
+    """Cwd scopes should salt nested idempotency keys."""
+
     protocol = _ProtocolStub()
     module = _build_module(protocol)
     context = RequestContext(request_id="run-cwd-idempotency", user_id="1", client_id="unit")
@@ -342,8 +394,27 @@ async def test_run_cwd_participates_in_nested_idempotency_keys() -> None:
     assert protocol.prepare_calls[1].idempotency_key.startswith("parent-idem-cwd:")
 
 
+def test_scoped_parent_idempotency_key_uses_unambiguous_scope_serialization() -> None:
+    """Crafted scope values must not collide with separate scope components."""
+
+    newline_encoded_key = RunCommandModule._scoped_parent_idempotency_key(
+        "parent-idem",
+        "docs\nsandbox_session_id=sandbox-1",
+        None,
+    )
+    component_key = RunCommandModule._scoped_parent_idempotency_key(
+        "parent-idem",
+        "docs",
+        "sandbox-1",
+    )
+
+    assert newline_encoded_key != component_key
+
+
 @pytest.mark.asyncio
 async def test_run_sandbox_session_id_uses_session_backed_sandbox_run() -> None:
+    """Sandbox commands should pass sandboxSessionId as sandbox.run session_id."""
+
     class _SandboxProtocolStub(_ProtocolStub):
         async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
             del params, context
@@ -384,6 +455,8 @@ async def test_run_sandbox_session_id_uses_session_backed_sandbox_run() -> None:
 
 @pytest.mark.asyncio
 async def test_run_sandbox_session_id_participates_in_nested_idempotency_keys() -> None:
+    """Sandbox session scopes should salt nested idempotency keys."""
+
     class _SandboxProtocolStub(_ProtocolStub):
         async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
             del params, context
@@ -435,6 +508,8 @@ async def test_run_sandbox_session_id_participates_in_nested_idempotency_keys() 
 )
 @pytest.mark.asyncio
 async def test_run_rejects_invalid_sandbox_session_arguments(arguments: dict[str, Any]) -> None:
+    """Sandbox session aliases must be non-empty strings when provided."""
+
     protocol = _ProtocolStub()
     module = _build_module(protocol)
 
@@ -453,6 +528,8 @@ async def test_run_rejects_invalid_sandbox_session_arguments(arguments: dict[str
 )
 @pytest.mark.asyncio
 async def test_run_rejects_unsafe_cwd_arguments(arguments: dict[str, Any]) -> None:
+    """Cwd must remain workspace-relative and alias-consistent."""
+
     protocol = _ProtocolStub()
     module = _build_module(protocol)
 
@@ -475,6 +552,8 @@ async def test_shell_alias_rejects_unsupported_raw_shell_syntax_before_backend_c
     command: str,
     expected_message: str,
 ) -> None:
+    """Unsupported raw shell syntax must fail before any governed backend call."""
+
     protocol = _ProtocolStub()
     module = _build_module(protocol)
     context = RequestContext(request_id="run-shell-unsupported", user_id="1", client_id="unit")
@@ -954,6 +1033,8 @@ async def test_run_uses_configured_spill_settings_and_workspace_relative_spill_d
 
 @pytest.mark.asyncio
 async def test_run_cleans_up_internal_spill_files_after_rendering(tmp_path: Path) -> None:
+    """Default rendering should delete oversized internal spill files."""
+
     protocol = _ProtocolStub()
     protocol.read_text_content = "line\n" * 500
     spill_root = tmp_path / "spills"
@@ -978,7 +1059,42 @@ async def test_run_cleans_up_internal_spill_files_after_rendering(tmp_path: Path
 
 
 @pytest.mark.asyncio
+async def test_run_timeout_removes_spill_files_created_before_cancellation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Timeout cleanup should remove spills even when no execution result is returned."""
+
+    async def _timeout_after_spill(self: CommandRuntimeExecutor, _chain: Any) -> Any:
+        await self._spill_payload_async("line\n" * 500, kind="stdout")
+        raise TimeoutError
+
+    monkeypatch.setattr(CommandRuntimeExecutor, "execute", _timeout_after_spill)
+    protocol = _ProtocolStub()
+    spill_root = tmp_path / "spills"
+    module = RunCommandModule(
+        ModuleConfig(
+            name="run",
+            settings={
+                "protocol": protocol,
+                "spill_dir": spill_root,
+                "spill_threshold_bytes": 32,
+            },
+        )
+    )
+    context = RequestContext(request_id="run-spill-timeout-cleanup", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": "cat notes.txt", "timeout_seconds": 1}, context=context)
+
+    assert "Command timed out after 1s" in rendered
+    assert spill_root.exists()
+    assert list(spill_root.iterdir()) == []
+
+
+@pytest.mark.asyncio
 async def test_run_can_retain_spill_files_as_redacted_output_artifacts(tmp_path: Path) -> None:
+    """Retained spill artifacts should use redacted handles and keep files private."""
+
     protocol = _ProtocolStub()
     protocol.read_text_content = "line\n" * 500
     spill_root = tmp_path / "spills"
@@ -1000,7 +1116,10 @@ async def test_run_can_retain_spill_files_as_redacted_output_artifacts(tmp_path:
         context=context,
     )
 
-    retained = list(spill_root.iterdir())
+    retained_dirs = list(spill_root.iterdir())
+    assert len(retained_dirs) == 1
+    assert retained_dirs[0].is_dir()
+    retained = list(retained_dirs[0].iterdir())
     assert len(retained) == 1
     assert retained[0].read_text(encoding="utf-8") == protocol.read_text_content
     assert "--- stdout truncated" in rendered
@@ -1019,6 +1138,8 @@ async def test_run_can_retain_spill_files_as_redacted_output_artifacts(tmp_path:
 )
 @pytest.mark.asyncio
 async def test_run_rejects_invalid_retain_output_artifact_arguments(arguments: dict[str, Any]) -> None:
+    """Artifact retention aliases must be booleans with matching values."""
+
     protocol = _ProtocolStub()
     module = _build_module(protocol)
 
