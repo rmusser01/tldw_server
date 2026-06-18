@@ -9,6 +9,8 @@ import pytest
 import yaml
 
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "vz-linux-host-gated.yml"
 POLICY_PATH = REPO_ROOT / "Docs" / "Sandbox" / "vz-linux-host-gated-ci-acceptance-policy.md"
@@ -42,6 +44,14 @@ def _workflow_triggers(workflow: dict[str, Any]) -> dict[str, Any]:
     triggers = workflow.get("on", workflow.get(True))
     assert isinstance(triggers, dict)  # nosec B101
     return triggers
+
+
+def _workflow_step_run(steps: list[dict[str, Any]], step_name: str) -> str:
+    """Return the run block for a named workflow step."""
+    for step in steps:
+        if step.get("name") == step_name:
+            return str(step.get("run", ""))
+    pytest.fail(f"Workflow step not found: {step_name}")
 
 
 def _normalized_text(path: Path) -> str:
@@ -137,10 +147,10 @@ def test_vz_linux_host_gated_workflow_passes_explicit_evidence_dir() -> None:
     """The workflow should make structured smoke evidence a named runtime path."""
     workflow = _load_workflow()
     steps = workflow["jobs"]["vz-linux-host-gated-smoke"]["steps"]
-    run_blocks = "\n".join(str(step.get("run", "")) for step in steps)
+    smoke_step_run = _workflow_step_run(steps, "Run managed host smoke")
 
-    assert 'evidence_dir="${runtime_dir}/evidence"' in run_blocks  # nosec B101
-    assert '--evidence-dir "${evidence_dir}"' in run_blocks  # nosec B101
+    assert 'evidence_dir="${runtime_dir}/evidence"' in smoke_step_run  # nosec B101
+    assert '--evidence-dir "${evidence_dir}"' in smoke_step_run  # nosec B101
 
 
 def test_vz_linux_host_gated_workflow_failure_drills_are_manual_opt_in() -> None:
