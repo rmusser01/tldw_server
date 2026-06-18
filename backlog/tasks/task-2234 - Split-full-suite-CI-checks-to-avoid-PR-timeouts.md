@@ -11,6 +11,8 @@ modified_files:
 - .github/actions/setup-ffmpeg/action.yml
 - pyproject.toml
 - .github/workflows/ci.yml
+- .github/workflows/backend-required.yml
+- .github/workflows/frontend-e2e-tiers.yml
 - .github/workflows/coverage-required.yml
 - .github/workflows/sbom.yml
 - Docs/Sandbox/sandbox-runtime-capability-inventory.md
@@ -1055,6 +1057,8 @@ Current-head run `27730023004` on merge commit `e2a079a` drained with no pending
 Merged latest `origin/dev` commit `d06f579d95` after the drain so the next push tests against the current base. The merge completed without conflicts. Post-merge verification: `git diff --check` passed, workflow/router contract tests passed together (`203 passed`), compileall passed for the touched Python tests, and Bandit with `B101` skipped reported no findings.
 
 Current-head run `27764477414` exposed Windows/Python 3.12 `ai-chromadb` cancelling before pytest while `Pre-download embedding models` downloaded `sentence-transformers/all-MiniLM-L6-v2` from Hugging Face; the job log reached snapshot download progress and then ended with `The operation was canceled`, so this was CI setup/download budget pressure rather than a ChromaDB test assertion. The workflow now makes embedding model pre-download opt-in via `RUN_MODEL_TESTS` or `RUN_REAL_HF_EMBEDDING_TESTS`, and when enabled it remains MiniLM-only instead of defaulting to the broader download set. The ChromaDB fixture now also keeps default CI offline/deterministic unless model tests are explicitly enabled, avoiding a runtime Hugging Face probe/download path in normal shards. Verification: the workflow/router contract tests plus new fixture gating tests passed locally (`205 passed`), compileall passed for touched Python tests, `git diff --check` passed, Bandit JSON `/tmp/bandit_ci2258_hf_model_gate.json` reported `errors=[]` and `results=[]`, and PR checks still showed only the same `ai-chromadb` cancelled row before staging.
+
+Fresh run `27770115333` on head `f0c042ed10` exposed `E2E Critical (Tier 1 + Journeys)` cancelling before frontend tests while the frontend E2E workflow was still in the shared FFmpeg/PortAudio apt setup step. The log showed Ubuntu archive retries through `azure.archive.ubuntu.com` and ended with `The operation was canceled` before backend or Playwright tests started. The same setup class then appeared in `backend-required` job `82182210282`, which also cancelled in the old shared setup action before any backend checks ran. Frontend E2E and backend-required now keep PortAudio for PyAudio builds but disable unnecessary FFmpeg installation, and the shared setup action rewrites the flaky Azure Ubuntu mirror to `archive.ubuntu.com`, skips apt when neither install input is requested, and bounds apt update HTTP/HTTPS timeouts. Verification: `test_required_workflow_contracts.py` passed locally (`28 passed`), YAML parsed for `setup-ffmpeg/action.yml`, `backend-required.yml`, `frontend-e2e-tiers.yml`, and `ci.yml`, compileall passed for the touched contract test, `git diff --check` passed, and Bandit JSON `/tmp/bandit_ci2258_setup_required_gates.json` reported no findings.
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 

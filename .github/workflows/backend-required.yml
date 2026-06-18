@@ -51,6 +51,7 @@ jobs:
         if: needs.changes.outputs.backend_changed == 'true'
         uses: ./.github/actions/setup-ffmpeg
         with:
+          install-ffmpeg: 'false'
           install-portaudio: 'true'
 
       - name: Setup Python and dependencies

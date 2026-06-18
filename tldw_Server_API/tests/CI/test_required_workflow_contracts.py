@@ -83,6 +83,10 @@ def test_backend_required_has_noop_and_execute_paths() -> None:
 
 def test_backend_required_installs_portaudio_for_pyaudio_builds() -> None:
     _assert_ffmpeg_portaudio_setup(".github/workflows/backend-required.yml", "backend-required")
+    workflow = _load(".github/workflows/backend-required.yml")
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    install_step = _get_step(steps, "Install FFmpeg and PortAudio (Linux)")
+    assert install_step["with"]["install-ffmpeg"] == "false"
 
 
 def test_backend_required_type_checks_only_changed_python_files() -> None:
@@ -178,11 +182,17 @@ def test_e2e_required_explicitly_loads_pytest_asyncio_plugin() -> None:
 
 
 def test_frontend_e2e_tiers_install_portaudio_before_backend_dependency_setup() -> None:
+    workflow = _load(".github/workflows/frontend-e2e-tiers.yml")
     for job_name in ("critical", "features", "admin"):
         _assert_portaudio_installed_before_python_setup(
             ".github/workflows/frontend-e2e-tiers.yml",
             job_name,
         )
+        install_step = _get_step(
+            workflow["jobs"][job_name]["steps"],
+            "Install FFmpeg and PortAudio (Linux)",
+        )
+        assert install_step["with"]["install-ffmpeg"] == "false"
 
 
 def test_security_required_lane_exists_and_uses_threshold_policy() -> None:
@@ -318,6 +328,12 @@ def test_setup_ffmpeg_action_can_skip_ffmpeg_but_keep_portaudio() -> None:
     linux_step = _get_step(action["runs"]["steps"], "Install FFmpeg (Linux)")
     linux_script = linux_step["run"]
     assert 'inputs.install-ffmpeg' in linux_script
+    assert "azure.archive.ubuntu.com" in linux_script
+    assert "Acquire::http::Timeout=20" in linux_script
+    assert (
+        '"${{ inputs.install-ffmpeg }}" = "true" ] || [ "${{ inputs.install-portaudio }}" = "true"'
+        in linux_script
+    )
     assert (
         "sudo apt-get install -y --no-install-recommends ffmpeg portaudio19-dev python3-all-dev"
         in linux_script

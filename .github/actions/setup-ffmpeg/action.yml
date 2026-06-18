@@ -18,8 +18,14 @@ runs:
       run: |
         if [ -d /etc/apt/sources.list.d ]; then
           grep -rl 'packages.microsoft.com' /etc/apt/sources.list.d | xargs -r sudo rm -f
+          grep -rl 'azure.archive.ubuntu.com' /etc/apt/sources.list.d | xargs -r sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g'
         fi
-        sudo apt-get update -o Acquire::Retries=3
+        if [ -f /etc/apt/sources.list ]; then
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
+        fi
+        if [ "${{ inputs.install-ffmpeg }}" = "true" ] || [ "${{ inputs.install-portaudio }}" = "true" ]; then
+          sudo apt-get update -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20
+        fi
         if [ "${{ inputs.install-ffmpeg }}" = "true" ] && [ "${{ inputs.install-portaudio }}" = "true" ]; then
           sudo apt-get install -y --no-install-recommends ffmpeg portaudio19-dev python3-all-dev
         elif [ "${{ inputs.install-ffmpeg }}" = "true" ]; then

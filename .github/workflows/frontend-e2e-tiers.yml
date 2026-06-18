@@ -68,6 +68,7 @@ jobs:
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
         with:
+          install-ffmpeg: 'false'
           install-portaudio: 'true'
 
       - name: Setup Python and backend
@@ -160,6 +161,7 @@ jobs:
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
         with:
+          install-ffmpeg: 'false'
           install-portaudio: 'true'
 
       - name: Setup Python and backend
@@ -244,6 +246,7 @@ jobs:
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
         with:
+          install-ffmpeg: 'false'
           install-portaudio: 'true'
 
       - name: Setup Python and backend
