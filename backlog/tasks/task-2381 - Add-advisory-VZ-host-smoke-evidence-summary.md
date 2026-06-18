@@ -37,6 +37,7 @@ Add an advisory-first host-gated evidence summary path for VZ Linux smoke runs. 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Design spec drafted at `Docs/superpowers/specs/2026-06-17-vz-host-gated-evidence-summary-advisory-design.md`.
 - Local design review tightened the read-only contract: append-only GitHub step summary output, no evidence mutation, direct-child-only probes, symlink/non-regular-file skips, and bounded JSON reads.
+- Follow-up spec review found and addressed two masking risks: `if: always()` can run after checkout/setup failure when the script or interpreter is missing, and `$GITHUB_STEP_SUMMARY` write failures could otherwise make the advisory step fail. The spec now requires shell guards, stdout/stderr fallback, advisory exit `0`, Markdown sanitization, non-directory evidence path handling, and tests for these cases.
 - Subagent spec review was not spawned because the available multi-agent tool requires explicit user authorization for delegation.
 - Planning verification: `git diff --check`; Bandit not run for the design-only docs/backlog commit.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

@@ -51,6 +51,10 @@ helper.
 The summarizer is a read-only diagnostic tool. It must not create, modify, or
 delete the evidence directory or any evidence file.
 
+Summary output is diagnostic, not authoritative. If appending to
+`$GITHUB_STEP_SUMMARY` fails, the script should write the same summary to stdout
+or stderr, emit a warning, and still exit `0` in advisory mode.
+
 The workflow should run the summarizer with `if: always()` after the smoke
 wrapper has had a chance to finalize evidence and before or near the artifact
 upload steps. The summary step must exit `0` in this first advisory slice, even
@@ -72,7 +76,9 @@ The summary should treat these files as expected evidence:
 The implementation should inspect only these direct child paths under the
 configured evidence directory. It should use `lstat`-style checks, skip
 symlinks and non-regular files with warnings, and cap JSON reads so a corrupt
-or malicious file cannot exhaust memory in an operator diagnostic path.
+or malicious file cannot exhaust memory in an operator diagnostic path. The JSON
+read cap should be explicit in code, with `1 MiB` as the initial ceiling because
+the current evidence schema is small.
 
 When `host-smoke-evidence.json` is present and valid, the summary should report:
 
@@ -89,6 +95,11 @@ The summary should not parse or embed raw serial logs, helper stdout/stderr, or
 guest command output. It may mention paths, file names, sizes, and status values
 already present in the evidence bundle.
 
+All values read from evidence JSON or filesystem metadata should be treated as
+external input for rendering purposes. The Markdown renderer should escape table
+cell separators, normalize newlines, cap displayed field lengths, and avoid
+passing raw HTML through to the GitHub summary.
+
 ## Error Handling
 
 Missing evidence directory:
@@ -96,6 +107,13 @@ Missing evidence directory:
 - write a warning summary that evidence is unavailable
 - list the expected evidence directory
 - explain that this may indicate an early setup/preflight failure
+- exit `0`
+
+Evidence path exists but is not a directory:
+
+- write a warning summary that the configured evidence path is unusable
+- do not descend into or read through symlinks, regular files, devices, or other
+  non-directory paths
 - exit `0`
 
 Missing `host-smoke-evidence.json` with some files present:
@@ -120,6 +138,13 @@ Unexpected filesystem errors while probing evidence:
   evidence rather than reading through them
 - exit `0` in advisory mode
 
+Unexpected implementation errors:
+
+- catch at the CLI boundary
+- print a concise advisory warning without a traceback by default
+- exit `0` in advisory mode so the summary step cannot mask the primary smoke
+  result
+
 ## Workflow Contract
 
 The host-gated workflow should preserve this order:
@@ -132,6 +157,16 @@ The host-gated workflow should preserve this order:
 The summary step must not use broad runtime globs and must not change the
 artifact paths. It should read only the configured evidence directory.
 
+Because the summary step uses `if: always()`, it can run after checkout or
+Python setup failures. The workflow shell should therefore guard the
+summarizer invocation:
+
+- if the summarizer script is present, run it with `python` or `python3`,
+  whichever is available
+- if the script or interpreter is unavailable, append a short advisory warning
+  directly to `$GITHUB_STEP_SUMMARY` when possible and exit `0`
+- do not install dependencies or run repository setup from the summary step
+
 ## Risk Review
 
 - Advisory mode can hide defects if operators treat warnings as success.
@@ -143,9 +178,15 @@ artifact paths. It should read only the configured evidence directory.
 - A diagnostic reader can become a filesystem probe if it follows arbitrary
   links. Mitigation: inspect only known direct child evidence files, skip
   symlinks/non-regular files, and avoid recursive traversal.
+- Markdown output can be shaped by evidence values. Mitigation: escape Markdown
+  table separators, normalize newlines, cap displayed values, and avoid raw HTML
+  passthrough.
 - Missing evidence after a smoke failure is still useful signal, but failing the
   summary step would obscure the original failure. Mitigation: always exit `0`
   for malformed/missing evidence until a later strict-mode design is approved.
+- Always-run workflow steps may execute after checkout or setup failures.
+  Mitigation: guard missing script/interpreter cases in shell and emit a direct
+  advisory summary without failing the job.
 - Parsing too much evidence schema now would make future schema changes harder.
   Mitigation: use optional reads with graceful fallbacks and treat unknown JSON
   fields as ignored.
@@ -162,9 +203,14 @@ Portable tests should cover:
 - missing evidence directory produces a warning summary and exits `0`
 - malformed `host-smoke-evidence.json` produces a warning summary, keeps the
   file checklist, and exits `0`
+- oversized JSON and symlink/non-regular evidence files are warned about and not
+  read through
+- unwritable or missing `$GITHUB_STEP_SUMMARY` falls back without a non-zero exit
 - partial evidence without JSON still summarizes present/missing files
 - workflow contract includes an always-run summary step pointed at
   `${{ runner.temp }}/tldw-vz-helper-ci/evidence`
+- workflow contract guards missing summarizer script or missing interpreter so
+  early checkout/setup failures are not masked
 
 Real VZ execution remains host-gated/manual and is not required for normal CI.
 
