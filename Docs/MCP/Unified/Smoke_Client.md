@@ -84,7 +84,8 @@ For stdio subprocesses, environment inheritance is deny-by-default. Use
 `--env NAME` for each variable the subprocess may inherit. If `--command` is a
 command name rather than an absolute executable path, include `--env PATH` so it
 can be resolved consistently. The CLI uses argv execution and does not invoke a
-shell.
+shell. The token after `--arg` is always treated as subprocess argv, including
+values that look like `mcp-unified-smoke` options.
 
 ## Scenario Tuning
 

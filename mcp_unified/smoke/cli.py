@@ -30,27 +30,6 @@ _EXIT_TRANSPORT_FAILED = 3
 _EXIT_STRICT_CAPABILITY_UNAVAILABLE = 4
 _SCENARIO_CHOICES = ("baseline",)
 _MODE_CHOICES = ("best-effort", "strict")
-_STDIO_CLI_OPTION_NAMES = frozenset(
-    {
-        "--scenario",
-        "--mode",
-        "--profile-id",
-        "--api-key-env",
-        "--bearer-token-env",
-        "--json-report",
-        "--debug-trace",
-        "--timeout",
-        "--safe-tool-name",
-        "--safe-tool-arguments-json",
-        "--safe-resource-uri",
-        "--safe-prompt-name",
-        "--safe-prompt-arguments-json",
-        "--command",
-        "--arg",
-        "--cwd",
-        "--env",
-    }
-)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -144,7 +123,7 @@ def _normalize_stdio_arg_tokens(argv: Sequence[str] | None) -> list[str]:
         token = tokens[index]
         if token == "--arg" and index + 1 < len(tokens):  # nosec B105
             value = tokens[index + 1]
-            if value.startswith("-") and value != "--" and value not in _STDIO_CLI_OPTION_NAMES:
+            if value.startswith("-"):
                 normalized.append(f"--arg={value}")
                 index += 2
                 continue
