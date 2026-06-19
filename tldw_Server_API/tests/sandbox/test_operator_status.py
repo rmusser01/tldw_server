@@ -132,6 +132,29 @@ def test_operator_status_points_reconciliation_to_dry_run_repair() -> None:
     assert model.sections["reconciliation"].status == "action_recommended"
 
 
+def test_operator_status_accepts_healthy_reconciliation_schema_status() -> None:
+    macos = _macos_diagnostics_unconfigured()
+    macos["recovery_summary"] = {
+        "status": "healthy",
+        "severity": "ok",
+        "codes": [],
+        "counts": {},
+        "repair_endpoint": None,
+        "cleanup_plan_endpoint": None,
+        "notes": [],
+    }
+
+    payload = build_operator_status(
+        runtime_diagnostics=_runtime_diagnostics(),
+        macos_diagnostics=macos,
+        startup_warning_summary={"present": False, "blocking": False, "codes": []},
+    )
+
+    model = SandboxAdminOperatorStatusResponse.model_validate(payload)
+
+    assert model.sections["reconciliation"].status == "healthy"
+
+
 def test_operator_status_keeps_runtime_section_when_macos_section_unavailable() -> None:
     payload = build_operator_status(
         runtime_diagnostics=_runtime_diagnostics(),

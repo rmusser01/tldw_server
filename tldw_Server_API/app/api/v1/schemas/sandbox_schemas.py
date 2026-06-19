@@ -656,6 +656,7 @@ OperatorStatusValue = Literal[
     "not_configured",
     "action_recommended",
     "cleanup_recommended",
+    "healthy",
 ]
 OperatorSeverity = Literal["info", "warning", "error"]
 
