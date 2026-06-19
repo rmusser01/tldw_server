@@ -28,10 +28,8 @@ _DEFAULT_IDEMPOTENT_HTTP_METHODS = frozenset(
         "prompts/list",
     }
 )
-_MANAGED_HTTP_HEADER_NAMES = frozenset(
+_PROFILE_HTTP_HEADER_NAMES = frozenset(
     {
-        "authorization",
-        "x-api-key",
         "x-mcp-profile",
         "x-mcp-profile-id",
     }
@@ -279,14 +277,14 @@ class LiveHttpTransport:
     def _request_headers(self) -> httpx.Headers:
         headers = httpx.Headers({"accept": "application/json"})
         headers.update(self.headers)
-        for header_name in _MANAGED_HTTP_HEADER_NAMES:
-            if header_name in headers:
-                del headers[header_name]
         if self.profile_id:
+            self._delete_headers(headers, _PROFILE_HTTP_HEADER_NAMES)
             headers["x-mcp-profile"] = self.profile_id
         if self.bearer_token:
+            self._delete_headers(headers, ("authorization",))
             headers["Authorization"] = self._authorization_header(self.bearer_token)
         if self.api_key:
+            self._delete_headers(headers, ("x-api-key",))
             headers["X-API-KEY"] = self.api_key
         return headers
 
@@ -378,6 +376,12 @@ class LiveHttpTransport:
         if stripped.lower().startswith("bearer "):
             return stripped
         return f"Bearer {stripped}"
+
+    @staticmethod
+    def _delete_headers(headers: httpx.Headers, names: Collection[str]) -> None:
+        for name in names:
+            if name in headers:
+                del headers[name]
 
     @staticmethod
     def _payload_methods(payload: JsonRpcPayload) -> list[str]:

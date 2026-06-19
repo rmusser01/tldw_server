@@ -581,6 +581,58 @@ async def test_live_http_transport_replaces_managed_headers_case_insensitively()
 
 
 @pytest.mark.asyncio
+async def test_live_http_transport_preserves_managed_headers_without_replacements() -> None:
+    from mcp_unified.smoke.transports import LiveHttpTransport
+
+    seen_raw_headers: list[list[tuple[str, str]]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen_raw_headers.append(
+            [
+                (
+                    name.decode("ascii").lower(),
+                    value.decode("ascii"),
+                )
+                for name, value in request.headers.raw
+            ]
+        )
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": "smoke-1",
+                "result": {"pong": True},
+            },
+        )
+
+    headers = {
+        "authorization": "Bearer caller-token",
+        "X-API-Key": "caller-api-key",
+        "x-MCP-profile": "caller-profile",
+        "X-MCP-Profile-ID": "caller-profile-id",
+        "X-Custom-Smoke": "custom-value",
+    }
+    transport = LiveHttpTransport(
+        "http://mcp.test/request",
+        headers=headers,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    try:
+        await transport.request({"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"})
+    finally:
+        await transport.close()
+
+    raw_headers = seen_raw_headers[0]
+
+    assert ("authorization", headers["authorization"]) in raw_headers  # nosec B101
+    assert ("x-api-key", headers["X-API-Key"]) in raw_headers  # nosec B101
+    assert ("x-mcp-profile", headers["x-MCP-profile"]) in raw_headers  # nosec B101
+    assert ("x-mcp-profile-id", headers["X-MCP-Profile-ID"]) in raw_headers  # nosec B101
+    assert ("x-custom-smoke", headers["X-Custom-Smoke"]) in raw_headers  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_live_http_transport_treats_204_as_notification_success() -> None:
     from mcp_unified.smoke.transports import LiveHttpTransport
 
