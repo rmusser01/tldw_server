@@ -80,6 +80,18 @@ _DEFAULT_COMMANDS: Final[tuple[CommandDescriptor, ...]] = (
         pure_transform=True,
     ),
     CommandDescriptor(
+        name="pwd",
+        summary="Print the current virtual workspace directory.",
+        backend_tools=(),
+        pure_transform=True,
+    ),
+    CommandDescriptor(
+        name="cd",
+        summary="Change the virtual workspace directory for later commands in this run.",
+        backend_tools=(),
+        pure_transform=True,
+    ),
+    CommandDescriptor(
         name="stat",
         summary="Inspect workspace file metadata.",
         backend_tools=("fs.stat",),

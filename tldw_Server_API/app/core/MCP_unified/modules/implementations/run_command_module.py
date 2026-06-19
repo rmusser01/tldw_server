@@ -204,6 +204,14 @@ class RunCommandModule(BaseModule):
         async def _execute_chain() -> CommandExecutionResult:
             """Preflight and execute the parsed command chain."""
 
+            validation_error = adapters.validate_chain(chain)
+            if validation_error is not None:
+                return CommandExecutionResult(
+                    stdout="",
+                    stderr=validation_error.stderr,
+                    exit_code=validation_error.exit_code,
+                    duration_ms=max(0.0, (time.perf_counter() - start) * 1000.0),
+                )
             if adapters.requires_whole_chain_preflight(chain):
                 await adapters.preflight_chain(chain)
             return await executor.execute(chain)
