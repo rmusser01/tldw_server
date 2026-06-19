@@ -385,7 +385,7 @@ git commit -m "feat: add mcp smoke websocket transport"
 - Create: `tldw_Server_API/app/core/MCP_unified/tests/fixtures/smoke_stdio_server.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_smoke_client.py`
 
-- [ ] **Step 1: Write failing tests for stdio subprocess object payloads**
+- [x] **Step 1: Write failing tests for stdio subprocess object payloads**
 
 Start the fixture subprocess via argv:
 
@@ -400,7 +400,7 @@ transport = StdioSubprocessTransport(
 
 Assert `initialize`, `ping`, and `tools/list` work.
 
-- [ ] **Step 2: Create `smoke_stdio_server.py` fixture**
+- [x] **Step 2: Create `smoke_stdio_server.py` fixture**
 
 The fixture should:
 
@@ -411,7 +411,7 @@ The fixture should:
 - suppress notification responses;
 - implement `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `prompts/list`.
 
-- [ ] **Step 3: Implement `StdioSubprocessTransport`**
+- [x] **Step 3: Implement `StdioSubprocessTransport`**
 
 Use `asyncio.create_subprocess_exec`, never `shell=True`.
 
@@ -425,23 +425,23 @@ Support:
 - bounded stderr capture;
 - cleanup on success, failure, timeout, and cancellation.
 
-- [ ] **Step 4: Write failing tests for batch payloads and cleanup**
+- [x] **Step 4: Write failing tests for batch payloads and cleanup**
 
 Assert a batch containing a notification and `ping` returns only the `ping` response. Assert the subprocess exits or is terminated after `close()`.
 
-- [ ] **Step 5: Implement batch support and cleanup**
+- [x] **Step 5: Implement batch support and cleanup**
 
 Accept list payloads in `request()`. Serialize compact JSON plus newline. Parse exactly one stdout line as the response unless the request is notification-only.
 
-- [ ] **Step 6: Write failing tests for secret redaction in stderr**
+- [x] **Step 6: Write failing tests for secret redaction in stderr**
 
 Have the fixture write a secret-looking value to stderr on a controlled request. Assert the transport error/report does not expose it.
 
-- [ ] **Step 7: Implement stderr redaction and bounds**
+- [x] **Step 7: Implement stderr redaction and bounds**
 
 Cap stderr bytes and run captured text through the same redaction helpers used by `SmokeReport`.
 
-- [ ] **Step 8: Run Task 5 tests**
+- [x] **Step 8: Run Task 5 tests**
 
 Run:
 
@@ -452,7 +452,7 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_smoke_client.py
 
 Expected: pass.
 
-- [ ] **Step 9: Commit Task 5**
+- [x] **Step 9: Commit Task 5**
 
 ```bash
 git add mcp_unified/smoke tldw_Server_API/app/core/MCP_unified/tests
