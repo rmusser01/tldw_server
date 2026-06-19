@@ -245,6 +245,7 @@ async def _step_unknown_tool(transport: McpSmokeTransport) -> object:
     )
     return _expect_jsonrpc_error(
         response,
+        expected_id="smoke-unknown-tool",
         expected_code=_METHOD_NOT_FOUND,
         reason_code="unknown_tool_not_rejected",
     )
@@ -311,12 +312,20 @@ async def _step_jsonrpc_batch(transport: McpSmokeTransport) -> object:
     )
     if not isinstance(response, list):
         return _failure("invalid_batch_response", detail=response)
+    expected_ids = {"smoke-batch-ping", "smoke-batch-tools"}
+    if len(response) != len(expected_ids):
+        return _failure("invalid_batch_response_count", detail=response)
+    if not all(isinstance(item, dict) for item in response):
+        return _failure("invalid_batch_item", detail=response)
+    response_ids = [item.get("id") for item in response]
+    if len(response_ids) != len(set(response_ids)):
+        return _failure("duplicate_batch_id", detail=response)
     responses = {
         item.get("id"): item
         for item in response
         if isinstance(item, dict)
     }
-    if set(responses) != {"smoke-batch-ping", "smoke-batch-tools"}:
+    if set(responses) != expected_ids:
         return _failure("invalid_batch_correlation", detail=response)
     ping_validation = _validate_jsonrpc_success_response(
         responses["smoke-batch-ping"],
@@ -348,6 +357,7 @@ async def _step_malformed_request(transport: McpSmokeTransport) -> object:
     )
     return _expect_jsonrpc_error(
         response,
+        expected_id="smoke-malformed",
         expected_code=_INVALID_REQUEST,
         reason_code="malformed_request_not_rejected",
     )
@@ -370,6 +380,7 @@ async def _step_policy_denial(transport: McpSmokeTransport) -> object:
     )
     return _expect_jsonrpc_error(
         response,
+        expected_id="smoke-policy-denial",
         expected_code=_POLICY_DENIED,
         reason_code="policy_denial_not_enforced",
     )
@@ -438,13 +449,51 @@ def _skip(reason_code: str, *, detail: object | None = None) -> _StepOutcome:
 def _expect_jsonrpc_error(
     response: object,
     *,
+    expected_id: str,
     expected_code: int,
     reason_code: str,
 ) -> object:
-    code = _jsonrpc_error_code(response)
-    if code != expected_code:
-        return _failure(reason_code, detail=response, error_code=code)
+    validation = _validate_jsonrpc_error_response(
+        response,
+        expected_id=expected_id,
+        expected_code=expected_code,
+    )
+    if validation is not None:
+        reason, code = validation
+        if reason == "unexpected_error_code":
+            return _failure(reason_code, detail=response, error_code=code)
+        return _failure(reason, detail=response, error_code=code)
     return response
+
+
+def _validate_jsonrpc_error_response(
+    response: object,
+    *,
+    expected_id: str,
+    expected_code: int,
+) -> tuple[str, int | None] | None:
+    if not isinstance(response, dict):
+        return ("malformed_error_envelope", None)
+    code = _jsonrpc_error_code(response)
+    if response.get("jsonrpc") != "2.0":
+        return ("malformed_error_envelope", code)
+    if response.get("id") != expected_id:
+        return ("malformed_error_envelope", code)
+    has_result = "result" in response
+    has_error = "error" in response
+    if has_result or not has_error:
+        return ("malformed_error_envelope", code)
+    error = response.get("error")
+    if not isinstance(error, dict):
+        return ("malformed_error_envelope", None)
+    if not isinstance(code, int):
+        return ("malformed_error_envelope", None)
+    message = error.get("message")
+    if not isinstance(message, str) or not message.strip():
+        return ("malformed_error_envelope", code)
+    if code != expected_code:
+        return ("unexpected_error_code", code)
+    return None
 
 
 def _validate_jsonrpc_success_response(

@@ -652,6 +652,71 @@ async def test_baseline_scenario_rejects_malformed_batch_items() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("batch_response", "expected_reason_code"),
+    [
+        (
+            [
+                {"jsonrpc": "2.0", "id": "smoke-batch-ping", "result": {"pong": True}},
+                {"jsonrpc": "2.0", "id": "smoke-batch-tools", "result": {"tools": []}},
+                "malformed-extra-item",
+            ],
+            "invalid_batch_response_count",
+        ),
+        (
+            [
+                {"jsonrpc": "2.0", "id": "smoke-batch-ping", "result": {"pong": True}},
+                {"jsonrpc": "2.0", "id": "smoke-batch-tools", "result": {"tools": []}},
+                {"jsonrpc": "2.0", "id": "smoke-batch-extra", "result": {}},
+            ],
+            "invalid_batch_response_count",
+        ),
+        (
+            [
+                {"id": "smoke-batch-ping"},
+                {"jsonrpc": "2.0", "id": "smoke-batch-ping", "result": {"pong": True}},
+                {"jsonrpc": "2.0", "id": "smoke-batch-tools", "result": {"tools": []}},
+            ],
+            "invalid_batch_response_count",
+        ),
+        (
+            [
+                {"jsonrpc": "2.0", "id": "smoke-batch-ping", "result": {"pong": True}},
+                {"jsonrpc": "2.0", "id": "smoke-batch-ping", "result": {"pong": True}},
+            ],
+            "duplicate_batch_id",
+        ),
+    ],
+)
+async def test_baseline_scenario_rejects_batch_extras_and_duplicate_ids(
+    batch_response: list[object],
+    expected_reason_code: str,
+) -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.scenarios import run_baseline_scenario
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    class _MalformedBatchTransport(InProcessGatewayTransport):
+        async def request(
+            self,
+            payload: dict[str, object] | list[object],
+        ) -> object | None:
+            if isinstance(payload, list):
+                return batch_response
+            return await super().request(payload)
+
+    report = await run_baseline_scenario(
+        _MalformedBatchTransport(SmokeFixtureGatewayRuntime()),
+        mode="best_effort",
+    )
+    batch_step = next(step for step in report.steps if step.name == "json-rpc batch")
+
+    assert report.ok is False  # nosec B101
+    assert batch_step.ok is False  # nosec B101
+    assert batch_step.reason_code == expected_reason_code  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_baseline_scenario_preserves_empty_safe_tool_and_prompt_arguments() -> None:
     from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
     from mcp_unified.smoke.scenarios import run_baseline_scenario
@@ -717,3 +782,43 @@ async def test_baseline_scenario_redacts_direct_client_error_details() -> None:
     assert "nested-secret" not in rendered_detail  # nosec B101
     assert "/Users/example" not in rendered_detail  # nosec B101
     assert "full user supplied tool arguments" not in rendered_detail  # nosec B101
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("target_id", "error_code", "step_name"),
+    [
+        ("smoke-unknown-tool", -32601, "tools/call:unknown"),
+        ("smoke-malformed", -32600, "malformed request"),
+        ("smoke-policy-denial", -32001, "policy denial"),
+    ],
+)
+async def test_baseline_scenario_rejects_malformed_error_envelopes(
+    target_id: str,
+    error_code: int,
+    step_name: str,
+) -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.scenarios import run_baseline_scenario
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    class _MalformedErrorEnvelopeTransport(InProcessGatewayTransport):
+        async def request(
+            self,
+            payload: dict[str, object] | list[object],
+        ) -> object | None:
+            if isinstance(payload, dict) and payload.get("id") == target_id:
+                return {"error": {"code": error_code}}
+            return await super().request(payload)
+
+    report = await run_baseline_scenario(
+        _MalformedErrorEnvelopeTransport(
+            SmokeFixtureGatewayRuntime(include_denied_tool=True)
+        ),
+        mode="best_effort",
+    )
+    target_step = next(step for step in report.steps if step.name == step_name)
+
+    assert report.ok is False  # nosec B101
+    assert target_step.ok is False  # nosec B101
+    assert target_step.reason_code == "malformed_error_envelope"  # nosec B101
