@@ -654,6 +654,8 @@ OperatorStatusValue = Literal[
     "unavailable",
     "unknown",
     "not_configured",
+    "action_recommended",
+    "cleanup_recommended",
 ]
 OperatorSeverity = Literal["info", "warning", "error"]
 

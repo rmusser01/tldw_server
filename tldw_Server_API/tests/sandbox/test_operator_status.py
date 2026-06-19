@@ -124,9 +124,12 @@ def test_operator_status_points_reconciliation_to_dry_run_repair() -> None:
         startup_warning_summary={"present": False, "blocking": False, "codes": []},
     )
 
+    model = SandboxAdminOperatorStatusResponse.model_validate(payload)
+
     assert payload["overall_status"] == "action_required"
     assert payload["recommended_actions"][0]["code"] == "run_repair_dry_run"
     assert payload["recommended_actions"][0]["dry_run_required"] is True
+    assert model.sections["reconciliation"].status == "action_recommended"
 
 
 def test_operator_status_keeps_runtime_section_when_macos_section_unavailable() -> None:
@@ -257,11 +260,14 @@ def test_operator_status_points_image_store_to_cleanup_plan() -> None:
         startup_warning_summary={"present": False, "blocking": False, "codes": []},
     )
 
+    model = SandboxAdminOperatorStatusResponse.model_validate(payload)
+
     assert payload["overall_status"] == "degraded"
     assert payload["recommended_actions"][0]["code"] == (
         "inspect_image_store_cleanup_plan"
     )
     assert payload["recommended_actions"][0]["dry_run_required"] is False
+    assert model.sections["reconciliation"].status == "cleanup_recommended"
 
 
 def test_service_operator_status_uses_existing_diagnostics(monkeypatch) -> None:
