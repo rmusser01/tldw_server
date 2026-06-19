@@ -18,6 +18,7 @@ from mcp_unified.smoke.transports import (
     InProcessFastApiTransport,
     InProcessGatewayTransport,
     LiveHttpTransport,
+    LiveWebSocketTransport,
     McpSmokeTransport,
     McpSmokeTransportError,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "InProcessFastApiTransport",
     "InProcessGatewayTransport",
     "LiveHttpTransport",
+    "LiveWebSocketTransport",
     "McpSmokeClient",
     "McpSmokeClientError",
     "McpSmokeTransport",

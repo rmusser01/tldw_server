@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
+import json
 from collections.abc import Collection
+from contextlib import suppress
 from typing import Any, Protocol
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
+import websockets
 
 from mcp_unified.gateway.jsonrpc import (
     GATEWAY_RESPONSE_TYPES,
@@ -34,6 +40,7 @@ _PROFILE_HTTP_HEADER_NAMES = frozenset(
         "x-mcp-profile-id",
     }
 )
+_DEFAULT_WEBSOCKET_TIMEOUT_SECONDS = 10.0
 
 
 class McpSmokeTransport(Protocol):
@@ -408,6 +415,408 @@ class LiveHttpTransport:
         return None
 
 
+class LiveWebSocketTransport:
+    """Exchange JSON-RPC payloads with a live MCP WebSocket endpoint."""
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        bearer_token: str | None = None,
+        api_key: str | None = None,
+        profile_id: str | None = None,
+        timeout: float | None = _DEFAULT_WEBSOCKET_TIMEOUT_SECONDS,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.url = url
+        self.bearer_token = bearer_token
+        self.api_key = api_key
+        self.profile_id = profile_id
+        self.timeout = timeout
+        self.headers = dict(headers or {})
+        self._connection: Any | None = None
+        self._receiver_task: asyncio.Task[None] | None = None
+        self._pending: dict[object, asyncio.Future[object]] = {}
+        self._start_lock = asyncio.Lock()
+        self._send_lock = asyncio.Lock()
+        self._receive_error: McpSmokeTransportError | None = None
+        self._closing = False
+
+    async def start(self) -> None:
+        """Open one WebSocket connection for the current smoke scenario."""
+
+        async with self._start_lock:
+            if self._connection is not None:
+                if self._receive_error is not None:
+                    raise self._receive_error
+                return
+
+            self._closing = False
+            self._receive_error = None
+            try:
+                self._connection = await websockets.connect(
+                    self._url_with_profile_query(),
+                    **self._connect_kwargs(),
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                raise McpSmokeTransportError(
+                    "transport_websocket_connect_failed",
+                    "WebSocket transport failed to connect",
+                    cause=exc,
+                ) from exc
+
+            self._receiver_task = asyncio.create_task(self._receive_loop())
+
+    async def request(self, payload: JsonRpcPayload) -> object | None:
+        """Send one JSON-RPC request or batch and await correlated responses."""
+
+        connection = await self._started_connection()
+        request_ids = self._payload_request_ids(payload)
+        futures = self._register_pending(request_ids)
+        try:
+            await self._send_payload(connection, payload)
+            if not futures:
+                return None
+            if len(futures) == 1:
+                return await self._wait_for_response(
+                    futures[0],
+                    request_ids=request_ids,
+                    payload=payload,
+                )
+            return await self._wait_for_batch_responses(
+                futures,
+                request_ids=request_ids,
+                payload=payload,
+            )
+        except Exception:
+            self._discard_pending(request_ids)
+            raise
+
+    async def notify(self, payload: JsonObject) -> None:
+        """Send one JSON-RPC notification without awaiting a response."""
+
+        connection = await self._started_connection()
+        await self._send_payload(connection, payload)
+
+    async def close(self) -> None:
+        """Close the WebSocket connection and cancel receive processing."""
+
+        self._closing = True
+        pending_error = McpSmokeTransportError(
+            "transport_websocket_closed",
+            "WebSocket transport closed before all responses were received",
+        )
+        self._fail_pending(pending_error)
+
+        connection = self._connection
+        task = self._receiver_task
+        self._connection = None
+        self._receiver_task = None
+
+        if connection is not None:
+            with suppress(Exception):
+                await connection.close()
+
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+        self._closing = False
+
+    async def _started_connection(self) -> Any:
+        if self._receive_error is not None:
+            raise self._receive_error
+        if self._connection is None:
+            await self.start()
+        if self._connection is None:  # pragma: no cover - defensive guard
+            raise McpSmokeTransportError(
+                "transport_start_failed",
+                "WebSocket transport failed to create a connection",
+            )
+        return self._connection
+
+    async def _send_payload(self, connection: Any, payload: JsonRpcPayload) -> None:
+        try:
+            encoded = json.dumps(payload, separators=(",", ":"))
+            async with self._send_lock:
+                await connection.send(encoded)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise McpSmokeTransportError(
+                "transport_websocket_send_failed",
+                "WebSocket transport failed to send a JSON-RPC payload",
+                method=self._single_payload_method(payload),
+                cause=exc,
+            ) from exc
+
+    async def _wait_for_response(
+        self,
+        future: asyncio.Future[object],
+        *,
+        request_ids: list[object],
+        payload: JsonRpcPayload,
+    ) -> object:
+        try:
+            return await asyncio.wait_for(future, timeout=self.timeout)
+        except TimeoutError as exc:
+            raise self._timeout_error(request_ids, payload, cause=exc) from exc
+
+    async def _wait_for_batch_responses(
+        self,
+        futures: list[asyncio.Future[object]],
+        *,
+        request_ids: list[object],
+        payload: JsonRpcPayload,
+    ) -> list[object]:
+        try:
+            return await asyncio.wait_for(
+                asyncio.gather(*futures),
+                timeout=self.timeout,
+            )
+        except TimeoutError as exc:
+            raise self._timeout_error(request_ids, payload, cause=exc) from exc
+
+    async def _receive_loop(self) -> None:
+        try:
+            async for message in self._connection:
+                self._handle_frame(message)
+        except asyncio.CancelledError:
+            raise
+        except McpSmokeTransportError as exc:
+            self._receive_error = exc
+            self._fail_pending(exc)
+            await self._close_after_receive_error()
+        except Exception as exc:
+            error = McpSmokeTransportError(
+                "transport_websocket_receive_failed",
+                "WebSocket transport failed while receiving frames",
+                cause=exc,
+            )
+            self._receive_error = error
+            self._fail_pending(error)
+            await self._close_after_receive_error()
+        else:
+            if self._pending and not self._closing:
+                error = McpSmokeTransportError(
+                    "transport_websocket_closed",
+                    "WebSocket connection closed before pending responses completed",
+                )
+                self._receive_error = error
+                self._fail_pending(error)
+
+    async def _close_after_receive_error(self) -> None:
+        connection = self._connection
+        if connection is not None:
+            with suppress(Exception):
+                await connection.close()
+
+    def _handle_frame(self, message: object) -> None:
+        if not isinstance(message, (str, bytes, bytearray)):
+            raise McpSmokeTransportError(
+                "transport_invalid_json_response",
+                "WebSocket transport received a non-text JSON-RPC frame",
+            )
+        try:
+            decoded = json.loads(message)
+        except (TypeError, ValueError) as exc:
+            raise McpSmokeTransportError(
+                "transport_invalid_json_response",
+                "WebSocket transport received a non-JSON frame",
+                cause=exc,
+            ) from exc
+
+        if isinstance(decoded, list):
+            if not decoded:
+                raise McpSmokeTransportError(
+                    "transport_malformed_websocket_frame",
+                    "WebSocket transport received an empty JSON-RPC batch frame",
+                )
+            for item in decoded:
+                self._handle_message(item)
+            return
+
+        self._handle_message(decoded)
+
+    def _handle_message(self, message: object) -> None:
+        if not isinstance(message, dict):
+            raise McpSmokeTransportError(
+                "transport_malformed_websocket_frame",
+                "WebSocket transport received a non-object JSON-RPC message",
+            )
+        if self._is_server_notification(message):
+            return
+        if not self._is_response_message(message):
+            raise McpSmokeTransportError(
+                "transport_malformed_websocket_frame",
+                "WebSocket transport received a malformed JSON-RPC message",
+            )
+
+        request_id = message["id"]
+        future = self._pending.pop(request_id, None)
+        if future is None:
+            raise McpSmokeTransportError(
+                "transport_unexpected_websocket_response",
+                "WebSocket transport received a response for an unknown request id",
+            )
+        if not future.done():
+            future.set_result(message)
+
+    def _register_pending(
+        self,
+        request_ids: list[object],
+    ) -> list[asyncio.Future[object]]:
+        futures: list[asyncio.Future[object]] = []
+        loop = asyncio.get_running_loop()
+        for request_id in request_ids:
+            if request_id in self._pending:
+                raise McpSmokeTransportError(
+                    "transport_duplicate_request_id",
+                    "WebSocket transport cannot send duplicate pending request ids",
+                )
+            future: asyncio.Future[object] = loop.create_future()
+            self._pending[request_id] = future
+            futures.append(future)
+        return futures
+
+    def _discard_pending(self, request_ids: list[object]) -> None:
+        for request_id in request_ids:
+            future = self._pending.pop(request_id, None)
+            if future is not None and not future.done():
+                future.cancel()
+
+    def _fail_pending(self, error: McpSmokeTransportError) -> None:
+        for future in list(self._pending.values()):
+            if not future.done():
+                future.set_exception(error)
+        self._pending.clear()
+
+    def _timeout_error(
+        self,
+        request_ids: list[object],
+        payload: JsonRpcPayload,
+        *,
+        cause: BaseException,
+    ) -> McpSmokeTransportError:
+        return McpSmokeTransportError(
+            "transport_websocket_response_timeout",
+            "Timed out waiting for WebSocket JSON-RPC response ids "
+            f"{', '.join(map(str, request_ids))}",
+            method=self._single_payload_method(payload),
+            cause=cause,
+        )
+
+    def _connect_kwargs(self) -> dict[str, object]:
+        kwargs: dict[str, object] = {}
+        signature = inspect.signature(websockets.connect)
+        parameters = signature.parameters
+
+        headers = self._request_headers()
+        if headers:
+            if "additional_headers" in parameters:
+                kwargs["additional_headers"] = headers
+            elif "extra_headers" in parameters:
+                kwargs["extra_headers"] = headers
+
+        if "open_timeout" in parameters:
+            kwargs["open_timeout"] = self.timeout
+        if "proxy" in parameters:
+            kwargs["proxy"] = None
+        return kwargs
+
+    def _request_headers(self) -> dict[str, str]:
+        headers = dict(self.headers)
+        if self.bearer_token:
+            self._delete_header(headers, "authorization")
+            headers["Authorization"] = LiveHttpTransport._authorization_header(
+                self.bearer_token
+            )
+        if self.api_key:
+            self._delete_header(headers, "x-api-key")
+            headers["X-API-KEY"] = self.api_key
+        return headers
+
+    def _url_with_profile_query(self) -> str:
+        if not self.profile_id:
+            return self.url
+
+        parts = urlsplit(self.url)
+        query_pairs = parse_qsl(parts.query, keep_blank_values=True)
+        if any(key.lower() == "profile" for key, _value in query_pairs):
+            return self.url
+        query_pairs.append(("profile", self.profile_id))
+        return urlunsplit(
+            (
+                parts.scheme,
+                parts.netloc,
+                parts.path,
+                urlencode(query_pairs),
+                parts.fragment,
+            )
+        )
+
+    @staticmethod
+    def _delete_header(headers: dict[str, str], target: str) -> None:
+        for name in list(headers):
+            if name.lower() == target:
+                del headers[name]
+
+    @staticmethod
+    def _payload_request_ids(payload: JsonRpcPayload) -> list[object]:
+        if isinstance(payload, dict):
+            return [payload["id"]] if "id" in payload else []
+
+        request_ids: list[object] = []
+        seen_ids: set[object] = set()
+        for item in payload:
+            if not isinstance(item, dict) or "id" not in item:
+                continue
+            request_id = item["id"]
+            if request_id in seen_ids:
+                raise McpSmokeTransportError(
+                    "transport_duplicate_request_id",
+                    "WebSocket transport cannot send duplicate request ids",
+                )
+            seen_ids.add(request_id)
+            request_ids.append(request_id)
+        return request_ids
+
+    @staticmethod
+    def _is_response_message(message: dict[str, object]) -> bool:
+        if message.get("jsonrpc") != "2.0" or "id" not in message:
+            return False
+        has_result = "result" in message
+        has_error = "error" in message
+        return has_result != has_error
+
+    @staticmethod
+    def _is_server_notification(message: dict[str, object]) -> bool:
+        if message.get("jsonrpc") != "2.0" or "id" in message:
+            return False
+        if "result" in message or "error" in message:
+            return False
+        return isinstance(message.get("method"), str)
+
+    @staticmethod
+    def _single_payload_method(payload: JsonRpcPayload) -> str | None:
+        if isinstance(payload, dict):
+            method = payload.get("method")
+            return method if isinstance(method, str) else None
+        methods = [
+            item.get("method")
+            for item in payload
+            if isinstance(item, dict) and isinstance(item.get("method"), str)
+        ]
+        if len(methods) == 1:
+            return methods[0]
+        if methods:
+            return ",".join(methods)
+        return None
+
+
 def _gateway_response_to_plain_json(response: object) -> object | None:
     if isinstance(response, GatewayNoResponse):
         return None
@@ -424,6 +833,7 @@ __all__ = [
     "JsonObject",
     "JsonRpcPayload",
     "LiveHttpTransport",
+    "LiveWebSocketTransport",
     "McpSmokeTransport",
     "McpSmokeTransportError",
 ]

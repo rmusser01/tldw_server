@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
+import websockets
 
 
 def test_smoke_report_redacts_sensitive_details(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -818,6 +821,182 @@ async def test_live_http_retry_replays_configured_idempotent_method() -> None:
         "ping",
         "ping",
     ]
+
+
+@pytest.mark.asyncio
+async def test_live_websocket_transport_correlates_out_of_order_responses() -> None:
+    from mcp_unified.smoke.client import McpSmokeClient
+    from mcp_unified.smoke.transports import LiveWebSocketTransport
+
+    async def handler(websocket) -> None:
+        first = json.loads(await websocket.recv())
+        second = json.loads(await websocket.recv())
+
+        await websocket.send(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": second["id"],
+                    "result": {"method": second["method"]},
+                }
+            )
+        )
+        await websocket.send(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": first["id"],
+                    "result": {"method": first["method"]},
+                }
+            )
+        )
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        transport = LiveWebSocketTransport(f"ws://127.0.0.1:{port}/mcp")
+        client = McpSmokeClient(transport)
+
+        try:
+            first_task = asyncio.create_task(client.request("tools/list"))
+            second_task = asyncio.create_task(client.request("ping"))
+            first_result, second_result = await asyncio.gather(first_task, second_task)
+        finally:
+            await transport.close()
+
+    assert first_result == {"method": "tools/list"}  # nosec B101
+    assert second_result == {"method": "ping"}  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_live_websocket_transport_suppresses_server_notifications() -> None:
+    from mcp_unified.smoke.client import McpSmokeClient
+    from mcp_unified.smoke.transports import LiveWebSocketTransport
+
+    received_payloads: list[dict[str, object]] = []
+
+    async def handler(websocket) -> None:
+        notification = json.loads(await websocket.recv())
+        received_payloads.append(notification)
+        await websocket.send(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "notifications/progress",
+                    "params": {"progress": 1},
+                }
+            )
+        )
+
+        ping = json.loads(await websocket.recv())
+        received_payloads.append(ping)
+        await websocket.send(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": ping["id"],
+                    "result": {"pong": True},
+                }
+            )
+        )
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        transport = LiveWebSocketTransport(f"ws://127.0.0.1:{port}/mcp")
+        client = McpSmokeClient(transport)
+
+        try:
+            await client.notify("notifications/initialized")
+            ping_result = await client.ping()
+        finally:
+            await transport.close()
+
+    assert ping_result == {"pong": True}  # nosec B101
+    assert received_payloads == [  # nosec B101
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_live_websocket_transport_rejects_malformed_frames() -> None:
+    from mcp_unified.smoke.transports import (
+        LiveWebSocketTransport,
+        McpSmokeTransportError,
+    )
+
+    async def handler(websocket) -> None:
+        await websocket.recv()
+        await websocket.send("not-json")
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        transport = LiveWebSocketTransport(f"ws://127.0.0.1:{port}/mcp")
+
+        try:
+            with pytest.raises(
+                McpSmokeTransportError,
+                match="transport_invalid_json_response",
+            ):
+                await transport.request(
+                    {"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"}
+                )
+        finally:
+            await transport.close()
+
+
+@pytest.mark.asyncio
+async def test_live_websocket_transport_adds_profile_query_and_auth_headers() -> None:
+    from mcp_unified.smoke.transports import LiveWebSocketTransport
+
+    bearer_value = "jwt-token"
+    api_key_value = "api-key-value"
+    seen_path: str | None = None
+    seen_authorization: str | None = None
+    seen_api_key: str | None = None
+
+    async def handler(websocket) -> None:
+        nonlocal seen_path, seen_authorization, seen_api_key
+        seen_path = websocket.request.path
+        seen_authorization = websocket.request.headers.get("authorization")
+        seen_api_key = websocket.request.headers.get("x-api-key")
+        payload = json.loads(await websocket.recv())
+        await websocket.send(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {"pong": True},
+                }
+            )
+        )
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        transport = LiveWebSocketTransport(
+            f"ws://127.0.0.1:{port}/mcp?client_id=smoke",
+            bearer_token=bearer_value,
+            api_key=api_key_value,
+            profile_id="reviewer",
+        )
+
+        try:
+            response = await transport.request(
+                {"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"}
+            )
+        finally:
+            await transport.close()
+
+    assert response == {  # nosec B101
+        "jsonrpc": "2.0",
+        "id": "smoke-1",
+        "result": {"pong": True},
+    }
+    assert seen_authorization == f"Bearer {bearer_value}"  # nosec B101
+    assert seen_api_key == api_key_value  # nosec B101
+    assert seen_path is not None  # nosec B101
+    query = parse_qs(urlsplit(seen_path).query)
+    assert query["client_id"] == ["smoke"]  # nosec B101
+    assert query["profile"] == ["reviewer"]  # nosec B101
 
 
 @pytest.mark.asyncio
