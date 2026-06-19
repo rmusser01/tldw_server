@@ -105,6 +105,34 @@ def _macos_diagnostics_configured_broken() -> dict[str, object]:
     return macos
 
 
+def _evidence_ready(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "configured": True,
+        "source": "host_smoke_evidence",
+        "available": True,
+        "valid": True,
+        "evidence_dir": "/tmp/evidence",
+        "schema_version": 1,
+        "created_at": "2026-06-19T11:59:00+00:00",
+        "age_seconds": 60,
+        "stale": False,
+        "smoke_run_id": "smoke-123",
+        "final_exit_code": 0,
+        "phases": {},
+        "cleanup": {},
+        "runtime_pointers": {},
+        "expected_files": {},
+        "skip_flags": {
+            "skip_build": False,
+            "skip_sign": False,
+            "include_failure_drills": False,
+        },
+        "reasons": [],
+    }
+    payload.update(overrides)
+    return payload
+
+
 def test_operator_status_ready_when_runtime_ready_and_vz_unconfigured() -> None:
     payload = build_operator_status(
         runtime_diagnostics=_runtime_diagnostics(),
@@ -117,6 +145,115 @@ def test_operator_status_ready_when_runtime_ready_and_vz_unconfigured() -> None:
     assert payload["overall_severity"] == "info"
     assert payload["sections"]["evidence"]["status"] == "not_configured"
     assert "generated_at" not in payload
+
+
+def test_operator_status_projects_unconfigured_evidence_without_degrading() -> None:
+    payload = build_operator_status(
+        runtime_diagnostics=_runtime_diagnostics(),
+        macos_diagnostics=_macos_diagnostics_unconfigured(),
+        startup_warning_summary={"present": False, "blocking": False, "codes": []},
+        evidence_summary={
+            "configured": False,
+            "source": "host_smoke_evidence",
+            "reasons": ["evidence_not_configured"],
+        },
+    )
+
+    assert payload["overall_status"] == "ready"
+    assert payload["sections"]["evidence"]["status"] == "not_configured"
+    assert payload["sections"]["evidence"]["configured"] is False
+    assert payload["recommended_actions"] == []
+
+
+def test_operator_status_projects_successful_evidence_as_ready() -> None:
+    payload = build_operator_status(
+        runtime_diagnostics=_runtime_diagnostics(),
+        macos_diagnostics=_macos_diagnostics_unconfigured(),
+        startup_warning_summary={"present": False, "blocking": False, "codes": []},
+        evidence_summary=_evidence_ready(),
+    )
+
+    model = SandboxAdminOperatorStatusResponse.model_validate(payload)
+
+    assert payload["overall_status"] == "ready"
+    assert payload["sections"]["evidence"]["status"] == "ready"
+    assert payload["sections"]["evidence"]["final_exit_code"] == 0
+    assert payload["sections"]["evidence"]["evidence_dir"] == "/tmp/evidence"
+    assert model.sections["evidence"].status == "ready"
+
+
+def test_operator_status_degrades_for_unavailable_evidence() -> None:
+    payload = build_operator_status(
+        runtime_diagnostics=_runtime_diagnostics(),
+        macos_diagnostics=_macos_diagnostics_unconfigured(),
+        startup_warning_summary={"present": False, "blocking": False, "codes": []},
+        evidence_summary={
+            "configured": True,
+            "source": "host_smoke_evidence",
+            "available": False,
+            "valid": False,
+            "reasons": ["evidence_directory_missing"],
+        },
+    )
+
+    assert payload["overall_status"] == "degraded"
+    assert payload["sections"]["evidence"]["status"] == "unavailable"
+    assert payload["sections"]["evidence"]["severity"] == "warning"
+    assert payload["recommended_actions"][0]["code"] == "inspect_host_gated_evidence"
+
+
+def test_operator_status_requires_action_for_failed_evidence() -> None:
+    payload = build_operator_status(
+        runtime_diagnostics=_runtime_diagnostics(),
+        macos_diagnostics=_macos_diagnostics_unconfigured(),
+        startup_warning_summary={"present": False, "blocking": False, "codes": []},
+        evidence_summary=_evidence_ready(final_exit_code=2),
+    )
+
+    assert payload["overall_status"] == "action_required"
+    assert payload["overall_severity"] == "error"
+    assert payload["sections"]["evidence"]["status"] == "action_required"
+    assert payload["sections"]["evidence"]["severity"] == "error"
+    assert payload["recommended_actions"][0]["code"] == "run_host_gated_smoke"
+
+
+def test_operator_status_degrades_for_stale_or_skipped_evidence() -> None:
+    payload = build_operator_status(
+        runtime_diagnostics=_runtime_diagnostics(),
+        macos_diagnostics=_macos_diagnostics_unconfigured(),
+        startup_warning_summary={"present": False, "blocking": False, "codes": []},
+        evidence_summary=_evidence_ready(
+            stale=True,
+            skip_flags={
+                "skip_build": True,
+                "skip_sign": False,
+                "include_failure_drills": False,
+            },
+        ),
+    )
+
+    assert payload["overall_status"] == "degraded"
+    assert payload["sections"]["evidence"]["status"] == "degraded"
+    assert payload["recommended_actions"][0]["code"] == "review_expected_skips"
+
+
+def test_operator_status_keeps_failure_drills_false_informational() -> None:
+    payload = build_operator_status(
+        runtime_diagnostics=_runtime_diagnostics(),
+        macos_diagnostics=_macos_diagnostics_unconfigured(),
+        startup_warning_summary={"present": False, "blocking": False, "codes": []},
+        evidence_summary=_evidence_ready(
+            skip_flags={
+                "skip_build": False,
+                "skip_sign": False,
+                "include_failure_drills": False,
+            }
+        ),
+    )
+
+    assert payload["overall_status"] == "ready"
+    assert payload["sections"]["evidence"]["status"] == "ready"
+    assert payload["recommended_actions"] == []
 
 
 def test_operator_status_flags_configured_broken_vz_as_action_required() -> None:
@@ -409,6 +546,67 @@ def test_service_operator_status_uses_existing_diagnostics(monkeypatch) -> None:
 
     assert payload["source"] == "sandbox_operator_status"
     assert payload["overall_status"] == "ready"
+
+
+def test_service_operator_status_collects_evidence(monkeypatch) -> None:
+    svc = SandboxService()
+    monkeypatch.setattr(svc, "runtime_diagnostics_summary", lambda: _runtime_diagnostics())
+    monkeypatch.setattr(svc, "macos_diagnostics", lambda: _macos_diagnostics_unconfigured())
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Sandbox.service.collect_operator_evidence",
+        lambda: _evidence_ready(),
+    )
+
+    payload = svc.operator_status(
+        startup_warning_summary={"present": False, "blocking": False, "codes": []}
+    )
+
+    assert payload["sections"]["evidence"]["status"] == "ready"
+
+
+def test_service_operator_status_isolates_evidence_operational_failure(
+    monkeypatch,
+) -> None:
+    svc = SandboxService()
+    monkeypatch.setattr(svc, "runtime_diagnostics_summary", lambda: _runtime_diagnostics())
+    monkeypatch.setattr(svc, "macos_diagnostics", lambda: _macos_diagnostics_unconfigured())
+
+    def fail_evidence() -> dict[str, object]:
+        raise OSError("boom")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Sandbox.service.collect_operator_evidence",
+        fail_evidence,
+    )
+
+    payload = svc.operator_status(
+        startup_warning_summary={"present": False, "blocking": False, "codes": []}
+    )
+
+    assert payload["sections"]["runtime_readiness"]["status"] == "ready"
+    assert payload["sections"]["evidence"]["status"] == "unavailable"
+    assert payload["sections"]["evidence"]["reasons"] == ["evidence_collection_failed"]
+
+
+def test_service_operator_status_propagates_evidence_programming_error(
+    monkeypatch,
+) -> None:
+    svc = SandboxService()
+    monkeypatch.setattr(svc, "runtime_diagnostics_summary", lambda: _runtime_diagnostics())
+    monkeypatch.setattr(svc, "macos_diagnostics", lambda: _macos_diagnostics_unconfigured())
+
+    def fail_evidence() -> dict[str, object]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Sandbox.service.collect_operator_evidence",
+        fail_evidence,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        svc.operator_status(
+            startup_warning_summary={"present": False, "blocking": False, "codes": []}
+        )
 
 
 def test_service_operator_status_isolates_macos_diagnostics_failure(monkeypatch) -> None:

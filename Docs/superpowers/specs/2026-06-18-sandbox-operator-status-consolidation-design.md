@@ -256,9 +256,13 @@ Deliverables:
 
 Add optional, bounded evidence summary ingestion.
 
+Detailed Slice 2 design is captured in
+`Docs/superpowers/specs/2026-06-19-sandbox-operator-evidence-ingestion-design.md`.
+
 Deliverables:
 
-- Safe parser for existing host-gated evidence summary JSON.
+- Safe parser for the existing host-gated evidence bundle JSON
+  (`host-smoke-evidence.json`), not the Markdown summary.
 - Optional server-side config/env path for operator-supplied evidence.
 - Tests for malformed paths, malformed JSON, oversized JSON, stale evidence,
   blocking failure evidence, and expected skips.
