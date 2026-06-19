@@ -252,8 +252,10 @@ for support-safe sharing. The current release posture is:
   audit events before purging old audit rows.
 - Agent Tasks run history exposes bounded prompt/result previews for
   authenticated owners. These previews are capped at 500 characters and are
-  intended for operator drill-through, not public support evidence. Use the
-  redacted ACP session endpoints when transcript snippets must be shared.
+  intended for operator drill-through. Add `?run_summary_mode=redacted` to task
+  detail when support/export workflows need operational run summaries without
+  prompt/result preview text. Use the redacted ACP session endpoints when
+  transcript, event, or artifact detail must be shared.
 - Accepted ACP work products promoted into workspace artifacts follow the
   workspace artifact lifecycle after promotion. ACP session retention removes
   raw session evidence; it does not automatically delete promoted workspace
@@ -273,7 +275,7 @@ Current policy classification:
 | Audit metadata | Compliant | Sensitive metadata keys, common secret markers, and long string values are sanitized before audit events are returned. |
 | Session TTL and max-duration cleanup | Compliant | Active sessions are closed by configured duration limits; closed/error sessions older than `ACP_SESSION_RETENTION_DAYS` are hard-deleted with message cascade cleanup. |
 | Automatic audit retention enforcement | Compliant | `ACP_AUDIT_RETENTION_DAYS` is enforced by ACP retention maintenance at startup and during the periodic cleanup task. |
-| Task run transcript previews | Partial | Agent Tasks exposes owner-scoped 500-character prompt/result previews for diagnosis; these are bounded but not a support-safe redaction surface. Support-safe task run summaries are tracked by #2408. |
+| Task run transcript previews | Compliant | Agent Tasks exposes owner-scoped 500-character prompt/result previews for diagnosis by default; `?run_summary_mode=redacted` provides support-safe task run summaries while preserving counts, stop reason, status, and session links. |
 | Promoted workspace artifacts | Separate lifecycle | Accepted work products promoted from ACP output are retained by the workspace artifact store, not ACP session retention. |
 | Workspace environment and runner env vars | Partial | Operational environment configuration can be stored or forwarded as plaintext; real secrets must come from host-level injection or an external secret manager. |
 | Redacted transcript and artifact views | Compliant | Session detail, event, and artifact endpoints accept `?redacted=true` for support-safe output. |

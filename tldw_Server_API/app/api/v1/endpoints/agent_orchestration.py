@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
@@ -151,15 +151,32 @@ def _record_orchestration_audit_event(
 
 
 _RUN_HISTORY_PREVIEW_LIMIT = 500
+RunSummaryMode = Literal["full", "redacted"]
+_RUN_SUMMARY_MODE_FULL = "full"
+_RUN_SUMMARY_MODE_REDACTED = "redacted"
+_RUN_SUMMARY_REDACTED_VALUE = "[redacted]"
+_RUN_HISTORY_REDACTED_FIELDS = (
+    "history.prompt.preview",
+    "history.result.preview",
+    "history.diagnostics.message",
+    "history.diagnostics.diagnostic_uri",
+    "result_summary",
+    "error",
+    "failure_context.message",
+    "failure_context.diagnostic_uri",
+    "review_decision.feedback_preview",
+    "reviews.feedback",
+)
 
 
-def _acp_session_links(session_id: str) -> dict[str, str]:
+def _acp_session_links(session_id: str, *, redacted: bool = False) -> dict[str, str]:
     base = f"/api/v1/acp/sessions/{session_id}"
+    redacted_query = "?redacted=true" if redacted else ""
     return {
-        "detail": f"{base}/detail",
-        "events": f"{base}/events",
+        "detail": f"{base}/detail{redacted_query}",
+        "events": f"{base}/events{redacted_query}",
         "events_stream": f"{base}/events/stream",
-        "artifacts": f"{base}/artifacts",
+        "artifacts": f"{base}/artifacts{redacted_query}",
         "diagnostics": f"{base}/diagnostics",
         "audit": f"{base}/audit",
         "updates": f"{base}/updates",
@@ -307,11 +324,16 @@ def _session_usage_dict(session_record: Any) -> dict[str, Any]:
     return {}
 
 
-def _session_info(session_id: str, session_record: Any | None) -> dict[str, Any]:
+def _session_info(
+    session_id: str,
+    session_record: Any | None,
+    *,
+    redacted: bool = False,
+) -> dict[str, Any]:
     info: dict[str, Any] = {
         "session_id": session_id,
         "available": session_record is not None,
-        "links": _acp_session_links(session_id),
+        "links": _acp_session_links(session_id, redacted=redacted),
     }
     if session_record is None:
         return info
@@ -434,12 +456,103 @@ def _run_history_summary(
     }
 
 
+def _redact_preview_payload(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    redacted: dict[str, Any] = {
+        "role": value.get("role"),
+        "timestamp": value.get("timestamp"),
+    }
+    if value.get("preview") is not None:
+        redacted["preview"] = _RUN_SUMMARY_REDACTED_VALUE
+    return redacted
+
+
+def _redact_diagnostic_payload(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {
+            "reason_code": "failed_runtime",
+            "message": _RUN_SUMMARY_REDACTED_VALUE,
+            "diagnostic_uri": None,
+        }
+    redacted: dict[str, Any] = {
+        "session_id": value.get("session_id"),
+        "index": value.get("index"),
+        "timestamp": value.get("timestamp"),
+        "role": value.get("role"),
+        "reason_code": value.get("reason_code"),
+        "message": (
+            _RUN_SUMMARY_REDACTED_VALUE
+            if value.get("message") is not None
+            else value.get("message")
+        ),
+        "diagnostic_uri": (
+            _RUN_SUMMARY_REDACTED_VALUE
+            if value.get("diagnostic_uri")
+            else value.get("diagnostic_uri")
+        ),
+    }
+    return redacted
+
+
+def _redact_run_history_summary(history: dict[str, Any]) -> dict[str, Any]:
+    redacted = dict(history)
+    redacted["support_safe"] = True
+    redacted["redacted_fields"] = list(_RUN_HISTORY_REDACTED_FIELDS)
+    redacted["prompt"] = _redact_preview_payload(history.get("prompt"))
+    redacted["result"] = _redact_preview_payload(history.get("result"))
+    redacted["diagnostics"] = [
+        _redact_diagnostic_payload(item)
+        for item in (history.get("diagnostics") or [])
+    ]
+    return redacted
+
+
+def _redact_run_summary_payload(run_dict: dict[str, Any]) -> dict[str, Any]:
+    if run_dict.get("result_summary") is not None:
+        run_dict["result_summary"] = _RUN_SUMMARY_REDACTED_VALUE
+    if run_dict.get("error") is not None:
+        run_dict["error"] = _RUN_SUMMARY_REDACTED_VALUE
+
+    failure_context = run_dict.get("failure_context")
+    if isinstance(failure_context, dict):
+        redacted_failure = dict(failure_context)
+        if redacted_failure.get("message") is not None:
+            redacted_failure["message"] = _RUN_SUMMARY_REDACTED_VALUE
+        if redacted_failure.get("diagnostic_uri"):
+            redacted_failure["diagnostic_uri"] = _RUN_SUMMARY_REDACTED_VALUE
+        run_dict["failure_context"] = redacted_failure
+
+    review_decision = run_dict.get("review_decision")
+    if isinstance(review_decision, dict):
+        redacted_review = dict(review_decision)
+        if redacted_review.get("feedback_preview") is not None:
+            redacted_review["feedback_preview"] = _RUN_SUMMARY_REDACTED_VALUE
+        run_dict["review_decision"] = redacted_review
+
+    return run_dict
+
+
+def _redact_task_review_payloads(reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    redacted_reviews: list[dict[str, Any]] = []
+    for review in reviews:
+        if not isinstance(review, dict):
+            continue
+        redacted_review = dict(review)
+        if redacted_review.get("feedback") is not None:
+            redacted_review["feedback"] = _RUN_SUMMARY_REDACTED_VALUE
+        redacted_reviews.append(redacted_review)
+    return redacted_reviews
+
+
 async def _enrich_task_runs(
     runs: list[Any],
     reviews: list[dict[str, Any]],
     *,
     user_id: int,
+    run_summary_mode: RunSummaryMode = _RUN_SUMMARY_MODE_FULL,
 ) -> list[dict[str, Any]]:
+    use_redacted_summaries = run_summary_mode == _RUN_SUMMARY_MODE_REDACTED
     session_ids = [str(run.session_id) for run in runs if getattr(run, "session_id", None)]
     session_store: Any | None = None
     if session_ids:
@@ -470,7 +583,11 @@ async def _enrich_task_runs(
                 audit_event_count = len(_acp_list_audit_events(session_id=session_id))
             except Exception:
                 audit_event_count = 0
-            run_dict["session"] = _session_info(session_id, session_record)
+            run_dict["session"] = _session_info(
+                session_id,
+                session_record,
+                redacted=use_redacted_summaries,
+            )
             history = _run_history_summary(
                 run=run,
                 session_record=session_record,
@@ -490,12 +607,16 @@ async def _enrich_task_runs(
                 "artifacts": [],
                 "diagnostics": [],
             }
+        if use_redacted_summaries:
+            history = _redact_run_history_summary(history)
         run_dict["history"] = history
         run_dict["failure_context"] = _run_failure_context(
             run=run,
             diagnostics=history.get("diagnostics", []),
         )
         run_dict["review_decision"] = _review_decision_for_run(run, reviews)
+        if use_redacted_summaries:
+            run_dict = _redact_run_summary_payload(run_dict)
         enriched.append(run_dict)
     return enriched
 
@@ -1517,6 +1638,15 @@ async def list_tasks(
 )
 async def get_task(
     task_id: int,
+    run_summary_mode: Annotated[
+        RunSummaryMode,
+        Query(
+            description=(
+                "Controls whether enriched task run summaries include full "
+                "diagnostic previews or support-safe redacted fields."
+            ),
+        ),
+    ] = _RUN_SUMMARY_MODE_FULL,
     user: User = Depends(get_request_user),
 ) -> TaskResponse:
     """Get task detail including run history."""
@@ -1531,11 +1661,16 @@ async def get_task(
     if project and project.workspace_id:
         workspace = await _run_sync(lambda: db.get_workspace(project.workspace_id))
         d["canonical_workspace"] = _canonical_workspace_link_from_workspace(workspace)
-    d["reviews"] = reviews
+    d["reviews"] = (
+        _redact_task_review_payloads(reviews)
+        if run_summary_mode == _RUN_SUMMARY_MODE_REDACTED
+        else reviews
+    )
     d["runs"] = await _enrich_task_runs(
         runs,
         reviews,
         user_id=_user_id_int(user),
+        run_summary_mode=run_summary_mode,
     )
     return TaskResponse(**d)
 
