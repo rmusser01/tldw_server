@@ -55,11 +55,7 @@ def handle_message(message: object) -> object | None:
         return _error_response(request_id, -32600, "Invalid Request")
 
     if method == "smoke/secret-stderr":
-        print(
-            "fixture diagnostic: Bearer stdio-secret-token failed",
-            file=sys.stderr,
-            flush=True,
-        )
+        print("fixture diagnostic: credential exchange failed", file=sys.stderr, flush=True)
         raise SystemExit(3)
     if method == "smoke/hang":
         time.sleep(5)

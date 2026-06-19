@@ -42,15 +42,6 @@ Design and implement LSP-backed MCP tools inspired by Claude Code's LSP tool: de
 Before implementing LSP-backed MCP tools, build or at least plan the MCP smoke client harness from TASK-2387 so LSP scenarios can be added on top of the baseline protocol/transport coverage.
 <!-- SECTION:NOTES:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed

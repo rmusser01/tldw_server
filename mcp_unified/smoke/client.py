@@ -2,35 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Protocol
-
-JsonObject = dict[str, object]
-JsonRpcPayload = JsonObject | list[object]
-
-
-class McpSmokeTransport(Protocol):
-    """Structural transport interface consumed by the smoke client."""
-
-    async def request(self, payload: JsonRpcPayload) -> object | None:
-        """Send a JSON-RPC request payload and return the decoded response."""
-
-    async def notify(self, payload: JsonObject) -> object | None:
-        """Send a JSON-RPC notification payload and return any observed response."""
-
-
-class McpSmokeClientError(RuntimeError):
-    """Raised when a smoke client receives an unusable JSON-RPC response."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        response: object | None = None,
-        error: object | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.response = response
-        self.error = error
+from mcp_unified.smoke.exceptions import McpSmokeClientError
+from mcp_unified.smoke.types import JsonObject, McpSmokeTransport
 
 
 class McpSmokeClient:

@@ -60,15 +60,6 @@ Created design spec Docs/superpowers/specs/2026-06-19-mcp-smoke-client-transport
 Implemented the MCP smoke client harness with deterministic in-process coverage plus live HTTP, live WebSocket, and argv-only stdio subprocess transports. Added a redacted/bounded report contract, baseline scenario coverage, CLI entrypoint mcp-unified-smoke, operator docs at Docs/MCP/Unified/Smoke_Client.md, and tests for exit-code mapping, transport response correlation, stdio cleanup, stderr redaction, WebSocket profile/header behavior, and dash-prefixed stdio subprocess arguments. Final verification: python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_smoke_client.py -q passed with 60 tests; python -m py_compile mcp_unified/smoke/*.py passed; python -m ruff check mcp_unified/smoke tldw_Server_API/app/core/MCP_unified/tests/test_smoke_client.py tldw_Server_API/app/core/MCP_unified/tests/fixtures/smoke_stdio_server.py passed; python -m bandit -r mcp_unified/smoke -f json -o /tmp/bandit_mcp_smoke_client.json reported 0 findings; git diff --check passed. Spec-review follow-up fixed stdio dash-prefixed subprocess argument handling so documented forms like --arg -m reach the stdio transport, and documented PATH allowlisting for command-name resolution.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

@@ -7,14 +7,15 @@ from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any, Literal
 
-from mcp_unified.smoke.client import McpSmokeClient, McpSmokeClientError
+from mcp_unified.smoke.client import McpSmokeClient
+from mcp_unified.smoke.exceptions import McpSmokeClientError, McpSmokeTransportError
 from mcp_unified.smoke.reporting import (
     SmokeReport,
     SmokeStepReport,
     redact_detail,
     summarize_result,
 )
-from mcp_unified.smoke.transports import McpSmokeTransport, McpSmokeTransportError
+from mcp_unified.smoke.types import McpSmokeTransport
 
 ScenarioMode = Literal["best_effort", "strict"]
 
@@ -132,6 +133,8 @@ async def _record_step(
     *,
     method: str | None = None,
 ) -> None:
+    """Run one smoke scenario step and append its redacted outcome to the report."""
+
     started = perf_counter()
     try:
         outcome = await action()

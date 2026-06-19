@@ -1,9 +1,7 @@
 """Smoke-test helpers for MCP Unified JSON-RPC clients."""
 
-from mcp_unified.smoke.client import (
-    McpSmokeClient,
-    McpSmokeClientError,
-)
+from mcp_unified.smoke.client import McpSmokeClient
+from mcp_unified.smoke.exceptions import McpSmokeClientError, McpSmokeTransportError
 from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
 from mcp_unified.smoke.reporting import (
     SmokeReport,
@@ -19,10 +17,9 @@ from mcp_unified.smoke.transports import (
     InProcessGatewayTransport,
     LiveHttpTransport,
     LiveWebSocketTransport,
-    McpSmokeTransport,
-    McpSmokeTransportError,
     StdioSubprocessTransport,
 )
+from mcp_unified.smoke.types import McpSmokeTransport
 
 __all__ = [
     "InProcessFastApiTransport",

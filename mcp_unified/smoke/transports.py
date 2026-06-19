@@ -8,7 +8,7 @@ import json
 import os
 from collections.abc import Collection
 from contextlib import suppress
-from typing import Any, Protocol
+from typing import Any
 
 import httpx
 import websockets
@@ -20,10 +20,10 @@ from mcp_unified.gateway.jsonrpc import (
     response_to_json,
 )
 from mcp_unified.gateway.runtime import GatewayRuntime
+from mcp_unified.smoke.exceptions import McpSmokeTransportError
 from mcp_unified.smoke.reporting import redact_detail
+from mcp_unified.smoke.types import JsonObject, JsonRpcPayload, McpSmokeTransport
 
-JsonObject = dict[str, object]
-JsonRpcPayload = JsonObject | list[object]
 _DEFAULT_HTTP_TIMEOUT_SECONDS = 10.0
 _RETRYABLE_HTTP_STATUS_CODES = frozenset({500, 502, 503, 504})
 _DEFAULT_IDEMPOTENT_HTTP_METHODS = frozenset(
@@ -47,46 +47,6 @@ _DEFAULT_STDERR_MAX_BYTES = 8192
 _DEFAULT_RESPONSE_MAX_BYTES = 1024 * 1024
 _STDIO_CLOSE_TIMEOUT_SECONDS = 1.0
 _IGNORE_STDIO_RESPONSE = object()
-
-
-class McpSmokeTransport(Protocol):
-    """Async transport protocol consumed by MCP smoke scenarios."""
-
-    async def start(self) -> None:
-        """Open any resources needed by this transport."""
-
-    async def request(self, payload: JsonRpcPayload) -> object | None:
-        """Send a JSON-RPC request or batch payload and return the decoded response."""
-
-    async def notify(self, payload: JsonObject) -> object | None:
-        """Send a JSON-RPC notification payload and return any observed response."""
-
-    async def close(self) -> None:
-        """Release any resources opened by this transport."""
-
-
-class McpSmokeTransportError(RuntimeError):
-    """Raised when a smoke transport cannot exchange JSON-RPC payloads."""
-
-    def __init__(
-        self,
-        reason_code: str,
-        message: str,
-        *,
-        method: str | None = None,
-        status_code: int | None = None,
-        cause: BaseException | None = None,
-    ) -> None:
-        parts = [reason_code, message]
-        if method is not None:
-            parts.append(f"method={method}")
-        if status_code is not None:
-            parts.append(f"status_code={status_code}")
-        super().__init__(": ".join(parts))
-        self.reason_code = reason_code
-        self.method = method
-        self.status_code = status_code
-        self.__cause__ = cause
 
 
 class InProcessGatewayTransport:
@@ -179,7 +139,16 @@ class InProcessFastApiTransport:
             self.response_max_bytes,
             method=_single_payload_method(payload),
         )
-        return response.json()
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise McpSmokeTransportError(
+                "transport_invalid_json_response",
+                "In-process FastAPI transport received a non-JSON response body",
+                method=_single_payload_method(payload),
+                status_code=response.status_code,
+                cause=exc,
+            ) from exc
 
     async def notify(self, payload: JsonObject) -> object | None:
         """POST one notification to the configured ASGI route."""
@@ -613,6 +582,22 @@ class LiveWebSocketTransport:
             self._receive_error = exc
             self._fail_pending(exc)
             await self._close_after_receive_error()
+        except websockets.exceptions.ConnectionClosedError as exc:
+            if _websocket_close_code(exc) == 1009:
+                error = McpSmokeTransportError(
+                    "response_too_large",
+                    "WebSocket transport response exceeded max byte size",
+                    cause=exc,
+                )
+            else:
+                error = McpSmokeTransportError(
+                    "transport_websocket_receive_failed",
+                    "WebSocket transport failed while receiving frames",
+                    cause=exc,
+                )
+            self._receive_error = error
+            self._fail_pending(error)
+            await self._close_after_receive_error()
         except Exception as exc:  # noqa: BLE001 - convert unexpected receive failures.
             error = McpSmokeTransportError(
                 "transport_websocket_receive_failed",
@@ -630,6 +615,10 @@ class LiveWebSocketTransport:
                 )
                 self._receive_error = error
                 self._fail_pending(error)
+        finally:
+            if not self._closing:
+                self._connection = None
+                self._receiver_task = None
 
     async def _close_after_receive_error(self) -> None:
         connection = self._connection
@@ -755,6 +744,8 @@ class LiveWebSocketTransport:
 
         if "open_timeout" in parameters:
             kwargs["open_timeout"] = self.timeout
+        if "max_size" in parameters:
+            kwargs["max_size"] = self.response_max_bytes
         if "proxy" in parameters:
             kwargs["proxy"] = None
         return kwargs
@@ -1323,6 +1314,15 @@ def _single_payload_method(payload: JsonRpcPayload) -> str | None:
         return methods[0]
     if methods:
         return ",".join(methods)
+    return None
+
+
+def _websocket_close_code(exc: websockets.exceptions.ConnectionClosedError) -> int | None:
+    """Return the WebSocket close code when the peer or client supplied one."""
+
+    for close_frame in (exc.rcvd, exc.sent):
+        if close_frame is not None:
+            return close_frame.code
     return None
 
 

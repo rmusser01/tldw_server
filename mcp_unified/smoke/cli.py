@@ -11,6 +11,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, TextIO, cast
 
+from loguru import logger
+
 from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
 from mcp_unified.smoke.reporting import SmokeReport, report_to_json
 from mcp_unified.smoke.scenarios import ScenarioMode, run_baseline_scenario
@@ -44,10 +46,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         report = asyncio.run(_run(args))
     except (McpSmokeTransportError, OSError) as exc:
-        print(f"transport error: {exc}", file=sys.stderr)
+        logger.error("transport error: {}", exc)
         return _EXIT_TRANSPORT_FAILED
     except ValueError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        logger.error("error: {}", exc)
         return _EXIT_USAGE
 
     _write_report(report, args.json_report, stdout=sys.stdout)
@@ -356,7 +358,7 @@ def _write_report(report: SmokeReport, destination: str | None, *, stdout: TextI
         return
     if destination:
         path = Path(destination)
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return
 
     status = "PASS" if payload["ok"] else "FAIL"

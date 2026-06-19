@@ -12,10 +12,31 @@ import httpx
 import pytest
 import websockets
 
+pytestmark = pytest.mark.integration
+
 REPO_ROOT = Path(__file__).resolve().parents[5]
 FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "smoke_stdio_server.py"
 )
+
+
+def test_smoke_package_exports_canonical_protocol_and_errors() -> None:
+    from mcp_unified.smoke import (
+        McpSmokeClientError,
+        McpSmokeTransport,
+        McpSmokeTransportError,
+    )
+    from mcp_unified.smoke.exceptions import (
+        McpSmokeClientError as CanonicalClientError,
+    )
+    from mcp_unified.smoke.exceptions import (
+        McpSmokeTransportError as CanonicalTransportError,
+    )
+    from mcp_unified.smoke.types import McpSmokeTransport as CanonicalTransport
+
+    assert McpSmokeTransport is CanonicalTransport  # nosec B101
+    assert McpSmokeClientError is CanonicalClientError  # nosec B101
+    assert McpSmokeTransportError is CanonicalTransportError  # nosec B101
 
 
 def test_smoke_report_redacts_sensitive_details(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -325,11 +346,18 @@ def test_smoke_cli_returns_two_for_invalid_arguments(
 
 
 def test_smoke_cli_returns_three_for_transport_startup_failure(
-    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from mcp_unified.smoke.cli import main
+    from mcp_unified.smoke import cli
 
-    exit_code = main(
+    logged_errors: list[str] = []
+    monkeypatch.setattr(
+        cli.logger,
+        "error",
+        lambda template, *args: logged_errors.append(template.format(*args)),
+    )
+
+    exit_code = cli.main(
         [
             "stdio",
             "--command",
@@ -339,10 +367,8 @@ def test_smoke_cli_returns_three_for_transport_startup_failure(
         ]
     )
 
-    captured = capsys.readouterr()
-
     assert exit_code == 3  # nosec B101
-    assert "transport_stdio_start_failed" in captured.err  # nosec B101
+    assert "transport_stdio_start_failed" in logged_errors[0]  # nosec B101
 
 
 def test_smoke_cli_accepts_dash_prefixed_stdio_argument(
@@ -682,6 +708,33 @@ async def test_inprocess_fastapi_transport_uses_asgi_request_path() -> None:
 
     try:
         assert await client.ping() == {"pong": True}  # nosec B101
+    finally:
+        await transport.close()
+
+
+@pytest.mark.asyncio
+async def test_inprocess_fastapi_transport_wraps_non_json_response_body() -> None:
+    from fastapi import FastAPI
+    from mcp_unified.smoke.transports import (
+        InProcessFastApiTransport,
+        McpSmokeTransportError,
+    )
+    from starlette.responses import PlainTextResponse
+
+    app = FastAPI()
+
+    @app.post("/mcp/request")
+    async def _non_json_response() -> PlainTextResponse:
+        return PlainTextResponse("not-json")
+
+    transport = InProcessFastApiTransport(app, request_path="/mcp/request")
+
+    try:
+        with pytest.raises(
+            McpSmokeTransportError,
+            match="transport_invalid_json_response",
+        ):
+            await transport.request({"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"})
     finally:
         await transport.close()
 
@@ -1250,6 +1303,39 @@ async def test_live_websocket_transport_rejects_oversized_frame_before_json_pars
             await transport.close()
 
 
+def test_live_websocket_transport_passes_response_limit_to_connect_max_size() -> None:
+    from mcp_unified.smoke.transports import LiveWebSocketTransport
+
+    transport = LiveWebSocketTransport(
+        "ws://127.0.0.1/mcp",
+        response_max_bytes=1234,
+    )
+
+    assert transport._connect_kwargs()["max_size"] == 1234  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_live_websocket_transport_clears_stale_connection_after_server_close() -> None:
+    from mcp_unified.smoke.transports import LiveWebSocketTransport
+
+    class _ClosedConnection:
+        def __aiter__(self) -> _ClosedConnection:
+            return self
+
+        async def __anext__(self) -> object:
+            raise StopAsyncIteration
+
+    transport = LiveWebSocketTransport("ws://127.0.0.1/mcp")
+    transport._connection = _ClosedConnection()
+    receiver_task = asyncio.create_task(transport._receive_loop())
+    transport._receiver_task = receiver_task
+
+    await asyncio.wait_for(receiver_task, timeout=1.0)
+
+    assert transport._connection is None  # nosec B101
+    assert transport._receiver_task is None  # nosec B101
+
+
 @pytest.mark.asyncio
 async def test_live_websocket_transport_adds_profile_header_and_auth_headers() -> None:
     from mcp_unified.smoke.transports import LiveWebSocketTransport
@@ -1496,6 +1582,22 @@ async def test_stdio_subprocess_transport_redacts_secret_stderr_on_error() -> No
     assert "stdio-secret-token" not in rendered_error  # nosec B101
     assert "Bearer stdio-secret-token" not in rendered_error  # nosec B101
     assert "stderr=" in rendered_error  # nosec B101
+
+
+def test_stdio_subprocess_transport_redacts_buffered_stderr_without_fixture_secret_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp_unified.smoke.transports import StdioSubprocessTransport
+
+    monkeypatch.setenv("TLDW_SMOKE_TEST_SECRET", "stdio-secret-token")
+    transport = StdioSubprocessTransport(command=sys.executable)
+    transport._stderr_buffer.extend(b"fixture diagnostic: Bearer stdio-secret-token failed")
+
+    rendered_stderr = transport._stderr_detail()
+
+    assert rendered_stderr is not None  # nosec B101
+    assert "stdio-secret-token" not in rendered_stderr  # nosec B101
+    assert "Bearer stdio-secret-token" not in rendered_stderr  # nosec B101
 
 
 @pytest.mark.asyncio
