@@ -1,4 +1,5 @@
 from tldw_Server_API.app.core.Sandbox.operator_status import build_operator_status
+from tldw_Server_API.app.core.Sandbox.service import SandboxService
 
 
 def _runtime_diagnostics(*, ready: int = 1) -> dict[str, object]:
@@ -208,3 +209,33 @@ def test_operator_status_points_image_store_to_cleanup_plan() -> None:
         "inspect_image_store_cleanup_plan"
     )
     assert payload["recommended_actions"][0]["dry_run_required"] is False
+
+
+def test_service_operator_status_uses_existing_diagnostics(monkeypatch) -> None:
+    svc = SandboxService()
+    monkeypatch.setattr(svc, "runtime_diagnostics_summary", lambda: _runtime_diagnostics())
+    monkeypatch.setattr(svc, "macos_diagnostics", lambda: _macos_diagnostics_unconfigured())
+
+    payload = svc.operator_status(
+        startup_warning_summary={"present": False, "blocking": False, "codes": []}
+    )
+
+    assert payload["source"] == "sandbox_operator_status"
+    assert payload["overall_status"] == "ready"
+
+
+def test_service_operator_status_isolates_macos_diagnostics_failure(monkeypatch) -> None:
+    svc = SandboxService()
+    monkeypatch.setattr(svc, "runtime_diagnostics_summary", lambda: _runtime_diagnostics())
+
+    def fail_macos() -> dict[str, object]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(svc, "macos_diagnostics", fail_macos)
+
+    payload = svc.operator_status(
+        startup_warning_summary={"present": False, "blocking": False, "codes": []}
+    )
+
+    assert payload["sections"]["runtime_readiness"]["status"] == "ready"
+    assert payload["sections"]["macos_vz"]["status"] == "unknown"

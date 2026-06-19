@@ -47,6 +47,7 @@ from .models import (
     SessionSpec,
     TrustLevel,
 )
+from .operator_status import build_operator_status
 from .orchestrator import SandboxOrchestrator, SessionActiveRunsConflict
 from .policy import SandboxPolicy, SandboxPolicyConfig, compute_policy_hash
 from .runners.docker_runner import DockerRunner, docker_available
@@ -1143,6 +1144,39 @@ class SandboxService:
             },
             "runtimes": runtime_rows,
         }
+
+    def operator_status(
+        self,
+        *,
+        startup_warning_summary: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        runtime_diagnostics: dict[str, object] | None
+        macos_diagnostics: dict[str, object] | None
+        try:
+            runtime_diagnostics = self.runtime_diagnostics_summary()
+        except (ConnectionError, OSError, RuntimeError, TimeoutError, ValueError) as exc:
+            logger.warning(
+                "Sandbox operator status runtime diagnostics unavailable: {}",
+                type(exc).__name__,
+            )
+            runtime_diagnostics = {
+                "_section_error": f"runtime_diagnostics_failed: {type(exc).__name__}"
+            }
+        try:
+            macos_diagnostics = self.macos_diagnostics()
+        except (ConnectionError, OSError, RuntimeError, TimeoutError, ValueError) as exc:
+            logger.warning(
+                "Sandbox operator status macOS diagnostics unavailable: {}",
+                type(exc).__name__,
+            )
+            macos_diagnostics = {
+                "_section_error": f"macos_diagnostics_failed: {type(exc).__name__}"
+            }
+        return build_operator_status(
+            runtime_diagnostics=runtime_diagnostics,
+            macos_diagnostics=macos_diagnostics,
+            startup_warning_summary=startup_warning_summary,
+        )
 
     @staticmethod
     def _runtime_diagnostics_item(row: dict[str, object]) -> dict[str, object]:
