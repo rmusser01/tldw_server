@@ -201,6 +201,31 @@ def test_operator_status_accepts_healthy_reconciliation_schema_status() -> None:
     assert model.sections["reconciliation"].status == "healthy"
 
 
+def test_operator_status_normalizes_invalid_reconciliation_values() -> None:
+    macos = _macos_diagnostics_unconfigured()
+    macos["recovery_summary"] = {
+        "status": "unexpected_status",
+        "severity": "unexpected_severity",
+        "codes": ["vz_recovery_unknown"],
+        "counts": {},
+        "repair_endpoint": None,
+        "cleanup_plan_endpoint": None,
+        "notes": [],
+    }
+
+    payload = build_operator_status(
+        runtime_diagnostics=_runtime_diagnostics(),
+        macos_diagnostics=macos,
+        startup_warning_summary={"present": False, "blocking": False, "codes": []},
+    )
+
+    model = SandboxAdminOperatorStatusResponse.model_validate(payload)
+
+    assert model.sections["reconciliation"].status == "unknown"
+    assert model.sections["reconciliation"].severity == "warning"
+    assert model.sections["reconciliation"].reasons == ["vz_recovery_unknown"]
+
+
 def test_operator_status_keeps_runtime_section_when_macos_section_unavailable() -> None:
     payload = build_operator_status(
         runtime_diagnostics=_runtime_diagnostics(),
@@ -230,6 +255,32 @@ def test_operator_status_reports_unknown_when_runtime_diagnostics_unavailable() 
         "runtime_diagnostics_failed"
     ]
     assert payload["overall_status"] == "unknown"
+
+
+def test_operator_status_treats_configured_image_store_reasons_as_unavailable() -> None:
+    macos = _macos_diagnostics_unconfigured()
+    macos["helper"] = {"configured": True, "ready": True, "reasons": []}
+    macos["image_store"] = {
+        "configured": True,
+        "registered_templates": 0,
+        "run_manifests": 0,
+        "gc_candidates": 0,
+        "reasons": ["image_store_root_missing"],
+    }
+
+    payload = build_operator_status(
+        runtime_diagnostics=_runtime_diagnostics(),
+        macos_diagnostics=macos,
+        startup_warning_summary={"present": False, "blocking": False, "codes": []},
+    )
+
+    model = SandboxAdminOperatorStatusResponse.model_validate(payload)
+
+    assert model.sections["image_store"].status == "unavailable"
+    assert model.sections["image_store"].severity == "error"
+    assert model.sections["image_store"].reasons == ["image_store_root_missing"]
+    assert payload["overall_status"] == "action_required"
+    assert payload["recommended_actions"][0]["code"] == "restore_image_store"
 
 
 def test_operator_status_treats_string_booleans_as_unknown_not_actionable() -> None:
@@ -375,6 +426,7 @@ def test_service_operator_status_isolates_macos_diagnostics_failure(monkeypatch)
 
     assert payload["sections"]["runtime_readiness"]["status"] == "ready"
     assert payload["sections"]["macos_vz"]["status"] == "unknown"
+    assert payload["sections"]["macos_vz"]["reasons"] == ["macos_diagnostics_failed"]
 
 
 def test_service_operator_status_reports_unknown_for_runtime_diagnostics_failure(
@@ -393,6 +445,9 @@ def test_service_operator_status_reports_unknown_for_runtime_diagnostics_failure
     )
 
     assert payload["sections"]["runtime_readiness"]["status"] == "unknown"
+    assert payload["sections"]["runtime_readiness"]["reasons"] == [
+        "runtime_diagnostics_failed"
+    ]
     assert payload["overall_status"] == "unknown"
 
 

@@ -1,20 +1,40 @@
+"""Build read-only consolidated sandbox operator status payloads."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
 
 OperatorSection = dict[str, object]
+_SECTION_STATUSES = {
+    "ready",
+    "degraded",
+    "action_required",
+    "unavailable",
+    "unknown",
+    "not_configured",
+    "action_recommended",
+    "cleanup_recommended",
+    "healthy",
+}
+_SEVERITIES = {"info", "warning", "error"}
 
 
 def _as_dict(value: object) -> dict[str, object]:
+    """Return a plain dict for mapping inputs, otherwise an empty dict."""
+
     return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _safe_dict(value: object) -> dict[str, object]:
+    """Coerce untrusted diagnostic values into a dict-shaped payload."""
+
     return _as_dict(value)
 
 
 def _safe_int(value: object) -> int:
+    """Coerce diagnostic counts to non-negative integers."""
+
     if isinstance(value, bool):
         return 0
     try:
@@ -25,6 +45,8 @@ def _safe_int(value: object) -> int:
 
 
 def _safe_list(value: object) -> list[object]:
+    """Copy list-like diagnostic values without trusting arbitrary iterables."""
+
     if isinstance(value, list):
         return list(value)
     if isinstance(value, tuple):
@@ -33,17 +55,47 @@ def _safe_list(value: object) -> list[object]:
 
 
 def _safe_bool(value: object) -> bool | None:
+    """Return bool values only when diagnostics supplied a real bool."""
+
     if isinstance(value, bool):
         return value
     return None
 
 
 def _safe_reason(value: object) -> list[str]:
+    """Convert a single optional reason value into a string reason list."""
+
     reason = str(value or "").strip()
     return [reason] if reason else []
 
 
+def _safe_str_list(value: object) -> list[str]:
+    """Coerce list-like reason/code values into non-empty strings."""
+
+    return [text for item in _safe_list(value) if (text := str(item).strip())]
+
+
+def _normalized_status(value: object, *, default: str = "unknown") -> str:
+    """Normalize external status text to the operator-status taxonomy."""
+
+    status = str(value or default).strip().lower()
+    if status == "ok":
+        return "healthy"
+    return status if status in _SECTION_STATUSES else default
+
+
+def _normalized_severity(value: object, *, default: str = "warning") -> str:
+    """Normalize external severity text to the operator-status taxonomy."""
+
+    severity = str(value or default).strip().lower()
+    if severity == "ok":
+        return "info"
+    return severity if severity in _SEVERITIES else default
+
+
 def _section(status: str, *, severity: str = "info", **extra: object) -> OperatorSection:
+    """Create one operator-status section payload."""
+
     return {"status": status, "severity": severity, **extra}
 
 
@@ -55,6 +107,8 @@ def _action(
     endpoint: str | None = None,
     dry_run_required: bool = False,
 ) -> dict[str, object]:
+    """Create one recommended operator action payload."""
+
     return {
         "code": code,
         "severity": severity,
@@ -71,6 +125,8 @@ def build_operator_status(
     macos_diagnostics: Mapping[str, Any] | None,
     startup_warning_summary: Mapping[str, Any] | None = None,
 ) -> dict[str, object]:
+    """Project sandbox diagnostics into a stable admin/operator status payload."""
+
     runtime_payload = _safe_dict(runtime_diagnostics)
     macos_payload = _safe_dict(macos_diagnostics)
     startup_payload = _safe_dict(startup_warning_summary)
@@ -98,6 +154,8 @@ def build_operator_status(
     repair_endpoint = recovery.get("repair_endpoint")
     cleanup_plan_endpoint = recovery.get("cleanup_plan_endpoint")
     gc_candidates = _safe_int(image_store.get("gc_candidates"))
+    image_store_reasons = _safe_str_list(image_store.get("reasons"))
+    recovery_reasons = macos_failure_reasons or _safe_str_list(recovery.get("codes"))
     helper_configured = _safe_bool(helper.get("configured"))
     helper_ready = _safe_bool(helper.get("ready"))
     image_store_configured = _safe_bool(image_store.get("configured"))
@@ -135,6 +193,12 @@ def build_operator_status(
             or str(recovery.get("severity") or "").strip().lower() == "error"
         )
     )
+    image_store_unavailable = bool(
+        image_store_configured is True and image_store_reasons
+    )
+    image_store_action_required = bool(
+        configured_macos_vz and image_store_unavailable
+    )
 
     recommended_actions: list[dict[str, object]] = []
     if macos_vz_action_required:
@@ -144,6 +208,16 @@ def build_operator_status(
                 "error",
                 "macos_vz",
                 "Restore configured macOS VZ helper/template readiness before relying on that runtime path.",
+                endpoint="/api/v1/sandbox/admin/macos-diagnostics",
+            )
+        )
+    if image_store_action_required:
+        recommended_actions.append(
+            _action(
+                "restore_image_store",
+                "error",
+                "image_store",
+                "Restore configured image-store readiness before relying on VZ workflows.",
                 endpoint="/api/v1/sandbox/admin/macos-diagnostics",
             )
         )
@@ -212,25 +286,41 @@ def build_operator_status(
         "image_store": _section(
             "unknown"
             if macos_failed or image_store_bool_malformed
-            else ("ready" if image_store_configured else "not_configured"),
+            else (
+                "unavailable"
+                if image_store_unavailable
+                else ("ready" if image_store_configured else "not_configured")
+            ),
             severity="warning"
             if macos_failed or image_store_bool_malformed
-            else "info",
+            else (
+                "error"
+                if image_store_action_required
+                else ("warning" if image_store_unavailable else "info")
+            ),
             configured=image_store_configured,
             gc_candidates=gc_candidates,
-            reasons=macos_failure_reasons or _safe_list(image_store.get("reasons")),
+            reasons=macos_failure_reasons or image_store_reasons,
         ),
         "reconciliation": _section(
             "unknown"
             if macos_failed
-            else str(recovery.get("status") or "not_configured"),
+            else _normalized_status(
+                recovery.get("status"),
+                default="not_configured" if not recovery else "unknown",
+            ),
             severity="warning"
             if macos_failed
-            else str(recovery.get("severity") or "info").replace("ok", "info"),
+            else _normalized_severity(
+                recovery.get("severity"),
+                default="info"
+                if not str(recovery.get("severity") or "").strip()
+                else "warning",
+            ),
             counts=_safe_dict(recovery.get("counts")),
             repair_endpoint=repair_endpoint,
             cleanup_plan_endpoint=cleanup_plan_endpoint,
-            reasons=macos_failure_reasons,
+            reasons=recovery_reasons,
         ),
         "evidence": _section("not_configured"),
         "security_boundaries": _section(
@@ -271,6 +361,9 @@ def build_operator_status(
     has_macos_vz_action = any(
         action["code"] == "restore_helper_readiness" for action in recommended_actions
     )
+    has_image_store_action = any(
+        action["code"] == "restore_image_store" for action in recommended_actions
+    )
     has_cleanup_candidates = gc_candidates > 0 or (
         isinstance(cleanup_plan_endpoint, str) and bool(cleanup_plan_endpoint)
     )
@@ -282,13 +375,21 @@ def build_operator_status(
     elif ready_count <= 0:
         overall_status = "unavailable"
         overall_severity = "error"
-    elif startup_blocking is True or has_repair_action or has_macos_vz_action:
+    elif (
+        startup_blocking is True
+        or has_repair_action
+        or has_macos_vz_action
+        or has_image_store_action
+    ):
         overall_status = "action_required"
         overall_severity = (
-            "error" if startup_blocking is True or has_macos_vz_action else "warning"
+            "error"
+            if startup_blocking is True or has_macos_vz_action or has_image_store_action
+            else "warning"
         )
     elif (
         has_section_failures
+        or image_store_unavailable
         or startup_present is True
         or has_cleanup_candidates
         or has_host_local_warnings

@@ -1160,27 +1160,27 @@ class SandboxService:
         *,
         startup_warning_summary: dict[str, object] | None = None,
     ) -> dict[str, object]:
+        """Return a read-only consolidated sandbox operator status projection."""
+
         runtime_diagnostics: dict[str, object] | None
         macos_diagnostics: dict[str, object] | None
         try:
             runtime_diagnostics = self.runtime_diagnostics_summary()
         except _SANDBOX_OPERATOR_STATUS_OPERATIONAL_EXCEPTIONS as exc:
-            logger.warning(
-                "Sandbox operator status runtime diagnostics unavailable: {}",
-                type(exc).__name__,
+            logger.opt(exception=exc).warning(
+                "Sandbox operator status runtime diagnostics unavailable"
             )
             runtime_diagnostics = {
-                "_section_error": f"runtime_diagnostics_failed: {type(exc).__name__}"
+                "_section_error": "runtime_diagnostics_failed"
             }
         try:
             macos_diagnostics = self.macos_diagnostics()
         except _SANDBOX_OPERATOR_STATUS_OPERATIONAL_EXCEPTIONS as exc:
-            logger.warning(
-                "Sandbox operator status macOS diagnostics unavailable: {}",
-                type(exc).__name__,
+            logger.opt(exception=exc).warning(
+                "Sandbox operator status macOS diagnostics unavailable"
             )
             macos_diagnostics = {
-                "_section_error": f"macos_diagnostics_failed: {type(exc).__name__}"
+                "_section_error": "macos_diagnostics_failed"
             }
         return build_operator_status(
             runtime_diagnostics=runtime_diagnostics,
