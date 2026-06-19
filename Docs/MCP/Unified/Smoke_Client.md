@@ -119,10 +119,12 @@ the CLI prints a compact human-readable summary.
 
 Report fields include:
 
-- top-level `ok`, `transport`, timing, and metadata
-- one entry per scenario step
+- top-level `ok`, `transport`, `server_info`, `started_at`, `duration_ms`,
+  `scenario`, `profile_id`, `summary`, and `metadata`
+- one entry per scenario step with `name`, `method`, `request_id`, `status`,
+  `elapsed_ms`, `error_code`, `reason_code`, `message`, and `result_summary`
 - step result summaries rather than raw tool/resource/prompt payloads
-- error reason codes and redacted diagnostics
+- error reason codes such as `response_too_large` and redacted diagnostics
 - optional trace fields when future transports add debug trace details
 
 ## Exit Codes

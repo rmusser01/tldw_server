@@ -75,6 +75,8 @@ def handle_message(message: object) -> object | None:
         return {"jsonrpc": "2.0", "id": request_id, "result": {"after": "notification"}}
     if method == "smoke/wrong-id-response":
         return {"jsonrpc": "2.0", "id": "wrong-id", "result": {"wrong": True}}
+    if method == "smoke/large-response":
+        return {"blob": "x" * 4096}
 
     if is_notification:
         print(f"fixture diagnostic: notification {method}", file=sys.stderr, flush=True)
@@ -113,7 +115,10 @@ def _method_result(method: str, params: object) -> object:
             ]
         }
     if method == "tools/call":
-        arguments = _params_dict(params).get("arguments", {})
+        params_dict = _params_dict(params)
+        if params_dict.get("name") != "echo.search":
+            return _UNKNOWN_METHOD
+        arguments = params_dict.get("arguments", {})
         query = arguments.get("query", "") if isinstance(arguments, dict) else ""
         return {"content": [{"type": "text", "text": f"echo.search:{query}"}]}
     if method == "resources/list":
@@ -126,8 +131,35 @@ def _method_result(method: str, params: object) -> object:
                 }
             ]
         }
+    if method == "resources/read":
+        uri = _params_dict(params).get("uri")
+        if uri != "resource://smoke/doc":
+            return _UNKNOWN_METHOD
+        return {
+            "contents": [
+                {
+                    "uri": "resource://smoke/doc",
+                    "mimeType": "text/plain",
+                    "text": "Smoke fixture resource.",
+                }
+            ]
+        }
     if method == "prompts/list":
         return {"prompts": [{"name": "smoke.review", "description": "Review prompt"}]}
+    if method == "prompts/get":
+        params_dict = _params_dict(params)
+        if params_dict.get("name") != "smoke.review":
+            return _UNKNOWN_METHOD
+        arguments = params_dict.get("arguments", {})
+        topic = arguments.get("topic", "smoke") if isinstance(arguments, dict) else "smoke"
+        return {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": {"type": "text", "text": f"Review {topic}"},
+                }
+            ]
+        }
     return _UNKNOWN_METHOD
 
 

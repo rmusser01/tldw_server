@@ -13,6 +13,14 @@ MAX_MAPPING_ITEMS = 16
 MAX_SEQUENCE_ITEMS = 12
 MAX_DEPTH = 5
 
+_SKIP_REASON_CODES = frozenset(
+    {
+        "capability_unavailable",
+        "not_configured",
+        "safe_tool_unavailable",
+    }
+)
+
 _REDACTED = "[redacted]"
 _REDACTED_ARGUMENTS = "[redacted tool arguments]"
 _REDACTED_CONTENT = "[summarized content]"
@@ -135,27 +143,36 @@ def redact_detail(value: object) -> object:
 def report_to_json(report: SmokeReport) -> dict[str, object]:
     """Convert a smoke report to a bounded JSON-compatible dictionary."""
 
+    steps = [_step_to_json(step) for step in report.steps]
     return {
         "ok": _report_ok(report),
         "transport": redact_detail(report.transport),
+        "server_info": redact_detail(report.metadata.get("server_info")),
         "started_at": redact_detail(report.started_at),
+        "duration_ms": report.elapsed_ms,
         "elapsed_ms": report.elapsed_ms,
+        "scenario": redact_detail(report.metadata.get("scenario")),
+        "profile_id": redact_detail(report.metadata.get("profile_id")),
         "metadata": redact_detail(report.metadata),
-        "steps": [_step_to_json(step) for step in report.steps],
+        "steps": steps,
+        "summary": _report_summary(report.steps),
         "traces": [_trace_to_json(trace) for trace in report.traces],
     }
 
 
 def _step_to_json(step: SmokeStepReport) -> dict[str, object]:
+    status = _step_status(step)
     return {
         "name": redact_detail(step.name),
         "ok": step.ok,
+        "status": status,
         "method": redact_detail(step.method),
         "request_id": redact_detail(step.request_id),
         "elapsed_ms": step.elapsed_ms,
         "result_summary": redact_detail(step.result_summary),
         "error_code": step.error_code,
         "reason_code": redact_detail(step.reason_code),
+        "message": _step_message(step, status=status),
         "detail": redact_detail(step.detail),
     }
 
@@ -174,6 +191,34 @@ def _report_ok(report: SmokeReport) -> bool:
     if report.ok is not None:
         return report.ok
     return all(step.ok for step in report.steps)
+
+
+def _report_summary(steps: list[SmokeStepReport]) -> dict[str, int]:
+    summary = {"total": len(steps), "passed": 0, "skipped": 0, "failed": 0}
+    for step in steps:
+        status = _step_status(step)
+        summary[status] += 1
+    return summary
+
+
+def _step_status(step: SmokeStepReport) -> str:
+    if not step.ok:
+        return "failed"
+    if step.reason_code in _SKIP_REASON_CODES:
+        return "skipped"
+    return "passed"
+
+
+def _step_message(step: SmokeStepReport, *, status: str) -> object | None:
+    if isinstance(step.detail, dict):
+        message = step.detail.get("message")
+        if isinstance(message, str) and message:
+            return redact_detail(message)
+    if step.reason_code:
+        return redact_detail(step.reason_code)
+    if status == "passed":
+        return None
+    return status
 
 
 def _redact(

@@ -14,8 +14,8 @@ class McpSmokeTransport(Protocol):
     async def request(self, payload: JsonRpcPayload) -> object | None:
         """Send a JSON-RPC request payload and return the decoded response."""
 
-    async def notify(self, payload: JsonObject) -> None:
-        """Send a JSON-RPC notification payload."""
+    async def notify(self, payload: JsonObject) -> object | None:
+        """Send a JSON-RPC notification payload and return any observed response."""
 
 
 class McpSmokeClientError(RuntimeError):
@@ -48,11 +48,11 @@ class McpSmokeClient:
         response = await self._transport.request(payload)
         return self._extract_result(response, request_id=request_id)
 
-    async def notify(self, method: str, params: JsonObject | None = None) -> None:
-        """Send a notification without a JSON-RPC id."""
+    async def notify(self, method: str, params: JsonObject | None = None) -> object | None:
+        """Send a notification without a JSON-RPC id and return any response."""
 
         payload = self._build_payload(method=method, request_id=None, params=params)
-        await self._transport.notify(payload)
+        return await self._transport.notify(payload)
 
     async def initialize(self, client_name: str = "mcp-smoke-client") -> object:
         """Initialize an MCP session."""

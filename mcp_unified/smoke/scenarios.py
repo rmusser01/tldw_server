@@ -14,7 +14,7 @@ from mcp_unified.smoke.reporting import (
     redact_detail,
     summarize_result,
 )
-from mcp_unified.smoke.transports import McpSmokeTransport
+from mcp_unified.smoke.transports import McpSmokeTransport, McpSmokeTransportError
 
 ScenarioMode = Literal["best_effort", "strict"]
 
@@ -115,6 +115,9 @@ async def run_baseline_scenario(
             lambda: _step_policy_denial(transport),
         )
     finally:
+        server_info = state.get("server_info")
+        if isinstance(server_info, dict):
+            report.metadata["server_info"] = server_info
         await transport.close()
         report.elapsed_ms = _elapsed_ms(started)
         report.ok = all(step.ok for step in report.steps)
@@ -142,6 +145,20 @@ async def _record_step(
                 reason_code="jsonrpc_error",
                 error_code=_client_error_code(exc),
                 detail=redact_detail({"message": str(exc), "error": exc.error}),
+            )
+        )
+        return
+    except McpSmokeTransportError as exc:
+        report.steps.append(
+            SmokeStepReport(
+                name=name,
+                ok=False,
+                method=method or exc.method,
+                elapsed_ms=_elapsed_ms(started),
+                reason_code=exc.reason_code,
+                detail=redact_detail(
+                    {"type": exc.__class__.__name__, "message": str(exc)}
+                ),
             )
         )
         return
@@ -174,11 +191,14 @@ async def _step_initialize(client: McpSmokeClient, state: dict[str, Any]) -> obj
     if not isinstance(capabilities, dict):
         return _failure("missing_capabilities", detail=result)
     state["capabilities"] = capabilities
+    state["server_info"] = server_info
     return result
 
 
 async def _step_initialized_notification(client: McpSmokeClient) -> object:
-    await client.notify("notifications/initialized")
+    notification_response = await client.notify("notifications/initialized")
+    if notification_response is not None:
+        return _failure("notification_returned_response", detail=notification_response)
     try:
         ping = await client.ping()
     except McpSmokeClientError as exc:

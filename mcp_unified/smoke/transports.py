@@ -44,6 +44,7 @@ _PROFILE_HTTP_HEADER_NAMES = frozenset(
 _DEFAULT_WEBSOCKET_TIMEOUT_SECONDS = 10.0
 _DEFAULT_STDIO_TIMEOUT_SECONDS = 10.0
 _DEFAULT_STDERR_MAX_BYTES = 8192
+_DEFAULT_RESPONSE_MAX_BYTES = 1024 * 1024
 _STDIO_CLOSE_TIMEOUT_SECONDS = 1.0
 _IGNORE_STDIO_RESPONSE = object()
 
@@ -57,8 +58,8 @@ class McpSmokeTransport(Protocol):
     async def request(self, payload: JsonRpcPayload) -> object | None:
         """Send a JSON-RPC request or batch payload and return the decoded response."""
 
-    async def notify(self, payload: JsonObject) -> None:
-        """Send a JSON-RPC notification payload."""
+    async def notify(self, payload: JsonObject) -> object | None:
+        """Send a JSON-RPC notification payload and return any observed response."""
 
     async def close(self) -> None:
         """Release any resources opened by this transport."""
@@ -122,10 +123,10 @@ class InProcessGatewayTransport:
         )
         return _gateway_response_to_plain_json(response)
 
-    async def notify(self, payload: JsonObject) -> None:
-        """Dispatch a notification payload and ignore the no-response sentinel."""
+    async def notify(self, payload: JsonObject) -> object | None:
+        """Dispatch a notification payload and return any observed response."""
 
-        await self.request(payload)
+        return await self.request(payload)
 
     async def close(self) -> None:
         """Mark the no-op in-process transport as closed."""
@@ -143,11 +144,13 @@ class InProcessFastApiTransport:
         request_path: str = "/api/v1/mcp/request",
         base_url: str = "http://mcp-smoke.local",
         headers: dict[str, str] | None = None,
+        response_max_bytes: int = _DEFAULT_RESPONSE_MAX_BYTES,
     ) -> None:
         self.app = app
         self.request_path = request_path
         self.base_url = base_url
         self.headers = dict(headers or {})
+        self.response_max_bytes = max(1, int(response_max_bytes))
         self._client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -171,12 +174,17 @@ class InProcessFastApiTransport:
         response.raise_for_status()
         if not response.content:
             return None
+        _ensure_response_size(
+            len(response.content),
+            self.response_max_bytes,
+            method=_single_payload_method(payload),
+        )
         return response.json()
 
-    async def notify(self, payload: JsonObject) -> None:
+    async def notify(self, payload: JsonObject) -> object | None:
         """POST one notification to the configured ASGI route."""
 
-        await self.request(payload)
+        return await self.request(payload)
 
     async def close(self) -> None:
         """Close the ASGI-backed async HTTP client."""
@@ -210,6 +218,7 @@ class LiveHttpTransport:
         retry_idempotent_methods: bool = False,
         headers: dict[str, str] | None = None,
         http_client: httpx.AsyncClient | None = None,
+        response_max_bytes: int = _DEFAULT_RESPONSE_MAX_BYTES,
     ) -> None:
         self.url = url
         self.bearer_token = bearer_token
@@ -222,6 +231,7 @@ class LiveHttpTransport:
             self.retry_methods.update(_DEFAULT_IDEMPOTENT_HTTP_METHODS)
         self.headers = dict(headers or {})
         self._client = http_client
+        self.response_max_bytes = max(1, int(response_max_bytes))
 
     async def start(self) -> None:
         """Create the async HTTP client when one was not injected."""
@@ -235,10 +245,10 @@ class LiveHttpTransport:
 
         return await self._post(payload)
 
-    async def notify(self, payload: JsonObject) -> None:
+    async def notify(self, payload: JsonObject) -> object | None:
         """POST one JSON-RPC notification and accept HTTP 204 no-content success."""
 
-        await self._post(payload)
+        return await self._post(payload)
 
     async def close(self) -> None:
         """Close the async HTTP client."""
@@ -371,6 +381,11 @@ class LiveHttpTransport:
             )
         if not response.content:
             return None
+        _ensure_response_size(
+            len(response.content),
+            self.response_max_bytes,
+            method=self._single_payload_method(payload),
+        )
         try:
             return response.json()
         except ValueError as exc:
@@ -432,6 +447,7 @@ class LiveWebSocketTransport:
         profile_id: str | None = None,
         timeout: float | None = _DEFAULT_WEBSOCKET_TIMEOUT_SECONDS,
         headers: dict[str, str] | None = None,
+        response_max_bytes: int = _DEFAULT_RESPONSE_MAX_BYTES,
     ) -> None:
         self.url = url
         self.bearer_token = bearer_token
@@ -439,6 +455,7 @@ class LiveWebSocketTransport:
         self.profile_id = profile_id
         self.timeout = timeout
         self.headers = dict(headers or {})
+        self.response_max_bytes = max(1, int(response_max_bytes))
         self._connection: Any | None = None
         self._receiver_task: asyncio.Task[None] | None = None
         self._pending: dict[object, asyncio.Future[object]] = {}
@@ -499,11 +516,12 @@ class LiveWebSocketTransport:
             self._discard_pending(request_ids)
             raise
 
-    async def notify(self, payload: JsonObject) -> None:
+    async def notify(self, payload: JsonObject) -> object | None:
         """Send one JSON-RPC notification without awaiting a response."""
 
         connection = await self._started_connection()
         await self._send_payload(connection, payload)
+        return None
 
     async def close(self) -> None:
         """Close the WebSocket connection and cancel receive processing."""
@@ -625,6 +643,11 @@ class LiveWebSocketTransport:
                 "transport_invalid_json_response",
                 "WebSocket transport received a non-text JSON-RPC frame",
             )
+        _ensure_response_size(
+            _frame_byte_count(message),
+            self.response_max_bytes,
+            method=None,
+        )
         try:
             decoded = json.loads(message)
         except (TypeError, ValueError) as exc:
@@ -828,6 +851,7 @@ class StdioSubprocessTransport:
         startup_timeout: float | None = _DEFAULT_STDIO_TIMEOUT_SECONDS,
         request_timeout: float | None = _DEFAULT_STDIO_TIMEOUT_SECONDS,
         stderr_max_bytes: int = _DEFAULT_STDERR_MAX_BYTES,
+        response_max_bytes: int = _DEFAULT_RESPONSE_MAX_BYTES,
     ) -> None:
         self.command = command
         self.args = tuple(args or ())
@@ -836,6 +860,7 @@ class StdioSubprocessTransport:
         self.startup_timeout = startup_timeout
         self.request_timeout = request_timeout
         self.stderr_max_bytes = max(0, int(stderr_max_bytes))
+        self.response_max_bytes = max(1, int(response_max_bytes))
         self._process: asyncio.subprocess.Process | None = None
         self._stderr_task: asyncio.Task[None] | None = None
         self._stderr_buffer = bytearray()
@@ -908,10 +933,10 @@ class StdioSubprocessTransport:
             await self.close()
             raise error from exc
 
-    async def notify(self, payload: JsonObject) -> None:
+    async def notify(self, payload: JsonObject) -> object | None:
         """Send one JSON-RPC notification line."""
 
-        await self.request(payload)
+        return await self.request(payload)
 
     async def close(self) -> None:
         """Close pipes and terminate the subprocess if it is still running."""
@@ -1035,6 +1060,13 @@ class StdioSubprocessTransport:
                 raise self._stdio_error(
                     "transport_stdio_closed",
                     "Stdio subprocess closed stdout before a JSON-RPC response",
+                    payload,
+                )
+            if len(line) > self.response_max_bytes:
+                raise self._stdio_error(
+                    "response_too_large",
+                    "Stdio subprocess response exceeded max byte size "
+                    f"({len(line)}>{self.response_max_bytes})",
                     payload,
                 )
             response = self._decode_response_line(line, payload)
@@ -1254,6 +1286,44 @@ def _gateway_response_to_plain_json(response: object) -> object | None:
     if isinstance(response, GATEWAY_RESPONSE_TYPES):
         return response_to_json(response)
     return response
+
+
+def _ensure_response_size(
+    byte_count: int,
+    max_bytes: int,
+    *,
+    method: str | None,
+) -> None:
+    if byte_count <= max_bytes:
+        return
+    raise McpSmokeTransportError(
+        "response_too_large",
+        "JSON-RPC response exceeded max byte size "
+        f"({byte_count}>{max_bytes})",
+        method=method,
+    )
+
+
+def _frame_byte_count(message: str | bytes | bytearray) -> int:
+    if isinstance(message, str):
+        return len(message.encode("utf-8"))
+    return len(message)
+
+
+def _single_payload_method(payload: JsonRpcPayload) -> str | None:
+    if isinstance(payload, dict):
+        method = payload.get("method")
+        return method if isinstance(method, str) else None
+    methods = [
+        item.get("method")
+        for item in payload
+        if isinstance(item, dict) and isinstance(item.get("method"), str)
+    ]
+    if len(methods) == 1:
+        return methods[0]
+    if methods:
+        return ",".join(methods)
+    return None
 
 
 __all__ = [

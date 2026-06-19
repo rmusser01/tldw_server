@@ -181,6 +181,60 @@ def test_smoke_report_json_sanitizes_step_details() -> None:
     assert payload["steps"][0]["ok"] is False  # nosec B101
 
 
+def test_smoke_report_json_includes_documented_compatibility_fields() -> None:
+    from mcp_unified.smoke.reporting import SmokeReport, SmokeStepReport, report_to_json
+
+    report = SmokeReport(
+        transport="stdio",
+        started_at="2026-06-19T00:00:00+00:00",
+        elapsed_ms=12.5,
+        metadata={
+            "scenario": "baseline",
+            "profile_id": "backend-engineer",
+            "server_info": {"name": "fixture", "version": "0"},
+        },
+        steps=[
+            SmokeStepReport(
+                name="initialize",
+                ok=True,
+                method="initialize",
+                request_id="smoke-1",
+                result_summary={"kind": "dict"},
+            ),
+            SmokeStepReport(
+                name="resources",
+                ok=True,
+                reason_code="capability_unavailable",
+                detail={"capability": "resources"},
+            ),
+            SmokeStepReport(
+                name="tools/call",
+                ok=False,
+                method="tools/call",
+                reason_code="jsonrpc_error",
+                detail={"message": "failed"},
+            ),
+        ],
+    )
+
+    payload = report_to_json(report)
+
+    assert payload["server_info"] == {"name": "fixture", "version": "0"}  # nosec B101
+    assert payload["scenario"] == "baseline"  # nosec B101
+    assert payload["profile_id"] == "backend-engineer"  # nosec B101
+    assert payload["duration_ms"] == 12.5  # nosec B101
+    assert payload["summary"] == {  # nosec B101
+        "total": 3,
+        "passed": 1,
+        "skipped": 1,
+        "failed": 1,
+    }
+    assert payload["steps"][0]["status"] == "passed"  # nosec B101
+    assert payload["steps"][1]["status"] == "skipped"  # nosec B101
+    assert payload["steps"][2]["status"] == "failed"  # nosec B101
+    assert payload["steps"][2]["message"] == "failed"  # nosec B101
+
+
 def test_smoke_report_json_summarizes_resource_read_details() -> None:
     from mcp_unified.smoke.reporting import SmokeReport, SmokeStepReport, report_to_json
 
@@ -368,6 +422,34 @@ def test_smoke_cli_returns_four_for_strict_capability_skip(
 
     assert exit_code == 4  # nosec B101
     assert resources_step["reason_code"] == "required_capability_unavailable"  # nosec B101
+
+
+def test_smoke_cli_returns_zero_for_stdio_fixture_baseline(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from mcp_unified.smoke.cli import main
+
+    exit_code = main(
+        [
+            "stdio",
+            "--command",
+            sys.executable,
+            "--arg",
+            str(FIXTURE_PATH),
+            "--cwd",
+            str(REPO_ROOT),
+            "--env",
+            "PYTHONPATH",
+            "--json-report",
+            "-",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0  # nosec B101
+    assert payload["ok"] is True  # nosec B101
+    assert payload["transport"] == "StdioSubprocessTransport"  # nosec B101
 
 
 class _ExplodingItemsDict(dict):
@@ -850,6 +932,36 @@ async def test_live_http_transport_parses_jsonrpc_response_body() -> None:
 
 
 @pytest.mark.asyncio
+async def test_live_http_transport_rejects_oversized_response_before_json_parse() -> None:
+    from mcp_unified.smoke.transports import LiveHttpTransport, McpSmokeTransportError
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads((await request.aread()).decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "result": {"blob": "x" * 4096},
+            },
+        )
+
+    transport = LiveHttpTransport(
+        "http://mcp.test/request",
+        response_max_bytes=128,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    try:
+        with pytest.raises(McpSmokeTransportError, match="response_too_large"):
+            await transport.request(
+                {"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"}
+            )
+    finally:
+        await transport.close()
+
+
+@pytest.mark.asyncio
 async def test_live_http_transport_wraps_connect_failures() -> None:
     from mcp_unified.smoke.transports import LiveHttpTransport, McpSmokeTransportError
 
@@ -1096,6 +1208,41 @@ async def test_live_websocket_transport_rejects_malformed_frames() -> None:
                 McpSmokeTransportError,
                 match="transport_invalid_json_response",
             ):
+                await transport.request(
+                    {"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"}
+                )
+        finally:
+            await transport.close()
+
+
+@pytest.mark.asyncio
+async def test_live_websocket_transport_rejects_oversized_frame_before_json_parse() -> None:
+    from mcp_unified.smoke.transports import (
+        LiveWebSocketTransport,
+        McpSmokeTransportError,
+    )
+
+    async def handler(websocket) -> None:
+        payload = json.loads(await websocket.recv())
+        await websocket.send(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {"blob": "x" * 4096},
+                }
+            )
+        )
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        transport = LiveWebSocketTransport(
+            f"ws://127.0.0.1:{port}/mcp",
+            response_max_bytes=128,
+        )
+
+        try:
+            with pytest.raises(McpSmokeTransportError, match="response_too_large"):
                 await transport.request(
                     {"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"}
                 )
@@ -1352,6 +1499,29 @@ async def test_stdio_subprocess_transport_redacts_secret_stderr_on_error() -> No
 
 
 @pytest.mark.asyncio
+async def test_stdio_subprocess_transport_rejects_oversized_response_line() -> None:
+    from mcp_unified.smoke.transports import (
+        McpSmokeTransportError,
+        StdioSubprocessTransport,
+    )
+
+    transport = StdioSubprocessTransport(
+        command=sys.executable,
+        args=[str(FIXTURE_PATH)],
+        cwd=str(REPO_ROOT),
+        env_allowlist=["PYTHONPATH"],
+        response_max_bytes=128,
+    )
+
+    with pytest.raises(McpSmokeTransportError, match="response_too_large"):
+        await transport.request(
+            {"jsonrpc": "2.0", "id": "smoke-large", "method": "smoke/large-response"}
+        )
+
+    assert transport._process is None  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_stdio_subprocess_transport_duplicate_batch_ids_do_not_start_process() -> None:
     from mcp_unified.smoke.transports import (
         McpSmokeTransportError,
@@ -1504,6 +1674,114 @@ async def test_baseline_scenario_requires_followup_ping_after_initialized_notifi
     assert report.ok is False  # nosec B101
     assert notification_step.ok is False  # nosec B101
     assert notification_step.reason_code == "followup_ping_failed"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_baseline_scenario_rejects_initialized_notification_response() -> None:
+    from mcp_unified.smoke.scenarios import run_baseline_scenario
+
+    class _NotificationResponseTransport:
+        async def start(self) -> None:
+            return None
+
+        async def request(
+            self,
+            payload: dict[str, object] | list[object],
+        ) -> object | None:
+            if isinstance(payload, list):
+                return [
+                    {
+                        "jsonrpc": "2.0",
+                        "id": item["id"],
+                        "result": {"pong": True} if item["method"] == "ping" else {"tools": []},
+                    }
+                    for item in payload
+                    if isinstance(item, dict) and "id" in item
+                ]
+            assert isinstance(payload, dict)  # nosec B101
+            method = payload["method"]
+            if method == "initialize":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {
+                        "capabilities": {
+                            "tools": {"available": True},
+                            "resources": {"available": False},
+                            "prompts": {"available": False},
+                        },
+                        "serverInfo": {"name": "unit", "version": "0"},
+                    },
+                }
+            if method == "ping":
+                return {"jsonrpc": "2.0", "id": payload["id"], "result": {"pong": True}}
+            if method == "tools/list":
+                return {"jsonrpc": "2.0", "id": payload["id"], "result": {"tools": []}}
+            if method == "tools/call":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "error": {"code": -32601, "message": "Method not found"},
+                }
+            return {
+                "jsonrpc": "2.0",
+                "id": payload.get("id"),
+                "error": {"code": -32600, "message": "Invalid request"},
+            }
+
+        async def notify(self, payload: dict[str, object]) -> object:
+            return {
+                "jsonrpc": "2.0",
+                "id": None,
+                "result": {"accepted": True},
+            }
+
+        async def close(self) -> None:
+            return None
+
+    report = await run_baseline_scenario(
+        _NotificationResponseTransport(),
+        mode="best_effort",
+    )
+    notification_step = next(
+        step for step in report.steps if step.name == "notifications/initialized"
+    )
+
+    assert report.ok is False  # nosec B101
+    assert notification_step.ok is False  # nosec B101
+    assert notification_step.reason_code == "notification_returned_response"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_baseline_scenario_reports_transport_reason_codes() -> None:
+    from mcp_unified.smoke.scenarios import run_baseline_scenario
+    from mcp_unified.smoke.transports import McpSmokeTransportError
+
+    class _OversizedInitializeTransport:
+        async def start(self) -> None:
+            return None
+
+        async def request(self, payload: dict[str, object] | list[object]) -> object | None:
+            raise McpSmokeTransportError(
+                "response_too_large",
+                "JSON-RPC response exceeded max byte size",
+            )
+
+        async def notify(self, payload: dict[str, object]) -> object | None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    report = await run_baseline_scenario(
+        _OversizedInitializeTransport(),
+        mode="best_effort",
+    )
+
+    initialize_step = report.steps[0]
+    assert report.ok is False  # nosec B101
+    assert initialize_step.name == "initialize"  # nosec B101
+    assert initialize_step.reason_code == "response_too_large"  # nosec B101
 
 
 @pytest.mark.asyncio
