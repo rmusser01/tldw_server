@@ -375,7 +375,7 @@ need support-safe output. Redacted views scrub transcript content, raw payloads,
 secret-looking values, and local filesystem paths, but they are not a general
 DLP guarantee. Task run previews in Agent Tasks are bounded diagnosis snippets,
 not public evidence. For the release policy, see
-`Docs/Development/ACP_Production_Readiness.md`.
+[ACP Production Readiness](../../Development/ACP_Production_Readiness.md).
 
 ## Alternative Agents
 

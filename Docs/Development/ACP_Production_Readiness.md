@@ -65,7 +65,7 @@ admin/deployment posture.
 
 ## ACP Retention And Redaction Release Policy
 
-`Docs/Development/Agent_Client_Protocol.md` is the contributor/operator source
+[Agent Client Protocol](Agent_Client_Protocol.md) is the contributor/operator source
 of truth for ACP retention and redaction behavior. The release-facing summary is:
 
 | Surface | Retained data | Retention boundary | Redaction behavior |

@@ -41,7 +41,7 @@ Track GitHub issue #2401: audit current ACP artifact/event/audit/diagnostic/tran
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-IMPLEMENTATION_PLAN_acp_artifact_retention_redaction_policy_2401.md
+[IMPLEMENTATION_PLAN_acp_artifact_retention_redaction_policy_2401.md](../../IMPLEMENTATION_PLAN_acp_artifact_retention_redaction_policy_2401.md)
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
