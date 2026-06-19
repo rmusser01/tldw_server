@@ -519,6 +519,68 @@ async def test_live_http_transport_sends_auth_headers() -> None:
 
 
 @pytest.mark.asyncio
+async def test_live_http_transport_replaces_managed_headers_case_insensitively() -> None:
+    from mcp_unified.smoke.transports import LiveHttpTransport
+
+    seen_raw_headers: list[list[tuple[str, str]]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen_raw_headers.append(
+            [
+                (
+                    name.decode("ascii").lower(),
+                    value.decode("ascii"),
+                )
+                for name, value in request.headers.raw
+            ]
+        )
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": "smoke-1",
+                "result": {"pong": True},
+            },
+        )
+
+    auth_material = ("new-jwt-token", "new-api-key")
+    transport = LiveHttpTransport(
+        "http://mcp.test/request",
+        bearer_token=auth_material[0],
+        api_key=auth_material[1],
+        profile_id="reviewer",
+        headers={
+            "authorization": "Bearer stale-token",
+            "X-API-Key": "stale-api-key",
+            "x-MCP-profile": "stale-profile",
+            "X-MCP-Profile-ID": "stale-profile-alias",
+            "X-Custom-Smoke": "custom-value",
+        },
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    try:
+        await transport.request({"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"})
+    finally:
+        await transport.close()
+
+    raw_headers = seen_raw_headers[0]
+    names = [name for name, _value in raw_headers]
+
+    assert [  # nosec B101
+        value for name, value in raw_headers if name == "authorization"
+    ] == [f"Bearer {auth_material[0]}"]
+    assert [value for name, value in raw_headers if name == "x-api-key"] == [  # nosec B101
+        auth_material[1]
+    ]
+    assert [value for name, value in raw_headers if name == "x-mcp-profile"] == [  # nosec B101
+        "reviewer"
+    ]
+    assert "x-mcp-profile-id" not in names  # nosec B101
+    assert ("x-custom-smoke", "custom-value") in raw_headers  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_live_http_transport_treats_204_as_notification_success() -> None:
     from mcp_unified.smoke.transports import LiveHttpTransport
 

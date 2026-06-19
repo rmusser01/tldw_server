@@ -28,6 +28,14 @@ _DEFAULT_IDEMPOTENT_HTTP_METHODS = frozenset(
         "prompts/list",
     }
 )
+_MANAGED_HTTP_HEADER_NAMES = frozenset(
+    {
+        "authorization",
+        "x-api-key",
+        "x-mcp-profile",
+        "x-mcp-profile-id",
+    }
+)
 
 
 class McpSmokeTransport(Protocol):
@@ -268,9 +276,12 @@ class LiveHttpTransport:
             )
         return self._client
 
-    def _request_headers(self) -> dict[str, str]:
-        headers = {"accept": "application/json"}
+    def _request_headers(self) -> httpx.Headers:
+        headers = httpx.Headers({"accept": "application/json"})
         headers.update(self.headers)
+        for header_name in _MANAGED_HTTP_HEADER_NAMES:
+            if header_name in headers:
+                del headers[header_name]
         if self.profile_id:
             headers["x-mcp-profile"] = self.profile_id
         if self.bearer_token:
