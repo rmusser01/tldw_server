@@ -72,6 +72,19 @@ unsafe, unreadable, malformed, or oversized, the evidence section should report
 that state and the overall status should degrade unless a more severe live
 diagnostic condition already dominates.
 
+The direct child files recognized by this slice are the existing smoke wrapper
+artifacts:
+
+- `host-smoke-evidence.json`
+- `source-bundle-hashes-before.txt`
+- `source-bundle-hashes-after.txt`
+- `run-bundle-hashes.txt`
+- `runtime-paths.txt`
+- `cleanup-status.txt`
+
+Only `host-smoke-evidence.json` is parsed for structured metadata. The other
+known files are probed only for direct-child presence/readability/size status.
+
 ## Parser Boundary
 
 Add a small server-side parser module, for example:
@@ -109,6 +122,7 @@ The parser must reject or safely report:
 - `host-smoke-evidence.json` larger than the configured size cap
 - malformed UTF-8 or malformed JSON
 - top-level JSON values that are not objects
+- missing `schema_version`
 - unsupported schema versions
 
 Use a conservative size cap. The existing summarizer uses `1 MiB`; the server
@@ -121,14 +135,20 @@ operations, the parser should fail closed for configured evidence and report a
 stable reason such as `evidence_safe_open_unavailable`. It should not fall back
 to unsafe recursive or symlink-following reads.
 
+Failing closed applies to every configured evidence directory, not only to
+intermediate symlink checks. The implementation may normalize the macOS
+`/tmp`/`/var` aliases to `/private/tmp`/`/private/var` before descriptor-safe
+traversal, matching the existing smoke summarizer, but it must not resolve or
+follow arbitrary user-controlled symlinks elsewhere in the path.
+
 ## Parsed Metadata
 
 The normalized parser output should include only bounded scalar metadata and
 small bounded collections:
 
 - configured path status
-- `schema_version`
-- `created_at`
+- `schema_version`, accepting only schema version `1` in this slice
+- `created_at`, accepting only timezone-aware ISO-8601 timestamps
 - computed `age_seconds` when `created_at` is valid
 - `smoke_run_id`
 - `final_exit_code`, accepting only real integer values and rejecting boolean
@@ -140,8 +160,35 @@ small bounded collections:
 - stable parser reason codes
 
 Path metadata in `host-smoke-evidence.json` may be retained only as bounded
-pointers already emitted by the smoke wrapper, and only after scalar coercion.
-Do not dereference those paths.
+pointers already emitted by the smoke wrapper, only after scalar coercion, and
+only from this allowlist:
+
+- `source_bundle_path`
+- `run_bundle_path`
+- `image_store_root`
+- `socket_path`
+- `serial_log_dir`
+- `helper_pid_file`
+- `evidence_dir`
+
+Do not dereference those paths. Do not expose `helper_path` in the
+operator-status response even though the smoke wrapper records it; the helper
+readiness section already reports helper configuration state, and the evidence
+section does not need to disclose executable locations.
+
+Parser output should be deliberately bounded:
+
+- truncate dynamic strings before projection, using the same `240` character
+  display bound as the existing summarizer unless implementation review finds a
+  stronger reason to choose a different limit
+- cap phase entries to a small fixed maximum such as `16`
+- include only known phase scalar fields such as `status`, `exit_code`, and
+  `timestamp`
+- include only known cleanup scalar fields such as `status`, `helper_pid`,
+  `helper_running_after_cleanup`, and `socket_present_after_cleanup`
+- include only the fixed expected-file names listed in this design
+- emit stable parser reason codes rather than raw exception strings in the API
+  payload
 
 Do not expose:
 
@@ -184,11 +231,15 @@ Recommended evidence fields:
 - `smoke_run_id`
 - `final_exit_code`
 - `phases`
+- `cleanup`
+- `runtime_pointers`
 - `expected_files`
 - `skip_flags`
 - `reasons`
 
 All dynamic values must be scalar-coerced and bounded before inclusion.
+`runtime_pointers` must use only the explicit path allowlist above, and
+`expected_files` must use only the fixed direct-child evidence file names.
 
 ## Recommended Actions
 
@@ -223,6 +274,11 @@ classification, but keep it advisory:
 - stale valid success evidence -> `degraded`
 - stale valid failure evidence -> remains `action_required`
 - malformed timestamp -> evidence `degraded` or `unknown` with a stable reason
+
+Naive timestamps should be treated as malformed. `age_seconds` should never be
+negative in the response; future-dated evidence should be reported with a stable
+reason such as `evidence_created_at_in_future` and classified as degraded or
+unknown rather than ready.
 
 Do not make stale evidence blocking in this slice.
 
@@ -282,11 +338,17 @@ Add unit tests for the parser:
 - embedded NUL path is rejected without crashing
 - missing directory reports unavailable
 - evidence directory symlink is rejected
+- safe directory traversal unavailable fails closed for configured evidence
 - JSON symlink is rejected
 - oversized JSON is rejected without reading contents
 - malformed JSON does not leak raw JSON
+- missing schema version reports a stable reason
 - unsupported schema version reports a stable reason
 - nested/raw container values are not exposed
+- arbitrary path fields and `helper_path` are not exposed
+- runtime pointers use only the explicit allowlist
+- phases are bounded and include only known scalar fields
+- malformed, naive, and future-dated timestamps report stable reasons
 - valid stale evidence computes age with an injectable clock
 
 Add projection/service tests:
@@ -318,8 +380,11 @@ Run Bandit on touched server files.
 - Do not recursively walk directories.
 - Do not create or mutate evidence files.
 - Do not expose raw logs or arbitrary JSON keys.
+- Do not expose `helper_path` or unallowlisted path pointers from evidence JSON.
 - Keep evidence advisory and label it as such in docs.
 - Treat path strings and JSON as untrusted external input.
+- Bound strings, collections, expected files, and phase records before
+  projection.
 - Keep strict evidence enforcement as a future separately reviewed design.
 
 ## Risks And Mitigations

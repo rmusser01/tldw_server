@@ -36,12 +36,13 @@ Design Slice 2 for bounded host-gated VZ smoke evidence bundle ingestion into th
 - Locked down env/server-config-only path input for this slice; no request-supplied paths.
 - Documented fail-closed handling for unsafe paths, symlinks, oversized JSON, malformed JSON, unsupported schema, stale evidence, build/sign skips, and non-zero final exits.
 - Updated the parent operator-status design to link to the Slice 2 spec and use evidence-bundle terminology.
+- Review hardening: made expected files explicit, required fail-closed safe traversal, allowlisted runtime path pointers, excluded `helper_path`, bounded phase/string output, and added schema/timestamp edge-case tests.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Designed Slice 2 for advisory evidence ingestion in `Docs/superpowers/specs/2026-06-19-sandbox-operator-evidence-ingestion-design.md`, with a parent-spec link in `Docs/superpowers/specs/2026-06-18-sandbox-operator-status-consolidation-design.md`. Verification: `git diff --check` passed. This is documentation/spec-only, so Bandit was not applicable.
+Designed Slice 2 for advisory evidence ingestion in `Docs/superpowers/specs/2026-06-19-sandbox-operator-evidence-ingestion-design.md`, with a parent-spec link in `Docs/superpowers/specs/2026-06-18-sandbox-operator-status-consolidation-design.md`. Follow-up spec review tightened the parser contract around expected files, schema versions, timestamp handling, path-pointer privacy, bounded collections, and fail-closed traversal. Verification: `git diff --check` passed. This is documentation/spec-only, so Bandit was not applicable.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
