@@ -144,3 +144,45 @@ def test_operator_status_treats_string_booleans_as_unknown_not_actionable() -> N
     assert payload["sections"]["startup_warnings"]["status"] == "unknown"
     assert payload["recommended_actions"] == []
     assert payload["overall_status"] == "degraded"
+
+
+def test_operator_status_rejects_malformed_runtime_integer_values() -> None:
+    runtime = _runtime_diagnostics()
+    runtime["summary"]["ready"] = True
+    runtime["summary"]["total"] = float("inf")
+
+    payload = build_operator_status(
+        runtime_diagnostics=runtime,
+        macos_diagnostics=_macos_diagnostics_unconfigured(),
+        startup_warning_summary={"present": False, "blocking": False, "codes": []},
+    )
+
+    assert payload["sections"]["runtime_readiness"]["status"] == "unavailable"
+    assert payload["summary"]["runtime_ready"] == 0
+    assert payload["summary"]["runtime_total"] == 0
+    assert payload["overall_status"] == "unavailable"
+
+
+def test_operator_status_points_image_store_to_cleanup_plan() -> None:
+    macos = _macos_diagnostics_unconfigured()
+    macos["recovery_summary"] = {
+        "status": "cleanup_recommended",
+        "severity": "warning",
+        "codes": ["image_store_gc_candidates"],
+        "counts": {"gc_candidates": 2},
+        "repair_endpoint": None,
+        "cleanup_plan_endpoint": "/api/v1/sandbox/admin/images/cleanup-plan",
+        "notes": [],
+    }
+
+    payload = build_operator_status(
+        runtime_diagnostics=_runtime_diagnostics(),
+        macos_diagnostics=macos,
+        startup_warning_summary={"present": False, "blocking": False, "codes": []},
+    )
+
+    assert payload["overall_status"] == "degraded"
+    assert payload["recommended_actions"][0]["code"] == (
+        "inspect_image_store_cleanup_plan"
+    )
+    assert payload["recommended_actions"][0]["dry_run_required"] is False

@@ -15,9 +15,11 @@ def _safe_dict(value: object) -> dict[str, object]:
 
 
 def _safe_int(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
     try:
         return int(value or 0)
-    except (TypeError, ValueError):
+    except (OverflowError, TypeError, ValueError):
         return 0
 
 
