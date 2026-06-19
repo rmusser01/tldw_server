@@ -6697,7 +6697,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _sqlite_linear_migration_steps(self) -> dict[int, Callable[[sqlite3.Connection], None]]:
         """Return SQLite schema migrations keyed by their source schema version."""
-        return {
+        steps = {
             4: self._migrate_from_v4_to_v5,
             5: self._migrate_from_v5_to_v6,
             6: self._migrate_from_v6_to_v7,
@@ -6742,6 +6742,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             45: self._migrate_from_v45_to_v46,
             46: self._migrate_from_v46_to_v47,
         }
+        for version, method_name in (
+            (47, "_migrate_from_v47_to_v48"),
+            (48, "_migrate_from_v48_to_v49"),
+            (49, "_migrate_from_v49_to_v50"),
+        ):
+            method = getattr(self, method_name, None)
+            if method is not None:
+                steps[version] = method
+        return steps
 
     def _run_sqlite_linear_migration_step(
         self,
