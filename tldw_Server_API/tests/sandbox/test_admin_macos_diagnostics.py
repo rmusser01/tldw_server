@@ -318,6 +318,84 @@ def test_admin_runtime_diagnostics_returns_structured_payload(
     }
 
 
+def test_admin_operator_status_returns_structured_payload(monkeypatch) -> None:
+    from tldw_Server_API.app.services.startup_warning_models import (
+        StartupWarningRecord,
+    )
+    from tldw_Server_API.app.services.startup_warning_registry import (
+        StartupWarningRegistry,
+    )
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+    startup_summaries: list[dict[str, object] | None] = []
+
+    async def fake_to_thread(
+        func: Callable[..., Any],
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        calls.append((getattr(func, "__name__", "unknown"), dict(kwargs)))
+        return func(*args, **kwargs)
+
+    def fake_operator_status(
+        *,
+        startup_warning_summary: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        startup_summaries.append(startup_warning_summary)
+        return {
+            "source": "sandbox_operator_status",
+            "overall_status": "ready",
+            "overall_severity": "info",
+            "summary": {"runtime_total": 1, "runtime_ready": 1, "actions": 0},
+            "sections": {
+                "runtime_readiness": {"status": "ready", "severity": "info"}
+            },
+            "recommended_actions": [],
+            "notes": [],
+        }
+
+    fake_service = SimpleNamespace(
+        operator_status=fake_operator_status,
+    )
+    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr(sandbox_mod.asyncio, "to_thread", fake_to_thread)
+
+    app = _build_app_with_overrides(_make_principal(is_admin=True))
+    registry = StartupWarningRegistry(startup_id="boot-operator-status")
+    registry.add_warning(
+        StartupWarningRecord(
+            component="sandbox.vz_linux",
+            severity="warning",
+            startup_action="warn",
+            code="vz_operator_status_warning",
+            summary="operator status warning",
+            remediation="inspect operator status",
+            details={},
+        )
+    )
+    app.state.startup_warning_registry = registry
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/sandbox/admin/operator-status")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["source"] == "sandbox_operator_status"
+    assert data["overall_status"] == "ready"
+    expected_summary = {
+        "present": True,
+        "blocking": False,
+        "codes": ["vz_operator_status_warning"],
+    }
+    assert calls == [
+        (
+            "fake_operator_status",
+            {"startup_warning_summary": expected_summary},
+        )
+    ]
+    assert startup_summaries == [expected_summary]
+
+
 def test_admin_runtime_diagnostics_offloads_runtime_discovery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

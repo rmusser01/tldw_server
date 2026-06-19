@@ -274,6 +274,28 @@ advertises it. Today that means `vz_linux`; this endpoint does not add generic
 repair or reconciliation behavior for Docker, Firecracker, Lima, `seatbelt`,
 `worktree`, or `vz_macos`.
 
+### Operator status
+
+GET `/api/v1/sandbox/admin/operator-status`
+
+This admin-only, read-only endpoint returns a consolidated operator projection
+over existing sandbox diagnostics. It is derived from the runtime diagnostics,
+macOS diagnostics, image-store, reconciliation, evidence, and startup-warning
+surfaces; it is not a new source of truth.
+
+The top-level response shape includes `source`, `overall_status`,
+`overall_severity`, `summary`, `sections`, `recommended_actions`, and `notes`.
+Example section keys include `runtime_readiness`, `macos_vz`, `image_store`,
+`reconciliation`, `evidence`, `security_boundaries`, and `startup_warnings`.
+
+The endpoint does not start or stop helpers, run repair, run image-store cleanup,
+launch real VMs, install launchd services, or create image or evidence
+directories. Use it for a dashboard-level status summary, then drill down into
+`/api/v1/sandbox/admin/runtime-diagnostics`,
+`/api/v1/sandbox/admin/macos-diagnostics`,
+`/api/v1/sandbox/admin/macos-image-store/cleanup-plan`, and the dry-run-first
+repair or cleanup endpoints before taking action.
+
 ### macOS diagnostics
 
 GET `/api/v1/sandbox/admin/macos-diagnostics`

@@ -254,6 +254,22 @@ across Docker, Firecracker, Lima, `vz_linux`, `vz_macos`, `seatbelt`, and
 `worktree`; use `/api/v1/sandbox/admin/macos-diagnostics` when you need
 helper/template/image-store details for the macOS runtime family.
 
+`/api/v1/sandbox/admin/operator-status` is the admin-only consolidated operator
+projection over existing diagnostics. Its top-level shape includes `source`,
+`overall_status`, `overall_severity`, `summary`, `sections`,
+`recommended_actions`, and `notes`; section examples include
+`runtime_readiness`, `macos_vz`, `image_store`, `reconciliation`, `evidence`,
+`security_boundaries`, and `startup_warnings`. It is not a new source of truth
+and does not start or stop helpers, run repair, run image-store cleanup, launch
+real VMs, install launchd services, or create image/evidence directories.
+Unconfigured VZ or evidence surfaces do not degrade an otherwise usable install;
+if runtime diagnostics collection fails, the projection reports that section as
+unknown rather than falsely unavailable. Use this endpoint for a compact status
+view, then drill down into `/api/v1/sandbox/admin/runtime-diagnostics`,
+`/api/v1/sandbox/admin/macos-diagnostics`,
+`/api/v1/sandbox/admin/macos-image-store/cleanup-plan`, and the dry-run-first
+repair or cleanup endpoints before mutating anything.
+
 `/api/v1/sandbox/admin/macos-diagnostics` is the operator-focused companion surface.
 It is admin-only and returns:
 
