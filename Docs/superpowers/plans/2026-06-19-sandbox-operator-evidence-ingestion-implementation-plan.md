@@ -855,7 +855,7 @@ git commit -m "feat: collect sandbox evidence for operator status"
 **Files:**
 - Modify: `backlog/tasks/task-2392 - Implement-sandbox-operator-status-evidence-ingestion-Slice-2.md`
 
-- [ ] **Step 1: Run full focused test set**
+- [x] **Step 1: Run full focused test set**
 
 Run:
 
@@ -870,7 +870,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: all selected tests pass.
 
-- [ ] **Step 2: Run whitespace check**
+- [x] **Step 2: Run whitespace check**
 
 Run:
 
@@ -880,7 +880,7 @@ git diff --check
 
 Expected: no output, exit code 0.
 
-- [ ] **Step 3: Run Bandit on touched server files**
+- [x] **Step 3: Run Bandit on touched server files**
 
 Run:
 
@@ -894,7 +894,7 @@ source .venv/bin/activate && python -m bandit -r \
 
 Expected: no new actionable findings in touched code. If Bandit is unavailable, document the environment skip in `TASK-2392` and final response.
 
-- [ ] **Step 4: Update Backlog task**
+- [x] **Step 4: Update Backlog task**
 
 Update `TASK-2392` with:
 
@@ -902,14 +902,14 @@ Update `TASK-2392` with:
 - final verification commands and outcomes
 - checked acceptance criteria and DOD only after verification
 
-- [ ] **Step 5: Final commit**
+- [x] **Step 5: Final commit**
 
 ```bash
 git add backlog/tasks/task-2392\ -\ Implement-sandbox-operator-status-evidence-ingestion-Slice-2.md
 git commit -m "docs: update sandbox evidence ingestion task"
 ```
 
-- [ ] **Step 6: Check branch status**
+- [x] **Step 6: Check branch status**
 
 Run:
 
