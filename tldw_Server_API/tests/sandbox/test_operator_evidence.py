@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.Sandbox.operator_evidence import (
+    DISPLAY_MAX_CHARS,
     ENV_VZ_EVIDENCE_DIR,
     JSON_MAX_BYTES,
     MAX_PHASES,
-    _dir_fd_operations_available,
     collect_operator_evidence,
 )
 
@@ -73,6 +73,22 @@ def _write_evidence(root: Path, payload: dict[str, object]) -> None:
         (root / name).write_text("ok\n", encoding="utf-8")
 
 
+@pytest.fixture
+def safe_evidence_root(tmp_path: Path) -> Path:
+    """Return an evidence root only when descriptor-safe reads are available."""
+
+    probe = tmp_path / "safe-open-probe"
+    _write_evidence(probe, _valid_payload())
+    summary = collect_operator_evidence(
+        environ={ENV_VZ_EVIDENCE_DIR: str(probe)},
+        now=NOW,
+    )
+    if "evidence_safe_open_unavailable" in summary.get("reasons", []):
+        pytest.skip("descriptor-safe directory operations are unavailable")
+    assert summary["valid"] is True
+    return tmp_path / "evidence"
+
+
 def test_collect_operator_evidence_unconfigured() -> None:
     summary = collect_operator_evidence(environ={}, now=NOW)
 
@@ -81,13 +97,11 @@ def test_collect_operator_evidence_unconfigured() -> None:
     assert summary["reasons"] == ["evidence_not_configured"]
 
 
-def test_collect_operator_evidence_valid_bundle(tmp_path: Path) -> None:
-    if not _dir_fd_operations_available():
-        pytest.skip("descriptor-safe directory operations are unavailable")
-    _write_evidence(tmp_path, _valid_payload())
+def test_collect_operator_evidence_valid_bundle(safe_evidence_root: Path) -> None:
+    _write_evidence(safe_evidence_root, _valid_payload())
 
     summary = collect_operator_evidence(
-        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        environ={ENV_VZ_EVIDENCE_DIR: str(safe_evidence_root)},
         now=NOW,
     )
 
@@ -113,8 +127,10 @@ def test_collect_operator_evidence_rejects_nul_path() -> None:
     assert "evidence_path_contains_nul" in summary["reasons"]
 
 
-def test_collect_operator_evidence_reports_missing_directory(tmp_path: Path) -> None:
-    missing = tmp_path / "missing"
+def test_collect_operator_evidence_reports_missing_directory(
+    safe_evidence_root: Path,
+) -> None:
+    missing = safe_evidence_root
     summary = collect_operator_evidence(
         environ={ENV_VZ_EVIDENCE_DIR: str(missing)},
         now=NOW,
@@ -124,12 +140,12 @@ def test_collect_operator_evidence_reports_missing_directory(tmp_path: Path) -> 
     assert "evidence_directory_missing" in summary["reasons"]
 
 
-def test_collect_operator_evidence_rejects_directory_symlink(tmp_path: Path) -> None:
-    if not _dir_fd_operations_available():
-        pytest.skip("descriptor-safe directory operations are unavailable")
-    target = tmp_path / "target"
+def test_collect_operator_evidence_rejects_directory_symlink(
+    safe_evidence_root: Path,
+) -> None:
+    target = safe_evidence_root.parent / "target"
     target.mkdir()
-    link = tmp_path / "link"
+    link = safe_evidence_root.parent / "link"
     try:
         link.symlink_to(target, target_is_directory=True)
     except OSError:
@@ -144,19 +160,21 @@ def test_collect_operator_evidence_rejects_directory_symlink(tmp_path: Path) -> 
     assert "evidence_directory_symlink" in summary["reasons"]
 
 
-def test_collect_operator_evidence_rejects_json_symlink(tmp_path: Path) -> None:
-    if not _dir_fd_operations_available():
-        pytest.skip("descriptor-safe directory operations are unavailable")
-    _write_evidence(tmp_path, _valid_payload())
-    (tmp_path / "target.json").write_text("{}", encoding="utf-8")
-    (tmp_path / "host-smoke-evidence.json").unlink()
+def test_collect_operator_evidence_rejects_json_symlink(
+    safe_evidence_root: Path,
+) -> None:
+    _write_evidence(safe_evidence_root, _valid_payload())
+    (safe_evidence_root / "target.json").write_text("{}", encoding="utf-8")
+    (safe_evidence_root / "host-smoke-evidence.json").unlink()
     try:
-        (tmp_path / "host-smoke-evidence.json").symlink_to(tmp_path / "target.json")
+        (safe_evidence_root / "host-smoke-evidence.json").symlink_to(
+            safe_evidence_root / "target.json"
+        )
     except OSError:
         pytest.skip("symlink creation is unavailable on this platform")
 
     summary = collect_operator_evidence(
-        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        environ={ENV_VZ_EVIDENCE_DIR: str(safe_evidence_root)},
         now=NOW,
     )
 
@@ -165,33 +183,31 @@ def test_collect_operator_evidence_rejects_json_symlink(tmp_path: Path) -> None:
 
 
 def test_collect_operator_evidence_fails_closed_without_safe_open(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     _write_evidence(tmp_path, _valid_payload())
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.Sandbox.operator_evidence._dir_fd_operations_available",
-        lambda: False,
-    )
 
     summary = collect_operator_evidence(
         environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
         now=NOW,
+        safe_open_available=lambda: False,
     )
 
     assert summary["available"] is False
     assert "evidence_safe_open_unavailable" in summary["reasons"]
 
 
-def test_collect_operator_evidence_rejects_oversized_json(tmp_path: Path) -> None:
-    _write_evidence(tmp_path, _valid_payload())
-    (tmp_path / "host-smoke-evidence.json").write_text(
+def test_collect_operator_evidence_rejects_oversized_json(
+    safe_evidence_root: Path,
+) -> None:
+    _write_evidence(safe_evidence_root, _valid_payload())
+    (safe_evidence_root / "host-smoke-evidence.json").write_text(
         " " * (JSON_MAX_BYTES + 1),
         encoding="utf-8",
     )
 
     summary = collect_operator_evidence(
-        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        environ={ENV_VZ_EVIDENCE_DIR: str(safe_evidence_root)},
         now=NOW,
     )
 
@@ -199,64 +215,79 @@ def test_collect_operator_evidence_rejects_oversized_json(tmp_path: Path) -> Non
     assert "evidence_json_oversized" in summary["reasons"]
 
 
-def test_collect_operator_evidence_rejects_malformed_utf8(tmp_path: Path) -> None:
-    _write_evidence(tmp_path, _valid_payload())
-    (tmp_path / "host-smoke-evidence.json").write_bytes(b"\xff")
+def test_collect_operator_evidence_rejects_malformed_utf8(
+    safe_evidence_root: Path,
+) -> None:
+    _write_evidence(safe_evidence_root, _valid_payload())
+    (safe_evidence_root / "host-smoke-evidence.json").write_bytes(b"\xff")
 
     summary = collect_operator_evidence(
-        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        environ={ENV_VZ_EVIDENCE_DIR: str(safe_evidence_root)},
         now=NOW,
     )
 
     assert summary["valid"] is False
     assert "evidence_json_malformed_utf8" in summary["reasons"]
+    assert summary["expected_files"]["host-smoke-evidence.json"]["readable"] is True
 
 
 def test_collect_operator_evidence_rejects_malformed_json_without_leaking_raw(
-    tmp_path: Path,
+    safe_evidence_root: Path,
 ) -> None:
-    _write_evidence(tmp_path, _valid_payload())
+    _write_evidence(safe_evidence_root, _valid_payload())
     raw_json = '{"schema_version": 1, "secret_raw": "must-not-leak"'
-    (tmp_path / "host-smoke-evidence.json").write_text(raw_json, encoding="utf-8")
+    (safe_evidence_root / "host-smoke-evidence.json").write_text(
+        raw_json,
+        encoding="utf-8",
+    )
 
     summary = collect_operator_evidence(
-        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        environ={ENV_VZ_EVIDENCE_DIR: str(safe_evidence_root)},
         now=NOW,
     )
 
     assert summary["valid"] is False
     assert "evidence_json_malformed" in summary["reasons"]
+    assert summary["expected_files"]["host-smoke-evidence.json"]["readable"] is True
     assert "must-not-leak" not in str(summary)
 
 
-def test_collect_operator_evidence_rejects_top_level_non_object(tmp_path: Path) -> None:
-    _write_evidence(tmp_path, _valid_payload())
-    (tmp_path / "host-smoke-evidence.json").write_text("[]", encoding="utf-8")
+def test_collect_operator_evidence_rejects_top_level_non_object(
+    safe_evidence_root: Path,
+) -> None:
+    _write_evidence(safe_evidence_root, _valid_payload())
+    (safe_evidence_root / "host-smoke-evidence.json").write_text(
+        "[]",
+        encoding="utf-8",
+    )
 
     summary = collect_operator_evidence(
-        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        environ={ENV_VZ_EVIDENCE_DIR: str(safe_evidence_root)},
         now=NOW,
     )
 
     assert summary["valid"] is False
     assert "evidence_json_top_level_not_object" in summary["reasons"]
+    assert summary["expected_files"]["host-smoke-evidence.json"]["readable"] is True
 
 
-def test_collect_operator_evidence_requires_supported_schema(tmp_path: Path) -> None:
+def test_collect_operator_evidence_requires_supported_schema(
+    safe_evidence_root: Path,
+) -> None:
     payload = _valid_payload()
     payload.pop("schema_version")
-    _write_evidence(tmp_path, payload)
+    _write_evidence(safe_evidence_root, payload)
 
     missing = collect_operator_evidence(
-        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        environ={ENV_VZ_EVIDENCE_DIR: str(safe_evidence_root)},
         now=NOW,
     )
     assert missing["valid"] is False
     assert "evidence_schema_version_missing" in missing["reasons"]
 
-    _write_evidence(tmp_path, _valid_payload(schema_version=2))
+    _write_evidence(safe_evidence_root, _valid_payload(schema_version=2))
     unsupported = collect_operator_evidence(
-        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        environ={ENV_VZ_EVIDENCE_DIR: str(safe_evidence_root)},
         now=NOW,
     )
     assert unsupported["valid"] is False
@@ -264,15 +295,15 @@ def test_collect_operator_evidence_requires_supported_schema(tmp_path: Path) -> 
 
 
 def test_collect_operator_evidence_rejects_invalid_exit_code_and_skip_flags(
-    tmp_path: Path,
+    safe_evidence_root: Path,
 ) -> None:
     _write_evidence(
-        tmp_path,
+        safe_evidence_root,
         _valid_payload(final_exit_code=True, skip_build="false"),
     )
 
     summary = collect_operator_evidence(
-        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        environ={ENV_VZ_EVIDENCE_DIR: str(safe_evidence_root)},
         now=NOW,
     )
 
@@ -284,7 +315,7 @@ def test_collect_operator_evidence_rejects_invalid_exit_code_and_skip_flags(
 
 
 def test_collect_operator_evidence_bounds_and_allowlists_metadata(
-    tmp_path: Path,
+    safe_evidence_root: Path,
 ) -> None:
     phases = {
         f"phase-{index}": {
@@ -296,20 +327,23 @@ def test_collect_operator_evidence_bounds_and_allowlists_metadata(
         for index in range(MAX_PHASES + 9)
     }
     _write_evidence(
-        tmp_path,
+        safe_evidence_root,
         _valid_payload(
             helper_path="/secret/helper",
             unexpected_path="/secret/other",
+            smoke_run_id="x" * (DISPLAY_MAX_CHARS + 50),
             phases=phases,
             nested={"raw": "must-not-leak"},
         ),
     )
 
     summary = collect_operator_evidence(
-        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        environ={ENV_VZ_EVIDENCE_DIR: str(safe_evidence_root)},
         now=NOW,
     )
 
+    assert len(summary["smoke_run_id"]) <= DISPLAY_MAX_CHARS
+    assert summary["smoke_run_id"].endswith("...")
     assert "helper_path" not in summary["runtime_pointers"]
     assert "unexpected_path" not in summary["runtime_pointers"]
     assert len(summary["phases"]) == MAX_PHASES
@@ -318,14 +352,16 @@ def test_collect_operator_evidence_bounds_and_allowlists_metadata(
     assert "must-not-leak" not in str(summary)
 
 
-def test_collect_operator_evidence_classifies_stale_evidence(tmp_path: Path) -> None:
+def test_collect_operator_evidence_classifies_stale_evidence(
+    safe_evidence_root: Path,
+) -> None:
     _write_evidence(
-        tmp_path,
+        safe_evidence_root,
         _valid_payload(created_at="2026-06-01T00:00:00+00:00"),
     )
 
     summary = collect_operator_evidence(
-        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        environ={ENV_VZ_EVIDENCE_DIR: str(safe_evidence_root)},
         now=NOW,
     )
 
@@ -343,14 +379,14 @@ def test_collect_operator_evidence_classifies_stale_evidence(tmp_path: Path) -> 
     ],
 )
 def test_collect_operator_evidence_rejects_invalid_timestamps(
-    tmp_path: Path,
+    safe_evidence_root: Path,
     created_at: str,
     reason: str,
 ) -> None:
-    _write_evidence(tmp_path, _valid_payload(created_at=created_at))
+    _write_evidence(safe_evidence_root, _valid_payload(created_at=created_at))
 
     summary = collect_operator_evidence(
-        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        environ={ENV_VZ_EVIDENCE_DIR: str(safe_evidence_root)},
         now=NOW,
     )
 

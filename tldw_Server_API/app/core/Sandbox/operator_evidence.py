@@ -6,7 +6,7 @@ import errno
 import json
 import os
 import stat
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -94,8 +94,13 @@ def _bounded_str(value: object, *, max_chars: int = DISPLAY_MAX_CHARS) -> str:
 
     text = "" if value is None else str(value)
     text = " ".join(text.replace("\r", "\n").splitlines())
+    if max_chars <= 0:
+        return ""
     if len(text) > max_chars:
-        return text[: max_chars - 1] + "..."
+        suffix = "..."
+        if max_chars <= len(suffix):
+            return text[:max_chars]
+        return text[: max_chars - len(suffix)] + suffix
     return text
 
 
@@ -216,10 +221,14 @@ def _classify_component_open_error(
     return _classify_open_error(exc)
 
 
-def _open_evidence_dir(evidence_dir: Path) -> EvidenceDirHandle:
+def _open_evidence_dir(
+    evidence_dir: Path,
+    *,
+    safe_open_available: Callable[[], bool] | None = None,
+) -> EvidenceDirHandle:
     """Open the evidence directory using descriptor-safe traversal."""
 
-    if not _dir_fd_operations_available():
+    if not (safe_open_available or _dir_fd_operations_available)():
         return EvidenceDirHandle(
             path=evidence_dir,
             fd=None,
@@ -458,6 +467,7 @@ def collect_operator_evidence(
     *,
     environ: Mapping[str, str] | None = None,
     now: datetime | None = None,
+    safe_open_available: Callable[[], bool] | None = None,
 ) -> dict[str, object]:
     """Collect bounded operator evidence from the configured smoke bundle."""
 
@@ -479,7 +489,10 @@ def collect_operator_evidence(
 
     current_time = now or datetime.now(timezone.utc)
     evidence_dir = Path(evidence_dir_text)
-    with _open_evidence_dir(evidence_dir) as handle:
+    with _open_evidence_dir(
+        evidence_dir,
+        safe_open_available=safe_open_available,
+    ) as handle:
         if handle.fd is None:
             return _invalid_summary(
                 evidence_dir=evidence_dir_text,
@@ -500,23 +513,32 @@ def collect_operator_evidence(
     try:
         payload = json.loads(raw_bytes.decode("utf-8"))
     except UnicodeDecodeError:
-        return _invalid_summary(
-            evidence_dir=evidence_dir_text,
-            reasons=["evidence_json_malformed_utf8"],
-            available=True,
-        )
+        return {
+            **_invalid_summary(
+                evidence_dir=evidence_dir_text,
+                reasons=["evidence_json_malformed_utf8"],
+                available=True,
+            ),
+            "expected_files": expected_files,
+        }
     except json.JSONDecodeError:
-        return _invalid_summary(
-            evidence_dir=evidence_dir_text,
-            reasons=["evidence_json_malformed"],
-            available=True,
-        )
+        return {
+            **_invalid_summary(
+                evidence_dir=evidence_dir_text,
+                reasons=["evidence_json_malformed"],
+                available=True,
+            ),
+            "expected_files": expected_files,
+        }
     if not isinstance(payload, Mapping):
-        return _invalid_summary(
-            evidence_dir=evidence_dir_text,
-            reasons=["evidence_json_top_level_not_object"],
-            available=True,
-        )
+        return {
+            **_invalid_summary(
+                evidence_dir=evidence_dir_text,
+                reasons=["evidence_json_top_level_not_object"],
+                available=True,
+            ),
+            "expected_files": expected_files,
+        }
 
     reasons: list[str] = []
     schema_version = _safe_int(payload.get("schema_version"))
