@@ -40,6 +40,8 @@ Verification:
 - Focused v1.1 regression suite passed: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_manifest_contract.py tldw_Server_API/tests/Chatbooks/test_chatbooks_manifest_v1_1_contract.py tldw_Server_API/tests/Chatbooks/test_chatbooks_v1_1_file_inventory.py tldw_Server_API/tests/Chatbooks/test_chatbooks_v1_1_preview.py tldw_Server_API/tests/Chatbooks/test_explainer_session_content_type.py tldw_Server_API/tests/Chatbooks/test_chatbooks_import_validation.py -v` passed with 46 tests and 6 warnings.
 - Task-scoped `git diff --check` passed for the touched test and Backlog files.
 - Bandit skipped because this was a test-only fixture change and no production code changed.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2397
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

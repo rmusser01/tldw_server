@@ -81,6 +81,8 @@ Known blocker: the combined endpoint preview command
 `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_api_preview.py tldw_Server_API/tests/Chatbooks/test_chatbooks_api_error_and_preview_mapping.py -v`
 hung after `test_preview_manifest_version_coercion_legacy` passed and made no progress on `test_preview_manifest_version_ok`; it was interrupted after 101.76 seconds. A reduced run of `test_chatbooks_api_preview.py -k 'not test_preview_manifest_version_ok' --timeout=60 -v` also timed out while setting up the next TestClient. This matches the pre-existing full-app TestClient lifecycle hang documented during Task 6.
 Known unrelated workspace blocker: full `git diff --check` exits 2 because `Docs/Design/Agents.md:175` has trailing whitespace outside the touched Chatbook scope.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2397
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
