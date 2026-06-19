@@ -61,6 +61,7 @@ mcp-unified-smoke stdio \
   --arg -m \
   --arg my_mcp_server \
   --cwd /path/to/workspace \
+  --env PATH \
   --env PYTHONPATH \
   --json-report /tmp/mcp-smoke-stdio.json
 ```
@@ -80,8 +81,10 @@ not print these values; report rendering redacts sensitive fields and matching
 environment secrets.
 
 For stdio subprocesses, environment inheritance is deny-by-default. Use
-`--env NAME` for each variable the subprocess may inherit. The CLI uses argv
-execution and does not invoke a shell.
+`--env NAME` for each variable the subprocess may inherit. If `--command` is a
+command name rather than an absolute executable path, include `--env PATH` so it
+can be resolved consistently. The CLI uses argv execution and does not invoke a
+shell.
 
 ## Scenario Tuning
 

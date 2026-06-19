@@ -30,6 +30,27 @@ _EXIT_TRANSPORT_FAILED = 3
 _EXIT_STRICT_CAPABILITY_UNAVAILABLE = 4
 _SCENARIO_CHOICES = ("baseline",)
 _MODE_CHOICES = ("best-effort", "strict")
+_STDIO_CLI_OPTION_NAMES = frozenset(
+    {
+        "--scenario",
+        "--mode",
+        "--profile-id",
+        "--api-key-env",
+        "--bearer-token-env",
+        "--json-report",
+        "--debug-trace",
+        "--timeout",
+        "--safe-tool-name",
+        "--safe-tool-arguments-json",
+        "--safe-resource-uri",
+        "--safe-prompt-name",
+        "--safe-prompt-arguments-json",
+        "--command",
+        "--arg",
+        "--cwd",
+        "--env",
+    }
+)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -37,7 +58,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = _build_parser()
     try:
-        args = parser.parse_args(argv)
+        args = parser.parse_args(_normalize_stdio_arg_tokens(argv))
     except SystemExit as exc:
         return int(exc.code) if isinstance(exc.code, int) else _EXIT_USAGE
 
@@ -113,6 +134,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Environment variable name to inherit; repeat for multiple names.",
     )
     return parser
+
+
+def _normalize_stdio_arg_tokens(argv: Sequence[str] | None) -> list[str]:
+    tokens = list(sys.argv[1:] if argv is None else argv)
+    normalized: list[str] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--arg" and index + 1 < len(tokens):  # nosec B105
+            value = tokens[index + 1]
+            if value.startswith("-") and value != "--" and value not in _STDIO_CLI_OPTION_NAMES:
+                normalized.append(f"--arg={value}")
+                index += 2
+                continue
+        normalized.append(token)
+        index += 1
+    return normalized
 
 
 def _build_common_parser(*, with_defaults: bool) -> argparse.ArgumentParser:

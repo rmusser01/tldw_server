@@ -291,6 +291,35 @@ def test_smoke_cli_returns_three_for_transport_startup_failure(
     assert "transport_stdio_start_failed" in captured.err  # nosec B101
 
 
+def test_smoke_cli_accepts_dash_prefixed_stdio_argument(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from mcp_unified.smoke.cli import main
+
+    exit_code = main(
+        [
+            "stdio",
+            "--command",
+            sys.executable,
+            "--arg",
+            "-c",
+            "--arg",
+            "import sys; sys.exit(42)",
+            "--timeout",
+            "0.5",
+            "--json-report",
+            "-",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 1  # nosec B101
+    assert payload["transport"] == "StdioSubprocessTransport"  # nosec B101
+    assert "argument --arg" not in captured.err  # nosec B101
+
+
 def test_smoke_cli_returns_four_for_strict_capability_skip(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
