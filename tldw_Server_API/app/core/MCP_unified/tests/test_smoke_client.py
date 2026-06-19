@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+
+import httpx
 import pytest
 
 
@@ -437,6 +440,270 @@ async def test_inprocess_fastapi_transport_uses_asgi_request_path() -> None:
         assert await client.ping() == {"pong": True}  # nosec B101
     finally:
         await transport.close()
+
+
+@pytest.mark.asyncio
+async def test_live_http_transport_sends_profile_header() -> None:
+    from mcp_unified.smoke.transports import LiveHttpTransport
+
+    seen_headers: list[str | None] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.append(request.headers.get("x-mcp-profile"))
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": "smoke-1",
+                "result": {"pong": True},
+            },
+        )
+
+    transport = LiveHttpTransport(
+        "http://mcp.test/request",
+        profile_id="reviewer",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    try:
+        response = await transport.request(
+            {"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"}
+        )
+    finally:
+        await transport.close()
+
+    assert response == {  # nosec B101
+        "jsonrpc": "2.0",
+        "id": "smoke-1",
+        "result": {"pong": True},
+    }
+    assert seen_headers == ["reviewer"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_live_http_transport_sends_auth_headers() -> None:
+    from mcp_unified.smoke.transports import LiveHttpTransport
+
+    seen_headers: list[tuple[str | None, str | None]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.append(
+            (
+                request.headers.get("authorization"),
+                request.headers.get("x-api-key"),
+            )
+        )
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": "smoke-1",
+                "result": {"pong": True},
+            },
+        )
+
+    auth_material = ("jwt-token", "api-key-value")
+    transport = LiveHttpTransport(
+        "http://mcp.test/request",
+        bearer_token=auth_material[0],
+        api_key=auth_material[1],
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    try:
+        await transport.request({"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"})
+    finally:
+        await transport.close()
+
+    assert seen_headers == [(f"Bearer {auth_material[0]}", auth_material[1])]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_live_http_transport_treats_204_as_notification_success() -> None:
+    from mcp_unified.smoke.transports import LiveHttpTransport
+
+    payloads: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payloads.append(json.loads((await request.aread()).decode("utf-8")))
+        return httpx.Response(204)
+
+    transport = LiveHttpTransport(
+        "http://mcp.test/request",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    try:
+        await transport.notify(
+            {"jsonrpc": "2.0", "method": "notifications/initialized"}
+        )
+    finally:
+        await transport.close()
+
+    assert payloads == [  # nosec B101
+        {"jsonrpc": "2.0", "method": "notifications/initialized"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_live_http_transport_parses_jsonrpc_response_body() -> None:
+    from mcp_unified.smoke.client import McpSmokeClient
+    from mcp_unified.smoke.transports import LiveHttpTransport
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads((await request.aread()).decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "result": {"tools": []},
+            },
+        )
+
+    transport = LiveHttpTransport(
+        "http://mcp.test/request",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    client = McpSmokeClient(transport)
+
+    try:
+        assert await client.list_tools() == {"tools": []}  # nosec B101
+    finally:
+        await transport.close()
+
+
+@pytest.mark.asyncio
+async def test_live_http_transport_wraps_connect_failures() -> None:
+    from mcp_unified.smoke.transports import LiveHttpTransport, McpSmokeTransportError
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    transport = LiveHttpTransport(
+        "http://mcp.test/request",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with pytest.raises(McpSmokeTransportError, match="transport_http_request_failed"):
+        await transport.request({"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"})
+
+    await transport.close()
+
+
+@pytest.mark.asyncio
+async def test_live_http_retry_skips_transmitted_tool_call_on_5xx() -> None:
+    from mcp_unified.smoke.transports import LiveHttpTransport, McpSmokeTransportError
+
+    received_payloads: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        received_payloads.append(json.loads((await request.aread()).decode("utf-8")))
+        return httpx.Response(503, json={"error": "unavailable"})
+
+    transport = LiveHttpTransport(
+        "http://mcp.test/request",
+        max_retries=1,
+        retry_methods={"ping"},
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with pytest.raises(
+        McpSmokeTransportError,
+        match="transport_retry_skipped_non_idempotent",
+    ):
+        await transport.request(
+            {
+                "jsonrpc": "2.0",
+                "id": "smoke-1",
+                "method": "tools/call",
+                "params": {"name": "echo.search", "arguments": {"query": "needle"}},
+            }
+        )
+
+    await transport.close()
+
+    assert len(received_payloads) == 1  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_live_http_retry_skips_transmitted_tool_call_on_disconnect() -> None:
+    from mcp_unified.smoke.transports import LiveHttpTransport, McpSmokeTransportError
+
+    received_payloads: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        received_payloads.append(json.loads((await request.aread()).decode("utf-8")))
+        raise httpx.RemoteProtocolError("server disconnected", request=request)
+
+    transport = LiveHttpTransport(
+        "http://mcp.test/request",
+        max_retries=1,
+        retry_methods={"ping"},
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with pytest.raises(
+        McpSmokeTransportError,
+        match="transport_retry_skipped_non_idempotent",
+    ):
+        await transport.request(
+            {
+                "jsonrpc": "2.0",
+                "id": "smoke-1",
+                "method": "tools/call",
+                "params": {"name": "echo.search", "arguments": {"query": "needle"}},
+            }
+        )
+
+    await transport.close()
+
+    assert len(received_payloads) == 1  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_live_http_retry_replays_configured_idempotent_method() -> None:
+    from mcp_unified.smoke.transports import LiveHttpTransport
+
+    received_payloads: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads((await request.aread()).decode("utf-8"))
+        received_payloads.append(payload)
+        if len(received_payloads) == 1:
+            return httpx.Response(503, json={"error": "temporarily unavailable"})
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "result": {"pong": True},
+            },
+        )
+
+    transport = LiveHttpTransport(
+        "http://mcp.test/request",
+        max_retries=1,
+        retry_methods={"ping"},
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    try:
+        response = await transport.request(
+            {"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"}
+        )
+    finally:
+        await transport.close()
+
+    assert response == {  # nosec B101
+        "jsonrpc": "2.0",
+        "id": "smoke-1",
+        "result": {"pong": True},
+    }
+    assert [payload["method"] for payload in received_payloads] == [  # nosec B101
+        "ping",
+        "ping",
+    ]
 
 
 @pytest.mark.asyncio

@@ -17,15 +17,19 @@ from mcp_unified.smoke.scenarios import run_baseline_scenario
 from mcp_unified.smoke.transports import (
     InProcessFastApiTransport,
     InProcessGatewayTransport,
+    LiveHttpTransport,
     McpSmokeTransport,
+    McpSmokeTransportError,
 )
 
 __all__ = [
     "InProcessFastApiTransport",
     "InProcessGatewayTransport",
+    "LiveHttpTransport",
     "McpSmokeClient",
     "McpSmokeClientError",
     "McpSmokeTransport",
+    "McpSmokeTransportError",
     "SmokeFixtureGatewayRuntime",
     "SmokeReport",
     "SmokeStepReport",
