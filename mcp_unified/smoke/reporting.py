@@ -42,9 +42,7 @@ _CONTENT_KEYS = {
 _ENV_KEYS = {"env", "environment", "environ"}
 
 _BEARER_RE = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
-_UNIX_LOCAL_PATH_RE = re.compile(
-    r"(?<![\w.-])/(?:Users|home|private|tmp|var|Volumes)/[^\s'\"),\]}]+"
-)
+_UNIX_ABSOLUTE_PATH_RE = re.compile(r"(?<![:/\w.-])/(?!/)[^\s'\"),\]}]+")
 _WINDOWS_LOCAL_PATH_RE = re.compile(
     r"(?<![\w.-])(?:[A-Za-z]:\\|\\\\)[^\s'\"),\]}]+"
 )
@@ -97,9 +95,13 @@ def summarize_result(result: object, max_text_chars: int = MAX_TEXT_CHARS) -> di
         for key, value in list(result.items())[:MAX_MAPPING_ITEMS]:
             key_text = str(key)
             normalized = _normalize_key(key_text)
-            if normalized == "content" and isinstance(value, list):
-                summary["content_count"] = len(value)
-                summary["content_types"] = _content_types(value)
+            redacted = _redact_keyed_value(
+                normalized=normalized,
+                value=value,
+                max_text_chars=max_text_chars,
+            )
+            if redacted is not _USE_GENERIC_REDACTION:
+                summary[key_text] = redacted
                 continue
             if normalized in {"tools", "resources", "prompts"} and isinstance(value, list):
                 summary[f"{normalized}_count"] = len(value)
@@ -190,14 +192,13 @@ def _redact(
         for key, nested in items[:MAX_MAPPING_ITEMS]:
             key_text = str(key)
             normalized = _normalize_key(key_text)
-            if _is_sensitive_key(normalized):
-                output[key_text] = _REDACTED
-                continue
-            if normalized in _ARGUMENT_KEYS:
-                output[key_text] = _REDACTED_ARGUMENTS
-                continue
-            if normalized in _CONTENT_KEYS:
-                output[key_text] = _summarize_content(nested)
+            redacted = _redact_keyed_value(
+                normalized=normalized,
+                value=nested,
+                max_text_chars=max_text_chars,
+            )
+            if redacted is not _USE_GENERIC_REDACTION:
+                output[key_text] = redacted
                 continue
             output[key_text] = _redact(
                 nested,
@@ -224,7 +225,7 @@ def _redact_string(value: str, *, max_text_chars: int) -> str:
     text = _BEARER_RE.sub("[redacted bearer token]", value)
     for env_value in _sensitive_env_values():
         text = text.replace(env_value, _REDACTED)
-    text = _UNIX_LOCAL_PATH_RE.sub(_REDACTED_PATH, text)
+    text = _UNIX_ABSOLUTE_PATH_RE.sub(_REDACTED_PATH, text)
     text = _WINDOWS_LOCAL_PATH_RE.sub(_REDACTED_PATH, text)
     if len(text) > max_text_chars:
         omitted = len(text) - max_text_chars
@@ -251,16 +252,24 @@ def _is_sensitive_key(key: str) -> bool:
     return any(part in key for part in _SENSITIVE_KEY_PARTS)
 
 
-def _content_types(value: list[object]) -> list[object]:
-    types: list[object] = []
-    for item in value[:MAX_SEQUENCE_ITEMS]:
-        if isinstance(item, dict):
-            types.append(_redact(item.get("type"), max_text_chars=MAX_TEXT_CHARS))
-        else:
-            types.append(type(item).__name__)
-    if len(value) > MAX_SEQUENCE_ITEMS:
-        types.append({"omitted_items": len(value) - MAX_SEQUENCE_ITEMS})
-    return types
+_USE_GENERIC_REDACTION = object()
+
+
+def _redact_keyed_value(
+    *,
+    normalized: str,
+    value: object,
+    max_text_chars: int,
+) -> object:
+    if _is_sensitive_key(normalized):
+        return _REDACTED
+    if normalized in _ARGUMENT_KEYS:
+        return _REDACTED_ARGUMENTS
+    if normalized in _CONTENT_KEYS:
+        return _summarize_content(value)
+    if normalized in _ENV_KEYS:
+        return _redact(value, max_text_chars=max_text_chars, in_env=True)
+    return _USE_GENERIC_REDACTION
 
 
 def _safe_item_names(value: list[object], kind: str) -> list[object]:

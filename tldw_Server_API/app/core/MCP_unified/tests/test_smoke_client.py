@@ -26,8 +26,32 @@ def test_smoke_report_redacts_sensitive_details(monkeypatch: pytest.MonkeyPatch)
     assert "env-secret-value-12345" not in rendered  # nosec B101
     assert "/Users/example" not in rendered  # nosec B101
     assert "x" * 500 not in rendered  # nosec B101
-    assert summary["content_count"] == 1  # nosec B101
+    assert summary["content"] == {  # nosec B101
+        "summary": "[summarized content]",
+        "item_count": 1,
+    }
     assert len(rendered) < 1200  # nosec B101
+
+
+def test_smoke_report_redacts_top_level_sensitive_summary_fields() -> None:
+    from mcp_unified.smoke.reporting import summarize_result
+
+    summary = summarize_result(
+        {
+            "arguments": {"query": "full user supplied tool arguments"},
+            "content": "short full file contents",
+            "env": {"CUSTOM_ENV": "raw-env-value"},
+            "path": "/opt/app/data/file.txt",
+            "authorization": "Bearer top-level-token",
+        }
+    )
+
+    rendered = repr(summary)
+    assert "full user supplied tool arguments" not in rendered  # nosec B101
+    assert "short full file contents" not in rendered  # nosec B101
+    assert "raw-env-value" not in rendered  # nosec B101
+    assert "/opt/app/data/file.txt" not in rendered  # nosec B101
+    assert "top-level-token" not in rendered  # nosec B101
 
 
 def test_smoke_report_json_sanitizes_step_details() -> None:
