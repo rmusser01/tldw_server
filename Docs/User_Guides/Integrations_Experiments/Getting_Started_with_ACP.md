@@ -363,6 +363,20 @@ When you're done:
      -d '{"session_id": "your-session-id"}'
    ```
 
+### Retention And Support-Safe Views
+
+ACP keeps full-fidelity session history for authenticated owner/operator
+drill-through. Closed or errored sessions are purged after
+`ACP_SESSION_RETENTION_DAYS` once the background ACP retention maintenance task
+runs; audit events are purged separately by `ACP_AUDIT_RETENTION_DAYS`.
+
+Use `?redacted=true` on session detail, event, and artifact endpoints when you
+need support-safe output. Redacted views scrub transcript content, raw payloads,
+secret-looking values, and local filesystem paths, but they are not a general
+DLP guarantee. Task run previews in Agent Tasks are bounded diagnosis snippets,
+not public evidence. For the release policy, see
+`Docs/Development/ACP_Production_Readiness.md`.
+
 ## Alternative Agents
 
 ### Codex CLI (OpenAI)
