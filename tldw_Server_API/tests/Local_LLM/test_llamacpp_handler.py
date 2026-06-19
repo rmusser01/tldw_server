@@ -508,19 +508,35 @@ async def test_llamacpp_start_server_not_ready(monkeypatch, tmp_path: Path):
         stdout = None
         stderr = None
 
+        def __init__(self):
+            self.terminated = False
+
         def terminate(self):
-            pass
+            self.terminated = True
 
     async def _fake_cpe2(*a, **k):
-        return DP()
+        proc = DP()
+        proc_holder["proc"] = proc
+        return proc
 
+    proc_holder = {}
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_cpe2)
     from tldw_Server_API.app.core.Local_LLM import http_utils
 
     monkeypatch.setattr(http_utils, "wait_for_http_ready", lambda *a, **k: asyncio.sleep(0, result=False))
+    import tldw_Server_API.app.core.Local_LLM.LlamaCpp_Handler as llama_mod
+
+    monkeypatch.setattr(llama_mod.os, "getpgid", lambda pid: pid)
+
+    def fail_killpg(*_args):
+        raise AssertionError("fake subprocess cleanup must not signal a real process group")
+
+    monkeypatch.setattr(llama_mod.os, "killpg", fail_killpg)
 
     with pytest.raises(ServerError):
         await handler.start_server("toy.gguf", server_args={"port": 8099})
+
+    assert proc_holder["proc"].terminated is True
 
 
 @pytest.mark.asyncio

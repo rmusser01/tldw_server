@@ -249,13 +249,22 @@ async def test_llamafile_start_server_not_ready_terminates_process(monkeypatch, 
     from tldw_Server_API.app.core.Local_LLM import http_utils
 
     monkeypatch.setattr(http_utils, "wait_for_http_ready", lambda *a, **k: asyncio.sleep(0, result=False))
-    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    import tldw_Server_API.app.core.Local_LLM.Llamafile_Handler as llamafile_mod
+
+    monkeypatch.setattr(llamafile_mod.os, "getpgid", lambda pid: pid)
+
+    def fail_killpg(*_args):
+        raise AssertionError("fake subprocess cleanup must not signal a real process group")
+
+    monkeypatch.setattr(llamafile_mod.os, "killpg", fail_killpg)
 
     with pytest.raises(ServerError):
         await handler.start_server("toy.gguf", server_args={"port": 8077})
 
     proc = proc_holder["proc"]
-    assert proc.terminated or proc.killed
+    assert proc.terminated is True
+    assert proc.killed is False
 
 
 @pytest.mark.unit
