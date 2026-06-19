@@ -39,7 +39,7 @@ def parse_jsonrpc_body(raw_body: bytes) -> Any | MCPResponse:
     """Parse a JSON-RPC request body, returning a parse-error response on failure."""
     try:
         return json.loads(raw_body)
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except (TypeError, ValueError):
         return parse_error_response()
 
 
