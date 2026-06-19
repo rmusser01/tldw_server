@@ -79,6 +79,32 @@ def _macos_diagnostics_unconfigured() -> dict[str, object]:
     }
 
 
+def _macos_diagnostics_configured_broken() -> dict[str, object]:
+    macos = _macos_diagnostics_unconfigured()
+    macos["helper"] = {
+        "configured": True,
+        "ready": False,
+        "reasons": ["macos_virtualization_helper_unavailable"],
+    }
+    macos["templates"] = {
+        "vz_linux": {
+            "configured": True,
+            "ready": False,
+            "reasons": ["vz_linux_template_missing"],
+        }
+    }
+    macos["recovery_summary"] = {
+        "status": "unavailable",
+        "severity": "error",
+        "codes": ["vz_recovery_unavailable"],
+        "counts": {},
+        "repair_endpoint": None,
+        "cleanup_plan_endpoint": None,
+        "notes": ["Reconciliation did not compute."],
+    }
+    return macos
+
+
 def test_operator_status_ready_when_runtime_ready_and_vz_unconfigured() -> None:
     payload = build_operator_status(
         runtime_diagnostics=_runtime_diagnostics(),
@@ -91,6 +117,26 @@ def test_operator_status_ready_when_runtime_ready_and_vz_unconfigured() -> None:
     assert payload["overall_severity"] == "info"
     assert payload["sections"]["evidence"]["status"] == "not_configured"
     assert "generated_at" not in payload
+
+
+def test_operator_status_flags_configured_broken_vz_as_action_required() -> None:
+    payload = build_operator_status(
+        runtime_diagnostics=_runtime_diagnostics(),
+        macos_diagnostics=_macos_diagnostics_configured_broken(),
+        startup_warning_summary={"present": False, "blocking": False, "codes": []},
+    )
+
+    model = SandboxAdminOperatorStatusResponse.model_validate(payload)
+
+    assert payload["overall_status"] == "action_required"
+    assert payload["overall_severity"] == "error"
+    assert payload["sections"]["macos_vz"]["status"] == "action_required"
+    assert payload["sections"]["macos_vz"]["severity"] == "error"
+    assert payload["sections"]["macos_vz"]["reasons"] == [
+        "macos_virtualization_helper_unavailable"
+    ]
+    assert payload["recommended_actions"][0]["code"] == "restore_helper_readiness"
+    assert model.sections["macos_vz"].status == "action_required"
 
 
 def test_operator_status_payload_validates_against_schema() -> None:
@@ -164,6 +210,11 @@ def test_operator_status_keeps_runtime_section_when_macos_section_unavailable() 
 
     assert payload["sections"]["runtime_readiness"]["status"] == "ready"
     assert payload["sections"]["macos_vz"]["status"] == "unknown"
+    assert payload["sections"]["macos_vz"]["reasons"] == ["macos_diagnostics_failed"]
+    assert payload["sections"]["reconciliation"]["severity"] == "warning"
+    assert payload["sections"]["reconciliation"]["reasons"] == [
+        "macos_diagnostics_failed"
+    ]
     assert payload["overall_status"] == "degraded"
 
 
@@ -175,6 +226,9 @@ def test_operator_status_reports_unknown_when_runtime_diagnostics_unavailable() 
     )
 
     assert payload["sections"]["runtime_readiness"]["status"] == "unknown"
+    assert payload["sections"]["runtime_readiness"]["reasons"] == [
+        "runtime_diagnostics_failed"
+    ]
     assert payload["overall_status"] == "unknown"
 
 

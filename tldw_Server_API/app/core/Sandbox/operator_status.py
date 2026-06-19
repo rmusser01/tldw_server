@@ -38,6 +38,11 @@ def _safe_bool(value: object) -> bool | None:
     return None
 
 
+def _safe_reason(value: object) -> list[str]:
+    reason = str(value or "").strip()
+    return [reason] if reason else []
+
+
 def _section(status: str, *, severity: str = "info", **extra: object) -> OperatorSection:
     return {"status": status, "severity": severity, **extra}
 
@@ -72,6 +77,8 @@ def build_operator_status(
 
     runtime_failed = "_section_error" in runtime_payload
     macos_failed = "_section_error" in macos_payload
+    runtime_failure_reasons = _safe_reason(runtime_payload.get("_section_error"))
+    macos_failure_reasons = _safe_reason(macos_payload.get("_section_error"))
 
     runtime_summary = _safe_dict(runtime_payload.get("summary"))
     ready_count = _safe_int(runtime_summary.get("ready"))
@@ -84,6 +91,7 @@ def build_operator_status(
     )
 
     helper = _safe_dict(macos_payload.get("helper"))
+    templates = _safe_dict(macos_payload.get("templates"))
     image_store = _safe_dict(macos_payload.get("image_store"))
     recovery = _safe_dict(macos_payload.get("recovery_summary"))
 
@@ -106,8 +114,39 @@ def build_operator_status(
     macos_vz_bool_malformed = helper_configured is None or helper_ready is None
     image_store_bool_malformed = image_store_configured is None
     startup_bool_malformed = startup_present is None or startup_blocking is None
+    configured_templates = [
+        str(name)
+        for name, value in templates.items()
+        if _safe_bool(_safe_dict(value).get("configured")) is True
+    ]
+    unready_templates = [
+        str(name)
+        for name, value in templates.items()
+        if _safe_bool(_safe_dict(value).get("configured")) is True
+        and _safe_bool(_safe_dict(value).get("ready")) is False
+    ]
+    configured_macos_vz = helper_configured is True or bool(configured_templates)
+    macos_vz_action_required = bool(
+        configured_macos_vz
+        and (
+            helper_ready is False
+            or bool(unready_templates)
+            or str(recovery.get("status") or "").strip().lower() == "unavailable"
+            or str(recovery.get("severity") or "").strip().lower() == "error"
+        )
+    )
 
     recommended_actions: list[dict[str, object]] = []
+    if macos_vz_action_required:
+        recommended_actions.append(
+            _action(
+                "restore_helper_readiness",
+                "error",
+                "macos_vz",
+                "Restore configured macOS VZ helper/template readiness before relying on that runtime path.",
+                endpoint="/api/v1/sandbox/admin/macos-diagnostics",
+            )
+        )
     if isinstance(repair_endpoint, str) and repair_endpoint:
         recommended_actions.append(
             _action(
@@ -151,15 +190,24 @@ def build_operator_status(
             total=runtime_total,
             host_local_warning_runtimes=host_local_warning_runtimes,
             repair_supported_runtimes=repair_supported_runtimes,
+            reasons=runtime_failure_reasons,
         ),
         "macos_vz": _section(
             "unknown"
             if macos_failed or macos_vz_bool_malformed
-            else ("ready" if helper_ready else "not_configured"),
-            severity="warning" if macos_failed or macos_vz_bool_malformed else "info",
+            else (
+                "action_required"
+                if macos_vz_action_required
+                else ("ready" if helper_ready else "not_configured")
+            ),
+            severity="warning"
+            if macos_failed or macos_vz_bool_malformed
+            else ("error" if macos_vz_action_required else "info"),
             configured=helper_configured,
             helper_ready=helper_ready,
-            reasons=_safe_list(helper.get("reasons")),
+            reasons=macos_failure_reasons or _safe_list(helper.get("reasons")),
+            configured_templates=configured_templates,
+            unready_templates=unready_templates,
         ),
         "image_store": _section(
             "unknown"
@@ -170,16 +218,19 @@ def build_operator_status(
             else "info",
             configured=image_store_configured,
             gc_candidates=gc_candidates,
-            reasons=_safe_list(image_store.get("reasons")),
+            reasons=macos_failure_reasons or _safe_list(image_store.get("reasons")),
         ),
         "reconciliation": _section(
             "unknown"
             if macos_failed
             else str(recovery.get("status") or "not_configured"),
-            severity=str(recovery.get("severity") or "info").replace("ok", "info"),
+            severity="warning"
+            if macos_failed
+            else str(recovery.get("severity") or "info").replace("ok", "info"),
             counts=_safe_dict(recovery.get("counts")),
             repair_endpoint=repair_endpoint,
             cleanup_plan_endpoint=cleanup_plan_endpoint,
+            reasons=macos_failure_reasons,
         ),
         "evidence": _section("not_configured"),
         "security_boundaries": _section(
@@ -217,6 +268,9 @@ def build_operator_status(
     has_repair_action = any(
         action["code"] == "run_repair_dry_run" for action in recommended_actions
     )
+    has_macos_vz_action = any(
+        action["code"] == "restore_helper_readiness" for action in recommended_actions
+    )
     has_cleanup_candidates = gc_candidates > 0 or (
         isinstance(cleanup_plan_endpoint, str) and bool(cleanup_plan_endpoint)
     )
@@ -228,9 +282,11 @@ def build_operator_status(
     elif ready_count <= 0:
         overall_status = "unavailable"
         overall_severity = "error"
-    elif startup_blocking is True or has_repair_action:
+    elif startup_blocking is True or has_repair_action or has_macos_vz_action:
         overall_status = "action_required"
-        overall_severity = "error" if startup_blocking is True else "warning"
+        overall_severity = (
+            "error" if startup_blocking is True or has_macos_vz_action else "warning"
+        )
     elif (
         has_section_failures
         or startup_present is True
