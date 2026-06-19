@@ -125,6 +125,17 @@ def test_operator_status_keeps_runtime_section_when_macos_section_unavailable() 
     assert payload["overall_status"] == "degraded"
 
 
+def test_operator_status_reports_unknown_when_runtime_diagnostics_unavailable() -> None:
+    payload = build_operator_status(
+        runtime_diagnostics={"_section_error": "runtime_diagnostics_failed"},
+        macos_diagnostics=_macos_diagnostics_unconfigured(),
+        startup_warning_summary={"present": False, "blocking": False, "codes": []},
+    )
+
+    assert payload["sections"]["runtime_readiness"]["status"] == "unknown"
+    assert payload["overall_status"] == "unknown"
+
+
 def test_operator_status_treats_string_booleans_as_unknown_not_actionable() -> None:
     macos = _macos_diagnostics_unconfigured()
     macos["helper"] = {"configured": False, "ready": "false", "reasons": []}
@@ -241,6 +252,25 @@ def test_service_operator_status_isolates_macos_diagnostics_failure(monkeypatch)
 
     assert payload["sections"]["runtime_readiness"]["status"] == "ready"
     assert payload["sections"]["macos_vz"]["status"] == "unknown"
+
+
+def test_service_operator_status_reports_unknown_for_runtime_diagnostics_failure(
+    monkeypatch,
+) -> None:
+    svc = SandboxService()
+
+    def fail_runtime() -> dict[str, object]:
+        raise OSError("boom")
+
+    monkeypatch.setattr(svc, "runtime_diagnostics_summary", fail_runtime)
+    monkeypatch.setattr(svc, "macos_diagnostics", lambda: _macos_diagnostics_unconfigured())
+
+    payload = svc.operator_status(
+        startup_warning_summary={"present": False, "blocking": False, "codes": []}
+    )
+
+    assert payload["sections"]["runtime_readiness"]["status"] == "unknown"
+    assert payload["overall_status"] == "unknown"
 
 
 def test_service_operator_status_propagates_macos_runtime_error(monkeypatch) -> None:

@@ -222,7 +222,10 @@ def build_operator_status(
     )
     has_host_local_warnings = bool(host_local_warning_runtimes)
 
-    if ready_count <= 0:
+    if runtime_failed:
+        overall_status = "unknown"
+        overall_severity = "warning"
+    elif ready_count <= 0:
         overall_status = "unavailable"
         overall_severity = "error"
     elif startup_blocking is True or has_repair_action:
