@@ -16,6 +16,8 @@ from tldw_Server_API.tests.Chatbooks.test_chatbook_security import (
     build_traversal_archive_bytes,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def service(tmp_path, monkeypatch):
@@ -110,7 +112,6 @@ def _write_v1_1_note_chatbook(
             "total_world_books": 0,
             "total_dictionaries": 0,
             "total_documents": 0,
-            "total_explainer_sessions": 0,
             "total_size_bytes": len(note_payload),
         },
         "metadata": {"tags": [], "categories": [], "language": "en", "license": None},
@@ -200,7 +201,6 @@ def _write_v1_1_conversation_chatbook_with_missing_attachment_inventory(
             "total_world_books": 0,
             "total_dictionaries": 0,
             "total_documents": 0,
-            "total_explainer_sessions": 0,
             "total_size_bytes": len(conversation_payload) + len(attachment_payload),
         },
         "metadata": {"tags": [], "categories": [], "language": "en", "license": None},

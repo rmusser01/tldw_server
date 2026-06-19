@@ -6,6 +6,7 @@ from pathlib import Path
 
 import jsonschema
 import pytest
+from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.chatbook_schemas import CreateChatbookRequest
 from tldw_Server_API.app.services import core_jobs_worker as active_core_jobs_worker
@@ -18,6 +19,8 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.Chatbooks.services.jobs_worker import ChatbooksJobError, _handle_export
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
@@ -69,7 +72,6 @@ def _minimal_v1_1_manifest() -> dict:
             "total_world_books": 0,
             "total_dictionaries": 0,
             "total_documents": 0,
-            "total_explainer_sessions": 0,
             "total_size_bytes": 0,
         },
         "metadata": {
@@ -103,7 +105,7 @@ def test_create_chatbook_request_accepts_format_version_v1_1():
 
 
 def test_create_chatbook_request_rejects_future_format_version_v2():
-    with pytest.raises(ValueError, match="Unsupported chatbook export format_version"):
+    with pytest.raises(ValidationError, match="Unsupported chatbook export format_version"):
         CreateChatbookRequest(
             name="v2",
             description="v2",
@@ -123,7 +125,6 @@ def test_create_chatbook_request_canonicalizes_legacy_v1_format_version():
     assert request.format_version is ChatbookVersion.V1
 
 
-@pytest.mark.asyncio
 async def test_create_chatbook_export_writes_requested_v1_1_manifest_version(chatbook_v1_1_service):
     success, _message, archive_path = await chatbook_v1_1_service.create_chatbook(
         name="v1.1",
@@ -151,7 +152,6 @@ async def test_create_chatbook_export_writes_requested_v1_1_manifest_version(cha
     jsonschema.validate(manifest, _load_v1_1_schema())
 
 
-@pytest.mark.asyncio
 async def test_create_chatbook_export_canonicalizes_legacy_v1_manifest_version(chatbook_v1_1_service):
     success, _message, archive_path = await chatbook_v1_1_service.create_chatbook(
         name="legacy v1",
@@ -169,7 +169,6 @@ async def test_create_chatbook_export_canonicalizes_legacy_v1_manifest_version(c
     assert manifest["version"] == "1.0.0"
 
 
-@pytest.mark.asyncio
 async def test_prompt_studio_export_payload_includes_format_version(chatbook_v1_1_service):
     captured_payload = {}
 
@@ -194,7 +193,6 @@ async def test_prompt_studio_export_payload_includes_format_version(chatbook_v1_
     assert captured_payload["format_version"] == "1.1.0"
 
 
-@pytest.mark.asyncio
 async def test_core_jobs_worker_forwards_format_version_to_archive_creation():
     captured_kwargs = {}
 
@@ -224,7 +222,6 @@ async def test_core_jobs_worker_forwards_format_version_to_archive_creation():
     assert captured_kwargs["format_version"] == ChatbookVersion.V1_1
 
 
-@pytest.mark.asyncio
 async def test_core_jobs_worker_rejects_unsupported_format_version_nonretryably():
     class _Service:
         def _claim_export_job(self, job_id):
@@ -245,7 +242,6 @@ async def test_core_jobs_worker_rejects_unsupported_format_version_nonretryably(
     assert exc_info.value.retryable is False
 
 
-@pytest.mark.asyncio
 async def test_core_jobs_worker_marks_export_job_failed_for_unsupported_format_version():
     saved_jobs = []
     export_job = ExportJob(
@@ -338,7 +334,6 @@ async def _run_active_core_jobs_worker_export_once(monkeypatch, payload, *, serv
     return captured_kwargs, fail_calls
 
 
-@pytest.mark.asyncio
 async def test_active_core_jobs_worker_forwards_format_version_to_archive_creation(monkeypatch):
     captured_kwargs, _fail_calls = await _run_active_core_jobs_worker_export_once(
         monkeypatch,
@@ -353,7 +348,6 @@ async def test_active_core_jobs_worker_forwards_format_version_to_archive_creati
     assert captured_kwargs["format_version"] == ChatbookVersion.V1_1
 
 
-@pytest.mark.asyncio
 async def test_active_core_jobs_worker_defaults_format_version_to_v1(monkeypatch):
     captured_kwargs, _fail_calls = await _run_active_core_jobs_worker_export_once(
         monkeypatch,
@@ -367,7 +361,6 @@ async def test_active_core_jobs_worker_defaults_format_version_to_v1(monkeypatch
     assert captured_kwargs["format_version"] == ChatbookVersion.V1
 
 
-@pytest.mark.asyncio
 async def test_active_core_jobs_worker_fails_unsupported_format_version_nonretryably(monkeypatch):
     captured_kwargs, fail_calls = await _run_active_core_jobs_worker_export_once(
         monkeypatch,
@@ -389,6 +382,14 @@ async def test_active_core_jobs_worker_fails_unsupported_format_version_nonretry
 
 def test_minimal_v1_1_manifest_matches_schema():
     jsonschema.validate(_minimal_v1_1_manifest(), _load_v1_1_schema())
+
+
+def test_v1_1_schema_requires_file_inventory():
+    manifest = _minimal_v1_1_manifest()
+    manifest.pop("file_inventory")
+
+    with pytest.raises(jsonschema.exceptions.ValidationError, match="'file_inventory' is a required property"):
+        jsonschema.validate(manifest, _load_v1_1_schema())
 
 
 def test_chatbook_manifest_parses_v1_1_metadata_fields():
@@ -466,17 +467,17 @@ def test_v1_1_manifest_allows_content_item_metadata_envelope():
     manifest["features_used"] = ["content_envelopes"]
     manifest["content_items"] = [
         {
-            "id": "exp_123",
-            "type": "explainer_session",
-            "title": "Learn attention",
+            "id": "doc_123",
+            "type": "generated_document",
+            "title": "Generated brief",
             "description": None,
             "created_at": None,
             "updated_at": None,
             "tags": [],
             "metadata": {
-                "format": "tldw.explainer_session.v1",
+                "format": "tldw.generated_document.v1",
                 "envelope": {
-                    "format": "tldw.explainer_session.v1",
+                    "format": "tldw.generated_document.v1",
                     "schema_version": 1,
                     "representations": [],
                     "integrity": {},
@@ -485,7 +486,7 @@ def test_v1_1_manifest_allows_content_item_metadata_envelope():
                     "source_refs": [],
                 },
             },
-            "file_path": "content/explainer_sessions/session_exp_123.json",
+            "file_path": "content/generated_documents/document_doc_123.json",
             "checksum": "sha256:example",
         }
     ]

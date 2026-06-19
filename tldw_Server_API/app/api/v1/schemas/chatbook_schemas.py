@@ -116,7 +116,7 @@ class CreateChatbookRequest(BaseModel):
 
     @field_validator('format_version', mode='before')
     @classmethod
-    def validate_format_version(cls, v):
+    def validate_format_version(cls: Any, v: Any) -> ChatbookVersion:
         """Validate and canonicalize the requested export format version."""
         return coerce_chatbook_export_version(v)
 

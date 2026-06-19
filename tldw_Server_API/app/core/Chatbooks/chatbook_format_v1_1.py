@@ -1,3 +1,5 @@
+"""Utilities for Chatbook manifest v1.1 inventory, preview, and import checks."""
+
 from __future__ import annotations
 
 import hashlib
@@ -23,6 +25,7 @@ FEATURE_REGISTRY: set[str] = {
 
 
 def sha256_file(path: Path) -> str:
+    """Return a sha256 integrity string for a bundled archive file."""
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -31,6 +34,7 @@ def sha256_file(path: Path) -> str:
 
 
 def ensure_known_features(features: list[str]) -> dict[str, list[str]]:
+    """Split feature tokens into reader-supported and unsupported sets."""
     supported: list[str] = []
     unsupported: list[str] = []
 
@@ -210,6 +214,7 @@ def build_content_envelope(
     source_refs: list[dict[str, Any]] | None = None,
     redaction_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Build a v1.1 content envelope for one restorable structured payload."""
     representations = [
         {
             "kind": "structured",
@@ -241,6 +246,7 @@ def build_content_envelope(
 
 
 def build_file_inventory(work_dir: Path) -> list[dict[str, Any]]:
+    """Build deterministic per-file inventory records for a prepared archive directory."""
     inventory: list[dict[str, Any]] = []
 
     for path in sorted(
@@ -416,9 +422,7 @@ def _required_import_payload_paths(content_items: Any) -> list[str]:
         item_type = _content_type_value(_content_item_field(item, "type"))
         path: str | None = None
         if item_type in fallback_templates:
-            path = fallback_templates[item_type].format(id=str(item_id))
-        elif item_type == "explainer_session":
-            path = _content_item_file_path(item) or f"content/explainer_sessions/session_{item_id}.json"
+            path = _content_item_file_path(item) or fallback_templates[item_type].format(id=str(item_id))
         elif item_type == "generated_document":
             path = _content_item_file_path(item) or f"content/generated_documents/document_{item_id}.json"
 
@@ -445,7 +449,10 @@ def _conversation_attachment_inventory_requirements(
         if item_type != "conversation":
             continue
 
-        conversation_path = f"content/conversations/conversation_{item_id}.json"
+        conversation_path = (
+            _content_item_file_path(item)
+            or f"content/conversations/conversation_{item_id}.json"
+        )
         if conversation_path not in inventory_paths or conversation_path in failed_inventory_paths:
             continue
 

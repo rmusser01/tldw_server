@@ -3,6 +3,7 @@ import io
 import json
 import zipfile
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import chatbooks as chatbooks_endpoints
@@ -10,6 +11,8 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.Chatbooks.chatbook_format_v1_1 import build_preview_report
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import ChatbookManifest, ChatbookVersion
 from tldw_Server_API.app.main import app
+
+pytestmark = pytest.mark.integration
 
 
 class _DummyAuditService:
@@ -22,8 +25,8 @@ async def _override_user() -> User:
 
 
 def _make_v1_1_chatbook_bytes() -> bytes:
-    payload_path = "content/explainer_sessions/session_exp_1.json"
-    payload = json.dumps({"id": "exp_1", "title": "Preview"}).encode("utf-8")
+    payload_path = "content/generated_documents/document_doc_1.json"
+    payload = json.dumps({"id": "doc_1", "title": "Preview"}).encode("utf-8")
     digest = hashlib.sha256(payload).hexdigest()
 
     manifest = {
@@ -36,17 +39,17 @@ def _make_v1_1_chatbook_bytes() -> bytes:
         "export_id": "preview-v11",
         "content_items": [
             {
-                "id": "exp_1",
-                "type": "explainer_session",
+                "id": "doc_1",
+                "type": "generated_document",
                 "title": "Preview",
                 "description": None,
                 "created_at": None,
                 "updated_at": None,
                 "tags": [],
                 "metadata": {
-                    "format": "tldw.explainer_session.v1",
+                    "format": "tldw.generated_document.v1",
                     "envelope": {
-                        "format": "tldw.explainer_session.v1",
+                        "format": "tldw.generated_document.v1",
                         "schema_version": 1,
                         "media_type": "application/json",
                         "representations": [
@@ -92,8 +95,7 @@ def _make_v1_1_chatbook_bytes() -> bytes:
             "total_embeddings": 0,
             "total_world_books": 0,
             "total_dictionaries": 0,
-            "total_documents": 0,
-            "total_explainer_sessions": 1,
+            "total_documents": 1,
             "total_size_bytes": len(payload),
         },
         "metadata": {"tags": [], "categories": [], "language": "en", "license": None},
@@ -113,7 +115,7 @@ def _make_v1_1_chatbook_bytes() -> bytes:
                     "value": f"sha256:{digest}",
                 },
                 "role": "payload",
-                "content_item_ids": ["exp_1"],
+                "content_item_ids": ["doc_1"],
             }
         ],
     }

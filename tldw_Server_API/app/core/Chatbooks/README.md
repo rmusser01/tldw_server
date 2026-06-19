@@ -76,9 +76,8 @@ Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
     the default v1.0.0/legacy-compatible manifest.
   - v1.1 exports add manifest metadata, feature tokens, compatibility data, and
     a top-level `file_inventory` built from bundled files.
-  - The first v1.1 producer is Explainer sessions. They keep the structured
-    restore JSON and add a rendered Markdown representation with a content
-    envelope.
+  - Producer-specific content envelopes can be added incrementally for content
+    types with stable structured restore payloads.
   - Preview exposes a v1.1 preview report with compatibility, feature,
     integrity, lossiness, source reference, warning, and error summaries.
   - Import runs v1.1 validation before writes, including checksum validation,
@@ -198,7 +197,6 @@ Developer Code Guide: `Docs/Code_Documentation/Guides/Chatbooks_Code_Guide.md:1`
   - `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_v1_1_file_inventory.py -v`
   - `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_v1_1_preview.py -v`
   - `python -m pytest tldw_Server_API/tests/Chatbooks/test_chatbooks_import_validation.py -v`
-  - `python -m pytest tldw_Server_API/tests/Chatbooks/test_explainer_session_content_type.py -v`
 - When adding features, mirror existing test patterns and add:
   - Unit tests for validators and service behavior
   - Integration tests for endpoints (`export`, `import`, `download`, `preview`)

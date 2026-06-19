@@ -232,10 +232,9 @@ the shared version helper; v1.1 output is produced only when callers request
 
 For v1.1 export, `ChatbookService` builds the normal v1-compatible manifest and
 then adds `features_used`, `producer`, `source_instance`, `compatibility`, and
-`file_inventory`. Explainer sessions are the first v1.1 producer: the exporter
-keeps the structured JSON restore payload, adds a rendered Markdown
-representation under `rendered/explainer_sessions/`, and stores the envelope in
-`content_items[].metadata.envelope`.
+`file_inventory`. Producer-specific content envelopes can be added
+incrementally for content types that have stable structured restore payloads;
+until then, content payloads keep the v1-compatible `file_path` layout.
 
 Preview keeps `preview_chatbook()` as the legacy two-tuple. The API endpoint
 prefers `preview_chatbook_with_report()`, which reuses the safe extraction flow

@@ -19,8 +19,7 @@ v1.0.0 as the default export format. Completed implementation stages include:
   produce v1.1 output.
 - v1.1 manifest metadata, producer/source/compatibility data, and archive file
   inventory generation.
-- Explainer session envelopes as the first v1.1 producer, including structured
-  restore JSON and rendered Markdown representation.
+- Shared content-envelope helper support for future producer-specific rollout.
 - v1.1 preview report fields for compatibility, features, integrity, lossiness,
   source references, warnings, and errors.
 - v1.1 import validation before writes, including checksum mismatches, missing
@@ -53,8 +52,8 @@ features would make an import lossy.
    hash inside `manifest.json`.
 5. Separate relationships between bundled Chatbook items from references to
    external or unresolved sources.
-6. Standardize the successful pattern already used by Explainer exports:
-   structured content for restoration and rendered Markdown for human review.
+6. Standardize a producer pattern that keeps structured content for restoration
+   while optionally adding rendered Markdown for human review.
 
 ## 3. Non-Goals
 
@@ -192,7 +191,7 @@ v1.1 producers MAY add:
 
 ```text
 schemas/
-  tldw.explainer_session.v1.schema.json
+  tldw.generated_document.v1.schema.json
 rendered/
   <content_type>/...
 ```
@@ -209,9 +208,12 @@ and whole-archive checksum sidecars. `manifest.json` cannot carry its own
 content hash without becoming self-referential. Whole-archive checksum sidecars
 must live outside the ZIP if they hash the final ZIP bytes.
 
+v1.1 manifests MUST include `file_inventory`. Producers with no bundled payload
+files MUST emit an empty list rather than omitting the field.
+
 ```json
 {
-  "path": "content/explainer_sessions/session_exp_123.json",
+  "path": "content/generated_documents/document_doc_123.json",
   "media_type": "application/json",
   "size_bytes": 14520,
   "integrity": {
@@ -220,7 +222,7 @@ must live outside the ZIP if they hash the final ZIP bytes.
     "value": "sha256:..."
   },
   "role": "payload",
-  "content_item_ids": ["exp_123"]
+  "content_item_ids": ["doc_123"]
 }
 ```
 
@@ -233,8 +235,7 @@ must live outside the ZIP if they hash the final ZIP bytes.
 - `readme`
 - `other`
 
-Readers MUST verify file inventory entries before import when `features_used`
-contains `file_inventory` or `integrity_metadata`. Readers verify
+Readers MUST verify file inventory entries before import. Readers verify
 `manifest.json` through normal JSON parsing, schema validation, and optional
 external archive checksum metadata rather than through `file_inventory`.
 
@@ -246,17 +247,17 @@ for existing fields such as `file_path`.
 
 ```json
 {
-  "id": "exp_123",
-  "type": "explainer_session",
-  "title": "Learn attention",
-  "file_path": "content/explainer_sessions/session_exp_123.json",
+  "id": "doc_123",
+  "type": "generated_document",
+  "title": "Generated brief",
+  "file_path": "content/generated_documents/document_doc_123.json",
   "checksum": "sha256:...",
   "metadata": {
-    "format": "tldw.explainer_session.v1",
+    "format": "tldw.generated_document.v1",
     "envelope": {
-      "format": "tldw.explainer_session.v1",
+      "format": "tldw.generated_document.v1",
       "schema_version": 1,
-      "schema_ref": "schemas/tldw.explainer_session.v1.schema.json",
+      "schema_ref": "schemas/tldw.generated_document.v1.schema.json",
       "media_type": "application/json",
       "representations": [],
       "integrity": {},
@@ -276,7 +277,7 @@ For v1.1 content-envelope items, these fields are required:
 
 | Field | Requirement |
 | --- | --- |
-| `format` | Stable payload format identifier, for example `tldw.explainer_session.v1`. |
+| `format` | Stable payload format identifier, for example `tldw.generated_document.v1`. |
 | `schema_version` | Integer or semantic string used by the payload importer. |
 | `media_type` | MIME type of the primary structured payload. |
 | `representations` | Array of structured, rendered, binary, or reference representations. |
@@ -296,7 +297,7 @@ The v1.1 equivalent is expressed as:
   "representations": [
     {
       "kind": "structured",
-      "path": "content/explainer_sessions/session_exp_123.json",
+      "path": "content/generated_documents/document_doc_123.json",
       "media_type": "application/json",
       "primary": true
     }
@@ -314,7 +315,7 @@ Representations tell readers what files or references exist for one item.
 ```json
 {
   "kind": "structured",
-  "path": "content/explainer_sessions/session_exp_123.json",
+  "path": "content/generated_documents/document_doc_123.json",
   "media_type": "application/json",
   "primary": true,
   "role": "restore_payload"
@@ -500,8 +501,8 @@ revealing the removed values.
 }
 ```
 
-This generalizes the current Explainer behavior that removes API keys, tokens,
-passwords, raw prompts, and system prompts from exported metadata.
+This generalizes safe-export behavior for producer payloads that may carry API
+keys, tokens, passwords, raw prompts, or system prompts in source metadata.
 
 ## 16. Reader Behavior
 
@@ -676,37 +677,37 @@ describes the report. It MUST NOT become a second version field inside
 }
 ```
 
-### 18.3 Explainer Session Item
+### 18.3 Generated Document Envelope Example
 
 ```json
 {
-  "id": "exp_123",
-  "type": "explainer_session",
-  "title": "Learn attention",
+  "id": "doc_123",
+  "type": "generated_document",
+  "title": "Generated brief",
   "description": null,
   "created_at": "2026-06-18T12:00:00Z",
   "updated_at": "2026-06-18T12:10:00Z",
   "tags": [],
-  "file_path": "content/explainer_sessions/session_exp_123.json",
+  "file_path": "content/generated_documents/document_doc_123.json",
   "checksum": "sha256:789abc",
   "metadata": {
-    "format": "tldw.explainer_session.v1",
+    "format": "tldw.generated_document.v1",
     "envelope": {
-      "format": "tldw.explainer_session.v1",
+      "format": "tldw.generated_document.v1",
       "schema_version": 1,
-      "schema_ref": "schemas/tldw.explainer_session.v1.schema.json",
+      "schema_ref": "schemas/tldw.generated_document.v1.schema.json",
       "media_type": "application/json",
       "representations": [
         {
           "kind": "structured",
-          "path": "content/explainer_sessions/session_exp_123.json",
+          "path": "content/generated_documents/document_doc_123.json",
           "media_type": "application/json",
           "primary": true,
           "role": "restore_payload"
         },
         {
           "kind": "markdown",
-          "path": "rendered/explainer_sessions/session_exp_123.md",
+          "path": "rendered/generated_documents/document_doc_123.md",
           "media_type": "text/markdown",
           "primary": false,
           "role": "human_review"
@@ -726,7 +727,7 @@ describes the report. It MUST NOT become a second version field inside
         {
           "source_type": "media",
           "source_id": "media_42",
-          "title": "Attention paper notes",
+          "title": "Source notes",
           "resolution_status": "external",
           "snapshot_hash": "sha256:citationhash",
           "location": {
@@ -754,7 +755,7 @@ describes the report. It MUST NOT become a second version field inside
 ### Stage 1: Producer-Only Envelopes
 
 - Add envelopes to new exports for one content type, preferably
-  `explainer_session`.
+  a content type with a stable structured restore payload.
 - Keep existing `file_path`, `checksum`, and `metadata.format` fields populated.
 - Add file inventory entries for the new payloads.
 
@@ -787,7 +788,7 @@ The implementation should add tests for:
   algorithms.
 - `file_path` and primary structured representation mismatch is rejected.
 - Reference-only items report lossiness and do not use fake payload checksums.
-- Explainer exports include envelope metadata without leaking scrubbed secrets.
+- Envelope producer exports include metadata without leaking scrubbed secrets.
 - Preview reports unsupported content types, lossy items, unresolved refs, and
   checksum errors before import.
 

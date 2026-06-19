@@ -126,6 +126,7 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                             except _CORE_JOBS_WORKER_NONCRITICAL_EXCEPTIONS:
                                 logger.debug("metrics increment failed for lease_renew_failed")
                         # Apply jitter to renewal interval to avoid thundering herd
+                        # Lease jitter only spreads renewal wake-ups; it is not security-sensitive.
                         slp = _renew_interval + random.uniform(-float(_renew_jitter), float(_renew_jitter))  # nosec B311
                         await asyncio.sleep(max(1.0, slp))
                 return asyncio.create_task(_loop())
@@ -162,14 +163,14 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                     ej = None
                 if ej:
                     ej.status = ExportStatus.IN_PROGRESS
-                    ej.started_at = datetime.utcnow()
+                    ej.started_at = datetime.now(timezone.utc)
                     svc._save_export_job(ej)
                 # Pre-flight cancel check
                 cur = jm.get_job(int(job["id"])) or {}
                 if cur.get("cancel_requested_at"):
                     if ej:
                         ej.status = ExportStatus.CANCELLED
-                        ej.completed_at = datetime.utcnow()
+                        ej.completed_at = datetime.now(timezone.utc)
                         svc._save_export_job(ej)
                     jm.finalize_cancelled(int(job["id"]), reason="cancel requested before start")
                     continue
@@ -185,7 +186,7 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                         err_msg = str(exc)
                         if ej:
                             ej.status = ExportStatus.FAILED
-                            ej.completed_at = datetime.utcnow()
+                            ej.completed_at = datetime.now(timezone.utc)
                             ej.error_message = err_msg
                             svc._save_export_job(ej)
                         jm.fail_job(
@@ -218,7 +219,7 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                         if cur.get("cancel_requested_at") or (cur.get("status") and str(cur.get("status")).lower() != "processing"):
                             if ej:
                                 ej.status = ExportStatus.CANCELLED
-                                ej.completed_at = datetime.utcnow()
+                                ej.completed_at = datetime.now(timezone.utc)
                                 svc._save_export_job(ej)
                             _safe_remove_export_file(file_path)
                             jm.finalize_cancelled(int(job["id"]), reason="cancel requested during processing")
@@ -229,7 +230,7 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                             ej = None
                         if ej and ej.status != ExportStatus.CANCELLED:
                             ej.status = ExportStatus.COMPLETED
-                            ej.completed_at = datetime.utcnow()
+                            ej.completed_at = datetime.now(timezone.utc)
                             ej.output_path = file_path
                             try:
                                 ej.file_size_bytes = Path(file_path).stat().st_size if file_path else None
@@ -256,7 +257,7 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                             ej = None
                         if ej:
                             ej.status = ExportStatus.FAILED
-                            ej.completed_at = datetime.utcnow()
+                            ej.completed_at = datetime.now(timezone.utc)
                             ej.error_message = msg
                             svc._save_export_job(ej)
                         jm.fail_job(int(job["id"]), error=str(msg), retryable=False, worker_id=worker_id, lease_id=str(lease_id), completion_token=str(lease_id))
@@ -280,14 +281,14 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                     ij = svc._get_import_job(chatbooks_job_id)
                     if ij:
                         ij.status = ImportStatus.IN_PROGRESS
-                        ij.started_at = datetime.utcnow()
+                        ij.started_at = datetime.now(timezone.utc)
                         svc._save_import_job(ij)
                     # Pre-flight cancel check
                     cur = jm.get_job(int(job["id"])) or {}
                     if cur.get("cancel_requested_at"):
                         if ij:
                             ij.status = ImportStatus.CANCELLED
-                            ij.completed_at = datetime.utcnow()
+                            ij.completed_at = datetime.now(timezone.utc)
                             svc._save_import_job(ij)
                         jm.finalize_cancelled(int(job["id"]), reason="cancel requested before start")
                         continue
@@ -342,19 +343,19 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                         if cur.get("cancel_requested_at") or (cur.get("status") and str(cur.get("status")).lower() != "processing"):
                             if ij:
                                 ij.status = ImportStatus.CANCELLED
-                                ij.completed_at = datetime.utcnow()
+                                ij.completed_at = datetime.now(timezone.utc)
                                 svc._save_import_job(ij)
                             jm.finalize_cancelled(int(job["id"]), reason="cancel requested during processing")
                             continue
                         if ij and ij.status != ImportStatus.CANCELLED:
                             ij.status = ImportStatus.COMPLETED
-                            ij.completed_at = datetime.utcnow()
+                            ij.completed_at = datetime.now(timezone.utc)
                             svc._save_import_job(ij)
                         jm.complete_job(int(job["id"]), worker_id=worker_id, lease_id=str(lease_id), completion_token=str(lease_id))
                     else:
                         if ij:
                             ij.status = ImportStatus.FAILED
-                            ij.completed_at = datetime.utcnow()
+                            ij.completed_at = datetime.now(timezone.utc)
                             ij.error_message = msg
                             svc._save_import_job(ij)
                         jm.fail_job(int(job["id"]), error=str(msg), retryable=False, worker_id=worker_id, lease_id=str(lease_id), completion_token=str(lease_id))

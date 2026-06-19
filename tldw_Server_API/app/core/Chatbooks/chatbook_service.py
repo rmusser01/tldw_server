@@ -1748,7 +1748,7 @@ class ChatbookService:
             # Create README asynchronously
             await self._create_readme_async(work_dir, manifest)
             if manifest.version == ChatbookVersion.V1_1:
-                manifest.file_inventory = build_file_inventory(work_dir)
+                manifest.file_inventory = await asyncio.to_thread(build_file_inventory, work_dir)
                 await _write_manifest()
 
             # Create archive in secure export directory

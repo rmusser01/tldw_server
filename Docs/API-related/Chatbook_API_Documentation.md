@@ -141,9 +141,9 @@ Implementation notes:
 - For robust automation, prefer async mode and then poll job status to obtain the canonical `download_url` by `job_id`.
 - When evaluation exports exceed row caps, export job metadata can include continuation tokens and the manifest can include `truncation.evaluations.continuations` so clients can resume the same chatbook export.
 - v1.1 export currently uses the shared format helpers for manifest metadata,
-  `file_inventory` hashing, and Explainer session content envelopes. Other
-  content types keep their v1-compatible payload layout until their v1.1
-  producer work is added.
+  `file_inventory` hashing, preview reporting, and import validation. Content
+  types keep their v1-compatible payload layout until producer-specific v1.1
+  envelopes are added.
 
 **Response (Asynchronous)**:
 ```json
@@ -249,6 +249,8 @@ option are rejected before content is imported.
 ```
 
 **v1.1 Import Behavior**:
+- v1.1 manifests must include `file_inventory`; an empty list is valid only
+  when the archive has no bundled payload files.
 - v1.1 archives are validated before any content writes.
 - `file_inventory` checksum failures, missing listed files, unsafe inventory
   paths, and missing inventory coverage for import payloads fail the import

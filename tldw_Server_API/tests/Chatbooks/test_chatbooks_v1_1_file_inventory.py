@@ -1,9 +1,14 @@
 import hashlib
 
+import pytest
+
 from tldw_Server_API.app.core.Chatbooks.chatbook_format_v1_1 import (
+    _required_import_payload_paths,
     build_file_inventory,
     ensure_known_features,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_build_file_inventory_excludes_manifest_and_hashes_payload(tmp_path):
@@ -74,3 +79,25 @@ def test_ensure_known_features_reports_unknown_tokens():
 
     assert report["supported"] == ["content_envelopes"]
     assert report["unsupported"] == ["future_feature"]
+
+
+def test_required_import_payload_paths_prefers_explicit_file_path_for_standard_types():
+    paths = _required_import_payload_paths(
+        [
+            {
+                "id": "1",
+                "type": "note",
+                "file_path": "content/custom/note-one.md",
+            },
+            {
+                "id": "2",
+                "type": "conversation",
+                "file_path": "content/custom/conversation-two.json",
+            },
+        ]
+    )
+
+    assert paths == [
+        "content/custom/note-one.md",
+        "content/custom/conversation-two.json",
+    ]
