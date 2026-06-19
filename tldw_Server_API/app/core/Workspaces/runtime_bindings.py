@@ -50,6 +50,17 @@ _PATH_METADATA_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 _WRITE_STATUSES = WORKSPACE_RUNTIME_BINDING_STATUSES - {"archived"}
+_RUNTIME_BINDING_USER_FIELDS = (
+    "binding_kind",
+    "owner_domain",
+    "locator_ref",
+    "label",
+    "status",
+    "path_hint",
+    "portability",
+    "metadata",
+    "redaction_report",
+)
 
 
 def _input_error(message: str) -> ValueError:
@@ -150,6 +161,58 @@ def runtime_binding_response_payload(row: Mapping[str, Any]) -> dict[str, Any]:
     item["deleted"] = bool(item.get("deleted", False))
     item["version"] = int(item.get("version") or 1)
     return item
+
+
+def runtime_binding_payload_changed(
+    existing: Mapping[str, Any] | None,
+    requested: Mapping[str, Any],
+) -> bool:
+    """Return true when a runtime binding write changes user-controlled fields."""
+    if existing is None:
+        return True
+    if existing.get("deleted") in (True, 1, "1", "true", "True"):
+        return True
+    normalized = normalize_runtime_binding_payload(requested)
+    return any(existing.get(field_name) != normalized.get(field_name) for field_name in _RUNTIME_BINDING_USER_FIELDS)
+
+
+def record_runtime_binding_activity_event(
+    db: Any,
+    workspace_id: str,
+    event_type: str,
+    binding: Mapping[str, Any],
+    *,
+    user_id: str,
+) -> None:
+    """Record best-effort runtime binding activity without coupling endpoints to payload details."""
+    recorder = getattr(db, "record_workspace_activity_event", None)
+    if not callable(recorder):
+        return
+    try:
+        recorder(
+            workspace_id,
+            {
+                "event_type": event_type,
+                "category": "runtime_binding",
+                "resource_type": "workspace_runtime_binding",
+                "resource_id": str(binding.get("binding_id") or ""),
+                "summary": "Updated workspace runtime binding",
+                "metadata": {
+                    "binding_kind": str(binding.get("binding_kind") or ""),
+                    "owner_domain": str(binding.get("owner_domain") or ""),
+                    "status": str(binding.get("status") or ""),
+                },
+            },
+            user_id=user_id,
+            return_row=False,
+        )
+    except Exception:  # noqa: BLE001 - activity is an inspection aid, not write-path authority.
+        logger.opt(exception=True).warning(
+            "Failed to record Workspace runtime binding activity workspace={} event_type={} binding_id={}",
+            workspace_id,
+            event_type,
+            binding.get("binding_id"),
+        )
 
 
 def redacted_path_hint(value: Any) -> str:
