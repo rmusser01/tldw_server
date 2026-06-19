@@ -722,7 +722,7 @@ git commit -m "feat: project sandbox evidence into operator status"
 - Modify: `tldw_Server_API/tests/sandbox/test_operator_status.py`
 - Optionally modify: `tldw_Server_API/tests/sandbox/test_admin_macos_diagnostics.py`
 
-- [ ] **Step 1: Add failing service tests**
+- [x] **Step 1: Add failing service tests**
 
 In `test_operator_status.py`, add:
 
@@ -786,7 +786,7 @@ def test_service_operator_status_propagates_evidence_programming_error(monkeypat
         )
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -796,7 +796,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test
 
 Expected: service evidence tests fail until integration is added.
 
-- [ ] **Step 3: Integrate parser in service**
+- [x] **Step 3: Integrate parser in service**
 
 In `service.py`:
 
@@ -823,11 +823,11 @@ except _SANDBOX_OPERATOR_STATUS_OPERATIONAL_EXCEPTIONS as exc:
 
 Do not catch `RuntimeError`, `AssertionError`, `TypeError`, or other programming defects beyond the existing operational tuple.
 
-- [ ] **Step 4: Optionally add endpoint-level assertion**
+- [x] **Step 4: Endpoint-level assertion reviewed; no change needed**
 
 Only add endpoint coverage if schema validation fails or the existing endpoint test does not exercise the changed service shape. If needed, adjust `fake_operator_status()` in `test_admin_macos_diagnostics.py` to return an `evidence` section with extra fields and assert response serialization keeps them.
 
-- [ ] **Step 5: Run focused service/API tests**
+- [x] **Step 5: Run focused service/API tests**
 
 Run:
 
@@ -841,7 +841,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: all selected tests pass.
 
-- [ ] **Step 6: Commit Task 5**
+- [x] **Step 6: Commit Task 5**
 
 ```bash
 git add tldw_Server_API/app/core/Sandbox/service.py \

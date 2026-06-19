@@ -47,6 +47,7 @@ from .models import (
     SessionSpec,
     TrustLevel,
 )
+from .operator_evidence import collect_operator_evidence
 from .operator_status import build_operator_status
 from .orchestrator import SandboxOrchestrator, SessionActiveRunsConflict
 from .policy import SandboxPolicy, SandboxPolicyConfig, compute_policy_hash
@@ -1182,10 +1183,24 @@ class SandboxService:
             macos_diagnostics = {
                 "_section_error": "macos_diagnostics_failed"
             }
+        try:
+            evidence_summary = collect_operator_evidence()
+        except _SANDBOX_OPERATOR_STATUS_OPERATIONAL_EXCEPTIONS as exc:
+            logger.opt(exception=exc).warning(
+                "Sandbox operator status evidence unavailable"
+            )
+            evidence_summary = {
+                "configured": True,
+                "source": "host_smoke_evidence",
+                "available": True,
+                "valid": False,
+                "reasons": ["evidence_collection_failed"],
+            }
         return build_operator_status(
             runtime_diagnostics=runtime_diagnostics,
             macos_diagnostics=macos_diagnostics,
             startup_warning_summary=startup_warning_summary,
+            evidence_summary=evidence_summary,
         )
 
     @staticmethod

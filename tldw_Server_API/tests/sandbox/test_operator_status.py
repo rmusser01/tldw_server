@@ -548,6 +548,67 @@ def test_service_operator_status_uses_existing_diagnostics(monkeypatch) -> None:
     assert payload["overall_status"] == "ready"
 
 
+def test_service_operator_status_collects_evidence(monkeypatch) -> None:
+    svc = SandboxService()
+    monkeypatch.setattr(svc, "runtime_diagnostics_summary", lambda: _runtime_diagnostics())
+    monkeypatch.setattr(svc, "macos_diagnostics", lambda: _macos_diagnostics_unconfigured())
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Sandbox.service.collect_operator_evidence",
+        lambda: _evidence_ready(),
+    )
+
+    payload = svc.operator_status(
+        startup_warning_summary={"present": False, "blocking": False, "codes": []}
+    )
+
+    assert payload["sections"]["evidence"]["status"] == "ready"
+
+
+def test_service_operator_status_isolates_evidence_operational_failure(
+    monkeypatch,
+) -> None:
+    svc = SandboxService()
+    monkeypatch.setattr(svc, "runtime_diagnostics_summary", lambda: _runtime_diagnostics())
+    monkeypatch.setattr(svc, "macos_diagnostics", lambda: _macos_diagnostics_unconfigured())
+
+    def fail_evidence() -> dict[str, object]:
+        raise OSError("boom")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Sandbox.service.collect_operator_evidence",
+        fail_evidence,
+    )
+
+    payload = svc.operator_status(
+        startup_warning_summary={"present": False, "blocking": False, "codes": []}
+    )
+
+    assert payload["sections"]["runtime_readiness"]["status"] == "ready"
+    assert payload["sections"]["evidence"]["status"] == "unknown"
+    assert payload["sections"]["evidence"]["reasons"] == ["evidence_collection_failed"]
+
+
+def test_service_operator_status_propagates_evidence_programming_error(
+    monkeypatch,
+) -> None:
+    svc = SandboxService()
+    monkeypatch.setattr(svc, "runtime_diagnostics_summary", lambda: _runtime_diagnostics())
+    monkeypatch.setattr(svc, "macos_diagnostics", lambda: _macos_diagnostics_unconfigured())
+
+    def fail_evidence() -> dict[str, object]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Sandbox.service.collect_operator_evidence",
+        fail_evidence,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        svc.operator_status(
+            startup_warning_summary={"present": False, "blocking": False, "codes": []}
+        )
+
+
 def test_service_operator_status_isolates_macos_diagnostics_failure(monkeypatch) -> None:
     svc = SandboxService()
     monkeypatch.setattr(svc, "runtime_diagnostics_summary", lambda: _runtime_diagnostics())
