@@ -195,6 +195,7 @@ async def test_get_task_run_history_includes_acp_session_drillthrough(monkeypatc
         ]
         assert enriched_run["failure_context"] is None
     finally:
+        _clear_acp_audit_events()
         db.close()
 
 
@@ -327,6 +328,7 @@ async def test_get_task_run_history_redacted_mode_omits_support_unsafe_text(monk
             "/api/v1/acp/sessions/session-redacted/artifacts?redacted=true"
         )
     finally:
+        _clear_acp_audit_events()
         db.close()
 
 
@@ -1244,6 +1246,7 @@ async def test_dispatch_run_reviewer_agent_approval_completes_and_records_review
         assert "Dispatch me" not in serialized
         assert "Meets the success criteria" not in serialized
     finally:
+        _clear_acp_audit_events()
         db.close()
 
 
@@ -1301,6 +1304,7 @@ async def test_dispatch_run_reviewer_agent_rejection_retries_with_history(monkey
         serialized = json.dumps(_acp_audit_events_for_task(task.id))
         assert "Missing required tests" not in serialized
     finally:
+        _clear_acp_audit_events()
         db.close()
 
 
@@ -1356,6 +1360,7 @@ async def test_dispatch_run_reviewer_agent_rejection_max_attempts_triages(monkey
         serialized = json.dumps(_acp_audit_events_for_task(task.id))
         assert "Still fails review" not in serialized
     finally:
+        _clear_acp_audit_events()
         db.close()
 
 
