@@ -109,6 +109,8 @@ from tldw_Server_API.app.core.Workspaces.operations import workspace_operation_r
 from tldw_Server_API.app.core.Workspaces.runtime_bindings import (
     WORKSPACE_RUNTIME_BINDING_KINDS,
     WORKSPACE_RUNTIME_BINDING_OWNER_DOMAINS,
+    record_runtime_binding_activity_event,
+    runtime_binding_payload_changed,
     runtime_binding_response_payload,
 )
 from tldw_Server_API.app.core.Workspaces.sandbox_root_provisioning import (
@@ -591,41 +593,6 @@ def _list_workspace_runtime_bindings_sync(
     )
 
 
-def _record_runtime_binding_activity_event(
-    db: CharactersRAGDB,
-    workspace_id: str,
-    event_type: str,
-    binding: dict[str, Any],
-    *,
-    user_id: str,
-) -> None:
-    """Record runtime binding activity without making descriptor writes depend on it."""
-    try:
-        db.record_workspace_activity_event(
-            workspace_id,
-            {
-                "event_type": event_type,
-                "category": "runtime_binding",
-                "resource_type": "workspace_runtime_binding",
-                "resource_id": str(binding.get("binding_id") or ""),
-                "summary": "Updated workspace runtime binding",
-                "metadata": {
-                    "binding_kind": str(binding.get("binding_kind") or ""),
-                    "owner_domain": str(binding.get("owner_domain") or ""),
-                    "status": str(binding.get("status") or ""),
-                },
-            },
-            user_id=user_id,
-        )
-    except Exception:  # noqa: BLE001 - activity is an inspection aid, not write-path authority.
-        logger.opt(exception=True).warning(
-            "Failed to record Workspace runtime binding activity workspace={} event_type={} binding_id={}",
-            workspace_id,
-            event_type,
-            binding.get("binding_id"),
-        )
-
-
 def _upsert_workspace_runtime_binding_sync(
     db: CharactersRAGDB,
     workspace_id: str,
@@ -642,13 +609,14 @@ def _upsert_workspace_runtime_binding_sync(
         str(payload.get("binding_id") or ""),
         include_deleted=True,
     )
+    should_record_activity = runtime_binding_payload_changed(before, payload)
     binding = db.upsert_workspace_runtime_binding(
         workspace_id,
         payload,
         user_id=user_id,
     )
-    if before != binding:
-        _record_runtime_binding_activity_event(
+    if should_record_activity:
+        record_runtime_binding_activity_event(
             db,
             workspace_id,
             "runtime_binding.upserted",
@@ -684,7 +652,7 @@ def _archive_workspace_runtime_binding_sync(
         user_id=user_id,
     )
     if archived is not None:
-        _record_runtime_binding_activity_event(
+        record_runtime_binding_activity_event(
             db,
             workspace_id,
             "runtime_binding.archived",
@@ -1243,16 +1211,18 @@ async def get_workspace_index(
 ) -> WorkspaceIndexResponse:
     """Return a lightweight inspection/navigation index for one workspace."""
     try:
-        payload = WorkspaceActivityIndexService(db).build_index(
-            workspace_id,
-            group_limit=group_limit,
-            activity_limit=activity_limit,
-            media_db=media_db,
-            prompts_db=prompts_db,
-            workflows_db=workflows_db,
-            watchlists_db=watchlists_db,
-            user_id=_request_user_id(current_user),
-            request_metadata=build_workspace_membership_request_metadata(current_user),
+        payload = await run_in_threadpool(
+            lambda: WorkspaceActivityIndexService(db).build_index(
+                workspace_id,
+                group_limit=group_limit,
+                activity_limit=activity_limit,
+                media_db=media_db,
+                prompts_db=prompts_db,
+                workflows_db=workflows_db,
+                watchlists_db=watchlists_db,
+                user_id=_request_user_id(current_user),
+                request_metadata=build_workspace_membership_request_metadata(current_user),
+            )
         )
     except WorkspaceMembershipServiceError as exc:
         raise _membership_service_error_to_http(exc) from exc

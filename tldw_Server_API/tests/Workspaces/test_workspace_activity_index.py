@@ -62,6 +62,10 @@ def test_workspace_activity_events_are_timestamped_newest_first_and_safe(tmp_pat
     assert "api_key" not in rows[1]["metadata"]
     assert "/Users/alice" not in repr(rows)
     assert "sk-secret" not in repr(rows)
+    assert [
+        row["event_type"]
+        for row in db.list_workspace_activity_events("workspace-1", limit=10, category="runtime_binding")
+    ] == ["runtime_binding.upserted"]
 
 
 class FakeWorkspaceIndexDB:
@@ -120,7 +124,8 @@ class FakeWorkspaceIndexDB:
             },
         ]
 
-    def get_workspace(self, workspace_id: str) -> dict[str, object] | None:
+    def get_workspace(self, workspace_id: str, *, include_deleted: bool = False) -> dict[str, object] | None:
+        _ = include_deleted
         return self.workspaces.get(workspace_id)
 
     def get_conversation_for_workspace_membership(self, conversation_id: str) -> dict[str, object] | None:
@@ -280,3 +285,46 @@ def test_workspace_index_api_groups_resources_activity_and_warnings() -> None:
     assert any(warning["reason_code"] == "runtime_binding_missing" for warning in body["warnings"])
     assert "/Users/alice" not in response.text
     assert "do not expose" not in response.text
+
+
+def test_workspace_index_api_returns_deleted_warning_for_soft_deleted_workspace(tmp_path) -> None:
+    db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="test-client")
+    try:
+        workspace = db.upsert_workspace("workspace-deleted", "Deleted Workspace")
+        db.record_workspace_activity_event(
+            "workspace-deleted",
+            {
+                "event_type": "workspace.deleted",
+                "category": "workspace",
+                "summary": "Deleted workspace",
+            },
+            user_id="user-1",
+        )
+        db.delete_workspace("workspace-deleted", expected_version=workspace["version"])
+        app = FastAPI()
+        app.include_router(workspaces_endpoint.router, prefix="/api/v1/workspaces")
+
+        async def _allow_rate_limit() -> None:
+            return None
+
+        app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id="user-1")
+        app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+        app.dependency_overrides[try_get_media_db_for_user] = lambda: None
+        app.dependency_overrides[try_get_prompts_db_for_user] = lambda: None
+        app.dependency_overrides[workspaces_endpoint.try_get_workflows_db_for_user] = lambda: None
+        app.dependency_overrides[try_get_watchlists_db_for_user] = lambda: None
+        app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/workspace-deleted/index")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["workspace"]["deleted"] in (True, 1)
+        assert body["membership_summary"] == {"total": 0, "by_resource_type": {}, "by_role": {}}
+        assert body["resource_groups"] == []
+        assert body["runtime_summary"] == {"total": 0, "by_kind": {}, "by_status": {}, "bindings": []}
+        assert body["recent_activity"][0]["event_type"] == "workspace.deleted"
+        assert any(warning["reason_code"] == "workspace_deleted" for warning in body["warnings"])
+    finally:
+        db.close_connection()

@@ -1042,6 +1042,7 @@ class WorkspaceMembershipService:
                     },
                 },
                 user_id=user_id,
+                return_row=False,
             )
         except Exception:  # noqa: BLE001 - activity recording must not fail membership writes.
             logger.opt(exception=True).warning(

@@ -575,7 +575,8 @@ class FakeChaChaDB:
         data: dict[str, object],
         *,
         user_id: str | None = None,
-    ) -> dict[str, object]:
+        return_row: bool = True,
+    ) -> dict[str, object] | None:
         event = {
             "workspace_id": workspace_id,
             "actor_user_id": user_id,
@@ -585,6 +586,8 @@ class FakeChaChaDB:
             **dict(data),
         }
         self.activity_events.append(event)
+        if not return_row:
+            return None
         return dict(event)
 
 

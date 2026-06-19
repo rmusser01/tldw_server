@@ -73,3 +73,16 @@ Implemented the Workspace #1994 activity/index contract in PR https://github.com
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Review follow-up for PR #2396: rebased branch against latest origin/dev (already up to date), addressed Gemini/Qodo comments by moving runtime-binding activity event construction into core, isolating the workspace index builder in run_in_threadpool, narrowing runtime-binding upsert activity to normalized user-field changes, replacing activity listing dynamic SQL with static parameterized query variants, returning deleted-workspace index payloads with workspace_deleted warnings, and replacing list+scan activity insert readback with direct primary-key lookup plus return_row=False support for best-effort write hooks.
+
+Review verification:
+- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_activity_index.py tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings_api.py tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed 107 tests.
+- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_activity_index.py tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings.py tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings_api.py -q` passed 139 tests.
+- `./node_modules/.bin/vitest run src/services/workspace-index/__tests__/normalizers.test.ts --maxWorkers=1` passed 3 tests.
+- `git diff --check` passed.
+- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/Workspaces/activity_index.py tldw_Server_API/app/core/Workspaces/membership_service.py tldw_Server_API/app/core/Workspaces/runtime_bindings.py tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/app/api/v1/schemas/workspace_schemas.py -f json -o /tmp/bandit_workspace_activity_index_review.json` completed with zero results/errors.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

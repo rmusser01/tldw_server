@@ -100,6 +100,14 @@ def test_workspace_runtime_binding_api_upserts_lists_gets_and_archives(
     assert [event["event_type"] for event in db.list_workspace_activity_events("ws-runtime", limit=5)] == [
         "runtime_binding.upserted"
     ]
+    repeated = workspace_client.post(
+        "/api/v1/workspaces/ws-runtime/runtime-bindings",
+        json=_descriptor_payload(),
+    )
+    assert repeated.status_code == 201
+    assert [event["event_type"] for event in db.list_workspace_activity_events("ws-runtime", limit=5)] == [
+        "runtime_binding.upserted"
+    ]
 
     listed = workspace_client.get(
         "/api/v1/workspaces/ws-runtime/runtime-bindings?binding_kind=acp_session"

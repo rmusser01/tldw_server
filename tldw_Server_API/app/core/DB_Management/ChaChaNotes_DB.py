@@ -16337,10 +16337,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise  # pragma: no cover
         return self.get_workspace(workspace_id)  # type: ignore[return-value]
 
-    def get_workspace(self, workspace_id: str) -> dict[str, Any] | None:
-        """Retrieve a non-deleted workspace by id."""
-        query = "SELECT * FROM workspaces WHERE id = ? AND deleted = 0"
-        cursor = self.execute_query(query, (workspace_id,))
+    def get_workspace(
+        self,
+        workspace_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        """Retrieve a workspace by id, optionally including soft-deleted rows."""
+        if include_deleted:
+            cursor = self.execute_query("SELECT * FROM workspaces WHERE id = ?", (workspace_id,))
+        else:
+            cursor = self.execute_query(
+                "SELECT * FROM workspaces WHERE id = ? AND deleted = 0",
+                (workspace_id,),
+            )
         row = cursor.fetchone()
         return self._workspace_row_to_dict(row) if row else None
 
@@ -18612,7 +18622,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         data: Mapping[str, Any],
         *,
         user_id: str | None = None,
-    ) -> dict[str, Any]:
+        return_row: bool = True,
+    ) -> dict[str, Any] | None:
         """Append a bounded, secret-safe activity event for a workspace."""
         normalized_workspace_id = self._normalize_workspace_activity_required_string(workspace_id, "workspace_id")
         event_type = self._normalize_workspace_activity_required_string(data.get("event_type"), "event_type")
@@ -18664,10 +18675,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
             raise CharactersRAGDBError(f"Workspace activity event write failed: {exc}") from exc  # noqa: TRY003
 
-        rows = self.list_workspace_activity_events(normalized_workspace_id, limit=100)
-        for row in rows:
-            if row.get("event_id") == event_id:
-                return row
+        if not return_row:
+            return None
+
+        cursor = self.execute_query(
+            "SELECT * FROM workspace_activity_events WHERE workspace_id = ? AND event_id = ?",
+            (normalized_workspace_id, event_id),
+        )
+        row = self._normalize_workspace_activity_row(cursor.fetchone())
+        if row is not None:
+            return row
         raise CharactersRAGDBError("Created workspace activity event could not be reloaded.")  # noqa: TRY003
 
     def list_workspace_activity_events(
@@ -18680,17 +18697,30 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """List recent workspace activity events in deterministic newest-first order."""
         normalized_workspace_id = self._normalize_workspace_activity_required_string(workspace_id, "workspace_id")
         normalized_limit = self._normalize_workspace_activity_limit(limit)
-        clauses = ["workspace_id = ?"]
-        params: list[Any] = [normalized_workspace_id]
-        if category is not None:
-            clauses.append("category = ?")
-            params.append(self._normalize_workspace_activity_required_string(category, "category"))
-        params.append(normalized_limit)
-        cursor = self.execute_query(
-            f"SELECT * FROM workspace_activity_events WHERE {' AND '.join(clauses)} "  # nosec B608
-            "ORDER BY created_at DESC, event_id DESC LIMIT ?",
-            tuple(params),
-        )
+        if category is None:
+            cursor = self.execute_query(
+                """
+                SELECT *
+                  FROM workspace_activity_events
+                 WHERE workspace_id = ?
+                 ORDER BY created_at DESC, event_id DESC
+                 LIMIT ?
+                """,
+                (normalized_workspace_id, normalized_limit),
+            )
+        else:
+            normalized_category = self._normalize_workspace_activity_required_string(category, "category")
+            cursor = self.execute_query(
+                """
+                SELECT *
+                  FROM workspace_activity_events
+                 WHERE workspace_id = ?
+                   AND category = ?
+                 ORDER BY created_at DESC, event_id DESC
+                 LIMIT ?
+                """,
+                (normalized_workspace_id, normalized_category, normalized_limit),
+            )
         return [
             item
             for row in cursor.fetchall()

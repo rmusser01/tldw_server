@@ -62,7 +62,7 @@ class WorkspaceActivityIndexService:
         activity_limit: int = 25,
     ) -> dict[str, Any]:
         """Return the Workspace index/activity contract for API responses."""
-        workspace = self.chacha_db.get_workspace(workspace_id)
+        workspace = self.chacha_db.get_workspace(workspace_id, include_deleted=True)
         if workspace is None:
             raise WorkspaceMembershipServiceError(
                 "workspace_not_found",
@@ -76,19 +76,24 @@ class WorkspaceActivityIndexService:
             default=25,
             max_value=_ACTIVITY_LIMIT_MAX,
         )
-        membership_summary = self.memberships.workspace_membership_summary(workspace_id)
-        resource_groups = self._resource_groups(
-            workspace_id,
-            membership_summary=membership_summary,
-            group_limit=normalized_group_limit,
-            user_id=user_id,
-            media_db=media_db,
-            prompts_db=prompts_db,
-            workflows_db=workflows_db,
-            watchlists_db=watchlists_db,
-            request_metadata=request_metadata,
-        )
-        runtime_summary = self._runtime_summary(workspace_id)
+        if _workspace_truthy(workspace.get("deleted")):
+            membership_summary: dict[str, Any] = {"total": 0, "by_resource_type": {}, "by_role": {}}
+            resource_groups: list[dict[str, Any]] = []
+            runtime_summary = {"total": 0, "by_kind": {}, "by_status": {}, "bindings": []}
+        else:
+            membership_summary = self.memberships.workspace_membership_summary(workspace_id)
+            resource_groups = self._resource_groups(
+                workspace_id,
+                membership_summary=membership_summary,
+                group_limit=normalized_group_limit,
+                user_id=user_id,
+                media_db=media_db,
+                prompts_db=prompts_db,
+                workflows_db=workflows_db,
+                watchlists_db=watchlists_db,
+                request_metadata=request_metadata,
+            )
+            runtime_summary = self._runtime_summary(workspace_id)
         recent_activity = self._recent_activity(workspace_id, normalized_activity_limit)
         warnings = self._warnings(
             workspace=workspace,
@@ -181,7 +186,7 @@ class WorkspaceActivityIndexService:
         runtime_bindings: list[Mapping[str, Any]],
     ) -> list[dict[str, Any]]:
         warnings: list[dict[str, Any]] = []
-        if workspace.get("deleted") in (True, 1, "1", "true", "True"):
+        if _workspace_truthy(workspace.get("deleted")):
             warnings.append(
                 {
                     "severity": "error",
@@ -190,7 +195,7 @@ class WorkspaceActivityIndexService:
                     "action_href": "#/workspaces",
                 }
             )
-        elif workspace.get("archived") in (True, 1, "1", "true", "True"):
+        elif _workspace_truthy(workspace.get("archived")):
             warnings.append(
                 {
                     "severity": "warning",
@@ -255,3 +260,7 @@ def _bounded_limit(value: int, *, default: int, max_value: int) -> int:
     except (TypeError, ValueError):
         return default
     return max(1, min(normalized, max_value))
+
+
+def _workspace_truthy(value: Any) -> bool:
+    return value in (True, 1, "1", "true", "True")
