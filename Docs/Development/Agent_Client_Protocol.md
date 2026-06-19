@@ -250,6 +250,14 @@ for support-safe sharing. The current release posture is:
 - `ACP_AUDIT_RETENTION_DAYS` is enforced by ACP retention maintenance at store
   startup and by the periodic cleanup task. The maintenance pass flushes pending
   audit events before purging old audit rows.
+- Agent Tasks run history exposes bounded prompt/result previews for
+  authenticated owners. These previews are capped at 500 characters and are
+  intended for operator drill-through, not public support evidence. Use the
+  redacted ACP session endpoints when transcript snippets must be shared.
+- Accepted ACP work products promoted into workspace artifacts follow the
+  workspace artifact lifecycle after promotion. ACP session retention removes
+  raw session evidence; it does not automatically delete promoted workspace
+  artifacts.
 - Workspace `env_vars` and runner environment configuration are operational
   configuration. They may be stored or forwarded as plaintext in orchestration
   metadata and process environment. Use external secret managers or host-level
@@ -265,6 +273,8 @@ Current policy classification:
 | Audit metadata | Compliant | Sensitive metadata keys, common secret markers, and long string values are sanitized before audit events are returned. |
 | Session TTL and max-duration cleanup | Compliant | Active sessions are closed by configured duration limits; closed/error sessions older than `ACP_SESSION_RETENTION_DAYS` are hard-deleted with message cascade cleanup. |
 | Automatic audit retention enforcement | Compliant | `ACP_AUDIT_RETENTION_DAYS` is enforced by ACP retention maintenance at startup and during the periodic cleanup task. |
+| Task run transcript previews | Partial | Agent Tasks exposes owner-scoped 500-character prompt/result previews for diagnosis; these are bounded but not a support-safe redaction surface. Support-safe task run summaries are tracked by #2408. |
+| Promoted workspace artifacts | Separate lifecycle | Accepted work products promoted from ACP output are retained by the workspace artifact store, not ACP session retention. |
 | Workspace environment and runner env vars | Partial | Operational environment configuration can be stored or forwarded as plaintext; real secrets must come from host-level injection or an external secret manager. |
 | Redacted transcript and artifact views | Compliant | Session detail, event, and artifact endpoints accept `?redacted=true` for support-safe output. |
 
@@ -272,7 +282,8 @@ Release notes may claim authenticated ACP session drill-through, bounded run
 previews, sanitized audit metadata, sanitized diagnostics, automatic ACP
 session/audit retention maintenance, and opt-in redacted session/event/artifact
 views. Do not claim that the default drill-through endpoints are redacted; they
-remain intentionally full fidelity for authorized operators.
+remain intentionally full fidelity for authorized operators. Do not claim ACP
+session retention deletes accepted workspace artifacts after promotion.
 
 ### Admin Execution-Health Summary
 
@@ -325,9 +336,9 @@ The current and planned product surfaces are:
 | Docs | Shipped | The PRD, readiness matrix, compatibility matrix, and this guide define metric semantics and release caveats. |
 
 Keep the closeout boundaries separate: #1537 owns the summary contract and
-initial admin display; #1512 owns retention cleanup, #1513 owns support-safe
-redacted views, #1529 owns broader admin/deployment packaging, and #1563/#1564
-own live downstream-agent certification evidence.
+initial admin display; #2401 records the release retention/redaction policy,
+#1529 owns broader admin/deployment packaging, and #1563/#1564 own live
+downstream-agent certification evidence.
 
 ### Traceable ACP Output Artifacts
 

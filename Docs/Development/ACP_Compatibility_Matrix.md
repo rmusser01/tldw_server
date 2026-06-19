@@ -151,6 +151,12 @@ Redaction requirements:
 - Record credential and environment variable names only, not values.
 - Use redacted support views for transcript, event, artifact, and diagnostics
   evidence.
+- Do not use bounded Agent Tasks prompt/result previews as public evidence; they
+  are owner-scoped diagnosis snippets and are not the support-safe redaction
+  surface.
+- Confirm artifact evidence distinguishes raw ACP session artifacts from
+  accepted workspace artifacts, because promoted workspace artifacts follow the
+  workspace artifact lifecycle rather than ACP session retention.
 - Treat missing redaction evidence as a blocker for public support claims.
 
 ## Evidence Record Template

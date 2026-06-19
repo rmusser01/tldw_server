@@ -207,7 +207,11 @@ Run this when changing a candidate agent row from `documented_unverified` to
 
 Live E2E evidence should include the JSON manifest plus command output summary,
 not raw secrets or full transcript payloads. Use `?redacted=true` support views
-for transcript and artifact snippets in public evidence.
+for transcript and artifact snippets in public evidence. Do not use Agent Tasks
+prompt/result previews as public evidence; they are bounded owner-scoped
+diagnosis snippets, not the support-safe redaction surface. The release
+retention/redaction boundaries are summarized in
+[ACP Production Readiness](ACP_Production_Readiness.md).
 
 ## Sandbox Checklist
 
