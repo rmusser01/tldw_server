@@ -4,7 +4,7 @@ title: Plan MCP UAT JSON-RPC and transport remediation
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-19 20:52'
+updated_date: '2026-06-19 21:06'
 labels:
   - mcp
   - uat
@@ -31,12 +31,14 @@ Create the approved design/spec for a cohesive PR that fixes discovered MCP UAT 
 
 <!-- SECTION:NOTES:BEGIN -->
 Spec written at Docs/superpowers/specs/2026-06-19-mcp-uat-jsonrpc-transport-remediation-design.md. Automated spec-review loop ran three passes. Pass 1 found seven gaps; pass 2 found four remaining gaps; pass 3 found five final tightening items. All concrete findings were incorporated into the spec. A fourth reviewer was not dispatched because the brainstorming workflow caps the loop at three iterations. Verification: git diff --check passed for the spec and backlog task. Bandit skipped because this is docs/backlog-only with no code changes.
+
+User-requested design review pass incorporated seven additional constraints: post-auth JSON-RPC authorization status handling, intentional mounted batch contract update, raw envelope id-presence parsing, explicit trusted compatibility metadata names, FastAPI response-model adjustments, exact WebSocket keepalive allowlist, and bounded standalone scope. Focused reviewer pass then found three gaps, followed by two final gaps; all were patched. Final focused review approved the revised spec. Verification: git diff --check passed for the spec and task file. Bandit remains skipped because this revision is docs/backlog-only.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created the MCP UAT JSON-RPC and transport remediation design for one cohesive PR covering mounted tldw_server MCP and standalone MCP smoke/UAT surfaces. The final spec pins JSON-RPC envelope serialization, id/null semantics, notification outcomes, malformed batch behavior, auth/RBAC compatibility guards, policy resolver fail-closed coverage, smoke harness alignment, and validation sequencing.
+Created and revised the MCP UAT JSON-RPC and transport remediation design for one cohesive PR covering mounted tldw_server MCP and standalone MCP smoke/UAT surfaces. The final spec pins JSON-RPC envelope serialization, raw id-presence semantics, notification outcomes, malformed HTTP and batch behavior, HTTP status handling for post-auth JSON-RPC authorization failures, trusted compatibility auth metadata, response-model adjustments, WebSocket keepalive/failure handling, policy resolver fail-closed coverage, bounded standalone scope, smoke harness alignment, and validation sequencing.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

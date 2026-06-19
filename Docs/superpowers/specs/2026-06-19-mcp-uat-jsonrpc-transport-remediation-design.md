@@ -5,8 +5,9 @@ Date: 2026-06-19
 ## Status
 
 Draft specification for TASK-2392. Revised after three automated spec-review
-passes; the third-pass findings were incorporated without dispatching a fourth
-reviewer to respect the workflow iteration cap.
+passes and one user-requested design review pass. The third-pass findings were
+incorporated without dispatching a fourth reviewer to respect the workflow
+iteration cap.
 
 ## Goal
 
@@ -64,6 +65,8 @@ Standalone MCP package:
 - No weakening of fail-closed policy behavior for real policy resolver
   failures.
 - No new transport framework or large abstraction layer.
+- No unrelated standalone gateway cleanup beyond JSON-RPC envelope,
+  notification, and smoke/UAT behavior found by this matrix.
 
 ## Selected Approach
 
@@ -113,6 +116,12 @@ Required behavior:
 - request parsing must preserve whether the `id` member was absent or present
   with a null value; do not rely on a parsed model default alone to distinguish
   notifications from explicit-null-id requests
+- mounted and standalone transports must both cover absent-id notification
+  behavior separately from explicit-null-id request behavior
+- implement this distinction at the raw JSON-RPC envelope boundary before
+  coercing into `MCPRequest`, for example with a small parser/helper that
+  records `has_id`; avoid broad protocol model churn unless the local helper is
+  not sufficient
 
 Use this helper in:
 
@@ -125,9 +134,9 @@ internal call sites do not churn.
 
 The standalone gateway transports are also part of the UAT matrix. They must
 be verified against the same strict-envelope contract. If they already satisfy
-it, leave them unchanged and record the verification; if they fail, fix the
-transport-specific serialization boundary with the same optional-null omission
-rules instead of changing runtime business logic.
+it, leave them unchanged and record the verification; if they fail, fix only
+the transport-specific serialization boundary with the same optional-null
+omission rules instead of changing runtime business logic.
 
 ### Notification Semantics
 
@@ -175,6 +184,12 @@ Route parsing rules:
 
 - JSON-RPC error bodies return HTTP 200 unless the route is intentionally
   returning HTTP 204 for notifications
+- pre-protocol transport, security, and authentication dependency failures can
+  remain HTTP 401/403/4xx because no trusted JSON-RPC request context exists
+  yet
+- once a request reaches MCP protocol handling, authorization failures such as
+  `-32001` should return an HTTP 200 JSON-RPC error body rather than being
+  converted into HTTP 403, so strict JSON-RPC clients can handle them uniformly
 - invalid JSON body returns one JSON-RPC parse-error object with code `-32700`
   and `id: null`
 - non-object single request returns one JSON-RPC invalid-request object with
@@ -187,14 +202,25 @@ Route parsing rules:
 - empty batch returns one invalid-request object with code `-32600`, not an
   array
 - invalid elements inside a batch return per-element invalid-request responses;
-  preserve the element id when safely available, otherwise use `id: null`
+  preserve the element id only when the element is an object and its `id` is a
+  JSON-RPC-compatible value: a JSON string, a JSON integer number excluding
+  booleans, or null. Do not coerce floats, booleans, objects, or arrays into
+  valid ids; use `id: null` when the element is not an object, has no `id`, or
+  has an invalid id type.
 - mixed valid, invalid, and notification batch items return responses only for
   response-producing items, preserving response correlation with each item id
 - notification-only batches return HTTP 204 with no response body, matching
   the standalone gateway notification contract
-- HTTP, batch, and WebSocket parsing tests must cover absent `id` notifications
-  separately from explicit `"id": null` requests, and explicit-null-id
-  requests must receive a response with `id: null`
+- mounted HTTP, batch, and WebSocket parsing tests must cover absent `id`
+  notifications separately from explicit `"id": null` requests, and
+  explicit-null-id requests must receive a response with `id: null`
+- this is an intentional mounted batch contract update: legacy tests and
+  clients that expected an array containing one error for empty-batch failures
+  should be updated to the single JSON-RPC error object shape
+- FastAPI response models for `/request` and `/request/batch` must be loosened
+  or removed where they cannot represent strict JSON-RPC error objects and 204
+  notification responses; keep route dependencies and OpenAPI descriptions
+  explicit so validation is not silently weakened outside the JSON-RPC parser
 
 The route should not silently bypass dependencies such as authentication,
 HTTP security enforcement, API-key metadata attachment, session header
@@ -214,6 +240,16 @@ Required behavior:
 - Protocol module/tool permission checks may honor wildcard or admin claims
   only when metadata marks them as trusted compatibility claims from the
   server-side auth path.
+- trusted compatibility metadata should use explicit server-side field names:
+  `auth_via`, `trusted_auth_claims`, and `compat_claims_source`.
+- accepted `auth_via` values for this compatibility path should be limited to
+  narrow variants such as `single_user_api_key` and
+  `single_user_test_api_key`; `compat_claims_source` should distinguish HTTP
+  and WebSocket server auth paths, for example `mounted_http` and
+  `mounted_ws`.
+- protocol code must ignore or overwrite caller-supplied request metadata using
+  those trusted field names; only the server-side auth layer can set
+  `trusted_auth_claims=true`.
 - Arbitrary caller-supplied metadata must not be able to set
   `permissions=["*"]` and bypass DB-backed RBAC.
 - `SINGLE_USER_TEST_API_KEY` is accepted only when explicit test-mode
@@ -259,13 +295,20 @@ Adjustments:
   found message for the mounted tldw protocol
 - standalone transports can continue returning `-32601` where `tools/call` is
   unavailable
-- the smoke WebSocket client can ignore known outbound host keepalive frames
-  such as `{"type": "ping"}` that arrive while waiting for the correlated
-  JSON-RPC response
-- the mounted WebSocket server may tolerate inbound known keepalive frames with
-  the same explicit shapes, but must not produce a JSON-RPC response for them
-  or treat them as satisfying an outstanding request id
-- malformed non-keepalive WebSocket objects remain strict protocol failures
+- the smoke WebSocket client can ignore only exact outbound host keepalive
+  frames `{"type": "ping"}` and `{"type": "pong"}` that arrive while waiting
+  for the correlated JSON-RPC response
+- the mounted WebSocket server may tolerate inbound keepalive frames only when
+  they exactly match `{"type": "ping"}` or `{"type": "pong"}`; it must not
+  produce a JSON-RPC response for them or treat them as satisfying an
+  outstanding request id
+- malformed non-keepalive WebSocket objects remain strict protocol failures:
+  if the frame is parseable JSON but not a valid JSON-RPC request/batch, send a
+  JSON-RPC invalid-request error frame with `id: null`; if the frame is invalid
+  JSON text, send a JSON-RPC parse-error frame with `id: null` when possible,
+  then close only if the existing WebSocket error policy requires it
+- tests must prove non-keepalive malformed WebSocket frames are not silently
+  ignored and do not satisfy an outstanding request id
 
 ## Sequential Implementation Plan
 
@@ -283,11 +326,23 @@ Add focused failing tests or smoke assertions for:
   already satisfy the no-response contract or get fixed
 - absent `id` notifications and explicit `"id": null` requests are distinct
   for mounted HTTP, batch, and WebSocket
-- malformed mounted HTTP single request returns JSON-RPC `-32600`, not HTTP
-  422
+- absent `id` notifications and explicit `"id": null` requests are distinct
+  for standalone in-process, HTTP, WebSocket, and stdio transports
+- raw JSON-RPC parsing preserves id-member presence before `MCPRequest`
+  construction
+- invalid mounted HTTP JSON body returns JSON-RPC `-32700` with `id: null`,
+  not HTTP 422
+- well-formed mounted HTTP JSON with an invalid JSON-RPC envelope returns
+  JSON-RPC `-32600`, not HTTP 422
 - mounted batch non-array payload returns one `-32600` object with HTTP 200
 - mounted batch empty array returns one `-32600` object with HTTP 200
-- mounted batch invalid elements preserve a safe element id or use `id: null`
+- legacy empty-batch tests expecting an array are updated to the new single
+  JSON-RPC error object contract
+- mounted and standalone batch invalid elements preserve only JSON strings,
+  JSON integer numbers excluding booleans, and null ids from object elements;
+  floats, booleans, objects, arrays, missing ids, and non-object elements use
+  `id: null`
+- batch invalid-id tests cover at least `id: true` and a non-integer number
 - mounted mixed batch omits notification items and preserves request-response
   correlation
 - mounted all-notification batch returns HTTP 204 with no body
@@ -296,6 +351,8 @@ Add focused failing tests or smoke assertions for:
 - mounted HTTP and WebSocket reject `SINGLE_USER_TEST_API_KEY` under
   production-default configuration and accept it only when the explicit test
   guard is active
+- server-side compatibility metadata fields are present for accepted
+  single-user/test credentials and cannot be injected from caller metadata
 - caller-supplied request metadata cannot grant wildcard/admin permissions
 - JWT and DB-backed RBAC authorization remains unchanged
 - policy-enabled safe discovery call does not fail from resolver import cycle
@@ -309,17 +366,26 @@ Implement the shared serialization helper and wire it through mounted HTTP,
 batch, and WebSocket response paths. Verify strict clients no longer see
 `error: null` on success or `data: null` on errors.
 
+Also update route response models where needed so strict JSON-RPC error object
+and 204 notification shapes are representable without bypassing the existing
+security dependencies.
+
 ### Stage 3: Notification And Request Parsing
 
 Add `notifications/initialized` support and update mounted HTTP parsing so
 invalid JSON-RPC envelopes are mapped into JSON-RPC errors. Preserve the
-existing auth/session/security path.
+existing auth/session/security path. Add a raw envelope parsing helper that
+keeps id-member presence separate from the parsed `id` value before
+constructing `MCPRequest`.
 
 ### Stage 4: Mounted Auth/RBAC Consistency
 
 Unify single-user/test API-key compatibility for mounted HTTP and WebSocket.
 Add trusted-claim metadata and ensure protocol RBAC compatibility honors it
-only from trusted server-side auth paths.
+only from trusted server-side auth paths. Treat JSON-RPC authorization failures
+that occur after protocol handling as JSON-RPC error responses with HTTP 200;
+leave pre-protocol authentication and transport-security dependency failures as
+HTTP 4xx responses.
 
 ### Stage 5: Policy Resolver Import Cycle
 
@@ -370,9 +436,15 @@ Risk: changing FastAPI request typing could weaken docs or validation.
 Mitigation: keep parsing localized to MCP JSON-RPC routes, preserve auth and
 security dependencies, and convert valid payloads back into `MCPRequest`.
 
+Risk: loosening FastAPI response models could hide route contract drift.
+Mitigation: replace model-level validation only where JSON-RPC requires
+multiple shapes, keep explicit OpenAPI response descriptions, and add endpoint
+tests for success, error, and 204 notification cases.
+
 Risk: wildcard permission compatibility could become a production bypass.
 Mitigation: honor wildcard/admin claims only when server-side auth metadata
-marks them as trusted compatibility claims.
+marks them as trusted compatibility claims, and ignore caller-provided metadata
+that attempts to set those trust fields.
 
 Risk: smoke harness loosening could mask real protocol bugs.
 Mitigation: loosen only payload-level metadata expectations, not JSON-RPC
@@ -383,8 +455,12 @@ Mitigation: move shared types/helpers downward or localize imports; avoid
 adding new service-to-service cycles.
 
 Risk: WebSocket keepalive tolerance could hide malformed frames.
-Mitigation: accept only explicit known keepalive shapes and keep strict failure
-for other non-JSON-RPC objects.
+Mitigation: accept only exact one-field keepalive objects `{"type": "ping"}`
+and `{"type": "pong"}` and keep strict failure for other non-JSON-RPC objects.
+
+Risk: explicit-null request ids could still be misclassified as notifications.
+Mitigation: preserve id-member presence at the raw envelope boundary and cover
+absent-id versus explicit-null-id behavior across HTTP, batch, and WebSocket.
 
 ## Success Criteria
 
@@ -395,8 +471,13 @@ for other non-JSON-RPC objects.
 - `notifications/initialized` behaves as a no-response notification.
 - Mounted malformed JSON-RPC requests return JSON-RPC errors instead of FastAPI
   422 responses.
+- Post-auth JSON-RPC authorization failures return JSON-RPC error bodies rather
+  than HTTP 403 conversions; pre-protocol authentication failures still use
+  HTTP auth status codes.
 - Single-user/test API-key behavior is consistent between mounted HTTP and
   WebSocket.
+- Trusted compatibility metadata uses explicit server-side-only fields and
+  cannot be injected by callers.
 - Policy-enabled safe discovery calls no longer fail due to resolver import
   cycles.
 - Smoke harness distinguishes valid metadata from actual protocol failures.
