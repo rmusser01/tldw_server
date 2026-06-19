@@ -1234,7 +1234,6 @@ flowchart LR
   Ingestion --> dbMedia
   Collections --> dbMedia
   Watchlists --> dbMedia
-  Watchlists --> dbPers
   Meetings --> dbMedia
   SearchRes --> dbMedia
   RAG --> dbMedia
