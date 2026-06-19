@@ -4,7 +4,7 @@ title: Design MCP smoke client transport harness
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-19 03:08'
+updated_date: '2026-06-19 03:19'
 labels:
   - mcp
   - testing
@@ -18,6 +18,8 @@ references:
 documentation:
   - >-
     Docs/superpowers/specs/2026-06-19-mcp-smoke-client-transport-harness-design.md
+  - >-
+    Docs/superpowers/plans/2026-06-19-mcp-smoke-client-transport-harness-implementation-plan.md
 ---
 
 ## Description
@@ -34,6 +36,12 @@ Design a simple MCP smoke client that runs the standalone/tldw MCP server throug
 - [ ] #4 TASK-2281 LSP implementation references the smoke client as its prerequisite harness.
 - [ ] #5 Baseline scenarios cover initialize, initialized notification, tools/list, ping, safe tools/call, unknown tool, resources, prompts, JSON-RPC batch, malformed request, profile filtering, and policy denial where fixtures support it.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-06-19-mcp-smoke-client-transport-harness-implementation-plan.md
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 

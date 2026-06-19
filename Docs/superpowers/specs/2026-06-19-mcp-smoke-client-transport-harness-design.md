@@ -56,6 +56,9 @@ JSON report that is safe to attach to PRs, CI artifacts, or Backlog task notes.
    scenarios should be additive modules on top of the baseline client.
 7. **Capability-adaptive.** Optional resources, prompts, and fixture tools should
    be skipped with explicit reason codes unless strict mode requests them.
+8. **Idempotent retries only.** Transport adapters may retry connection setup and
+   explicitly idempotent read-only steps, but must not automatically replay
+   `tools/call` requests after bytes have been sent.
 
 ## Architecture
 
@@ -90,6 +93,7 @@ JSON report that is safe to attach to PRs, CI artifacts, or Backlog task notes.
 - `mcp_unified/smoke/scenarios.py`
 - `mcp_unified/smoke/reporting.py`
 - `mcp_unified/smoke/cli.py`
+- `mcp_unified/smoke/fixtures.py`
 - `tldw_Server_API/app/core/MCP_unified/tests/test_smoke_client.py`
 - `tldw_Server_API/app/core/MCP_unified/tests/fixtures/smoke_stdio_server.py`
 - `Docs/MCP/Unified/Smoke_Client.md`
@@ -107,11 +111,16 @@ forms are useful:
 
 - `InProcessGatewayTransport` for a `GatewayRuntime` using
   `mcp_unified.gateway.jsonrpc.handle_jsonrpc()`.
-- `InProcessFastApiTransport` for a FastAPI `TestClient`, using
+- `InProcessFastApiTransport` for a FastAPI app, using `httpx.AsyncClient` with
+  an ASGI transport against
   `/api/v1/mcp/request` or the standalone gateway route mounted in a test app.
 
 This mode is the CI baseline because it is deterministic, fast, and does not
 need port allocation.
+
+Avoid leaking synchronous `TestClient` behavior into the async smoke client. If
+sync testing remains useful for compatibility checks, keep it behind a dedicated
+adapter so the scenario runner stays async-first.
 
 ### Live HTTP
 
@@ -133,6 +142,12 @@ The adapter must never print credentials in reports or logs.
 HTTP notification behavior should accept HTTP 204 or a JSON-RPC no-response
 equivalent, depending on the endpoint implementation. The adapter should treat
 both as a passed notification when no JSON-RPC response object is expected.
+
+HTTP retries must be conservative. By default, the adapter may retry only before
+the request body is sent or for explicitly idempotent read-only scenario steps
+such as `initialize`, `ping`, `tools/list`, `resources/list`, and `prompts/list`.
+It must not automatically retry `tools/call`, `resources/read`, or `prompts/get`
+after transmission unless a scenario explicitly marks the call as idempotent.
 
 ### Live WebSocket
 
@@ -157,8 +172,9 @@ cleanup as a client would.
 
 ### Stdio Subprocess
 
-The stdio adapter starts a configured command and exchanges one JSON-RPC object
-per line over stdin/stdout. It should support:
+The stdio adapter starts a configured command and exchanges one JSON-RPC payload
+per line over stdin/stdout. A payload may be either one JSON-RPC object or a
+batch array. It should support:
 
 - command plus argument array, not a shell string;
 - explicit `cwd`;
@@ -172,6 +188,8 @@ external MCP servers. It must not become a general shell execution path.
 
 Notification steps over stdio should assert that no response line is produced
 within a short bounded timeout, then continue using the same subprocess.
+Subprocess stdout must be treated as protocol-only JSON-RPC output. Diagnostics
+belong on stderr and should be captured only through the bounded redaction path.
 
 ## Baseline Scenario Set
 
@@ -180,11 +198,15 @@ The initial built-in scenario group should include:
 1. `initialize`
    - request server capabilities;
    - assert `serverInfo.name` and capability shape are present;
+   - record advertised capabilities for scenario gating;
    - capture session metadata when available.
 
 2. `notifications/initialized`
    - send as a notification;
-   - assert no response is returned.
+   - assert no response is returned;
+   - send a follow-up `ping` on the same connection/process and assert it
+     succeeds, because no-response alone also happens for unknown notification
+     methods.
 
 3. `tools/list`
    - assert response contains a tool list;
@@ -211,11 +233,17 @@ The initial built-in scenario group should include:
      policy allows them.
 
 8. Resources
+   - check `initialize.capabilities.resources.available`;
+   - skip in best-effort mode when not advertised;
+   - fail in strict mode when required but not advertised;
    - call `resources/list`;
    - if resources exist, call `resources/read` for one safe resource;
    - if none exist, assert the empty response is well formed.
 
 9. Prompts
+   - check `initialize.capabilities.prompts.available`;
+   - skip in best-effort mode when not advertised;
+   - fail in strict mode when required but not advertised;
    - call `prompts/list`;
    - if prompts exist, call `prompts/get` with safe arguments;
    - if none exist, assert the empty response is well formed.
@@ -256,6 +284,11 @@ The stdio example should initially target a test fixture subprocess. If the
 standalone gateway later exposes a packaged stdio entrypoint, the docs can add a
 second example for that executable without changing the transport contract.
 
+After the module shape is stable, add a console script such as
+`mcp-unified-smoke = "mcp_unified.smoke.cli:main"` so operators can run the
+harness without spelling the Python module path. The initial implementation can
+ship `python -m` first if that keeps packaging churn lower.
+
 Exit codes:
 
 - `0`: all required steps passed;
@@ -295,12 +328,20 @@ Each step should include:
 tool names, resource counts, prompt counts, or error reason codes rather than
 dumping full payloads.
 
+An optional debug trace mode may add redacted request/response summaries for
+diagnostics. Trace entries should include method, id, top-level result keys,
+error code, reason code, payload byte sizes, and elapsed time. They must not
+include raw auth headers, full tool arguments, full result payloads, full file
+contents, or absolute local paths by default.
+
 ## Security And Safety
 
 - Auth material may be read only from explicit CLI flags or named environment
   variables.
 - Reports must redact auth headers, environment values, and subprocess command
   environment.
+- Debug traces must stay summary-only unless a future explicit unsafe local-only
+  mode is designed and reviewed separately.
 - Stdio command execution must use argv arrays and `asyncio.create_subprocess_exec`
   or equivalent, never `shell=True`.
 - Live transport modes must require explicit URLs.
@@ -339,7 +380,8 @@ the first LSP PR.
    - focused pytest coverage.
 
 3. **Live HTTP transport**
-   - URL, headers, auth env support, session capture, timeout behavior.
+   - URL, headers, auth env support, session capture, timeout behavior;
+   - no automatic replay of non-idempotent calls.
 
 4. **Live WebSocket transport**
    - request correlation, notification behavior, timeout diagnostics.
@@ -357,12 +399,19 @@ the first LSP PR.
 
 - Unit tests for report sanitization and JSON-RPC helpers.
 - In-process scenario tests with a fake `GatewayRuntime`.
-- HTTP tests using FastAPI `TestClient` or an ASGI test transport.
+- HTTP tests using `httpx.AsyncClient` with an ASGI transport for in-process
+  FastAPI coverage.
 - WebSocket tests against the existing in-process WebSocket test app.
 - Stdio tests against a tiny fixture subprocess that implements initialize,
   tools/list, tools/call, resources/list, and prompts/list.
 - Failure tests for malformed JSON-RPC, unknown method/tool, timeout, oversized
   response, subprocess startup failure, and redaction.
+- Regression tests that prove `notifications/initialized` is followed by a
+  successful request on the same transport.
+- Tests that prove resource and prompt scenarios are gated by advertised
+  capabilities in best-effort and strict modes.
+- Tests that prove HTTP retry policy does not replay transmitted `tools/call`
+  requests.
 - Live transport commands should have documented manual smoke examples but should
   not block default CI unless a job explicitly provisions the target server.
 
@@ -386,5 +435,9 @@ git diff --check
   ping, unknown tool/error behavior, JSON-RPC batch, optional profile filtering,
   and optional policy denial.
 - Report output is bounded and redacted.
+- Optional debug traces are bounded and redacted.
 - Stdio subprocess execution is argv-based and never shell-based.
+- Stdio subprocess mode supports object and batch-array JSON-RPC payloads.
+- HTTP retry behavior cannot duplicate non-idempotent tool calls by default.
+- Resource and prompt scenarios honor `initialize` capability advertisement.
 - LSP work has a clear follow-up hook for adding LSP-specific smoke scenarios.

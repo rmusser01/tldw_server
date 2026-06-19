@@ -4,7 +4,7 @@ title: Add LSP-backed code intelligence MCP tools
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-19 03:08'
+updated_date: '2026-06-19 03:19'
 labels:
   - mcp
   - code-intelligence
@@ -18,6 +18,8 @@ references:
 documentation:
   - >-
     Docs/superpowers/specs/2026-06-19-mcp-smoke-client-transport-harness-design.md
+  - >-
+    Docs/superpowers/plans/2026-06-19-mcp-smoke-client-transport-harness-implementation-plan.md
 ---
 
 ## Description
