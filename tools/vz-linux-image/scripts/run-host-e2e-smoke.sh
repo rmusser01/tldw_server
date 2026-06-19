@@ -413,6 +413,11 @@ print_evidence_plan() {
   for evidence_file in "${EVIDENCE_FILE_NAMES[@]}"; do
     echo "evidence file: ${EVIDENCE_DIR}/${evidence_file}"
   done
+  print_evidence_env_hint
+}
+
+print_evidence_env_hint() {
+  printf 'export TLDW_SANDBOX_VZ_EVIDENCE_DIR=%q\n' "${EVIDENCE_DIR}"
 }
 
 prepare_runtime_paths() {
@@ -908,6 +913,7 @@ finalize_evidence() {
     write_json_evidence "${final_exit}" "$(phase_records_text; printf '%s\n' "${evidence_success_record}")" || status="$?"
     if [[ "${status}" -eq 0 ]]; then
       PHASE_RECORDS+=("${evidence_success_record}")
+      print_evidence_env_hint
     fi
   fi
   if [[ "${status}" -ne 0 ]]; then

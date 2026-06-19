@@ -213,6 +213,17 @@ bundle hashes separately from disposable run bundle hashes. A post-smoke change
 to the disposable run bundle is expected; a source bundle hash or mtime change
 is not.
 
+The wrapper prints a sourceable evidence handoff when planning or finishing a
+run:
+
+```bash
+export TLDW_SANDBOX_VZ_EVIDENCE_DIR=/path/to/runtime/evidence
+```
+
+Use that value when starting the API server if you want
+`GET /api/v1/sandbox/admin/operator-status` to include the latest local host
+smoke evidence.
+
 The helper refuses sockets whose parent directory is not owner-only. Do not put
 the helper socket directly under `/tmp`; use the script defaults or create a
 private `0700` runtime directory as shown above.

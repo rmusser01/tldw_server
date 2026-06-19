@@ -78,6 +78,7 @@ def test_host_e2e_smoke_script_help_mentions_required_bundle() -> None:
     assert "Usage:" in result.stdout
     assert "--bundle PATH" in result.stdout
     assert "Canonical source vz_linux bundle" in result.stdout
+    assert "--evidence-dir PATH" in result.stdout  # nosec B101
     assert "--include-failure-drills" in result.stdout
 
 
@@ -195,6 +196,7 @@ def test_host_e2e_smoke_script_dry_run_prints_default_evidence_bundle(tmp_path: 
     evidence_dir = Path(evidence_dir_text)
     assert evidence_dir.name == "evidence"
     assert not evidence_dir.exists()
+    assert f"export TLDW_SANDBOX_VZ_EVIDENCE_DIR={evidence_dir_text}" in result.stdout  # nosec B101
     expected_paths = {f"{evidence_dir_text}/{evidence_file}" for evidence_file in EVIDENCE_FILES}
     assert expected_paths <= _planned_evidence_files(result.stdout)
 
@@ -222,6 +224,7 @@ def test_host_e2e_smoke_script_dry_run_accepts_evidence_dir_override(tmp_path: P
 
     assert result.returncode == 0, result.stderr
     assert f"evidence directory: {evidence_dir}" in result.stdout
+    assert f"export TLDW_SANDBOX_VZ_EVIDENCE_DIR={evidence_dir}" in result.stdout  # nosec B101
     assert not evidence_dir.exists()
     expected_paths = {str(evidence_dir / evidence_file) for evidence_file in EVIDENCE_FILES}
     assert expected_paths <= _planned_evidence_files(result.stdout)
@@ -429,6 +432,7 @@ def test_host_e2e_smoke_script_real_run_writes_evidence_bundle(tmp_path: Path) -
         assert f"{_sha256_file(kernel)}  kernel" in source_before_hashes
         assert f"{_sha256_file(rootfs)}  rootfs.img" in source_after_hashes
         assert f"{_sha256_file(rootfs)}  rootfs.img" in run_hashes
+        assert f"export TLDW_SANDBOX_VZ_EVIDENCE_DIR={evidence_dir}" in result.stdout  # nosec B101
         evidence = json.loads((evidence_dir / "host-smoke-evidence.json").read_text(encoding="utf-8"))
     finally:
         for unreadable_log in tmp_dir.glob("**/unreadable.log"):
