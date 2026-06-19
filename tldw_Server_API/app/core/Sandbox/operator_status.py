@@ -18,14 +18,15 @@ def _safe_int(value: object) -> int:
     if isinstance(value, bool):
         return 0
     try:
-        return int(value or 0)
+        coerced = int(value or 0)
     except (OverflowError, TypeError, ValueError):
         return 0
+    return max(coerced, 0)
 
 
 def _safe_list(value: object) -> list[object]:
     if isinstance(value, list):
-        return value
+        return list(value)
     if isinstance(value, tuple):
         return list(value)
     return []
@@ -142,10 +143,10 @@ def build_operator_status(
         "runtime_readiness": _section(
             "unknown"
             if runtime_failed
-            else ("ready" if ready_count else "unavailable"),
+            else ("ready" if ready_count > 0 else "unavailable"),
             severity="warning"
             if runtime_failed
-            else ("info" if ready_count else "error"),
+            else ("info" if ready_count > 0 else "error"),
             ready=ready_count,
             total=runtime_total,
             host_local_warning_runtimes=host_local_warning_runtimes,

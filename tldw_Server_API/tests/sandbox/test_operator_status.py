@@ -163,6 +163,28 @@ def test_operator_status_rejects_malformed_runtime_integer_values() -> None:
     assert payload["overall_status"] == "unavailable"
 
 
+def test_operator_status_clamps_negative_count_diagnostics() -> None:
+    runtime = _runtime_diagnostics()
+    runtime["summary"]["ready"] = -1
+    runtime["summary"]["total"] = -2
+    macos = _macos_diagnostics_unconfigured()
+    macos["image_store"]["gc_candidates"] = -3
+
+    payload = build_operator_status(
+        runtime_diagnostics=runtime,
+        macos_diagnostics=macos,
+        startup_warning_summary={"present": False, "blocking": False, "codes": []},
+    )
+
+    assert payload["sections"]["runtime_readiness"]["status"] == "unavailable"
+    assert payload["sections"]["runtime_readiness"]["ready"] == 0
+    assert payload["sections"]["runtime_readiness"]["total"] == 0
+    assert payload["sections"]["image_store"]["gc_candidates"] == 0
+    assert payload["summary"]["runtime_ready"] == 0
+    assert payload["summary"]["runtime_total"] == 0
+    assert payload["overall_status"] == "unavailable"
+
+
 def test_operator_status_points_image_store_to_cleanup_plan() -> None:
     macos = _macos_diagnostics_unconfigured()
     macos["recovery_summary"] = {
@@ -171,7 +193,7 @@ def test_operator_status_points_image_store_to_cleanup_plan() -> None:
         "codes": ["image_store_gc_candidates"],
         "counts": {"gc_candidates": 2},
         "repair_endpoint": None,
-        "cleanup_plan_endpoint": "/api/v1/sandbox/admin/images/cleanup-plan",
+        "cleanup_plan_endpoint": "/api/v1/sandbox/admin/macos-image-store/cleanup-plan",
         "notes": [],
     }
 
