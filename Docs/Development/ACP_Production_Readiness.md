@@ -33,6 +33,7 @@ verified production deployment on a specific host.
 | [#1532](https://github.com/rmusser01/tldw_server/issues/1532) | ACP-adjacent release work tracker | Tracks artifact storage/API, promotion, UI, export, verification, compatibility, and product-state follow-ups after the first ACP productionization pass. |
 | [#1704](https://github.com/rmusser01/tldw_server/issues/1704) | ACP artifact release verification | Records release-grade verification for the first accepted ACP-to-workspace-artifact golden path. |
 | [#2401](https://github.com/rmusser01/tldw_server/issues/2401) | Artifact retention and transcript redaction release policy | Makes the release retention/redaction boundaries explicit for ACP session evidence, audit records, diagnostics, artifacts, run previews, and promoted workspace artifacts. |
+| [#2400](https://github.com/rmusser01/tldw_server/issues/2400) | Sandbox host-runtime release verification | Records release-host evidence for selected ACP sandbox runtimes before sandbox-backed support claims are made. |
 
 Recommended order: seed #1472, then complete #1479, #1478, #1476, #1475,
 #1477, #1474, #1473, #1480, and finally close #1472. ACP maturity
@@ -42,6 +43,20 @@ claims, with [#2401](https://github.com/rmusser01/tldw_server/issues/2401)
 capturing the release retention/redaction policy and
 [#1529](https://github.com/rmusser01/tldw_server/issues/1529) capturing
 admin/deployment posture.
+
+## Sandbox Host-Runtime Evidence
+
+[#2400](https://github.com/rmusser01/tldw_server/issues/2400) selected Docker
+as the only runtime with current release-host pass evidence. See
+[ACP Sandbox Host Runtime Verification - 2026-06-19](ACP_Sandbox_Host_Runtime_Verification_2026_06_19.md)
+for the recorded host OS, Docker version, commands, commit, results, and
+cleanup probes.
+
+Release surfaces may say the Docker-backed ACP sandbox runtime lifecycle was
+verified on that macOS/Docker Desktop host. They must not claim Lima, VZ, or
+all-runtimes sandbox support from this evidence. Named downstream-agent rows
+also remain `sandbox=skip` until the agent has its own sandbox run, preferably
+`workspace-live-e2e` with `ACP_E2E_EXPECT_SANDBOX=1`.
 
 ## Readiness Matrix
 
@@ -182,11 +197,13 @@ python -m bandit -r <touched_python_paths> -f json -o /tmp/bandit_acp_<task>.jso
 ## Optional Runtime Caveats
 
 - Docker sandbox verification requires the ACP sandbox dependencies and a local
-  Docker runtime. If Docker is unavailable, mark the Docker row blocked or
+  Docker runtime. The current release-host Docker pass evidence is recorded in
+  [ACP Sandbox Host Runtime Verification - 2026-06-19](ACP_Sandbox_Host_Runtime_Verification_2026_06_19.md).
+  If Docker is unavailable on another host, mark the Docker row blocked or
   skipped with host evidence instead of marking it passed.
 - Lima and Apple Virtualization Framework coverage is host-specific. These can
   be optional rows unless one of them is selected as the default production
-  runtime.
+  runtime. They remain unverified in the current #2400 release-host evidence.
 - Workspace creation and dispatch require `ACP-WORKSPACE.allowed_base_paths` or
   `ACP_WORKSPACE_ALLOWED_BASE_PATHS`. A missing allowlist is a configuration
   failure, not an implicit permission to run anywhere on the host.
