@@ -9,6 +9,7 @@ labels:
 references:
 - https://github.com/rmusser01/tldw_server/issues/2408
 - https://github.com/rmusser01/tldw_server/issues/2398
+- https://github.com/rmusser01/tldw_server/pull/2413
 modified_files:
 - Docs/Development/ACP_Production_Readiness.md
 - Docs/Development/Agent_Client_Protocol.md
@@ -48,6 +49,8 @@ Track implementation for GitHub issue #2408: add a support-safe/redacted task ru
 Implemented GitHub issue #2408 for ACP support-safe Agent Tasks run summaries. `GET /api/v1/agent-orchestration/tasks/{task_id}` now accepts `run_summary_mode=full|redacted`, with full as the unchanged default. Redacted mode preserves operational metadata while replacing prompt/result previews, diagnostic messages/URIs, run errors/result summaries, failure-context free text, review-decision feedback, and top-level review feedback with `[redacted]`; ACP detail/events/artifacts links point to `?redacted=true` in redacted mode. Added frontend URL-builder support and docs/spec/plan updates.
 
 Final verification after rebase onto `origin/dev`: `python -m pytest tldw_Server_API/tests/Agent_Orchestration/test_orchestration_api.py -q` passed 40 tests; `./node_modules/.bin/vitest run src/components/Option/AgentTasks/__tests__/AgentTasksPage.connection.test.tsx --maxWorkers=1 --no-file-parallelism` passed 12 tests after temporary `bun install` in `apps/` to repair local worktree dependency links, with generated Bun artifacts restored before staging; `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/agent_orchestration.py -f json -o /tmp/bandit_acp_task_run_summaries_2408_post_rebase.json` reported zero findings; `git diff --check` passed.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2413
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
