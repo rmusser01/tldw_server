@@ -8,6 +8,8 @@ import pytest
 
 from tldw_Server_API.app.core.Sandbox.operator_evidence import (
     ENV_VZ_EVIDENCE_DIR,
+    JSON_MAX_BYTES,
+    MAX_PHASES,
     _dir_fd_operations_available,
     collect_operator_evidence,
 )
@@ -179,3 +181,179 @@ def test_collect_operator_evidence_fails_closed_without_safe_open(
 
     assert summary["available"] is False
     assert "evidence_safe_open_unavailable" in summary["reasons"]
+
+
+def test_collect_operator_evidence_rejects_oversized_json(tmp_path: Path) -> None:
+    _write_evidence(tmp_path, _valid_payload())
+    (tmp_path / "host-smoke-evidence.json").write_text(
+        " " * (JSON_MAX_BYTES + 1),
+        encoding="utf-8",
+    )
+
+    summary = collect_operator_evidence(
+        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        now=NOW,
+    )
+
+    assert summary["valid"] is False
+    assert "evidence_json_oversized" in summary["reasons"]
+
+
+def test_collect_operator_evidence_rejects_malformed_utf8(tmp_path: Path) -> None:
+    _write_evidence(tmp_path, _valid_payload())
+    (tmp_path / "host-smoke-evidence.json").write_bytes(b"\xff")
+
+    summary = collect_operator_evidence(
+        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        now=NOW,
+    )
+
+    assert summary["valid"] is False
+    assert "evidence_json_malformed_utf8" in summary["reasons"]
+
+
+def test_collect_operator_evidence_rejects_malformed_json_without_leaking_raw(
+    tmp_path: Path,
+) -> None:
+    _write_evidence(tmp_path, _valid_payload())
+    raw_json = '{"schema_version": 1, "secret_raw": "must-not-leak"'
+    (tmp_path / "host-smoke-evidence.json").write_text(raw_json, encoding="utf-8")
+
+    summary = collect_operator_evidence(
+        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        now=NOW,
+    )
+
+    assert summary["valid"] is False
+    assert "evidence_json_malformed" in summary["reasons"]
+    assert "must-not-leak" not in str(summary)
+
+
+def test_collect_operator_evidence_rejects_top_level_non_object(tmp_path: Path) -> None:
+    _write_evidence(tmp_path, _valid_payload())
+    (tmp_path / "host-smoke-evidence.json").write_text("[]", encoding="utf-8")
+
+    summary = collect_operator_evidence(
+        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        now=NOW,
+    )
+
+    assert summary["valid"] is False
+    assert "evidence_json_top_level_not_object" in summary["reasons"]
+
+
+def test_collect_operator_evidence_requires_supported_schema(tmp_path: Path) -> None:
+    payload = _valid_payload()
+    payload.pop("schema_version")
+    _write_evidence(tmp_path, payload)
+
+    missing = collect_operator_evidence(
+        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        now=NOW,
+    )
+    assert missing["valid"] is False
+    assert "evidence_schema_version_missing" in missing["reasons"]
+
+    _write_evidence(tmp_path, _valid_payload(schema_version=2))
+    unsupported = collect_operator_evidence(
+        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        now=NOW,
+    )
+    assert unsupported["valid"] is False
+    assert "evidence_schema_version_unsupported" in unsupported["reasons"]
+
+
+def test_collect_operator_evidence_rejects_invalid_exit_code_and_skip_flags(
+    tmp_path: Path,
+) -> None:
+    _write_evidence(
+        tmp_path,
+        _valid_payload(final_exit_code=True, skip_build="false"),
+    )
+
+    summary = collect_operator_evidence(
+        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        now=NOW,
+    )
+
+    assert summary["valid"] is False
+    assert summary["final_exit_code"] is None
+    assert summary["skip_flags"]["skip_build"] is None
+    assert "evidence_final_exit_code_invalid" in summary["reasons"]
+    assert "evidence_skip_flag_invalid" in summary["reasons"]
+
+
+def test_collect_operator_evidence_bounds_and_allowlists_metadata(
+    tmp_path: Path,
+) -> None:
+    phases = {
+        f"phase-{index}": {
+            "status": "ok",
+            "exit_code": 0,
+            "timestamp": "2026-06-19T11:59:10Z",
+            "raw_output": "must-not-leak",
+        }
+        for index in range(MAX_PHASES + 9)
+    }
+    _write_evidence(
+        tmp_path,
+        _valid_payload(
+            helper_path="/secret/helper",
+            unexpected_path="/secret/other",
+            phases=phases,
+            nested={"raw": "must-not-leak"},
+        ),
+    )
+
+    summary = collect_operator_evidence(
+        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        now=NOW,
+    )
+
+    assert "helper_path" not in summary["runtime_pointers"]
+    assert "unexpected_path" not in summary["runtime_pointers"]
+    assert len(summary["phases"]) == MAX_PHASES
+    assert "raw_output" not in next(iter(summary["phases"].values()))
+    assert "nested" not in summary
+    assert "must-not-leak" not in str(summary)
+
+
+def test_collect_operator_evidence_classifies_stale_evidence(tmp_path: Path) -> None:
+    _write_evidence(
+        tmp_path,
+        _valid_payload(created_at="2026-06-01T00:00:00+00:00"),
+    )
+
+    summary = collect_operator_evidence(
+        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        now=NOW,
+    )
+
+    assert summary["valid"] is True
+    assert summary["stale"] is True
+    assert summary["age_seconds"] > 7 * 24 * 60 * 60
+
+
+@pytest.mark.parametrize(
+    ("created_at", "reason"),
+    [
+        ("2026-06-19T11:59:00", "evidence_created_at_malformed"),
+        ("not-a-date", "evidence_created_at_malformed"),
+        ("2026-06-20T00:00:00+00:00", "evidence_created_at_in_future"),
+    ],
+)
+def test_collect_operator_evidence_rejects_invalid_timestamps(
+    tmp_path: Path,
+    created_at: str,
+    reason: str,
+) -> None:
+    _write_evidence(tmp_path, _valid_payload(created_at=created_at))
+
+    summary = collect_operator_evidence(
+        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        now=NOW,
+    )
+
+    assert summary["valid"] is False
+    assert reason in summary["reasons"]
+    assert summary.get("age_seconds") is None or summary["age_seconds"] >= 0

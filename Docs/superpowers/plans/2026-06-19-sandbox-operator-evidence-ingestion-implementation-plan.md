@@ -473,7 +473,7 @@ git commit -m "feat: validate sandbox evidence paths safely"
 - Modify: `tldw_Server_API/app/core/Sandbox/operator_evidence.py`
 - Modify: `tldw_Server_API/tests/sandbox/test_operator_evidence.py`
 
-- [ ] **Step 1: Add failing normalization tests**
+- [x] **Step 1: Add normalization tests**
 
 Add tests for:
 
@@ -538,7 +538,7 @@ def test_collect_operator_evidence_bounds_and_allowlists_metadata(tmp_path: Path
     assert "nested" not in summary
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to identify normalization gaps**
 
 Run:
 
@@ -546,9 +546,11 @@ Run:
 source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test_operator_evidence.py -q
 ```
 
-Expected: normalization tests fail until coercion/bounds are complete.
+Expected: normalization tests fail until coercion/bounds are complete, or pass
+if the descriptor-safe parser skeleton already implemented the required
+normalization behavior.
 
-- [ ] **Step 3: Implement normalization helpers**
+- [x] **Step 3: Implement normalization helpers if gaps remain**
 
 Implement:
 
@@ -563,7 +565,7 @@ Implement:
 
 Use scalar coercion only. Reject `bool` as an integer. Truncate dynamic strings to `DISPLAY_MAX_CHARS`. Clamp `age_seconds` to non-negative only after adding a future-date reason; do not return negative ages.
 
-- [ ] **Step 4: Run parser tests**
+- [x] **Step 4: Run parser tests**
 
 Run:
 
@@ -573,7 +575,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test
 
 Expected: parser tests pass.
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
 ```bash
 git add tldw_Server_API/app/core/Sandbox/operator_evidence.py \
