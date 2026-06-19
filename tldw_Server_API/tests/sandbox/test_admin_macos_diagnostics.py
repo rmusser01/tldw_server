@@ -318,6 +318,32 @@ def test_admin_runtime_diagnostics_returns_structured_payload(
     }
 
 
+def test_admin_operator_status_returns_structured_payload(monkeypatch) -> None:
+    fake_service = SimpleNamespace(
+        operator_status=lambda *, startup_warning_summary=None: {
+            "source": "sandbox_operator_status",
+            "overall_status": "ready",
+            "overall_severity": "info",
+            "summary": {"runtime_total": 1, "runtime_ready": 1, "actions": 0},
+            "sections": {
+                "runtime_readiness": {"status": "ready", "severity": "info"}
+            },
+            "recommended_actions": [],
+            "notes": [],
+        }
+    )
+    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+
+    app = _build_app_with_overrides(_make_principal(is_admin=True))
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/sandbox/admin/operator-status")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["source"] == "sandbox_operator_status"
+    assert data["overall_status"] == "ready"
+
+
 def test_admin_runtime_diagnostics_offloads_runtime_discovery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

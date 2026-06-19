@@ -47,6 +47,7 @@ from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
     SandboxAdminMacOSImageStoreCleanupResponse,
     SandboxAdminMacOSReconciliationRepairRequest,
     SandboxAdminMacOSReconciliationRepairResponse,
+    SandboxAdminOperatorStatusResponse,
     SandboxAdminRunDetails,
     SandboxAdminRunListResponse,
     SandboxAdminRunSummary,
@@ -2319,6 +2320,26 @@ async def admin_runtime_diagnostics(
     payload = dict(await asyncio.to_thread(_service.runtime_diagnostics_summary))
     payload["startup_warning_summary"] = _sandbox_startup_warning_summary(request)
     return SandboxAdminRuntimeDiagnosticsResponse.model_validate(payload)
+
+
+@router.get(
+    "/admin/operator-status",
+    response_model=SandboxAdminOperatorStatusResponse,
+    summary="Admin: consolidated sandbox operator status",
+)
+async def admin_operator_status(
+    request: Request,
+    _principal: AuthPrincipal = Depends(RequireRole("admin")),
+    _current_user: User = Depends(get_request_user),
+) -> SandboxAdminOperatorStatusResponse:
+    """Return consolidated read-only sandbox operator status."""
+    payload = dict(
+        await asyncio.to_thread(
+            _service.operator_status,
+            startup_warning_summary=_sandbox_startup_warning_summary(request),
+        )
+    )
+    return SandboxAdminOperatorStatusResponse.model_validate(payload)
 
 
 @router.get(
