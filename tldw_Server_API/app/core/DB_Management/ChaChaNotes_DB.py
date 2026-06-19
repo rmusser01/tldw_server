@@ -10508,109 +10508,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         self._migrate_from_v28_to_v29(conn)
                         current_db_version = self._get_db_version(conn)
                     else:
-                        # Fallback: attempt linear migrations for known versions.
+                        # Fallback through the shared registry so late migrations
+                        # stay available when branches add newer schema versions.
                         fallback_version = current_initial_version
                         while fallback_version < target_version:
-                            if fallback_version == 4:
-                                self._migrate_from_v4_to_v5(conn)
-                            elif fallback_version == 5:
-                                self._migrate_from_v5_to_v6(conn)
-                            elif fallback_version == 6:
-                                self._migrate_from_v6_to_v7(conn)
-                            elif fallback_version == 7:
-                                self._migrate_from_v7_to_v8(conn)
-                            elif fallback_version == 8:
-                                self._migrate_from_v8_to_v9(conn)
-                            elif fallback_version == 9:
-                                self._migrate_from_v9_to_v10(conn)
-                            elif fallback_version == 10:
-                                self._migrate_from_v10_to_v11(conn)
-                            elif fallback_version == 11:
-                                self._migrate_from_v11_to_v12(conn)
-                            elif fallback_version == 12:
-                                self._migrate_from_v12_to_v13(conn)
-                            elif fallback_version == 13:
-                                self._migrate_from_v13_to_v14(conn)
-                            elif fallback_version == 14:
-                                self._migrate_from_v14_to_v15(conn)
-                            elif fallback_version == 15:
-                                self._migrate_from_v15_to_v16(conn)
-                            elif fallback_version == 16:
-                                self._migrate_from_v16_to_v17(conn)
-                            elif fallback_version == 17:
-                                self._migrate_from_v17_to_v18(conn)
-                            elif fallback_version == 18:
-                                self._migrate_from_v18_to_v19(conn)
-                            elif fallback_version == 19:
-                                self._migrate_from_v19_to_v20(conn)
-                            elif fallback_version == 20:
-                                self._migrate_from_v20_to_v21(conn)
-                            elif fallback_version == 21:
-                                self._migrate_from_v21_to_v22(conn)
-                            elif fallback_version == 22:
-                                self._migrate_from_v22_to_v23(conn)
-                            elif fallback_version == 23:
-                                self._migrate_from_v23_to_v24(conn)
-                            elif fallback_version == 24:
-                                self._migrate_from_v24_to_v25(conn)
-                            elif fallback_version == 25:
-                                self._migrate_from_v25_to_v26(conn)
-                            elif fallback_version == 26:
-                                self._migrate_from_v26_to_v27(conn)
-                            elif fallback_version == 27:
-                                self._migrate_from_v27_to_v28(conn)
-                            elif fallback_version == 28:
-                                self._migrate_from_v28_to_v29(conn)
-                            elif fallback_version == 29:
-                                self._migrate_from_v29_to_v30(conn)
-                            elif fallback_version == 30:
-                                self._migrate_from_v30_to_v31(conn)
-                            elif fallback_version == 31:
-                                self._migrate_from_v31_to_v32(conn)
-                            elif fallback_version == 32:
-                                self._migrate_from_v32_to_v33(conn)
-                            elif fallback_version == 33:
-                                self._migrate_from_v33_to_v34(conn)
-                            elif fallback_version == 34:
-                                self._migrate_from_v34_to_v35(conn)
-                            elif fallback_version == 35:
-                                self._migrate_from_v35_to_v36(conn)
-                            elif fallback_version == 36:
-                                self._migrate_from_v36_to_v37(conn)
-                            elif fallback_version == 37:
-                                self._migrate_from_v37_to_v38(conn)
-                            elif fallback_version == 38:
-                                self._migrate_from_v38_to_v39(conn)
-                            elif fallback_version == 39:
-                                self._migrate_from_v39_to_v40(conn)
-                            elif fallback_version == 40:
-                                self._migrate_from_v40_to_v41(conn)
-                            elif fallback_version == 41:
-                                self._migrate_from_v41_to_v42(conn)
-                            elif fallback_version == 42:
-                                self._migrate_from_v42_to_v43(conn)
-                            elif fallback_version == 43:
-                                self._migrate_from_v43_to_v44(conn)
-                            elif fallback_version == 44:
-                                self._run_sqlite_linear_migration_step(
-                                    conn,
-                                    from_version=44,
-                                    target_version=target_version,
-                                    initial_version=current_initial_version,
-                                )
-                            elif fallback_version == 45:
-                                self._migrate_from_v45_to_v46(conn)
-                            elif fallback_version == 46:
-                                self._migrate_from_v46_to_v47(conn)
-                            elif fallback_version == 47:
-                                self._migrate_from_v47_to_v48(conn)
-                            elif fallback_version == 48:
-                                self._migrate_from_v48_to_v49(conn)
-                            else:
-                                raise SchemaError(  # noqa: TRY003, TRY301
-                                    f"Migration path undefined for '{self._SCHEMA_NAME}' from version {current_initial_version} to {target_version}. "
-                                    f"Manual migration or a new database may be required.")
-                            fallback_version = self._get_db_version(conn)
+                            fallback_version = self._run_sqlite_linear_migration_step(
+                                conn,
+                                from_version=fallback_version,
+                                target_version=target_version,
+                                initial_version=current_initial_version,
+                            )
                         current_db_version = fallback_version
                 else: # Should not be reached due to prior checks
                     raise SchemaError(f"Unexpected schema state: current {current_initial_version}, target {target_version}")  # noqa: TRY003, TRY301
