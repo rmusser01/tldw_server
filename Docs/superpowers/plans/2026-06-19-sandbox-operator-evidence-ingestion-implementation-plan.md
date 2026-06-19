@@ -174,7 +174,7 @@ For configured but invalid/unavailable evidence, return `configured=True`, `avai
 - Create: `tldw_Server_API/app/core/Sandbox/operator_evidence.py`
 - Create: `tldw_Server_API/tests/sandbox/test_operator_evidence.py`
 
-- [ ] **Step 1: Write failing tests for unconfigured and valid evidence**
+- [x] **Step 1: Write failing tests for unconfigured and valid evidence**
 
 Add `test_operator_evidence.py` with helpers:
 
@@ -275,7 +275,7 @@ def test_collect_operator_evidence_valid_bundle(tmp_path: Path) -> None:
     assert summary["expected_files"]["host-smoke-evidence.json"]["readable"] is True
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -285,7 +285,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test
 
 Expected: import failure for missing `operator_evidence.py`.
 
-- [ ] **Step 3: Add minimal descriptor-safe parser skeleton**
+- [x] **Step 3: Add minimal descriptor-safe parser skeleton**
 
 Implement:
 
@@ -304,7 +304,7 @@ do not use ordinary symlink-following `Path.read_text()` or `Path.open()` for
 configured evidence. Task 2 adds exhaustive negative coverage, but Task 1 must
 already fail closed if descriptor-safe directory operations are unavailable.
 
-- [ ] **Step 4: Run tests to verify Task 1 passes**
+- [x] **Step 4: Run tests to verify Task 1 passes**
 
 Run:
 
@@ -314,7 +314,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test
 
 Expected: Task 1 tests pass.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 ```bash
 git add tldw_Server_API/app/core/Sandbox/operator_evidence.py \
