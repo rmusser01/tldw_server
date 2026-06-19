@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sized
 from dataclasses import dataclass, field
+from itertools import islice
 import os
 import re
 
@@ -34,14 +36,17 @@ _CONTENT_KEYS = {
     "bytes",
     "content",
     "content_bytes",
+    "contents",
     "file_contents",
     "file_content",
     "payload",
     "raw",
 }
+_CONTENT_BLOCK_KEYS = {"blob", "text"}
 _ENV_KEYS = {"env", "environment", "environ"}
 
 _BEARER_RE = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
+_FILE_URI_RE = re.compile(r"\bfile://[^\s'\"),\]}]+")
 _UNIX_ABSOLUTE_PATH_RE = re.compile(r"(?<![:/\w.-])/(?!/)[^\s'\"),\]}]+")
 _WINDOWS_LOCAL_PATH_RE = re.compile(
     r"(?<![\w.-])(?:[A-Za-z]:\\|\\\\)[^\s'\"),\]}]+"
@@ -92,7 +97,7 @@ def summarize_result(result: object, max_text_chars: int = MAX_TEXT_CHARS) -> di
 
     if isinstance(result, dict):
         summary: dict[str, object] = {"kind": "dict"}
-        for key, value in list(result.items())[:MAX_MAPPING_ITEMS]:
+        for key, value in islice(result.items(), MAX_MAPPING_ITEMS):
             key_text = str(key)
             normalized = _normalize_key(key_text)
             redacted = _redact_keyed_value(
@@ -110,8 +115,9 @@ def summarize_result(result: object, max_text_chars: int = MAX_TEXT_CHARS) -> di
                     summary[f"{normalized}_sample"] = names
                 continue
             summary[key_text] = _redact(value, max_text_chars=max_text_chars)
-        if len(result) > MAX_MAPPING_ITEMS:
-            summary["omitted_keys"] = len(result) - MAX_MAPPING_ITEMS
+        omitted_keys = _omitted_count(result, MAX_MAPPING_ITEMS)
+        if omitted_keys is not None:
+            summary["omitted_keys"] = omitted_keys
         return summary
     return {
         "kind": type(result).__name__,
@@ -175,6 +181,7 @@ def _redact(
     max_text_chars: int,
     depth: int = 0,
     in_env: bool = False,
+    in_content_payload: bool = False,
 ) -> object:
     if depth > MAX_DEPTH:
         return "[max-depth]"
@@ -188,14 +195,14 @@ def _redact(
         return {"kind": "bytes", "byte_count": len(value)}
     if isinstance(value, dict):
         output: dict[str, object] = {}
-        items = list(value.items())
-        for key, nested in items[:MAX_MAPPING_ITEMS]:
+        for key, nested in islice(value.items(), MAX_MAPPING_ITEMS):
             key_text = str(key)
             normalized = _normalize_key(key_text)
             redacted = _redact_keyed_value(
                 normalized=normalized,
                 value=nested,
                 max_text_chars=max_text_chars,
+                in_content_payload=in_content_payload,
             )
             if redacted is not _USE_GENERIC_REDACTION:
                 output[key_text] = redacted
@@ -205,18 +212,26 @@ def _redact(
                 max_text_chars=max_text_chars,
                 depth=depth + 1,
                 in_env=in_env or normalized in _ENV_KEYS,
+                in_content_payload=in_content_payload or normalized in _CONTENT_KEYS,
             )
-        if len(items) > MAX_MAPPING_ITEMS:
-            output["omitted_keys"] = len(items) - MAX_MAPPING_ITEMS
+        omitted_keys = _omitted_count(value, MAX_MAPPING_ITEMS)
+        if omitted_keys is not None:
+            output["omitted_keys"] = omitted_keys
         return output
     if isinstance(value, (list, tuple, set, frozenset)):
-        values = list(value)
         output = [
-            _redact(item, max_text_chars=max_text_chars, depth=depth + 1, in_env=in_env)
-            for item in values[:MAX_SEQUENCE_ITEMS]
+            _redact(
+                item,
+                max_text_chars=max_text_chars,
+                depth=depth + 1,
+                in_env=in_env,
+                in_content_payload=in_content_payload,
+            )
+            for item in islice(value, MAX_SEQUENCE_ITEMS)
         ]
-        if len(values) > MAX_SEQUENCE_ITEMS:
-            output.append({"omitted_items": len(values) - MAX_SEQUENCE_ITEMS})
+        omitted_items = _omitted_count(value, MAX_SEQUENCE_ITEMS)
+        if omitted_items is not None:
+            output.append({"omitted_items": omitted_items})
         return output
     return _redact_string(repr(value), max_text_chars=max_text_chars)
 
@@ -225,6 +240,7 @@ def _redact_string(value: str, *, max_text_chars: int) -> str:
     text = _BEARER_RE.sub("[redacted bearer token]", value)
     for env_value in _sensitive_env_values():
         text = text.replace(env_value, _REDACTED)
+    text = _FILE_URI_RE.sub(f"file://{_REDACTED_PATH}", text)
     text = _UNIX_ABSOLUTE_PATH_RE.sub(_REDACTED_PATH, text)
     text = _WINDOWS_LOCAL_PATH_RE.sub(_REDACTED_PATH, text)
     if len(text) > max_text_chars:
@@ -260,6 +276,7 @@ def _redact_keyed_value(
     normalized: str,
     value: object,
     max_text_chars: int,
+    in_content_payload: bool = False,
 ) -> object:
     if _is_sensitive_key(normalized):
         return _REDACTED
@@ -267,9 +284,21 @@ def _redact_keyed_value(
         return _REDACTED_ARGUMENTS
     if normalized in _CONTENT_KEYS:
         return _summarize_content(value)
+    if in_content_payload and normalized in _CONTENT_BLOCK_KEYS:
+        return _summarize_content(value)
     if normalized in _ENV_KEYS:
         return _redact(value, max_text_chars=max_text_chars, in_env=True)
     return _USE_GENERIC_REDACTION
+
+
+def _omitted_count(value: object, limit: int) -> int | None:
+    if not isinstance(value, Sized):
+        return None
+    total = len(value)
+    omitted = total - limit
+    if omitted <= 0:
+        return None
+    return omitted
 
 
 def _safe_item_names(value: list[object], kind: str) -> list[object]:

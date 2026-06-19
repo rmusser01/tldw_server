@@ -54,6 +54,54 @@ def test_smoke_report_redacts_top_level_sensitive_summary_fields() -> None:
     assert "top-level-token" not in rendered  # nosec B101
 
 
+def test_smoke_report_summarizes_resource_contents_and_file_uris() -> None:
+    from mcp_unified.smoke.reporting import summarize_result
+
+    summary = summarize_result(
+        {
+            "contents": [
+                {
+                    "uri": "file:///Users/example/private.txt",
+                    "mimeType": "text/plain",
+                    "text": "short resource text body",
+                },
+                {
+                    "uri": "file:///tmp/private.txt",
+                    "mimeType": "application/octet-stream",
+                    "blob": "base64-resource-body",
+                },
+            ]
+        }
+    )
+
+    rendered = repr(summary)
+    assert "short resource text body" not in rendered  # nosec B101
+    assert "base64-resource-body" not in rendered  # nosec B101
+    assert "file:///Users/example/private.txt" not in rendered  # nosec B101
+    assert "file:///tmp/private.txt" not in rendered  # nosec B101
+    assert summary["contents"] == {  # nosec B101
+        "summary": "[summarized content]",
+        "item_count": 2,
+    }
+
+
+def test_smoke_report_redacts_file_uri_paths() -> None:
+    from mcp_unified.smoke.reporting import summarize_result
+
+    summary = summarize_result(
+        {
+            "primary_uri": "file:///Users/example/private.txt",
+            "tmp_uri": "file:///tmp/private.txt",
+        }
+    )
+
+    rendered = repr(summary)
+    assert "file:///Users/example/private.txt" not in rendered  # nosec B101
+    assert "file:///tmp/private.txt" not in rendered  # nosec B101
+    assert "/Users/example/private.txt" not in rendered  # nosec B101
+    assert "/tmp/private.txt" not in rendered  # nosec B101 B108
+
+
 def test_smoke_report_json_sanitizes_step_details() -> None:
     from mcp_unified.smoke.reporting import (
         SmokeReport,
@@ -95,6 +143,75 @@ def test_smoke_report_json_sanitizes_step_details() -> None:
     assert "y" * 500 not in rendered  # nosec B101
     assert payload["ok"] is False  # nosec B101
     assert payload["steps"][0]["ok"] is False  # nosec B101
+
+
+def test_smoke_report_json_summarizes_resource_read_details() -> None:
+    from mcp_unified.smoke.reporting import SmokeReport, SmokeStepReport, report_to_json
+
+    report = SmokeReport(
+        transport="inprocess",
+        steps=[
+            SmokeStepReport(
+                name="resources/read",
+                ok=True,
+                method="resources/read",
+                detail={
+                    "response": {
+                        "contents": [
+                            {
+                                "uri": "file:///Users/example/private.txt",
+                                "text": "short resource detail body",
+                            },
+                            {
+                                "uri": "file:///tmp/private.txt",
+                                "blob": "resource-detail-blob",
+                            },
+                        ]
+                    }
+                },
+            )
+        ],
+    )
+
+    payload = report_to_json(report)
+
+    rendered = repr(payload)
+    assert "short resource detail body" not in rendered  # nosec B101
+    assert "resource-detail-blob" not in rendered  # nosec B101
+    assert "file:///Users/example/private.txt" not in rendered  # nosec B101
+    assert "file:///tmp/private.txt" not in rendered  # nosec B101
+
+
+class _ExplodingItemsDict(dict):
+    def __len__(self) -> int:
+        return 1000
+
+    def items(self):
+        for index in range(1000):
+            if index > 32:
+                raise AssertionError("iterated beyond bounded mapping summary")
+            yield f"k{index}", index
+
+
+class _ExplodingList(list):
+    def __len__(self) -> int:
+        return 1000
+
+    def __iter__(self):
+        for index in range(1000):
+            if index > 32:
+                raise AssertionError("iterated beyond bounded sequence summary")
+            yield index
+
+
+def test_smoke_report_summaries_do_not_materialize_full_containers() -> None:
+    from mcp_unified.smoke.reporting import summarize_result
+
+    mapping_summary = summarize_result(_ExplodingItemsDict())
+    sequence_summary = summarize_result({"items": _ExplodingList()})
+
+    assert mapping_summary["omitted_keys"] > 0  # nosec B101
+    assert sequence_summary["items"][-1]["omitted_items"] > 0  # nosec B101
 
 
 class _RecordingTransport:
