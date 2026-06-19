@@ -1,15 +1,23 @@
 ---
 id: TASK-2281
 title: Add LSP-backed code intelligence MCP tools
-status: To Do
+status: In Progress
+assignee: []
+created_date: ''
+updated_date: '2026-06-19 03:08'
 labels:
-- mcp
-- code-intelligence
-- lsp
-- tools
-- agentic-execution
+  - mcp
+  - code-intelligence
+  - lsp
+  - tools
+  - agentic-execution
+dependencies:
+  - TASK-2387
 references:
-- https://code.claude.com/docs/en/tools-reference
+  - 'https://code.claude.com/docs/en/tools-reference'
+documentation:
+  - >-
+    Docs/superpowers/specs/2026-06-19-mcp-smoke-client-transport-harness-design.md
 ---
 
 ## Description
@@ -24,13 +32,20 @@ Design and implement LSP-backed MCP tools inspired by Claude Code's LSP tool: de
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
-## Final Summary
+Before implementing LSP-backed MCP tools, build or at least plan the MCP smoke client harness from TASK-2387 so LSP scenarios can be added on top of the baseline protocol/transport coverage.
+<!-- SECTION:NOTES:END -->
 
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 
