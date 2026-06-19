@@ -1,3 +1,5 @@
+import pytest
+
 from tldw_Server_API.app.core.Sandbox.operator_status import build_operator_status
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
 
@@ -229,7 +231,7 @@ def test_service_operator_status_isolates_macos_diagnostics_failure(monkeypatch)
     monkeypatch.setattr(svc, "runtime_diagnostics_summary", lambda: _runtime_diagnostics())
 
     def fail_macos() -> dict[str, object]:
-        raise RuntimeError("boom")
+        raise OSError("boom")
 
     monkeypatch.setattr(svc, "macos_diagnostics", fail_macos)
 
@@ -239,3 +241,34 @@ def test_service_operator_status_isolates_macos_diagnostics_failure(monkeypatch)
 
     assert payload["sections"]["runtime_readiness"]["status"] == "ready"
     assert payload["sections"]["macos_vz"]["status"] == "unknown"
+
+
+def test_service_operator_status_propagates_macos_runtime_error(monkeypatch) -> None:
+    svc = SandboxService()
+    monkeypatch.setattr(svc, "runtime_diagnostics_summary", lambda: _runtime_diagnostics())
+
+    def fail_macos() -> dict[str, object]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(svc, "macos_diagnostics", fail_macos)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        svc.operator_status(
+            startup_warning_summary={"present": False, "blocking": False, "codes": []}
+        )
+
+
+def test_service_operator_status_propagates_runtime_diagnostics_runtime_error(
+    monkeypatch,
+) -> None:
+    svc = SandboxService()
+
+    def fail_runtime() -> dict[str, object]:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(svc, "runtime_diagnostics_summary", fail_runtime)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        svc.operator_status(
+            startup_warning_summary={"present": False, "blocking": False, "codes": []}
+        )

@@ -80,6 +80,16 @@ from .vz_reconciliation import (
     collect_vz_reconciliation,
 )
 
+_SANDBOX_OPERATOR_STATUS_OPERATIONAL_EXCEPTIONS = (
+    ConnectionError,
+    OSError,
+    TimeoutError,
+    ValueError,
+    MacOSVirtualizationHelperFailure,
+    MacOSVirtualizationHelperProtocolError,
+    MacOSVirtualizationHelperUnavailable,
+)
+
 _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
     asyncio.TimeoutError,
@@ -1154,7 +1164,7 @@ class SandboxService:
         macos_diagnostics: dict[str, object] | None
         try:
             runtime_diagnostics = self.runtime_diagnostics_summary()
-        except (ConnectionError, OSError, RuntimeError, TimeoutError, ValueError) as exc:
+        except _SANDBOX_OPERATOR_STATUS_OPERATIONAL_EXCEPTIONS as exc:
             logger.warning(
                 "Sandbox operator status runtime diagnostics unavailable: {}",
                 type(exc).__name__,
@@ -1164,7 +1174,7 @@ class SandboxService:
             }
         try:
             macos_diagnostics = self.macos_diagnostics()
-        except (ConnectionError, OSError, RuntimeError, TimeoutError, ValueError) as exc:
+        except _SANDBOX_OPERATOR_STATUS_OPERATIONAL_EXCEPTIONS as exc:
             logger.warning(
                 "Sandbox operator status macOS diagnostics unavailable: {}",
                 type(exc).__name__,
