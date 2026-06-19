@@ -29,6 +29,12 @@ def _safe_list(value: object) -> list[object]:
     return []
 
 
+def _safe_bool(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    return None
+
+
 def _section(status: str, *, severity: str = "info", **extra: object) -> OperatorSection:
     return {"status": status, "severity": severity, **extra}
 
@@ -81,8 +87,22 @@ def build_operator_status(
     repair_endpoint = recovery.get("repair_endpoint")
     cleanup_plan_endpoint = recovery.get("cleanup_plan_endpoint")
     gc_candidates = _safe_int(image_store.get("gc_candidates"))
-    startup_present = bool(startup_payload.get("present"))
-    startup_blocking = bool(startup_payload.get("blocking"))
+    helper_configured = _safe_bool(helper.get("configured"))
+    helper_ready = _safe_bool(helper.get("ready"))
+    image_store_configured = _safe_bool(image_store.get("configured"))
+    startup_present = (
+        _safe_bool(startup_payload.get("present"))
+        if "present" in startup_payload
+        else False
+    )
+    startup_blocking = (
+        _safe_bool(startup_payload.get("blocking"))
+        if "blocking" in startup_payload
+        else False
+    )
+    macos_vz_bool_malformed = helper_configured is None or helper_ready is None
+    image_store_bool_malformed = image_store_configured is None
+    startup_bool_malformed = startup_present is None or startup_blocking is None
 
     recommended_actions: list[dict[str, object]] = []
     if isinstance(repair_endpoint, str) and repair_endpoint:
@@ -106,7 +126,7 @@ def build_operator_status(
                 endpoint=cleanup_plan_endpoint,
             )
         )
-    if startup_blocking:
+    if startup_blocking is True:
         recommended_actions.append(
             _action(
                 "resolve_startup_warnings",
@@ -131,19 +151,21 @@ def build_operator_status(
         ),
         "macos_vz": _section(
             "unknown"
-            if macos_failed
-            else ("ready" if bool(helper.get("ready")) else "not_configured"),
-            severity="warning" if macos_failed else "info",
-            configured=bool(helper.get("configured")),
-            helper_ready=bool(helper.get("ready")),
+            if macos_failed or macos_vz_bool_malformed
+            else ("ready" if helper_ready else "not_configured"),
+            severity="warning" if macos_failed or macos_vz_bool_malformed else "info",
+            configured=helper_configured,
+            helper_ready=helper_ready,
             reasons=_safe_list(helper.get("reasons")),
         ),
         "image_store": _section(
             "unknown"
-            if macos_failed
-            else ("ready" if bool(image_store.get("configured")) else "not_configured"),
-            severity="warning" if macos_failed else "info",
-            configured=bool(image_store.get("configured")),
+            if macos_failed or image_store_bool_malformed
+            else ("ready" if image_store_configured else "not_configured"),
+            severity="warning"
+            if macos_failed or image_store_bool_malformed
+            else "info",
+            configured=image_store_configured,
             gc_candidates=gc_candidates,
             reasons=_safe_list(image_store.get("reasons")),
         ),
@@ -162,19 +184,33 @@ def build_operator_status(
             host_local_warning_runtimes=host_local_warning_runtimes,
         ),
         "startup_warnings": _section(
-            "action_required"
-            if startup_blocking
-            else ("degraded" if startup_present else "ready"),
-            severity="error"
-            if startup_blocking
-            else ("warning" if startup_present else "info"),
+            "unknown"
+            if startup_bool_malformed
+            else (
+                "action_required"
+                if startup_blocking
+                else ("degraded" if startup_present else "ready")
+            ),
+            severity="warning"
+            if startup_bool_malformed
+            else (
+                "error"
+                if startup_blocking
+                else ("warning" if startup_present else "info")
+            ),
             present=startup_present,
             blocking=startup_blocking,
             codes=_safe_list(startup_payload.get("codes")),
         ),
     }
 
-    has_section_failures = runtime_failed or macos_failed
+    has_section_failures = (
+        runtime_failed
+        or macos_failed
+        or macos_vz_bool_malformed
+        or image_store_bool_malformed
+        or startup_bool_malformed
+    )
     has_repair_action = any(
         action["code"] == "run_repair_dry_run" for action in recommended_actions
     )
@@ -186,12 +222,12 @@ def build_operator_status(
     if ready_count <= 0:
         overall_status = "unavailable"
         overall_severity = "error"
-    elif startup_blocking or has_repair_action:
+    elif startup_blocking is True or has_repair_action:
         overall_status = "action_required"
-        overall_severity = "error" if startup_blocking else "warning"
+        overall_severity = "error" if startup_blocking is True else "warning"
     elif (
         has_section_failures
-        or startup_present
+        or startup_present is True
         or has_cleanup_candidates
         or has_host_local_warnings
     ):

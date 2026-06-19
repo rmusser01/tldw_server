@@ -120,3 +120,27 @@ def test_operator_status_keeps_runtime_section_when_macos_section_unavailable() 
     assert payload["sections"]["runtime_readiness"]["status"] == "ready"
     assert payload["sections"]["macos_vz"]["status"] == "unknown"
     assert payload["overall_status"] == "degraded"
+
+
+def test_operator_status_treats_string_booleans_as_unknown_not_actionable() -> None:
+    macos = _macos_diagnostics_unconfigured()
+    macos["helper"] = {"configured": False, "ready": "false", "reasons": []}
+    macos["image_store"] = {
+        "configured": "false",
+        "registered_templates": 0,
+        "run_manifests": 0,
+        "gc_candidates": 0,
+        "reasons": [],
+    }
+
+    payload = build_operator_status(
+        runtime_diagnostics=_runtime_diagnostics(),
+        macos_diagnostics=macos,
+        startup_warning_summary={"present": False, "blocking": "false", "codes": []},
+    )
+
+    assert payload["sections"]["macos_vz"]["status"] == "unknown"
+    assert payload["sections"]["image_store"]["status"] == "unknown"
+    assert payload["sections"]["startup_warnings"]["status"] == "unknown"
+    assert payload["recommended_actions"] == []
+    assert payload["overall_status"] == "degraded"
