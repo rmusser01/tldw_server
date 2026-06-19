@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing import (
     persistence,
 )
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
+from tldw_Server_API.app.services import storage_quota_service
 
 
 pytestmark = pytest.mark.unit
@@ -50,6 +51,25 @@ class _MetricsRaising:
 class _FakeDB:
     db_path_str = ":memory:"
     client_id = "test-client"
+
+
+class _AllowingQuotaService:
+    def __init__(self) -> None:
+        self.checks: list[tuple[int, int, bool]] = []
+
+    async def check_quota(
+        self,
+        user_id: int,
+        new_bytes: int,
+        raise_on_exceed: bool = False,
+    ) -> tuple[bool, dict[str, Any]]:
+        self.checks.append((user_id, new_bytes, raise_on_exceed))
+        return True, {
+            "current_usage_mb": 0,
+            "new_size_mb": 0,
+            "quota_mb": 1024,
+            "available_mb": 1024,
+        }
 
 
 def _contains_metric_call(
@@ -108,6 +128,7 @@ async def test_add_media_orchestrate_emits_request_and_duration_metrics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     metrics = _MetricsCapture()
+    quota_service = _AllowingQuotaService()
 
     async def fake_save_uploaded_files(_files: list[Any], temp_dir: Path, **_kwargs: Any):
         path = Path(temp_dir) / "doc.txt"
@@ -140,6 +161,7 @@ async def test_add_media_orchestrate_emits_request_and_duration_metrics(
     monkeypatch.setattr(persistence, "get_metrics_registry", lambda: metrics)
     monkeypatch.setattr(input_sourcing, "save_uploaded_files", fake_save_uploaded_files)
     monkeypatch.setattr(persistence, "process_document_like_item", fake_process_doc_item_fn)
+    monkeypatch.setattr(storage_quota_service, "get_storage_quota_service", lambda: quota_service)
 
     form_data = SimpleNamespace(
         media_type="document",
@@ -159,6 +181,7 @@ async def test_add_media_orchestrate_emits_request_and_duration_metrics(
     )
 
     assert response.status_code == 200
+    assert quota_service.checks == [(1, len("hello"), False)]
     assert _contains_metric_call(
         metrics.increment_calls,
         metric_name="ingestion_requests_total",

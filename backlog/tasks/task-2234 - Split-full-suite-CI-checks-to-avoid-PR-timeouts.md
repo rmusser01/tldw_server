@@ -157,6 +157,7 @@ modified_files:
 - tldw_Server_API/tests/MediaIngestion_NEW/integration/test_video_download_integration.py
 - tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_add_deps_error_mapping.py
 - tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_chunk_consistency.py
+- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_ingestion_metrics.py
 - tldw_Server_API/tests/Notifications/test_bridge_opt_out.py
 - tldw_Server_API/tests/Notifications/test_notifications_service_lifecycle.py
 - tldw_Server_API/tests/LLM_Adapters/benchmarks/test_streaming_unified_benchmark.py
@@ -358,6 +359,8 @@ Restructure the GitHub Actions CI full-suite jobs so PRs do not run all slow tes
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-06-18 PR #2258 run `27799452909` exposed Ubuntu/Python 3.13 `media-ingestion-new-unit-persistence` failing `test_add_media_orchestrate_emits_request_and_duration_metrics` because the metrics unit test reached the real upload storage quota service and failed against the CI AuthNZ DB with `UserNotFoundError: User 1`. The test now follows the surrounding persistence unit tests by patching `storage_quota_service.get_storage_quota_service` with an allowing fake and asserting the upload byte count still reaches quota validation, keeping the metrics test isolated from the real AuthNZ backing store. Verification: exact failed test passed locally; local shard pattern `tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_*.py` passed with `51 passed`; compileall passed for the touched test; `git diff --check` passed; Bandit JSON `/tmp/bandit_ci2258_ingestion_metrics_quota.json` reported `errors=[]` and `results=[]` with test assert skip `B101`.
+
 2026-06-14 PR #2258 run `27504395236` exposed Windows/Python 3.12 `admin-monitoring` failing `test_monitoring_alerts_include_backend_overlay_and_authoritative_actions` because the reloaded minimal test app did not treat the public monitoring router as part of the required core surface. The minimal router group now selects `monitoring` with the required routers instead of relying on the optional pass, and the router contract asserts that `monitoring` remains required. Verification: the regression failed before the fix and passed after; the local admin-monitoring shard passed with `20 passed`; compileall passed for touched files; `git diff --check` passed; Bandit on the touched scope reported no findings in production `minimal.py` and only pre-existing `test_main_router_contract.py` test-file baseline warnings after avoiding a new assert finding.
 
 2026-06-14 PR #2258 run `27502070819` exposed Windows/Python 3.12 `admin-g-i` failing `test_admin_integration_smoke.py::TestAdminKeyEndpointsExist::test_key_endpoints_present` because `/api/v1/admin/roles` was absent from the app route table. The admin aggregate was still only part of the optional minimal-test router pass, so platform-specific optional registration could leave admin smoke tests inspecting an app without core admin routes. The minimal-test required router set now includes `admin` with fail-fast skip semantics, and the admin integration smoke test asserts that contract.
