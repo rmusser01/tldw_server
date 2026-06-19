@@ -336,11 +336,11 @@ git commit -m "feat: add mcp smoke http transport"
 - Modify: `mcp_unified/smoke/transports.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_smoke_client.py`
 
-- [ ] **Step 1: Write failing tests for WebSocket request correlation**
+- [x] **Step 1: Write failing tests for WebSocket request correlation**
 
 Use `websockets.serve()` on `127.0.0.1` with an ephemeral port. The fixture server should return responses out of order for two requests so the transport must correlate by id.
 
-- [ ] **Step 2: Implement `LiveWebSocketTransport`**
+- [x] **Step 2: Implement `LiveWebSocketTransport`**
 
 Use the `websockets` package already present in project dependencies. Support:
 
@@ -352,15 +352,15 @@ Use the `websockets` package already present in project dependencies. Support:
 - notification sends with no response expectation;
 - receive timeout diagnostics.
 
-- [ ] **Step 3: Write failing tests for notification suppression**
+- [x] **Step 3: Write failing tests for notification suppression**
 
 Send a notification and then a `ping` over the same connection. Assert only the `ping` response is returned.
 
-- [ ] **Step 4: Implement notification-safe receive loop**
+- [x] **Step 4: Implement notification-safe receive loop**
 
 Keep a pending response map. Ignore unrelated notifications from the server only if they are valid server-side notifications; surface malformed frames as transport errors.
 
-- [ ] **Step 5: Run Task 4 tests**
+- [x] **Step 5: Run Task 4 tests**
 
 Run:
 
@@ -371,7 +371,7 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_smoke_client.py
 
 Expected: pass.
 
-- [ ] **Step 6: Commit Task 4**
+- [x] **Step 6: Commit Task 4**
 
 ```bash
 git add mcp_unified/smoke tldw_Server_API/app/core/MCP_unified/tests/test_smoke_client.py
