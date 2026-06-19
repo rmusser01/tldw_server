@@ -218,6 +218,102 @@ def test_smoke_report_json_summarizes_resource_read_details() -> None:
     assert "file:///tmp/private.txt" not in rendered  # nosec B101
 
 
+def test_smoke_cli_returns_zero_for_passed_inprocess_baseline(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from mcp_unified.smoke.cli import main
+
+    exit_code = main(["inprocess", "--mode", "best-effort", "--json-report", "-"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0  # nosec B101
+    assert payload["ok"] is True  # nosec B101
+    assert payload["metadata"]["scenario"] == "baseline"  # nosec B101
+    assert payload["metadata"]["mode"] == "best_effort"  # nosec B101
+
+
+def test_smoke_cli_returns_one_for_required_step_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from mcp_unified.smoke.cli import main
+
+    exit_code = main(
+        [
+            "inprocess",
+            "--mode",
+            "strict",
+            "--safe-tool-name",
+            "missing.tool",
+            "--json-report",
+            "-",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1  # nosec B101
+    assert payload["ok"] is False  # nosec B101
+
+
+def test_smoke_cli_returns_two_for_invalid_arguments(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from mcp_unified.smoke.cli import main
+
+    exit_code = main(["http"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 2  # nosec B101
+    assert "error" in captured.err.lower()  # nosec B101
+
+
+def test_smoke_cli_returns_three_for_transport_startup_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from mcp_unified.smoke.cli import main
+
+    exit_code = main(
+        [
+            "stdio",
+            "--command",
+            str(FIXTURE_PATH.parent / "missing-smoke-command"),
+            "--json-report",
+            "-",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 3  # nosec B101
+    assert "transport_stdio_start_failed" in captured.err  # nosec B101
+
+
+def test_smoke_cli_returns_four_for_strict_capability_skip(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from mcp_unified.smoke.cli import main
+
+    exit_code = main(
+        [
+            "inprocess",
+            "--mode",
+            "strict",
+            "--disable-resources",
+            "--json-report",
+            "-",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    resources_step = next(step for step in payload["steps"] if step["name"] == "resources")
+
+    assert exit_code == 4  # nosec B101
+    assert resources_step["reason_code"] == "required_capability_unavailable"  # nosec B101
+
+
 class _ExplodingItemsDict(dict):
     def __len__(self) -> int:
         return 1000

@@ -510,6 +510,7 @@ tldw-server = "tldw_Server_API.app.main:run_server"
 tldw-evals = "tldw_Server_API.cli.evals_cli:main"
 tldw-setup = "tldw_Server_API.cli.wizard.cli:main"
 mcp-unified-gateway = "mcp_unified.gateway.cli:main"
+mcp-unified-smoke = "mcp_unified.smoke.cli:main"
 
 ###########################
 # Tools - Package Discovery

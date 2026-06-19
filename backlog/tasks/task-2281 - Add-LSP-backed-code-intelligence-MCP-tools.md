@@ -4,22 +4,22 @@ title: Add LSP-backed code intelligence MCP tools
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-19 03:19'
+updated_date: 2026-06-19 03:19
 labels:
-  - mcp
-  - code-intelligence
-  - lsp
-  - tools
-  - agentic-execution
+- mcp
+- code-intelligence
+- lsp
+- tools
+- agentic-execution
 dependencies:
-  - TASK-2387
+- TASK-2387
 references:
-  - 'https://code.claude.com/docs/en/tools-reference'
+- https://code.claude.com/docs/en/tools-reference
+- TASK-2387
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-06-19-mcp-smoke-client-transport-harness-design.md
-  - >-
-    Docs/superpowers/plans/2026-06-19-mcp-smoke-client-transport-harness-implementation-plan.md
+- Docs/superpowers/specs/2026-06-19-mcp-smoke-client-transport-harness-design.md
+- Docs/superpowers/plans/2026-06-19-mcp-smoke-client-transport-harness-implementation-plan.md
+- Docs/MCP/Unified/Smoke_Client.md
 ---
 
 ## Description

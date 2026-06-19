@@ -468,7 +468,7 @@ git commit -m "feat: add mcp smoke stdio transport"
 - Modify: `backlog/tasks/task-2387 - Design-MCP-smoke-client-transport-harness.md`
 - Modify: `backlog/tasks/task-2281 - Add-LSP-backed-code-intelligence-MCP-tools.md`
 
-- [ ] **Step 1: Write failing tests for CLI exit codes**
+- [x] **Step 1: Write failing tests for CLI exit codes**
 
 Use `main([...])` directly with in-process mode.
 
@@ -480,7 +480,7 @@ Assert:
 - `3` for transport startup/connect failure;
 - `4` for strict-mode capability skip.
 
-- [ ] **Step 2: Implement CLI parser**
+- [x] **Step 2: Implement CLI parser**
 
 Support:
 
@@ -497,7 +497,7 @@ Support:
 - `--debug-trace`;
 - `--timeout`.
 
-- [ ] **Step 3: Add console script**
+- [x] **Step 3: Add console script**
 
 Modify `pyproject.toml`:
 
@@ -508,7 +508,7 @@ mcp-unified-smoke = "mcp_unified.smoke.cli:main"
 
 Keep the existing `mcp-unified-gateway` entrypoint unchanged.
 
-- [ ] **Step 4: Write operator docs**
+- [x] **Step 4: Write operator docs**
 
 Create `Docs/MCP/Unified/Smoke_Client.md` with:
 
@@ -523,11 +523,11 @@ Create `Docs/MCP/Unified/Smoke_Client.md` with:
 - exit codes;
 - CI recommendations.
 
-- [ ] **Step 5: Update Backlog tasks**
+- [x] **Step 5: Update Backlog tasks**
 
 Update `TASK-2387` with final summary, checked acceptance criteria, and validation results. Keep `TASK-2281` dependent on `TASK-2387` and mention LSP scenarios should be added after the baseline harness lands.
 
-- [ ] **Step 6: Run full smoke-client verification**
+- [x] **Step 6: Run full smoke-client verification**
 
 Run:
 
@@ -548,7 +548,7 @@ Expected:
 - Bandit reports no new actionable findings in `mcp_unified/smoke`;
 - diff check passes.
 
-- [ ] **Step 7: Commit Task 6**
+- [x] **Step 7: Commit Task 6**
 
 ```bash
 git add mcp_unified/smoke pyproject.toml Docs/MCP/Unified/Smoke_Client.md backlog/tasks \
