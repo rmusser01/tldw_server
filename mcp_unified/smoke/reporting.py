@@ -41,6 +41,7 @@ _CONTENT_KEYS = {
     "file_content",
     "payload",
     "raw",
+    "structured_content",
 }
 _CONTENT_BLOCK_KEYS = {"blob", "text"}
 _ENV_KEYS = {"env", "environment", "environ"}
@@ -261,7 +262,10 @@ def _sensitive_env_values() -> tuple[str, ...]:
 
 
 def _normalize_key(key: str) -> str:
-    return key.strip().lower().replace("-", "_").replace(".", "_")
+    text = key.strip().replace("-", "_").replace(".", "_")
+    text = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", text)
+    text = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", text)
+    return text.lower()
 
 
 def _is_sensitive_key(key: str) -> bool:

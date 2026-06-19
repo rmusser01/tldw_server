@@ -54,6 +54,29 @@ def test_smoke_report_redacts_top_level_sensitive_summary_fields() -> None:
     assert "top-level-token" not in rendered  # nosec B101
 
 
+def test_smoke_report_redacts_camel_case_content_and_argument_keys() -> None:
+    from mcp_unified.smoke.reporting import summarize_result
+
+    summary = summarize_result(
+        {
+            "structuredContent": {"documentText": "secret short body"},
+            "fileContent": "file secret",
+            "fileContents": "files secret",
+            "contentBytes": "bytes secret",
+            "toolArguments": {"q": "secret arg"},
+            "toolArgs": {"q": "secret tool arg"},
+        }
+    )
+
+    rendered = repr(summary)
+    assert "secret short body" not in rendered  # nosec B101
+    assert "file secret" not in rendered  # nosec B101
+    assert "files secret" not in rendered  # nosec B101
+    assert "bytes secret" not in rendered  # nosec B101
+    assert "secret arg" not in rendered  # nosec B101
+    assert "secret tool arg" not in rendered  # nosec B101
+
+
 def test_smoke_report_summarizes_resource_contents_and_file_uris() -> None:
     from mcp_unified.smoke.reporting import summarize_result
 
