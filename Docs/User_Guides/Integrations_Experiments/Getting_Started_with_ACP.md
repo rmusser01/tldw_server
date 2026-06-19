@@ -380,8 +380,10 @@ runs; audit events are purged separately by `ACP_AUDIT_RETENTION_DAYS`.
 Use `?redacted=true` on session detail, event, and artifact endpoints when you
 need support-safe output. Redacted views scrub transcript content, raw payloads,
 secret-looking values, and local filesystem paths, but they are not a general
-DLP guarantee. Task run previews in Agent Tasks are bounded diagnosis snippets,
-not public evidence. For the release policy, see
+DLP guarantee. Agent Tasks task detail supports `?run_summary_mode=redacted`
+when support/export workflows need run-status, count, and session-link summaries
+without prompt/result previews. Use the session redacted endpoints for detailed
+transcript, event, or artifact drill-through. For the release policy, see
 [ACP Production Readiness](../../Development/ACP_Production_Readiness.md).
 
 ## Alternative Agents

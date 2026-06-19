@@ -195,7 +195,172 @@ async def test_get_task_run_history_includes_acp_session_drillthrough(monkeypatc
         ]
         assert enriched_run["failure_context"] is None
     finally:
+        _clear_acp_audit_events()
         db.close()
+
+
+async def test_get_task_run_history_redacted_mode_omits_support_unsafe_text(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_client_protocol as acp_mod
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    project = db.create_project(name="P1")
+    task = db.create_task(project.id, title="T1", description="Dispatch me", agent_type="codex")
+    run = db.create_run(task.id, agent_type="codex", session_id="session-redacted")
+    db.complete_run(run.id, result_summary="Run result summary secret")
+    db.transition_task(task.id, TaskStatus.IN_PROGRESS)
+    db.transition_task(task.id, TaskStatus.REVIEW)
+    db.submit_review(
+        task.id,
+        approved=False,
+        feedback="Reviewer feedback secret",
+        reviewer="codex",
+    )
+
+    _clear_acp_audit_events()
+    acp_mod._acp_record_audit_event(
+        action="orchestration_task_completed",
+        user_id=1,
+        session_id="session-redacted",
+        metadata={"task_id": task.id},
+    )
+    session = SimpleNamespace(
+        session_id="session-redacted",
+        user_id=1,
+        agent_type="codex",
+        name="orchestration-task-1",
+        status="closed",
+        created_at="2026-05-10T01:00:00+00:00",
+        last_activity_at="2026-05-10T01:01:00+00:00",
+        message_count=2,
+        usage=SimpleNamespace(
+            to_dict=lambda: {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            }
+        ),
+        messages=[
+            {
+                "role": "user",
+                "content": "Task prompt secret",
+                "timestamp": "2026-05-10T01:00:00+00:00",
+                "raw_prompt": {"role": "user", "content": "Task prompt secret"},
+            },
+            {
+                "role": "assistant",
+                "content": {
+                    "status": "timeout",
+                    "error": "Assistant result secret",
+                    "diagnostic_uri": "file:///tmp/acp-secret-diagnostic.json",
+                },
+                "timestamp": "2026-05-10T01:01:00+00:00",
+                "raw_result": {
+                    "content": "Assistant result secret",
+                    "stopReason": "end",
+                    "tool_calls": [{"name": "write_file"}],
+                    "artifacts": [{"id": "artifact-1", "type": "summary"}],
+                },
+            },
+        ],
+    )
+
+    async def fake_store():
+        return _RunHistorySessionStore({"session-redacted": session})
+
+    def fake_audit_events(*, session_id: str):
+        with acp_mod._ACP_AUDIT_LOCK:
+            return [
+                dict(event)
+                for event in acp_mod._ACP_AUDIT_EVENTS
+                if event.get("session_id") == session_id
+            ]
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(acp_mod, "_acp_list_audit_events", fake_audit_events)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+
+    try:
+        detail = await orch_mod.get_task(
+            task.id,
+            run_summary_mode="redacted",
+            user=_TestUser(),
+        )
+        payload = detail.model_dump(mode="json")
+        serialized = json.dumps(payload)
+
+        assert "Task prompt secret" not in serialized
+        assert "Assistant result secret" not in serialized
+        assert "Run result summary secret" not in serialized
+        assert "Reviewer feedback secret" not in serialized
+        assert "file:///tmp/acp-secret-diagnostic.json" not in serialized
+        assert "[redacted]" in serialized
+
+        enriched_run = payload["runs"][0]
+        assert enriched_run["result_summary"] == "[redacted]"
+        assert enriched_run["history"]["support_safe"] is True
+        assert "history.prompt.preview" in enriched_run["history"]["redacted_fields"]
+        assert enriched_run["history"]["event_count"] == 2
+        assert enriched_run["history"]["audit_event_count"] == 1
+        assert enriched_run["history"]["artifact_count"] == 1
+        assert enriched_run["history"]["diagnostic_count"] == 1
+        assert enriched_run["history"]["tool_call_count"] == 1
+        assert enriched_run["history"]["stop_reason"] == "end"
+        assert enriched_run["history"]["prompt"]["preview"] == "[redacted]"
+        assert enriched_run["history"]["result"]["preview"] == "[redacted]"
+        assert enriched_run["history"]["diagnostics"][0]["reason_code"] == "timed_out"
+        assert enriched_run["history"]["diagnostics"][0]["message"] == "[redacted]"
+        assert enriched_run["history"]["diagnostics"][0]["diagnostic_uri"] == "[redacted]"
+        assert enriched_run["failure_context"]["reason_code"] == "timed_out"
+        assert enriched_run["failure_context"]["message"] == "[redacted]"
+        assert enriched_run["failure_context"]["diagnostic_uri"] == "[redacted]"
+        assert enriched_run["review_decision"]["feedback_preview"] == "[redacted]"
+        assert enriched_run["session"]["links"]["detail"] == (
+            "/api/v1/acp/sessions/session-redacted/detail?redacted=true"
+        )
+        assert enriched_run["session"]["links"]["events"] == (
+            "/api/v1/acp/sessions/session-redacted/events?redacted=true"
+        )
+        assert enriched_run["session"]["links"]["artifacts"] == (
+            "/api/v1/acp/sessions/session-redacted/artifacts?redacted=true"
+        )
+    finally:
+        _clear_acp_audit_events()
+        db.close()
+
+
+async def test_redact_task_review_payloads_preserves_model_like_reviews():
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    class ModelLikeReview:
+        def model_dump(self, mode: str = "json") -> dict[str, Any]:
+            return {
+                "id": 1,
+                "approved": False,
+                "feedback": "model feedback secret",
+                "reviewer": "codex",
+            }
+
+    namespace_review = SimpleNamespace(
+        id=2,
+        approved=True,
+        feedback="namespace feedback secret",
+        reviewer="goose",
+    )
+
+    payloads = orch_mod._redact_task_review_payloads(
+        [ModelLikeReview(), namespace_review]
+    )
+
+    assert payloads[0]["id"] == 1
+    assert payloads[0]["feedback"] == "[redacted]"
+    assert payloads[0]["reviewer"] == "codex"
+    assert payloads[1]["id"] == 2
+    assert payloads[1]["feedback"] == "[redacted]"
+    assert payloads[1]["reviewer"] == "goose"
 
 
 async def test_get_task_run_history_includes_failed_session_diagnostics(monkeypatch, tmp_path):
@@ -216,7 +381,13 @@ async def test_get_task_run_history_includes_failed_session_diagnostics(monkeypa
         created_at="2026-05-10T01:00:00+00:00",
         last_activity_at="2026-05-10T01:01:00+00:00",
         message_count=2,
-        usage=SimpleNamespace(to_dict=lambda: {"prompt_tokens": 4, "completion_tokens": 0, "total_tokens": 4}),
+        usage=SimpleNamespace(
+            to_dict=lambda: {
+                "prompt_tokens": 4,
+                "completion_tokens": 0,
+                "total_tokens": 4,
+            }
+        ),
         messages=[
             {
                 "role": "user",
@@ -1075,6 +1246,7 @@ async def test_dispatch_run_reviewer_agent_approval_completes_and_records_review
         assert "Dispatch me" not in serialized
         assert "Meets the success criteria" not in serialized
     finally:
+        _clear_acp_audit_events()
         db.close()
 
 
@@ -1132,6 +1304,7 @@ async def test_dispatch_run_reviewer_agent_rejection_retries_with_history(monkey
         serialized = json.dumps(_acp_audit_events_for_task(task.id))
         assert "Missing required tests" not in serialized
     finally:
+        _clear_acp_audit_events()
         db.close()
 
 
@@ -1187,6 +1360,7 @@ async def test_dispatch_run_reviewer_agent_rejection_max_attempts_triages(monkey
         serialized = json.dumps(_acp_audit_events_for_task(task.id))
         assert "Still fails review" not in serialized
     finally:
+        _clear_acp_audit_events()
         db.close()
 
 
