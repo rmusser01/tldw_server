@@ -945,7 +945,7 @@ async def test_live_websocket_transport_rejects_malformed_frames() -> None:
 
 
 @pytest.mark.asyncio
-async def test_live_websocket_transport_adds_profile_query_and_auth_headers() -> None:
+async def test_live_websocket_transport_adds_profile_header_and_auth_headers() -> None:
     from mcp_unified.smoke.transports import LiveWebSocketTransport
 
     bearer_value = "jwt-token"
@@ -953,12 +953,17 @@ async def test_live_websocket_transport_adds_profile_query_and_auth_headers() ->
     seen_path: str | None = None
     seen_authorization: str | None = None
     seen_api_key: str | None = None
+    seen_profile: str | None = None
+    seen_profile_alias: str | None = None
 
     async def handler(websocket) -> None:
-        nonlocal seen_path, seen_authorization, seen_api_key
+        nonlocal seen_path, seen_authorization, seen_api_key, seen_profile
+        nonlocal seen_profile_alias
         seen_path = websocket.request.path
         seen_authorization = websocket.request.headers.get("authorization")
         seen_api_key = websocket.request.headers.get("x-api-key")
+        seen_profile = websocket.request.headers.get("x-mcp-profile")
+        seen_profile_alias = websocket.request.headers.get("x-mcp-profile-id")
         payload = json.loads(await websocket.recv())
         await websocket.send(
             json.dumps(
@@ -977,6 +982,11 @@ async def test_live_websocket_transport_adds_profile_query_and_auth_headers() ->
             bearer_token=bearer_value,
             api_key=api_key_value,
             profile_id="reviewer",
+            headers={
+                "x-MCP-profile": "stale-profile",
+                "X-MCP-Profile-ID": "stale-profile-alias",
+                "X-Custom-Smoke": "custom-value",
+            },
         )
 
         try:
@@ -993,10 +1003,33 @@ async def test_live_websocket_transport_adds_profile_query_and_auth_headers() ->
     }
     assert seen_authorization == f"Bearer {bearer_value}"  # nosec B101
     assert seen_api_key == api_key_value  # nosec B101
+    assert seen_profile == "reviewer"  # nosec B101
+    assert seen_profile_alias is None  # nosec B101
     assert seen_path is not None  # nosec B101
     query = parse_qs(urlsplit(seen_path).query)
     assert query["client_id"] == ["smoke"]  # nosec B101
-    assert query["profile"] == ["reviewer"]  # nosec B101
+    assert "profile" not in query  # nosec B101
+    assert "profile_id" not in query  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_live_websocket_pending_registration_rolls_back_batch_conflicts() -> None:
+    from mcp_unified.smoke.transports import (
+        LiveWebSocketTransport,
+        McpSmokeTransportError,
+    )
+
+    transport = LiveWebSocketTransport("ws://127.0.0.1/mcp")
+    transport._register_pending(["existing"])
+
+    with pytest.raises(
+        McpSmokeTransportError,
+        match="transport_duplicate_request_id",
+    ):
+        transport._register_pending(["new", "existing"])
+
+    assert "existing" in transport._pending  # nosec B101
+    assert "new" not in transport._pending  # nosec B101
 
 
 @pytest.mark.asyncio

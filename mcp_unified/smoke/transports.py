@@ -8,7 +8,6 @@ import json
 from collections.abc import Collection
 from contextlib import suppress
 from typing import Any, Protocol
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 import websockets
@@ -455,7 +454,7 @@ class LiveWebSocketTransport:
             self._receive_error = None
             try:
                 self._connection = await websockets.connect(
-                    self._url_with_profile_query(),
+                    self.url,
                     **self._connect_kwargs(),
                 )
             except asyncio.CancelledError:
@@ -669,14 +668,18 @@ class LiveWebSocketTransport:
         self,
         request_ids: list[object],
     ) -> list[asyncio.Future[object]]:
-        futures: list[asyncio.Future[object]] = []
-        loop = asyncio.get_running_loop()
+        seen_ids: set[object] = set()
         for request_id in request_ids:
-            if request_id in self._pending:
+            if request_id in seen_ids or request_id in self._pending:
                 raise McpSmokeTransportError(
                     "transport_duplicate_request_id",
                     "WebSocket transport cannot send duplicate pending request ids",
                 )
+            seen_ids.add(request_id)
+
+        futures: list[asyncio.Future[object]] = []
+        loop = asyncio.get_running_loop()
+        for request_id in request_ids:
             future: asyncio.Future[object] = loop.create_future()
             self._pending[request_id] = future
             futures.append(future)
@@ -729,6 +732,9 @@ class LiveWebSocketTransport:
 
     def _request_headers(self) -> dict[str, str]:
         headers = dict(self.headers)
+        if self.profile_id:
+            self._delete_headers(headers, _PROFILE_HTTP_HEADER_NAMES)
+            headers["x-mcp-profile"] = self.profile_id
         if self.bearer_token:
             self._delete_header(headers, "authorization")
             headers["Authorization"] = LiveHttpTransport._authorization_header(
@@ -739,30 +745,16 @@ class LiveWebSocketTransport:
             headers["X-API-KEY"] = self.api_key
         return headers
 
-    def _url_with_profile_query(self) -> str:
-        if not self.profile_id:
-            return self.url
-
-        parts = urlsplit(self.url)
-        query_pairs = parse_qsl(parts.query, keep_blank_values=True)
-        if any(key.lower() == "profile" for key, _value in query_pairs):
-            return self.url
-        query_pairs.append(("profile", self.profile_id))
-        return urlunsplit(
-            (
-                parts.scheme,
-                parts.netloc,
-                parts.path,
-                urlencode(query_pairs),
-                parts.fragment,
-            )
-        )
-
     @staticmethod
     def _delete_header(headers: dict[str, str], target: str) -> None:
         for name in list(headers):
             if name.lower() == target:
                 del headers[name]
+
+    @classmethod
+    def _delete_headers(cls, headers: dict[str, str], targets: Collection[str]) -> None:
+        for target in targets:
+            cls._delete_header(headers, target)
 
     @staticmethod
     def _payload_request_ids(payload: JsonRpcPayload) -> list[object]:

@@ -4,22 +4,23 @@ title: Design MCP smoke client transport harness
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-19 03:19'
+updated_date: 2026-06-19 03:19
 labels:
-  - mcp
-  - testing
-  - smoke-client
-  - gateway
-  - agentic-execution
+- mcp
+- testing
+- smoke-client
+- gateway
+- agentic-execution
 dependencies: []
 references:
-  - TASK-2281
-  - 'https://code.claude.com/docs/en/tools-reference'
+- TASK-2281
+- https://code.claude.com/docs/en/tools-reference
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-06-19-mcp-smoke-client-transport-harness-design.md
-  - >-
-    Docs/superpowers/plans/2026-06-19-mcp-smoke-client-transport-harness-implementation-plan.md
+- Docs/superpowers/specs/2026-06-19-mcp-smoke-client-transport-harness-design.md
+- Docs/superpowers/plans/2026-06-19-mcp-smoke-client-transport-harness-implementation-plan.md
+modified_files:
+- mcp_unified/smoke/transports.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_smoke_client.py
 ---
 
 ## Description
