@@ -32,15 +32,84 @@ def test_http_batch_initialize_and_ping():
     assert ids == [1, 2]
     for item in data:
         assert item.get("jsonrpc") == "2.0"
-        assert item.get("error") is None
+        assert "error" not in item
 
 
 def test_http_batch_empty_returns_invalid_request():
     resp = client.post("/api/v1/mcp/request/batch", json=[])
     assert resp.status_code == 200
     data = resp.json()
-    assert isinstance(data, list)
-    assert len(data) == 1
-    error = data[0].get("error")
+    assert isinstance(data, dict)
+    error = data.get("error")
     assert error is not None
     assert error.get("code") == -32600
+
+
+def test_http_batch_non_array_returns_single_invalid_request_object():
+    resp = client.post("/api/v1/mcp/request/batch", json={"jsonrpc": "2.0", "method": "ping", "id": 1})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, dict)
+    assert data["id"] is None
+    assert data["error"]["code"] == -32600
+    assert "result" not in data
+
+
+@pytest.mark.parametrize("bad_id", [True, 1.5])
+def test_http_batch_invalid_element_unsafe_id_returns_null_id(bad_id):
+    resp = client.post(
+        "/api/v1/mcp/request/batch",
+        json=[{"jsonrpc": "2.0", "params": {}, "id": bad_id}],
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert len(data) == 1
+    assert data[0]["id"] is None
+    assert data[0]["error"]["code"] == -32600
+    assert "result" not in data[0]
+
+
+def test_http_batch_invalid_and_valid_items_preserve_response_order():
+    resp = client.post(
+        "/api/v1/mcp/request/batch",
+        json=[
+            {"jsonrpc": "2.0", "params": {}, "id": True},
+            {"jsonrpc": "2.0", "method": "ping", "id": "ordered-ping"},
+        ],
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert [item["id"] for item in data] == [None, "ordered-ping"]
+    assert data[0]["error"]["code"] == -32600
+    assert "error" not in data[1]
+
+
+def test_http_batch_mixed_notification_and_request_omits_notification_item():
+    resp = client.post(
+        "/api/v1/mcp/request/batch",
+        json=[
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "method": "ping", "id": "batch-ping"},
+        ],
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert len(data) == 1
+    assert data[0]["id"] == "batch-ping"
+    assert "result" in data[0]
+    assert "error" not in data[0]
+
+
+def test_http_batch_all_notifications_returns_204_empty_body():
+    resp = client.post(
+        "/api/v1/mcp/request/batch",
+        json=[
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {}},
+        ],
+    )
+    assert resp.status_code == 204
+    assert resp.content == b""

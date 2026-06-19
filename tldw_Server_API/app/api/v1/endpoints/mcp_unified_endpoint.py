@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, Security, WebSocket, status
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -42,6 +43,14 @@ from tldw_Server_API.app.core.feature_flags import is_mcp_hub_policy_enforcement
 from tldw_Server_API.app.core.MCP_unified import MCPRequest, MCPResponse, get_config, get_mcp_server
 from tldw_Server_API.app.core.MCP_unified.auth import UserRole
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import TokenData, get_jwt_manager
+from tldw_Server_API.app.core.MCP_unified.jsonrpc_transport import (
+    invalid_request_response,
+    jsonrpc_payload_has_id,
+    mcp_response_to_json,
+    mcp_responses_to_json,
+    parse_jsonrpc_body,
+    safe_jsonrpc_id,
+)
 from tldw_Server_API.app.core.MCP_unified.monitoring.metrics import get_metrics_collector
 from tldw_Server_API.app.core.MCP_unified.security.request_guards import enforce_http_security
 from tldw_Server_API.app.core.MCP_unified.server import _is_authnz_access_token
@@ -672,6 +681,72 @@ def _is_catalog_admin_context(
     return any(str(role).lower() == "admin" for role in roles)
 
 
+def _jsonrpc_error_response(response: MCPResponse) -> JSONResponse:
+    """Return an explicit JSON-RPC error response with normalized shape."""
+    return JSONResponse(mcp_response_to_json(response))
+
+
+def _jsonrpc_request_id_error(payload: Any, message: str) -> MCPResponse:
+    """Build an invalid-request response using only safe request ids."""
+    request_id = None
+    if isinstance(payload, dict) and jsonrpc_payload_has_id(payload):
+        request_id = safe_jsonrpc_id(payload.get("id"))
+    return invalid_request_response(message, request_id=request_id)
+
+
+def _is_valid_jsonrpc_id_value(value: Any) -> bool:
+    """Return True for JSON-RPC id values this transport can safely echo."""
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return False
+    return isinstance(value, (str, int))
+
+
+def _jsonrpc_null_id_sentinel(index: int | None = None) -> str:
+    """Return a request-local sentinel for explicit JSON-RPC null ids."""
+    suffix = secrets.token_hex(8)
+    if index is None:
+        return f"__tldw_jsonrpc_explicit_null_id_{suffix}__"
+    return f"__tldw_jsonrpc_explicit_null_id_{index}_{suffix}__"
+
+
+def _mcp_request_from_jsonrpc_payload(
+    payload: Any,
+    *,
+    null_id_sentinel: str | None = None,
+) -> tuple[MCPRequest | None, MCPResponse | None, bool]:
+    """Validate a JSON-RPC object and construct an MCPRequest when valid."""
+    if not isinstance(payload, dict):
+        return None, invalid_request_response("Invalid request", request_id=None), False
+
+    id_present = jsonrpc_payload_has_id(payload)
+    if id_present and not _is_valid_jsonrpc_id_value(payload.get("id")):
+        return None, invalid_request_response("Invalid request id", request_id=None), False
+
+    request_payload = dict(payload)
+    explicit_null_id = id_present and payload.get("id") is None
+    if explicit_null_id:
+        request_payload["id"] = null_id_sentinel or _jsonrpc_null_id_sentinel()
+
+    try:
+        return MCPRequest(**request_payload), None, explicit_null_id
+    except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS as exc:
+        return (
+            None,
+            _jsonrpc_request_id_error(payload, f"Invalid request format: {exc}"),
+            False,
+        )
+
+
+def _is_jsonrpc_notification_payload(payload: Any) -> bool:
+    """Return True when a payload is a valid JSON-RPC notification object."""
+    if not isinstance(payload, dict) or jsonrpc_payload_has_id(payload):
+        return False
+    request_obj, error_obj, _explicit_null_id = _mcp_request_from_jsonrpc_payload(payload)
+    return request_obj is not None and error_obj is None
+
+
 # WebSocket endpoint
 
 
@@ -736,15 +811,16 @@ async def websocket_endpoint(
 
 @router.post(
     "/request",
-    response_model=MCPResponse,
     responses={
+        status.HTTP_200_OK: {
+            "description": "JSON-RPC response object.",
+        },
         status.HTTP_204_NO_CONTENT: {
             "description": "MCP request acknowledged with no response body.",
         },
     },
 )
 async def mcp_request(
-    request: MCPRequest,
     http_request: Request,
     client_id: Optional[str] = Query(None, description="Client identifier"),
     auth: McpAuthContext = Depends(get_mcp_auth_context),
@@ -759,6 +835,22 @@ async def mcp_request(
     This endpoint provides a simpler alternative to WebSocket for clients
     that don't need real-time bidirectional communication.
     """
+    raw_body = await http_request.body()
+    payload = parse_jsonrpc_body(raw_body)
+    if isinstance(payload, MCPResponse):
+        return _jsonrpc_error_response(payload)
+
+    if _is_jsonrpc_notification_payload(payload):
+        return Response(status_code=204)
+
+    null_id_sentinel = _jsonrpc_null_id_sentinel()
+    request_obj, error_obj, explicit_null_id = _mcp_request_from_jsonrpc_payload(
+        payload,
+        null_id_sentinel=null_id_sentinel,
+    )
+    if error_obj is not None or request_obj is None:
+        return _jsonrpc_error_response(error_obj or invalid_request_response("Invalid request", request_id=None))
+
     server = get_mcp_server()
 
     # Ensure server is initialized
@@ -791,7 +883,7 @@ async def mcp_request(
 
     # Session lifecycle: if initialize and no session id provided, generate one and return header
     try:
-        if request.method == "initialize" and not mcp_session_id:
+        if isinstance(payload, dict) and payload.get("method") == "initialize" and not mcp_session_id:
             import uuid as _uuid
 
             mcp_session_id = _uuid.uuid4().hex
@@ -813,34 +905,28 @@ async def mcp_request(
         metadata["safe_config"] = safe_config
 
     resp_obj = await server.handle_http_request(
-        request, client_id=client_id, user_id=derived_user_id, metadata=metadata or None
+        request_obj, client_id=client_id, user_id=derived_user_id, metadata=metadata or None
     )
     if resp_obj is None:
         return Response(status_code=204)
-    # Convert authorization errors to HTTP 403 with hint for HTTP clients
-    if resp_obj.error and resp_obj.error.code == -32001:
-        hint = None
-        try:
-            if request.method == "tools/call":
-                tname = (request.params or {}).get("name") if isinstance(request.params, dict) else None
-                if tname:
-                    hint = f"Permission denied. Ask an admin to grant tools.execute:{tname} or tools.execute:* to your role (Admin → Access Control)."
-        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-            hint = None
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "message": resp_obj.error.message or "Insufficient permissions",
-                "hint": hint or "Insufficient permissions for this operation",
-            },
-        )
-
-    return resp_obj
+    if explicit_null_id and resp_obj.id == null_id_sentinel:
+        resp_obj.id = None
+    headers = dict(response.headers) if response is not None else None
+    return JSONResponse(mcp_response_to_json(resp_obj), headers=headers)
 
 
-@router.post("/request/batch", response_model=list[MCPResponse])
+@router.post(
+    "/request/batch",
+    responses={
+        status.HTTP_200_OK: {
+            "description": "JSON-RPC response object or response batch.",
+        },
+        status.HTTP_204_NO_CONTENT: {
+            "description": "JSON-RPC notification batch acknowledged with no response body.",
+        },
+    },
+)
 async def mcp_request_batch(
-    requests: list[MCPRequest],
     http_request: Request,
     client_id: Optional[str] = Query(None, description="Client identifier"),
     auth: McpAuthContext = Depends(get_mcp_auth_context),
@@ -854,6 +940,38 @@ async def mcp_request_batch(
     Accepts a JSON array of JSON-RPC 2.0 requests and returns an array
     of responses. Notifications (no id) are dropped per spec.
     """
+    raw_body = await http_request.body()
+    payload = parse_jsonrpc_body(raw_body)
+    if isinstance(payload, MCPResponse):
+        return _jsonrpc_error_response(payload)
+    if not isinstance(payload, list):
+        return _jsonrpc_error_response(invalid_request_response("Invalid request: batch payload must be an array"))
+    if not payload:
+        return _jsonrpc_error_response(invalid_request_response("Invalid request: empty batch"))
+
+    requests: list[MCPRequest] = []
+    batch_entries: list[tuple[str, MCPRequest | MCPResponse]] = []
+    explicit_null_id_sentinels: set[str] = set()
+    for index, item in enumerate(payload):
+        if _is_jsonrpc_notification_payload(item):
+            continue
+
+        sentinel = _jsonrpc_null_id_sentinel(index)
+        request_obj, error_obj, explicit_null_id = _mcp_request_from_jsonrpc_payload(
+            item,
+            null_id_sentinel=sentinel,
+        )
+        if error_obj is not None or request_obj is None:
+            batch_entries.append(("error", error_obj or invalid_request_response("Invalid request", request_id=None)))
+            continue
+        if explicit_null_id:
+            explicit_null_id_sentinels.add(sentinel)
+        requests.append(request_obj)
+        batch_entries.append(("request", request_obj))
+
+    if not batch_entries:
+        return Response(status_code=204)
+
     server = get_mcp_server()
     if not server.initialized:
         await server.initialize()
@@ -888,7 +1006,10 @@ async def mcp_request_batch(
 
     # If any initialize request is present and no session id was provided, generate one.
     try:
-        if not mcp_session_id and any(req.method == "initialize" for req in requests):
+        if (
+            not mcp_session_id
+            and any(isinstance(item, dict) and item.get("method") == "initialize" for item in payload)
+        ):
             import uuid as _uuid
 
             mcp_session_id = _uuid.uuid4().hex
@@ -909,11 +1030,33 @@ async def mcp_request_batch(
     if safe_config:
         metadata["safe_config"] = safe_config
 
-    resp = await server.handle_http_batch(
-        requests, client_id=client_id, user_id=derived_user_id, metadata=metadata or None
-    )
-    # If only notifications were sent, return empty list
-    return resp or []
+    server_responses: list[MCPResponse] = []
+    if requests:
+        handled_responses = await server.handle_http_batch(
+            requests, client_id=client_id, user_id=derived_user_id, metadata=metadata or None
+        )
+        if handled_responses:
+            server_responses.extend(handled_responses)
+
+    resp: list[MCPResponse] = []
+    server_response_index = 0
+    for entry_type, entry in batch_entries:
+        if entry_type == "error":
+            if isinstance(entry, MCPResponse):
+                resp.append(entry)
+            continue
+        if server_response_index < len(server_responses):
+            resp.append(server_responses[server_response_index])
+            server_response_index += 1
+
+    if not resp:
+        return Response(status_code=204)
+
+    for item in resp:
+        if isinstance(item.id, str) and item.id in explicit_null_id_sentinels:
+            item.id = None
+    headers = dict(response.headers) if response is not None else None
+    return JSONResponse(mcp_responses_to_json(resp), headers=headers)
 
 
 @router.get("/status", response_model=ServerStatusResponse)

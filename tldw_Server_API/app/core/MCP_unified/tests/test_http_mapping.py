@@ -87,6 +87,7 @@ def test_tools_list_via_request_bearer_token_allowed(client: TestClient):
     body = r.json()
     assert isinstance(body, dict) and isinstance(body.get("result"), dict)
     assert "tools" in body["result"]
+    assert "error" not in body
 
 
 def test_initialize_request_sets_session_header(client: TestClient):
@@ -102,6 +103,7 @@ def test_initialize_request_sets_session_header(client: TestClient):
     assert r.headers.get("mcp-session-id") is not None
     body = r.json()
     assert isinstance(body, dict) and body.get("result") is not None
+    assert "error" not in body
     result = body["result"]
     assert result.get("serverInfo", {}).get("name") == "tldw-mcp-unified"
 
