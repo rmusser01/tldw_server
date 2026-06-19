@@ -328,7 +328,7 @@ git commit -m "feat: add sandbox operator evidence parser skeleton"
 - Modify: `tldw_Server_API/app/core/Sandbox/operator_evidence.py`
 - Modify: `tldw_Server_API/tests/sandbox/test_operator_evidence.py`
 
-- [ ] **Step 1: Add failing filesystem safety tests**
+- [x] **Step 1: Add failing filesystem safety tests**
 
 Add tests for:
 
@@ -415,7 +415,7 @@ def test_collect_operator_evidence_fails_closed_without_safe_open(
     assert "evidence_safe_open_unavailable" in summary["reasons"]
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -425,7 +425,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test
 
 Expected: safety tests fail until descriptor-safe traversal is implemented.
 
-- [ ] **Step 3: Complete descriptor-safe traversal**
+- [x] **Step 3: Complete descriptor-safe traversal**
 
 Complete the safe traversal helpers introduced in Task 1 by porting the
 remaining safe traversal ideas from
@@ -449,7 +449,7 @@ Important details:
 - Cap `host-smoke-evidence.json` at `JSON_MAX_BYTES` using metadata and read length.
 - Do not recurse.
 
-- [ ] **Step 4: Run parser tests**
+- [x] **Step 4: Run parser tests**
 
 Run:
 
@@ -459,7 +459,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test
 
 Expected: parser tests pass.
 
-- [ ] **Step 5: Commit Task 2**
+- [x] **Step 5: Commit Task 2**
 
 ```bash
 git add tldw_Server_API/app/core/Sandbox/operator_evidence.py \

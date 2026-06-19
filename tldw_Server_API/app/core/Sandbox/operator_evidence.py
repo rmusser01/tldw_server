@@ -195,6 +195,27 @@ def _classify_open_error(exc: OSError) -> str:
     return "evidence_directory_unavailable"
 
 
+def _classify_component_open_error(
+    exc: OSError,
+    *,
+    parent_fd: int,
+    component: str,
+) -> str:
+    """Classify a descriptor-relative component open failure."""
+
+    try:
+        metadata = os.stat(component, dir_fd=parent_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return "evidence_directory_missing"
+    except OSError:
+        return _classify_open_error(exc)
+    if stat.S_ISLNK(metadata.st_mode):
+        return "evidence_directory_symlink"
+    if not stat.S_ISDIR(metadata.st_mode):
+        return "evidence_directory_not_directory"
+    return _classify_open_error(exc)
+
+
 def _open_evidence_dir(evidence_dir: Path) -> EvidenceDirHandle:
     """Open the evidence directory using descriptor-safe traversal."""
 
@@ -214,7 +235,20 @@ def _open_evidence_dir(evidence_dir: Path) -> EvidenceDirHandle:
     try:
         fd = os.open(start_path, _open_dir_flags())
         for component in components:
-            next_fd = os.open(component, _open_dir_flags(), dir_fd=fd)
+            try:
+                next_fd = os.open(component, _open_dir_flags(), dir_fd=fd)
+            except OSError as exc:
+                reason = _classify_component_open_error(
+                    exc,
+                    parent_fd=fd,
+                    component=component,
+                )
+                os.close(fd)
+                return EvidenceDirHandle(
+                    path=evidence_dir,
+                    fd=None,
+                    reasons=[reason],
+                )
             os.close(fd)
             fd = next_fd
         metadata = os.fstat(fd)

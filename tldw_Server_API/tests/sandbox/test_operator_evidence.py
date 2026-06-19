@@ -98,3 +98,84 @@ def test_collect_operator_evidence_valid_bundle(tmp_path: Path) -> None:
     assert summary["skip_flags"]["include_failure_drills"] is False
     assert "helper_path" not in summary.get("runtime_pointers", {})
     assert summary["expected_files"]["host-smoke-evidence.json"]["readable"] is True
+
+
+def test_collect_operator_evidence_rejects_nul_path() -> None:
+    summary = collect_operator_evidence(
+        environ={ENV_VZ_EVIDENCE_DIR: "/tmp/bad\0path"},
+        now=NOW,
+    )
+
+    assert summary["configured"] is True
+    assert summary["available"] is False
+    assert "evidence_path_contains_nul" in summary["reasons"]
+
+
+def test_collect_operator_evidence_reports_missing_directory(tmp_path: Path) -> None:
+    missing = tmp_path / "missing"
+    summary = collect_operator_evidence(
+        environ={ENV_VZ_EVIDENCE_DIR: str(missing)},
+        now=NOW,
+    )
+
+    assert summary["available"] is False
+    assert "evidence_directory_missing" in summary["reasons"]
+
+
+def test_collect_operator_evidence_rejects_directory_symlink(tmp_path: Path) -> None:
+    if not _dir_fd_operations_available():
+        pytest.skip("descriptor-safe directory operations are unavailable")
+    target = tmp_path / "target"
+    target.mkdir()
+    link = tmp_path / "link"
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable on this platform")
+
+    summary = collect_operator_evidence(
+        environ={ENV_VZ_EVIDENCE_DIR: str(link)},
+        now=NOW,
+    )
+
+    assert summary["available"] is False
+    assert "evidence_directory_symlink" in summary["reasons"]
+
+
+def test_collect_operator_evidence_rejects_json_symlink(tmp_path: Path) -> None:
+    if not _dir_fd_operations_available():
+        pytest.skip("descriptor-safe directory operations are unavailable")
+    _write_evidence(tmp_path, _valid_payload())
+    (tmp_path / "target.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "host-smoke-evidence.json").unlink()
+    try:
+        (tmp_path / "host-smoke-evidence.json").symlink_to(tmp_path / "target.json")
+    except OSError:
+        pytest.skip("symlink creation is unavailable on this platform")
+
+    summary = collect_operator_evidence(
+        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        now=NOW,
+    )
+
+    assert summary["valid"] is False
+    assert "evidence_json_symlink" in summary["reasons"]
+
+
+def test_collect_operator_evidence_fails_closed_without_safe_open(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _write_evidence(tmp_path, _valid_payload())
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Sandbox.operator_evidence._dir_fd_operations_available",
+        lambda: False,
+    )
+
+    summary = collect_operator_evidence(
+        environ={ENV_VZ_EVIDENCE_DIR: str(tmp_path)},
+        now=NOW,
+    )
+
+    assert summary["available"] is False
+    assert "evidence_safe_open_unavailable" in summary["reasons"]
