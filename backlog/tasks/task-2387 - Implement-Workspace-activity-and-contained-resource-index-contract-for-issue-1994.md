@@ -1,24 +1,41 @@
 ---
 id: TASK-2387
-title: >-
-  Implement Workspace activity and contained-resource index contract for issue
+title: Implement Workspace activity and contained-resource index contract for issue
   1994
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-18 20:12'
+updated_date: 2026-06-18 20:12
 labels:
-  - workspaces
-  - acp
-  - implementation
+- workspaces
+- acp
+- implementation
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_server/issues/1994'
-  - 'https://github.com/rmusser01/tldw_server/issues/1984'
+- https://github.com/rmusser01/tldw_server/issues/1994
+- https://github.com/rmusser01/tldw_server/issues/1984
 documentation:
-  - Docs/Design/Workspace_Container_Contract_2026_06.md
-  - Docs/superpowers/plans/2026-06-18-workspace-activity-index-contract-plan.md
+- Docs/Design/Workspace_Container_Contract_2026_06.md
+- Docs/superpowers/plans/2026-06-18-workspace-activity-index-contract-plan.md
+- 'PR #2396 Qodo follow-up: replace activity-event listing nosec query with fixed
+  SQL variants.'
 priority: high
+modified_files:
+- tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py
+- tldw_Server_API/app/core/Workspaces/activity_index.py
+- tldw_Server_API/app/core/Workspaces/membership_service.py
+- tldw_Server_API/app/core/Workspaces/runtime_bindings.py
+- tldw_Server_API/app/api/v1/endpoints/workspaces.py
+- tldw_Server_API/app/api/v1/schemas/workspace_schemas.py
+- tldw_Server_API/tests/Workspaces/test_workspace_activity_index.py
+- tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py
+- tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py
+- tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings.py
+- tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings_api.py
+- apps/packages/ui/src/services/workspace-index/contracts.ts
+- apps/packages/ui/src/services/workspace-index/normalizers.ts
+- apps/packages/ui/src/services/workspace-index/index.ts
+- apps/packages/ui/src/services/workspace-index/__tests__/normalizers.test.ts
 ---
 
 ## Description
