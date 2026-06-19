@@ -1,5 +1,8 @@
 import pytest
 
+from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
+    SandboxAdminOperatorStatusResponse,
+)
 from tldw_Server_API.app.core.Sandbox.operator_status import build_operator_status
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
 
@@ -90,6 +93,19 @@ def test_operator_status_ready_when_runtime_ready_and_vz_unconfigured() -> None:
     assert "generated_at" not in payload
 
 
+def test_operator_status_payload_validates_against_schema() -> None:
+    payload = build_operator_status(
+        runtime_diagnostics=_runtime_diagnostics(),
+        macos_diagnostics=_macos_diagnostics_unconfigured(),
+        startup_warning_summary={"present": False, "blocking": False, "codes": []},
+    )
+
+    model = SandboxAdminOperatorStatusResponse.model_validate(payload)
+
+    assert model.source == "sandbox_operator_status"
+    assert model.overall_status == "ready"
+
+
 def test_operator_status_points_reconciliation_to_dry_run_repair() -> None:
     macos = _macos_diagnostics_unconfigured()
     macos["recovery_summary"] = {
@@ -158,6 +174,30 @@ def test_operator_status_treats_string_booleans_as_unknown_not_actionable() -> N
     assert payload["sections"]["startup_warnings"]["status"] == "unknown"
     assert payload["recommended_actions"] == []
     assert payload["overall_status"] == "degraded"
+
+
+def test_operator_status_malformed_boolean_payload_validates_against_schema() -> None:
+    macos = _macos_diagnostics_unconfigured()
+    macos["helper"] = {"configured": False, "ready": "false", "reasons": []}
+    macos["image_store"] = {
+        "configured": "false",
+        "registered_templates": 0,
+        "run_manifests": 0,
+        "gc_candidates": 0,
+        "reasons": [],
+    }
+
+    payload = build_operator_status(
+        runtime_diagnostics=_runtime_diagnostics(),
+        macos_diagnostics=macos,
+        startup_warning_summary={"present": False, "blocking": "false", "codes": []},
+    )
+
+    model = SandboxAdminOperatorStatusResponse.model_validate(payload)
+
+    assert model.sections["macos_vz"].status == "unknown"
+    assert model.sections["image_store"].status == "unknown"
+    assert model.sections["startup_warnings"].status == "unknown"
 
 
 def test_operator_status_rejects_malformed_runtime_integer_values() -> None:

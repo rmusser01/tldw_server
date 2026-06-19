@@ -647,6 +647,62 @@ class SandboxAdminRuntimeDiagnosticsResponse(BaseModel):
     startup_warning_summary: SandboxAdminStartupWarningSummary | None = None
 
 
+OperatorStatusValue = Literal[
+    "ready",
+    "degraded",
+    "action_required",
+    "unavailable",
+    "unknown",
+    "not_configured",
+]
+OperatorSeverity = Literal["info", "warning", "error"]
+
+
+class SandboxAdminOperatorStatusAction(BaseModel):
+    """Recommended operator action for sandbox admin status."""
+
+    code: str
+    severity: OperatorSeverity
+    section: str
+    message: str
+    endpoint: str | None = None
+    dry_run_required: bool = False
+
+
+class SandboxAdminOperatorStatusSection(BaseModel):
+    """Extensible per-section operator status projection."""
+
+    model_config = ConfigDict(extra="allow")
+
+    status: OperatorStatusValue
+    severity: OperatorSeverity = "info"
+    configured: bool | None = None
+    reasons: list[str] = Field(default_factory=list)
+    counts: dict[str, int] = Field(default_factory=dict)
+    repair_endpoint: str | None = None
+    cleanup_plan_endpoint: str | None = None
+
+
+class SandboxAdminOperatorStatusResponse(BaseModel):
+    """Admin-facing consolidated sandbox operator status."""
+
+    source: Literal["sandbox_operator_status"]
+    overall_status: Literal[
+        "ready",
+        "degraded",
+        "action_required",
+        "unavailable",
+        "unknown",
+    ]
+    overall_severity: OperatorSeverity
+    summary: dict[str, int | bool | str | list[str]]
+    sections: dict[str, SandboxAdminOperatorStatusSection]
+    recommended_actions: list[SandboxAdminOperatorStatusAction] = Field(
+        default_factory=list
+    )
+    notes: list[str] = Field(default_factory=list)
+
+
 class SandboxAdminMacOSHostDiagnostics(BaseModel):
     """Admin-facing host facts for macOS sandbox readiness checks."""
 
