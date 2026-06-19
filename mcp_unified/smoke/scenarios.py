@@ -50,10 +50,18 @@ async def run_baseline_scenario(
         "capabilities": {},
         "tools": [],
         "safe_tool_name": safe_tool_name,
-        "safe_tool_arguments": safe_tool_arguments or {"query": "smoke"},
+        "safe_tool_arguments": (
+            safe_tool_arguments
+            if safe_tool_arguments is not None
+            else {"query": "smoke"}
+        ),
         "safe_resource_uri": safe_resource_uri,
         "safe_prompt_name": safe_prompt_name,
-        "safe_prompt_arguments": safe_prompt_arguments or {"topic": "smoke"},
+        "safe_prompt_arguments": (
+            safe_prompt_arguments
+            if safe_prompt_arguments is not None
+            else {"topic": "smoke"}
+        ),
     }
 
     await transport.start()
@@ -133,7 +141,7 @@ async def _record_step(
                 elapsed_ms=_elapsed_ms(started),
                 reason_code="jsonrpc_error",
                 error_code=_client_error_code(exc),
-                detail={"message": str(exc), "error": exc.error},
+                detail=redact_detail({"message": str(exc), "error": exc.error}),
             )
         )
         return
@@ -145,7 +153,9 @@ async def _record_step(
                 method=method,
                 elapsed_ms=_elapsed_ms(started),
                 reason_code="exception",
-                detail={"type": exc.__class__.__name__, "message": str(exc)},
+                detail=redact_detail(
+                    {"type": exc.__class__.__name__, "message": str(exc)}
+                ),
             )
         )
         return
@@ -308,8 +318,23 @@ async def _step_jsonrpc_batch(transport: McpSmokeTransport) -> object:
     }
     if set(responses) != {"smoke-batch-ping", "smoke-batch-tools"}:
         return _failure("invalid_batch_correlation", detail=response)
-    if "error" in responses["smoke-batch-ping"] or "error" in responses["smoke-batch-tools"]:
-        return _failure("batch_item_failed", detail=response)
+    ping_validation = _validate_jsonrpc_success_response(
+        responses["smoke-batch-ping"],
+        expected_id="smoke-batch-ping",
+    )
+    if ping_validation is not None:
+        return _failure(ping_validation, detail=response)
+    tools_validation = _validate_jsonrpc_success_response(
+        responses["smoke-batch-tools"],
+        expected_id="smoke-batch-tools",
+    )
+    if tools_validation is not None:
+        return _failure(tools_validation, detail=response)
+    if not _is_successful_ping_result(responses["smoke-batch-ping"]["result"]):
+        return _failure("invalid_batch_ping_result", detail=response)
+    tools_result = responses["smoke-batch-tools"]["result"]
+    if not isinstance(tools_result, dict) or not isinstance(tools_result.get("tools"), list):
+        return _failure("invalid_batch_tools_result", detail=response)
     return {"responses": response}
 
 
@@ -420,6 +445,26 @@ def _expect_jsonrpc_error(
     if code != expected_code:
         return _failure(reason_code, detail=response, error_code=code)
     return response
+
+
+def _validate_jsonrpc_success_response(
+    response: object,
+    *,
+    expected_id: str,
+) -> str | None:
+    if not isinstance(response, dict):
+        return "invalid_batch_item"
+    if response.get("jsonrpc") != "2.0":
+        return "invalid_batch_item"
+    if response.get("id") != expected_id:
+        return "invalid_batch_correlation"
+    has_result = "result" in response
+    has_error = "error" in response
+    if has_result == has_error:
+        return "invalid_batch_item"
+    if has_error:
+        return "batch_item_failed"
+    return None
 
 
 def _jsonrpc_error_code(response: object) -> int | None:

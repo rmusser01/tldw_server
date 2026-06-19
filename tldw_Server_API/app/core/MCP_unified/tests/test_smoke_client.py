@@ -620,3 +620,100 @@ async def test_baseline_scenario_fails_unadvertised_resources_in_strict_mode() -
     assert report.ok is False  # nosec B101
     assert resources_step.ok is False  # nosec B101
     assert resources_step.reason_code == "required_capability_unavailable"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_baseline_scenario_rejects_malformed_batch_items() -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.scenarios import run_baseline_scenario
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    class _MalformedBatchTransport(InProcessGatewayTransport):
+        async def request(
+            self,
+            payload: dict[str, object] | list[object],
+        ) -> object | None:
+            if isinstance(payload, list):
+                return [
+                    {"id": "smoke-batch-ping"},
+                    {"id": "smoke-batch-tools"},
+                ]
+            return await super().request(payload)
+
+    report = await run_baseline_scenario(
+        _MalformedBatchTransport(SmokeFixtureGatewayRuntime()),
+        mode="best_effort",
+    )
+    batch_step = next(step for step in report.steps if step.name == "json-rpc batch")
+
+    assert report.ok is False  # nosec B101
+    assert batch_step.ok is False  # nosec B101
+    assert batch_step.reason_code == "invalid_batch_item"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_baseline_scenario_preserves_empty_safe_tool_and_prompt_arguments() -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.scenarios import run_baseline_scenario
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    runtime = SmokeFixtureGatewayRuntime()
+
+    report = await run_baseline_scenario(
+        InProcessGatewayTransport(runtime),
+        mode="best_effort",
+        safe_tool_arguments={},
+        safe_prompt_arguments={},
+    )
+
+    safe_tool_call = next(
+        request for request in runtime.call_requests if request[0] == "echo.search"
+    )
+    assert report.ok is True  # nosec B101
+    assert safe_tool_call[1] == {}  # nosec B101
+    assert runtime.prompt_gets[0][1] == {}  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_baseline_scenario_redacts_direct_client_error_details() -> None:
+    from mcp_unified.smoke.scenarios import run_baseline_scenario
+
+    class _SensitiveInitializeErrorTransport:
+        async def start(self) -> None:
+            return None
+
+        async def request(
+            self,
+            payload: dict[str, object] | list[object],
+        ) -> object | None:
+            assert isinstance(payload, dict)  # nosec B101
+            return {
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "error": {
+                    "code": -32603,
+                    "message": "Bearer secret-token failed near /Users/example/private.txt",
+                    "data": {
+                        "arguments": {"query": "full user supplied tool arguments"},
+                        "authorization": "Bearer nested-secret",
+                    },
+                },
+            }
+
+        async def notify(self, payload: dict[str, object]) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    report = await run_baseline_scenario(
+        _SensitiveInitializeErrorTransport(),
+        mode="best_effort",
+    )
+    rendered_detail = repr(report.steps[0].detail)
+
+    assert report.steps[0].ok is False  # nosec B101
+    assert "secret-token" not in rendered_detail  # nosec B101
+    assert "nested-secret" not in rendered_detail  # nosec B101
+    assert "/Users/example" not in rendered_detail  # nosec B101
+    assert "full user supplied tool arguments" not in rendered_detail  # nosec B101
