@@ -10,8 +10,45 @@ def _as_dict(value: object) -> dict[str, object]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
+def _safe_dict(value: object) -> dict[str, object]:
+    return _as_dict(value)
+
+
+def _safe_int(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_list(value: object) -> list[object]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return []
+
+
 def _section(status: str, *, severity: str = "info", **extra: object) -> OperatorSection:
     return {"status": status, "severity": severity, **extra}
+
+
+def _action(
+    code: str,
+    severity: str,
+    section: str,
+    message: str,
+    endpoint: str | None = None,
+    dry_run_required: bool = False,
+) -> dict[str, object]:
+    return {
+        "code": code,
+        "severity": severity,
+        "section": section,
+        "message": message,
+        "endpoint": endpoint,
+        "dry_run_required": dry_run_required,
+    }
 
 
 def build_operator_status(
@@ -20,80 +57,160 @@ def build_operator_status(
     macos_diagnostics: Mapping[str, Any] | None,
     startup_warning_summary: Mapping[str, Any] | None = None,
 ) -> dict[str, object]:
-    runtime_payload = _as_dict(runtime_diagnostics)
-    macos_payload = _as_dict(macos_diagnostics)
-    startup_payload = _as_dict(startup_warning_summary)
+    runtime_payload = _safe_dict(runtime_diagnostics)
+    macos_payload = _safe_dict(macos_diagnostics)
+    startup_payload = _safe_dict(startup_warning_summary)
 
-    runtime_summary = _as_dict(runtime_payload.get("summary"))
-    ready_count = int(runtime_summary.get("ready") or 0)
-    helper = _as_dict(macos_payload.get("helper"))
-    image_store = _as_dict(macos_payload.get("image_store"))
-    recovery = _as_dict(macos_payload.get("recovery_summary"))
+    runtime_failed = "_section_error" in runtime_payload
+    macos_failed = "_section_error" in macos_payload
+
+    runtime_summary = _safe_dict(runtime_payload.get("summary"))
+    ready_count = _safe_int(runtime_summary.get("ready"))
+    runtime_total = _safe_int(runtime_summary.get("total"))
+    host_local_warning_runtimes = _safe_list(
+        runtime_summary.get("host_local_warning_runtimes")
+    )
+    repair_supported_runtimes = _safe_list(
+        runtime_summary.get("repair_supported_runtimes")
+    )
+
+    helper = _safe_dict(macos_payload.get("helper"))
+    image_store = _safe_dict(macos_payload.get("image_store"))
+    recovery = _safe_dict(macos_payload.get("recovery_summary"))
+
+    repair_endpoint = recovery.get("repair_endpoint")
+    cleanup_plan_endpoint = recovery.get("cleanup_plan_endpoint")
+    gc_candidates = _safe_int(image_store.get("gc_candidates"))
+    startup_present = bool(startup_payload.get("present"))
+    startup_blocking = bool(startup_payload.get("blocking"))
+
+    recommended_actions: list[dict[str, object]] = []
+    if isinstance(repair_endpoint, str) and repair_endpoint:
+        recommended_actions.append(
+            _action(
+                "run_repair_dry_run",
+                "warning",
+                "reconciliation",
+                "Run the macOS reconciliation repair endpoint in dry-run mode first.",
+                endpoint=repair_endpoint,
+                dry_run_required=True,
+            )
+        )
+    if isinstance(cleanup_plan_endpoint, str) and cleanup_plan_endpoint:
+        recommended_actions.append(
+            _action(
+                "inspect_image_store_cleanup_plan",
+                "warning",
+                "image_store",
+                "Inspect the image-store cleanup plan before deleting candidates.",
+                endpoint=cleanup_plan_endpoint,
+            )
+        )
+    if startup_blocking:
+        recommended_actions.append(
+            _action(
+                "resolve_startup_warnings",
+                "error",
+                "startup_warnings",
+                "Resolve blocking sandbox startup warnings before relying on sandbox execution.",
+            )
+        )
 
     sections = {
         "runtime_readiness": _section(
-            "ready" if ready_count else "unavailable",
-            severity="info" if ready_count else "error",
+            "unknown"
+            if runtime_failed
+            else ("ready" if ready_count else "unavailable"),
+            severity="warning"
+            if runtime_failed
+            else ("info" if ready_count else "error"),
             ready=ready_count,
-            total=int(runtime_summary.get("total") or 0),
-            host_local_warning_runtimes=list(
-                runtime_summary.get("host_local_warning_runtimes") or []
-            ),
-            repair_supported_runtimes=list(
-                runtime_summary.get("repair_supported_runtimes") or []
-            ),
+            total=runtime_total,
+            host_local_warning_runtimes=host_local_warning_runtimes,
+            repair_supported_runtimes=repair_supported_runtimes,
         ),
         "macos_vz": _section(
-            "ready" if bool(helper.get("ready")) else "not_configured",
+            "unknown"
+            if macos_failed
+            else ("ready" if bool(helper.get("ready")) else "not_configured"),
+            severity="warning" if macos_failed else "info",
             configured=bool(helper.get("configured")),
             helper_ready=bool(helper.get("ready")),
-            reasons=list(helper.get("reasons") or []),
+            reasons=_safe_list(helper.get("reasons")),
         ),
         "image_store": _section(
-            "ready" if bool(image_store.get("configured")) else "not_configured",
+            "unknown"
+            if macos_failed
+            else ("ready" if bool(image_store.get("configured")) else "not_configured"),
+            severity="warning" if macos_failed else "info",
             configured=bool(image_store.get("configured")),
-            gc_candidates=int(image_store.get("gc_candidates") or 0),
-            reasons=list(image_store.get("reasons") or []),
+            gc_candidates=gc_candidates,
+            reasons=_safe_list(image_store.get("reasons")),
         ),
         "reconciliation": _section(
-            str(recovery.get("status") or "not_configured"),
+            "unknown"
+            if macos_failed
+            else str(recovery.get("status") or "not_configured"),
             severity=str(recovery.get("severity") or "info").replace("ok", "info"),
-            counts=dict(recovery.get("counts") or {}),
-            repair_endpoint=recovery.get("repair_endpoint"),
-            cleanup_plan_endpoint=recovery.get("cleanup_plan_endpoint"),
+            counts=_safe_dict(recovery.get("counts")),
+            repair_endpoint=repair_endpoint,
+            cleanup_plan_endpoint=cleanup_plan_endpoint,
         ),
         "evidence": _section("not_configured"),
         "security_boundaries": _section(
             "ready",
-            host_local_warning_runtimes=list(
-                runtime_summary.get("host_local_warning_runtimes") or []
-            ),
+            host_local_warning_runtimes=host_local_warning_runtimes,
         ),
         "startup_warnings": _section(
             "action_required"
-            if bool(startup_payload.get("blocking"))
-            else ("degraded" if bool(startup_payload.get("present")) else "ready"),
+            if startup_blocking
+            else ("degraded" if startup_present else "ready"),
             severity="error"
-            if bool(startup_payload.get("blocking"))
-            else ("warning" if bool(startup_payload.get("present")) else "info"),
-            present=bool(startup_payload.get("present")),
-            blocking=bool(startup_payload.get("blocking")),
-            codes=list(startup_payload.get("codes") or []),
+            if startup_blocking
+            else ("warning" if startup_present else "info"),
+            present=startup_present,
+            blocking=startup_blocking,
+            codes=_safe_list(startup_payload.get("codes")),
         ),
     }
 
-    overall_status = "ready" if ready_count else "unavailable"
-    overall_severity = "info" if ready_count else "error"
+    has_section_failures = runtime_failed or macos_failed
+    has_repair_action = any(
+        action["code"] == "run_repair_dry_run" for action in recommended_actions
+    )
+    has_cleanup_candidates = gc_candidates > 0 or (
+        isinstance(cleanup_plan_endpoint, str) and bool(cleanup_plan_endpoint)
+    )
+    has_host_local_warnings = bool(host_local_warning_runtimes)
+
+    if ready_count <= 0:
+        overall_status = "unavailable"
+        overall_severity = "error"
+    elif startup_blocking or has_repair_action:
+        overall_status = "action_required"
+        overall_severity = "error" if startup_blocking else "warning"
+    elif (
+        has_section_failures
+        or startup_present
+        or has_cleanup_candidates
+        or has_host_local_warnings
+    ):
+        overall_status = "degraded"
+        overall_severity = "warning"
+    else:
+        overall_status = "ready"
+        overall_severity = "info"
+
     return {
         "source": "sandbox_operator_status",
         "overall_status": overall_status,
         "overall_severity": overall_severity,
         "summary": {
-            "runtime_total": int(runtime_summary.get("total") or 0),
+            "runtime_total": runtime_total,
             "runtime_ready": ready_count,
-            "actions": 0,
+            "actions": len(recommended_actions),
         },
         "sections": sections,
-        "recommended_actions": [],
+        "recommended_actions": recommended_actions,
         "notes": [],
     }

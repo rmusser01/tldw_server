@@ -85,3 +85,38 @@ def test_operator_status_ready_when_runtime_ready_and_vz_unconfigured() -> None:
     assert payload["overall_severity"] == "info"
     assert payload["sections"]["evidence"]["status"] == "not_configured"
     assert "generated_at" not in payload
+
+
+def test_operator_status_points_reconciliation_to_dry_run_repair() -> None:
+    macos = _macos_diagnostics_unconfigured()
+    macos["recovery_summary"] = {
+        "status": "action_recommended",
+        "severity": "warning",
+        "codes": ["vz_stale_session_controls"],
+        "counts": {"stale_session_controls": 1},
+        "repair_endpoint": "/api/v1/sandbox/admin/macos-reconciliation/repair",
+        "cleanup_plan_endpoint": None,
+        "notes": [],
+    }
+
+    payload = build_operator_status(
+        runtime_diagnostics=_runtime_diagnostics(),
+        macos_diagnostics=macos,
+        startup_warning_summary={"present": False, "blocking": False, "codes": []},
+    )
+
+    assert payload["overall_status"] == "action_required"
+    assert payload["recommended_actions"][0]["code"] == "run_repair_dry_run"
+    assert payload["recommended_actions"][0]["dry_run_required"] is True
+
+
+def test_operator_status_keeps_runtime_section_when_macos_section_unavailable() -> None:
+    payload = build_operator_status(
+        runtime_diagnostics=_runtime_diagnostics(),
+        macos_diagnostics={"_section_error": "macos_diagnostics_failed"},
+        startup_warning_summary={"present": False, "blocking": False, "codes": []},
+    )
+
+    assert payload["sections"]["runtime_readiness"]["status"] == "ready"
+    assert payload["sections"]["macos_vz"]["status"] == "unknown"
+    assert payload["overall_status"] == "degraded"
