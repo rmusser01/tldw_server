@@ -161,11 +161,8 @@ class PhaseOneCommandAdapters:
                 if descriptor.pure_transform:
                     if argv[0] == "cd":
                         cd_target = self._cd_target(argv, current_cwd)
-                        if isinstance(cd_target, _UsageError):
-                            raise PreflightCommandError(
-                                CommandStepResult(stderr=cd_target.message, exit_code=cd_target.exit_code)
-                            )
-                        current_cwd = cd_target
+                        if not isinstance(cd_target, _UsageError):
+                            current_cwd = cd_target
                     step_index += 1
                     continue
 
@@ -248,6 +245,8 @@ class PhaseOneCommandAdapters:
         stdin: Any,
         handler_context: Any | None = None,
     ) -> CommandStepResult:
+        """Execute one pure in-memory transform or virtual cwd command."""
+
         command = argv[0]
         if command == "grep":
             return self._pure_grep(argv, stdin)
@@ -264,6 +263,8 @@ class PhaseOneCommandAdapters:
         return CommandStepResult(stderr=f"Unknown command: {command}", exit_code=127)
 
     def _governed_plan(self, argv: list[str], *, cwd: str | None = None) -> _GovernedCallPlan | _UsageError:
+        """Build the governed backend call plan for one virtual CLI command."""
+
         command = argv[0]
         if command == "ls":
             if len(argv) > 2:
@@ -482,7 +483,7 @@ class PhaseOneCommandAdapters:
         if cls._is_anchored_path(text) or text.startswith("~"):
             return _UsageError("cd path must be workspace-relative")
 
-        parts = [] if not cwd else [part for part in str(cwd).split("/") if part]
+        parts = [] if not cwd else [part for part in str(cwd).replace("\\", "/").split("/") if part]
         for raw_part in text.replace("\\", "/").split("/"):
             if not raw_part or raw_part == ".":
                 continue

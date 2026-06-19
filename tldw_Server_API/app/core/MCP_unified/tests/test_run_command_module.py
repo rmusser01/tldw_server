@@ -10,9 +10,13 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.MCP_unified.command_runtime.adapters import (
+    AdapterContext,
+    PhaseOneCommandAdapters,
     derive_step_idempotency_key,
 )
 from tldw_Server_API.app.core.MCP_unified.command_runtime.executor import CommandRuntimeExecutor
+from tldw_Server_API.app.core.MCP_unified.command_runtime.parser import parse_command
+from tldw_Server_API.app.core.MCP_unified.command_runtime.registry import build_default_registry
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import (
     run_command_module as run_command_module_module,
@@ -423,6 +427,44 @@ async def test_run_cd_parent_segments_stay_bounded_to_workspace_root() -> None:
     assert "[exit:2 |" in denied
     assert protocol.prepare_calls == []
     assert protocol.execute_calls == []
+
+
+@pytest.mark.unit
+async def test_run_cd_usage_error_does_not_abort_later_semicolon_governed_steps() -> None:
+    """A failing cd should not short-circuit later semicolon-separated governed commands."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-cd-usage-continues", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": "cd .. ; cat notes.txt"}, context=context)
+
+    assert "hello" in rendered
+    assert "[exit:0 |" in rendered
+    assert [call.params["name"] for call in protocol.prepare_calls] == ["fs.read"]
+    assert protocol.prepare_calls[0].params["arguments"] == {"path": "notes.txt"}
+
+
+@pytest.mark.unit
+async def test_command_adapters_normalize_backslash_cwd_before_cd_carry_over() -> None:
+    """Adapter-managed cwd should stay portable when initialized with Windows separators."""
+
+    protocol = _ProtocolStub()
+    visible = build_default_registry().visible_commands({"fs.read", "fs.read_text"})
+    adapters = PhaseOneCommandAdapters(
+        AdapterContext(
+            protocol=protocol,
+            request_context=RequestContext(request_id="run-cd-backslash-cwd", user_id="1", client_id="unit"),
+            visible_commands=visible,
+            cwd=r"docs\windows",
+        )
+    )
+
+    await adapters.preflight_chain(parse_command("cd nested ; cat notes.txt"))
+
+    assert protocol.prepare_calls[0].params["arguments"] == {
+        "path": "docs/windows/nested/notes.txt",
+    }
 
 
 @pytest.mark.unit
