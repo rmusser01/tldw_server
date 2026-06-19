@@ -373,3 +373,250 @@ async def test_smoke_client_rejects_malformed_jsonrpc_responses() -> None:
 
     with pytest.raises(McpSmokeClientError):
         await client.ping()
+
+
+@pytest.mark.asyncio
+async def test_inprocess_gateway_transport_runs_ping() -> None:
+    from mcp_unified.smoke.client import McpSmokeClient
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    transport = InProcessGatewayTransport(SmokeFixtureGatewayRuntime())
+    await transport.start()
+    client = McpSmokeClient(transport)
+
+    try:
+        assert await client.ping() == {"pong": True}  # nosec B101
+    finally:
+        await transport.close()
+
+
+@pytest.mark.asyncio
+async def test_inprocess_gateway_transport_exposes_fixture_tools_resources_and_prompts() -> None:
+    from mcp_unified.smoke.client import McpSmokeClient
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    client = McpSmokeClient(InProcessGatewayTransport(SmokeFixtureGatewayRuntime()))
+
+    initialized = await client.initialize()
+    tools = await client.list_tools()
+    called = await client.call_tool("echo.search", {"query": "needle"})
+    resources = await client.list_resources()
+    resource = await client.read_resource("resource://smoke/doc")
+    prompts = await client.list_prompts()
+    prompt = await client.get_prompt("smoke.review", {"topic": "transport"})
+
+    assert initialized["serverInfo"] == {  # nosec B101
+        "name": "smoke-fixture-gateway",
+        "version": "0.0-test",
+    }
+    assert initialized["capabilities"]["resources"]["available"] is True  # nosec B101
+    assert initialized["capabilities"]["prompts"]["available"] is True  # nosec B101
+    assert tools["tools"][0]["name"] == "echo.search"  # nosec B101
+    assert called["content"][0]["text"] == "echo.search:needle"  # nosec B101
+    assert resources["resources"][0]["uri"] == "resource://smoke/doc"  # nosec B101
+    assert resource["contents"][0]["uri"] == "resource://smoke/doc"  # nosec B101
+    assert prompts["prompts"][0]["name"] == "smoke.review"  # nosec B101
+    assert prompt["messages"][0]["content"]["text"] == "Review transport"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_inprocess_fastapi_transport_uses_asgi_request_path() -> None:
+    from mcp_unified.gateway.fastapi import create_gateway_app
+    from mcp_unified.smoke.client import McpSmokeClient
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.transports import InProcessFastApiTransport
+
+    app = create_gateway_app(SmokeFixtureGatewayRuntime(), prefix="/mcp")
+    transport = InProcessFastApiTransport(app, request_path="/mcp/request")
+    await transport.start()
+    client = McpSmokeClient(transport)
+
+    try:
+        assert await client.ping() == {"pong": True}  # nosec B101
+    finally:
+        await transport.close()
+
+
+@pytest.mark.asyncio
+async def test_baseline_scenario_passes_in_best_effort_mode() -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.scenarios import run_baseline_scenario
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    report = await run_baseline_scenario(
+        InProcessGatewayTransport(SmokeFixtureGatewayRuntime(include_denied_tool=True)),
+        mode="best_effort",
+    )
+
+    assert report.ok is True  # nosec B101
+    assert [step.name for step in report.steps] == [  # nosec B101
+        "initialize",
+        "notifications/initialized",
+        "ping",
+        "tools/list",
+        "tools/call",
+        "tools/call:unknown",
+        "profile-filtered visibility",
+        "resources",
+        "prompts",
+        "json-rpc batch",
+        "malformed request",
+        "policy denial",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_baseline_scenario_requires_followup_ping_after_initialized_notification() -> None:
+    from mcp_unified.smoke.scenarios import run_baseline_scenario
+
+    class _NotificationOnlyTransport:
+        async def start(self) -> None:
+            return None
+
+        async def request(
+            self,
+            payload: dict[str, object] | list[object],
+        ) -> object | None:
+            assert isinstance(payload, dict)  # nosec B101
+            if payload["method"] == "initialize":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {
+                        "capabilities": {"tools": {"available": True}},
+                        "serverInfo": {"name": "unit", "version": "0"},
+                    },
+                }
+            return {
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "error": {"code": -32601, "message": "ping unavailable"},
+            }
+
+        async def notify(self, payload: dict[str, object]) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    report = await run_baseline_scenario(_NotificationOnlyTransport(), mode="best_effort")
+
+    notification_step = next(
+        step for step in report.steps if step.name == "notifications/initialized"
+    )
+    assert report.ok is False  # nosec B101
+    assert notification_step.ok is False  # nosec B101
+    assert notification_step.reason_code == "followup_ping_failed"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_baseline_scenario_skips_unavailable_resources_and_prompts_in_best_effort() -> None:
+    from mcp_unified.smoke.scenarios import run_baseline_scenario
+
+    class _NoOptionalCapabilityTransport:
+        async def start(self) -> None:
+            return None
+
+        async def request(
+            self,
+            payload: dict[str, object] | list[object],
+        ) -> object | None:
+            if isinstance(payload, list):
+                return [
+                    {
+                        "jsonrpc": "2.0",
+                        "id": item["id"],
+                        "result": {"pong": True} if item["method"] == "ping" else {"tools": []},
+                    }
+                    for item in payload
+                    if isinstance(item, dict) and "id" in item
+                ]
+            assert isinstance(payload, dict)  # nosec B101
+            method = payload.get("method")
+            if method == "initialize":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {
+                        "capabilities": {
+                            "tools": {"available": True},
+                            "resources": {"available": False},
+                            "prompts": {"available": False},
+                        },
+                        "serverInfo": {"name": "unit", "version": "0"},
+                    },
+                }
+            if method == "ping":
+                return {"jsonrpc": "2.0", "id": payload["id"], "result": {"pong": True}}
+            if method == "tools/list":
+                return {"jsonrpc": "2.0", "id": payload["id"], "result": {"tools": []}}
+            if method == "tools/call":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "error": {"code": -32601, "message": "Method not found"},
+                }
+            return {
+                "jsonrpc": "2.0",
+                "id": payload.get("id"),
+                "error": {"code": -32600, "message": "Invalid request"},
+            }
+
+        async def notify(self, payload: dict[str, object]) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    report = await run_baseline_scenario(
+        _NoOptionalCapabilityTransport(),
+        mode="best_effort",
+    )
+    steps = {step.name: step for step in report.steps}
+
+    assert report.ok is True  # nosec B101
+    assert steps["resources"].reason_code == "capability_unavailable"  # nosec B101
+    assert steps["prompts"].reason_code == "capability_unavailable"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_baseline_scenario_fails_unadvertised_resources_in_strict_mode() -> None:
+    from mcp_unified.smoke.scenarios import run_baseline_scenario
+
+    class _NoResourceCapabilityTransport:
+        async def start(self) -> None:
+            return None
+
+        async def request(self, payload: dict[str, object] | list[object]) -> object | None:
+            assert isinstance(payload, dict)  # nosec B101
+            if payload["method"] == "initialize":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {
+                        "capabilities": {
+                            "tools": {"available": True},
+                            "resources": {"available": False},
+                        },
+                        "serverInfo": {"name": "unit", "version": "0"},
+                    },
+                }
+            return {"jsonrpc": "2.0", "id": payload["id"], "result": {"pong": True}}
+
+        async def notify(self, payload: dict[str, object]) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    report = await run_baseline_scenario(
+        _NoResourceCapabilityTransport(),
+        mode="strict",
+    )
+    resources_step = next(step for step in report.steps if step.name == "resources")
+
+    assert report.ok is False  # nosec B101
+    assert resources_step.ok is False  # nosec B101
+    assert resources_step.reason_code == "required_capability_unavailable"  # nosec B101

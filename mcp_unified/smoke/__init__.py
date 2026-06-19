@@ -3,8 +3,8 @@
 from mcp_unified.smoke.client import (
     McpSmokeClient,
     McpSmokeClientError,
-    McpSmokeTransport,
 )
+from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
 from mcp_unified.smoke.reporting import (
     SmokeReport,
     SmokeStepReport,
@@ -13,15 +13,25 @@ from mcp_unified.smoke.reporting import (
     report_to_json,
     summarize_result,
 )
+from mcp_unified.smoke.scenarios import run_baseline_scenario
+from mcp_unified.smoke.transports import (
+    InProcessFastApiTransport,
+    InProcessGatewayTransport,
+    McpSmokeTransport,
+)
 
 __all__ = [
+    "InProcessFastApiTransport",
+    "InProcessGatewayTransport",
     "McpSmokeClient",
     "McpSmokeClientError",
     "McpSmokeTransport",
+    "SmokeFixtureGatewayRuntime",
     "SmokeReport",
     "SmokeStepReport",
     "SmokeTraceSummary",
     "redact_detail",
     "report_to_json",
+    "run_baseline_scenario",
     "summarize_result",
 ]
