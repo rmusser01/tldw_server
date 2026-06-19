@@ -1095,6 +1095,64 @@ async def test_stdio_subprocess_transport_batch_suppresses_notification_response
 
 
 @pytest.mark.asyncio
+async def test_stdio_subprocess_transport_ignores_server_notifications_before_response() -> None:
+    from mcp_unified.smoke.transports import StdioSubprocessTransport
+
+    transport = StdioSubprocessTransport(
+        command=sys.executable,
+        args=[str(FIXTURE_PATH)],
+        cwd=str(REPO_ROOT),
+        env_allowlist=["PYTHONPATH"],
+    )
+
+    try:
+        response = await transport.request(
+            {
+                "jsonrpc": "2.0",
+                "id": "smoke-notification",
+                "method": "smoke/server-notification-before-response",
+            }
+        )
+    finally:
+        await transport.close()
+
+    assert response == {  # nosec B101
+        "jsonrpc": "2.0",
+        "id": "smoke-notification",
+        "result": {"after": "notification"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_stdio_subprocess_transport_rejects_wrong_response_id() -> None:
+    from mcp_unified.smoke.transports import (
+        McpSmokeTransportError,
+        StdioSubprocessTransport,
+    )
+
+    transport = StdioSubprocessTransport(
+        command=sys.executable,
+        args=[str(FIXTURE_PATH)],
+        cwd=str(REPO_ROOT),
+        env_allowlist=["PYTHONPATH"],
+    )
+
+    with pytest.raises(
+        McpSmokeTransportError,
+        match="transport_unexpected_stdio_response",
+    ):
+        await transport.request(
+            {
+                "jsonrpc": "2.0",
+                "id": "smoke-expected-id",
+                "method": "smoke/wrong-id-response",
+            }
+        )
+
+    assert transport._process is None  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_stdio_subprocess_transport_close_terminates_process() -> None:
     from mcp_unified.smoke.transports import StdioSubprocessTransport
 
@@ -1191,6 +1249,35 @@ async def test_stdio_subprocess_transport_timeout_closes_process() -> None:
         await transport.request(
             {"jsonrpc": "2.0", "id": "smoke-timeout", "method": "smoke/hang"}
         )
+
+    assert transport._process is None  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_stdio_subprocess_transport_exited_process_request_clears_state() -> None:
+    from mcp_unified.smoke.transports import (
+        McpSmokeTransportError,
+        StdioSubprocessTransport,
+    )
+
+    transport = StdioSubprocessTransport(
+        command=sys.executable,
+        args=[str(FIXTURE_PATH)],
+        cwd=str(REPO_ROOT),
+        env_allowlist=["PYTHONPATH"],
+    )
+
+    await transport.start()
+    process = transport._process
+    assert process is not None  # nosec B101
+    process.terminate()
+    await asyncio.wait_for(process.wait(), timeout=1.0)
+
+    with pytest.raises(
+        McpSmokeTransportError,
+        match="transport_stdio_process_exited",
+    ):
+        await transport.request({"jsonrpc": "2.0", "id": "after-exit", "method": "ping"})
 
     assert transport._process is None  # nosec B101
 

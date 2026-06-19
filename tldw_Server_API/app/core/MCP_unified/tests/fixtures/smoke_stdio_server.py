@@ -64,6 +64,17 @@ def handle_message(message: object) -> object | None:
     if method == "smoke/hang":
         time.sleep(5)
         return None
+    if method == "smoke/server-notification-before-response":
+        _write_stdout(
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/progress",
+                "params": {"progress": 1},
+            }
+        )
+        return {"jsonrpc": "2.0", "id": request_id, "result": {"after": "notification"}}
+    if method == "smoke/wrong-id-response":
+        return {"jsonrpc": "2.0", "id": "wrong-id", "result": {"wrong": True}}
 
     if is_notification:
         print(f"fixture diagnostic: notification {method}", file=sys.stderr, flush=True)
@@ -132,6 +143,10 @@ def _error_response(request_id: object, code: int, message: str) -> dict[str, ob
         "id": request_id,
         "error": {"code": code, "message": message},
     }
+
+
+def _write_stdout(payload: object) -> None:
+    print(json.dumps(payload, separators=(",", ":")), flush=True)
 
 
 _UNKNOWN_METHOD = object()

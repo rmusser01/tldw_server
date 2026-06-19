@@ -45,6 +45,7 @@ _DEFAULT_WEBSOCKET_TIMEOUT_SECONDS = 10.0
 _DEFAULT_STDIO_TIMEOUT_SECONDS = 10.0
 _DEFAULT_STDERR_MAX_BYTES = 8192
 _STDIO_CLOSE_TIMEOUT_SECONDS = 1.0
+_IGNORE_STDIO_RESPONSE = object()
 
 
 class McpSmokeTransport(Protocol):
@@ -884,29 +885,28 @@ class StdioSubprocessTransport:
         """Send one JSON-RPC line and parse one response line when required."""
 
         request_ids = self._payload_request_ids(payload)
-        process = await self._started_process()
-        async with self._request_lock:
-            try:
+        try:
+            process = await self._started_process()
+            async with self._request_lock:
                 await self._send_payload(process, payload)
                 if not request_ids:
                     return None
-                line = await self._read_response_line(process, payload)
-                return self._decode_response_line(line, payload)
-            except asyncio.CancelledError:
-                await self.close()
-                raise
-            except McpSmokeTransportError:
-                await self.close()
-                raise
-            except Exception as exc:
-                error = self._stdio_error(
-                    "transport_stdio_request_failed",
-                    "Stdio subprocess request failed",
-                    payload,
-                    cause=exc,
-                )
-                await self.close()
-                raise error from exc
+                return await self._read_response(process, request_ids, payload)
+        except asyncio.CancelledError:
+            await self.close()
+            raise
+        except McpSmokeTransportError:
+            await self.close()
+            raise
+        except Exception as exc:
+            error = self._stdio_error(
+                "transport_stdio_request_failed",
+                "Stdio subprocess request failed",
+                payload,
+                cause=exc,
+            )
+            await self.close()
+            raise error from exc
 
     async def notify(self, payload: JsonObject) -> None:
         """Send one JSON-RPC notification line."""
@@ -991,11 +991,12 @@ class StdioSubprocessTransport:
                 cause=exc,
             ) from exc
 
-    async def _read_response_line(
+    async def _read_response(
         self,
         process: asyncio.subprocess.Process,
+        request_ids: list[object],
         payload: JsonRpcPayload,
-    ) -> bytes:
+    ) -> object:
         if process.stdout is None:
             raise self._stdio_error(
                 "transport_stdio_pipe_unavailable",
@@ -1003,8 +1004,8 @@ class StdioSubprocessTransport:
                 payload,
             )
         try:
-            line = await asyncio.wait_for(
-                process.stdout.readline(),
+            return await asyncio.wait_for(
+                self._read_matching_response(process, request_ids, payload),
                 timeout=self.request_timeout,
             )
         except TimeoutError as exc:
@@ -1014,13 +1015,128 @@ class StdioSubprocessTransport:
                 payload,
                 cause=exc,
             ) from exc
-        if not line:
+
+    async def _read_matching_response(
+        self,
+        process: asyncio.subprocess.Process,
+        request_ids: list[object],
+        payload: JsonRpcPayload,
+    ) -> object:
+        if process.stdout is None:
             raise self._stdio_error(
-                "transport_stdio_closed",
-                "Stdio subprocess closed stdout before a JSON-RPC response",
+                "transport_stdio_pipe_unavailable",
+                "Stdio subprocess stdout is unavailable",
                 payload,
             )
-        return line
+        expected_ids = set(request_ids)
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                raise self._stdio_error(
+                    "transport_stdio_closed",
+                    "Stdio subprocess closed stdout before a JSON-RPC response",
+                    payload,
+                )
+            response = self._decode_response_line(line, payload)
+            matched = self._match_response(response, expected_ids, payload)
+            if matched is _IGNORE_STDIO_RESPONSE:
+                continue
+            return matched
+
+    def _match_response(
+        self,
+        response: object,
+        expected_ids: set[object],
+        payload: JsonRpcPayload,
+    ) -> object:
+        if isinstance(response, dict):
+            if self._is_server_notification(response):
+                return _IGNORE_STDIO_RESPONSE
+            self._validate_response_message(response, payload)
+            response_id = response["id"]
+            if response_id not in expected_ids:
+                raise self._stdio_error(
+                    "transport_unexpected_stdio_response",
+                    "Stdio subprocess emitted a response for an unexpected request id",
+                    payload,
+                )
+            if len(expected_ids) != 1:
+                raise self._stdio_error(
+                    "transport_incomplete_stdio_batch_response",
+                    "Stdio subprocess emitted a single response for a batch request",
+                    payload,
+                )
+            return response
+
+        if isinstance(response, list):
+            if not response:
+                raise self._stdio_error(
+                    "transport_malformed_stdio_response",
+                    "Stdio subprocess emitted an empty JSON-RPC batch response",
+                    payload,
+                )
+            matched_responses: list[dict[str, object]] = []
+            seen_ids: set[object] = set()
+            for item in response:
+                if not isinstance(item, dict):
+                    raise self._stdio_error(
+                        "transport_malformed_stdio_response",
+                        "Stdio subprocess emitted a non-object batch response item",
+                        payload,
+                    )
+                if self._is_server_notification(item):
+                    continue
+                self._validate_response_message(item, payload)
+                response_id = item["id"]
+                if response_id not in expected_ids:
+                    raise self._stdio_error(
+                        "transport_unexpected_stdio_response",
+                        "Stdio subprocess emitted a batch response for an unexpected request id",
+                        payload,
+                    )
+                if response_id in seen_ids:
+                    raise self._stdio_error(
+                        "transport_malformed_stdio_response",
+                        "Stdio subprocess emitted duplicate batch response ids",
+                        payload,
+                    )
+                seen_ids.add(response_id)
+                matched_responses.append(item)
+            if not matched_responses:
+                return _IGNORE_STDIO_RESPONSE
+            if seen_ids != expected_ids:
+                raise self._stdio_error(
+                    "transport_incomplete_stdio_batch_response",
+                    "Stdio subprocess emitted an incomplete batch response",
+                    payload,
+                )
+            return matched_responses
+
+        raise self._stdio_error(
+            "transport_malformed_stdio_response",
+            "Stdio subprocess emitted a non-object JSON-RPC response",
+            payload,
+        )
+
+    def _validate_response_message(
+        self,
+        response: dict[str, object],
+        payload: JsonRpcPayload,
+    ) -> None:
+        if response.get("jsonrpc") != "2.0" or "id" not in response:
+            raise self._stdio_error(
+                "transport_malformed_stdio_response",
+                "Stdio subprocess emitted a malformed JSON-RPC response",
+                payload,
+            )
+        has_result = "result" in response
+        has_error = "error" in response
+        if has_result == has_error:
+            raise self._stdio_error(
+                "transport_malformed_stdio_response",
+                "Stdio subprocess response must contain exactly one of result or error",
+                payload,
+            )
 
     def _decode_response_line(self, line: bytes, payload: JsonRpcPayload) -> object:
         try:
@@ -1032,6 +1148,14 @@ class StdioSubprocessTransport:
                 payload,
                 cause=exc,
             ) from exc
+
+    @staticmethod
+    def _is_server_notification(message: dict[str, object]) -> bool:
+        if message.get("jsonrpc") != "2.0" or "id" in message:
+            return False
+        if "result" in message or "error" in message:
+            return False
+        return isinstance(message.get("method"), str)
 
     async def _capture_stderr(self) -> None:
         process = self._process
