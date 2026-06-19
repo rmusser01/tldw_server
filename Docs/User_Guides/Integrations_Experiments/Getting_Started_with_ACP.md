@@ -87,6 +87,13 @@ pip install -e ".[acp]"
 
 ### Optional: Sandbox Mode (Run ACP in Containers)
 
+Current release evidence verifies the Docker sandbox runtime lifecycle on one
+macOS/Docker Desktop host. Lima and Apple Virtualization Framework are not
+certified by that evidence, and named downstream agents still need their own
+sandbox run before their compatibility row can claim sandbox support. See
+[ACP Sandbox Host Runtime Verification - 2026-06-19](../../Development/ACP_Sandbox_Host_Runtime_Verification_2026_06_19.md)
+for the exact host, runtime, commands, and caveats.
+
 To run the ACP agent inside a sandbox container and access it via web SSH:
 
 1. Build the ACP image:

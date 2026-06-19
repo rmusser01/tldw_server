@@ -671,6 +671,11 @@ SANDBOX_DOCKER_BIND_WORKSPACE=1
 - Docker, Lima, and VZ runtimes depend on host prerequisites. If the selected
   runtime is unavailable or not opted in, session creation should fail before
   launching the downstream agent with an operator-facing runtime reason code.
+- The current release-host runtime evidence verifies Docker sandbox lifecycle
+  behavior only. See
+  [ACP Sandbox Host Runtime Verification - 2026-06-19](ACP_Sandbox_Host_Runtime_Verification_2026_06_19.md).
+  Lima, VZ, and named downstream-agent sandbox support remain caveated until
+  runtime-specific or agent-specific sandbox evidence is recorded.
 - Sandbox mode ignores host `cwd` and uses `/workspace` inside the runtime.
   Workspace setup guidance should make the bind/mount requirement explicit for
   the selected backend.
