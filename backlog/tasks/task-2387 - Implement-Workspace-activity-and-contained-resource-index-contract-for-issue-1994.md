@@ -45,15 +45,15 @@ Docs/superpowers/plans/2026-06-18-workspace-activity-index-contract-plan.md
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Created implementation plan in isolated worktree `/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/workspace-activity-index-contract`.
+Created implementation plan in isolated worktree `.worktrees/workspace-activity-index-contract`.
 
 Implemented ChaChaNotes schema v50 activity storage; activity DB APIs; WorkspaceActivityIndexService; `GET /api/v1/workspaces/{workspace_id}/index`; best-effort membership/runtime binding activity hooks; frontend `src/services/workspace-index` contract normalizers; and docs updates.
 
 Verification:
-- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_activity_index.py tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings.py tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings_api.py -q` passed 138 tests after rebase onto `origin/dev` (`a798b78f60`).
+- `python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_activity_index.py tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings.py tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings_api.py -q` passed 138 tests after rebase onto `origin/dev` (`a798b78f60`).
 - `./node_modules/.bin/vitest run src/services/workspace-index/__tests__/normalizers.test.ts --maxWorkers=1` passed 3 tests.
 - `git diff --check` passed.
-- `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/Workspaces/activity_index.py tldw_Server_API/app/core/Workspaces/membership_service.py tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/app/api/v1/schemas/workspace_schemas.py -f json -o /tmp/bandit_workspace_activity_index.json` completed with zero results.
+- `python -m bandit -r tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/Workspaces/activity_index.py tldw_Server_API/app/core/Workspaces/membership_service.py tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/app/api/v1/schemas/workspace_schemas.py -f json -o /tmp/bandit_workspace_activity_index.json` completed with zero results.
 
 PR opened: https://github.com/rmusser01/tldw_server/pull/2396. Earlier Git DNS fetch blocker is resolved; branch was rebased onto `origin/dev` before final verification.
 <!-- SECTION:NOTES:END -->
@@ -80,9 +80,17 @@ Implemented the Workspace #1994 activity/index contract in PR https://github.com
 Review follow-up for PR #2396: rebased branch against latest origin/dev (already up to date), addressed Gemini/Qodo comments by moving runtime-binding activity event construction into core, isolating the workspace index builder in run_in_threadpool, narrowing runtime-binding upsert activity to normalized user-field changes, replacing activity listing dynamic SQL with static parameterized query variants, returning deleted-workspace index payloads with workspace_deleted warnings, and replacing list+scan activity insert readback with direct primary-key lookup plus return_row=False support for best-effort write hooks.
 
 Review verification:
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_activity_index.py tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings_api.py tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed 107 tests.
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_activity_index.py tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings.py tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings_api.py -q` passed 139 tests.
+- `python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_activity_index.py tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings_api.py tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py -q` passed 107 tests after activating the project venv.
+- `python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_activity_index.py tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings.py tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings_api.py -q` passed 139 tests after activating the project venv.
 - `./node_modules/.bin/vitest run src/services/workspace-index/__tests__/normalizers.test.ts --maxWorkers=1` passed 3 tests.
 - `git diff --check` passed.
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/Workspaces/activity_index.py tldw_Server_API/app/core/Workspaces/membership_service.py tldw_Server_API/app/core/Workspaces/runtime_bindings.py tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/app/api/v1/schemas/workspace_schemas.py -f json -o /tmp/bandit_workspace_activity_index_review.json` completed with zero results/errors.
+- `python -m bandit -r tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/Workspaces/activity_index.py tldw_Server_API/app/core/Workspaces/membership_service.py tldw_Server_API/app/core/Workspaces/runtime_bindings.py tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/app/api/v1/schemas/workspace_schemas.py -f json -o /tmp/bandit_workspace_activity_index_review.json` completed with zero results/errors after activating the project venv.
+Second review follow-up for PR #2396: addressed fresh CodeRabbit comments by making Backlog verification notes environment-agnostic, closing the DB-backed activity test connection, adding unpaginated runtime binding aggregate counts for index summaries, and scanning membership pages independently of the preview `group_limit` so resource warnings are not silently missed. The direct activity insert readback comment was already fixed in commit 20958f6159 with a primary-key lookup.
+
+Second review verification:
+- `python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_activity_index.py -q` passed 5 tests after activating the project venv.
+- `python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_activity_index.py tldw_Server_API/tests/Workspaces/test_workspace_membership_adapters.py tldw_Server_API/tests/Workspaces/test_workspace_memberships_api.py tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings.py tldw_Server_API/tests/Workspaces/test_workspace_runtime_bindings_api.py -q` passed 141 tests after activating the project venv.
+- `./node_modules/.bin/vitest run src/services/workspace-index/__tests__/normalizers.test.ts --maxWorkers=1` passed 3 tests.
+- `git diff --check` passed.
+- `python -m bandit -r tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/Workspaces/activity_index.py tldw_Server_API/app/core/Workspaces/membership_service.py tldw_Server_API/app/core/Workspaces/runtime_bindings.py tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/app/api/v1/schemas/workspace_schemas.py -f json -o /tmp/bandit_workspace_activity_index_review2.json` completed with zero results/errors after activating the project venv.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

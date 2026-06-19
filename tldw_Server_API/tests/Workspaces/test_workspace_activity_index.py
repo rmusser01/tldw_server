@@ -18,54 +18,57 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 
 def test_workspace_activity_events_are_timestamped_newest_first_and_safe(tmp_path) -> None:
     db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="test-client")
-    db.upsert_workspace("workspace-1", "Activity Workspace")
+    try:
+        db.upsert_workspace("workspace-1", "Activity Workspace")
 
-    db.record_workspace_activity_event(
-        "workspace-1",
-        {
-            "event_type": "membership.linked",
-            "category": "membership",
-            "resource_type": "chat",
-            "resource_id": "chat-1",
-            "summary": "Linked chat",
-            "metadata": {
-                "role": "conversation",
-                "absolute_root": "/Users/alice/private/project",
-                "api_key": "sk-secret-value",
+        db.record_workspace_activity_event(
+            "workspace-1",
+            {
+                "event_type": "membership.linked",
+                "category": "membership",
+                "resource_type": "chat",
+                "resource_id": "chat-1",
+                "summary": "Linked chat",
+                "metadata": {
+                    "role": "conversation",
+                    "absolute_root": "/Users/alice/private/project",
+                    "api_key": "sk-secret-value",
+                },
             },
-        },
-        user_id="user-1",
-    )
-    db.record_workspace_activity_event(
-        "workspace-1",
-        {
-            "event_type": "runtime_binding.upserted",
-            "category": "runtime_binding",
-            "resource_type": "workspace_runtime_binding",
-            "resource_id": "repo-main",
-            "summary": "Updated runtime binding",
-            "metadata": {"binding_kind": "repo", "status": "missing"},
-        },
-        user_id="user-1",
-    )
+            user_id="user-1",
+        )
+        db.record_workspace_activity_event(
+            "workspace-1",
+            {
+                "event_type": "runtime_binding.upserted",
+                "category": "runtime_binding",
+                "resource_type": "workspace_runtime_binding",
+                "resource_id": "repo-main",
+                "summary": "Updated runtime binding",
+                "metadata": {"binding_kind": "repo", "status": "missing"},
+            },
+            user_id="user-1",
+        )
 
-    rows = db.list_workspace_activity_events("workspace-1", limit=10)
+        rows = db.list_workspace_activity_events("workspace-1", limit=10)
 
-    assert [row["event_type"] for row in rows] == [
-        "runtime_binding.upserted",
-        "membership.linked",
-    ]
-    assert rows[0]["category"] == "runtime_binding"
-    assert rows[0]["actor_user_id"] == "user-1"
-    assert rows[0]["created_at"]
-    assert rows[1]["metadata"]["absolute_root"] == "project"
-    assert "api_key" not in rows[1]["metadata"]
-    assert "/Users/alice" not in repr(rows)
-    assert "sk-secret" not in repr(rows)
-    assert [
-        row["event_type"]
-        for row in db.list_workspace_activity_events("workspace-1", limit=10, category="runtime_binding")
-    ] == ["runtime_binding.upserted"]
+        assert [row["event_type"] for row in rows] == [
+            "runtime_binding.upserted",
+            "membership.linked",
+        ]
+        assert rows[0]["category"] == "runtime_binding"
+        assert rows[0]["actor_user_id"] == "user-1"
+        assert rows[0]["created_at"]
+        assert rows[1]["metadata"]["absolute_root"] == "project"
+        assert "api_key" not in rows[1]["metadata"]
+        assert "/Users/alice" not in repr(rows)
+        assert "sk-secret" not in repr(rows)
+        assert [
+            row["event_type"]
+            for row in db.list_workspace_activity_events("workspace-1", limit=10, category="runtime_binding")
+        ] == ["runtime_binding.upserted"]
+    finally:
+        db.close_connection()
 
 
 class FakeWorkspaceIndexDB:
@@ -122,6 +125,25 @@ class FakeWorkspaceIndexDB:
                 "version": 1,
                 "deleted": False,
             },
+        ]
+        self.runtime_bindings: list[dict[str, object]] = [
+            {
+                "workspace_id": "workspace-1",
+                "binding_id": "repo-main",
+                "binding_kind": "repo",
+                "owner_domain": "workspaces",
+                "locator_ref": "repo-1",
+                "label": "Main Repo",
+                "status": "missing",
+                "path_hint": "/Users/alice/private/project",
+                "portability": "reference",
+                "metadata": {"branch": "dev"},
+                "redaction_report": {"redacted": True, "redacted_fields": ["path_hint"], "rejected_fields": []},
+                "created_at": "2026-06-18T12:00:00Z",
+                "updated_at": "2026-06-18T12:00:00Z",
+                "deleted": False,
+                "version": 1,
+            }
         ]
 
     def get_workspace(self, workspace_id: str, *, include_deleted: bool = False) -> dict[str, object] | None:
@@ -183,25 +205,27 @@ class FakeWorkspaceIndexDB:
         limit: int = 100,
     ) -> list[dict[str, object]]:
         _ = workspace_id, binding_kind, owner_domain, include_deleted, limit
-        return [
-            {
-                "workspace_id": "workspace-1",
-                "binding_id": "repo-main",
-                "binding_kind": "repo",
-                "owner_domain": "workspaces",
-                "locator_ref": "repo-1",
-                "label": "Main Repo",
-                "status": "missing",
-                "path_hint": "/Users/alice/private/project",
-                "portability": "reference",
-                "metadata": {"branch": "dev"},
-                "redaction_report": {"redacted": True, "redacted_fields": ["path_hint"], "rejected_fields": []},
-                "created_at": "2026-06-18T12:00:00Z",
-                "updated_at": "2026-06-18T12:00:00Z",
-                "deleted": False,
-                "version": 1,
-            }
-        ]
+        return [dict(row) for row in self.runtime_bindings[:limit]]
+
+    def workspace_runtime_binding_summary(
+        self,
+        workspace_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, object]:
+        _ = workspace_id, include_deleted
+        by_kind: dict[str, int] = {}
+        by_status: dict[str, int] = {}
+        for row in self.runtime_bindings:
+            kind = str(row.get("binding_kind") or "")
+            status = str(row.get("status") or "")
+            by_kind[kind] = by_kind.get(kind, 0) + 1
+            by_status[status] = by_status.get(status, 0) + 1
+        return {
+            "total": len(self.runtime_bindings),
+            "by_kind": by_kind,
+            "by_status": by_status,
+        }
 
     def list_workspace_activity_events(
         self,
@@ -285,6 +309,101 @@ def test_workspace_index_api_groups_resources_activity_and_warnings() -> None:
     assert any(warning["reason_code"] == "runtime_binding_missing" for warning in body["warnings"])
     assert "/Users/alice" not in response.text
     assert "do not expose" not in response.text
+
+
+def test_workspace_index_scans_resource_warnings_beyond_preview_limit() -> None:
+    db = FakeWorkspaceIndexDB()
+    db.memberships.append(
+        {
+            "workspace_id": "workspace-1",
+            "resource_type": "chat",
+            "resource_id": "chat-missing",
+            "role": "conversation",
+            "label": "Missing chat",
+            "transfer_policy": "link",
+            "provenance": {},
+            "metadata": {},
+            "created_at": "2026-06-18T11:00:00Z",
+            "updated_at": "2026-06-18T11:00:00Z",
+            "version": 1,
+            "deleted": False,
+        }
+    )
+    app = FastAPI()
+    app.include_router(workspaces_endpoint.router, prefix="/api/v1/workspaces")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id="user-1", tenant_id="tenant-a")
+    app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    app.dependency_overrides[try_get_media_db_for_user] = lambda: None
+    app.dependency_overrides[try_get_prompts_db_for_user] = lambda: FakePromptsDB()
+    app.dependency_overrides[workspaces_endpoint.try_get_workflows_db_for_user] = lambda: None
+    app.dependency_overrides[try_get_watchlists_db_for_user] = lambda: None
+    app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/v1/workspaces/workspace-1/index", params={"group_limit": "1"})
+
+    assert response.status_code == 200
+    body = response.json()
+    groups = {group["resource_type"]: group for group in body["resource_groups"]}
+    assert groups["chat"]["count"] == 2
+    assert [item["resource_id"] for item in groups["chat"]["items"]] == ["chat-1"]
+    assert any(
+        warning["reason_code"] == "resource_unresolved"
+        and warning["resource_id"] == "chat-missing"
+        for warning in body["warnings"]
+    )
+
+
+def test_workspace_index_runtime_summary_counts_beyond_binding_preview() -> None:
+    db = FakeWorkspaceIndexDB()
+    base = db.runtime_bindings[0]
+    db.runtime_bindings = [
+        {
+            **base,
+            "binding_id": f"repo-ready-{idx}",
+            "status": "ready",
+        }
+        for idx in range(50)
+    ] + [
+        {
+            **base,
+            "binding_id": f"repo-missing-{idx}",
+            "status": "missing",
+        }
+        for idx in range(10)
+    ]
+    app = FastAPI()
+    app.include_router(workspaces_endpoint.router, prefix="/api/v1/workspaces")
+
+    async def _allow_rate_limit() -> None:
+        return None
+
+    app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id="user-1", tenant_id="tenant-a")
+    app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    app.dependency_overrides[try_get_media_db_for_user] = lambda: None
+    app.dependency_overrides[try_get_prompts_db_for_user] = lambda: FakePromptsDB()
+    app.dependency_overrides[workspaces_endpoint.try_get_workflows_db_for_user] = lambda: None
+    app.dependency_overrides[try_get_watchlists_db_for_user] = lambda: None
+    app.dependency_overrides[WORKSPACES_READ_RATE_LIMIT] = _allow_rate_limit
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/v1/workspaces/workspace-1/index")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["runtime_summary"]["total"] == 60
+    assert body["runtime_summary"]["by_status"] == {"missing": 10, "ready": 50}
+    assert len(body["runtime_summary"]["bindings"]) == 50
+    assert all(binding["status"] == "ready" for binding in body["runtime_summary"]["bindings"])
+    assert any(
+        warning["reason_code"] == "runtime_binding_missing"
+        and warning["resource_id"] is None
+        for warning in body["warnings"]
+    )
 
 
 def test_workspace_index_api_returns_deleted_warning_for_soft_deleted_workspace(tmp_path) -> None:

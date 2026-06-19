@@ -94,11 +94,25 @@ class WorkspaceActivityIndexService:
                 request_metadata=request_metadata,
             )
             runtime_summary = self._runtime_summary(workspace_id)
+        resource_warnings = (
+            []
+            if _workspace_truthy(workspace.get("deleted"))
+            else self._resource_warnings(
+                workspace_id,
+                resource_groups=resource_groups,
+                user_id=user_id,
+                media_db=media_db,
+                prompts_db=prompts_db,
+                workflows_db=workflows_db,
+                watchlists_db=watchlists_db,
+                request_metadata=request_metadata,
+            )
+        )
         recent_activity = self._recent_activity(workspace_id, normalized_activity_limit)
         warnings = self._warnings(
             workspace=workspace,
-            resource_groups=resource_groups,
-            runtime_bindings=runtime_summary["bindings"],
+            resource_warnings=resource_warnings,
+            runtime_summary=runtime_summary,
         )
 
         return {
@@ -161,6 +175,22 @@ class WorkspaceActivityIndexService:
         except AttributeError:
             rows = []
         bindings = [runtime_binding_response_payload(row) for row in rows]
+        summary = self._runtime_binding_summary(workspace_id, bindings)
+        return {
+            "total": int(summary.get("total") or 0),
+            "by_kind": dict(summary.get("by_kind") or {}),
+            "by_status": dict(summary.get("by_status") or {}),
+            "bindings": bindings,
+        }
+
+    def _runtime_binding_summary(
+        self,
+        workspace_id: str,
+        bindings: list[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        summary = getattr(self.chacha_db, "workspace_runtime_binding_summary", None)
+        if callable(summary):
+            return summary(workspace_id)
         by_kind = Counter(str(item.get("binding_kind") or "") for item in bindings)
         by_status = Counter(str(item.get("status") or "") for item in bindings)
         by_kind.pop("", None)
@@ -169,7 +199,6 @@ class WorkspaceActivityIndexService:
             "total": len(bindings),
             "by_kind": dict(sorted(by_kind.items())),
             "by_status": dict(sorted(by_status.items())),
-            "bindings": bindings,
         }
 
     def _recent_activity(self, workspace_id: str, activity_limit: int) -> list[dict[str, Any]]:
@@ -182,8 +211,8 @@ class WorkspaceActivityIndexService:
         self,
         *,
         workspace: Mapping[str, Any],
-        resource_groups: list[Mapping[str, Any]],
-        runtime_bindings: list[Mapping[str, Any]],
+        resource_warnings: list[dict[str, Any]],
+        runtime_summary: Mapping[str, Any],
     ) -> list[dict[str, Any]]:
         warnings: list[dict[str, Any]] = []
         if _workspace_truthy(workspace.get("deleted")):
@@ -205,28 +234,15 @@ class WorkspaceActivityIndexService:
                 }
             )
 
-        for group in resource_groups:
-            for item in group.get("items") or []:
-                summary = item.get("summary") or {}
-                state = str(summary.get("state") or "available")
-                if state == "available":
-                    continue
-                reason = "resource_unresolved" if state == "unresolved" else f"resource_{state}"
-                warnings.append(
-                    {
-                        "severity": "warning",
-                        "reason_code": reason,
-                        "message": "A workspace resource needs attention in its owning surface.",
-                        "resource_type": item.get("resource_type"),
-                        "resource_id": item.get("resource_id"),
-                        "action_href": (summary.get("href") or _owner_surface(str(item.get("resource_type") or ""))["href"]),
-                    }
-                )
+        warnings.extend(resource_warnings)
 
+        runtime_bindings = list(runtime_summary.get("bindings") or [])
+        warned_runtime_statuses: set[str] = set()
         for binding in runtime_bindings:
             status = str(binding.get("status") or "").strip().lower()
             if status not in _RUNTIME_WARNING_STATUSES:
                 continue
+            warned_runtime_statuses.add(status)
             reason = "runtime_binding_missing" if status in {"missing", "runtime-missing"} else (
                 f"runtime_binding_{status.replace('-', '_')}"
             )
@@ -240,6 +256,64 @@ class WorkspaceActivityIndexService:
                     "action_href": "#/workspaces",
                 }
             )
+        for status, count in dict(runtime_summary.get("by_status") or {}).items():
+            normalized_status = str(status or "").strip().lower()
+            if normalized_status not in _RUNTIME_WARNING_STATUSES or normalized_status in warned_runtime_statuses:
+                continue
+            reason = "runtime_binding_missing" if normalized_status in {"missing", "runtime-missing"} else (
+                f"runtime_binding_{normalized_status.replace('-', '_')}"
+            )
+            warnings.append(
+                {
+                    "severity": "warning",
+                    "reason_code": reason,
+                    "message": (
+                        f"{int(count or 0)} workspace runtime binding(s) need attention "
+                        "before runtime-backed actions are reliable."
+                    ),
+                    "resource_type": "workspace_runtime_binding",
+                    "resource_id": None,
+                    "action_href": "#/workspaces",
+                }
+            )
+        return warnings
+
+    def _resource_warnings(
+        self,
+        workspace_id: str,
+        *,
+        resource_groups: list[Mapping[str, Any]],
+        user_id: str | None,
+        media_db: Any | None,
+        prompts_db: Any | None,
+        workflows_db: Any | None,
+        watchlists_db: Any | None,
+        request_metadata: Mapping[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        warnings: list[dict[str, Any]] = []
+        for group in resource_groups:
+            resource_type = str(group.get("resource_type") or "")
+            if not resource_type:
+                continue
+            cursor: str | None = None
+            while True:
+                page = self.memberships.list_workspace_memberships(
+                    workspace_id,
+                    resource_type=resource_type,
+                    resolve=True,
+                    limit=1000,
+                    cursor=cursor,
+                    user_id=user_id,
+                    media_db=media_db,
+                    prompts_db=prompts_db,
+                    workflows_db=workflows_db,
+                    watchlists_db=watchlists_db,
+                    request_metadata=request_metadata,
+                )
+                warnings.extend(_warnings_from_resource_items(page.get("items") or []))
+                cursor = page.get("next_cursor")
+                if not cursor:
+                    break
         return warnings
 
 
@@ -260,6 +334,28 @@ def _bounded_limit(value: int, *, default: int, max_value: int) -> int:
     except (TypeError, ValueError):
         return default
     return max(1, min(normalized, max_value))
+
+
+def _warnings_from_resource_items(items: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    warnings: list[dict[str, Any]] = []
+    for item in items:
+        summary = item.get("summary") or {}
+        state = str(summary.get("state") or "available")
+        if state == "available":
+            continue
+        resource_type = str(item.get("resource_type") or "")
+        reason = "resource_unresolved" if state == "unresolved" else f"resource_{state}"
+        warnings.append(
+            {
+                "severity": "warning",
+                "reason_code": reason,
+                "message": "A workspace resource needs attention in its owning surface.",
+                "resource_type": item.get("resource_type"),
+                "resource_id": item.get("resource_id"),
+                "action_href": (summary.get("href") or _owner_surface(resource_type)["href"]),
+            }
+        )
+    return warnings
 
 
 def _workspace_truthy(value: Any) -> bool:

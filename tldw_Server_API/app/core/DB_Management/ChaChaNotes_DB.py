@@ -44,6 +44,7 @@ import tempfile  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
 import uuid  # noqa: E402
+from collections import Counter
 from collections.abc import Mapping
 from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
@@ -19162,6 +19163,50 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             for row in cursor.fetchall()
             if (normalized := self._normalize_workspace_runtime_binding_row(row)) is not None
         ]
+
+    def workspace_runtime_binding_summary(
+        self,
+        workspace_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any]:
+        """Return unpaginated runtime binding counts for one Workspace."""
+        normalized_workspace_id = self._normalize_workspace_runtime_binding_required_string(
+            workspace_id,
+            "workspace_id",
+        )
+        include_deleted_flag = 1 if include_deleted else 0
+        cursor = self.execute_query(
+            """
+            SELECT binding_kind, status, COUNT(*) AS count
+              FROM workspace_runtime_bindings
+             WHERE workspace_id = ?
+               AND (? = 1 OR deleted = ?)
+             GROUP BY binding_kind, status
+            """,
+            (
+                normalized_workspace_id,
+                include_deleted_flag,
+                self._workspace_active_deleted_value(),
+            ),
+        )
+        by_kind: Counter[str] = Counter()
+        by_status: Counter[str] = Counter()
+        total = 0
+        for row in cursor.fetchall():
+            count = int(row["count"] if isinstance(row, Mapping) else row[2])
+            binding_kind = str((row["binding_kind"] if isinstance(row, Mapping) else row[0]) or "")
+            status = str((row["status"] if isinstance(row, Mapping) else row[1]) or "")
+            total += count
+            if binding_kind:
+                by_kind[binding_kind] += count
+            if status:
+                by_status[status] += count
+        return {
+            "total": total,
+            "by_kind": dict(sorted(by_kind.items())),
+            "by_status": dict(sorted(by_status.items())),
+        }
 
     def archive_workspace_runtime_binding(
         self,
