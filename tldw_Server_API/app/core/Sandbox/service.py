@@ -1192,7 +1192,7 @@ class SandboxService:
             evidence_summary = {
                 "configured": True,
                 "source": "host_smoke_evidence",
-                "available": True,
+                "available": False,
                 "valid": False,
                 "reasons": ["evidence_collection_failed"],
             }

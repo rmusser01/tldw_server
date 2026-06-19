@@ -584,7 +584,7 @@ def test_service_operator_status_isolates_evidence_operational_failure(
     )
 
     assert payload["sections"]["runtime_readiness"]["status"] == "ready"
-    assert payload["sections"]["evidence"]["status"] == "unknown"
+    assert payload["sections"]["evidence"]["status"] == "unavailable"
     assert payload["sections"]["evidence"]["reasons"] == ["evidence_collection_failed"]
 
 
