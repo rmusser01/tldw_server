@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import os
 from collections.abc import Collection
 from contextlib import suppress
 from typing import Any, Protocol
@@ -19,6 +20,7 @@ from mcp_unified.gateway.jsonrpc import (
     response_to_json,
 )
 from mcp_unified.gateway.runtime import GatewayRuntime
+from mcp_unified.smoke.reporting import redact_detail
 
 JsonObject = dict[str, object]
 JsonRpcPayload = JsonObject | list[object]
@@ -40,6 +42,9 @@ _PROFILE_HTTP_HEADER_NAMES = frozenset(
     }
 )
 _DEFAULT_WEBSOCKET_TIMEOUT_SECONDS = 10.0
+_DEFAULT_STDIO_TIMEOUT_SECONDS = 10.0
+_DEFAULT_STDERR_MAX_BYTES = 8192
+_STDIO_CLOSE_TIMEOUT_SECONDS = 1.0
 
 
 class McpSmokeTransport(Protocol):
@@ -544,7 +549,7 @@ class LiveWebSocketTransport:
                 await connection.send(encoded)
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - convert unexpected send failures.
             raise McpSmokeTransportError(
                 "transport_websocket_send_failed",
                 "WebSocket transport failed to send a JSON-RPC payload",
@@ -589,7 +594,7 @@ class LiveWebSocketTransport:
             self._receive_error = exc
             self._fail_pending(exc)
             await self._close_after_receive_error()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - convert unexpected receive failures.
             error = McpSmokeTransportError(
                 "transport_websocket_receive_failed",
                 "WebSocket transport failed while receiving frames",
@@ -809,6 +814,314 @@ class LiveWebSocketTransport:
         return None
 
 
+class StdioSubprocessTransport:
+    """Exchange newline-delimited JSON-RPC payloads with a subprocess over stdio."""
+
+    def __init__(
+        self,
+        command: str,
+        *,
+        args: list[str] | tuple[str, ...] | None = None,
+        cwd: str | None = None,
+        env_allowlist: Collection[str] | None = None,
+        startup_timeout: float | None = _DEFAULT_STDIO_TIMEOUT_SECONDS,
+        request_timeout: float | None = _DEFAULT_STDIO_TIMEOUT_SECONDS,
+        stderr_max_bytes: int = _DEFAULT_STDERR_MAX_BYTES,
+    ) -> None:
+        self.command = command
+        self.args = tuple(args or ())
+        self.cwd = cwd
+        self.env_allowlist = tuple(env_allowlist or ())
+        self.startup_timeout = startup_timeout
+        self.request_timeout = request_timeout
+        self.stderr_max_bytes = max(0, int(stderr_max_bytes))
+        self._process: asyncio.subprocess.Process | None = None
+        self._stderr_task: asyncio.Task[None] | None = None
+        self._stderr_buffer = bytearray()
+        self._stderr_truncated = False
+        self._start_lock = asyncio.Lock()
+        self._request_lock = asyncio.Lock()
+
+    async def start(self) -> None:
+        """Start the subprocess using argv execution."""
+
+        async with self._start_lock:
+            if self._process is not None and self._process.returncode is None:
+                return
+            self._stderr_buffer.clear()
+            self._stderr_truncated = False
+            try:
+                self._process = await asyncio.wait_for(
+                    asyncio.create_subprocess_exec(
+                        self.command,
+                        *self.args,
+                        cwd=self.cwd,
+                        env=self._subprocess_env(),
+                        stdin=asyncio.subprocess.PIPE,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    ),
+                    timeout=self.startup_timeout,
+                )
+            except asyncio.CancelledError:
+                raise
+            except TimeoutError as exc:
+                raise McpSmokeTransportError(
+                    "transport_stdio_start_timeout",
+                    "Timed out starting stdio subprocess",
+                    cause=exc,
+                ) from exc
+            except Exception as exc:
+                raise McpSmokeTransportError(
+                    "transport_stdio_start_failed",
+                    "Failed to start stdio subprocess",
+                    cause=exc,
+                ) from exc
+
+            self._stderr_task = asyncio.create_task(self._capture_stderr())
+
+    async def request(self, payload: JsonRpcPayload) -> object | None:
+        """Send one JSON-RPC line and parse one response line when required."""
+
+        request_ids = self._payload_request_ids(payload)
+        process = await self._started_process()
+        async with self._request_lock:
+            try:
+                await self._send_payload(process, payload)
+                if not request_ids:
+                    return None
+                line = await self._read_response_line(process, payload)
+                return self._decode_response_line(line, payload)
+            except asyncio.CancelledError:
+                await self.close()
+                raise
+            except McpSmokeTransportError:
+                await self.close()
+                raise
+            except Exception as exc:
+                error = self._stdio_error(
+                    "transport_stdio_request_failed",
+                    "Stdio subprocess request failed",
+                    payload,
+                    cause=exc,
+                )
+                await self.close()
+                raise error from exc
+
+    async def notify(self, payload: JsonObject) -> None:
+        """Send one JSON-RPC notification line."""
+
+        await self.request(payload)
+
+    async def close(self) -> None:
+        """Close pipes and terminate the subprocess if it is still running."""
+
+        process = self._process
+        stderr_task = self._stderr_task
+        self._process = None
+        self._stderr_task = None
+
+        if process is not None:
+            await self._close_stdin(process)
+            if process.returncode is None:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(
+                        process.wait(),
+                        timeout=_STDIO_CLOSE_TIMEOUT_SECONDS,
+                    )
+                except TimeoutError:
+                    process.kill()
+                    with suppress(Exception):
+                        await asyncio.wait_for(
+                            process.wait(),
+                            timeout=_STDIO_CLOSE_TIMEOUT_SECONDS,
+                        )
+            else:
+                with suppress(Exception):
+                    await process.wait()
+
+        if stderr_task is not None:
+            try:
+                await asyncio.wait_for(
+                    stderr_task,
+                    timeout=_STDIO_CLOSE_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                stderr_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await stderr_task
+
+    async def _started_process(self) -> asyncio.subprocess.Process:
+        if self._process is None:
+            await self.start()
+        if self._process is None:  # pragma: no cover - defensive guard
+            raise McpSmokeTransportError(
+                "transport_start_failed",
+                "Stdio transport failed to create a subprocess",
+            )
+        if self._process.returncode is not None:
+            raise self._stdio_error(
+                "transport_stdio_process_exited",
+                f"Stdio subprocess exited with code {self._process.returncode}",
+                None,
+            )
+        return self._process
+
+    async def _send_payload(
+        self,
+        process: asyncio.subprocess.Process,
+        payload: JsonRpcPayload,
+    ) -> None:
+        if process.stdin is None:
+            raise self._stdio_error(
+                "transport_stdio_pipe_unavailable",
+                "Stdio subprocess stdin is unavailable",
+                payload,
+            )
+        try:
+            encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+            process.stdin.write(encoded + b"\n")
+            await process.stdin.drain()
+        except Exception as exc:
+            raise self._stdio_error(
+                "transport_stdio_send_failed",
+                "Failed to write JSON-RPC payload to stdio subprocess",
+                payload,
+                cause=exc,
+            ) from exc
+
+    async def _read_response_line(
+        self,
+        process: asyncio.subprocess.Process,
+        payload: JsonRpcPayload,
+    ) -> bytes:
+        if process.stdout is None:
+            raise self._stdio_error(
+                "transport_stdio_pipe_unavailable",
+                "Stdio subprocess stdout is unavailable",
+                payload,
+            )
+        try:
+            line = await asyncio.wait_for(
+                process.stdout.readline(),
+                timeout=self.request_timeout,
+            )
+        except TimeoutError as exc:
+            raise self._stdio_error(
+                "transport_stdio_response_timeout",
+                "Timed out waiting for stdio JSON-RPC response",
+                payload,
+                cause=exc,
+            ) from exc
+        if not line:
+            raise self._stdio_error(
+                "transport_stdio_closed",
+                "Stdio subprocess closed stdout before a JSON-RPC response",
+                payload,
+            )
+        return line
+
+    def _decode_response_line(self, line: bytes, payload: JsonRpcPayload) -> object:
+        try:
+            return json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise self._stdio_error(
+                "transport_invalid_json_response",
+                "Stdio subprocess emitted a non-JSON response line",
+                payload,
+                cause=exc,
+            ) from exc
+
+    async def _capture_stderr(self) -> None:
+        process = self._process
+        if process is None or process.stderr is None:
+            return
+        while True:
+            chunk = await process.stderr.read(1024)
+            if not chunk:
+                return
+            remaining = self.stderr_max_bytes - len(self._stderr_buffer)
+            if remaining > 0:
+                self._stderr_buffer.extend(chunk[:remaining])
+            if len(chunk) > max(0, remaining):
+                self._stderr_truncated = True
+
+    async def _close_stdin(self, process: asyncio.subprocess.Process) -> None:
+        if process.stdin is None:
+            return
+        with suppress(Exception):
+            process.stdin.close()
+            await process.stdin.wait_closed()
+
+    def _subprocess_env(self) -> dict[str, str]:
+        return {name: os.environ[name] for name in self.env_allowlist if name in os.environ}
+
+    def _stderr_detail(self) -> str | None:
+        if not self._stderr_buffer and not self._stderr_truncated:
+            return None
+        text = self._stderr_buffer.decode("utf-8", errors="replace")
+        if self._stderr_truncated:
+            text = f"{text}...[stderr truncated]"
+        return str(redact_detail(text))
+
+    def _stdio_error(
+        self,
+        reason_code: str,
+        message: str,
+        payload: JsonRpcPayload | None,
+        *,
+        cause: BaseException | None = None,
+    ) -> McpSmokeTransportError:
+        stderr = self._stderr_detail()
+        if stderr:
+            message = f"{message} stderr={stderr}"
+        return McpSmokeTransportError(
+            reason_code,
+            message,
+            method=self._single_payload_method(payload),
+            cause=cause,
+        )
+
+    @staticmethod
+    def _payload_request_ids(payload: JsonRpcPayload) -> list[object]:
+        if isinstance(payload, dict):
+            return [payload["id"]] if "id" in payload else []
+
+        request_ids: list[object] = []
+        seen_ids: set[object] = set()
+        for item in payload:
+            if not isinstance(item, dict) or "id" not in item:
+                continue
+            request_id = item["id"]
+            if request_id in seen_ids:
+                raise McpSmokeTransportError(
+                    "transport_duplicate_request_id",
+                    "Stdio transport cannot send duplicate request ids",
+                )
+            seen_ids.add(request_id)
+            request_ids.append(request_id)
+        return request_ids
+
+    @staticmethod
+    def _single_payload_method(payload: JsonRpcPayload | None) -> str | None:
+        if payload is None:
+            return None
+        if isinstance(payload, dict):
+            method = payload.get("method")
+            return method if isinstance(method, str) else None
+        methods = [
+            item.get("method")
+            for item in payload
+            if isinstance(item, dict) and isinstance(item.get("method"), str)
+        ]
+        if len(methods) == 1:
+            return methods[0]
+        if methods:
+            return ",".join(methods)
+        return None
+
+
 def _gateway_response_to_plain_json(response: object) -> object | None:
     if isinstance(response, GatewayNoResponse):
         return None
@@ -828,4 +1141,5 @@ __all__ = [
     "LiveWebSocketTransport",
     "McpSmokeTransport",
     "McpSmokeTransportError",
+    "StdioSubprocessTransport",
 ]

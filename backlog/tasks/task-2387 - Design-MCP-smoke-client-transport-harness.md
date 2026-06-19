@@ -19,8 +19,10 @@ documentation:
 - Docs/superpowers/specs/2026-06-19-mcp-smoke-client-transport-harness-design.md
 - Docs/superpowers/plans/2026-06-19-mcp-smoke-client-transport-harness-implementation-plan.md
 modified_files:
+- mcp_unified/smoke/__init__.py
 - mcp_unified/smoke/transports.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_smoke_client.py
+- tldw_Server_API/app/core/MCP_unified/tests/fixtures/smoke_stdio_server.py
 ---
 
 ## Description

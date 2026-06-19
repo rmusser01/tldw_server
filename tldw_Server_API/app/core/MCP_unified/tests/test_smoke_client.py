@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
 import websockets
+
+REPO_ROOT = Path(__file__).resolve().parents[5]
+FIXTURE_PATH = (
+    Path(__file__).resolve().parent / "fixtures" / "smoke_stdio_server.py"
+)
 
 
 def test_smoke_report_redacts_sensitive_details(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1030,6 +1037,162 @@ async def test_live_websocket_pending_registration_rolls_back_batch_conflicts() 
 
     assert "existing" in transport._pending  # nosec B101
     assert "new" not in transport._pending  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_stdio_subprocess_transport_exchanges_object_payloads() -> None:
+    from mcp_unified.smoke.client import McpSmokeClient
+    from mcp_unified.smoke.transports import StdioSubprocessTransport
+
+    transport = StdioSubprocessTransport(
+        command=sys.executable,
+        args=[str(FIXTURE_PATH)],
+        cwd=str(REPO_ROOT),
+        env_allowlist=["PYTHONPATH"],
+    )
+    client = McpSmokeClient(transport)
+
+    try:
+        initialized = await client.initialize()
+        ping = await client.ping()
+        tools = await client.list_tools()
+    finally:
+        await transport.close()
+
+    assert initialized["serverInfo"]["name"] == "smoke-stdio-fixture"  # nosec B101
+    assert ping == {"pong": True}  # nosec B101
+    assert tools["tools"][0]["name"] == "echo.search"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_stdio_subprocess_transport_batch_suppresses_notification_response() -> None:
+    from mcp_unified.smoke.transports import StdioSubprocessTransport
+
+    transport = StdioSubprocessTransport(
+        command=sys.executable,
+        args=[str(FIXTURE_PATH)],
+        cwd=str(REPO_ROOT),
+        env_allowlist=["PYTHONPATH"],
+    )
+
+    try:
+        response = await transport.request(
+            [
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                {"jsonrpc": "2.0", "id": "smoke-batch-ping", "method": "ping"},
+            ]
+        )
+    finally:
+        await transport.close()
+
+    assert response == [  # nosec B101
+        {
+            "jsonrpc": "2.0",
+            "id": "smoke-batch-ping",
+            "result": {"pong": True},
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stdio_subprocess_transport_close_terminates_process() -> None:
+    from mcp_unified.smoke.transports import StdioSubprocessTransport
+
+    transport = StdioSubprocessTransport(
+        command=sys.executable,
+        args=[str(FIXTURE_PATH)],
+        cwd=str(REPO_ROOT),
+        env_allowlist=["PYTHONPATH"],
+    )
+    await transport.start()
+    process = transport._process
+
+    await transport.close()
+
+    assert process is not None  # nosec B101
+    await asyncio.wait_for(process.wait(), timeout=1.0)
+    assert process.returncode is not None  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_stdio_subprocess_transport_redacts_secret_stderr_on_error() -> None:
+    from mcp_unified.smoke.transports import (
+        McpSmokeTransportError,
+        StdioSubprocessTransport,
+    )
+
+    transport = StdioSubprocessTransport(
+        command=sys.executable,
+        args=[str(FIXTURE_PATH)],
+        cwd=str(REPO_ROOT),
+        env_allowlist=["PYTHONPATH"],
+    )
+
+    with pytest.raises(McpSmokeTransportError) as caught:
+        await transport.request(
+            {"jsonrpc": "2.0", "id": "smoke-secret", "method": "smoke/secret-stderr"}
+        )
+
+    await transport.close()
+
+    rendered_error = str(caught.value)
+    assert "stdio-secret-token" not in rendered_error  # nosec B101
+    assert "Bearer stdio-secret-token" not in rendered_error  # nosec B101
+    assert "stderr=" in rendered_error  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_stdio_subprocess_transport_duplicate_batch_ids_do_not_start_process() -> None:
+    from mcp_unified.smoke.transports import (
+        McpSmokeTransportError,
+        StdioSubprocessTransport,
+    )
+
+    transport = StdioSubprocessTransport(
+        command=sys.executable,
+        args=[str(FIXTURE_PATH)],
+        cwd=str(REPO_ROOT),
+        env_allowlist=["PYTHONPATH"],
+    )
+
+    with pytest.raises(
+        McpSmokeTransportError,
+        match="transport_duplicate_request_id",
+    ):
+        await transport.request(
+            [
+                {"jsonrpc": "2.0", "id": "duplicate", "method": "ping"},
+                {"jsonrpc": "2.0", "id": "duplicate", "method": "tools/list"},
+            ]
+        )
+
+    assert transport._process is None  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_stdio_subprocess_transport_timeout_closes_process() -> None:
+    from mcp_unified.smoke.transports import (
+        McpSmokeTransportError,
+        StdioSubprocessTransport,
+    )
+
+    transport = StdioSubprocessTransport(
+        command=sys.executable,
+        args=[str(FIXTURE_PATH)],
+        cwd=str(REPO_ROOT),
+        env_allowlist=["PYTHONPATH"],
+        request_timeout=0.05,
+    )
+
+    with pytest.raises(
+        McpSmokeTransportError,
+        match="transport_stdio_response_timeout",
+    ):
+        await transport.request(
+            {"jsonrpc": "2.0", "id": "smoke-timeout", "method": "smoke/hang"}
+        )
+
+    assert transport._process is None  # nosec B101
 
 
 @pytest.mark.asyncio

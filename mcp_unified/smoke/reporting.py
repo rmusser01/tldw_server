@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import re
 from collections.abc import Sized
 from dataclasses import dataclass, field
 from itertools import islice
-import os
-import re
 
 MAX_TEXT_CHARS = 240
 MAX_MAPPING_ITEMS = 16

@@ -21,6 +21,7 @@ from mcp_unified.smoke.transports import (
     LiveWebSocketTransport,
     McpSmokeTransport,
     McpSmokeTransportError,
+    StdioSubprocessTransport,
 )
 
 __all__ = [
@@ -32,6 +33,7 @@ __all__ = [
     "McpSmokeClientError",
     "McpSmokeTransport",
     "McpSmokeTransportError",
+    "StdioSubprocessTransport",
     "SmokeFixtureGatewayRuntime",
     "SmokeReport",
     "SmokeStepReport",
