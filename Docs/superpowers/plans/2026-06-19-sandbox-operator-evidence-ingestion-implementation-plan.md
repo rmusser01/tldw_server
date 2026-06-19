@@ -589,7 +589,7 @@ git commit -m "feat: normalize sandbox evidence metadata"
 - Modify: `tldw_Server_API/app/core/Sandbox/operator_status.py`
 - Modify: `tldw_Server_API/tests/sandbox/test_operator_status.py`
 
-- [ ] **Step 1: Add failing projection tests**
+- [x] **Step 1: Add failing projection tests**
 
 Add helper summaries in `test_operator_status.py`:
 
@@ -653,7 +653,7 @@ def test_operator_status_projects_successful_evidence_as_ready() -> None:
     assert model.sections["evidence"].status == "ready"
 ```
 
-- [ ] **Step 2: Run projection tests to verify they fail**
+- [x] **Step 2: Run projection tests to verify they fail**
 
 Run:
 
@@ -663,7 +663,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test
 
 Expected: failures because `build_operator_status()` does not accept `evidence_summary` yet.
 
-- [ ] **Step 3: Implement projection**
+- [x] **Step 3: Implement projection**
 
 In `operator_status.py`:
 
@@ -697,7 +697,7 @@ else:
     section = _section("ready", severity="info", ...)
 ```
 
-- [ ] **Step 4: Run projection tests**
+- [x] **Step 4: Run projection tests**
 
 Run:
 
@@ -707,7 +707,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/sandbox/test
 
 Expected: operator-status tests pass.
 
-- [ ] **Step 5: Commit Task 4**
+- [x] **Step 5: Commit Task 4**
 
 ```bash
 git add tldw_Server_API/app/core/Sandbox/operator_status.py \

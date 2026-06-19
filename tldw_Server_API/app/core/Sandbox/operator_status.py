@@ -44,6 +44,12 @@ def _safe_int(value: object) -> int:
     return max(coerced, 0)
 
 
+def _strict_int(value: object) -> int | None:
+    """Return only real integer values, excluding bool."""
+
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def _safe_list(value: object) -> list[object]:
     """Copy list-like diagnostic values without trusting arbitrary iterables."""
 
@@ -119,17 +125,128 @@ def _action(
     }
 
 
+def _project_evidence_section(
+    evidence_summary: Mapping[str, Any] | None,
+) -> tuple[OperatorSection, list[dict[str, object]], bool, bool]:
+    """Project normalized host smoke evidence into an operator-status section."""
+
+    payload = _safe_dict(evidence_summary)
+    source = str(payload.get("source") or "host_smoke_evidence")
+    configured = _safe_bool(payload.get("configured"))
+    reasons = _safe_str_list(payload.get("reasons"))
+    if configured is not True:
+        return (
+            _section(
+                "not_configured",
+                configured=False if configured is False else None,
+                source=source,
+                reasons=reasons,
+            ),
+            [],
+            False,
+            False,
+        )
+
+    available = _safe_bool(payload.get("available"))
+    valid = _safe_bool(payload.get("valid"))
+    skip_flags = _safe_dict(payload.get("skip_flags"))
+    skip_build = _safe_bool(skip_flags.get("skip_build")) is True
+    skip_sign = _safe_bool(skip_flags.get("skip_sign")) is True
+    stale = _safe_bool(payload.get("stale")) is True
+    final_exit_code = _strict_int(payload.get("final_exit_code"))
+
+    fields: dict[str, object] = {
+        "configured": True,
+        "source": source,
+        "reasons": reasons,
+    }
+    for key in ("evidence_dir", "created_at", "smoke_run_id"):
+        value = payload.get(key)
+        if isinstance(value, str):
+            fields[key] = value
+    for key in ("schema_version", "age_seconds"):
+        value = _strict_int(payload.get(key))
+        if value is not None:
+            fields[key] = value
+    if final_exit_code is not None:
+        fields["final_exit_code"] = final_exit_code
+    for key in (
+        "phases",
+        "cleanup",
+        "runtime_pointers",
+        "expected_files",
+        "skip_flags",
+    ):
+        value = payload.get(key)
+        if isinstance(value, Mapping):
+            fields[key] = dict(value)
+
+    actions: list[dict[str, object]] = []
+    if available is not True:
+        actions.append(
+            _action(
+                "inspect_host_gated_evidence",
+                "warning",
+                "evidence",
+                "Inspect the configured host-gated smoke evidence bundle path and expected files.",
+                endpoint="/api/v1/sandbox/admin/operator-status",
+            )
+        )
+        return _section("unavailable", severity="warning", **fields), actions, True, False
+    if valid is not True or final_exit_code is None:
+        actions.append(
+            _action(
+                "inspect_host_gated_evidence",
+                "warning",
+                "evidence",
+                "Inspect the configured host-gated smoke evidence JSON for parser warnings.",
+                endpoint="/api/v1/sandbox/admin/operator-status",
+            )
+        )
+        return _section("unknown", severity="warning", **fields), actions, True, False
+    if final_exit_code != 0:
+        actions.append(
+            _action(
+                "run_host_gated_smoke",
+                "error",
+                "evidence",
+                "Re-run the host-gated VZ Linux smoke workflow and inspect the failed evidence bundle.",
+            )
+        )
+        return (
+            _section("action_required", severity="error", **fields),
+            actions,
+            False,
+            True,
+        )
+    if stale or skip_build or skip_sign:
+        actions.append(
+            _action(
+                "review_expected_skips",
+                "warning",
+                "evidence",
+                "Review stale host-gated smoke evidence or expected build/sign skip flags.",
+            )
+        )
+        return _section("degraded", severity="warning", **fields), actions, True, False
+    return _section("ready", **fields), actions, False, False
+
+
 def build_operator_status(
     *,
     runtime_diagnostics: Mapping[str, Any] | None,
     macos_diagnostics: Mapping[str, Any] | None,
     startup_warning_summary: Mapping[str, Any] | None = None,
+    evidence_summary: Mapping[str, Any] | None = None,
 ) -> dict[str, object]:
     """Project sandbox diagnostics into a stable admin/operator status payload."""
 
     runtime_payload = _safe_dict(runtime_diagnostics)
     macos_payload = _safe_dict(macos_diagnostics)
     startup_payload = _safe_dict(startup_warning_summary)
+    evidence_section, evidence_actions, evidence_degraded, evidence_action_required = (
+        _project_evidence_section(evidence_summary)
+    )
 
     runtime_failed = "_section_error" in runtime_payload
     macos_failed = "_section_error" in macos_payload
@@ -251,6 +368,7 @@ def build_operator_status(
                 "Resolve blocking sandbox startup warnings before relying on sandbox execution.",
             )
         )
+    recommended_actions.extend(evidence_actions)
 
     sections = {
         "runtime_readiness": _section(
@@ -322,7 +440,7 @@ def build_operator_status(
             cleanup_plan_endpoint=cleanup_plan_endpoint,
             reasons=recovery_reasons,
         ),
-        "evidence": _section("not_configured"),
+        "evidence": evidence_section,
         "security_boundaries": _section(
             "ready",
             host_local_warning_runtimes=host_local_warning_runtimes,
@@ -380,11 +498,17 @@ def build_operator_status(
         or has_repair_action
         or has_macos_vz_action
         or has_image_store_action
+        or evidence_action_required
     ):
         overall_status = "action_required"
         overall_severity = (
             "error"
-            if startup_blocking is True or has_macos_vz_action or has_image_store_action
+            if (
+                startup_blocking is True
+                or has_macos_vz_action
+                or has_image_store_action
+                or evidence_action_required
+            )
             else "warning"
         )
     elif (
@@ -393,6 +517,7 @@ def build_operator_status(
         or startup_present is True
         or has_cleanup_candidates
         or has_host_local_warnings
+        or evidence_degraded
     ):
         overall_status = "degraded"
         overall_severity = "warning"
