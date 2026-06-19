@@ -232,7 +232,13 @@ async def test_get_task_run_history_redacted_mode_omits_support_unsafe_text(monk
         created_at="2026-05-10T01:00:00+00:00",
         last_activity_at="2026-05-10T01:01:00+00:00",
         message_count=2,
-        usage=SimpleNamespace(to_dict=lambda: {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}),
+        usage=SimpleNamespace(
+            to_dict=lambda: {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            }
+        ),
         messages=[
             {
                 "role": "user",
@@ -311,11 +317,48 @@ async def test_get_task_run_history_redacted_mode_omits_support_unsafe_text(monk
         assert enriched_run["failure_context"]["message"] == "[redacted]"
         assert enriched_run["failure_context"]["diagnostic_uri"] == "[redacted]"
         assert enriched_run["review_decision"]["feedback_preview"] == "[redacted]"
-        assert enriched_run["session"]["links"]["detail"] == "/api/v1/acp/sessions/session-redacted/detail?redacted=true"
-        assert enriched_run["session"]["links"]["events"] == "/api/v1/acp/sessions/session-redacted/events?redacted=true"
-        assert enriched_run["session"]["links"]["artifacts"] == "/api/v1/acp/sessions/session-redacted/artifacts?redacted=true"
+        assert enriched_run["session"]["links"]["detail"] == (
+            "/api/v1/acp/sessions/session-redacted/detail?redacted=true"
+        )
+        assert enriched_run["session"]["links"]["events"] == (
+            "/api/v1/acp/sessions/session-redacted/events?redacted=true"
+        )
+        assert enriched_run["session"]["links"]["artifacts"] == (
+            "/api/v1/acp/sessions/session-redacted/artifacts?redacted=true"
+        )
     finally:
         db.close()
+
+
+async def test_redact_task_review_payloads_preserves_model_like_reviews():
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    class ModelLikeReview:
+        def model_dump(self, mode: str = "json") -> dict[str, Any]:
+            return {
+                "id": 1,
+                "approved": False,
+                "feedback": "model feedback secret",
+                "reviewer": "codex",
+            }
+
+    namespace_review = SimpleNamespace(
+        id=2,
+        approved=True,
+        feedback="namespace feedback secret",
+        reviewer="goose",
+    )
+
+    payloads = orch_mod._redact_task_review_payloads(
+        [ModelLikeReview(), namespace_review]
+    )
+
+    assert payloads[0]["id"] == 1
+    assert payloads[0]["feedback"] == "[redacted]"
+    assert payloads[0]["reviewer"] == "codex"
+    assert payloads[1]["id"] == 2
+    assert payloads[1]["feedback"] == "[redacted]"
+    assert payloads[1]["reviewer"] == "goose"
 
 
 async def test_get_task_run_history_includes_failed_session_diagnostics(monkeypatch, tmp_path):
@@ -336,7 +379,13 @@ async def test_get_task_run_history_includes_failed_session_diagnostics(monkeypa
         created_at="2026-05-10T01:00:00+00:00",
         last_activity_at="2026-05-10T01:01:00+00:00",
         message_count=2,
-        usage=SimpleNamespace(to_dict=lambda: {"prompt_tokens": 4, "completion_tokens": 0, "total_tokens": 4}),
+        usage=SimpleNamespace(
+            to_dict=lambda: {
+                "prompt_tokens": 4,
+                "completion_tokens": 0,
+                "total_tokens": 4,
+            }
+        ),
         messages=[
             {
                 "role": "user",

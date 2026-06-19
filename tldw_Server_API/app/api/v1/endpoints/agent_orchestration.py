@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -533,12 +534,77 @@ def _redact_run_summary_payload(run_dict: dict[str, Any]) -> dict[str, Any]:
     return run_dict
 
 
-def _redact_task_review_payloads(reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _coerce_task_review_payload(review: Any) -> dict[str, Any]:
+    """Return a JSON-style review payload from dict, model, row, or ORM-like values."""
+    if isinstance(review, dict):
+        return dict(review)
+
+    mapping = getattr(review, "_mapping", None)
+    if isinstance(mapping, Mapping):
+        return dict(mapping)
+
+    model_dump = getattr(review, "model_dump", None)
+    if callable(model_dump):
+        try:
+            dumped = model_dump(mode="json")
+        except TypeError:
+            dumped = model_dump()
+        if isinstance(dumped, dict):
+            return dict(dumped)
+
+    dict_method = getattr(review, "dict", None)
+    if callable(dict_method):
+        dumped = dict_method()
+        if isinstance(dumped, dict):
+            return dict(dumped)
+
+    try:
+        return dict(review)
+    except (TypeError, ValueError):
+        pass
+
+    known_fields = (
+        "id",
+        "task_id",
+        "approved",
+        "feedback",
+        "reviewer",
+        "created_at",
+    )
+    coerced: dict[str, Any] = {}
+    for field in known_fields:
+        try:
+            coerced[field] = getattr(review, field)
+        except AttributeError:
+            continue
+    if coerced:
+        return coerced
+
+    try:
+        instance_attrs = vars(review)
+    except TypeError:
+        instance_attrs = {}
+    filtered_attrs = {
+        key: value
+        for key, value in instance_attrs.items()
+        if not key.startswith("_")
+    }
+    if filtered_attrs:
+        return filtered_attrs
+
+    logger.warning(
+        "Skipping unsupported orchestration review payload type {} during redaction",
+        type(review).__name__,
+    )
+    return {}
+
+
+def _redact_task_review_payloads(reviews: list[Any]) -> list[dict[str, Any]]:
     redacted_reviews: list[dict[str, Any]] = []
     for review in reviews:
-        if not isinstance(review, dict):
+        redacted_review = _coerce_task_review_payload(review)
+        if not redacted_review:
             continue
-        redacted_review = dict(review)
         if redacted_review.get("feedback") is not None:
             redacted_review["feedback"] = _RUN_SUMMARY_REDACTED_VALUE
         redacted_reviews.append(redacted_review)
