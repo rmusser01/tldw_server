@@ -83,7 +83,6 @@ proceeds.
 Top-level fields:
 
 - `source`: fixed string such as `sandbox_operator_status`.
-- `generated_at`: ISO timestamp from the server process.
 - `overall_status`: one of `ready`, `degraded`, `action_required`,
   `unavailable`, or `unknown`.
 - `overall_severity`: one of `info`, `warning`, or `error`.
@@ -91,6 +90,12 @@ Top-level fields:
 - `sections`: structured section records.
 - `recommended_actions`: ordered action records.
 - `notes`: bounded operator-readable notes.
+
+Do not include a wall-clock `generated_at` field in Slice 1. Existing sandbox
+diagnostics surfaces do not expose timestamps, and adding one would complicate
+portable tests without proving freshness. Evidence records may still expose
+their own captured timestamp and computed age because that is part of the
+evidence artifact, not the live status projection.
 
 Section records should be stable and small:
 
@@ -120,17 +125,29 @@ The implementation should derive action order from existing normalized reason
 details where possible. New action codes must be documented in the schema and
 tests before clients depend on them.
 
+Action records should include enough context for clients to render them without
+parsing prose:
+
+- `code`: stable action code.
+- `severity`: `info`, `warning`, or `error`.
+- `section`: source section such as `runtime_readiness` or `reconciliation`.
+- `endpoint`: optional existing endpoint pointer for read-only follow-up or
+  dry-run-first action.
+- `dry_run_required`: `true` when the next step is an explicit repair or cleanup
+  planning flow that must remain dry-run-first.
+- `message`: short operator-facing summary.
+
 ## Status Classification
 
 The projection should classify the overall status conservatively:
 
-- `ready`: at least one configured runtime is ready, no blocking macOS/VZ
+- `ready`: at least one usable runtime is ready, no blocking macOS/VZ
   recovery issues are present, and no evidence artifact reports a blocking
   failure.
-- `degraded`: usable runtime coverage exists, but host-gated VZ evidence is
-  missing/stale, optional drills were skipped, image-store cleanup candidates
-  exist, startup warnings exist, or host-local runtime warnings need operator
-  awareness.
+- `degraded`: usable runtime coverage exists, but configured/expected
+  host-gated VZ evidence is stale or reports non-blocking skips, image-store
+  cleanup candidates exist, startup warnings exist, or host-local runtime
+  warnings need operator awareness.
 - `action_required`: runtime diagnostics or macOS diagnostics found repairable
   stale/unhealthy state, helper/template setup is incomplete for a configured
   VZ path, or evidence reports a blocking smoke failure.
@@ -142,14 +159,21 @@ The projection should classify the overall status conservatively:
 This is an operator UX classification. It must not change sandbox admission,
 runtime selection, repair eligibility, or security policy enforcement.
 
+"Usable runtime" means a runtime discovery row reports current readiness that
+can actually admit requests on this host. "Configured VZ path" means the
+operator has provided helper/template/image-store configuration or explicitly
+asked for VZ evidence handling. Unconfigured host-gated runtimes should remain
+visible in their section, but they should not make a Docker-only or host-local
+development install look broken.
+
 ## Evidence Summary Handling
 
 Evidence summary input is advisory and optional.
 
-Accepted sources:
+Accepted sources for the later evidence slice:
 
-- a caller-provided path to a local summary JSON produced by the existing
-  host-gated evidence summary tooling
+- a server-side configured path to a local summary JSON produced by the
+  existing host-gated evidence summary tooling
 - a future workflow artifact pointer that has already been validated by CI
   tooling
 
@@ -164,11 +188,31 @@ Safety rules:
 - If the summary is absent or invalid, report `evidence.status=unknown` or
   `evidence.status=unavailable`; do not fail the whole operator status unless
   the caller explicitly requested strict evidence mode.
+- Do not accept arbitrary evidence paths through the first endpoint shape.
+  Query-parameter path support should require a separate review because it can
+  become an admin file-probing primitive even when authorization is correct.
 
 The first implementation can omit path-based evidence ingestion if that would
 broaden the PR too much. In that case the spec still defines the section shape,
 and the endpoint should return `evidence.status=not_configured` with an action
-to run or attach host-gated smoke evidence.
+to run or attach host-gated smoke evidence. `not_configured` evidence should
+not degrade `overall_status` unless strict or expected-evidence mode is
+configured.
+
+## Partial Failure And Latency Boundaries
+
+The operator status endpoint must be bounded and partially successful.
+
+- Collect existing diagnostics through their service methods; do not add new
+  helper calls or filesystem scans.
+- If one section raises or returns malformed data, mark only that section as
+  `unknown` or `unavailable` with a reason and continue with the other
+  sections.
+- Do not retry slow helper diagnostics inside the status projection.
+- Do not perform blocking real-host probes beyond what the existing diagnostics
+  endpoint already does.
+- Add tests that inject a failing macOS diagnostics collector and verify the
+  runtime readiness section still renders.
 
 ## API Placement
 
@@ -195,7 +239,8 @@ plain and stable; prefer additive changes over nested runtime-specific blobs.
 
 ### Slice 1: Portable Status Projection
 
-Add service-level projection and endpoint without evidence-file ingestion.
+Add service-level projection and endpoint without evidence-file ingestion and
+without `generated_at`.
 
 Deliverables:
 
@@ -203,6 +248,8 @@ Deliverables:
 - Admin-only `GET /api/v1/sandbox/admin/operator-status`.
 - Pydantic response schema.
 - Unit tests with synthetic runtime diagnostics and macOS diagnostics.
+- Tests for partial section failure and unconfigured VZ/evidence not degrading
+  a host with another usable runtime.
 - Docs update pointing operators at detailed sources.
 
 ### Slice 2: Advisory Evidence Summary Input
@@ -212,7 +259,7 @@ Add optional, bounded evidence summary ingestion.
 Deliverables:
 
 - Safe parser for existing host-gated evidence summary JSON.
-- Optional config/env or request query path for operator-supplied evidence.
+- Optional server-side config/env path for operator-supplied evidence.
 - Tests for malformed paths, malformed JSON, oversized JSON, stale evidence,
   blocking failure evidence, and expected skips.
 - Docs describing evidence retention and privacy boundaries.
@@ -234,6 +281,8 @@ Normal CI should stay portable.
 Required tests for Slice 1:
 
 - Runtime ready plus clean macOS diagnostics returns `ready`.
+- Runtime ready plus unconfigured VZ/evidence returns `ready` or section-local
+  `not_configured`, not `degraded`.
 - Helper/protocol/template blockers produce `action_required` or
   `unavailable` with stable action codes.
 - Reconciliation stale/unhealthy/owned-orphan counts point to dry-run repair
@@ -241,6 +290,8 @@ Required tests for Slice 1:
 - Image-store GC candidates point to cleanup-plan, not cleanup mutation.
 - Host-local runtime warnings appear in `security_boundaries`.
 - Missing macOS diagnostics degrade gracefully rather than crashing.
+- A failing macOS diagnostics section does not prevent runtime readiness from
+  rendering.
 - No code path invokes helper lifecycle commands, launchd, repair mutation,
   image-store cleanup mutation, or real VZ execution.
 
@@ -287,12 +338,10 @@ Required tests for Slice 2:
 
 ## Open Questions
 
-- Should evidence summary input be configured server-side only, or should the
-  endpoint accept an admin query parameter in a later slice?
-- Should `overall_status=degraded` be used for stale evidence, or should stale
-  evidence remain section-local until a strict evidence mode is requested?
-- Should the first implementation expose `generated_at`, or follow existing
-  diagnostics surfaces and omit timestamps to keep tests deterministic?
+- Whether a later evidence slice should support an admin-supplied request path,
+  and what containment policy would make that safe enough.
+- Whether stale evidence should affect `overall_status` outside strict or
+  expected-evidence mode.
 
 ## Acceptance Criteria
 
