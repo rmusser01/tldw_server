@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -731,6 +732,26 @@ async def test_inprocess_fastapi_transport_uses_asgi_request_path() -> None:
 
 
 @pytest.mark.asyncio
+async def test_smoke_gateway_fixture_app_runs_prefixed_ping() -> None:
+    from mcp_unified.smoke.client import McpSmokeClient
+    from mcp_unified.smoke.transports import InProcessFastApiTransport
+
+    fixture_path = Path(__file__).resolve().parent / "fixtures" / "smoke_gateway_app.py"
+    spec = importlib.util.spec_from_file_location("smoke_gateway_app_fixture", fixture_path)
+    assert spec is not None and spec.loader is not None  # nosec B101
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    transport = InProcessFastApiTransport(module.app, request_path="/mcp/request")
+    client = McpSmokeClient(transport)
+
+    try:
+        assert await client.ping() == {"pong": True}  # nosec B101
+    finally:
+        await transport.close()
+
+
+@pytest.mark.asyncio
 async def test_inprocess_fastapi_transport_wraps_non_json_response_body() -> None:
     from fastapi import FastAPI
     from mcp_unified.smoke.transports import (
@@ -1259,6 +1280,30 @@ async def test_live_websocket_transport_suppresses_server_notifications() -> Non
     ]
 
 
+def test_live_websocket_transport_ignores_exact_keepalive_messages() -> None:
+    from mcp_unified.smoke.transports import LiveWebSocketTransport
+
+    transport = LiveWebSocketTransport("ws://127.0.0.1/mcp")
+
+    transport._handle_message({"type": "ping"})  # nosec B101
+    transport._handle_message({"type": "pong"})  # nosec B101
+
+
+def test_live_websocket_transport_rejects_keepalive_lookalikes() -> None:
+    from mcp_unified.smoke.transports import (
+        LiveWebSocketTransport,
+        McpSmokeTransportError,
+    )
+
+    transport = LiveWebSocketTransport("ws://127.0.0.1/mcp")
+
+    with pytest.raises(
+        McpSmokeTransportError,
+        match="transport_malformed_websocket_frame",
+    ):
+        transport._handle_message({"type": "ping", "id": "x"})  # nosec B101
+
+
 @pytest.mark.asyncio
 async def test_live_websocket_transport_rejects_malformed_frames() -> None:
     from mcp_unified.smoke.transports import (
@@ -1750,6 +1795,128 @@ async def test_baseline_scenario_passes_in_best_effort_mode() -> None:
         "malformed request",
         "policy denial",
     ]
+
+
+@pytest.mark.asyncio
+async def test_baseline_scenario_accepts_ping_metadata() -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.scenarios import run_baseline_scenario
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    class _PingMetadataTransport(InProcessGatewayTransport):
+        async def request(
+            self,
+            payload: dict[str, object] | list[object],
+        ) -> object | None:
+            response = await super().request(payload)
+            if isinstance(response, list):
+                for item in response:
+                    self._add_ping_metadata(item)
+                return response
+            self._add_ping_metadata(response)
+            return response
+
+        @staticmethod
+        def _add_ping_metadata(response: object | None) -> None:
+            if not isinstance(response, dict):
+                return
+            result = response.get("result")
+            if isinstance(result, dict) and result.get("pong") is True:
+                result["timestamp"] = "2026-06-20T00:00:00Z"
+
+    report = await run_baseline_scenario(
+        _PingMetadataTransport(SmokeFixtureGatewayRuntime(include_denied_tool=True)),
+        mode="best_effort",
+    )
+
+    assert report.ok is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_baseline_scenario_accepts_mounted_unknown_tool_error() -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.scenarios import run_baseline_scenario
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    class _MountedUnknownToolTransport(InProcessGatewayTransport):
+        async def request(
+            self,
+            payload: dict[str, object] | list[object],
+        ) -> object | None:
+            if (
+                isinstance(payload, dict)
+                and payload.get("id") == "smoke-unknown-tool"
+                and payload.get("method") == "tools/call"
+            ):
+                return {
+                    "jsonrpc": "2.0",
+                    "id": "smoke-unknown-tool",
+                    "error": {
+                        "code": -32602,
+                        "message": "Unknown tool: smoke.missing_tool",
+                    },
+                }
+            return await super().request(payload)
+
+    report = await run_baseline_scenario(
+        _MountedUnknownToolTransport(
+            SmokeFixtureGatewayRuntime(include_denied_tool=True)
+        ),
+        mode="best_effort",
+    )
+
+    assert report.ok is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_baseline_scenario_rejects_generic_invalid_params_for_unknown_tool() -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.scenarios import run_baseline_scenario
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    class _GenericInvalidParamsTransport(InProcessGatewayTransport):
+        async def request(
+            self,
+            payload: dict[str, object] | list[object],
+        ) -> object | None:
+            if isinstance(payload, dict) and payload.get("id") == "smoke-unknown-tool":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": "smoke-unknown-tool",
+                    "error": {"code": -32602, "message": "Invalid params"},
+                }
+            return await super().request(payload)
+
+    report = await run_baseline_scenario(
+        _GenericInvalidParamsTransport(
+            SmokeFixtureGatewayRuntime(include_denied_tool=True)
+        ),
+        mode="best_effort",
+    )
+    unknown_tool_step = next(
+        step for step in report.steps if step.name == "tools/call:unknown"
+    )
+
+    assert report.ok is False  # nosec B101
+    assert unknown_tool_step.reason_code == "unknown_tool_not_rejected"  # nosec B101
+
+
+def test_unknown_tool_relaxation_does_not_relax_unknown_method_errors() -> None:
+    from mcp_unified.smoke import scenarios
+
+    outcome = scenarios._expect_jsonrpc_error(  # nosec B101
+        {
+            "jsonrpc": "2.0",
+            "id": "smoke-unknown-method",
+            "error": {"code": -32602, "message": "Unknown tool: smoke.missing_tool"},
+        },
+        expected_id="smoke-unknown-method",
+        expected_code=-32601,
+        reason_code="unknown_method_not_rejected",
+    )
+
+    assert outcome.ok is False  # nosec B101
+    assert outcome.reason_code == "unknown_method_not_rejected"  # nosec B101
 
 
 @pytest.mark.asyncio

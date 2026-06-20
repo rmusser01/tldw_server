@@ -21,6 +21,7 @@ ScenarioMode = Literal["best_effort", "strict"]
 
 _METHOD_NOT_FOUND = -32601
 _INVALID_REQUEST = -32600
+_INVALID_PARAMS = -32602
 _POLICY_DENIED = -32001
 
 
@@ -266,10 +267,9 @@ async def _step_unknown_tool(transport: McpSmokeTransport) -> object:
             },
         }
     )
-    return _expect_jsonrpc_error(
+    return _expect_unknown_tool_error(
         response,
         expected_id="smoke-unknown-tool",
-        expected_code=_METHOD_NOT_FOUND,
         reason_code="unknown_tool_not_rejected",
     )
 
@@ -489,6 +489,32 @@ def _expect_jsonrpc_error(
     return response
 
 
+def _expect_unknown_tool_error(
+    response: object,
+    *,
+    expected_id: str,
+    reason_code: str,
+) -> object:
+    validation = _validate_jsonrpc_error_response(
+        response,
+        expected_id=expected_id,
+        expected_code=_METHOD_NOT_FOUND,
+    )
+    if validation is None:
+        return response
+
+    reason, code = validation
+    if (
+        reason == "unexpected_error_code"
+        and code == _INVALID_PARAMS
+        and _jsonrpc_error_message_indicates_unknown_tool(response)
+    ):
+        return response
+    if reason == "unexpected_error_code":
+        return _failure(reason_code, detail=response, error_code=code)
+    return _failure(reason, detail=response, error_code=code)
+
+
 def _validate_jsonrpc_error_response(
     response: object,
     *,
@@ -551,6 +577,23 @@ def _jsonrpc_error_code(response: object) -> int | None:
     return None
 
 
+def _jsonrpc_error_message_indicates_unknown_tool(response: object) -> bool:
+    if not isinstance(response, dict):
+        return False
+    error = response.get("error")
+    if not isinstance(error, dict):
+        return False
+    message = error.get("message")
+    if not isinstance(message, str):
+        return False
+    normalized = message.lower()
+    return (
+        "unknown tool" in normalized
+        or "missing tool" in normalized
+        or "tool not found" in normalized
+    )
+
+
 def _client_error_code(exc: McpSmokeClientError) -> int | None:
     if isinstance(exc.error, dict):
         code = exc.error.get("code")
@@ -560,7 +603,7 @@ def _client_error_code(exc: McpSmokeClientError) -> int | None:
 
 
 def _is_successful_ping_result(result: object) -> bool:
-    return result == {"pong": True} or result == {}
+    return isinstance(result, dict) and result.get("pong") is True
 
 
 def _capability_available(state: dict[str, Any], capability_name: str) -> bool:

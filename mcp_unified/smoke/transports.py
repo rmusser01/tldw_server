@@ -664,6 +664,8 @@ class LiveWebSocketTransport:
                 "transport_malformed_websocket_frame",
                 "WebSocket transport received a non-object JSON-RPC message",
             )
+        if self._is_keepalive_message(message):
+            return
         if self._is_server_notification(message):
             return
         if not self._is_response_message(message):
@@ -811,6 +813,10 @@ class LiveWebSocketTransport:
         if "result" in message or "error" in message:
             return False
         return isinstance(message.get("method"), str)
+
+    @staticmethod
+    def _is_keepalive_message(message: dict[str, object]) -> bool:
+        return message == {"type": "ping"} or message == {"type": "pong"}
 
     @staticmethod
     def _single_payload_method(payload: JsonRpcPayload) -> str | None:
