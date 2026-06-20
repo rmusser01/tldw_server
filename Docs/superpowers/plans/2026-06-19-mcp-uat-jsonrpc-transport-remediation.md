@@ -301,7 +301,7 @@ Run the same command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/endpoints/mcp_unified_endpoint.py \
@@ -362,7 +362,7 @@ Run the same command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/server.py \
@@ -594,7 +594,7 @@ Run the same command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/adapters/tldw_runtime.py \
@@ -604,6 +604,8 @@ git add tldw_Server_API/app/core/MCP_unified/adapters/tldw_runtime.py \
   tldw_Server_API/app/core/MCP_unified/tests/test_protocol_governance_preflight.py
 git commit -m "fix: stabilize mounted MCP policy resolver"
 ```
+
+Result: committed as `61e5796ed3 fix: stabilize mounted MCP policy resolver`.
 
 ## Task 7: Smoke Harness Contract Alignment
 
@@ -765,7 +767,7 @@ normal protocol instance.
 - Modify only if validation exposes bugs in touched MCP files.
 - Record outputs in PR notes and Backlog task, not in repo artifacts unless requested.
 
-- [ ] **Step 1: Run fixture smoke harness**
+- [x] **Step 1: Run fixture smoke harness**
 
 Run:
 
@@ -777,7 +779,10 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_smoke_client.py
 
 Expected: PASS.
 
-- [ ] **Step 2: Run standalone in-process and stdio smoke paths**
+Result: PASS, both focused fixture smoke CLI tests passed individually with
+`1 passed, 5 warnings`.
+
+- [x] **Step 2: Run standalone in-process and stdio smoke paths**
 
 Run:
 
@@ -798,7 +803,16 @@ python -m mcp_unified.smoke.cli --help
 
 and use the documented equivalent. Record the exact command used.
 
-- [ ] **Step 3: Run standalone live HTTP/WebSocket smoke paths**
+Result: PASS. Exact commands used:
+
+```bash
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m mcp_unified.smoke.cli inprocess --mode strict
+/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m mcp_unified.smoke.cli stdio --command /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python --arg tldw_Server_API/app/core/MCP_unified/tests/fixtures/smoke_stdio_server.py --mode strict
+```
+
+Both reported `PASS` with all strict baseline steps ok.
+
+- [x] **Step 3: Run standalone live HTTP/WebSocket smoke paths**
 
 Start the standalone fixture gateway in a separate terminal/session:
 
@@ -821,7 +835,10 @@ python -m mcp_unified.smoke.cli websocket \
 
 Expected: exit code 0 and report `ok: true` for both standalone live transports.
 
-- [ ] **Step 4: Run mounted live HTTP/WebSocket API-key smoke**
+Result: PASS. Started the standalone fixture app on `127.0.0.1:8765`; strict
+HTTP and WebSocket smoke commands both reported `PASS` with all steps ok.
+
+- [x] **Step 4: Run mounted live HTTP/WebSocket API-key smoke**
 
 Start a local server in a separate terminal/session:
 
@@ -852,7 +869,21 @@ python -m mcp_unified.smoke.cli websocket \
 
 Expected: exit code 0 and report `ok: true`.
 
-- [ ] **Step 5: Run mounted live WebSocket JWT smoke**
+Result: PASS after fixing a validation gap. Mounted HTTP validation exposed
+that mounted tldw_server uses separate single and batch endpoints
+(`/api/v1/mcp/request` and `/api/v1/mcp/request/batch`) while
+`LiveHttpTransport` previously posted both payload types to one URL. Added
+`LiveHttpTransport(batch_url=...)`, `mcp_unified.smoke.cli http --batch-url`,
+and regression coverage. Mounted API-key commands used:
+
+```bash
+MCP_SMOKE_API_KEY=test-api-key-1234567890 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m mcp_unified.smoke.cli http --url http://127.0.0.1:8000/api/v1/mcp/request --batch-url http://127.0.0.1:8000/api/v1/mcp/request/batch --api-key-env MCP_SMOKE_API_KEY --mode strict --safe-tool-name echo --safe-tool-arguments-json '{"message":"smoke"}'
+MCP_SMOKE_API_KEY=test-api-key-1234567890 /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m mcp_unified.smoke.cli websocket --url 'ws://127.0.0.1:8000/api/v1/mcp/ws?api_key=test-api-key-1234567890' --api-key-env MCP_SMOKE_API_KEY --mode strict --safe-tool-name echo --safe-tool-arguments-json '{"message":"smoke"}'
+```
+
+Both reported `PASS` with all strict baseline steps ok.
+
+- [x] **Step 5: Run mounted live WebSocket JWT smoke**
 
 Keep the mounted tldw server from Step 4 running with the same `MCP_JWT_SECRET`.
 
@@ -877,7 +908,15 @@ python -m mcp_unified.smoke.cli websocket \
 
 Expected: exit code 0 and report `ok: true`.
 
-- [ ] **Step 6: Run Bandit on touched MCP scopes**
+Result: PASS with a mounted RBAC note. The plan's illustrative JWT subject
+`smoke-user` authenticated but had no live AuthNZ grants; using subject `1`
+matches the seeded single-user DB identity and passed:
+
+```bash
+AUTH_MODE=single_user SINGLE_USER_API_KEY=test-api-key-1234567890 MCP_JWT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx MCP_API_KEY_SALT=ssssssssssssssssssssssssssssssss MCP_SMOKE_BEARER_TOKEN="$(/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -c 'from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager; print(get_jwt_manager().create_access_token(subject="1", username="smoke", roles=["admin"], permissions=["mcp:*"]))')" /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m mcp_unified.smoke.cli websocket --url ws://127.0.0.1:8000/api/v1/mcp/ws --bearer-token-env MCP_SMOKE_BEARER_TOKEN --mode strict --safe-tool-name echo --safe-tool-arguments-json '{"message":"smoke"}'
+```
+
+- [x] **Step 6: Run Bandit on touched MCP scopes**
 
 Run:
 
@@ -892,7 +931,14 @@ python -m bandit -r \
 
 Expected: no new findings in touched code. If baseline findings exist, document why they are unrelated and fix any new touched-code findings.
 
-- [ ] **Step 7: Final status and commit**
+Result: the broad MCP Bandit scan wrote `/tmp/bandit_mcp_uat_remediation.json`
+and returned existing baseline findings (`4093` total, mostly test `assert`
+findings) but no findings in touched production smoke files
+`mcp_unified/smoke/transports.py` or `mcp_unified/smoke/cli.py`. A direct
+touched-production scan wrote `/tmp/bandit_mcp_uat_touched_production.json`
+and reported `0` findings.
+
+- [x] **Step 7: Final status and commit**
 
 Run:
 
@@ -908,6 +954,10 @@ If validation fixes were needed:
 git add <changed-files>
 git commit -m "fix: close MCP UAT validation gaps"
 ```
+
+Result: validation fix is committed separately from tracking as
+`fix: support mounted MCP HTTP batch smoke endpoints`; final tracking changes
+are committed after this checklist update.
 
 ## PR Completion Notes
 
