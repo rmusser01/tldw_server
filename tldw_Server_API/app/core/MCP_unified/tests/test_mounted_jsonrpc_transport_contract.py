@@ -297,14 +297,14 @@ def _install_mounted_ws_single_user_compat(
     from tldw_Server_API.app.core.MCP_unified import server as mcp_server_module
 
     protocol = _RecordingWsProtocol()
-    server.initialized = True
-    server.protocol = protocol
-    server.auth_provider = _RejectingWsAuthProvider()
-    server.config.ws_auth_required = True
-    server.config.ws_allow_query_auth = True
-    server.config.allowed_client_ips = []
-    server.config.blocked_client_ips = []
-    server.config.debug_mode = debug_mode
+    monkeypatch.setattr(server, "initialized", True)
+    monkeypatch.setattr(server, "protocol", protocol)
+    monkeypatch.setattr(server, "auth_provider", _RejectingWsAuthProvider())
+    monkeypatch.setattr(server.config, "ws_auth_required", True)
+    monkeypatch.setattr(server.config, "ws_allow_query_auth", True)
+    monkeypatch.setattr(server.config, "allowed_client_ips", [])
+    monkeypatch.setattr(server.config, "blocked_client_ips", [])
+    monkeypatch.setattr(server.config, "debug_mode", debug_mode)
     monkeypatch.setattr(server, "_is_test_mode", lambda: test_mode)
     monkeypatch.setattr(server, "_is_explicit_pytest_runtime", lambda: test_mode)
     monkeypatch.setattr(server, "_env_flag_enabled", lambda _name: False)
