@@ -1540,7 +1540,7 @@ git commit -m "feat: expose research discovery search API"
 - Modify: `backlog/tasks/task-2338 - Implement-Phase-1-research-discovery-chokepoint.md` when finalizing implementation.
 - No code files unless earlier task verification exposes a defect.
 
-- [ ] **Step 1: Run focused research discovery tests**
+- [x] **Step 1: Run focused research discovery tests**
 
 Run:
 
@@ -1558,7 +1558,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run adjacent existing research tests**
+- [x] **Step 2: Run adjacent existing research tests**
 
 Run:
 
@@ -1573,7 +1573,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run Bandit on touched code scope**
+- [x] **Step 3: Run Bandit on touched code scope**
 
 Run:
 
@@ -1588,7 +1588,7 @@ source .venv/bin/activate && python -m bandit -r \
 
 Expected: no new high or medium findings in touched code.
 
-- [ ] **Step 4: Run syntax/import check for touched modules**
+- [x] **Step 4: Run syntax/import check for touched modules**
 
 Run:
 
@@ -1601,7 +1601,7 @@ source .venv/bin/activate && python -m compileall \
 
 Expected: successful compile.
 
-- [ ] **Step 5: Update Backlog task**
+- [x] **Step 5: Update Backlog task**
 
 Update `TASK-2338` with:
 
@@ -1611,7 +1611,7 @@ Update `TASK-2338` with:
 - verification commands/results
 - known skips or blockers
 
-- [ ] **Step 6: Final implementation commit**
+- [x] **Step 6: Final implementation commit**
 
 If Task 7 changed only Backlog metadata:
 
@@ -1624,12 +1624,12 @@ If Task 7 included code fixes, include those files and use a `fix:` commit messa
 
 ## Completion Checklist
 
-- [ ] Phase 1 endpoints are available at `GET /api/v1/research/sources` and `POST /api/v1/research/discovery/search`.
-- [ ] Discovery snapshots are persisted owner-scoped, sanitized, and short-lived.
-- [ ] Over-cap category/source selections return validation errors instead of silent truncation.
-- [ ] Fallback site search remains disabled by default.
-- [ ] Raw signed/token-bearing URLs do not appear in API responses, snapshots, logs, or candidate ids.
-- [ ] Existing provider-specific paper-search endpoints are unchanged.
-- [ ] Focused pytest commands pass.
-- [ ] Bandit touched-scope scan has no new actionable findings.
-- [ ] Backlog task is updated with verification.
+- [x] Phase 1 endpoints are available at `GET /api/v1/research/sources` and `POST /api/v1/research/discovery/search`.
+- [x] Discovery snapshots are persisted owner-scoped, sanitized, and short-lived.
+- [x] Over-cap category/source selections return validation errors instead of silent truncation.
+- [x] Fallback site search remains disabled by default.
+- [x] Raw signed/token-bearing URLs do not appear in API responses, snapshots, logs, or candidate ids.
+- [x] Existing provider-specific paper-search endpoints are unchanged.
+- [x] Focused pytest commands pass.
+- [x] Bandit touched-scope scan has no new actionable findings.
+- [x] Backlog task is updated with verification.

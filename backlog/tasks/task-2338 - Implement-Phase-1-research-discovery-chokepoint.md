@@ -1,7 +1,7 @@
 ---
 id: TASK-2338
 title: Implement Phase 1 research discovery chokepoint
-status: In Progress
+status: Done
 labels:
 - research
 - implementation
@@ -41,14 +41,14 @@ Implement the approved Phase 1 research discovery chokepoint plan: source catalo
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Phase 1 endpoints are available at GET /api/v1/research/sources and POST /api/v1/research/discovery/search.
-- [ ] #2 Discovery snapshots are persisted owner-scoped, sanitized, and short-lived in ResearchSessionsDB.
-- [ ] #3 Over-cap category/source selections return validation errors instead of silent truncation.
-- [ ] #4 Fallback site search remains disabled by default.
-- [ ] #5 Raw signed/token-bearing URLs do not appear in API responses, snapshots, logs, or candidate ids.
-- [ ] #6 Existing provider-specific paper-search endpoints are unchanged.
-- [ ] #7 Focused pytest commands and adjacent research tests pass.
-- [ ] #8 Bandit touched-scope scan has no new actionable findings.
+- [x] #1 Phase 1 endpoints are available at GET /api/v1/research/sources and POST /api/v1/research/discovery/search.
+- [x] #2 Discovery snapshots are persisted owner-scoped, sanitized, and short-lived in ResearchSessionsDB.
+- [x] #3 Over-cap category/source selections return validation errors instead of silent truncation.
+- [x] #4 Fallback site search remains disabled by default.
+- [x] #5 Raw signed/token-bearing URLs do not appear in API responses, snapshots, logs, or candidate ids.
+- [x] #6 Existing provider-specific paper-search endpoints are unchanged.
+- [x] #7 Focused pytest commands and adjacent research tests pass.
+- [x] #8 Bandit touched-scope scan has no new actionable findings.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -71,20 +71,22 @@ Task 4 complete. Implemented owner-scoped, short-lived discovery snapshot persis
 Task 5 complete. Implemented `ResearchDiscoveryService` orchestration with commit ea1aa9130b, including catalog selection/defaulting, router execution, total-budget timeout handling across provider search plus OA enrichment, off-thread OA resolver calls, sanitized warning/status/diagnostic metadata handling, metrics, effective config snapshots, and owner-scoped persisted discovery snapshots. TDD verification included a red regression for diagnostic status/error metadata leakage before the sanitizer fix. Final verification: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/test_research_discovery_service.py tldw_Server_API/tests/Research/test_research_discovery_identity.py tldw_Server_API/tests/Research/test_research_discovery_router.py tldw_Server_API/tests/Research/test_research_discovery_catalog.py -v` -> 56 passed, 7 warnings. Formatting: `source .venv/bin/activate && python -m black --check tldw_Server_API/app/core/Research/discovery/service.py tldw_Server_API/app/core/Research/discovery/models.py tldw_Server_API/app/core/Research/discovery/__init__.py tldw_Server_API/tests/Research/test_research_discovery_service.py` -> clean. Bandit: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Research/discovery/service.py tldw_Server_API/app/core/Research/discovery/models.py -f json -o /tmp/bandit_research_discovery_task5_after_status_fix2.json` -> 0 findings. `git diff --check` and staged diff check returned clean. Spec review and code-quality re-review both approved after fixes.
 
 Task 6 complete. Implemented the standalone research discovery API with commit 70bf2a1525, exposing the default source catalog and discovery search under `/api/v1/research` with focused endpoint tests and route registration smoke coverage. Verification: endpoint pytest red first failed on missing `research_discovery` module/router spec; final `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/test_research_discovery_endpoint.py -v` -> 10 passed, 7 warnings. Route smoke printed `content router specs ok`. Black `--check` passed for endpoint/schema/router/test files. `git diff --check` passed. Bandit endpoint/schema scan wrote `/tmp/bandit_research_discovery_task6_controller.json` with 0 findings. Spec review found the initial Task 6 tracking notes in Backlog frontmatter; this was corrected by moving them into implementation notes.
+
+Task 7 complete. Final verification after the formatting pass commit ce5fe2a82c: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/test_research_discovery_catalog.py tldw_Server_API/tests/Research/test_research_discovery_identity.py tldw_Server_API/tests/Research/test_research_discovery_router.py tldw_Server_API/tests/Research/test_research_discovery_adapters.py tldw_Server_API/tests/Research/test_research_discovery_service.py tldw_Server_API/tests/Research/test_research_discovery_endpoint.py tldw_Server_API/tests/Research/test_research_sessions_db.py -v` -> 92 passed, 7 warnings. Adjacent verification: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/test_research_provider_adapters.py tldw_Server_API/tests/Research/test_research_provider_config.py tldw_Server_API/tests/Research/test_research_runs_endpoint.py tldw_Server_API/tests/Research/test_unpaywall_sanitizers.py -v` -> 25 passed, 7 warnings. Formatting: touched-scope Black `--check` -> clean. Security: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Research/discovery tldw_Server_API/app/core/DB_Management/ResearchSessionsDB.py tldw_Server_API/app/api/v1/endpoints/research_discovery.py tldw_Server_API/app/api/v1/schemas/research_discovery_schemas.py -f json -o /tmp/bandit_research_discovery_phase1_after_black.json` -> 0 findings. Syntax/import check: `source .venv/bin/activate && python -m compileall tldw_Server_API/app/core/Research/discovery tldw_Server_API/app/api/v1/endpoints/research_discovery.py tldw_Server_API/app/api/v1/schemas/research_discovery_schemas.py` -> successful compile. `git diff --check` returned clean. No skips or blockers.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented Phase 1 of the research discovery chokepoint: a catalog-backed source registry, normalized/deduplicated discovery identity model, first-slice provider router/adapters, sanitized OA candidate handling, owner-scoped short-lived discovery snapshots, `ResearchDiscoveryService`, and standalone `/api/v1/research/sources` plus `/api/v1/research/discovery/search` endpoints. Existing provider-specific paper-search and deep research run endpoints remain unchanged. Final focused and adjacent research tests passed, touched-scope Bandit reported 0 findings, compileall succeeded, and no skips or blockers remain.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
