@@ -55,6 +55,9 @@ class SourceStatus:
     warnings: tuple[str, ...]
 
 
+DiscoverySourceStatus = SourceStatus
+
+
 @dataclass(frozen=True)
 class DiscoveryExecutionPolicy:
     per_source_timeout_seconds: float
@@ -122,3 +125,24 @@ class DiscoveryResult:
     safe_metadata: dict[str, Any]
     adapter_version: str
     catalog_version: str
+
+
+@dataclass(frozen=True)
+class DiscoveryMetrics:
+    selected_source_count: int
+    result_count: int
+    deduped_result_count: int
+    oa_candidate_count: int
+    elapsed_ms: float | None
+
+
+@dataclass(frozen=True)
+class DiscoverySearchResponse:
+    discovery_id: str
+    query: str
+    results: tuple[DiscoveryResult, ...]
+    source_statuses: tuple[DiscoverySourceStatus, ...]
+    warnings: tuple[str, ...]
+    effective_config: dict[str, Any]
+    catalog_version: str
+    metrics: DiscoveryMetrics
