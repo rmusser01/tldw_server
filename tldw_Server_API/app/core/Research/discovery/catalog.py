@@ -23,8 +23,10 @@ class ResearchSourceCatalog:
     ) -> None:
         self.catalog_version = catalog_version
         self.max_selected_sources = max_selected_sources
+        self._ensure_unique_source_ids(entries)
         self._entries = tuple(sorted(entries, key=_source_sort_key))
         self._entries_by_id = {entry.source_id: entry for entry in self._entries}
+        self._categories = frozenset(entry.category for entry in self._entries)
 
     def list_sources(self) -> list[ResearchSourceCatalogEntry]:
         """Return all catalog entries in deterministic priority order."""
@@ -40,6 +42,34 @@ class ResearchSourceCatalog:
         categories: list[str],
     ) -> tuple[list[ResearchSourceCatalogEntry], SourceSelectionError | None]:
         """Expand source/category selections, dedupe, and enforce the source cap."""
+        unknown_source_ids = [
+            source_id for source_id in source_ids if source_id not in self._entries_by_id
+        ]
+        if unknown_source_ids:
+            return [], SourceSelectionError(
+                code="unknown_source",
+                message=(
+                    "Unknown research discovery source id(s): "
+                    f"{', '.join(unknown_source_ids)}."
+                ),
+                selected_count=len(unknown_source_ids),
+                limit=self.max_selected_sources,
+            )
+
+        unknown_categories = [
+            category for category in categories if category not in self._categories
+        ]
+        if unknown_categories:
+            return [], SourceSelectionError(
+                code="unknown_category",
+                message=(
+                    "Unknown research discovery source category/categories: "
+                    f"{', '.join(unknown_categories)}."
+                ),
+                selected_count=len(unknown_categories),
+                limit=self.max_selected_sources,
+            )
+
         selected_by_id: dict[str, ResearchSourceCatalogEntry] = {}
 
         for source_id in source_ids:
@@ -64,6 +94,14 @@ class ResearchSourceCatalog:
             )
 
         return selected_entries, None
+
+    @staticmethod
+    def _ensure_unique_source_ids(entries: Sequence[ResearchSourceCatalogEntry]) -> None:
+        seen_source_ids: set[str] = set()
+        for entry in entries:
+            if entry.source_id in seen_source_ids:
+                raise ValueError(f"duplicate_source_id:{entry.source_id}")
+            seen_source_ids.add(entry.source_id)
 
 
 def default_source_catalog(
