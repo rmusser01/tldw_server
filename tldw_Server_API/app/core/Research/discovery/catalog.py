@@ -46,7 +46,7 @@ class ResearchSourceCatalog:
         if unknown_source_ids:
             return [], SourceSelectionError(
                 code="unknown_source",
-                message=("Unknown research discovery source id(s): " f"{', '.join(unknown_source_ids)}."),
+                message=f"Unknown research discovery source id(s): {', '.join(unknown_source_ids)}.",
                 selected_count=len(unknown_source_ids),
                 limit=self.max_selected_sources,
             )
@@ -55,7 +55,7 @@ class ResearchSourceCatalog:
         if unknown_categories:
             return [], SourceSelectionError(
                 code="unknown_category",
-                message=("Unknown research discovery source category/categories: " f"{', '.join(unknown_categories)}."),
+                message=f"Unknown research discovery source category/categories: {', '.join(unknown_categories)}.",
                 selected_count=len(unknown_categories),
                 limit=self.max_selected_sources,
             )

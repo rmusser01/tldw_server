@@ -124,6 +124,30 @@ class ValidationError(BadRequestError):
     """Raised when validation of input parameters fails."""
 
 
+class ResearchDiscoveryError(Exception):
+    """Base class for public research discovery service failures."""
+
+    def __init__(self, public_detail: str) -> None:
+        super().__init__(public_detail)
+        self.public_detail = public_detail
+
+
+class ResearchDiscoveryValidationError(ResearchDiscoveryError):
+    """Raised when a research discovery request fails validation."""
+
+
+class ResearchDiscoveryBadRequestError(ResearchDiscoveryError):
+    """Raised when a research discovery request is malformed or unsupported."""
+
+
+class ResearchDiscoveryTimeoutError(ResearchDiscoveryError):
+    """Raised when research discovery exceeds its configured time budget."""
+
+
+class ResearchDiscoveryUpstreamError(ResearchDiscoveryError):
+    """Raised when all selected research discovery providers fail."""
+
+
 class IngestionSourceValidationError(ValidationError):
     """Raised when an ingestion source payload fails validation."""
 

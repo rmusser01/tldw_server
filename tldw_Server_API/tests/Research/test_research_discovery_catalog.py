@@ -1,3 +1,9 @@
+import pytest
+
+
+pytestmark = pytest.mark.unit
+
+
 def test_catalog_lists_first_slice_sources_with_capabilities():
     from tldw_Server_API.app.core.Research.discovery.catalog import default_source_catalog
 
@@ -92,7 +98,7 @@ def test_catalog_rejects_duplicate_custom_source_ids():
         replace(base_source, display_name="Duplicate OpenAlex"),
     ]
 
-    with pytest.raises(ValueError, match="^duplicate_source_id:openalex$"):
+    with pytest.raises(ValueError, match=r"^duplicate_source_id:openalex$"):
         ResearchSourceCatalog(duplicate_entries)
 
 

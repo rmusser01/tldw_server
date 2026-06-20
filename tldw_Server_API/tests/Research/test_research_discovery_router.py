@@ -274,6 +274,37 @@ async def test_router_respects_rate_limiter_without_calling_adapter():
 
 
 @pytest.mark.asyncio
+async def test_router_reports_rate_limiter_exception_as_source_internal_error():
+    from tldw_Server_API.app.core.Research.discovery.catalog import default_source_catalog
+    from tldw_Server_API.app.core.Research.discovery.router import ResearchSourceRouter
+
+    class Adapter:
+        async def search(self, **_kwargs):
+            raise AssertionError("failing rate limiter should not call adapter")
+
+    async def failing_limiter(_source_id):
+        raise RuntimeError("token bucket backend leaked secret")
+
+    catalog = default_source_catalog()
+    router = ResearchSourceRouter(
+        catalog=catalog,
+        adapters={"openalex": Adapter()},
+        rate_limiter=failing_limiter,
+    )
+
+    records, statuses = await router.search_sources(
+        query="machine learning",
+        sources=[catalog.get_source("openalex")],
+        per_source_limit=3,
+        filters={},
+    )
+
+    assert records == []
+    assert statuses[0].status == "internal_error"
+    assert statuses[0].message == "Discovery adapter failed unexpectedly."
+
+
+@pytest.mark.asyncio
 async def test_router_reports_policy_and_configuration_blocked_sources():
     from tldw_Server_API.app.core.Research.discovery.catalog import ResearchSourceCatalog
     from tldw_Server_API.app.core.Research.discovery.models import (

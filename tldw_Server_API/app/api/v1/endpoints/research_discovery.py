@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, rbac_rate_limit
 from tldw_Server_API.app.api.v1.schemas.research_discovery_schemas import (
     ResearchDiscoverySearchRequest,
     ResearchDiscoverySearchResponse,
@@ -15,16 +16,14 @@ from tldw_Server_API.app.core.Research.discovery import (
     ResearchDiscoveryService,
     default_source_catalog,
 )
+from tldw_Server_API.app.core.exceptions import (
+    ResearchDiscoveryBadRequestError,
+    ResearchDiscoveryTimeoutError,
+    ResearchDiscoveryUpstreamError,
+    ResearchDiscoveryValidationError,
+)
 
 router = APIRouter(tags=["research-discovery"])
-
-_VALIDATION_VALUE_ERROR_PREFIXES = (
-    "source_selection_over_cap",
-    "research_discovery_fallback_disabled",
-    "research_discovery_no_runnable_sources",
-    "research_discovery_query_contains_unsafe_url",
-    "research_discovery_filters_contain_unsafe_url",
-)
 
 
 def get_research_discovery_service() -> ResearchDiscoveryService:
@@ -36,6 +35,10 @@ def get_research_discovery_service() -> ResearchDiscoveryService:
     "/sources",
     response_model=ResearchSourceListResponse,
     summary="List research discovery sources",
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(rbac_rate_limit("research.discovery.sources")),
+    ],
 )
 async def list_research_discovery_sources() -> ResearchSourceListResponse:
     """List the default research discovery source catalog."""
@@ -50,6 +53,10 @@ async def list_research_discovery_sources() -> ResearchSourceListResponse:
     "/discovery/search",
     response_model=ResearchDiscoverySearchResponse,
     summary="Search configured research discovery sources",
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(rbac_rate_limit("research.discovery.search")),
+    ],
 )
 async def search_research_discovery(
     payload: ResearchDiscoverySearchRequest,
@@ -68,32 +75,12 @@ async def search_research_discovery(
             fallback_policy=payload.fallback_policy,
             filters=payload.filters,
         )
-    except ValueError as exc:
-        _raise_value_error_http_exception(exc)
-    except TimeoutError as exc:
-        raise HTTPException(status_code=504, detail=str(exc)) from None
-    except RuntimeError as exc:
-        _raise_runtime_error_http_exception(exc)
+    except ResearchDiscoveryValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.public_detail) from None
+    except ResearchDiscoveryBadRequestError as exc:
+        raise HTTPException(status_code=400, detail=exc.public_detail) from None
+    except ResearchDiscoveryTimeoutError as exc:
+        raise HTTPException(status_code=504, detail=exc.public_detail) from None
+    except ResearchDiscoveryUpstreamError as exc:
+        raise HTTPException(status_code=502, detail=exc.public_detail) from None
     return ResearchDiscoverySearchResponse.model_validate(response)
-
-
-def _raise_value_error_http_exception(exc: ValueError) -> None:
-    detail = str(exc)
-    if _is_validation_value_error(detail):
-        raise HTTPException(status_code=422, detail=detail) from None
-    raise HTTPException(status_code=400, detail=detail) from None
-
-
-def _raise_runtime_error_http_exception(exc: RuntimeError) -> None:
-    detail = str(exc)
-    if detail.startswith("research_discovery_total_timeout"):
-        raise HTTPException(status_code=504, detail=detail) from None
-    if detail.startswith("research_discovery_all_sources_failed"):
-        raise HTTPException(status_code=502, detail=detail) from None
-    raise exc
-
-
-def _is_validation_value_error(detail: str) -> bool:
-    if detail.startswith(_VALIDATION_VALUE_ERROR_PREFIXES):
-        return True
-    return "fallback" in detail or "policy" in detail

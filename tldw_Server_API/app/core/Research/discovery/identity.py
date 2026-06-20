@@ -730,13 +730,16 @@ def _is_unsafe_url_like_value(value: str) -> bool:
     parsed = urlsplit(text)
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
         return False
-    return bool(
-        parsed.query
-        or parsed.fragment
-        or parsed.username
-        or parsed.password
-        or _url_path_has_unsafe_material(parsed.path)
-    )
+    try:
+        return bool(
+            parsed.query
+            or parsed.fragment
+            or parsed.username
+            or parsed.password
+            or _url_path_has_unsafe_material(parsed.path)
+        )
+    except ValueError:
+        return True
 
 
 def _url_path_has_unsafe_material(path: str) -> bool:

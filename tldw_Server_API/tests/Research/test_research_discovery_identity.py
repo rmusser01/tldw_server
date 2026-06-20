@@ -316,6 +316,23 @@ def test_oa_candidate_drops_path_param_token_material():
     assert candidates == []
 
 
+def test_oa_candidate_drops_url_with_invalid_port():
+    from tldw_Server_API.app.core.Research.discovery.oa import sanitize_candidate_url
+
+    safe_url, redacted = sanitize_candidate_url("https://repo.example:bad/files/paper.pdf")
+
+    assert safe_url is None
+    assert redacted is False
+
+
+def test_metadata_url_with_invalid_percent_encoded_userinfo_is_unsafe():
+    from tldw_Server_API.app.core.Research.discovery.identity import safe_provider_metadata
+
+    cleaned = safe_provider_metadata({"landing_page": "https://%gg@example.com/paper"})
+
+    assert cleaned == {}
+
+
 def test_oa_candidate_ids_ignore_unsafe_provider_ids_without_doi():
     from tldw_Server_API.app.core.Research.discovery.oa import build_oa_candidates
 

@@ -13,6 +13,12 @@ from tldw_Server_API.app.core.Research.discovery.models import (
     DiscoverySearchResponse,
     SourceStatus,
 )
+from tldw_Server_API.app.core.exceptions import (
+    ResearchDiscoveryBadRequestError,
+    ResearchDiscoveryTimeoutError,
+    ResearchDiscoveryUpstreamError,
+    ResearchDiscoveryValidationError,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -178,25 +184,25 @@ def test_content_router_specs_include_research_discovery():
     from tldw_Server_API.app.api.v1.router_groups.content import iter_content_router_specs
 
     specs = list(iter_content_router_specs())
-    spec = next(item for item in specs if item.prefix == "/api/v1/research" and item.tags == ("research-discovery",))
+    spec = next(item for item in specs if item.name == "research_discovery")
 
     assert spec.prefix == "/api/v1/research"
+    assert spec.route_key == "research"
     assert spec.tags == ("research-discovery",)
-    assert spec.router is not None
+    assert spec.resolve_router() is not None
 
 
 @pytest.mark.parametrize(
     ("exc", "expected_status"),
     [
-        (ValueError("source_selection_over_cap:9:8"), 422),
-        (ValueError("research_discovery_fallback_disabled"), 422),
-        (ValueError("research_discovery_no_runnable_sources"), 422),
-        (ValueError("research_discovery_query_contains_unsafe_url"), 422),
-        (ValueError("research_discovery_filters_contain_unsafe_url"), 422),
-        (RuntimeError("research_discovery_all_sources_failed"), 502),
-        (TimeoutError("research_discovery_total_timeout"), 504),
-        (RuntimeError("research_discovery_total_timeout"), 504),
-        (ValueError("unknown_source:missing"), 400),
+        (ResearchDiscoveryValidationError("source_selection_over_cap:9:8"), 422),
+        (ResearchDiscoveryValidationError("research_discovery_fallback_disabled"), 422),
+        (ResearchDiscoveryValidationError("research_discovery_no_runnable_sources"), 422),
+        (ResearchDiscoveryValidationError("research_discovery_query_contains_unsafe_url"), 422),
+        (ResearchDiscoveryValidationError("research_discovery_filters_contain_unsafe_url"), 422),
+        (ResearchDiscoveryUpstreamError("research_discovery_all_sources_failed"), 502),
+        (ResearchDiscoveryTimeoutError("research_discovery_total_timeout"), 504),
+        (ResearchDiscoveryBadRequestError("unknown_source:missing"), 400),
     ],
 )
 def test_search_maps_service_errors(exc, expected_status):
@@ -212,3 +218,21 @@ def test_search_maps_service_errors(exc, expected_status):
 
     assert response.status_code == expected_status
     assert response.json()["detail"] == str(exc)
+
+
+def test_search_rejects_oversized_filters_before_service():
+    class StubService:
+        async def search(self, **_kwargs):
+            raise AssertionError("service should not be called for invalid filters")
+
+    with _client_with_service(StubService()) as client:
+        response = client.post(
+            "/api/v1/research/discovery/search",
+            json={
+                "query": "open access",
+                "source_ids": ["openalex"],
+                "filters": {f"key_{index}": index for index in range(51)},
+            },
+        )
+
+    assert response.status_code == 422

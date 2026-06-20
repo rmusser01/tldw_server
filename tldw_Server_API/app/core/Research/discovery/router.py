@@ -138,20 +138,20 @@ class ResearchSourceRouter:
         adapter = self._adapters[provider]
 
         async with semaphore:
-            allowed = await self._rate_limit_allows(source.source_id)
-            if not allowed:
-                return [], SourceStatus(
-                    source_id=source.source_id,
-                    provider=provider,
-                    status="rate_limited",
-                    message="Source rate limit denied this request.",
-                    result_count=0,
-                    elapsed_ms=None,
-                    warnings=(),
-                )
-
             started_at = time.perf_counter()
             try:
+                allowed = await self._rate_limit_allows(source.source_id)
+                if not allowed:
+                    return [], SourceStatus(
+                        source_id=source.source_id,
+                        provider=provider,
+                        status="rate_limited",
+                        message="Source rate limit denied this request.",
+                        result_count=0,
+                        elapsed_ms=_elapsed_ms(started_at),
+                        warnings=(),
+                    )
+
                 raw_records = await asyncio.wait_for(
                     adapter.search(
                         query=query,

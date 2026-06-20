@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+MAX_DISCOVERY_FILTER_KEYS = 50
+MAX_DISCOVERY_FILTER_DEPTH = 6
+MAX_DISCOVERY_FILTER_BYTES = 8192
 
 
 class ResearchSourceCapabilitiesResponse(BaseModel):
@@ -61,6 +67,13 @@ class ResearchDiscoverySearchRequest(BaseModel):
     total_limit: int = Field(default=25, ge=1, le=100)
     fallback_policy: str = Field(default="disabled")
     filters: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("filters")
+    @classmethod
+    def _validate_filters(cls, value: dict[str, Any]) -> dict[str, Any]:
+        """Reject filters that would bloat snapshots or response config."""
+        _validate_filter_shape(value)
+        return value
 
 
 class ResearchDiscoveryOACandidateResponse(BaseModel):
@@ -173,3 +186,25 @@ class ResearchDiscoverySearchResponse(BaseModel):
     effective_config: dict[str, Any]
     catalog_version: str
     metrics: ResearchDiscoveryMetricsResponse
+
+
+def _validate_filter_shape(value: dict[str, Any]) -> None:
+    """Validate filter nesting, key count, and serialized size."""
+    key_count = _count_filter_keys(value, depth=1)
+    if key_count > MAX_DISCOVERY_FILTER_KEYS:
+        raise ValueError("research_discovery_filters_too_many_keys")
+
+    serialized = json.dumps(value, sort_keys=True, default=str, separators=(",", ":"))
+    if len(serialized.encode("utf-8")) > MAX_DISCOVERY_FILTER_BYTES:
+        raise ValueError("research_discovery_filters_too_large")
+
+
+def _count_filter_keys(value: Any, *, depth: int) -> int:
+    """Count mapping keys while enforcing maximum filter depth."""
+    if depth > MAX_DISCOVERY_FILTER_DEPTH:
+        raise ValueError("research_discovery_filters_too_deep")
+    if isinstance(value, dict):
+        return len(value) + sum(_count_filter_keys(item, depth=depth + 1) for item in value.values())
+    if isinstance(value, list):
+        return sum(_count_filter_keys(item, depth=depth + 1) for item in value)
+    return 0

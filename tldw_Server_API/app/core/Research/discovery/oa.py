@@ -49,12 +49,12 @@ def sanitize_candidate_url(raw_url: str | None) -> tuple[str | None, bool]:
     if has_unsafe_url_path_material(raw_url):
         return None, True
 
-    hostname = parsed.hostname.lower() if parsed.hostname else ""
-    if not hostname:
-        return None, False
     try:
+        hostname = parsed.hostname.lower() if parsed.hostname else ""
         port = parsed.port
     except ValueError:
+        return None, False
+    if not hostname:
         return None, False
     if ":" in hostname and not hostname.startswith("["):
         hostname = f"[{hostname}]"
