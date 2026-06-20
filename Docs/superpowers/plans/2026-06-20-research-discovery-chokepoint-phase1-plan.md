@@ -1355,7 +1355,7 @@ git commit -m "feat: orchestrate research discovery search"
 - Modify: `tldw_Server_API/app/api/v1/router_groups/content.py`
 - Test: `tldw_Server_API/tests/Research/test_research_discovery_endpoint.py`
 
-- [ ] **Step 1: Write failing endpoint tests**
+- [x] **Step 1: Write failing endpoint tests**
 
 Add lightweight FastAPI tests:
 
@@ -1425,7 +1425,7 @@ def test_discovery_search_endpoint_passes_owner_and_returns_response():
     assert response.json()["discovery_id"] == "rd_1"
 ```
 
-- [ ] **Step 2: Run endpoint tests and verify red**
+- [x] **Step 2: Run endpoint tests and verify red**
 
 Run:
 
@@ -1435,7 +1435,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/tes
 
 Expected: FAIL because endpoint/schema files are missing.
 
-- [ ] **Step 3: Implement Pydantic schemas**
+- [x] **Step 3: Implement Pydantic schemas**
 
 In `research_discovery_schemas.py`, define request and response schemas that mirror the dataclasses:
 
@@ -1463,7 +1463,7 @@ class ResearchDiscoverySearchRequest(BaseModel):
     filters: dict[str, Any] = Field(default_factory=dict)
 ```
 
-- [ ] **Step 4: Implement endpoint**
+- [x] **Step 4: Implement endpoint**
 
 In `research_discovery.py`:
 
@@ -1486,7 +1486,7 @@ Map service runtime failures:
 
 Use `str(current_user.id)` for owner id, matching `research_runs.py`.
 
-- [ ] **Step 5: Register router**
+- [x] **Step 5: Register router**
 
 In `router_groups/content.py`, add an `ImportedRouterSpec` near the existing research router:
 
@@ -1500,7 +1500,7 @@ ImportedRouterSpec(
 ),
 ```
 
-- [ ] **Step 6: Run endpoint tests and route import smoke**
+- [x] **Step 6: Run endpoint tests and route import smoke**
 
 Run:
 
@@ -1527,7 +1527,7 @@ PY
 
 Expected: prints `content router specs ok`.
 
-- [ ] **Step 7: Commit API slice**
+- [x] **Step 7: Commit API slice**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/research_discovery_schemas.py tldw_Server_API/app/api/v1/endpoints/research_discovery.py tldw_Server_API/app/api/v1/router_groups/content.py tldw_Server_API/tests/Research/test_research_discovery_endpoint.py
