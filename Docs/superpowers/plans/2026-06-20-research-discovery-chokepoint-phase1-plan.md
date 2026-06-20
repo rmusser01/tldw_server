@@ -1207,6 +1207,7 @@ async def test_service_rejects_site_search_fallback_by_default(tmp_path):
 
 @pytest.mark.asyncio
 async def test_service_defaults_empty_source_selection_to_open_research_graph(tmp_path):
+    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
     from tldw_Server_API.app.core.Research.discovery.catalog import default_source_catalog
     from tldw_Server_API.app.core.Research.discovery.models import SourceStatus
     from tldw_Server_API.app.core.Research.discovery.service import ResearchDiscoveryService
@@ -1227,10 +1228,11 @@ async def test_service_defaults_empty_source_selection_to_open_research_graph(tm
                 }
             ], [SourceStatus("openalex", "openalex", "ok", None, 1, 1.0, ())]
 
+    db = ResearchSessionsDB(tmp_path / "research.db")
     service = ResearchDiscoveryService(
         catalog=default_source_catalog(),
         router=FakeRouter(),
-        db_factory=lambda _owner_user_id: None,
+        db_factory=lambda _owner_user_id: db,
     )
 
     response = await service.search(
@@ -1245,6 +1247,7 @@ async def test_service_defaults_empty_source_selection_to_open_research_graph(tm
     )
 
     assert response.effective_config["defaulted_categories"] == ["open_research_graph"]
+    assert db.get_discovery_snapshot(response.discovery_id, owner_user_id="1") is not None
 ```
 
 - [ ] **Step 2: Run service tests and verify red**

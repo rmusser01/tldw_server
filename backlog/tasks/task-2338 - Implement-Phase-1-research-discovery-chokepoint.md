@@ -1,7 +1,7 @@
 ---
 id: TASK-2338
 title: Implement Phase 1 research discovery chokepoint
-status: To Do
+status: In Progress
 labels:
 - research
 - implementation
@@ -38,7 +38,7 @@ Docs/superpowers/plans/2026-06-20-research-discovery-chokepoint-phase1-plan.md
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Created as the dedicated implementation tracker for the approved Phase 1 plan. Start execution from Docs/superpowers/plans/2026-06-20-research-discovery-chokepoint-phase1-plan.md and keep TASK-2338 current with touched files, verification results, and final implementation summary.
+Subagent readiness review found one plan contradiction: a successful empty-source-default service test used db_factory=None even though successful discovery must persist a snapshot. Patched the plan so that test uses ResearchSessionsDB(tmp_path / "research.db") and asserts the snapshot exists. Ready to dispatch Task 1 implementer after committing this plan hardening.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
