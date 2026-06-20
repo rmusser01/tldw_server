@@ -23,6 +23,27 @@ async def test_notification_no_response():
 
 
 @pytest.mark.asyncio
+async def test_initialized_notification_no_response():
+    protocol = MCPProtocol()
+    req = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+    resp = await protocol.process_request(req, RequestContext(request_id="n-init", client_id="notif"))
+    assert resp is None
+
+
+@pytest.mark.asyncio
+async def test_explicit_null_id_ping_returns_response():
+    protocol = MCPProtocol()
+    req = {"jsonrpc": "2.0", "method": "ping", "id": None}
+
+    resp = await protocol.process_request(req, RequestContext(request_id="null-id", client_id="notif"))
+
+    assert resp is not None
+    assert resp.id is None
+    assert resp.result is not None
+    assert resp.result["pong"] is True
+
+
+@pytest.mark.asyncio
 async def test_batch_of_notifications_returns_none():
     protocol = MCPProtocol()
     # Two notifications (no ids) should yield None overall

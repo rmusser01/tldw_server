@@ -633,6 +633,7 @@ class MCPProtocol:
         # a shutdown/re-init cycle is picked up automatically.
         self.handlers: dict[str, Callable] = {
             "initialize": self._handle_initialize,
+            "notifications/initialized": self._handle_initialized_notification,
             "ping": self._handle_ping,
             "tools/list": self._handle_tools_list,
             "tools/call": self._handle_tools_call,
@@ -1938,6 +1939,8 @@ class MCPProtocol:
             # Per JSON-RPC, if the batch is empty or only notifications, return no response
             return responses if responses else None
 
+        raw_request_has_id = isinstance(request, dict) and "id" in request
+
         # Parse single request if dict
         if isinstance(request, dict):
             try:
@@ -1949,6 +1952,8 @@ class MCPProtocol:
                     f"Invalid request format: {str(e)}",
                     req_id
                 )
+
+        is_notification = isinstance(request, MCPRequest) and request.id is None and not raw_request_has_id
 
         # Create context if not provided
         if context is None:
@@ -2100,7 +2105,7 @@ class MCPProtocol:
                 "mcp.request",
                 {
                     "mcp.method": request.method,
-                    "mcp.request_id": str(request.id) if request.id is not None else "notification",
+                    "mcp.request_id": str(request.id) if request.id is not None else ("notification" if is_notification else "null"),
                     "mcp.user_id": str(context.user_id or ""),
                     "mcp.client_id": str(context.client_id or ""),
                     "mcp.session_id": str(context.session_id or ""),
@@ -2136,7 +2141,7 @@ class MCPProtocol:
                 self.metrics.record_request(method=request.method, duration=elapsed, status="success")
 
             # Notification: do not return a response
-            if request.id is None:
+            if is_notification:
                 return None
             # Return success response for standard requests
             return MCPResponse(result=result, id=request.id)
@@ -2159,12 +2164,12 @@ class MCPProtocol:
             raise
         except InvalidParamsException as ive:
             # Notification: do not return a response
-            if isinstance(request, MCPRequest) and request.id is None:
+            if is_notification:
                 return None
             return self._error_response(ErrorCode.INVALID_PARAMS, str(ive), request.id if isinstance(request, MCPRequest) else None)
         except PermissionError as perr:
             # Map policy/permission errors to AUTHORIZATION_ERROR
-            if isinstance(request, MCPRequest) and request.id is None:
+            if is_notification:
                 return None
             # Redact any secrets in message (defensive)
             msg = self._mask_secrets(str(perr))
@@ -2200,7 +2205,7 @@ class MCPProtocol:
                 pass
 
             # Notification: do not return a response
-            if isinstance(request, MCPRequest) and request.id is None:
+            if is_notification:
                 return None
             # Return error response with reduced leakage when not in debug mode
             try:
@@ -2230,7 +2235,7 @@ class MCPProtocol:
             with contextlib.suppress(_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS):
                 elapsed = max(0.0, time.time() - start_ts)
                 self.metrics.record_request(method=request.method, duration=elapsed, status="failure")
-            if isinstance(request, MCPRequest) and request.id is None:
+            if is_notification:
                 return None
             return self._error_response(
                 ErrorCode.INTERNAL_ERROR,
@@ -2352,7 +2357,7 @@ class MCPProtocol:
     ) -> bool:
         """Check if user is authorized for method"""
         # Public methods that don't require auth
-        public_methods = ["initialize", "ping"]
+        public_methods = ["initialize", "notifications/initialized", "ping"]
         method = request.method
         if method in public_methods:
             return True
@@ -2471,6 +2476,15 @@ class MCPProtocol:
                 "version": "3.0.0"
             }
         }
+
+    async def _handle_initialized_notification(
+        self,
+        params: dict[str, Any],
+        context: RequestContext,
+    ) -> None:
+        """Accept the MCP initialized notification without side effects."""
+
+        return None
 
     async def _handle_ping(
         self,

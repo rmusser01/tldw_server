@@ -5304,6 +5304,67 @@ def test_gateway_fastapi_app_handles_basic_jsonrpc_flow() -> None:
         assert runtime.call_requests[-1][2].request_id == "call-1"
 
 
+def test_gateway_jsonrpc_notification_and_explicit_null_id_are_distinct() -> None:
+    response = asyncio.run(
+        gateway_jsonrpc.handle_jsonrpc(
+            _FakeGatewayRuntime(),
+            {"jsonrpc": "2.0", "method": "ping"},
+            path="/mcp/request",
+        )
+    )
+    assert isinstance(response, gateway_jsonrpc.GatewayNoResponse)
+
+    explicit_null_response = asyncio.run(
+        gateway_jsonrpc.handle_jsonrpc(
+            _FakeGatewayRuntime(),
+            {"jsonrpc": "2.0", "method": "ping", "id": None},
+            path="/mcp/request",
+        )
+    )
+    assert isinstance(explicit_null_response, gateway_jsonrpc.GatewayJSONRPCSuccessResponse)
+    assert explicit_null_response.id is None
+    assert explicit_null_response.result == {"pong": True}
+
+
+def test_gateway_response_to_json_omits_invalid_optional_null_fields() -> None:
+    success = gateway_jsonrpc.response_to_json(
+        gateway_jsonrpc.GatewayJSONRPCSuccessResponse(result={"ok": True}, id=None)
+    )
+    assert success == {"jsonrpc": "2.0", "result": {"ok": True}, "id": None}
+    assert "error" not in success
+
+    error = gateway_jsonrpc.response_to_json(
+        gateway_jsonrpc.jsonrpc_error(-32600, "Invalid request", None)
+    )
+    assert error == {
+        "jsonrpc": "2.0",
+        "error": {"code": -32600, "message": "Invalid request"},
+        "id": None,
+    }
+    assert "result" not in error
+    assert "data" not in error["error"]
+
+
+def test_gateway_request_preserves_http_notification_and_explicit_null_id_semantics() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        notification = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "ping"},
+        )
+        explicit_null = client.post(
+            "/mcp/request",
+            json={"jsonrpc": "2.0", "method": "ping", "id": None},
+        )
+
+    assert notification.status_code == 204
+    assert notification.content == b""
+    assert explicit_null.status_code == 200
+    assert explicit_null.json() == {"jsonrpc": "2.0", "result": {"pong": True}, "id": None}
+
+
 def test_gateway_request_rejects_malformed_json_with_jsonrpc_parse_error() -> None:
     runtime = _FakeGatewayRuntime()
     app = create_gateway_app(runtime, prefix="/mcp")
@@ -5317,6 +5378,28 @@ def test_gateway_request_rejects_malformed_json_with_jsonrpc_parse_error() -> No
 
     assert response.status_code == 200
     _assert_jsonrpc_error(response.json(), code=-32700, request_id=None)
+
+
+def test_gateway_request_rejects_invalid_ids_with_null_error_id() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    invalid_ids: list[Any] = [True, 1.25]
+
+    with TestClient(app) as client:
+        responses = [
+            client.post(
+                "/mcp/request",
+                json={"jsonrpc": "2.0", "method": "ping", "id": invalid_id},
+            )
+            for invalid_id in invalid_ids
+        ]
+
+    for response in responses:
+        assert response.status_code == 200
+        body = response.json()
+        assert body["id"] is None
+        assert body["error"]["code"] == -32600
 
 
 def test_gateway_fastapi_app_handles_resource_prompt_and_module_methods() -> None:
@@ -5539,6 +5622,17 @@ def test_gateway_stdio_suppresses_notification_response() -> None:
     response_line = asyncio.run(handle_stdio_line(runtime, '{"jsonrpc":"2.0","method":"ping"}\n'))
 
     assert response_line is None
+
+
+def test_gateway_stdio_returns_response_for_explicit_null_id_request() -> None:
+    from mcp_unified.gateway.stdio import handle_stdio_line
+
+    runtime = _FakeGatewayRuntime()
+
+    response_line = asyncio.run(handle_stdio_line(runtime, '{"jsonrpc":"2.0","method":"ping","id":null}\n'))
+
+    assert response_line is not None
+    assert json.loads(response_line) == {"jsonrpc": "2.0", "result": {"pong": True}, "id": None}
 
 
 def test_gateway_stdio_ignores_blank_lines() -> None:

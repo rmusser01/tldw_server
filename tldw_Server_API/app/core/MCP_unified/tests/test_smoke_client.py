@@ -665,6 +665,24 @@ async def test_inprocess_gateway_transport_runs_ping() -> None:
 
 
 @pytest.mark.asyncio
+async def test_inprocess_gateway_transport_preserves_explicit_null_id_request() -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    transport = InProcessGatewayTransport(SmokeFixtureGatewayRuntime())
+    await transport.start()
+
+    try:
+        notification = await transport.request({"jsonrpc": "2.0", "method": "ping"})
+        explicit_null = await transport.request({"jsonrpc": "2.0", "method": "ping", "id": None})
+    finally:
+        await transport.close()
+
+    assert notification is None  # nosec B101
+    assert explicit_null == {"jsonrpc": "2.0", "result": {"pong": True}, "id": None}  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_inprocess_gateway_transport_exposes_fixture_tools_resources_and_prompts() -> None:
     from mcp_unified.smoke.client import McpSmokeClient
     from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
