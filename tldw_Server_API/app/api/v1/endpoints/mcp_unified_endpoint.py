@@ -52,6 +52,7 @@ from tldw_Server_API.app.core.MCP_unified.jsonrpc_transport import (
     safe_jsonrpc_id,
 )
 from tldw_Server_API.app.core.MCP_unified.monitoring.metrics import get_metrics_collector
+from tldw_Server_API.app.core.MCP_unified.protocol import _trusted_compat_claims_metadata
 from tldw_Server_API.app.core.MCP_unified.security.request_guards import enforce_http_security
 from tldw_Server_API.app.core.MCP_unified.server import _is_authnz_access_token
 from tldw_Server_API.app.core.Security.url_validation import assert_url_safe
@@ -205,6 +206,62 @@ def _should_use_single_user_api_key_compat() -> bool:
         return False
 
 
+def _single_user_test_key_compat_allowed() -> bool:
+    """Return True when SINGLE_USER_TEST_API_KEY may be used by mounted HTTP auth."""
+    if not is_test_mode():
+        return False
+    try:
+        cfg = get_config()
+    except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
+        cfg = None
+    env = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("ENV") or "").lower()
+    prod_flag = env_flag_enabled("tldw_production")
+    is_dev_ctx = bool(cfg and getattr(cfg, "debug_mode", False))
+    if os.getenv("PYTEST_CURRENT_TEST") is not None:
+        is_dev_ctx = True
+    try:
+        import sys as _sys
+
+        if "pytest" in _sys.modules:
+            is_dev_ctx = True
+    except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
+        pass
+    if env in {"dev", "development", "test", "ci"}:
+        is_dev_ctx = True
+    if prod_flag:
+        is_dev_ctx = False
+    if not is_dev_ctx:
+        logger.error(
+            "TEST_MODE enabled outside dev/test context; refusing SINGLE_USER_TEST_API_KEY",
+            extra={
+                "audit": True,
+                "env": env,
+                "debug_mode": bool(cfg and getattr(cfg, "debug_mode", False)),
+            },
+        )
+        return False
+    return True
+
+
+def _single_user_compat_auth_via(raw_api_key: Optional[str]) -> Optional[str]:
+    """Return mounted single-user compatibility auth source for a raw API key."""
+    if not raw_api_key:
+        return None
+    try:
+        if not _should_use_single_user_api_key_compat():
+            return None
+        settings = get_settings()
+        primary_key = getattr(settings, "SINGLE_USER_API_KEY", None)
+        if primary_key and secrets.compare_digest(raw_api_key, str(primary_key)):
+            return "single_user_api_key"
+        test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
+        if test_key and _single_user_test_key_compat_allowed() and secrets.compare_digest(raw_api_key, test_key):
+            return "single_user_test_api_key"
+    except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
+        return None
+    return None
+
+
 def _get_client_ip(request: Optional[Request]) -> Optional[str]:
     """Extract client IP from the incoming request."""
     if request is None:
@@ -350,41 +407,7 @@ async def _resolve_token_data_compat(
             try:
                 if _should_use_single_user_api_key_compat():
                     settings = get_settings()
-                    test_mode = is_test_mode()
-                    if test_mode:
-                        # Guard against accidental production use of TEST_MODE-based
-                        # SINGLE_USER_TEST_API_KEY shortcuts. Only honor TEST_MODE
-                        # in clear dev/test contexts (debug or explicit env/pytest).
-                        try:
-                            cfg = get_config()
-                        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-                            cfg = None
-                        env = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("ENV") or "").lower()
-                        prod_flag = env_flag_enabled("tldw_production")
-                        is_dev_ctx = bool(cfg and getattr(cfg, "debug_mode", False))
-                        if os.getenv("PYTEST_CURRENT_TEST") is not None:
-                            is_dev_ctx = True
-                        try:
-                            import sys as _sys
-
-                            if "pytest" in _sys.modules:
-                                is_dev_ctx = True
-                        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-                            pass
-                        if env in {"dev", "development", "test", "ci"}:
-                            is_dev_ctx = True
-                        if prod_flag:
-                            is_dev_ctx = False
-                        if not is_dev_ctx:
-                            logger.error(
-                                "TEST_MODE enabled outside dev/test context; refusing SINGLE_USER_TEST_API_KEY",
-                                extra={
-                                    "audit": True,
-                                    "env": env,
-                                    "debug_mode": bool(cfg and getattr(cfg, "debug_mode", False)),
-                                },
-                            )
-                            test_mode = False
+                    test_mode = _single_user_test_key_compat_allowed()
                     allowed: set[str] = set()
                     if settings.SINGLE_USER_API_KEY:
                         allowed.add(settings.SINGLE_USER_API_KEY)
@@ -579,6 +602,15 @@ async def _attach_api_key_metadata(
                 log_prefix,
                 exc_info=True,
             )
+
+    auth_via = _single_user_compat_auth_via(auth.raw_api_key)
+    if auth_via is not None:
+        metadata.update(
+            _trusted_compat_claims_metadata(
+                auth_via=auth_via,
+                compat_claims_source="mounted_http",
+            )
+        )
 
     _attach_rg_ingress_metadata(metadata, http_request)
     _attach_workspace_ingress_metadata(metadata, http_request)

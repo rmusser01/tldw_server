@@ -19,6 +19,9 @@ from typing import Any, Optional
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.ip_allowlist import is_single_user_ip_allowed
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings, is_single_user_profile_mode
+
 from .auth.rate_limiter import RateLimitExceeded
 from .config import get_config, validate_config
 from .interfaces.runtime import MCPRuntimeDependencies, WebSocketStream
@@ -29,7 +32,7 @@ from .jsonrpc_transport import (
     mcp_responses_to_json,
     parse_error_response,
 )
-from .protocol import MCPError, MCPProtocol, MCPRequest, MCPResponse, RequestContext
+from .protocol import MCPError, MCPProtocol, MCPRequest, MCPResponse, RequestContext, _trusted_compat_claims_metadata
 from .security.ip_filter import get_ip_access_controller
 from .security.request_guards import enforce_client_certificate_headers
 
@@ -341,6 +344,68 @@ class MCPServer:
             return bool(self.environment_flags_provider.is_explicit_pytest_runtime())
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
             return False
+
+    def _should_use_single_user_api_key_compat(self) -> bool:
+        """Return whether mounted WS should accept single-user API-key compatibility."""
+        flag = os.getenv("MCP_SINGLE_USER_COMPAT_SHIM", "").strip().lower()
+        if flag in {"0", "false", "off"}:
+            return False
+        try:
+            return bool(is_single_user_profile_mode())
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            logger.debug("MCP WS single-user profile detection failed closed", exc_info=True)
+            return False
+
+    def _single_user_test_key_compat_allowed(self) -> bool:
+        """Return True when SINGLE_USER_TEST_API_KEY may be accepted by mounted WS."""
+        if not self._is_test_mode():
+            return False
+        env = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("ENV") or "").lower()
+        prod_flag = self._env_flag_enabled("tldw_production")
+        is_dev_ctx = bool(getattr(self.config, "debug_mode", False))
+        if self._is_explicit_pytest_runtime():
+            is_dev_ctx = True
+        if env in {"dev", "development", "test", "ci"}:
+            is_dev_ctx = True
+        if prod_flag:
+            is_dev_ctx = False
+        if not is_dev_ctx:
+            logger.error(
+                "TEST_MODE enabled outside dev/test context; refusing SINGLE_USER_TEST_API_KEY",
+                extra={
+                    "audit": True,
+                    "env": env,
+                    "debug_mode": bool(getattr(self.config, "debug_mode", False)),
+                },
+            )
+            return False
+        return True
+
+    def _single_user_compat_auth_via(self, api_key: Optional[str], *, client_ip: Optional[str]) -> Optional[str]:
+        """Return mounted WS single-user compatibility auth source for an API key."""
+        if not api_key or not self._should_use_single_user_api_key_compat():
+            return None
+        try:
+            settings = get_settings()
+            primary_key = getattr(settings, "SINGLE_USER_API_KEY", None)
+            test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
+            auth_via: Optional[str] = None
+            if primary_key and secrets.compare_digest(api_key, str(primary_key)):
+                auth_via = "single_user_api_key"
+            elif test_key and self._single_user_test_key_compat_allowed() and secrets.compare_digest(api_key, test_key):
+                auth_via = "single_user_test_api_key"
+            if auth_via is None:
+                return None
+            if not is_single_user_ip_allowed(client_ip, settings):
+                logger.warning(
+                    "Single-user MCP WebSocket API key rejected due to client IP allowlist",
+                    extra={"audit": True, "client_ip": client_ip or "unknown"},
+                )
+                return None
+            return auth_via
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            logger.debug("MCP WS single-user API-key compatibility check failed closed", exc_info=True)
+            return None
 
     def _is_truthy(self, value: Any) -> bool:
         """Return host-normalized truthiness, with a neutral local fallback."""
@@ -1083,41 +1148,60 @@ class MCPServer:
 
         # API key auth (optional)
         if api_key and not user_id:
-            try:
-                # Enforce allowed IPs for API keys by forwarding resolved client IP
-                info = await self.auth_provider.validate_api_key(
-                    api_key,
-                    ip_address=client_ip,
+            compat_auth_via = self._single_user_compat_auth_via(api_key, client_ip=client_ip)
+            if compat_auth_via is not None:
+                settings = get_settings()
+                user_id = str(getattr(settings, "SINGLE_USER_FIXED_ID", "1"))
+                metadata.update(
+                    _trusted_compat_claims_metadata(
+                        auth_via=compat_auth_via,
+                        compat_claims_source="mounted_ws",
+                    )
                 )
-                if info and info.get('user_id'):
-                    user_id = str(info['user_id'])
-                    # Attach org/team context
-                    if info.get('org_id') is not None:
-                        metadata['org_id'] = info.get('org_id')
-                    if info.get('team_id') is not None:
-                        metadata['team_id'] = info.get('team_id')
-                    roles = metadata.setdefault('roles', [])
-                    if 'api_client' not in roles:
-                        roles.append('api_client')
-                    try:
-                        scopes = self._extract_api_key_permissions(info)
-                        if scopes:
-                            metadata["api_key_scopes"] = list(scopes)
-                            metadata["auth_via"] = "api_key"
-                            perms = metadata.setdefault('permissions', [])
-                            for scope in scopes:
-                                if scope not in perms:
-                                    perms.append(scope)
-                    except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-                        pass
-                    logger.info(f"WebSocket authenticated via API key for user: {user_id}")
-                else:
+                roles = metadata.setdefault("roles", [])
+                if "admin" not in roles:
+                    roles.append("admin")
+                if compat_auth_via == "single_user_test_api_key":
+                    perms = metadata.setdefault("permissions", [])
+                    if "*" not in perms:
+                        perms.append("*")
+                logger.info("WebSocket authenticated via mounted single-user compatibility key")
+            else:
+                try:
+                    # Enforce allowed IPs for API keys by forwarding resolved client IP
+                    info = await self.auth_provider.validate_api_key(
+                        api_key,
+                        ip_address=client_ip,
+                    )
+                    if info and info.get('user_id'):
+                        user_id = str(info['user_id'])
+                        # Attach org/team context
+                        if info.get('org_id') is not None:
+                            metadata['org_id'] = info.get('org_id')
+                        if info.get('team_id') is not None:
+                            metadata['team_id'] = info.get('team_id')
+                        roles = metadata.setdefault('roles', [])
+                        if 'api_client' not in roles:
+                            roles.append('api_client')
+                        try:
+                            scopes = self._extract_api_key_permissions(info)
+                            if scopes:
+                                metadata["api_key_scopes"] = list(scopes)
+                                metadata["auth_via"] = "api_key"
+                                perms = metadata.setdefault('permissions', [])
+                                for scope in scopes:
+                                    if scope not in perms:
+                                        perms.append(scope)
+                        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+                            pass
+                        logger.info(f"WebSocket authenticated via API key for user: {user_id}")
+                    else:
+                        await websocket.close(code=1008, reason="Authentication failed")
+                        return
+                except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
+                    logger.warning(f"WebSocket API key authentication failed: {self._mask_secrets(str(e))}")
                     await websocket.close(code=1008, reason="Authentication failed")
                     return
-            except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
-                logger.warning(f"WebSocket API key authentication failed: {self._mask_secrets(str(e))}")
-                await websocket.close(code=1008, reason="Authentication failed")
-                return
 
         # Optionally require authentication for WS (production hardening)
         ws_auth_required = self.config.ws_auth_required

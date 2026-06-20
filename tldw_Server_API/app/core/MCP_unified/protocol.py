@@ -307,6 +307,71 @@ class RequestContext:
         )
 
 
+class _TrustedCompatClaimsSentinel:
+    """Object-identity marker for server-created mounted auth compatibility claims."""
+
+    def __repr__(self) -> str:
+        return "<trusted_mcp_compat_auth>"
+
+
+_TRUSTED_COMPAT_CLAIMS_SENTINEL = _TrustedCompatClaimsSentinel()
+_TRUSTED_COMPAT_CLAIMS_SENTINEL_KEY = "_server_auth_compat_sentinel"
+_TRUSTED_COMPAT_AUTH_VIA = frozenset({"single_user_api_key", "single_user_test_api_key"})
+_TRUSTED_COMPAT_CLAIMS_SOURCES = frozenset({"mounted_http", "mounted_ws"})
+
+
+def _trusted_compat_claims_metadata(*, auth_via: str, compat_claims_source: str) -> dict[str, Any]:
+    """Return server-only metadata for mounted single-user compatibility claims."""
+    if auth_via not in _TRUSTED_COMPAT_AUTH_VIA:
+        raise ValueError("Unsupported compatibility auth source")
+    if compat_claims_source not in _TRUSTED_COMPAT_CLAIMS_SOURCES:
+        raise ValueError("Unsupported compatibility claims source")
+    return {
+        "auth_via": auth_via,
+        "trusted_auth_claims": True,
+        "compat_claims_source": compat_claims_source,
+        _TRUSTED_COMPAT_CLAIMS_SENTINEL_KEY: _TRUSTED_COMPAT_CLAIMS_SENTINEL,
+    }
+
+
+def _metadata_has_admin_claims(metadata: dict[str, Any]) -> bool:
+    """Return True when trusted metadata carries wildcard or admin claims."""
+    roles = {
+        str(role).strip().lower()
+        for role in (metadata.get("roles") or [])
+        if str(role).strip()
+    }
+    permissions = {
+        str(permission).strip().lower()
+        for permission in (metadata.get("permissions") or [])
+        if str(permission).strip()
+    }
+    return "admin" in roles or "*" in permissions
+
+
+def _has_trusted_compat_claims(context: RequestContext) -> bool:
+    """Return True only for server-created mounted compatibility auth claims."""
+    metadata = getattr(context, "metadata", None)
+    if not isinstance(metadata, dict):
+        return False
+    server_auth_keys = {
+        key
+        for key in metadata
+        if isinstance(key, str) and key.startswith("_server_auth_")
+    }
+    if server_auth_keys != {_TRUSTED_COMPAT_CLAIMS_SENTINEL_KEY}:
+        return False
+    if metadata.get(_TRUSTED_COMPAT_CLAIMS_SENTINEL_KEY) is not _TRUSTED_COMPAT_CLAIMS_SENTINEL:
+        return False
+    if metadata.get("trusted_auth_claims") is not True:
+        return False
+    if metadata.get("auth_via") not in _TRUSTED_COMPAT_AUTH_VIA:
+        return False
+    if metadata.get("compat_claims_source") not in _TRUSTED_COMPAT_CLAIMS_SOURCES:
+        return False
+    return _metadata_has_admin_claims(metadata)
+
+
 @dataclass(frozen=True, slots=True)
 class PreparedToolCall:
     """Prepared tool execution context reused by nested tool orchestration."""
@@ -1147,11 +1212,18 @@ class MCPProtocol:
 
     async def _has_module_permission(self, context: RequestContext, module_id: Optional[str]) -> bool:
         module_id_norm = module_id or ""
+        if _has_trusted_compat_claims(context):
+            return self._scope_allows(context, Resource.MODULE.value, module_id_norm or None)
         if not await self._rbac_check(context.user_id, Resource.MODULE, Action.READ, module_id_norm):
             return False
         return self._scope_allows(context, Resource.MODULE.value, module_id_norm or None)
 
     async def _has_tool_permission(self, context: RequestContext, tool_name: str, *, is_write: Optional[bool] = None) -> bool:
+        if _has_trusted_compat_claims(context):
+            for auth_name in self._tool_authorization_names(tool_name):
+                if self._scope_allows(context, Resource.TOOL.value, auth_name):
+                    return self._api_key_allows(context, is_write=is_write)
+            return False
         has_named_permission = False
         for auth_name in self._tool_authorization_names(tool_name):
             if not await self._rbac_check(context.user_id, Resource.TOOL, Action.EXECUTE, auth_name):
