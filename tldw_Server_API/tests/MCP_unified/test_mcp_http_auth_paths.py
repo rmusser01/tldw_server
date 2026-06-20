@@ -1,4 +1,5 @@
 import builtins
+import json
 import os
 from typing import Any, Dict, List, Optional
 
@@ -27,6 +28,23 @@ except Exception as exc:  # pragma: no cover - defensive
 
 
 client = TestClient(app)
+
+
+def _json_request(payload: Any) -> Request:
+    body = json.dumps(payload).encode("utf-8")
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/mcp/request",
+            "headers": [(b"content-type", b"application/json")],
+        },
+        receive,
+    )
 
 
 class _DummyProtocol:
@@ -119,26 +137,23 @@ async def test_mcp_initialize_session_id_logs_are_sanitized(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", _raise_uuid_import)
     auth = mcp_ep.McpAuthContext(user=None, principal=None, api_key_info=None, raw_api_key=None)
-    http_request = Request({"type": "http", "headers": []})
 
     await mcp_ep.mcp_request(
-        mcp_ep.MCPRequest(method="initialize", id=1),
-        http_request,
+        http_request=_json_request({"jsonrpc": "2.0", "method": "initialize", "id": 1}),
+        response=Response(),
         client_id=None,
         auth=auth,
         mcp_session_id=None,
         config=None,
-        response=Response(),
         _guard=None,
     )
     await mcp_ep.mcp_request_batch(
-        [mcp_ep.MCPRequest(method="initialize", id=2)],
-        http_request,
+        http_request=_json_request([{"jsonrpc": "2.0", "method": "initialize", "id": 2}]),
+        response=Response(),
         client_id=None,
         auth=auth,
         mcp_session_id=None,
         config=None,
-        response=Response(),
         _guard=None,
     )
 
@@ -274,9 +289,11 @@ def test_http_api_key_scopes_enforced(monkeypatch):
 
     payload = {"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "media.search"}, "id": 1}
 
-    # Scope mismatch -> authorization error (403)
+    # Scope mismatch -> protocol authorization error envelope.
     r0 = client.post("/api/v1/mcp/request", headers={"X-API-KEY": "scope-mismatch"}, json=payload)
-    assert r0.status_code == 403
+    assert r0.status_code == 200
+    body0 = r0.json()
+    assert body0.get("error", {}).get("code") == -32001
 
     # Scope match -> passes auth (handler will fail later with tool-not-found)
     r1 = client.post("/api/v1/mcp/request", headers={"X-API-KEY": "scope-match"}, json=payload)

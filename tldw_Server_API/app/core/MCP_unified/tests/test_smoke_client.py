@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -1773,6 +1774,34 @@ async def test_stdio_subprocess_transport_exchanges_object_payloads() -> None:
     assert initialized["serverInfo"]["name"] == "smoke-stdio-fixture"  # nosec B101
     assert ping == {"pong": True}  # nosec B101
     assert tools["tools"][0]["name"] == "echo.search"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_stdio_subprocess_transport_resolves_command_from_parent_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp_unified.smoke.client import McpSmokeClient
+    from mcp_unified.smoke.transports import StdioSubprocessTransport
+
+    executable = Path(sys.executable)
+    command_name = executable.name
+    existing_path = os.environ.get("PATH", "")
+    monkeypatch.setenv("PATH", f"{executable.parent}{os.pathsep}{existing_path}")
+
+    transport = StdioSubprocessTransport(
+        command=command_name,
+        args=[str(FIXTURE_PATH)],
+        cwd=str(REPO_ROOT),
+        env_allowlist=["PYTHONPATH"],
+    )
+    client = McpSmokeClient(transport)
+
+    try:
+        initialized = await client.initialize()
+    finally:
+        await transport.close()
+
+    assert initialized["serverInfo"]["name"] == "smoke-stdio-fixture"  # nosec B101
 
 
 @pytest.mark.asyncio

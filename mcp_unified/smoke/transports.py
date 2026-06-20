@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import os
+import shutil
 from collections.abc import Collection
 from contextlib import suppress
 from typing import Any
@@ -884,7 +885,7 @@ class StdioSubprocessTransport:
             try:
                 self._process = await asyncio.wait_for(
                     asyncio.create_subprocess_exec(
-                        self.command,
+                        self._resolved_command(),
                         *self.args,
                         cwd=self.cwd,
                         env=self._subprocess_env(),
@@ -1217,6 +1218,12 @@ class StdioSubprocessTransport:
 
     def _subprocess_env(self) -> dict[str, str]:
         return {name: os.environ[name] for name in self.env_allowlist if name in os.environ}
+
+    def _resolved_command(self) -> str:
+        """Resolve bare commands with the parent PATH before applying child env filtering."""
+        if os.path.dirname(self.command):
+            return self.command
+        return shutil.which(self.command) or self.command
 
     def _stderr_detail(self) -> str | None:
         if not self._stderr_buffer and not self._stderr_truncated:
