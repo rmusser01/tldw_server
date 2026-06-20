@@ -131,13 +131,13 @@ def check_chat_limit(user_id: int, current_chat_count: int, limits: CharacterLim
     return True
 
 
-def check_message_limit(chat_id: str, current_message_count: int, limits: CharacterLimits | None = None) -> bool:
+def check_message_limit(chat_id: str, projected_message_count: int, limits: CharacterLimits | None = None) -> bool:
     limits = limits or get_character_limits()
-    if current_message_count >= limits.max_messages_per_chat:
+    if projected_message_count > limits.max_messages_per_chat:
         logger.warning(
             "Message limit exceeded for chat {}: {}/{}",
             chat_id,
-            current_message_count,
+            projected_message_count,
             limits.max_messages_per_chat,
         )
         raise HTTPException(

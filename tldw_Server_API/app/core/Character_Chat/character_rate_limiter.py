@@ -223,8 +223,8 @@ class CharacterRateLimiter:
     async def check_chat_limit(self, user_id: int, current_chat_count: int) -> bool:
         return _check_chat_limit(user_id, current_chat_count, self._limits)
 
-    async def check_message_limit(self, chat_id: str, current_message_count: int) -> bool:
-        return _check_message_limit(chat_id, current_message_count, self._limits)
+    async def check_message_limit(self, chat_id: str, projected_message_count: int) -> bool:
+        return _check_message_limit(chat_id, projected_message_count, self._limits)
 
     async def check_soft_message_limit(self, chat_id: str, current_message_count: int) -> bool:
         return _check_soft_message_limit(chat_id, current_message_count, self._limits)

@@ -249,7 +249,6 @@ async def test_llamafile_start_server_not_ready_terminates_process(monkeypatch, 
     from tldw_Server_API.app.core.Local_LLM import http_utils
 
     monkeypatch.setattr(http_utils, "wait_for_http_ready", lambda *a, **k: asyncio.sleep(0, result=False))
-    monkeypatch.setattr(platform, "system", lambda: "Linux")
     import tldw_Server_API.app.core.Local_LLM.Llamafile_Handler as llamafile_mod
 
     monkeypatch.setattr(llamafile_mod.os, "getpgid", lambda pid: pid, raising=False)

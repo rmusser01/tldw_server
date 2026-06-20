@@ -34,10 +34,14 @@ async def test_max_messages_per_chat_limit():
     original_env = {key: os.environ.get(key) for key in env_overrides}
     os.environ.update(env_overrides)
     clear_config_cache()
+    crl = None
+    cl = None
     try:
         import tldw_Server_API.app.core.Character_Chat.character_rate_limiter as crl  # noqa: WPS433
+        from tldw_Server_API.app.core.Character_Chat import character_limits as cl  # noqa: WPS433
 
         crl._rate_limiter = None
+        cl._limits = None
 
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings
         from tldw_Server_API.app.main import app
@@ -78,7 +82,13 @@ async def test_max_messages_per_chat_limit():
                 os.environ[key] = value
         clear_config_cache()
         try:
-            crl._rate_limiter = None
+            if crl is not None:
+                crl._rate_limiter = None
+        except Exception:
+            _ = None
+        try:
+            if cl is not None:
+                cl._limits = None
         except Exception:
             _ = None
 
@@ -91,10 +101,14 @@ async def test_max_chats_per_user_limit():
     os.environ.update(env_overrides)
     clear_config_cache()
     original_max_chats = os.environ.get("MAX_CHATS_PER_USER")
+    crl = None
+    cl = None
     try:
         import tldw_Server_API.app.core.Character_Chat.character_rate_limiter as crl  # noqa: WPS433
+        from tldw_Server_API.app.core.Character_Chat import character_limits as cl  # noqa: WPS433
 
         crl._rate_limiter = None
+        cl._limits = None
 
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings
         from tldw_Server_API.app.main import app
@@ -138,7 +152,13 @@ async def test_max_chats_per_user_limit():
                 os.environ[key] = value
         clear_config_cache()
         try:
-            crl._rate_limiter = None
+            if crl is not None:
+                crl._rate_limiter = None
+        except Exception:
+            _ = None
+        try:
+            if cl is not None:
+                cl._limits = None
         except Exception:
             _ = None
 
