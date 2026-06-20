@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ContentType,
     ExportStatus,
     ImportStatus,
+    coerce_chatbook_export_version,
 )
 
 
@@ -95,6 +96,10 @@ class CreateChatbookRequest(BaseModel):
     include_generated_content: bool = Field(True, description="Include generated documents")
     tags: list[str] = Field(default_factory=list, max_length=50, description="Chatbook tags")
     categories: list[str] = Field(default_factory=list, max_length=20, description="Chatbook categories")
+    format_version: ChatbookVersion = Field(
+        ChatbookVersion.V1,
+        description="Chatbook manifest format version to produce"
+    )
     async_mode: bool = Field(False, description="Run as background job")
 
     @field_validator('tags', 'categories', mode='before')
@@ -108,6 +113,12 @@ class CreateChatbookRequest(BaseModel):
                 if isinstance(item, str) and len(item) > 50:
                     raise ValueError(f"Item '{item[:20]}...' exceeds maximum length of 50 characters")
         return v
+
+    @field_validator('format_version', mode='before')
+    @classmethod
+    def validate_format_version(cls: Any, v: Any) -> ChatbookVersion:
+        """Validate and canonicalize the requested export format version."""
+        return coerce_chatbook_export_version(v)
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -125,6 +136,7 @@ class CreateChatbookRequest(BaseModel):
             "include_generated_content": True,
             "tags": ["research", "AI"],
             "categories": ["Work"],
+            "format_version": ChatbookVersion.V1.value,
             "async_mode": False
         }
     })
@@ -502,6 +514,32 @@ class PreviewChatbookResponse(BaseModel):
     openwebui_preview: Optional[OpenWebUIImportPreview] = None
     openwebui_db_preview: Optional[OpenWebUIDatabasePreview] = None
     error: Optional[str] = None
+    compatibility: Optional["ChatbookPreviewCompatibility"] = None
+    features: Optional["ChatbookPreviewFeatures"] = None
+    integrity: Optional["ChatbookPreviewIntegrity"] = None
+    lossiness: Optional[dict[str, int]] = None
+    source_refs: Optional[dict[str, int]] = None
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
+class ChatbookPreviewCompatibility(BaseModel):
+    """Chatbook reader compatibility preview details."""
+    status: str
+    reader_version: str = "1.1.0"
+    manifest_version: Optional[str] = None
+
+
+class ChatbookPreviewFeatures(BaseModel):
+    """Supported and unsupported v1.1 feature tokens."""
+    supported: list[str] = Field(default_factory=list)
+    unsupported: list[str] = Field(default_factory=list)
+
+
+class ChatbookPreviewIntegrity(BaseModel):
+    """File inventory integrity summary for preview."""
+    verified_files: int = 0
+    failed_files: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ListExportJobsResponse(BaseModel):
