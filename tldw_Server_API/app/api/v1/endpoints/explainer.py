@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from tldw_Server_API.app.api.v1.API_Deps.Explainer_DB_Deps import get_explainer_db
@@ -13,6 +16,7 @@ from tldw_Server_API.app.api.v1.endpoints.chatbooks import (
 from tldw_Server_API.app.api.v1.schemas.chatbook_schemas import CreateChatbookResponse
 from tldw_Server_API.app.api.v1.schemas.explainer import (
     ExplainerChatbookExportRequest,
+    ExplainerCitationRequest,
     ExplainerDeleteNodeResponse,
     ExplainerJobAcceptedResponse,
     ExplainerJobStatusResponse,
@@ -21,6 +25,7 @@ from tldw_Server_API.app.api.v1.schemas.explainer import (
     ExplainerNodePatchRequest,
     ExplainerNodeResponse,
     ExplainerQuestionAnswerRequest,
+    ExplainerSelectedSourceRequest,
     ExplainerSessionCreateRequest,
     ExplainerSessionListResponse,
     ExplainerSessionPatchRequest,
@@ -31,8 +36,8 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import ContentType
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.DB_Management.Explainer_DB import ExplainerDatabase
+from tldw_Server_API.app.core.DB_Management.Explainer_Repository import ExplainerRepository
 from tldw_Server_API.app.core.Explainer.jobs import EXPLAINER_DOMAIN
-from tldw_Server_API.app.core.Explainer.repository import ExplainerRepository
 from tldw_Server_API.app.core.Explainer.service import (
     ExplainerService,
     map_explainer_service_error,
@@ -48,15 +53,15 @@ def _owner_user_id(current_user: User) -> str:
     return str(current_user.id)
 
 
-def _service(db: ExplainerDatabase, job_manager=None) -> ExplainerService:
+def _service(db: ExplainerDatabase, job_manager: JobManager | None = None) -> ExplainerService:
     return ExplainerService(ExplainerRepository(db), job_manager=job_manager)
 
 
-def _source_payloads(sources) -> list[dict]:
+def _source_payloads(sources: list[ExplainerSelectedSourceRequest]) -> list[dict[str, Any]]:
     return [source.model_dump(by_alias=False) for source in sources]
 
 
-def _citation_payloads(citations) -> list[dict]:
+def _citation_payloads(citations: list[ExplainerCitationRequest]) -> list[dict[str, Any]]:
     return [citation.model_dump(by_alias=False) for citation in citations]
 
 
@@ -65,12 +70,12 @@ def _raise_http(exc: Exception) -> None:
     raise HTTPException(status_code=status_code, detail=detail) from exc
 
 
-def _job_payload(job: dict) -> dict:
+def _job_payload(job: dict[str, Any]) -> dict[str, Any]:
     payload = job.get("payload") or {}
     return payload if isinstance(payload, dict) else {}
 
 
-def _public_job_error(job: dict) -> str | None:
+def _public_job_error(job: dict[str, Any]) -> str | None:
     raw_status = str(job.get("status") or "").strip().lower()
     if raw_status == "failed":
         return "Explainer job failed."
@@ -378,7 +383,7 @@ async def get_explainer_job_status(
     current_user: User = Depends(get_request_user),
     jm: JobManager = Depends(get_job_manager),
 ) -> ExplainerJobStatusResponse:
-    job = jm.get_job(job_id)
+    job = await asyncio.to_thread(jm.get_job, job_id)
     if (
         not job
         or str(job.get("domain") or "").strip().lower() != EXPLAINER_DOMAIN

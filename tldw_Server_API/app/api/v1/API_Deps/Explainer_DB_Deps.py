@@ -31,7 +31,7 @@ def cleanup_explainer_db_cache() -> None:
     with _explainer_db_lock:
         for _user_id, db in list(_explainer_db_instances.items()):
             try:
-                db.close_connection()
+                db.close_all_connections()
             except Exception as exc:
                 logger.warning(
                     "Failed to close Explainer DB connection on shutdown; error_type={}",
@@ -58,7 +58,7 @@ def get_explainer_db(
             if len(_explainer_db_instances) >= _MAX_CACHED_EXPLAINER_DB:
                 _oldest_key, oldest_db = _explainer_db_instances.popitem(last=False)
                 try:
-                    oldest_db.close_connection()
+                    oldest_db.close_all_connections()
                 except Exception as exc:
                     logger.warning(
                         "Failed to close evicted Explainer DB connection; error_type={}",

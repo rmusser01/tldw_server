@@ -21,9 +21,7 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-<!-- SECTION:DESCRIPTION:BEGIN -->
-<!-- SECTION:DESCRIPTION:END -->
-
+Implement the backend persistence and CRUD API foundation for the persisted Explainer workspace, including per-user storage, session/node/source/citation models, ownership checks, schemas, router registration, and focused verification.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

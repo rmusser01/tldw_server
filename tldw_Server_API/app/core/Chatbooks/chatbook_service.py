@@ -48,12 +48,12 @@ from ..Templating.template_renderer import (
 )
 from ..Templating.template_renderer import render as render_template
 from ..DB_Management.Explainer_DB import ExplainerDatabase
+from ..DB_Management.Explainer_Repository import ExplainerRepository
 from ..Explainer.chatbook_adapter import (
     EXPLAINER_CHATBOOK_FORMAT,
     restore_explainer_chatbook_payload,
     build_explainer_chatbook_payload,
 )
-from ..Explainer.repository import ExplainerRepository
 
 # Legacy job queue shim removed; using in-process task registry
 from .chatbook_models import (

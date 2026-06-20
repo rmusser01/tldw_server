@@ -20,7 +20,7 @@ from tldw_Server_API.app.core.Explainer.models import (
     ExplainerSelectedSource,
     ExplainerSession,
 )
-from tldw_Server_API.app.core.Explainer.repository import ExplainerRepository
+from tldw_Server_API.app.core.DB_Management.Explainer_Repository import ExplainerRepository
 
 EXPLAINER_CHATBOOK_FORMAT = "tldw.explainer_session.v1"
 EXPLAINER_CHATBOOK_TYPE = "explainer_session"
@@ -109,6 +109,8 @@ def restore_explainer_chatbook_payload(
     nodes_payload = structured.get("nodes")
     if not isinstance(nodes_payload, list) or not nodes_payload:
         raise ValueError("Explainer payload missing nodes")
+    if any(not isinstance(node, dict) for node in nodes_payload):
+        raise ValueError("Explainer payload nodes must be objects")
 
     title = _text(session_payload.get("title"), "Imported Explainer session")
     if prefix_imported:

@@ -79,8 +79,10 @@ export const ExplainerDetailPanel = ({
             <h3 className="text-sm font-semibold text-text">Clarifying answers</h3>
             <div className="flex flex-wrap gap-2">
               {node.questionOptions.map((option) => {
-                const id = typeof option.id === "string" ? option.id : ""
-                const label = typeof option.label === "string" ? option.label : id
+                const optionId = option["id"]
+                const optionLabel = option["label"]
+                const id = typeof optionId === "string" ? optionId : ""
+                const label = typeof optionLabel === "string" ? optionLabel : id
                 const selected = id && id === node.selectedOptionId
                 return (
                   <span

@@ -137,7 +137,7 @@ const installExplainerMocks = async (page: Page) => {
     })
   })
 
-  await page.route(/\/api\/v1\/notes\/search\/(?:\?.*)?$/, async (route) => {
+  await page.route(/\/api\/v1\/notes\/search\/?(?:\?.*)?$/, async (route) => {
     await json(route, 200, {
       notes: [
         {

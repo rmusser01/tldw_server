@@ -12,8 +12,8 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.Explainer_DB import ExplainerDatabase
+from tldw_Server_API.app.core.DB_Management.Explainer_Repository import ExplainerRepository
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Explainer.repository import ExplainerRepository
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env as _jobs_manager
@@ -92,7 +92,7 @@ def build_explainer_job_handler(
         db = ExplainerDatabase(db_path=db_path, client_id=owner_user_id)
         configured_generator: ExplainerGenerator | None = None
 
-        def _lazy_generator(prompt):
+        def _lazy_generator(prompt: Any) -> Any:
             nonlocal configured_generator
             if configured_generator is None:
                 configured_generator = generator_factory()

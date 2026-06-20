@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useEffect } from "react"
 import { explainerApi } from "./explainerApi"
 
 export const EXPLAINER_QUERY_KEYS = {
@@ -27,17 +28,9 @@ export const useExplainerJob = (
   sessionId: string | null | undefined
 ) => {
   const queryClient = useQueryClient()
-  return useQuery({
+  const query = useQuery({
     queryKey: EXPLAINER_QUERY_KEYS.job(jobId),
-    queryFn: async () => {
-      const job = await explainerApi.getJob(jobId as string)
-      if (["completed", "failed", "cancelled"].includes(job.status)) {
-        void queryClient.invalidateQueries({
-          queryKey: EXPLAINER_QUERY_KEYS.session(sessionId)
-        })
-      }
-      return job
-    },
+    queryFn: () => explainerApi.getJob(jobId as string),
     enabled: Boolean(jobId),
     refetchInterval: (query) => {
       const status = query.state.data?.status
@@ -45,6 +38,18 @@ export const useExplainerJob = (
       return ["completed", "failed", "cancelled"].includes(status) ? false : 1500
     }
   })
+
+  useEffect(() => {
+    const status = query.data?.status
+    if (!sessionId || !status || !["completed", "failed", "cancelled"].includes(status)) {
+      return
+    }
+    void queryClient.invalidateQueries({
+      queryKey: EXPLAINER_QUERY_KEYS.session(sessionId)
+    })
+  }, [query.data?.status, queryClient, sessionId])
+
+  return query
 }
 
 export const useExplainerMutations = () => {

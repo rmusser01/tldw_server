@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
+from tldw_Server_API.app.core.exceptions import ExplainerNotFoundError, ExplainerValidationError
 from tldw_Server_API.app.core.DB_Management.Explainer_DB import InputError
+from tldw_Server_API.app.core.DB_Management.Explainer_Repository import ExplainerRepository
 from tldw_Server_API.app.core.Explainer.models import (
     ExplainerGrounding,
     ExplainerNode,
@@ -21,16 +23,6 @@ from tldw_Server_API.app.core.Explainer.jobs import (
     enqueue_explainer_node_expansion_job,
     is_explainer_generation_configured,
 )
-from tldw_Server_API.app.core.Explainer.repository import ExplainerRepository
-
-
-class ExplainerValidationError(ValueError):
-    """Raised when an Explainer API request violates workspace rules."""
-
-
-class ExplainerNotFoundError(LookupError):
-    """Raised when an Explainer resource is not visible to the requesting user."""
-
 
 class ExplainerService:
     """Application service for ownership-aware Explainer CRUD behavior."""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import sqlite3
 import threading
 from collections.abc import Iterable
@@ -40,26 +41,51 @@ class ExplainerDatabase:
         self.db_path = Path(self._db_path_str).resolve() if self._db_path_str != ":memory:" else Path(":memory:")
         if self._db_path_str != ":memory:":
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._local = threading.local()
+        self._connection_var: contextvars.ContextVar[sqlite3.Connection | None] = contextvars.ContextVar(
+            f"explainer_db_connection_{id(self)}",
+            default=None,
+        )
+        self._connections_lock = threading.Lock()
+        self._open_connections: dict[int, sqlite3.Connection] = {}
         self._ensure_schema()
 
     def get_connection(self) -> sqlite3.Connection:
-        """Return a thread-local configured SQLite connection."""
-        conn = getattr(self._local, "connection", None)
+        """Return a context-local configured SQLite connection."""
+        conn = self._connection_var.get()
         if conn is None:
             conn = sqlite3.connect(self._db_path_str, check_same_thread=False)
             conn.row_factory = sqlite3.Row
             configure_sqlite_connection(conn)
             conn.execute("PRAGMA foreign_keys = ON")
-            self._local.connection = conn
+            self._connection_var.set(conn)
+            with self._connections_lock:
+                self._open_connections[id(conn)] = conn
         return conn
 
     def close_connection(self) -> None:
-        """Close the thread-local SQLite connection if one exists."""
-        conn = getattr(self._local, "connection", None)
+        """Close the current context-local SQLite connection if one exists."""
+        conn = self._connection_var.get()
         if conn is not None:
+            with self._connections_lock:
+                self._open_connections.pop(id(conn), None)
+            self._connection_var.set(None)
             conn.close()
-            self._local.connection = None
+
+    def close_all_connections(self) -> None:
+        """Close all SQLite connections opened by this database instance."""
+        with self._connections_lock:
+            connections = list(self._open_connections.values())
+            self._open_connections.clear()
+        self._connection_var.set(None)
+        first_error: Exception | None = None
+        for conn in connections:
+            try:
+                conn.close()
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error
 
     @contextmanager
     def transaction(self) -> Iterable[sqlite3.Connection]:

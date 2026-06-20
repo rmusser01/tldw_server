@@ -98,6 +98,32 @@ def test_persist_completed_sync_export_job_failure_logs_are_sanitized(monkeypatc
     assert "secret-user" not in str(logger_stub.warnings)
     assert "private-chatbook" not in str(logger_stub.warnings)
     assert "chatbook job store leaked" not in str(logger_stub.warnings)
+
+
+def test_persist_completed_sync_export_job_rejects_user_mismatch(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import chatbooks
+
+    export_file = tmp_path / "export.zip"
+    export_file.write_bytes(b"zip")
+
+    class _Service:
+        export_dir = tmp_path
+        user_id = "service-user"
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(chatbooks, "logger", logger_stub)
+
+    with pytest.raises(chatbooks.HTTPException) as exc_info:
+        chatbooks._persist_completed_sync_export_job(
+            _Service(),
+            user_id="request-user",
+            chatbook_name="chatbook",
+            output_path=export_file,
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Export job ownership validation failed"
+    assert logger_stub.warnings == ["Rejected sync export job persistence with mismatched user ownership"]
     assert "cleanup leaked" not in str(logger_stub.warnings)
     assert "/private/" not in str(logger_stub.warnings)
 

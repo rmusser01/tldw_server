@@ -235,6 +235,25 @@ def test_chatbook_adapter_restores_explainer_session_for_importing_user(tmp_path
     ]
 
 
+def test_chatbook_adapter_rejects_non_object_nodes(tmp_path):
+    source_repo = ExplainerRepository(ExplainerDatabase(tmp_path / "source.db"))
+    source_session = _create_complete_session(source_repo, owner_user_id="7")
+    payload = build_explainer_chatbook_payload(
+        repo=source_repo,
+        session_id=source_session.id,
+        owner_user_id="7",
+    )
+    payload["structured"]["nodes"].append("not-a-node")
+    target_repo = ExplainerRepository(ExplainerDatabase(tmp_path / "target.db"))
+
+    with pytest.raises(ValueError, match="Explainer payload nodes must be objects"):
+        restore_explainer_chatbook_payload(
+            repo=target_repo,
+            payload=payload,
+            owner_user_id="8",
+        )
+
+
 def test_generated_document_subtype_payload_restores_explainer_session(tmp_path):
     source_repo = ExplainerRepository(ExplainerDatabase(tmp_path / "source.db"))
     source_session = _create_complete_session(source_repo, owner_user_id="7")

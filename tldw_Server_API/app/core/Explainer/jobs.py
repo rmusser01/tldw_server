@@ -21,7 +21,7 @@ from tldw_Server_API.app.core.Explainer.models import (
     ExplainerSession,
 )
 from tldw_Server_API.app.core.Explainer.prompting import ExplainerPrompt, build_node_expansion_prompt
-from tldw_Server_API.app.core.Explainer.repository import ExplainerRepository
+from tldw_Server_API.app.core.DB_Management.Explainer_Repository import ExplainerRepository
 from tldw_Server_API.app.core.Explainer.retrieval import (
     ExplainerRetriever,
     ExplainerSourceContext,

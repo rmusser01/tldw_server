@@ -284,6 +284,14 @@ class WritingAnnotationReviewEnqueueError(RuntimeError):
         self.error_code = error_code
 
 
+class ExplainerValidationError(ValueError):
+    """Raised when an Explainer API request violates workspace rules."""
+
+
+class ExplainerNotFoundError(LookupError):
+    """Raised when an Explainer resource is not visible to the requesting user."""
+
+
 class CodeGraphJobError(RuntimeError):
     """Raised when a CodeGraph Jobs worker rejects or fails a job."""
 

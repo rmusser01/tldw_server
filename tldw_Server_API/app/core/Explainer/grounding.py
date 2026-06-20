@@ -105,18 +105,24 @@ def _coerce_citations(value: Any) -> list[dict[str, Any]]:
     for citation in value:
         if not isinstance(citation, dict):
             continue
-        source_id = citation.get("source_id") or citation.get("sourceId")
-        source_type = citation.get("source_type") or citation.get("sourceType")
-        title = citation.get("title")
-        excerpt = citation.get("excerpt")
+        source_id_raw = _get_alias(citation, "source_id", "sourceId")
+        source_type_raw = _get_alias(citation, "source_type", "sourceType")
+        title_raw = citation.get("title")
+        excerpt_raw = citation.get("excerpt")
+        if source_id_raw is None or source_type_raw is None or title_raw is None or excerpt_raw is None:
+            continue
+        source_id = str(source_id_raw).strip()
+        source_type = str(source_type_raw).strip()
+        title = str(title_raw).strip()
+        excerpt = str(excerpt_raw).strip()
         if not (source_id and source_type and title and excerpt):
             continue
         citations.append(
             {
-                "source_id": str(source_id),
-                "source_type": str(source_type),
-                "title": str(title),
-                "excerpt": str(excerpt),
+                "source_id": source_id,
+                "source_type": source_type,
+                "title": title,
+                "excerpt": excerpt,
                 "location_label": citation.get("location_label") or citation.get("locationLabel"),
                 "start_offset": _get_alias(citation, "start_offset", "startOffset"),
                 "end_offset": _get_alias(citation, "end_offset", "endOffset"),
