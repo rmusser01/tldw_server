@@ -179,6 +179,12 @@ def safe_provider_metadata(raw: dict[str, Any]) -> dict[str, Any]:
     return cleaned
 
 
+def has_unsafe_url_material(value: Any) -> bool:
+    """Return True when a value is a URL carrying query, fragment, or userinfo."""
+    text = _coerce_string(value)
+    return _is_unsafe_url_like_value(text) if text is not None else False
+
+
 def normalize_and_merge_records(
     records: list[dict[str, Any]],
     catalog_version: str,
@@ -424,7 +430,12 @@ def _provider_ids(record: dict[str, Any]) -> dict[str, str]:
         for key, value in raw_provider_ids.items():
             key_text = _coerce_string(key)
             value_text = _coerce_string(value)
-            if key_text and value_text and not _is_sensitive_metadata_key(key_text):
+            if (
+                key_text
+                and value_text
+                and not _is_sensitive_metadata_key(key_text)
+                and not has_unsafe_url_material(value_text)
+            ):
                 provider_ids[key_text.lower()] = value_text
 
     identifier_keys = (
@@ -440,7 +451,7 @@ def _provider_ids(record: dict[str, Any]) -> dict[str, str]:
     )
     for key in identifier_keys:
         value = _coerce_string(record.get(key))
-        if value:
+        if value and not has_unsafe_url_material(value):
             provider_ids.setdefault(key, value)
     return dict(sorted(provider_ids.items()))
 

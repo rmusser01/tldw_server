@@ -138,6 +138,35 @@ def test_normalize_and_merge_records_drops_unsafe_urls_from_safe_metadata_and_pr
     assert "SECRET" not in str(result.merged_provenance[0].safe_metadata)
 
 
+def test_normalize_and_merge_records_drops_unsafe_provider_id_values():
+    from tldw_Server_API.app.core.Research.discovery.identity import normalize_and_merge_records
+
+    results = normalize_and_merge_records(
+        [
+            {
+                "source_id": "openalex",
+                "provider": "openalex",
+                "doi": "10.1000/example",
+                "title": "Paper",
+                "provider_ids": {
+                    "safe": "openalex:W123",
+                    "opaque": "https://repo.example/paper.pdf?token=SECRET",
+                },
+            }
+        ],
+        catalog_version="research-discovery-v1",
+    )
+
+    result = results[0]
+    assert result.provider_ids == {"doi": "10.1000/example", "safe": "openalex:W123"}
+    assert result.merged_provenance[0].provider_ids == {
+        "doi": "10.1000/example",
+        "safe": "openalex:W123",
+    }
+    assert "SECRET" not in str(result.provider_ids)
+    assert "token=SECRET" not in str(result)
+
+
 def test_signed_oa_url_is_redacted_from_response_snapshot_and_candidate_id():
     from tldw_Server_API.app.core.Research.discovery.oa import build_oa_candidates
 
@@ -195,6 +224,35 @@ def test_oa_candidate_url_strips_unknown_tokenish_query_names():
     assert candidate.safe_url == "https://repo.example/files/paper.pdf"
     assert "authToken" not in candidate.candidate_id
     assert "SECRET" not in candidate.candidate_id
+
+
+def test_oa_candidate_ids_ignore_unsafe_provider_ids_without_doi():
+    from tldw_Server_API.app.core.Research.discovery.oa import build_oa_candidates
+
+    base_candidates = build_oa_candidates(
+        result_fingerprint="provider:openalex:id:abc",
+        source_id="openalex",
+        provider="openalex",
+        doi=None,
+        provider_ids={"safe": "openalex:W123"},
+        raw_urls=["https://repo.example/files/paper.pdf"],
+    )
+    unsafe_candidates = build_oa_candidates(
+        result_fingerprint="provider:openalex:id:abc",
+        source_id="openalex",
+        provider="openalex",
+        doi=None,
+        provider_ids={
+            "safe": "openalex:W123",
+            "opaque": "https://repo.example/paper.pdf?token=SECRET",
+        },
+        raw_urls=["https://repo.example/files/paper.pdf"],
+    )
+
+    assert unsafe_candidates[0].resolver_reference == base_candidates[0].resolver_reference
+    assert unsafe_candidates[0].candidate_id == base_candidates[0].candidate_id
+    assert "SECRET" not in unsafe_candidates[0].resolver_reference
+    assert "SECRET" not in unsafe_candidates[0].candidate_id
 
 
 def test_unpaywall_resolver_wraps_doi_lookup_and_sanitizes_signed_pdf_url():

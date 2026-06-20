@@ -11,7 +11,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from tldw_Server_API.app.core.Third_Party import Unpaywall
 
-from .identity import normalize_doi
+from .identity import has_unsafe_url_material, normalize_doi
 from .models import DiscoveryOACandidate
 
 
@@ -313,6 +313,7 @@ def _safe_provider_id_digest(provider_ids: Mapping[str, str]) -> str:
         for key, value in provider_ids.items()
         if key.lower() not in _SENSITIVE_QUERY_KEYS
         and all(part not in key.lower() for part in ("authorization", "credential", "secret", "signature"))
+        and not has_unsafe_url_material(value)
     }
     return _digest(safe_ids, length=16)
 
