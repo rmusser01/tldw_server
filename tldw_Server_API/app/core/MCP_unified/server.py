@@ -9,6 +9,7 @@ import ipaddress
 import json
 import os
 import re
+import secrets
 from collections import deque
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
@@ -21,7 +22,14 @@ from loguru import logger
 from .auth.rate_limiter import RateLimitExceeded
 from .config import get_config, validate_config
 from .interfaces.runtime import MCPRuntimeDependencies, WebSocketStream
-from .protocol import MCPProtocol, MCPRequest, MCPResponse, RequestContext
+from .jsonrpc_transport import (
+    invalid_request_response,
+    is_jsonrpc_keepalive,
+    mcp_response_to_json,
+    mcp_responses_to_json,
+    parse_error_response,
+)
+from .protocol import MCPError, MCPProtocol, MCPRequest, MCPResponse, RequestContext
 from .security.ip_filter import get_ip_access_controller
 from .security.request_guards import enforce_client_certificate_headers
 
@@ -50,6 +58,7 @@ _MCP_SERVER_NONCRITICAL_EXCEPTIONS = (
 )
 
 _ENV_PLACEHOLDER_RE = re.compile(r"^\$\{(?P<name>[A-Z0-9_]+)(?::-(?P<default>.*))?\}$")
+_JSONRPC_EXPLICIT_NULL_ID_PREFIX = "__tldw_ws_jsonrpc_explicit_null_id_"
 
 
 def _is_authnz_access_token(token: str) -> bool:
@@ -83,6 +92,44 @@ def _resolve_env_placeholders(value: Any) -> Any:
 def _normalize_optional_text(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _is_absent_id_jsonrpc_notification(payload: Any) -> bool:
+    """Return True for JSON-RPC notifications that must not emit WS responses."""
+    return (
+        isinstance(payload, dict)
+        and payload.get("jsonrpc") == "2.0"
+        and isinstance(payload.get("method"), str)
+        and "id" not in payload
+    )
+
+
+def _jsonrpc_explicit_null_id_sentinel() -> str:
+    """Return a request-local sentinel for explicit JSON-RPC null ids."""
+    return f"{_JSONRPC_EXPLICIT_NULL_ID_PREFIX}{secrets.token_hex(8)}__"
+
+
+def _replace_explicit_null_jsonrpc_ids(payload: Any, sentinels: set[str]) -> Any:
+    """Preserve explicit JSON-RPC null ids through protocol notification handling."""
+    if isinstance(payload, dict):
+        if payload.get("jsonrpc") == "2.0" and "id" in payload and payload.get("id") is None:
+            request_payload = dict(payload)
+            sentinel = _jsonrpc_explicit_null_id_sentinel()
+            sentinels.add(sentinel)
+            request_payload["id"] = sentinel
+            return request_payload
+        return payload
+    if isinstance(payload, list):
+        return [_replace_explicit_null_jsonrpc_ids(item, sentinels) for item in payload]
+    return payload
+
+
+def _restore_explicit_null_jsonrpc_ids(response: MCPResponse | list[MCPResponse], sentinels: set[str]) -> None:
+    """Restore transport-level explicit null ids before JSON serialization."""
+    responses = response if isinstance(response, list) else [response]
+    for item in responses:
+        if isinstance(item.id, str) and item.id in sentinels:
+            item.id = None
 
 
 class _JWTManagerProxy:
@@ -1211,31 +1258,33 @@ class MCPServer:
                 with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
                     stream.mark_activity()
             except json.JSONDecodeError as e:
-                await stream.send_json({
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32700,
-                        "message": f"Parse error: {str(e)}"
-                    }
-                })
+                await stream.send_json(mcp_response_to_json(parse_error_response(f"Parse error: {str(e)}")))
                 continue
 
             # Check message size
             message_size = len(json.dumps(data))
             if message_size > self.config.ws_max_message_size:
-                await stream.send_json({
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32600,
-                        "message": "Message too large"
-                    },
-                    "id": data.get("id") if isinstance(data, dict) else None
-                })
+                await stream.send_json(
+                    mcp_response_to_json(
+                        invalid_request_response(
+                            "Message too large",
+                            request_id=data.get("id") if isinstance(data, dict) else None,
+                        )
+                    )
+                )
                 continue
 
-            # Handle ping/pong
-            if isinstance(data, dict) and data.get("type") == "pong":
+            # Exact transport keepalives are consumed by the WebSocket transport.
+            if is_jsonrpc_keepalive(data):
                 continue
+
+            if isinstance(data, dict) and data.get("jsonrpc") != "2.0":
+                await stream.send_json(mcp_response_to_json(invalid_request_response("Invalid request")))
+                continue
+
+            is_notification = _is_absent_id_jsonrpc_notification(data)
+            explicit_null_id_sentinels: set[str] = set()
+            protocol_data = _replace_explicit_null_jsonrpc_ids(data, explicit_null_id_sentinels)
 
             # Per-session rate limit: requests per window
             try:
@@ -1247,14 +1296,14 @@ class MCPServer:
                 while connection.request_times and (now_ts - connection.request_times[0]) > window:
                     connection.request_times.popleft()
                 if len(connection.request_times) > threshold:
-                    await stream.send_json({
-                        "jsonrpc": "2.0",
-                        "error": {
-                            "code": -32002,
-                            "message": "Session rate limit exceeded"
-                        },
-                        "id": data.get("id") if isinstance(data, dict) else None
-                    })
+                    await stream.send_json(
+                        mcp_response_to_json(
+                            MCPResponse(
+                                error=MCPError(code=-32002, message="Session rate limit exceeded"),
+                                id=data.get("id") if isinstance(data, dict) else None,
+                            )
+                        )
+                    )
                     with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
                         self.metrics_collector.record_ws_session_closure("session_rate")
                     # Close with 1013 (try again later), matching prior behavior
@@ -1276,9 +1325,9 @@ class MCPServer:
                     cwd=connection.cwd,
                 )
                 # If this is initialize, capture clientInfo and optional config
-                if isinstance(data, dict) and data.get("method") == "initialize":
+                if isinstance(protocol_data, dict) and protocol_data.get("method") == "initialize":
                     try:
-                        params = data.get("params") or {}
+                        params = protocol_data.get("params") or {}
                         client_info = params.get("clientInfo") or {}
                         if isinstance(client_info, dict):
                             sess.client_info.update(client_info)
@@ -1303,14 +1352,14 @@ class MCPServer:
             except PermissionError:
                 # Session ownership mismatch - return authorization error and close
                 with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
-                    await stream.send_json({
-                        "jsonrpc": "2.0",
-                        "error": {
-                            "code": -32001,
-                            "message": "Session is bound to a different user"
-                        },
-                        "id": data.get("id") if isinstance(data, dict) else None
-                    })
+                    await stream.send_json(
+                        mcp_response_to_json(
+                            MCPResponse(
+                                error=MCPError(code=-32001, message="Session is bound to a different user"),
+                                id=data.get("id") if isinstance(data, dict) else None,
+                            )
+                        )
+                    )
                 with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
                     await stream.ws.close(code=1008, reason="Session ownership mismatch")
                 break
@@ -1332,7 +1381,7 @@ class MCPServer:
             except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
                 pass
             context = RequestContext(
-                request_id=data.get("id", "unknown") if isinstance(data, dict) else "unknown",
+                request_id=protocol_data.get("id", "unknown") if isinstance(protocol_data, dict) else "unknown",
                 user_id=connection.user_id,
                 client_id=connection.client_id,
                 session_id=connection.session_id,
@@ -1342,7 +1391,7 @@ class MCPServer:
 
             # Process MCP request (supports single, notification, and batch)
             try:
-                response = await self.protocol.process_request(data, context)
+                response = await self.protocol.process_request(protocol_data, context)
                 # Persist seen URIs back into session (if updated by tools)
                 try:
                     if sess and isinstance(context.metadata, dict):
@@ -1357,32 +1406,35 @@ class MCPServer:
                 if response is None:
                     # Notification - no reply
                     continue
-                if isinstance(response, list):
-                    await stream.send_json([r.model_dump() for r in response])
-                else:
-                    await stream.send_json(response.model_dump())
+                if is_notification:
+                    continue
+                _restore_explicit_null_jsonrpc_ids(response, explicit_null_id_sentinels)
+                await stream.send_json(mcp_responses_to_json(response))
             except RateLimitExceeded as e:
-                await stream.send_json({
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32002,
-                        "message": f"Rate limit exceeded. Retry after {e.retry_after} seconds",
-                        "data": {
-                            "hint": "Reduce request frequency or wait before retrying."
-                        }
-                    },
-                    "id": data.get("id") if isinstance(data, dict) else None
-                })
+                await stream.send_json(
+                    mcp_response_to_json(
+                        MCPResponse(
+                            error=MCPError(
+                                code=-32002,
+                                message=f"Rate limit exceeded. Retry after {e.retry_after} seconds",
+                                data={
+                                    "hint": "Reduce request frequency or wait before retrying."
+                                },
+                            ),
+                            id=data.get("id") if isinstance(data, dict) else None,
+                        )
+                    )
+                )
             except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
                 logger.error(f"Error processing WebSocket message: {self._mask_secrets(str(e))}")
-                await stream.send_json({
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32603,
-                        "message": "Internal error"
-                    },
-                    "id": data.get("id") if isinstance(data, dict) else None
-                })
+                await stream.send_json(
+                    mcp_response_to_json(
+                        MCPResponse(
+                            error=MCPError(code=-32603, message="Internal error"),
+                            id=data.get("id") if isinstance(data, dict) else None,
+                        )
+                    )
+                )
 
     def _ip_bucket(self, ip: str) -> str:
         """Return a coarse bucket label for an IP to avoid high-cardinality metrics."""
