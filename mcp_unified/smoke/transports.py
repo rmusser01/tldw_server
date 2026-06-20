@@ -178,6 +178,7 @@ class LiveHttpTransport:
         self,
         url: str,
         *,
+        batch_url: str | None = None,
         bearer_token: str | None = None,
         api_key: str | None = None,
         profile_id: str | None = None,
@@ -190,6 +191,7 @@ class LiveHttpTransport:
         response_max_bytes: int = _DEFAULT_RESPONSE_MAX_BYTES,
     ) -> None:
         self.url = url
+        self.batch_url = batch_url
         self.bearer_token = bearer_token
         self.api_key = api_key
         self.profile_id = profile_id
@@ -229,10 +231,11 @@ class LiveHttpTransport:
 
     async def _post(self, payload: JsonRpcPayload) -> object | None:
         attempt = 0
+        url = self._url_for_payload(payload)
         while True:
             try:
                 response = await (await self._started_client()).post(
-                    self.url,
+                    url,
                     json=payload,
                     headers=self._request_headers(),
                     timeout=self.timeout,
@@ -254,6 +257,11 @@ class LiveHttpTransport:
                     )
 
             return self._decode_response(response, payload)
+
+    def _url_for_payload(self, payload: JsonRpcPayload) -> str:
+        if isinstance(payload, list) and self.batch_url:
+            return self.batch_url
+        return self.url
 
     async def _started_client(self) -> httpx.AsyncClient:
         if self._client is None:

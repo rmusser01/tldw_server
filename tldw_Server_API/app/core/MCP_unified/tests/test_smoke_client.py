@@ -1187,6 +1187,54 @@ async def test_live_http_retry_replays_configured_idempotent_method() -> None:
 
 
 @pytest.mark.asyncio
+async def test_live_http_transport_uses_batch_url_for_batch_payloads() -> None:
+    from mcp_unified.smoke.transports import LiveHttpTransport
+
+    seen_paths: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads((await request.aread()).decode("utf-8"))
+        seen_paths.append(request.url.path)
+        if isinstance(payload, list):
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "jsonrpc": "2.0",
+                        "id": item["id"],
+                        "result": {"pong": True},
+                    }
+                    for item in payload
+                ],
+            )
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "result": {"pong": True},
+            },
+        )
+
+    transport = LiveHttpTransport(
+        "http://mcp.test/request",
+        batch_url="http://mcp.test/request/batch",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    await transport.request({"jsonrpc": "2.0", "id": "single", "method": "ping"})
+    await transport.request(
+        [
+            {"jsonrpc": "2.0", "id": "batch-1", "method": "ping"},
+            {"jsonrpc": "2.0", "id": "batch-2", "method": "ping"},
+        ]
+    )
+    await transport.close()
+
+    assert seen_paths == ["/request", "/request/batch"]  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_live_websocket_transport_correlates_out_of_order_responses() -> None:
     from mcp_unified.smoke.client import McpSmokeClient
     from mcp_unified.smoke.transports import LiveWebSocketTransport

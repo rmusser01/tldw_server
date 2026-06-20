@@ -87,6 +87,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run against a live MCP HTTP endpoint.",
     )
     http.add_argument("--url", required=True, help="MCP HTTP JSON-RPC endpoint URL.")
+    http.add_argument(
+        "--batch-url",
+        help="Optional MCP HTTP JSON-RPC batch endpoint URL when it differs from --url.",
+    )
 
     websocket = subparsers.add_parser(
         "websocket",
@@ -252,6 +256,7 @@ def _build_transport(args: argparse.Namespace) -> McpSmokeTransport:
     if transport_name == "http":
         return LiveHttpTransport(
             args.url,
+            batch_url=args.batch_url,
             bearer_token=bearer_token,
             api_key=api_key,
             profile_id=args.profile_id,
