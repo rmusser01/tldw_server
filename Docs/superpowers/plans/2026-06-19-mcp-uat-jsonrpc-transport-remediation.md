@@ -614,7 +614,7 @@ git commit -m "fix: stabilize mounted MCP policy resolver"
 - Modify: `mcp_unified/smoke/transports.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_smoke_client.py`
 
-- [ ] **Step 1: Write failing smoke tests**
+- [x] **Step 1: Write failing smoke tests**
 
 Add or update tests:
 
@@ -624,7 +624,7 @@ Add or update tests:
 - Live WebSocket transport ignores exact outbound `{"type":"ping"}` and `{"type":"pong"}` frames while waiting for correlated response.
 - Live WebSocket transport still fails on `{"type":"ping","id":"x"}` or any other malformed non-response frame.
 
-- [ ] **Step 2: Run smoke tests and verify failures**
+- [x] **Step 2: Run smoke tests and verify failures**
 
 Run:
 
@@ -635,7 +635,9 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_smoke_client.py
 
 Expected: FAIL on strict ping result, unknown-tool error expectation, or keepalive frames.
 
-- [ ] **Step 3: Update smoke harness only at contract edges**
+Observed targeted red check: 4 expected failures and 2 passing guards before implementation: missing standalone fixture, exact keepalive rejection, ping metadata rejection, and mounted-style unknown-tool rejection.
+
+- [x] **Step 3: Update smoke harness only at contract edges**
 
 In `mcp_unified/smoke/scenarios.py`:
 
@@ -661,13 +663,13 @@ from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
 app = create_gateway_app(SmokeFixtureGatewayRuntime(), prefix="/mcp")
 ```
 
-- [ ] **Step 4: Run smoke tests and verify pass**
+- [x] **Step 4: Run smoke tests and verify pass**
 
 Run the same command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add mcp_unified/smoke/scenarios.py \

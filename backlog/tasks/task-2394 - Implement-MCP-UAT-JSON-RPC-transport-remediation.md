@@ -27,7 +27,7 @@ Implement the approved MCP UAT JSON-RPC transport remediation plan across mounte
 - [x] #3 Standalone gateway HTTP/WebSocket/stdio preserves absent-id notification versus explicit null id and omits invalid optional null response fields.
 - [x] #4 Trusted single-user/test compatibility metadata cannot be forged by client-supplied request metadata.
 - [x] #5 Policy resolver import-cycle remediation is implemented without weakening fail-closed behavior.
-- [ ] #6 Smoke harness expectations align with valid ping metadata, unknown-tool semantics, and WebSocket keepalives.
+- [x] #6 Smoke harness expectations align with valid ping metadata, unknown-tool semantics, and WebSocket keepalives.
 - [ ] #7 Focused pytest suites, standalone/mounted smoke paths where feasible, and Bandit touched-scope validation are run or documented with reasons.
 <!-- AC:END -->
 
@@ -45,6 +45,8 @@ Task 4 complete. Notification and explicit-null id semantics were implemented in
 Task 5 complete. Mounted HTTP/WS single-user compatibility auth hardening was implemented in commits 4a77edd6db and 1022829683. HTTP and WebSocket now attach trusted server-created metadata only after configured single-user/test API key, test-mode guard, and IP allowlist checks pass. Protocol authorization honors compatibility admin claims only through the server-created sentinel, and forged client metadata with permissions, auth_via, compat_claims_source, or _server_auth_* keys does not bypass RBAC. Verification: red review-fix regressions failed before the fix and passed after; focused Task 5 suite passed with 32 passed, 4 warnings; git diff --check passed; compileall passed; Bandit on touched production files reported zero findings. Spec and code-quality re-reviews approved.
 
 Task 6 complete in commit 61e5796ed3. Mounted MCP policy resolver construction now uses a cycle-safe host adapter loader for the MCP Hub policy resolver, without moving host-specific resolver code into the standalone package. Added coverage for a policy-enabled discovery tool call through the tldw resolver and for resolver runtime failures failing closed before governance preflight. Verification: focused policy/governance pytest passed with 17 passed, 4 warnings; git diff --check passed; compileall passed for tldw_policy.py; Bandit on tldw_policy.py reported zero findings. Red-check caveat: the worker left tests and implementation uncommitted before controller takeover, so the red failure was not reproduced locally after takeover.
+
+Task 7 complete in commit 69fa5c0d8a. Smoke harness expectations now accept ping result metadata while still requiring `pong: true`, accept mounted-style unknown-tool `-32602` only when the message indicates unknown/missing/not-found tool, preserve strict `-32601` handling for unknown-method checks, ignore exact live WebSocket keepalive frames, and include a prefixed standalone FastAPI smoke fixture app. Verification: targeted red check failed for the intended fixture/keepalive/ping/unknown-tool cases before implementation; targeted green check passed with 6 passed; full smoke client suite passed with 81 passed, 5 warnings under loopback-enabled execution; git diff --check passed; compileall passed; Bandit on smoke scenarios/transports reported zero findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
