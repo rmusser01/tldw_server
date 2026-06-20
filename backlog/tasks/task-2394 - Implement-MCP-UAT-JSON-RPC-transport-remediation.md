@@ -4,7 +4,7 @@ title: Implement MCP UAT JSON-RPC transport remediation
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-20 07:39'
+updated_date: '2026-06-20 08:18'
 labels:
   - mcp
   - uat
@@ -25,7 +25,7 @@ Implement the approved MCP UAT JSON-RPC transport remediation plan across mounte
 - [x] #1 Mounted HTTP and batch JSON-RPC routes use raw parsing, strict response serialization, notification 204 handling, explicit-null-id responses, and post-protocol authz JSON-RPC errors.
 - [x] #2 Mounted WebSocket transport uses strict response serialization, notification suppression, exact keepalive handling, parse/invalid-request frames, and auth compatibility parity.
 - [x] #3 Standalone gateway HTTP/WebSocket/stdio preserves absent-id notification versus explicit null id and omits invalid optional null response fields.
-- [ ] #4 Trusted single-user/test compatibility metadata cannot be forged by client-supplied request metadata.
+- [x] #4 Trusted single-user/test compatibility metadata cannot be forged by client-supplied request metadata.
 - [ ] #5 Policy resolver import-cycle remediation is implemented without weakening fail-closed behavior.
 - [ ] #6 Smoke harness expectations align with valid ping metadata, unknown-tool semantics, and WebSocket keepalives.
 - [ ] #7 Focused pytest suites, standalone/mounted smoke paths where feasible, and Bandit touched-scope validation are run or documented with reasons.
@@ -41,6 +41,8 @@ Task 2 complete. Mounted HTTP /request and /request/batch now use raw JSON-RPC b
 Task 3 complete. Mounted WebSocket JSON-RPC normalization committed as 36824df465. Focused WebSocket suite passed: 16 passed, 4 warnings. Spec review approved. Code-quality review approved with non-blocking maintainability note: consider moving explicit-null-id sentinel helpers into jsonrpc_transport.py in a future cleanup if behavior keeps evolving.
 
 Task 4 complete. Notification and explicit-null id semantics were implemented in commits 7489802a81 and 83a61bc076. Mounted protocol now handles notifications/initialized as a no-op notification, distinguishes omitted id from explicit id:null for raw dict and MCPRequest inputs, and rejects invalid request ids before Pydantic coercion. Standalone gateway JSON-RPC now preserves absent-id notifications versus explicit-null requests across HTTP, stdio, and in-process smoke paths, normalizes runtime context request_id labels, and serializes JSON-RPC responses without invalid optional null fields. Verification: red review-fix tests failed before the fix and passed after; focused Task 4 suite passed with 281 passed, 6 warnings under loopback-enabled execution; git diff --check passed; compileall passed for touched files; Bandit on touched production files reported zero findings. Spec and code-quality re-reviews approved.
+
+Task 5 complete. Mounted HTTP/WS single-user compatibility auth hardening was implemented in commits 4a77edd6db and 1022829683. HTTP and WebSocket now attach trusted server-created metadata only after configured single-user/test API key, test-mode guard, and IP allowlist checks pass. Protocol authorization honors compatibility admin claims only through the server-created sentinel, and forged client metadata with permissions, auth_via, compat_claims_source, or _server_auth_* keys does not bypass RBAC. Verification: red review-fix regressions failed before the fix and passed after; focused Task 5 suite passed with 32 passed, 4 warnings; git diff --check passed; compileall passed; Bandit on touched production files reported zero findings. Spec and code-quality re-reviews approved.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

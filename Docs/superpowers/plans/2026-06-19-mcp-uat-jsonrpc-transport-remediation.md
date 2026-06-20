@@ -460,7 +460,7 @@ git commit -m "fix: preserve MCP notification id semantics"
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_mounted_jsonrpc_transport_contract.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_protocol_scope_enforcement.py` or `test_protocol_allowed_tools.py`
 
-- [ ] **Step 1: Write failing auth and metadata tests**
+- [x] **Step 1: Write failing auth and metadata tests**
 
 Mounted HTTP:
 
@@ -478,7 +478,7 @@ Protocol:
 - Caller-provided request metadata with `permissions=["*"]`, `trusted_auth_claims=True`, and `auth_via="single_user_api_key"` does not bypass RBAC unless it came from server-side trusted context.
 - Normal MCP JWT and DB-backed RBAC behavior remains unchanged.
 
-- [ ] **Step 2: Run auth tests and verify failures**
+- [x] **Step 2: Run auth tests and verify failures**
 
 Run:
 
@@ -493,7 +493,7 @@ python -m pytest \
 
 Expected: FAIL where WebSocket lacks compatibility or protocol ignores trusted metadata.
 
-- [ ] **Step 3: Implement trusted compatibility metadata**
+- [x] **Step 3: Implement trusted compatibility metadata**
 
 HTTP:
 
@@ -525,13 +525,13 @@ Protocol:
 - Add a regression test that passes forged client metadata with `auth_via`, `trusted_auth_claims`, and `compat_claims_source` and proves it does not bypass RBAC.
 - Allow direct unit tests to inject trust only through an explicit test helper that constructs the same server-side auth context/sentinel the transport would create.
 
-- [ ] **Step 4: Run auth tests and verify pass**
+- [x] **Step 4: Run auth tests and verify pass**
 
 Run the same command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/endpoints/mcp_unified_endpoint.py \
