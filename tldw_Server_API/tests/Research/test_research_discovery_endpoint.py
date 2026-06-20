@@ -192,6 +192,8 @@ def test_content_router_specs_include_research_discovery():
         (ValueError("source_selection_over_cap:9:8"), 422),
         (ValueError("research_discovery_fallback_disabled"), 422),
         (ValueError("research_discovery_no_runnable_sources"), 422),
+        (ValueError("research_discovery_query_contains_unsafe_url"), 422),
+        (ValueError("research_discovery_filters_contain_unsafe_url"), 422),
         (RuntimeError("research_discovery_all_sources_failed"), 502),
         (TimeoutError("research_discovery_total_timeout"), 504),
         (RuntimeError("research_discovery_total_timeout"), 504),

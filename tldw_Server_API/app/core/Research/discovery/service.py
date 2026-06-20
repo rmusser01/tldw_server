@@ -146,6 +146,8 @@ class ResearchDiscoveryService:
         query_text = query.strip()
         if not query_text:
             raise ValueError("research_discovery_query_required")
+        if _text_contains_unsafe_url_material(query_text):
+            raise ValueError("research_discovery_query_contains_unsafe_url")
 
         if limit is not None:
             per_source_limit = limit
@@ -167,6 +169,8 @@ class ResearchDiscoveryService:
             defaulted_categories = list(DEFAULT_SOURCE_CATEGORIES)
             normalized_categories = list(DEFAULT_SOURCE_CATEGORIES)
         safe_filters = _safe_json_mapping(_merge_filter_inputs(provider_overrides, filters))
+        if _contains_unsafe_url_text(safe_filters):
+            raise ValueError("research_discovery_filters_contain_unsafe_url")
         selected_sources = self._resolve_sources(
             source_ids=normalized_source_ids,
             categories=normalized_categories,
@@ -540,9 +544,23 @@ def _warning_text_is_unsafe(text: str) -> bool:
     lowered = text.lower()
     if any(part in lowered for part in _UNSAFE_WARNING_PARTS):
         return True
+    return _text_contains_unsafe_url_material(text)
+
+
+def _text_contains_unsafe_url_material(text: str) -> bool:
     for raw_url in _URL_IN_TEXT_RE.findall(text):
-        if has_unsafe_url_material(raw_url.rstrip(".,;")):
+        if has_unsafe_url_material(raw_url.rstrip(".,;:[]")):
             return True
+    return False
+
+
+def _contains_unsafe_url_text(value: Any) -> bool:
+    if isinstance(value, str):
+        return _text_contains_unsafe_url_material(value)
+    if isinstance(value, Mapping):
+        return any(_contains_unsafe_url_text(key) or _contains_unsafe_url_text(item) for key, item in value.items())
+    if isinstance(value, (tuple, list)):
+        return any(_contains_unsafe_url_text(item) for item in value)
     return False
 
 

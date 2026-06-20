@@ -22,6 +22,8 @@ _VALIDATION_VALUE_ERROR_PREFIXES = (
     "source_selection_over_cap",
     "research_discovery_fallback_disabled",
     "research_discovery_no_runnable_sources",
+    "research_discovery_query_contains_unsafe_url",
+    "research_discovery_filters_contain_unsafe_url",
 )
 
 

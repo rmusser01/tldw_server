@@ -271,6 +271,40 @@ async def test_search_rejects_empty_query(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_search_rejects_query_with_embedded_unsafe_url_before_router(tmp_path):
+    router = FakeRouter()
+    service, _db = service_with_db(tmp_path, router=router)
+
+    with pytest.raises(ValueError, match="^research_discovery_query_contains_unsafe_url$"):
+        await service.search(
+            owner_user_id="user-1",
+            query="see https://repo.example/file.pdf?token=SECRET",
+            source_ids=["openalex"],
+        )
+
+    assert router.calls == []
+
+
+@pytest.mark.asyncio
+async def test_search_rejects_filter_text_with_embedded_unsafe_url_before_router(tmp_path):
+    router = FakeRouter()
+    service, _db = service_with_db(tmp_path, router=router)
+
+    with pytest.raises(ValueError, match="^research_discovery_filters_contain_unsafe_url$"):
+        await service.search(
+            owner_user_id="user-1",
+            query="open research",
+            source_ids=["openalex"],
+            filters={
+                "safe_filter": "open",
+                "nested": {"note": "see https://repo.example/file.pdf?token=SECRET"},
+            },
+        )
+
+    assert router.calls == []
+
+
+@pytest.mark.asyncio
 async def test_search_rejects_over_cap_category_selection(tmp_path):
     from tldw_Server_API.app.core.Research.discovery.catalog import default_source_catalog
 
