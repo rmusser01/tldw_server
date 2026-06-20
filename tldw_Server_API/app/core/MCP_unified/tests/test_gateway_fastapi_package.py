@@ -5326,6 +5326,22 @@ def test_gateway_jsonrpc_notification_and_explicit_null_id_are_distinct() -> Non
     assert explicit_null_response.result == {"pong": True}
 
 
+def test_gateway_explicit_null_id_runtime_context_is_not_notification() -> None:
+    runtime = _FakeGatewayRuntime()
+
+    response = asyncio.run(
+        gateway_jsonrpc.handle_jsonrpc(
+            runtime,
+            {"jsonrpc": "2.0", "method": "tools/list", "id": None},
+            path="/mcp/request",
+        )
+    )
+
+    assert isinstance(response, gateway_jsonrpc.GatewayJSONRPCSuccessResponse)
+    assert response.id is None
+    assert runtime.list_contexts[-1].request_id == "null"
+
+
 def test_gateway_response_to_json_omits_invalid_optional_null_fields() -> None:
     success = gateway_jsonrpc.response_to_json(
         gateway_jsonrpc.GatewayJSONRPCSuccessResponse(result={"ok": True}, id=None)
@@ -5343,6 +5359,24 @@ def test_gateway_response_to_json_omits_invalid_optional_null_fields() -> None:
     }
     assert "result" not in error
     assert "data" not in error["error"]
+
+
+def test_gateway_request_parse_error_omits_null_error_data() -> None:
+    runtime = _FakeGatewayRuntime()
+    app = create_gateway_app(runtime, prefix="/mcp")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp/request",
+            content=b"{not-json",
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] is None
+    assert body["error"]["code"] == -32700
+    assert "data" not in body["error"]
 
 
 def test_gateway_request_preserves_http_notification_and_explicit_null_id_semantics() -> None:

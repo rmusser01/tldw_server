@@ -1713,7 +1713,7 @@ def create_gateway_router(
 
         payload = await _parse_json_body(request)
         if isinstance(payload, _GATEWAY_RESPONSE_TYPES):
-            return payload
+            return _to_http_response(payload)
         response = await handle_jsonrpc(
             runtime,
             payload,

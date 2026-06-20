@@ -26,8 +26,10 @@ from pydantic import BaseModel, Field
 
 try:
     from pydantic import field_validator, model_validator  # v2
+    _PYDANTIC_V2 = True
 except ImportError:  # Fallback for v1
     from pydantic import validator as field_validator  # type: ignore
+    _PYDANTIC_V2 = False
     try:
         from pydantic import root_validator as model_validator  # type: ignore
     except ImportError:
@@ -171,6 +173,28 @@ def _is_unexpected_keyword_type_error(exc: TypeError, keyword: str) -> bool:
     )
 
 
+def _jsonrpc_id_is_valid(value: Any) -> bool:
+    """Return True when a value is a valid JSON-RPC request id."""
+
+    return value is None or (not isinstance(value, bool) and isinstance(value, (str, int)))
+
+
+def _safe_jsonrpc_id(value: Any) -> str | int | None:
+    """Return a response-safe JSON-RPC id, normalizing invalid ids to null."""
+
+    if _jsonrpc_id_is_valid(value):
+        return value
+    return None
+
+
+def _validate_jsonrpc_id(value: Any) -> Any:
+    """Reject JSON-RPC ids before Pydantic can coerce booleans to integers."""
+
+    if not _jsonrpc_id_is_valid(value):
+        raise ValueError("JSON-RPC id must be a string, integer, or null")
+    return value
+
+
 async def _no_redis_client_factory(**_kwargs: Any) -> None:
     """Fallback Redis factory used when embedders do not provide Redis support."""
     return None
@@ -182,6 +206,19 @@ class MCPRequest(BaseModel):
     method: str = Field(..., min_length=1, max_length=100)
     params: Optional[dict[str, Any]] = None
     id: Optional[Union[str, int]] = None
+
+    if _PYDANTIC_V2:
+        @field_validator("id", mode="before")
+        @classmethod
+        def validate_id(cls, v):
+            """Validate JSON-RPC id before type coercion."""
+            return _validate_jsonrpc_id(v)
+    else:
+        @field_validator("id", pre=True)
+        @classmethod
+        def validate_id(cls, v):
+            """Validate JSON-RPC id before type coercion."""
+            return _validate_jsonrpc_id(v)
 
     @field_validator("method")
     @classmethod
@@ -199,6 +236,19 @@ class MCPRequest(BaseModel):
         if v is not None and not isinstance(v, dict):
             raise ValueError("Params must be a dictionary")
         return v
+
+
+def _mcp_request_has_id(request: Any) -> bool:
+    """Return whether a raw or modeled MCP request explicitly included an id."""
+
+    if isinstance(request, dict):
+        return "id" in request
+    if isinstance(request, MCPRequest):
+        fields_set = getattr(request, "model_fields_set", None)
+        if fields_set is None:
+            fields_set = getattr(request, "__fields_set__", set())
+        return "id" in fields_set
+    return False
 
 
 class MCPError(BaseModel):
@@ -1932,21 +1982,21 @@ class MCPProtocol:
                 except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as e:
                     # If parsing fails at top-level, try to include an error response for that item
                     try:
-                        req_id = item.get("id") if isinstance(item, dict) else None
+                        req_id = _safe_jsonrpc_id(item.get("id")) if isinstance(item, dict) else None
                     except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
                         req_id = None
                     responses.append(self._error_response(ErrorCode.INVALID_REQUEST, str(e), req_id))
             # Per JSON-RPC, if the batch is empty or only notifications, return no response
             return responses if responses else None
 
-        raw_request_has_id = isinstance(request, dict) and "id" in request
+        raw_request_has_id = _mcp_request_has_id(request)
 
         # Parse single request if dict
         if isinstance(request, dict):
             try:
                 request = MCPRequest(**request)
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as e:
-                req_id = request.get("id") if isinstance(request, dict) else None
+                req_id = _safe_jsonrpc_id(request.get("id")) if isinstance(request, dict) else None
                 return self._error_response(
                     ErrorCode.INVALID_REQUEST,
                     f"Invalid request format: {str(e)}",

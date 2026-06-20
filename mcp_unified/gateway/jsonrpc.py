@@ -110,6 +110,16 @@ class GatewayJSONRPCEnvelope:
         return not self.has_id
 
 
+def _request_id_label(*, has_id: bool, request_id: str | int | None) -> str:
+    """Return the request-id label used for runtime context metadata."""
+
+    if request_id is not None:
+        return str(request_id)
+    if has_id:
+        return "null"
+    return "notification"
+
+
 GatewayJSONRPCResponse = GatewayJSONRPCSuccessResponse | GatewayJSONRPCErrorResponse
 GatewayJSONRPCResult = GatewayJSONRPCResponse | list[GatewayJSONRPCResponse] | GatewayNoResponse
 GATEWAY_RESPONSE_TYPES = (GatewayJSONRPCSuccessResponse, GatewayJSONRPCErrorResponse)
@@ -243,6 +253,7 @@ def request_context(
     path: str,
     client_host: str | None = None,
     metadata: dict[str, Any] | None = None,
+    request_id_label: str | None = None,
 ) -> GatewayRequestContext:
     """Derive the host-neutral gateway request context from a JSON-RPC request."""
 
@@ -260,7 +271,7 @@ def request_context(
     if client_host is not None:
         context_metadata["client_host"] = client_host
     return GatewayRequestContext(
-        request_id=str(payload.id if payload.id is not None else "notification"),
+        request_id=request_id_label or str(payload.id if payload.id is not None else "notification"),
         metadata=context_metadata,
     )
 
@@ -291,13 +302,20 @@ async def dispatch_jsonrpc(
     path: str,
     client_host: str | None = None,
     metadata: dict[str, Any] | None = None,
+    request_id_label: str | None = None,
 ) -> Any:
     """Dispatch one validated JSON-RPC request to the injected runtime."""
 
     method = payload.method
     params = object_or_empty(payload.params, "params must be an object")
 
-    context = request_context(payload, path=path, client_host=client_host, metadata=metadata)
+    context = request_context(
+        payload,
+        path=path,
+        client_host=client_host,
+        metadata=metadata,
+        request_id_label=request_id_label,
+    )
 
     if method == "initialize":
         return await handle_initialize(runtime)
@@ -382,6 +400,10 @@ async def handle_single_jsonrpc(
             path=path,
             client_host=client_host,
             metadata=metadata,
+            request_id_label=_request_id_label(
+                has_id=envelope.has_id,
+                request_id=envelope.request_id,
+            ),
         )
     except GatewayPolicyDenied as exc:
         error = jsonrpc_error(POLICY_DENIED, str(exc), envelope.request_id, data=exc.to_error_data())
