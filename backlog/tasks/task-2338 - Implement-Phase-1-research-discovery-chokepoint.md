@@ -9,6 +9,13 @@ labels:
 documentation:
 - Docs/superpowers/specs/2026-06-20-research-source-discovery-chokepoint-design.md
 - Docs/superpowers/plans/2026-06-20-research-discovery-chokepoint-phase1-plan.md
+- 'Task 6 endpoint slice: expose default source catalog and standalone discovery search
+  API under /api/v1/research with focused endpoint tests and route registration smoke.'
+- 'Task 6 verification: endpoint pytest red first failed on missing research_discovery
+  module/router spec; final pytest passed 10 tests. Route smoke printed content router
+  specs ok. Black --check passed for the four touched files after formatting. git
+  diff --check passed. Bandit endpoint/schema scan wrote /tmp/bandit_research_discovery_task6.json
+  with 0 findings.'
 modified_files:
 - Docs/superpowers/plans/2026-06-20-research-discovery-chokepoint-phase1-plan.md
 - tldw_Server_API/app/core/Research/discovery/__init__.py
@@ -27,6 +34,10 @@ modified_files:
 - tldw_Server_API/app/core/DB_Management/ResearchSessionsDB.py
 - tldw_Server_API/tests/Research/test_research_sessions_db.py
 - backlog/tasks/task-2338 - Implement-Phase-1-research-discovery-chokepoint.md
+- tldw_Server_API/app/api/v1/schemas/research_discovery_schemas.py
+- tldw_Server_API/app/api/v1/endpoints/research_discovery.py
+- tldw_Server_API/app/api/v1/router_groups/content.py
+- tldw_Server_API/tests/Research/test_research_discovery_endpoint.py
 ---
 
 ## Description
