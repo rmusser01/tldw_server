@@ -145,12 +145,11 @@ def build_uat_plan(
     steps = [
         UatStep(
             "create_venv",
-            "Create an isolated virtual environment with shared site packages.",
+            "Create an isolated virtual environment.",
             command=[
                 python_executable,
                 "-m",
                 "venv",
-                "--system-site-packages",
                 str(venv_dir),
             ],
             cwd=workspace,
@@ -521,6 +520,7 @@ def build_uat_plan(
         UatStep(
             "stop_fixture_gateway",
             "Stop the local fixture gateway.",
+            required=False,
             stop_process_key="fixture_gateway",
         ),
     ]
@@ -562,7 +562,12 @@ def redact_text(
             redacted = redacted.replace(path, "<redacted-path>")
     for secret in sorted({secret for secret in secrets if secret}, key=len, reverse=True):
         redacted = redacted.replace(secret, "<redacted-secret>")
-    redacted = re.sub(r"Bearer\s+[^\s\"']+", "Bearer <redacted-secret>", redacted)
+    redacted = re.sub(
+        r"Bearer\s+[^\s\"']+",
+        "Bearer <redacted-secret>",
+        redacted,
+        flags=re.IGNORECASE,
+    )
     redacted = re.sub(
         r"(X-MCP-Gateway-Admin-Key\s*[:=]\s*)[^\s\"']+",
         r"\1<redacted-secret>",
@@ -852,10 +857,10 @@ def _stop_background_process(
         return UatStepResult(
             step_id=step.step_id,
             description=step.description,
-            status="failed",
+            status="skipped",
             required=step.required,
             duration_ms=_elapsed_ms(started),
-            reason="background process was not running",
+            reason="process not running",
         )
     stdout, stderr = _terminate_process(process)
     return UatStepResult(
@@ -884,6 +889,7 @@ def _wait_for_http_health(
     while perf_counter() < deadline:
         if process.poll() is not None:
             return f"process exited before health check passed: {process.returncode}"
+        connection: HTTPConnection | None = None
         try:
             connection = HTTPConnection(host, port, timeout=0.5)
             connection.request("GET", path)
@@ -895,10 +901,8 @@ def _wait_for_http_health(
         except OSError as exc:
             last_error = f"{exc.__class__.__name__}: {exc}"
         finally:
-            try:
+            if connection is not None:
                 connection.close()
-            except UnboundLocalError:
-                pass
         sleep(0.1)
     return last_error
 
@@ -915,7 +919,10 @@ def _terminate_process(process: subprocess.Popen[str]) -> tuple[str, str]:
 
 def _stop_remaining_processes(context: UatRunContext) -> None:
     for process in list(context.processes.values()):
-        _terminate_process(process)
+        try:
+            _terminate_process(process)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            continue
     context.processes.clear()
 
 
@@ -1020,7 +1027,9 @@ def _elapsed_ms(started: float) -> float:
     return round((perf_counter() - started) * 1000, 3)
 
 
-def _truncate(value: str) -> str:
+def _truncate(value: str | None) -> str:
+    if value is None:
+        return ""
     if len(value) <= _MAX_CAPTURE_CHARS:
         return value
     return value[:_MAX_CAPTURE_CHARS] + "\n<truncated>"

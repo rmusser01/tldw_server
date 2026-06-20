@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+import pytest
 import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -34,6 +35,7 @@ def _load_harness() -> ModuleType:
     return module
 
 
+@pytest.mark.unit
 def test_standalone_package_exposes_documented_gateway_and_smoke_clis() -> None:
     metadata = _mcp_package_metadata()
 
@@ -47,15 +49,17 @@ def test_standalone_package_exposes_documented_gateway_and_smoke_clis() -> None:
     assert package_dirs["mcp_unified.smoke"] == "smoke"
 
 
-def test_gateway_extra_installs_smoke_cli_runtime_dependencies() -> None:
+@pytest.mark.unit
+def test_base_install_includes_smoke_cli_runtime_dependencies() -> None:
     metadata = _mcp_package_metadata()
 
-    gateway_dependencies = metadata["project"]["optional-dependencies"]["gateway"]
+    dependencies = metadata["project"]["dependencies"]
 
-    assert any(dependency.startswith("httpx") for dependency in gateway_dependencies)
-    assert any(dependency.startswith("websockets") for dependency in gateway_dependencies)
+    assert any(dependency.startswith("httpx") for dependency in dependencies)
+    assert any(dependency.startswith("websockets") for dependency in dependencies)
 
 
+@pytest.mark.unit
 def test_user_guide_uat_plan_covers_documented_local_flows(tmp_path: Path) -> None:
     module = _load_harness()
 
@@ -105,8 +109,12 @@ def test_user_guide_uat_plan_covers_documented_local_flows(tmp_path: Path) -> No
         "stop_fixture_gateway",
         "remote_runtime_skipped",
     ]
+    create_venv = plan[0]
+    assert create_venv.command is not None
+    assert "--system-site-packages" not in create_venv.command
 
 
+@pytest.mark.unit
 def test_user_guide_uat_redaction_removes_secrets_and_workspace_paths(tmp_path: Path) -> None:
     module = _load_harness()
     workspace = tmp_path / "uat-workspace"
@@ -126,4 +134,18 @@ def test_user_guide_uat_redaction_removes_secrets_and_workspace_paths(tmp_path: 
     assert str(workspace) not in redacted
     assert "<redacted-secret>" in redacted
     assert "<redacted-path>" in redacted
+    assert "Bearer <redacted-secret>" in redacted
+
+
+@pytest.mark.unit
+def test_user_guide_uat_redaction_removes_lowercase_bearer_tokens() -> None:
+    module = _load_harness()
+
+    redacted = module.redact_text(
+        "authorization: bearer abc.def",
+        secrets=[],
+        sensitive_paths=[],
+    )
+
+    assert "abc.def" not in redacted
     assert "Bearer <redacted-secret>" in redacted
