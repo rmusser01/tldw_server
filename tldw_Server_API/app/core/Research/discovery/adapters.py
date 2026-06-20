@@ -305,7 +305,7 @@ def _items_from_semantic_scholar_result(result: object) -> list[dict[str, Any]]:
 
 def _items_from_payload(payload: object) -> list[dict[str, Any]]:
     if payload is None:
-        return []
+        raise DiscoveryProviderError()
     if isinstance(payload, list):
         return _items_from_list_payload(payload)
     if isinstance(payload, Mapping):
