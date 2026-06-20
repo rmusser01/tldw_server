@@ -110,6 +110,45 @@ def test_mounted_request_initialized_notification_returns_204_empty_body():
     assert response.content == b""
 
 
+def test_mounted_request_notification_is_delivered_to_server_before_response_suppression(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint
+    from tldw_Server_API.app.core.MCP_unified import MCPRequest, MCPResponse
+
+    class _RecordingServer:
+        initialized = True
+
+        def __init__(self) -> None:
+            self.requests: list[MCPRequest] = []
+
+        async def initialize(self) -> None:
+            self.initialized = True
+
+        async def handle_http_request(
+            self,
+            request: MCPRequest,
+            *_args: Any,
+            **_kwargs: Any,
+        ) -> MCPResponse:
+            self.requests.append(request)
+            return MCPResponse(result={"should": "be suppressed"}, id=request.id)
+
+    server = _RecordingServer()
+    monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
+
+    with build_mcp_test_client(auth_principal_override=build_mcp_admin_auth_override()) as client:
+        response = client.post(
+            "/api/v1/mcp/request",
+            json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert [request.method for request in server.requests] == ["notifications/initialized"]
+
+
 def test_mounted_request_explicit_null_id_returns_null_id_response():
     with build_mcp_test_client(auth_principal_override=build_mcp_admin_auth_override()) as client:
         response = client.post(
@@ -174,3 +213,56 @@ def test_mounted_request_pre_protocol_auth_dependency_failure_stays_http_error()
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Forbidden before JSON-RPC"
+
+
+def test_mounted_batch_notification_is_delivered_to_server_and_omitted_from_response(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint
+    from tldw_Server_API.app.core.MCP_unified import MCPRequest, MCPResponse
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPError
+
+    class _RecordingBatchServer:
+        initialized = True
+
+        def __init__(self) -> None:
+            self.batch_requests: list[MCPRequest] = []
+
+        async def initialize(self) -> None:
+            self.initialized = True
+
+        async def handle_http_batch(
+            self,
+            requests: list[MCPRequest],
+            *_args: Any,
+            **_kwargs: Any,
+        ) -> list[MCPResponse]:
+            self.batch_requests.extend(requests)
+            return [
+                MCPResponse(
+                    error=MCPError(code=-32601, message="notification response should be suppressed"),
+                    id=None,
+                ),
+                MCPResponse(result={"pong": True}, id="batch-ping"),
+            ]
+
+    server = _RecordingBatchServer()
+    monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
+
+    with build_mcp_test_client(auth_principal_override=build_mcp_admin_auth_override()) as client:
+        response = client.post(
+            "/api/v1/mcp/request/batch",
+            json=[
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                {"jsonrpc": "2.0", "method": "ping", "id": "batch-ping"},
+            ],
+            headers=_auth_headers(),
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body == [{"jsonrpc": "2.0", "id": "batch-ping", "result": {"pong": True}}]
+    assert [request.method for request in server.batch_requests] == [
+        "notifications/initialized",
+        "ping",
+    ]

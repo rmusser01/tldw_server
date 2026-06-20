@@ -840,10 +840,8 @@ async def mcp_request(
     if isinstance(payload, MCPResponse):
         return _jsonrpc_error_response(payload)
 
-    if _is_jsonrpc_notification_payload(payload):
-        return Response(status_code=204)
-
     null_id_sentinel = _jsonrpc_null_id_sentinel()
+    is_notification = isinstance(payload, dict) and not jsonrpc_payload_has_id(payload)
     request_obj, error_obj, explicit_null_id = _mcp_request_from_jsonrpc_payload(
         payload,
         null_id_sentinel=null_id_sentinel,
@@ -861,7 +859,6 @@ async def mcp_request(
     # Attach org/team metadata when auth via API key. Prefer any metadata attached
     # by the compatibility resolver to avoid re-validating the same key and
     # double-counting usage/audit; fall back to a direct lookup when needed.
-    # usage/audit; fall back to a direct lookup when needed.
     metadata = await _attach_api_key_metadata(auth, http_request)
 
     # Derive user id from the authenticated token user when present.
@@ -907,6 +904,8 @@ async def mcp_request(
     resp_obj = await server.handle_http_request(
         request_obj, client_id=client_id, user_id=derived_user_id, metadata=metadata or None
     )
+    if is_notification:
+        return Response(status_code=204)
     if resp_obj is None:
         return Response(status_code=204)
     if explicit_null_id and resp_obj.id == null_id_sentinel:
@@ -953,9 +952,6 @@ async def mcp_request_batch(
     batch_entries: list[tuple[str, MCPRequest | MCPResponse]] = []
     explicit_null_id_sentinels: set[str] = set()
     for index, item in enumerate(payload):
-        if _is_jsonrpc_notification_payload(item):
-            continue
-
         sentinel = _jsonrpc_null_id_sentinel(index)
         request_obj, error_obj, explicit_null_id = _mcp_request_from_jsonrpc_payload(
             item,
@@ -967,10 +963,9 @@ async def mcp_request_batch(
         if explicit_null_id:
             explicit_null_id_sentinels.add(sentinel)
         requests.append(request_obj)
+        if not jsonrpc_payload_has_id(item):
+            continue
         batch_entries.append(("request", request_obj))
-
-    if not batch_entries:
-        return Response(status_code=204)
 
     server = get_mcp_server()
     if not server.initialized:
@@ -979,7 +974,6 @@ async def mcp_request_batch(
     # Attach org/team metadata when auth via API key. Prefer any metadata attached
     # by the compatibility resolver to avoid re-validating the same key and
     # double-counting usage/audit; fall back to a direct lookup when needed.
-    # usage/audit; fall back to a direct lookup when needed.
     metadata = await _attach_api_key_metadata(
         auth,
         http_request,
@@ -1036,7 +1030,7 @@ async def mcp_request_batch(
             requests, client_id=client_id, user_id=derived_user_id, metadata=metadata or None
         )
         if handled_responses:
-            server_responses.extend(handled_responses)
+            server_responses.extend(item for item in handled_responses if item.id is not None)
 
     resp: list[MCPResponse] = []
     server_response_index = 0
