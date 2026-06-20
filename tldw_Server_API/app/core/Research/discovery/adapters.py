@@ -49,7 +49,7 @@ class OpenAlexDiscoveryAdapter:
         limit: int,
         filters: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        result = await asyncio.to_thread(
+        result = await _call_provider_function(
             self._search_fn,
             query,
             0,
@@ -75,7 +75,7 @@ class SemanticScholarDiscoveryAdapter:
         limit: int,
         filters: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        result = await asyncio.to_thread(
+        result = await _call_provider_function(
             self._search_fn,
             query,
             offset=0,
@@ -107,7 +107,7 @@ class CrossrefDiscoveryAdapter:
         limit: int,
         filters: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        result = await asyncio.to_thread(
+        result = await _call_provider_function(
             self._search_fn,
             query,
             0,
@@ -133,7 +133,7 @@ class ArxivDiscoveryAdapter:
         limit: int,
         filters: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        result = await asyncio.to_thread(
+        result = await _call_provider_function(
             self._search_fn,
             query,
             author=None,
@@ -158,7 +158,7 @@ class PubMedDiscoveryAdapter:
         limit: int,
         filters: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        result = await asyncio.to_thread(
+        result = await _call_provider_function(
             self._search_fn,
             query,
             offset=0,
@@ -184,7 +184,7 @@ class ZenodoDiscoveryAdapter:
         limit: int,
         filters: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        result = await asyncio.to_thread(
+        result = await _call_provider_function(
             self._search_fn,
             query,
             page=1,
@@ -210,7 +210,7 @@ class FigshareDiscoveryAdapter:
         limit: int,
         filters: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        result = await asyncio.to_thread(
+        result = await _call_provider_function(
             self._search_fn,
             query,
             page=1,
@@ -236,7 +236,7 @@ class OSFDiscoveryAdapter:
         limit: int,
         filters: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        result = await asyncio.to_thread(
+        result = await _call_provider_function(
             self._search_fn,
             term=query,
             page=1,
@@ -258,6 +258,17 @@ def default_discovery_adapters() -> dict[str, DiscoveryProviderAdapter]:
         "figshare": FigshareDiscoveryAdapter(),
         "osf": OSFDiscoveryAdapter(),
     }
+
+
+async def _call_provider_function(
+    search_fn: SearchFunction,
+    *args: Any,
+    **kwargs: Any,
+) -> object:
+    try:
+        return await asyncio.to_thread(search_fn, *args, **kwargs)
+    except Exception as exc:
+        raise DiscoveryProviderError(str(exc)) from None
 
 
 def _items_from_tuple_result(result: object) -> list[dict[str, Any]]:

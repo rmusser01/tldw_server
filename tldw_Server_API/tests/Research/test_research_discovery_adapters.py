@@ -93,6 +93,29 @@ async def test_adapter_provider_error_tuple_raises_sanitized_provider_error():
 
 
 @pytest.mark.asyncio
+async def test_adapter_helper_exception_raises_sanitized_provider_error():
+    from tldw_Server_API.app.core.Research.discovery.adapters import OpenAlexDiscoveryAdapter
+    from tldw_Server_API.app.core.Research.discovery.router import DiscoveryProviderError
+
+    def fake_search_openalex(*_args, **_kwargs):
+        raise RuntimeError("secret token /private/key")
+
+    adapter = OpenAlexDiscoveryAdapter(search_fn=fake_search_openalex)
+
+    with pytest.raises(DiscoveryProviderError) as exc_info:
+        await adapter.search(
+            query="graph",
+            source=_source("openalex"),
+            limit=2,
+            filters={},
+        )
+
+    assert str(exc_info.value) == "Provider request failed."
+    assert "secret token" not in str(exc_info.value)
+    assert "/private/key" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_adapter_error_shaped_mapping_payload_raises_sanitized_provider_error():
     from tldw_Server_API.app.core.Research.discovery.adapters import OpenAlexDiscoveryAdapter
     from tldw_Server_API.app.core.Research.discovery.router import DiscoveryProviderError
