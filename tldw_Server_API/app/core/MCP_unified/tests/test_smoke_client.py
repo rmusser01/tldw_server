@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import shutil
 import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -508,6 +509,50 @@ def test_smoke_cli_returns_zero_for_inprocess_real_world_scenario(
     assert "artifact write" in step_names  # nosec B101
     assert "artifact verification" in step_names  # nosec B101
     assert str(tmp_path) not in rendered  # nosec B101
+
+
+def test_smoke_cli_removes_auto_created_real_world_artifact_dir(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp_unified.smoke import cli as smoke_cli
+
+    class _RecordingTemporaryDirectory:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.name = str(tmp_path / "auto-artifacts")
+            self.cleaned = False
+            created_dirs.append(self)
+
+        def cleanup(self) -> None:
+            self.cleaned = True
+            shutil.rmtree(self.name, ignore_errors=True)
+
+    created_dirs: list[_RecordingTemporaryDirectory] = []
+
+    monkeypatch.setattr(
+        smoke_cli.tempfile,
+        "TemporaryDirectory",
+        _RecordingTemporaryDirectory,
+    )
+
+    exit_code = smoke_cli.main(
+        [
+            "inprocess",
+            "--scenario",
+            "real-world",
+            "--json-report",
+            "-",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0  # nosec B101
+    assert payload["ok"] is True  # nosec B101
+    assert len(created_dirs) == 1  # nosec B101
+    temp_dir = created_dirs[0]
+    assert temp_dir.cleaned is True  # nosec B101
+    assert not Path(temp_dir.name).exists()  # nosec B101
 
 
 def test_smoke_cli_returns_zero_for_stdio_fixture_real_world_scenario(
@@ -2818,6 +2863,93 @@ async def test_real_world_scenario_real_llm_step_uses_mocked_openai_compatible_a
     assert llm_step["result_summary"]["model"] == "smoke-model"  # nosec B101
     assert secret not in rendered  # nosec B101
     assert "artifact inspected" not in rendered  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_real_llm_response_size_bound_is_enforced_before_json_decode() -> None:
+    from mcp_unified.smoke.real_llm import call_openai_compatible
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"x" * (64 * 1024 + 1))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ValueError, match="real LLM response exceeded size bound"):
+            await call_openai_compatible(
+                api_key="test-secret",
+                prompt="Summarize the artifact.",
+                base_url="https://llm.test/v1",
+                http_client=client,
+            )
+
+
+@pytest.mark.asyncio
+async def test_real_world_scenario_does_not_reprocess_inserted_template_tokens(
+    tmp_path: Path,
+) -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.scenarios import run_real_world_scenario
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    class _PlaceholderSummaryRuntime(SmokeFixtureGatewayRuntime):
+        def _artifact_summarize(self, arguments: dict[str, object]) -> dict[str, object]:
+            result = super()._artifact_summarize(arguments)
+            placeholder_summary = "Derived summary keeps {artifact_read_text}"
+            content = result["content"]
+            assert isinstance(content, list)  # nosec B101
+            content[0]["text"] = placeholder_summary
+            structured = result["structuredContent"]
+            assert isinstance(structured, dict)  # nosec B101
+            structured["summary_markdown"] = placeholder_summary
+            return result
+
+    report = await run_real_world_scenario(
+        InProcessGatewayTransport(_PlaceholderSummaryRuntime(artifact_root=tmp_path)),
+        mode="strict",
+        artifact_dir=tmp_path,
+    )
+    output = (tmp_path / "output" / "user-stories.md").read_text(encoding="utf-8")
+
+    assert report.ok is True  # nosec B101
+    assert output == "Derived summary keeps {artifact_read_text}"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_real_world_scenario_removes_auto_created_artifact_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp_unified.smoke import scenarios
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    class _RecordingTemporaryDirectory:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.name = str(tmp_path / "scenario-auto-artifacts")
+            self.cleaned = False
+            created_dirs.append(self)
+
+        def cleanup(self) -> None:
+            self.cleaned = True
+            shutil.rmtree(self.name, ignore_errors=True)
+
+    created_dirs: list[_RecordingTemporaryDirectory] = []
+
+    monkeypatch.setattr(
+        scenarios.tempfile,
+        "TemporaryDirectory",
+        _RecordingTemporaryDirectory,
+    )
+
+    report = await scenarios.run_real_world_scenario(
+        InProcessGatewayTransport(SmokeFixtureGatewayRuntime()),
+        mode="best_effort",
+    )
+
+    assert report.ok is True  # nosec B101
+    assert len(created_dirs) == 1  # nosec B101
+    temp_dir = created_dirs[0]
+    assert temp_dir.cleaned is True  # nosec B101
+    assert not Path(temp_dir.name).exists()  # nosec B101
 
 
 class _RealWorldJsonRpcFixture:

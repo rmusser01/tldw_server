@@ -183,6 +183,7 @@ class SmokeFixtureGatewayRuntime:
         name: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
+        """Dispatch an artifact tool call against the configured artifact root."""
         if self.artifact_root is None:
             raise NotImplementedError(name)
         if name == "artifact.read":
@@ -196,6 +197,7 @@ class SmokeFixtureGatewayRuntime:
         raise NotImplementedError(name)
 
     def _artifact_read(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Read a UTF-8 artifact and return MCP text plus structured metadata."""
         relative_path, target = self._artifact_target(arguments.get("path"))
         body = target.read_text(encoding="utf-8")
         digest = _sha256_text(body)
@@ -215,6 +217,7 @@ class SmokeFixtureGatewayRuntime:
         }
 
     def _artifact_summarize(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Return a deterministic summary for a UTF-8 artifact."""
         source_path = arguments.get("source_path", arguments.get("path"))
         relative_path, target = self._artifact_target(source_path)
         body = target.read_text(encoding="utf-8")
@@ -235,6 +238,7 @@ class SmokeFixtureGatewayRuntime:
         }
 
     def _artifact_write(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Write a UTF-8 artifact and return path, size, and digest metadata."""
         relative_path, target = self._artifact_target(arguments.get("path"))
         content = arguments.get("content", arguments.get("text", ""))
         if not isinstance(content, str):
@@ -256,6 +260,7 @@ class SmokeFixtureGatewayRuntime:
         }
 
     def _artifact_stat(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Return existence, size, and optional digest metadata for an artifact."""
         relative_path, target = self._artifact_target(arguments.get("path"))
         exists = target.exists()
         size = target.stat().st_size if exists else 0
@@ -276,6 +281,7 @@ class SmokeFixtureGatewayRuntime:
         }
 
     def _artifact_target(self, path_value: object) -> tuple[str, Path]:
+        """Resolve an artifact-relative path and reject root escapes."""
         if self.artifact_root is None:
             raise ValueError("artifact_root_not_configured")
         relative_path = _normalize_relative_artifact_path(path_value)

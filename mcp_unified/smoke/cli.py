@@ -290,7 +290,11 @@ def _build_common_parser(*, with_defaults: bool) -> argparse.ArgumentParser:
 async def _run(args: argparse.Namespace) -> SmokeReport:
     scenario = cast(str, args.scenario)
     mode = _scenario_mode(args.mode)
-    artifact_root = _artifact_root_for_scenario(args) if scenario == "real-world" else None
+    artifact_tempdir: tempfile.TemporaryDirectory[str] | None = None
+    if scenario == "real-world":
+        artifact_root, artifact_tempdir = _artifact_root_for_scenario(args)
+    else:
+        artifact_root = None
     previous_artifact_root = os.environ.get("MCP_SMOKE_ARTIFACT_ROOT")
     if artifact_root is not None:
         os.environ["MCP_SMOKE_ARTIFACT_ROOT"] = str(artifact_root)
@@ -350,6 +354,8 @@ async def _run(args: argparse.Namespace) -> SmokeReport:
                 os.environ.pop("MCP_SMOKE_ARTIFACT_ROOT", None)
             else:
                 os.environ["MCP_SMOKE_ARTIFACT_ROOT"] = previous_artifact_root
+        if artifact_tempdir is not None:
+            artifact_tempdir.cleanup()
 
     report.metadata["scenario"] = scenario
     report.metadata["mode"] = mode
@@ -466,14 +472,19 @@ class _NoResourceFixtureRuntime:
         return await self._runtime.get_modules_health(context)
 
 
-def _artifact_root_for_scenario(args: argparse.Namespace) -> Path:
+def _artifact_root_for_scenario(
+    args: argparse.Namespace,
+) -> tuple[Path, tempfile.TemporaryDirectory[str] | None]:
+    """Resolve the real-world artifact root and its optional cleanup handle."""
     artifact_dir = getattr(args, "artifact_dir", None)
     if artifact_dir:
         root = Path(artifact_dir).expanduser()
+        tempdir = None
     else:
-        root = Path(tempfile.mkdtemp(prefix="mcp-smoke-real-world-"))
+        tempdir = tempfile.TemporaryDirectory(prefix="mcp-smoke-real-world-")
+        root = Path(tempdir.name)
     root.mkdir(parents=True, exist_ok=True)
-    return root.resolve()
+    return root.resolve(), tempdir
 
 
 def _scenario_mode(value: str) -> ScenarioMode:

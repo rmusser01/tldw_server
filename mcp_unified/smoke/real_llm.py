@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -41,16 +42,20 @@ async def call_openai_compatible(
     client = http_client or httpx.AsyncClient(timeout=timeout)
     should_close = http_client is None
     try:
-        response = await client.post(
+        async with client.stream(
+            "POST",
             f"{endpoint_root}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}"},
             json=payload,
             timeout=timeout,
-        )
-        if len(response.content) > _MAX_RESPONSE_BYTES:
-            raise ValueError("real LLM response exceeded size bound")
-        response.raise_for_status()
-        data = response.json()
+        ) as response:
+            response.raise_for_status()
+            body = bytearray()
+            async for chunk in response.aiter_bytes():
+                body.extend(chunk)
+                if len(body) > _MAX_RESPONSE_BYTES:
+                    raise ValueError("real LLM response exceeded size bound")
+            data = json.loads(bytes(body))
     finally:
         if should_close:
             await client.aclose()
@@ -66,6 +71,7 @@ async def call_openai_compatible(
 
 
 def _extract_choice_metadata(data: Any) -> tuple[str, object | None, int]:
+    """Extract redaction-safe choice text length metadata from an LLM response."""
     if not isinstance(data, dict):
         return "", None, 0
     choices = data.get("choices")

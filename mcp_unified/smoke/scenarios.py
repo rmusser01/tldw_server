@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+import re
 import tempfile
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -35,6 +37,9 @@ _DEFAULT_ARTIFACT_WRITE_ARGUMENTS = {
     "content": "{derived_content}",
 }
 _DEFAULT_ARTIFACT_STAT_ARGUMENTS = {"path": "{output_path}"}
+_TEMPLATE_PLACEHOLDER_RE = re.compile(
+    r"\{(input_path|output_path|derived_content|artifact_read_text)\}"
+)
 _PRODUCT_BRIEF_MARKDOWN = """# Portable Research Notebook
 
 Build a local-first research notebook for analysts who collect video, audio,
@@ -84,8 +89,8 @@ async def run_baseline_scenario(
         ),
     }
 
-    await transport.start()
     try:
+        await transport.start()
         await _record_step(report, "initialize", lambda: _step_initialize(client, state))
         await _record_step(
             report,
@@ -169,7 +174,14 @@ async def run_real_world_scenario(
     if mode not in {"best_effort", "strict"}:
         raise ValueError("mode must be 'best_effort' or 'strict'")
 
-    artifact_root = _prepare_artifact_root(artifact_dir)
+    temporary_artifact_root: tempfile.TemporaryDirectory[str] | None = None
+    if artifact_dir is None:
+        temporary_artifact_root = tempfile.TemporaryDirectory(
+            prefix="mcp-smoke-real-world-"
+        )
+        artifact_root = _prepare_artifact_root(temporary_artifact_root.name)
+    else:
+        artifact_root = _prepare_artifact_root(artifact_dir)
     started_at = datetime.now(UTC).isoformat()
     report = SmokeReport(
         transport=transport.__class__.__name__,
@@ -271,6 +283,8 @@ async def run_real_world_scenario(
         await transport.close()
         report.elapsed_ms = _elapsed_ms(started)
         report.ok = all(step.ok for step in report.steps)
+        if temporary_artifact_root is not None:
+            temporary_artifact_root.cleanup()
 
     return report
 
@@ -566,9 +580,7 @@ async def _step_artifact_setup(state: dict[str, Any]) -> object:
     input_target = artifact_root / input_path
     output_target = artifact_root / output_path
     try:
-        input_target.parent.mkdir(parents=True, exist_ok=True)
-        output_target.parent.mkdir(parents=True, exist_ok=True)
-        input_target.write_text(_PRODUCT_BRIEF_MARKDOWN, encoding="utf-8")
+        await asyncio.to_thread(_seed_artifact_files, input_target, output_target)
     except OSError as exc:
         return _failure(
             "artifact_setup_failed",
@@ -973,22 +985,28 @@ def _render_artifact_arguments(
 
 def _render_template_value(value: object, state: dict[str, Any]) -> object:
     if isinstance(value, str):
-        output = value
-        for key in (
-            "input_path",
-            "output_path",
-            "derived_content",
-            "artifact_read_text",
-        ):
-            replacement = state.get(key, "")
-            if isinstance(replacement, str):
-                output = output.replace("{" + key + "}", replacement)
-        return output
+        return _TEMPLATE_PLACEHOLDER_RE.sub(
+            lambda match: _template_replacement(match.group(1), state),
+            value,
+        )
     if isinstance(value, dict):
         return {key: _render_template_value(nested, state) for key, nested in value.items()}
     if isinstance(value, list):
         return [_render_template_value(item, state) for item in value]
     return value
+
+
+def _seed_artifact_files(input_target: Path, output_target: Path) -> None:
+    """Create artifact parent directories and seed the deterministic input file."""
+    input_target.parent.mkdir(parents=True, exist_ok=True)
+    output_target.parent.mkdir(parents=True, exist_ok=True)
+    input_target.write_text(_PRODUCT_BRIEF_MARKDOWN, encoding="utf-8")
+
+
+def _template_replacement(key: str, state: dict[str, Any]) -> str:
+    """Return the string replacement for one original artifact template token."""
+    replacement = state.get(key, "")
+    return replacement if isinstance(replacement, str) else ""
 
 
 def _extract_tool_text(result: dict[str, object]) -> str | None:
