@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -41,3 +42,65 @@ class SourceSelectionError:
     message: str
     selected_count: int
     limit: int
+
+
+@dataclass(frozen=True)
+class DiscoveryOACandidate:
+    candidate_id: str
+    candidate_type: str
+    safe_url: str | None
+    resolver_reference: str | None
+    url_redacted: bool
+    requires_reresolution: bool
+    provider: str
+    access_status: str | None
+    license_hint: str | None
+    content_type_hint: str | None
+    rank: int
+    confidence: float
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class DiscoveryProvenance:
+    source_id: str
+    provider: str
+    discovery_mode: str
+    provider_ids: dict[str, str]
+    url: str | None
+    source_rank: int | None
+    status: str
+    warnings: tuple[str, ...]
+    safe_metadata: dict[str, Any]
+    adapter_version: str
+
+
+@dataclass(frozen=True)
+class DiscoveryResult:
+    result_id: str
+    fingerprint: str
+    primary_source_id: str
+    primary_provider: str
+    discovery_mode: str
+    title: str
+    authors: tuple[str, ...]
+    abstract: str | None
+    doi: str | None
+    pmid: str | None
+    pmcid: str | None
+    arxiv_id: str | None
+    provider_ids: dict[str, str]
+    canonical_url: str | None
+    published_at: str | None
+    updated_at: str | None
+    source_category: str | None
+    oa_candidates: tuple[DiscoveryOACandidate, ...]
+    recommended_candidate_id: str | None
+    ingest_eligible: bool
+    dedupe_confidence: float
+    ranking_signals: dict[str, Any]
+    warnings: tuple[str, ...]
+    merged_provenance: tuple[DiscoveryProvenance, ...]
+    safe_metadata: dict[str, Any]
+    adapter_version: str
+    catalog_version: str
