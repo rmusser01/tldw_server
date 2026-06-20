@@ -34,6 +34,7 @@ verified production deployment on a specific host.
 | [#1704](https://github.com/rmusser01/tldw_server/issues/1704) | ACP artifact release verification | Records release-grade verification for the first accepted ACP-to-workspace-artifact golden path. |
 | [#2401](https://github.com/rmusser01/tldw_server/issues/2401) | Artifact retention and transcript redaction release policy | Makes the release retention/redaction boundaries explicit for ACP session evidence, audit records, diagnostics, artifacts, run previews, and promoted workspace artifacts. |
 | [#2400](https://github.com/rmusser01/tldw_server/issues/2400) | Sandbox host-runtime release verification | Records release-host evidence for selected ACP sandbox runtimes before sandbox-backed support claims are made. |
+| [#2402](https://github.com/rmusser01/tldw_server/issues/2402) | Live-agent caveat verification | Records deeper Goose, Hermes, and OpenCode evidence for workspace binding and non-empty MCP server injection while preserving artifact, sandbox, reviewer-loop, and failure-diagnostic caveats. |
 
 Recommended order: seed #1472, then complete #1479, #1478, #1476, #1475,
 #1477, #1474, #1473, #1480, and finally close #1472. ACP maturity
@@ -57,6 +58,19 @@ verified on that macOS/Docker Desktop host. They must not claim Lima, VZ, or
 all-runtimes sandbox support from this evidence. Named downstream-agent rows
 also remain `sandbox=skip` until the agent has its own sandbox run, preferably
 `workspace-live-e2e` with `ACP_E2E_EXPECT_SANDBOX=1`.
+
+## Live-Agent Caveat Evidence
+
+[#2402](https://github.com/rmusser01/tldw_server/issues/2402) verified
+Goose, Hermes, and OpenCode through `workspace-live-e2e` on the macOS host
+runner with a non-empty MCP server payload. See
+[ACP Live-Agent Caveat Verification - 2026-06-20](ACP_Live_Agent_Caveat_Verification_2026_06_20.md).
+
+Release surfaces may now claim workspace binding and non-empty MCP server
+injection evidence for those three agents on the verified host profile. They
+must keep `supported_with_caveats` wording because live agent-produced ACP
+artifacts, sandbox-backed execution, reviewer-loop behavior, and failure
+diagnostic payloads remain unverified for those profiles.
 
 ## Readiness Matrix
 
