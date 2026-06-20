@@ -921,8 +921,11 @@ def _stop_remaining_processes(context: UatRunContext) -> None:
     for process in list(context.processes.values()):
         try:
             _terminate_process(process)
-        except (OSError, subprocess.SubprocessError, ValueError):
-            continue
+        except Exception as exc:  # noqa: BLE001 - cleanup must not abort on unexpected process errors.
+            sys.stderr.write(
+                "warning: failed to stop background process "
+                f"{process.pid}: {exc.__class__.__name__}: {exc}\n"
+            )
     context.processes.clear()
 
 
