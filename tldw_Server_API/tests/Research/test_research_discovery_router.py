@@ -99,6 +99,34 @@ async def test_router_maps_wrapped_provider_helper_exception_to_provider_error()
 
 
 @pytest.mark.asyncio
+async def test_router_maps_malformed_provider_payload_to_provider_error():
+    from tldw_Server_API.app.core.Research.discovery.adapters import OpenAlexDiscoveryAdapter
+    from tldw_Server_API.app.core.Research.discovery.catalog import default_source_catalog
+    from tldw_Server_API.app.core.Research.discovery.router import ResearchSourceRouter
+
+    def malformed_provider_helper(*_args, **_kwargs):
+        return "not-json", 1, None
+
+    catalog = default_source_catalog()
+    router = ResearchSourceRouter(
+        catalog=catalog,
+        adapters={"openalex": OpenAlexDiscoveryAdapter(search_fn=malformed_provider_helper)},
+    )
+
+    records, statuses = await router.search_sources(
+        query="machine learning",
+        sources=[catalog.get_source("openalex")],
+        per_source_limit=3,
+        filters={},
+    )
+
+    assert records == []
+    assert statuses[0].status == "provider_error"
+    assert statuses[0].message == "Provider request failed."
+    assert "not-json" not in statuses[0].message
+
+
+@pytest.mark.asyncio
 async def test_router_reports_unexpected_adapter_bug_as_internal_error_without_leaking_details():
     from tldw_Server_API.app.core.Research.discovery.catalog import default_source_catalog
     from tldw_Server_API.app.core.Research.discovery.router import ResearchSourceRouter

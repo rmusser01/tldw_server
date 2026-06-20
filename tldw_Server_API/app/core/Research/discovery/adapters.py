@@ -307,22 +307,31 @@ def _items_from_payload(payload: object) -> list[dict[str, Any]]:
     if payload is None:
         return []
     if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
+        return _items_from_list_payload(payload)
     if isinstance(payload, Mapping):
         for key in ("data", "items", "results", "hits"):
             nested = payload.get(key)
             if isinstance(nested, list):
-                return [item for item in nested if isinstance(item, dict)]
+                return _items_from_list_payload(nested)
             if isinstance(nested, Mapping):
                 nested_hits = nested.get("hits")
                 if isinstance(nested_hits, list):
-                    return [item for item in nested_hits if isinstance(item, dict)]
+                    return _items_from_list_payload(nested_hits)
         if _is_error_shaped_payload(payload):
             raise DiscoveryProviderError()
         if _is_record_shaped_payload(payload):
             return [dict(payload)]
         raise DiscoveryProviderError()
-    return []
+    raise DiscoveryProviderError()
+
+
+def _items_from_list_payload(payload: list[object]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            raise DiscoveryProviderError()
+        records.append(item)
+    return records
 
 
 def _is_error_shaped_payload(payload: Mapping[str, object]) -> bool:

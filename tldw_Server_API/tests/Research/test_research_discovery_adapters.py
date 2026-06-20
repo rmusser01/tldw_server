@@ -161,6 +161,50 @@ async def test_adapter_unrecognized_mapping_payload_raises_sanitized_provider_er
 
 
 @pytest.mark.asyncio
+async def test_adapter_scalar_payload_raises_sanitized_provider_error():
+    from tldw_Server_API.app.core.Research.discovery.adapters import OpenAlexDiscoveryAdapter
+    from tldw_Server_API.app.core.Research.discovery.router import DiscoveryProviderError
+
+    def fake_search_openalex(*_args, **_kwargs):
+        return "not-json", 1, None
+
+    adapter = OpenAlexDiscoveryAdapter(search_fn=fake_search_openalex)
+
+    with pytest.raises(DiscoveryProviderError) as exc_info:
+        await adapter.search(
+            query="graph",
+            source=_source("openalex"),
+            limit=2,
+            filters={},
+        )
+
+    assert str(exc_info.value) == "Provider request failed."
+    assert "not-json" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_adapter_list_with_non_record_items_raises_sanitized_provider_error():
+    from tldw_Server_API.app.core.Research.discovery.adapters import OpenAlexDiscoveryAdapter
+    from tldw_Server_API.app.core.Research.discovery.router import DiscoveryProviderError
+
+    def fake_search_openalex(*_args, **_kwargs):
+        return ["not-a-record"], 1, None
+
+    adapter = OpenAlexDiscoveryAdapter(search_fn=fake_search_openalex)
+
+    with pytest.raises(DiscoveryProviderError) as exc_info:
+        await adapter.search(
+            query="graph",
+            source=_source("openalex"),
+            limit=2,
+            filters={},
+        )
+
+    assert str(exc_info.value) == "Provider request failed."
+    assert "not-a-record" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_semantic_scholar_adapter_wraps_existing_function_and_normalizes_record():
     from tldw_Server_API.app.core.Research.discovery.adapters import (
         SemanticScholarDiscoveryAdapter,
