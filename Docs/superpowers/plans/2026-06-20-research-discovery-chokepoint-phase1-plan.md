@@ -90,7 +90,7 @@ Do not modify:
 - Create: `tldw_Server_API/app/core/Research/discovery/models.py`
 - Test: `tldw_Server_API/tests/Research/test_research_discovery_catalog.py`
 
-- [ ] **Step 1: Write failing catalog tests**
+- [x] **Step 1: Write failing catalog tests**
 
 Add tests that assert:
 
@@ -140,7 +140,7 @@ def test_catalog_dedupes_explicit_and_category_selected_sources():
     assert len({entry.source_id for entry in resolved}) == len(resolved)
 ```
 
-- [ ] **Step 2: Run catalog tests and verify red**
+- [x] **Step 2: Run catalog tests and verify red**
 
 Run:
 
@@ -150,7 +150,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/tes
 
 Expected: FAIL because the discovery package does not exist.
 
-- [ ] **Step 3: Implement catalog dataclasses and defaults**
+- [x] **Step 3: Implement catalog dataclasses and defaults**
 
 In `models.py`, define immutable dataclasses:
 
@@ -218,7 +218,7 @@ Include first-slice entries:
 All first-slice entries should have `fallback_search_allowed=False` and `default_discovery_mode="api"`.
 All default first-slice entries should be `enabled=True`, `configured=True`, and `fallback_enabled=False`.
 
-- [ ] **Step 4: Run catalog tests and verify green**
+- [x] **Step 4: Run catalog tests and verify green**
 
 Run:
 
@@ -228,7 +228,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/tes
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit catalog slice**
+- [x] **Step 5: Commit catalog slice**
 
 ```bash
 git add tldw_Server_API/app/core/Research/discovery/__init__.py tldw_Server_API/app/core/Research/discovery/catalog.py tldw_Server_API/app/core/Research/discovery/models.py tldw_Server_API/tests/Research/test_research_discovery_catalog.py
@@ -243,7 +243,7 @@ git commit -m "feat: add research discovery source catalog"
 - Create: `tldw_Server_API/app/core/Research/discovery/oa.py`
 - Test: `tldw_Server_API/tests/Research/test_research_discovery_identity.py`
 
-- [ ] **Step 1: Write failing identity and sanitization tests**
+- [x] **Step 1: Write failing identity and sanitization tests**
 
 Cover:
 
@@ -320,7 +320,7 @@ def test_unpaywall_resolver_wraps_doi_lookup_and_sanitizes_signed_pdf_url():
     assert "SECRET" not in candidates[0].candidate_id
 ```
 
-- [ ] **Step 2: Run identity tests and verify red**
+- [x] **Step 2: Run identity tests and verify red**
 
 Run:
 
@@ -330,7 +330,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/tes
 
 Expected: FAIL because identity/OA modules are missing.
 
-- [ ] **Step 3: Add normalized discovery models**
+- [x] **Step 3: Add normalized discovery models**
 
 Extend `models.py` with dataclasses:
 
@@ -397,7 +397,7 @@ class DiscoveryResult:
     catalog_version: str
 ```
 
-- [ ] **Step 4: Implement identity helpers**
+- [x] **Step 4: Implement identity helpers**
 
 In `identity.py`, implement:
 
@@ -421,7 +421,7 @@ Ranking should be deterministic: source priority when present, identifier streng
 
 Keep `safe_provider_metadata` conservative: remove raw `pdf_url`, `download_url`, `files`, `links`, `headers`, `token`, `api_key`, and any key containing `secret`, `signature`, `credential`, or `authorization`.
 
-- [ ] **Step 5: Implement OA candidate sanitizer**
+- [x] **Step 5: Implement OA candidate sanitizer**
 
 In `oa.py`, implement:
 
@@ -458,7 +458,7 @@ For sensitive URLs, return a display URL with query and fragment removed, set `u
 
 `ResearchOAResolver` should call Unpaywall only when a DOI is available. It should return provider-supplied candidates even when Unpaywall is not configured, and should convert Unpaywall errors into candidate warnings instead of raising unless all candidate construction itself fails.
 
-- [ ] **Step 6: Run identity tests and verify green**
+- [x] **Step 6: Run identity tests and verify green**
 
 Run:
 
@@ -468,7 +468,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/tes
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit identity/OA slice**
+- [x] **Step 7: Commit identity/OA slice**
 
 ```bash
 git add tldw_Server_API/app/core/Research/discovery/models.py tldw_Server_API/app/core/Research/discovery/identity.py tldw_Server_API/app/core/Research/discovery/oa.py tldw_Server_API/tests/Research/test_research_discovery_identity.py

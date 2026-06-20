@@ -9,6 +9,16 @@ labels:
 documentation:
 - Docs/superpowers/specs/2026-06-20-research-source-discovery-chokepoint-design.md
 - Docs/superpowers/plans/2026-06-20-research-discovery-chokepoint-phase1-plan.md
+modified_files:
+- Docs/superpowers/plans/2026-06-20-research-discovery-chokepoint-phase1-plan.md
+- tldw_Server_API/app/core/Research/discovery/__init__.py
+- tldw_Server_API/app/core/Research/discovery/catalog.py
+- tldw_Server_API/app/core/Research/discovery/identity.py
+- tldw_Server_API/app/core/Research/discovery/models.py
+- tldw_Server_API/app/core/Research/discovery/oa.py
+- tldw_Server_API/tests/Research/test_research_discovery_catalog.py
+- tldw_Server_API/tests/Research/test_research_discovery_identity.py
+- backlog/tasks/task-2338 - Implement-Phase-1-research-discovery-chokepoint.md
 ---
 
 ## Description
@@ -38,7 +48,9 @@ Docs/superpowers/plans/2026-06-20-research-discovery-chokepoint-phase1-plan.md
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Subagent readiness review found one plan contradiction: a successful empty-source-default service test used db_factory=None even though successful discovery must persist a snapshot. Patched the plan so that test uses ResearchSessionsDB(tmp_path / "research.db") and asserts the snapshot exists. Ready to dispatch Task 1 implementer after committing this plan hardening.
+Task 1 complete. Implemented catalog models/default catalog in commits 03d6cd88a628 and a47defcd9919. Targeted verification: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/test_research_discovery_catalog.py -v` -> 7 passed, 7 warnings. Spec review passed. Code-quality review passed with only non-blocking minor test-hardening suggestions.
+
+Task 2 complete. Implemented normalized discovery identity, dedupe/ranking, OA candidate sanitization, safe metadata filtering, and provider-id URL safety through commits 198f5e81a3b6c, 0961eea8d3f0, 0ac4fb90ec23, 7a69a60de69, f17ddb542bf4, and ca57548db10. Review-driven fixes hardened metadata key variants, URL-like values under unknown/nested keys, credentialed/tokenized OA URLs, unsafe provider-id values, encoded URL/path-param secret material, and false positives for safe filenames such as tokenization papers. Targeted verification: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/test_research_discovery_identity.py tldw_Server_API/tests/Research/test_research_discovery_catalog.py -v` -> 26 passed, 7 warnings. Bandit: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Research/discovery/identity.py tldw_Server_API/app/core/Research/discovery/oa.py -f json -o /tmp/bandit_research_discovery_task2_controller_path_false_positive.json` -> 0 findings. Spec review and final code-quality re-review passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
