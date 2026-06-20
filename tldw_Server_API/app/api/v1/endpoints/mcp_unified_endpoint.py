@@ -243,25 +243,6 @@ def _single_user_test_key_compat_allowed() -> bool:
     return True
 
 
-def _single_user_compat_auth_via(raw_api_key: Optional[str]) -> Optional[str]:
-    """Return mounted single-user compatibility auth source for a raw API key."""
-    if not raw_api_key:
-        return None
-    try:
-        if not _should_use_single_user_api_key_compat():
-            return None
-        settings = get_settings()
-        primary_key = getattr(settings, "SINGLE_USER_API_KEY", None)
-        if primary_key and secrets.compare_digest(raw_api_key, str(primary_key)):
-            return "single_user_api_key"
-        test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-        if test_key and _single_user_test_key_compat_allowed() and secrets.compare_digest(raw_api_key, test_key):
-            return "single_user_test_api_key"
-    except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-        return None
-    return None
-
-
 def _get_client_ip(request: Optional[Request]) -> Optional[str]:
     """Extract client IP from the incoming request."""
     if request is None:
@@ -419,6 +400,15 @@ async def _resolve_token_data_compat(
                         client_ip = _get_client_ip(request)
                         if not is_single_user_ip_allowed(client_ip, settings):
                             return None
+                        auth_via = "single_user_api_key"
+                        test_key = os.getenv("SINGLE_USER_TEST_API_KEY") if test_mode else None
+                        if test_key and secrets.compare_digest(x_api_key, test_key):
+                            auth_via = "single_user_test_api_key"
+                        if request is not None:
+                            request.state.mcp_compat_auth_metadata = _trusted_compat_claims_metadata(
+                                auth_via=auth_via,
+                                compat_claims_source="mounted_http",
+                            )
                         roles = [UserRole.ADMIN.value]
                         perms = ["*"] if test_mode else []
                         return TokenData(
@@ -603,14 +593,13 @@ async def _attach_api_key_metadata(
                 exc_info=True,
             )
 
-    auth_via = _single_user_compat_auth_via(auth.raw_api_key)
-    if auth_via is not None:
-        metadata.update(
-            _trusted_compat_claims_metadata(
-                auth_via=auth_via,
-                compat_claims_source="mounted_http",
-            )
-        )
+    if http_request is not None:
+        try:
+            trusted_metadata = getattr(http_request.state, "mcp_compat_auth_metadata", None)
+        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
+            trusted_metadata = None
+        if isinstance(trusted_metadata, dict):
+            metadata.update(trusted_metadata)
 
     _attach_rg_ingress_metadata(metadata, http_request)
     _attach_workspace_ingress_metadata(metadata, http_request)

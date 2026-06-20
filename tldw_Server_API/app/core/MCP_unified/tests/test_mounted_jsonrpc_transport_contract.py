@@ -76,6 +76,7 @@ def _install_mounted_http_single_user_compat(
     api_key: str,
     test_mode: bool,
     debug_mode: bool = False,
+    ip_allowed: bool = True,
     test_key: str | None = None,
 ) -> None:
     from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint
@@ -92,7 +93,7 @@ def _install_mounted_http_single_user_compat(
     monkeypatch.setattr(mcp_unified_endpoint, "env_flag_enabled", lambda _name: False)
     monkeypatch.setattr(mcp_unified_endpoint, "get_settings", lambda: _SingleUserSettings(api_key))
     monkeypatch.setattr(mcp_unified_endpoint, "get_config", lambda: _DebugConfig(debug_mode=debug_mode))
-    monkeypatch.setattr(mcp_unified_endpoint, "is_single_user_ip_allowed", lambda _ip, _settings: True)
+    monkeypatch.setattr(mcp_unified_endpoint, "is_single_user_ip_allowed", lambda _ip, _settings: ip_allowed)
     monkeypatch.setattr(mcp_unified_endpoint, "get_api_key_manager", _get_api_key_manager)
     if test_key is None:
         monkeypatch.delenv("SINGLE_USER_TEST_API_KEY", raising=False)
@@ -217,6 +218,44 @@ def test_mounted_http_single_user_test_api_key_attaches_test_metadata_with_guard
     assert metadata["auth_via"] == "single_user_test_api_key"
     assert metadata["trusted_auth_claims"] is True
     assert metadata["compat_claims_source"] == "mounted_http"
+
+
+def test_mounted_http_single_user_api_key_does_not_attach_trust_when_ip_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    api_key = "primary-single-user-key-12345"
+    _install_mounted_http_single_user_compat(
+        monkeypatch,
+        api_key=api_key,
+        test_mode=False,
+        ip_allowed=False,
+    )
+
+    async def _valid_principal(_request: Any) -> AuthPrincipal:
+        return AuthPrincipal(kind="user", user_id=7, roles=["user"], permissions=[])
+
+    monkeypatch.setattr(mcp_unified_endpoint, "get_auth_principal", _valid_principal)
+    server = _RecordingHttpAuthServer()
+    monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
+
+    with build_mcp_test_client() as client:
+        response = client.post(
+            "/api/v1/mcp/request",
+            json={"jsonrpc": "2.0", "method": "tools/list", "id": "http-ip-reject"},
+            headers={"X-API-KEY": api_key},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["result"] == {"tools": []}
+    assert server.calls[-1]["user_id"] == "7"
+    metadata = server.calls[-1]["metadata"]
+    assert metadata.get("auth_via") != "single_user_api_key"
+    assert "trusted_auth_claims" not in metadata
+    assert "compat_claims_source" not in metadata
+    assert not any(str(key).startswith("_server_auth_") for key in metadata)
 
 
 class _RejectingWsAuthProvider:

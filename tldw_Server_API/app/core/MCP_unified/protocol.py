@@ -2530,7 +2530,18 @@ class MCPProtocol:
                         resource_id = name
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
                 resource_id = None
-            if inspect.iscoroutinefunction(fn):
+            trusted_compat_allowed = False
+            if _has_trusted_compat_claims(context):
+                if resource == Resource.TOOL and action == Action.EXECUTE and isinstance(resource_id, str):
+                    trusted_compat_allowed = await self._has_tool_permission(context, resource_id)
+                elif resource == Resource.MODULE:
+                    trusted_compat_allowed = await self._has_module_permission(
+                        context,
+                        resource_id if isinstance(resource_id, str) else None,
+                    )
+            if trusted_compat_allowed:
+                allowed = True
+            elif inspect.iscoroutinefunction(fn):
                 allowed = await fn(context.user_id, resource, action, resource_id)
             else:
                 allowed = fn(context.user_id, resource, action, resource_id)
