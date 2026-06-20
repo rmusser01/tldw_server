@@ -484,7 +484,7 @@ git commit -m "feat: normalize research discovery identities"
 - Test: `tldw_Server_API/tests/Research/test_research_discovery_router.py`
 - Test: `tldw_Server_API/tests/Research/test_research_discovery_adapters.py`
 
-- [ ] **Step 1: Write failing router tests**
+- [x] **Step 1: Write failing router tests**
 
 Add tests for fake adapters, provider errors, timeout handling, rate limiting, and concurrency. The test module should import `asyncio` and `pytest`.
 
@@ -713,7 +713,7 @@ async def test_router_enforces_bounded_concurrency():
     assert max_seen == 1
 ```
 
-- [ ] **Step 2: Run router tests and verify red**
+- [x] **Step 2: Run router tests and verify red**
 
 Run:
 
@@ -723,7 +723,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/tes
 
 Expected: FAIL because router/adapters are missing.
 
-- [ ] **Step 3: Implement router models and protocol**
+- [x] **Step 3: Implement router models and protocol**
 
 Add to `models.py`:
 
@@ -789,7 +789,7 @@ class SourceRateLimiter(Protocol):
 Default `rate_limiter` is `None`, which allows all sources. This is the configured per-provider rate-limit enforcement point for Phase 1; later work can replace the default with persistent quotas.
 Expose a read-only `adapter_names: tuple[str, ...]` property for tests and diagnostics.
 
-- [ ] **Step 4: Implement existing-function provider adapters**
+- [x] **Step 4: Implement existing-function provider adapters**
 
 In `adapters.py`, create small adapter classes or a generic function adapter that wraps:
 
@@ -854,7 +854,7 @@ def test_default_discovery_adapters_contains_first_slice_sources():
     }.issubset(adapters)
 ```
 
-- [ ] **Step 5: Run router tests and provider adapter unit tests**
+- [x] **Step 5: Run router tests and provider adapter unit tests**
 
 Run:
 
@@ -868,7 +868,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit router/adapters slice**
+- [x] **Step 6: Commit router/adapters slice**
 
 ```bash
 git add tldw_Server_API/app/core/Research/discovery/router.py tldw_Server_API/app/core/Research/discovery/adapters.py tldw_Server_API/app/core/Research/discovery/__init__.py tldw_Server_API/app/core/Research/discovery/models.py tldw_Server_API/tests/Research/test_research_discovery_router.py tldw_Server_API/tests/Research/test_research_discovery_adapters.py
