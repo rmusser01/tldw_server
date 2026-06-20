@@ -2557,7 +2557,17 @@ class CollectionsDatabase:
             }
             metadata_json = json.dumps(desired_meta, ensure_ascii=False)
 
+            current: OutputTemplateRow | None = None
             if name not in existing:
+                try:
+                    current = self.get_output_template_by_name(name)
+                except KeyError:
+                    current = None
+                except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.debug("collections: failed to recheck watchlists template {} before seed insert: {}", name, exc)
+                    current = None
+
+            if name not in existing and current is None:
                 try:
                     self.create_output_template(
                         name=record.name,
@@ -2569,17 +2579,32 @@ class CollectionsDatabase:
                         metadata_json=metadata_json,
                     )
                     existing.add(record.name)
+                    continue
                 except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
-                    logger.debug("collections: failed to seed watchlists template {}: {}", record.name, exc)
-                continue
+                    try:
+                        current = self.get_output_template_by_name(name)
+                    except KeyError:
+                        logger.debug("collections: failed to seed watchlists template {}: {}", record.name, exc)
+                        continue
+                    except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as lookup_exc:
+                        logger.debug(
+                            "collections: failed to seed watchlists template {} and lookup existing row: {}; {}",
+                            record.name,
+                            exc,
+                            lookup_exc,
+                        )
+                        continue
 
-            try:
-                current = self.get_output_template_by_name(name)
-            except KeyError:
-                continue
-            except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug("collections: failed to lookup watchlists template {}: {}", name, exc)
-                continue
+            existing.add(name)
+
+            if current is None:
+                try:
+                    current = self.get_output_template_by_name(name)
+                except KeyError:
+                    continue
+                except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.debug("collections: failed to lookup watchlists template {}: {}", name, exc)
+                    continue
 
             current_meta: dict[str, Any] = {}
             if current.metadata_json:
