@@ -485,6 +485,121 @@ async def test_protocol_tools_call_blocks_when_policy_resolution_fails(monkeypat
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_policy_enabled_discovery_tool_call_uses_tldw_resolver_without_import_cycle(monkeypatch):
+    os.environ["TEST_MODE"] = "true"
+
+    import sys
+
+    from tldw_Server_API.app.core.MCP_unified.adapters import tldw_policy
+    from tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime import (
+        build_default_runtime_dependencies,
+    )
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest, RequestContext
+
+    for module_name in list(sys.modules):
+        if module_name == "tldw_Server_API.app.services.mcp_hub_policy_resolver":
+            sys.modules.pop(module_name, None)
+        elif module_name == "tldw_Server_API.app.core.Agent_Client_Protocol":
+            sys.modules.pop(module_name, None)
+        elif module_name.startswith("tldw_Server_API.app.core.Agent_Client_Protocol."):
+            sys.modules.pop(module_name, None)
+
+    class _DiscoveryModuleStub:
+        name = "mcp"
+
+        async def get_tools(self):
+            return [
+                {
+                    "name": "mcp.tools.list",
+                    "description": "",
+                    "inputSchema": {"type": "object"},
+                    "metadata": {"category": "discovery"},
+                }
+            ]
+
+        async def execute_tool(self, tool_name, arguments, context=None):
+            return {"ok": True, "tool": tool_name, "arguments": arguments}
+
+        async def execute_with_circuit_breaker(self, func, *args, **kwargs):
+            return await func(*args, **kwargs)
+
+        def sanitize_input(self, args):
+            return args
+
+        def validate_tool_arguments(self, tool_name, tool_args):
+            return None
+
+        def is_write_tool_def(self, tool_def):
+            return False
+
+        async def get_tool_def(self, tool_name):
+            return {"name": tool_name, "metadata": {"category": "discovery"}}
+
+    class _RegistryStub:
+        async def find_module_for_tool(self, tool_name):
+            return _DiscoveryModuleStub() if tool_name == "mcp.tools.list" else None
+
+        def get_module_id_for_tool(self, tool_name):
+            return "mcp" if tool_name == "mcp.tools.list" else None
+
+        async def get_all_modules(self):
+            return {"mcp": _DiscoveryModuleStub()}
+
+    class _AllowingHubResolver:
+        async def resolve_for_context(self, *, user_id, metadata):
+            return {
+                "enabled": True,
+                "allowed_tools": ["mcp.tools.list"],
+                "denied_tools": [],
+                "capabilities": [],
+                "sources": [],
+            }
+
+    class _AllowAllRBAC:
+        async def check_permission(self, *_args, **_kwargs):
+            return True
+
+    async def _fake_get_mcp_hub_policy_resolver():
+        return _AllowingHubResolver()
+
+    service_module = tldw_policy._load_mcp_hub_policy_resolver_module()
+    monkeypatch.setattr(
+        service_module,
+        "get_mcp_hub_policy_resolver",
+        _fake_get_mcp_hub_policy_resolver,
+    )
+
+    deps = build_default_runtime_dependencies()
+    deps.module_registry = _RegistryStub()
+    deps.effective_policy_resolver = tldw_policy.TldwEffectivePolicyResolver()
+    proto = MCPProtocol(dependencies=deps)
+    proto.rbac_policy = _AllowAllRBAC()
+
+    ctx = RequestContext(
+        request_id="policy-discovery-import-cycle",
+        user_id="1",
+        client_id="unit",
+        session_id=None,
+        metadata={
+            "mcp_policy_context_enabled": True,
+            "governance_rollout_mode": "off",
+        },
+    )
+    request = MCPRequest(
+        method="tools/call",
+        params={"name": "mcp.tools.list", "arguments": {}},
+        id="policy-discovery-import-cycle",
+    )
+
+    response = await proto.process_request(request, ctx)
+
+    assert response.error is None
+    assert response.result is not None
+    assert response.result["tool"] == "mcp.tools.list"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_protocol_process_request_returns_approval_required_payload(monkeypatch):
     os.environ["TEST_MODE"] = "true"
 
