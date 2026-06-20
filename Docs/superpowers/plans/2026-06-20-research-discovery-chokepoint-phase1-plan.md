@@ -1004,7 +1004,7 @@ git commit -m "feat: persist research discovery snapshots"
 - Modify: `tldw_Server_API/app/core/Research/discovery/models.py`
 - Test: `tldw_Server_API/tests/Research/test_research_discovery_service.py`
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 Cover successful search, over-cap validation, partial failure, total timeout handling, and sanitized snapshot storage. The test module should import `asyncio` and `pytest`.
 
@@ -1250,7 +1250,7 @@ async def test_service_defaults_empty_source_selection_to_open_research_graph(tm
     assert db.get_discovery_snapshot(response.discovery_id, owner_user_id="1") is not None
 ```
 
-- [ ] **Step 2: Run service tests and verify red**
+- [x] **Step 2: Run service tests and verify red**
 
 Run:
 
@@ -1260,7 +1260,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/tes
 
 Expected: FAIL because service is missing.
 
-- [ ] **Step 3: Implement service response models**
+- [x] **Step 3: Implement service response models**
 
 Add dataclasses to `models.py`:
 
@@ -1286,7 +1286,7 @@ class DiscoverySearchResponse:
     metrics: DiscoveryMetrics
 ```
 
-- [ ] **Step 4: Implement `ResearchDiscoveryService`**
+- [x] **Step 4: Implement `ResearchDiscoveryService`**
 
 `ResearchDiscoveryService.__init__` should accept:
 
@@ -1330,7 +1330,7 @@ _FAILURE_STATUSES = _NO_RUNNABLE_STATUSES | {"provider_error", "timeout", "rate_
 
 Only raise the all-failed error when there is a status for each selected source and all statuses are in `_FAILURE_STATUSES`.
 
-- [ ] **Step 5: Run service tests and verify green**
+- [x] **Step 5: Run service tests and verify green**
 
 Run:
 
@@ -1340,7 +1340,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/tes
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit service slice**
+- [x] **Step 6: Commit service slice**
 
 ```bash
 git add tldw_Server_API/app/core/Research/discovery/service.py tldw_Server_API/app/core/Research/discovery/models.py tldw_Server_API/tests/Research/test_research_discovery_service.py
