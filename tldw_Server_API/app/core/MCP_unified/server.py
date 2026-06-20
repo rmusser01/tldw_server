@@ -31,6 +31,7 @@ from .jsonrpc_transport import (
     mcp_response_to_json,
     mcp_responses_to_json,
     parse_error_response,
+    safe_jsonrpc_id,
 )
 from .protocol import MCPError, MCPProtocol, MCPRequest, MCPResponse, RequestContext, _trusted_compat_claims_metadata
 from .security.ip_filter import get_ip_access_controller
@@ -1352,7 +1353,7 @@ class MCPServer:
                     mcp_response_to_json(
                         invalid_request_response(
                             "Message too large",
-                            request_id=data.get("id") if isinstance(data, dict) else None,
+                            request_id=safe_jsonrpc_id(data.get("id")) if isinstance(data, dict) else None,
                         )
                     )
                 )
@@ -1384,7 +1385,7 @@ class MCPServer:
                         mcp_response_to_json(
                             MCPResponse(
                                 error=MCPError(code=-32002, message="Session rate limit exceeded"),
-                                id=data.get("id") if isinstance(data, dict) else None,
+                                id=safe_jsonrpc_id(data.get("id")) if isinstance(data, dict) else None,
                             )
                         )
                     )
@@ -1440,7 +1441,7 @@ class MCPServer:
                         mcp_response_to_json(
                             MCPResponse(
                                 error=MCPError(code=-32001, message="Session is bound to a different user"),
-                                id=data.get("id") if isinstance(data, dict) else None,
+                                id=safe_jsonrpc_id(data.get("id")) if isinstance(data, dict) else None,
                             )
                         )
                     )
@@ -1505,7 +1506,7 @@ class MCPServer:
                                     "hint": "Reduce request frequency or wait before retrying."
                                 },
                             ),
-                            id=data.get("id") if isinstance(data, dict) else None,
+                            id=safe_jsonrpc_id(data.get("id")) if isinstance(data, dict) else None,
                         )
                     )
                 )
@@ -1515,7 +1516,7 @@ class MCPServer:
                     mcp_response_to_json(
                         MCPResponse(
                             error=MCPError(code=-32603, message="Internal error"),
-                            id=data.get("id") if isinstance(data, dict) else None,
+                            id=safe_jsonrpc_id(data.get("id")) if isinstance(data, dict) else None,
                         )
                     )
                 )

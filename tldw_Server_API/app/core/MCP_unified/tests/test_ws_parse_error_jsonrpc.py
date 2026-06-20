@@ -19,7 +19,8 @@ def test_mcp_ws_invalid_json_returns_jsonrpc_parse_error(mcp_ws_client):
             msg = ws.receive_json()
             assert isinstance(msg, dict)  # nosec B101
             assert msg.get("jsonrpc") == "2.0"  # nosec B101
-            assert msg.get("id") is None  # nosec B101
+            assert "id" in msg  # nosec B101
+            assert msg["id"] is None  # nosec B101
             assert isinstance(msg.get("error"), dict)  # nosec B101
             assert msg["error"].get("code") == -32700  # nosec B101
             assert "Parse error" in (msg["error"].get("message") or "")  # nosec B101

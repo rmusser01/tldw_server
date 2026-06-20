@@ -12,6 +12,8 @@ from tldw_Server_API.app.core.MCP_unified.jsonrpc_transport import (
 )
 from tldw_Server_API.app.core.MCP_unified.protocol import MCPError, MCPResponse
 
+pytestmark = pytest.mark.unit
+
 
 def test_serialize_success_omits_error_but_preserves_id():
     response = MCPResponse(result={"ok": True}, id="ok-1")
@@ -19,6 +21,16 @@ def test_serialize_success_omits_error_but_preserves_id():
         "jsonrpc": "2.0",
         "id": "ok-1",
         "result": {"ok": True},
+    }
+
+
+def test_serialize_success_preserves_explicit_null_result():
+    response = MCPResponse(result=None, id="null-result")
+
+    assert mcp_response_to_json(response) == {
+        "jsonrpc": "2.0",
+        "id": "null-result",
+        "result": None,
     }
 
 

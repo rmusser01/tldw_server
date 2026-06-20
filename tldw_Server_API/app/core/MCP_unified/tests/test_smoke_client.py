@@ -1457,28 +1457,69 @@ async def test_live_websocket_transport_suppresses_server_notifications() -> Non
     ]
 
 
-def test_live_websocket_transport_ignores_exact_keepalive_messages() -> None:
+@pytest.mark.asyncio
+async def test_live_websocket_transport_ignores_exact_keepalive_messages() -> None:
+    from mcp_unified.smoke.client import McpSmokeClient
     from mcp_unified.smoke.transports import LiveWebSocketTransport
 
-    transport = LiveWebSocketTransport("ws://127.0.0.1/mcp")
+    received_payloads: list[dict[str, object]] = []
 
-    transport._handle_message({"type": "ping"})  # nosec B101
-    transport._handle_message({"type": "pong"})  # nosec B101
+    async def handler(websocket) -> None:
+        request = json.loads(await websocket.recv())
+        received_payloads.append(request)
+        await websocket.send(json.dumps({"type": "ping"}))
+        await websocket.send(json.dumps({"type": "pong"}))
+        await websocket.send(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request["id"],
+                    "result": {"pong": True},
+                }
+            )
+        )
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        transport = LiveWebSocketTransport(f"ws://127.0.0.1:{port}/mcp")
+        client = McpSmokeClient(transport)
+
+        try:
+            result = await client.ping()
+        finally:
+            await transport.close()
+
+    assert result == {"pong": True}  # nosec B101
+    assert received_payloads == [  # nosec B101
+        {"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"}
+    ]
 
 
-def test_live_websocket_transport_rejects_keepalive_lookalikes() -> None:
+@pytest.mark.asyncio
+async def test_live_websocket_transport_rejects_keepalive_lookalikes() -> None:
     from mcp_unified.smoke.transports import (
         LiveWebSocketTransport,
         McpSmokeTransportError,
     )
 
-    transport = LiveWebSocketTransport("ws://127.0.0.1/mcp")
+    async def handler(websocket) -> None:
+        await websocket.recv()
+        await websocket.send(json.dumps({"type": "ping", "id": "x"}))
 
-    with pytest.raises(
-        McpSmokeTransportError,
-        match="transport_malformed_websocket_frame",
-    ):
-        transport._handle_message({"type": "ping", "id": "x"})  # nosec B101
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        transport = LiveWebSocketTransport(f"ws://127.0.0.1:{port}/mcp")
+
+        try:
+            with pytest.raises(
+                McpSmokeTransportError,
+                match="transport_malformed_websocket_frame",
+            ):
+                await transport.request(
+                    {"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"}
+                )
+        finally:
+            await transport.close()
 
 
 @pytest.mark.asyncio

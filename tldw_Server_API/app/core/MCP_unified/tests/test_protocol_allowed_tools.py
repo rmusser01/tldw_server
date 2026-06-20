@@ -486,7 +486,7 @@ async def test_protocol_tools_call_blocks_when_policy_resolution_fails(monkeypat
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_policy_enabled_discovery_tool_call_uses_tldw_resolver_without_import_cycle(monkeypatch):
-    os.environ["TEST_MODE"] = "true"
+    monkeypatch.setenv("TEST_MODE", "true")
 
     import sys
 
@@ -497,12 +497,15 @@ async def test_policy_enabled_discovery_tool_call_uses_tldw_resolver_without_imp
     from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest, RequestContext
 
     for module_name in list(sys.modules):
-        if module_name == "tldw_Server_API.app.services.mcp_hub_policy_resolver":
-            sys.modules.pop(module_name, None)
-        elif module_name == "tldw_Server_API.app.core.Agent_Client_Protocol":
-            sys.modules.pop(module_name, None)
-        elif module_name.startswith("tldw_Server_API.app.core.Agent_Client_Protocol."):
-            sys.modules.pop(module_name, None)
+        if (
+            module_name
+            in {
+                "tldw_Server_API.app.services.mcp_hub_policy_resolver",
+                "tldw_Server_API.app.core.Agent_Client_Protocol",
+            }
+            or module_name.startswith("tldw_Server_API.app.core.Agent_Client_Protocol.")
+        ):
+            monkeypatch.delitem(sys.modules, module_name, raising=False)
 
     class _DiscoveryModuleStub:
         name = "mcp"

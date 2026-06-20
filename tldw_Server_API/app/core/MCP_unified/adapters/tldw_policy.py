@@ -6,6 +6,7 @@ import importlib
 import importlib.machinery
 import importlib.util
 import sys
+import threading
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import ModuleType
@@ -16,6 +17,7 @@ from mcp_unified.interfaces.path_scope import PathScopeCandidate
 _MCP_HUB_POLICY_RESOLVER_MODULE = "tldw_Server_API.app.services.mcp_hub_policy_resolver"
 _ACP_PACKAGE_MODULE = "tldw_Server_API.app.core.Agent_Client_Protocol"
 _ACP_MERGE_UTILS_MODULE = f"{_ACP_PACKAGE_MODULE}.merge_utils"
+_ACP_IMPORT_LOCK = threading.RLock()
 
 _ResolverFactory = Callable[[], Awaitable[Any]]
 
@@ -45,34 +47,35 @@ def _load_merge_utils_without_acp_package_init() -> tuple[ModuleType, ModuleType
     merge_module = importlib.util.module_from_spec(merge_spec)
     sys.modules[_ACP_PACKAGE_MODULE] = package_module
     sys.modules[_ACP_MERGE_UTILS_MODULE] = merge_module
-    setattr(package_module, "merge_utils", merge_module)
+    package_module.merge_utils = merge_module
     merge_spec.loader.exec_module(merge_module)
     return package_module, merge_module
 
 
 def _load_mcp_hub_policy_resolver_module() -> ModuleType:
     """Import the MCP Hub policy resolver without tripping the ACP import cycle."""
-    existing = sys.modules.get(_MCP_HUB_POLICY_RESOLVER_MODULE)
-    if isinstance(existing, ModuleType) and hasattr(existing, "get_mcp_hub_policy_resolver"):
-        return existing
+    with _ACP_IMPORT_LOCK:
+        existing = sys.modules.get(_MCP_HUB_POLICY_RESOLVER_MODULE)
+        if isinstance(existing, ModuleType) and hasattr(existing, "get_mcp_hub_policy_resolver"):
+            return existing
 
-    if _ACP_PACKAGE_MODULE in sys.modules:
-        return importlib.import_module(_MCP_HUB_POLICY_RESOLVER_MODULE)
+        if _ACP_PACKAGE_MODULE in sys.modules:
+            return importlib.import_module(_MCP_HUB_POLICY_RESOLVER_MODULE)
 
-    previous_package = sys.modules.get(_ACP_PACKAGE_MODULE)
-    previous_merge_utils = sys.modules.get(_ACP_MERGE_UTILS_MODULE)
-    _load_merge_utils_without_acp_package_init()
-    try:
-        return importlib.import_module(_MCP_HUB_POLICY_RESOLVER_MODULE)
-    finally:
-        if previous_merge_utils is None:
-            sys.modules.pop(_ACP_MERGE_UTILS_MODULE, None)
-        else:
-            sys.modules[_ACP_MERGE_UTILS_MODULE] = previous_merge_utils
-        if previous_package is None:
-            sys.modules.pop(_ACP_PACKAGE_MODULE, None)
-        else:
-            sys.modules[_ACP_PACKAGE_MODULE] = previous_package
+        previous_package = sys.modules.get(_ACP_PACKAGE_MODULE)
+        previous_merge_utils = sys.modules.get(_ACP_MERGE_UTILS_MODULE)
+        try:
+            _load_merge_utils_without_acp_package_init()
+            return importlib.import_module(_MCP_HUB_POLICY_RESOLVER_MODULE)
+        finally:
+            if previous_merge_utils is None:
+                sys.modules.pop(_ACP_MERGE_UTILS_MODULE, None)
+            else:
+                sys.modules[_ACP_MERGE_UTILS_MODULE] = previous_merge_utils
+            if previous_package is None:
+                sys.modules.pop(_ACP_PACKAGE_MODULE, None)
+            else:
+                sys.modules[_ACP_PACKAGE_MODULE] = previous_package
 
 
 async def _get_mcp_hub_policy_resolver() -> Any:

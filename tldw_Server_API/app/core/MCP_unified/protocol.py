@@ -320,6 +320,15 @@ _TRUSTED_COMPAT_AUTH_VIA = frozenset({"single_user_api_key", "single_user_test_a
 _TRUSTED_COMPAT_CLAIMS_SOURCES = frozenset({"mounted_http", "mounted_ws"})
 
 
+def _metadata_claim_values(value: Any) -> tuple[Any, ...]:
+    """Return metadata claim values without iterating strings character-by-character."""
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return tuple(value)
+    return ()
+
+
 def _trusted_compat_claims_metadata(*, auth_via: str, compat_claims_source: str) -> dict[str, Any]:
     """Return server-only metadata for mounted single-user compatibility claims."""
     if auth_via not in _TRUSTED_COMPAT_AUTH_VIA:
@@ -338,12 +347,12 @@ def _metadata_has_admin_claims(metadata: dict[str, Any]) -> bool:
     """Return True when trusted metadata carries wildcard or admin claims."""
     roles = {
         str(role).strip().lower()
-        for role in (metadata.get("roles") or [])
+        for role in _metadata_claim_values(metadata.get("roles"))
         if str(role).strip()
     }
     permissions = {
         str(permission).strip().lower()
-        for permission in (metadata.get("permissions") or [])
+        for permission in _metadata_claim_values(metadata.get("permissions"))
         if str(permission).strip()
     }
     return "admin" in roles or "*" in permissions
@@ -2077,6 +2086,16 @@ class MCPProtocol:
 
         is_notification = isinstance(request, MCPRequest) and request.id is None and not raw_request_has_id
 
+        def pre_dispatch_error(
+            code: ErrorCode,
+            message: str,
+            request_id: Optional[Union[str, int]],
+            data: Optional[Any] = None,
+        ) -> MCPResponse | None:
+            if is_notification:
+                return None
+            return self._error_response(code, message, request_id, data=data)
+
         # Create context if not provided
         if context is None:
             context = RequestContext(
@@ -2115,7 +2134,7 @@ class MCPProtocol:
 
             # Validate JSON-RPC version
             if request.jsonrpc != "2.0":
-                return self._error_response(
+                return pre_dispatch_error(
                     ErrorCode.INVALID_REQUEST,
                     "Invalid JSON-RPC version",
                     request.id
@@ -2135,7 +2154,7 @@ class MCPProtocol:
                             start_ts=start_ts,
                             requested_tool_name=_name,
                         )
-                        return self._error_response(
+                        return pre_dispatch_error(
                             ErrorCode.INVALID_PARAMS,
                             "Tool name is required",
                             request.id,
@@ -2150,7 +2169,7 @@ class MCPProtocol:
                             start_ts=start_ts,
                             requested_tool_name=_name,
                         )
-                        return self._error_response(
+                        return pre_dispatch_error(
                             ErrorCode.INVALID_PARAMS,
                             "Invalid tool name",
                             request.id,
@@ -2165,7 +2184,7 @@ class MCPProtocol:
                             start_ts=start_ts,
                             requested_tool_name=_name,
                         )
-                        return self._error_response(
+                        return pre_dispatch_error(
                             ErrorCode.INTERNAL_ERROR,
                             "Invalid tool name",
                             request.id,
@@ -2179,12 +2198,12 @@ class MCPProtocol:
                     reason_code="invalid_tool_name",
                     start_ts=start_ts,
                 )
-                return self._error_response(ErrorCode.INVALID_PARAMS, "Invalid tool name", request.id)
+                return pre_dispatch_error(ErrorCode.INVALID_PARAMS, "Invalid tool name", request.id)
 
             # Find handler
             handler = self.handlers.get(request.method)
             if not handler:
-                return self._error_response(
+                return pre_dispatch_error(
                     ErrorCode.METHOD_NOT_FOUND,
                     f"Method not found: {request.method}",
                     request.id
@@ -2214,7 +2233,7 @@ class MCPProtocol:
                     reason_code="permission_denied",
                     start_ts=start_ts,
                 )
-                return self._error_response(
+                return pre_dispatch_error(
                     ErrorCode.AUTHORIZATION_ERROR,
                     "Insufficient permissions",
                     request.id,
@@ -2537,6 +2556,12 @@ class MCPProtocol:
                 elif resource == Resource.MODULE:
                     trusted_compat_allowed = await self._has_module_permission(
                         context,
+                        resource_id if isinstance(resource_id, str) else None,
+                    )
+                elif resource in {Resource.RESOURCE, Resource.PROMPT}:
+                    trusted_compat_allowed = self._scope_allows(
+                        context,
+                        resource.value,
                         resource_id if isinstance(resource_id, str) else None,
                     )
             if trusted_compat_allowed:

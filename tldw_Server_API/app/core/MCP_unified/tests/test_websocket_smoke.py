@@ -1,5 +1,7 @@
 """WebSocket smoke test for MCP Unified (basic initialize/ping flow)."""
 
+from typing import Any
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -7,10 +9,12 @@ from tldw_Server_API.app.core.MCP_unified import get_mcp_server
 from tldw_Server_API.app.main import app
 
 
-def _receive_jsonrpc(ws):
+def _receive_jsonrpc(ws: Any) -> dict[str, Any]:
+    """Receive the next non-keepalive JSON-RPC message from the test websocket."""
     msg = ws.receive_json()
     while isinstance(msg, dict) and msg.get("type") == "ping":
         msg = ws.receive_json()
+    assert isinstance(msg, dict)
     return msg
 
 

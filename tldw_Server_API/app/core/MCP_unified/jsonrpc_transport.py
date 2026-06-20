@@ -23,6 +23,7 @@ def mcp_response_to_json(response: MCPResponse) -> dict[str, Any]:
             error.pop("data", None)
     else:
         data.pop("error", None)
+        data["result"] = response.result
     return data
 
 

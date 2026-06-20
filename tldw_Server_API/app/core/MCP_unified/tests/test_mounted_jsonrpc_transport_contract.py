@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import pytest
@@ -11,13 +10,16 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 
-os.environ.setdefault("TEST_MODE", "true")
-os.environ.setdefault("AUTH_MODE", "single_user")
-os.environ.setdefault("SINGLE_USER_API_KEY", "test-api-key-1234567890")
-os.environ.setdefault("SINGLE_USER_FIXED_ID", "1")
-os.environ.setdefault("MCP_JWT_SECRET", "x" * 64)
-os.environ.setdefault("MCP_API_KEY_SALT", "s" * 64)
-os.environ.setdefault("MCP_ALLOWED_IPS", "")
+@pytest.fixture(autouse=True)
+def mounted_mcp_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Scope mounted MCP environment defaults to each test."""
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-1234567890")
+    monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
+    monkeypatch.setenv("MCP_JWT_SECRET", "x" * 64)
+    monkeypatch.setenv("MCP_API_KEY_SALT", "s" * 64)
+    monkeypatch.setenv("MCP_ALLOWED_IPS", "")
 
 
 def build_mcp_admin_auth_override():

@@ -21,8 +21,13 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
 from pydantic import BaseModel, Field
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_db_transaction, RequirePermission, verify_jwt_and_fetch_user
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    get_auth_principal,
+    get_db_transaction,
+    verify_jwt_and_fetch_user,
+)
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import ToolCatalogResponse
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
@@ -225,7 +230,10 @@ def _single_user_test_key_compat_allowed() -> bool:
         if "pytest" in _sys.modules:
             is_dev_ctx = True
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-        pass
+        logger.debug(
+            "MCP unified test key compatibility pytest detection failed",
+            exc_info=True,
+        )
     if env in {"dev", "development", "test", "ci"}:
         is_dev_ctx = True
     if prod_flag:
@@ -843,11 +851,11 @@ async def websocket_endpoint(
 )
 async def mcp_request(
     http_request: Request,
+    response: Response,
     client_id: Optional[str] = Query(None, description="Client identifier"),
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     mcp_session_id: Optional[str] = Header(None, alias="mcp-session-id"),
     config: Optional[str] = Query(None, description="Base64-encoded JSON safe config for this request"),
-    response: Response = None,
     _guard: None = Depends(enforce_http_security),
 ):
     """
@@ -905,8 +913,7 @@ async def mcp_request(
             import uuid as _uuid
 
             mcp_session_id = _uuid.uuid4().hex
-            if response is not None:
-                response.headers["mcp-session-id"] = mcp_session_id
+            response.headers["mcp-session-id"] = mcp_session_id
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
         logger.debug("Failed to generate session ID for initialize request")
 
@@ -931,7 +938,7 @@ async def mcp_request(
         return Response(status_code=204)
     if explicit_null_id and resp_obj.id == null_id_sentinel:
         resp_obj.id = None
-    headers = dict(response.headers) if response is not None else None
+    headers = dict(response.headers)
     return JSONResponse(mcp_response_to_json(resp_obj), headers=headers)
 
 
@@ -948,11 +955,11 @@ async def mcp_request(
 )
 async def mcp_request_batch(
     http_request: Request,
+    response: Response,
     client_id: Optional[str] = Query(None, description="Client identifier"),
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     mcp_session_id: Optional[str] = Header(None, alias="mcp-session-id"),
     config: Optional[str] = Query(None, description="Base64-encoded JSON safe config for this request"),
-    response: Response = None,
     _guard: None = Depends(enforce_http_security),
 ):
     """
@@ -1028,8 +1035,7 @@ async def mcp_request_batch(
             import uuid as _uuid
 
             mcp_session_id = _uuid.uuid4().hex
-            if response is not None:
-                response.headers["mcp-session-id"] = mcp_session_id
+            response.headers["mcp-session-id"] = mcp_session_id
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
         logger.debug("Failed to generate session ID for batch initialize")
 
@@ -1070,7 +1076,7 @@ async def mcp_request_batch(
     for item in resp:
         if isinstance(item.id, str) and item.id in explicit_null_id_sentinels:
             item.id = None
-    headers = dict(response.headers) if response is not None else None
+    headers = dict(response.headers)
     return JSONResponse(mcp_responses_to_json(resp), headers=headers)
 
 

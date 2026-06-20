@@ -2,9 +2,9 @@
 HTTP batch endpoint tests for MCP Unified.
 """
 
-import os
-import pytest
 import os as _os
+
+import pytest
 
 _os.environ.setdefault("TEST_MODE", "true")
 _os.environ.setdefault("ENABLE_TRACING", "false")
@@ -13,8 +13,8 @@ _os.environ.setdefault("MCP_WS_AUTH_REQUIRED", "false")
 _os.environ.setdefault("MCP_ALLOWED_IPS", "")
 
 from fastapi.testclient import TestClient
-from tldw_Server_API.app.main import app
 
+from tldw_Server_API.app.main import app
 
 client = TestClient(app)
 
@@ -59,7 +59,7 @@ def test_http_batch_non_array_returns_single_invalid_request_object():
 def test_http_batch_invalid_element_unsafe_id_returns_null_id(bad_id):
     resp = client.post(
         "/api/v1/mcp/request/batch",
-        json=[{"jsonrpc": "2.0", "params": {}, "id": bad_id}],
+        json=[{"jsonrpc": "2.0", "method": "ping", "params": {}, "id": bad_id}],
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -74,7 +74,7 @@ def test_http_batch_invalid_and_valid_items_preserve_response_order():
     resp = client.post(
         "/api/v1/mcp/request/batch",
         json=[
-            {"jsonrpc": "2.0", "params": {}, "id": True},
+            {"jsonrpc": "2.0", "method": "ping", "params": {}, "id": True},
             {"jsonrpc": "2.0", "method": "ping", "id": "ordered-ping"},
         ],
     )
