@@ -89,6 +89,55 @@ def test_safe_provider_metadata_drops_common_sensitive_key_separators():
     assert metadata == {"safe_field": "ok"}
 
 
+def test_safe_provider_metadata_drops_url_like_values_with_sensitive_material():
+    from tldw_Server_API.app.core.Research.discovery.identity import safe_provider_metadata
+
+    metadata = safe_provider_metadata(
+        {
+            "href": "https://repo.example/paper.pdf?token=SECRET",
+            "uri": "https://repo.example/paper.pdf#SECRET",
+            "openAccessPdf": {
+                "href": "https://repo.example/other.pdf?authToken=SECRET",
+                "label": "repository copy",
+            },
+            "safe": "ok",
+        }
+    )
+
+    assert metadata == {"openAccessPdf": {"label": "repository copy"}, "safe": "ok"}
+
+
+def test_normalize_and_merge_records_drops_unsafe_urls_from_safe_metadata_and_provenance():
+    from tldw_Server_API.app.core.Research.discovery.identity import normalize_and_merge_records
+
+    results = normalize_and_merge_records(
+        [
+            {
+                "source_id": "openalex",
+                "provider": "openalex",
+                "doi": "10.1000/example",
+                "title": "Paper",
+                "href": "https://repo.example/paper.pdf?token=SECRET",
+                "best_oa_location": {
+                    "href": "https://repo.example/best.pdf?authToken=SECRET",
+                    "host_type": "repository",
+                },
+            }
+        ],
+        catalog_version="research-discovery-v1",
+    )
+
+    result = results[0]
+    assert "href" not in result.safe_metadata
+    assert result.safe_metadata["best_oa_location"] == {"host_type": "repository"}
+    assert "href" not in result.merged_provenance[0].safe_metadata
+    assert result.merged_provenance[0].safe_metadata["best_oa_location"] == {
+        "host_type": "repository"
+    }
+    assert "SECRET" not in str(result.safe_metadata)
+    assert "SECRET" not in str(result.merged_provenance[0].safe_metadata)
+
+
 def test_signed_oa_url_is_redacted_from_response_snapshot_and_candidate_id():
     from tldw_Server_API.app.core.Research.discovery.oa import build_oa_candidates
 
@@ -108,6 +157,44 @@ def test_signed_oa_url_is_redacted_from_response_snapshot_and_candidate_id():
     assert "X-Amz-Signature" not in candidate.candidate_id
     assert candidate.resolver_reference is not None
     assert candidate.requires_reresolution is True
+
+
+def test_oa_candidate_url_strips_userinfo_and_all_query_strings():
+    from tldw_Server_API.app.core.Research.discovery.oa import build_oa_candidates
+
+    candidates = build_oa_candidates(
+        result_fingerprint="doi:10.1000/example",
+        source_id="openalex",
+        provider="openalex",
+        doi="10.1000/example",
+        raw_urls=["https://user:pass@repo.example:8443/files/paper.pdf?download=1"],
+    )
+
+    candidate = candidates[0]
+    assert candidate.url_redacted is True
+    assert candidate.safe_url == "https://repo.example:8443/files/paper.pdf"
+    assert candidate.requires_reresolution is True
+    assert "user" not in candidate.candidate_id
+    assert "pass" not in candidate.candidate_id
+    assert "download=1" not in candidate.candidate_id
+
+
+def test_oa_candidate_url_strips_unknown_tokenish_query_names():
+    from tldw_Server_API.app.core.Research.discovery.oa import build_oa_candidates
+
+    candidates = build_oa_candidates(
+        result_fingerprint="doi:10.1000/example",
+        source_id="openalex",
+        provider="openalex",
+        doi="10.1000/example",
+        raw_urls=["https://repo.example/files/paper.pdf?authToken=SECRET"],
+    )
+
+    candidate = candidates[0]
+    assert candidate.url_redacted is True
+    assert candidate.safe_url == "https://repo.example/files/paper.pdf"
+    assert "authToken" not in candidate.candidate_id
+    assert "SECRET" not in candidate.candidate_id
 
 
 def test_unpaywall_resolver_wraps_doi_lookup_and_sanitizes_signed_pdf_url():

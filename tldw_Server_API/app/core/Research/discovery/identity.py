@@ -669,7 +669,11 @@ def _metadata_key_variants(key: Any) -> set[str]:
 
 
 def _json_safe_value(value: Any) -> Any:
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if value is None:
+        return value
+    if isinstance(value, str):
+        return None if _is_unsafe_url_like_value(value) else value
+    if isinstance(value, (int, float, bool)):
         return value
     if isinstance(value, Mapping):
         cleaned: dict[str, Any] = {}
@@ -688,6 +692,16 @@ def _json_safe_value(value: Any) -> Any:
                 cleaned_items.append(safe_item)
         return cleaned_items
     return str(value)
+
+
+def _is_unsafe_url_like_value(value: str) -> bool:
+    text = value.strip()
+    if not text:
+        return False
+    parsed = urlsplit(text)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return False
+    return bool(parsed.query or parsed.fragment or parsed.username or parsed.password)
 
 
 def _coerce_string(value: Any) -> str | None:

@@ -7,7 +7,7 @@ import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 from typing import Any
-from urllib.parse import parse_qsl, urlsplit, urlunsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from tldw_Server_API.app.core.Third_Party import Unpaywall
 
@@ -47,17 +47,23 @@ def sanitize_candidate_url(raw_url: str | None) -> tuple[str | None, bool]:
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
         return None, False
 
-    sensitive_query = any(
-        key.lower() in _SENSITIVE_QUERY_KEYS for key, _value in parse_qsl(parsed.query, keep_blank_values=True)
-    )
-    url_redacted = sensitive_query or bool(parsed.fragment)
-    safe_query = "" if url_redacted else parsed.query
+    hostname = parsed.hostname.lower() if parsed.hostname else ""
+    if not hostname:
+        return None, False
+    try:
+        port = parsed.port
+    except ValueError:
+        return None, False
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    netloc = f"{hostname}:{port}" if port else hostname
+    url_redacted = bool(parsed.query or parsed.fragment or parsed.username or parsed.password)
     safe_url = urlunsplit(
         (
             parsed.scheme.lower(),
-            parsed.netloc.lower(),
+            netloc,
             parsed.path,
-            safe_query,
+            "",
             "",
         )
     )
