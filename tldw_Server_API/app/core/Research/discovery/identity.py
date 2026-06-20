@@ -61,6 +61,25 @@ _SENSITIVE_METADATA_KEY_PARTS = (
     "secret",
     "signature",
 )
+_SENSITIVE_URL_PATH_PARTS = (
+    "access_token",
+    "accesstoken",
+    "api_key",
+    "apikey",
+    "authorization",
+    "credential",
+    "secret",
+    "signature",
+    "token",
+    "x_amz_credential",
+    "x_amz_signature",
+    "x_goog_credential",
+    "x_goog_signature",
+    "xamzcredential",
+    "xamzsignature",
+    "xgoogcredential",
+    "xgoogsignature",
+)
 _DOI_RE = re.compile(r"10\.\d{4,9}/\S+", re.IGNORECASE)
 _ARXIV_VERSION_RE = re.compile(r"v\d+$", re.IGNORECASE)
 
@@ -106,6 +125,9 @@ def canonicalize_url(value: Any) -> str | None:
         or (parsed.scheme.lower() == "https" and port == 443)
     ):
         netloc = f"{hostname}:{port}"
+
+    if _url_path_has_unsafe_material(parsed.path):
+        return None
 
     path = quote(unquote(parsed.path or ""), safe="/:@!$&'()*+,;=-._~")
     return urlunsplit((parsed.scheme.lower(), netloc, path, "", ""))
@@ -180,9 +202,20 @@ def safe_provider_metadata(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def has_unsafe_url_material(value: Any) -> bool:
-    """Return True when a value is a URL carrying query, fragment, or userinfo."""
+    """Return True when a value is a URL carrying unsafe response material."""
     text = _coerce_string(value)
     return _is_unsafe_url_like_value(text) if text is not None else False
+
+
+def has_unsafe_url_path_material(value: Any) -> bool:
+    """Return True when a URL path itself contains encoded or path-param secrets."""
+    text = _coerce_string(value)
+    if text is None:
+        return False
+    parsed = urlsplit(text)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return False
+    return _url_path_has_unsafe_material(parsed.path)
 
 
 def normalize_and_merge_records(
@@ -712,7 +745,31 @@ def _is_unsafe_url_like_value(value: str) -> bool:
     parsed = urlsplit(text)
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
         return False
-    return bool(parsed.query or parsed.fragment or parsed.username or parsed.password)
+    return bool(
+        parsed.query
+        or parsed.fragment
+        or parsed.username
+        or parsed.password
+        or _url_path_has_unsafe_material(parsed.path)
+    )
+
+
+def _url_path_has_unsafe_material(path: str) -> bool:
+    decoded_path = unquote(path or "")
+    if not decoded_path:
+        return False
+    if "?" in decoded_path or "#" in decoded_path:
+        return True
+    if ";" in decoded_path:
+        return True
+
+    lower_path = decoded_path.lower()
+    normalized_path = re.sub(r"[^a-z0-9]+", "_", lower_path).strip("_")
+    compact_path = re.sub(r"[^a-z0-9]+", "", lower_path)
+    return any(
+        part in normalized_path or part in compact_path
+        for part in _SENSITIVE_URL_PATH_PARTS
+    )
 
 
 def _coerce_string(value: Any) -> str | None:

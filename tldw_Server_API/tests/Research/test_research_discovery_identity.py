@@ -107,6 +107,19 @@ def test_safe_provider_metadata_drops_url_like_values_with_sensitive_material():
     assert metadata == {"openAccessPdf": {"label": "repository copy"}, "safe": "ok"}
 
 
+def test_safe_provider_metadata_drops_encoded_query_material_in_url_paths():
+    from tldw_Server_API.app.core.Research.discovery.identity import safe_provider_metadata
+
+    metadata = safe_provider_metadata(
+        {
+            "href": "https://repo.example/files/paper.pdf%3Ftoken%3DSECRET",
+            "safe": "ok",
+        }
+    )
+
+    assert metadata == {"safe": "ok"}
+
+
 def test_normalize_and_merge_records_drops_unsafe_urls_from_safe_metadata_and_provenance():
     from tldw_Server_API.app.core.Research.discovery.identity import normalize_and_merge_records
 
@@ -134,6 +147,32 @@ def test_normalize_and_merge_records_drops_unsafe_urls_from_safe_metadata_and_pr
     assert result.merged_provenance[0].safe_metadata["best_oa_location"] == {
         "host_type": "repository"
     }
+    assert "SECRET" not in str(result.safe_metadata)
+    assert "SECRET" not in str(result.merged_provenance[0].safe_metadata)
+
+
+def test_normalize_and_merge_records_drops_encoded_token_url_identity_material():
+    from tldw_Server_API.app.core.Research.discovery.identity import normalize_and_merge_records
+
+    encoded_url = "https://repo.example/files/paper.pdf%3Ftoken%3DSECRET"
+    results = normalize_and_merge_records(
+        [
+            {
+                "source_id": "openalex",
+                "provider": "openalex",
+                "title": "Paper",
+                "url": encoded_url,
+                "href": encoded_url,
+            }
+        ],
+        catalog_version="research-discovery-v1",
+    )
+
+    result = results[0]
+    assert result.canonical_url is None
+    assert result.fingerprint.startswith("title:")
+    assert "SECRET" not in result.fingerprint
+    assert "%3Ftoken" not in result.fingerprint
     assert "SECRET" not in str(result.safe_metadata)
     assert "SECRET" not in str(result.merged_provenance[0].safe_metadata)
 
@@ -224,6 +263,34 @@ def test_oa_candidate_url_strips_unknown_tokenish_query_names():
     assert candidate.safe_url == "https://repo.example/files/paper.pdf"
     assert "authToken" not in candidate.candidate_id
     assert "SECRET" not in candidate.candidate_id
+
+
+def test_oa_candidate_drops_encoded_query_material_in_path():
+    from tldw_Server_API.app.core.Research.discovery.oa import build_oa_candidates
+
+    candidates = build_oa_candidates(
+        result_fingerprint="doi:10.1000/example",
+        source_id="openalex",
+        provider="openalex",
+        doi="10.1000/example",
+        raw_urls=["https://repo.example/files/paper.pdf%3Ftoken%3DSECRET"],
+    )
+
+    assert candidates == []
+
+
+def test_oa_candidate_drops_path_param_token_material():
+    from tldw_Server_API.app.core.Research.discovery.oa import build_oa_candidates
+
+    candidates = build_oa_candidates(
+        result_fingerprint="doi:10.1000/example",
+        source_id="openalex",
+        provider="openalex",
+        doi="10.1000/example",
+        raw_urls=["https://repo.example/files/paper.pdf;token=SECRET"],
+    )
+
+    assert candidates == []
 
 
 def test_oa_candidate_ids_ignore_unsafe_provider_ids_without_doi():

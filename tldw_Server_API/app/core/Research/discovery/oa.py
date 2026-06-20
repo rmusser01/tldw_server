@@ -11,7 +11,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from tldw_Server_API.app.core.Third_Party import Unpaywall
 
-from .identity import has_unsafe_url_material, normalize_doi
+from .identity import has_unsafe_url_material, has_unsafe_url_path_material, normalize_doi
 from .models import DiscoveryOACandidate
 
 
@@ -46,6 +46,8 @@ def sanitize_candidate_url(raw_url: str | None) -> tuple[str | None, bool]:
     parsed = urlsplit(raw_url)
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
         return None, False
+    if has_unsafe_url_path_material(raw_url):
+        return None, True
 
     hostname = parsed.hostname.lower() if parsed.hostname else ""
     if not hostname:
