@@ -29,8 +29,9 @@ surface for early standalone gateway work.
   read-before-mutate workflows. The memory backend is the default.
   An optional SQLite backend can coordinate cooperating processes that point at
   the same local database file.
-- A package CLI, `mcp-unified-gateway`, for local config management and remote
-  gateway runtime operations.
+- Package CLIs: `mcp-unified-gateway` for local config management and remote
+  gateway runtime operations, plus `mcp-unified-smoke` for JSON-RPC gateway
+  smoke validation.
 
 For hands-on setup and operations, see [USER_GUIDE.md](USER_GUIDE.md).
 
@@ -59,10 +60,11 @@ Use the package-local project file when testing the standalone boundary:
 python -m pip install -e "mcp_unified[gateway]"
 ```
 
-For test and packaging work:
+For test and packaging work, install both the gateway runtime and development
+tools:
 
 ```bash
-python -m pip install -e "mcp_unified[dev]"
+python -m pip install -e "mcp_unified[gateway,dev]"
 ```
 
 The package dependency groups intentionally stay small. Heavy `tldw-server`
@@ -81,6 +83,12 @@ List bundled profile presets:
 
 ```bash
 mcp-unified-gateway list-presets
+```
+
+Run the deterministic in-process smoke scenario:
+
+```bash
+mcp-unified-smoke inprocess --json-report -
 ```
 
 Validate a gateway config file:
