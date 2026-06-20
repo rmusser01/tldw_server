@@ -56,6 +56,39 @@ def test_safe_provider_metadata_drops_raw_url_containers():
     assert metadata == {"title": "Paper"}
 
 
+def test_safe_provider_metadata_drops_reviewer_sensitive_key_probe():
+    from tldw_Server_API.app.core.Research.discovery.identity import safe_provider_metadata
+
+    metadata = safe_provider_metadata(
+        {
+            "access_token": "SECRET",
+            "api-key": "SECRET",
+            "header": "Bearer SECRET",
+            "file": "raw.pdf",
+            "link": "https://x.test?token=SECRET",
+            "safe": "ok",
+        }
+    )
+
+    assert metadata == {"safe": "ok"}
+
+
+def test_safe_provider_metadata_drops_common_sensitive_key_separators():
+    from tldw_Server_API.app.core.Research.discovery.identity import safe_provider_metadata
+
+    metadata = safe_provider_metadata(
+        {
+            "download-url": "https://x.test/paper.pdf?token=SECRET",
+            "pdf url": "https://x.test/paper.pdf?token=SECRET",
+            "apiKey": "SECRET",
+            "raw-files": ["paper.pdf"],
+            "safe_field": "ok",
+        }
+    )
+
+    assert metadata == {"safe_field": "ok"}
+
+
 def test_signed_oa_url_is_redacted_from_response_snapshot_and_candidate_id():
     from tldw_Server_API.app.core.Research.discovery.oa import build_oa_candidates
 

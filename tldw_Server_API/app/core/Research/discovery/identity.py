@@ -13,22 +13,46 @@ from .catalog import default_source_catalog
 from .models import DiscoveryProvenance, DiscoveryResult
 
 
-_SENSITIVE_METADATA_KEYS = {
+_SENSITIVE_METADATA_KEY_ALIASES = {
+    "access_token",
+    "accesstoken",
     "api_key",
+    "apikey",
     "canonical_url",
+    "canonicalurl",
+    "download",
     "download_url",
-    "files",
+    "downloadurl",
+    "downloads",
+    "file",
+    "file_url",
+    "fileurl",
     "full_text_url",
+    "fulltexturl",
+    "files",
+    "header",
     "headers",
     "landing_page_url",
+    "landingpageurl",
+    "link",
     "links",
+    "oaurl",
     "oa_url",
+    "pdf",
     "pdf_url",
+    "pdfurl",
+    "raw_file",
+    "raw_files",
+    "rawfile",
+    "rawfiles",
     "raw_urls",
+    "rawurls",
     "source_url",
+    "sourceurl",
     "token",
     "url",
     "url_for_pdf",
+    "urlforpdf",
     "urls",
 }
 _SENSITIVE_METADATA_KEY_PARTS = (
@@ -629,10 +653,19 @@ def _dedupe_strings(values: Iterable[str]) -> list[str]:
 
 
 def _is_sensitive_metadata_key(key: Any) -> bool:
-    key_text = str(key).lower()
-    return key_text in _SENSITIVE_METADATA_KEYS or any(
-        part in key_text for part in _SENSITIVE_METADATA_KEY_PARTS
+    key_variants = _metadata_key_variants(key)
+    return bool(key_variants & _SENSITIVE_METADATA_KEY_ALIASES) or any(
+        part in variant
+        for variant in key_variants
+        for part in _SENSITIVE_METADATA_KEY_PARTS
     )
+
+
+def _metadata_key_variants(key: Any) -> set[str]:
+    key_text = str(key).strip().lower()
+    separator_normalized = re.sub(r"[^a-z0-9]+", "_", key_text).strip("_")
+    compact = re.sub(r"[^a-z0-9]+", "", key_text)
+    return {variant for variant in (key_text, separator_normalized, compact) if variant}
 
 
 def _json_safe_value(value: Any) -> Any:
