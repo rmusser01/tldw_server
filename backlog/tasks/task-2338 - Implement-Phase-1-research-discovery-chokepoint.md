@@ -16,8 +16,12 @@ modified_files:
 - tldw_Server_API/app/core/Research/discovery/identity.py
 - tldw_Server_API/app/core/Research/discovery/models.py
 - tldw_Server_API/app/core/Research/discovery/oa.py
+- tldw_Server_API/app/core/Research/discovery/router.py
+- tldw_Server_API/app/core/Research/discovery/adapters.py
 - tldw_Server_API/tests/Research/test_research_discovery_catalog.py
 - tldw_Server_API/tests/Research/test_research_discovery_identity.py
+- tldw_Server_API/tests/Research/test_research_discovery_router.py
+- tldw_Server_API/tests/Research/test_research_discovery_adapters.py
 - backlog/tasks/task-2338 - Implement-Phase-1-research-discovery-chokepoint.md
 ---
 

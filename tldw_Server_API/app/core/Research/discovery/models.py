@@ -45,6 +45,24 @@ class SourceSelectionError:
 
 
 @dataclass(frozen=True)
+class SourceStatus:
+    source_id: str
+    provider: str | None
+    status: str
+    message: str | None
+    result_count: int
+    elapsed_ms: float | None
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class DiscoveryExecutionPolicy:
+    per_source_timeout_seconds: float
+    total_timeout_seconds: float
+    max_concurrency: int
+
+
+@dataclass(frozen=True)
 class DiscoveryOACandidate:
     candidate_id: str
     candidate_type: str
