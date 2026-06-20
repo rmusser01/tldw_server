@@ -4,6 +4,7 @@ import os
 import sys
 import types
 
+from fastapi.testclient import TestClient
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -292,6 +293,75 @@ def test_acp_setup_guide_codex_includes_entrypoint_blocker_steps(client_user_onl
         "live_certification_required",
     }
     assert any("adapter" in step.lower() for step in guide["steps"])
+
+
+def test_acp_setup_guide_preserves_aider_unverified_adapter_candidate(
+    client_user_only: TestClient,
+    stub_runner_client: StubRunnerClient,
+) -> None:
+    """Aider setup guidance must not convert adapter metadata into a support claim."""
+    resp = client_user_only.get("/api/v1/acp/setup-guide?agent_type=aider")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["guides"]) == 1
+    guide = data["guides"][0]
+
+    assert guide["agent_type"] == "aider"
+    compatibility = guide["compatibility"]
+    assert compatibility["support_state"] == "documented_unverified"
+    assert compatibility["verification_level"] == "documented_only"
+    assert compatibility["docs_url"] == "/docs-static/Development/ACP_Compatibility_Matrix.md"
+    entrypoint = guide["entrypoint"]
+    assert entrypoint["entrypoint_strategy"] == "external_acp_adapter"
+    assert entrypoint["acp_command"] == "aider-acp"
+    assert entrypoint["adapter_source"] == "jorgejhms/aider-acp"
+    assert any("certification checklist" in step.lower() for step in guide["steps"])
+
+
+def test_acp_setup_guide_preserves_continue_documented_only_status(
+    client_user_only: TestClient,
+    stub_runner_client: StubRunnerClient,
+) -> None:
+    """Continue setup guidance must require a concrete ACP entrypoint before support claims."""
+    resp = client_user_only.get("/api/v1/acp/setup-guide?agent_type=continue_dev")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["guides"]) == 1
+    guide = data["guides"][0]
+
+    assert guide["agent_type"] == "continue_dev"
+    compatibility = guide["compatibility"]
+    assert compatibility["support_state"] == "documented_unverified"
+    assert compatibility["verification_level"] == "documented_only"
+    entrypoint = guide["entrypoint"]
+    assert entrypoint["entrypoint_strategy"] == "documented_candidate"
+    assert entrypoint["acp_command"] == ""
+    assert entrypoint["primary_blocker"] == "entrypoint_strategy_missing"
+    assert any("concrete acp stdio entrypoint" in step.lower() for step in guide["steps"])
+    assert any("certification checklist" in step.lower() for step in guide["steps"])
+
+
+def test_acp_setup_guide_preserves_custom_template_only_status(
+    client_user_only: TestClient,
+    stub_runner_client: StubRunnerClient,
+) -> None:
+    """The seeded custom profile is a template, not a certifiable generic profile."""
+    resp = client_user_only.get("/api/v1/acp/setup-guide?agent_type=custom")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["guides"]) == 1
+    guide = data["guides"][0]
+
+    assert guide["agent_type"] == "custom"
+    compatibility = guide["compatibility"]
+    assert compatibility["support_state"] == "documented_unverified"
+    assert compatibility["verification_level"] == "documented_only"
+    entrypoint = guide["entrypoint"]
+    assert entrypoint["entrypoint_strategy"] == "custom_template"
+    assert entrypoint["probe_state"] == "custom_template"
+    assert entrypoint["primary_blocker"] == "custom_template"
+    assert any("distinct named custom acp profile" in step.lower() for step in guide["steps"])
+    assert any("certification checklist" in step.lower() for step in guide["steps"])
 
 
 def test_entrypoint_setup_steps_include_external_adapter_specific_actions() -> None:
