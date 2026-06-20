@@ -27,6 +27,12 @@ absolute paths, bearer tokens, API keys, or long payloads.
 
 ## Commands
 
+Install the package-local gateway extra first:
+
+```bash
+python -m pip install -e "mcp_unified[gateway]"
+```
+
 Run the deterministic in-process fixture:
 
 ```bash
