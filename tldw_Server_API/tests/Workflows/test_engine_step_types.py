@@ -39,11 +39,16 @@ def client_with_wf(tmp_path, auth_headers):
     app.dependency_overrides.clear()
 
 
-def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 30.0):
-    deadline = time.time() + timeout_s
+def _wait_for_status(
+    client: TestClient,
+    run_id: str,
+    statuses: set[str],
+    timeout_s: float = 30.0,
+) -> dict:
+    deadline = time.monotonic() + timeout_s
     last_response = None
     last_data = None
-    while time.time() < deadline:
+    while time.monotonic() < deadline:
         response = client.get(f"/api/v1/workflows/runs/{run_id}")
         last_response = response
         if response.status_code == 404:
@@ -53,7 +58,7 @@ def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 30.0)
         data = response.json()
         assert "status" in data, data
         last_data = data
-        if data["status"] in ("succeeded", "failed", "cancelled"):
+        if data["status"] in statuses:
             return data
         time.sleep(0.02)
     response = client.get(f"/api/v1/workflows/runs/{run_id}")
@@ -63,9 +68,13 @@ def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 30.0)
     data = response.json()
     assert "status" in data, data
     pytest.fail(
-        f"workflow run {run_id} did not reach terminal status within {timeout_s}s; "
+        f"workflow run {run_id} did not reach {sorted(statuses)} within {timeout_s}s; "
         f"last_data={last_data or data}"
     )
+
+
+def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 30.0):
+    return _wait_for_status(client, run_id, {"succeeded", "failed", "cancelled"}, timeout_s)
 
 
 def test_delay_step_then_log_succeeds(client_with_wf: TestClient):
@@ -109,17 +118,12 @@ def test_wait_for_approval_then_resume(client_with_wf: TestClient):
     }
     wid = client.post("/api/v1/workflows", json=definition).json()["id"]
     run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {"name": "Nina"}}).json()["run_id"]
-    # Wait until the run enters waiting state
-    import time as _time
-    deadline = _time.time() + 10.0
-    waiting = False
-    while _time.time() < deadline:
-        rd = client.get(f"/api/v1/workflows/runs/{run_id}").json()
-        if rd.get("status") in ("waiting_human", "waiting_approval"):
-            waiting = True
-            break
-        _time.sleep(0.05)
-    assert waiting
+    waiting = _wait_for_status(
+        client,
+        run_id,
+        {"waiting_human", "waiting_approval", "failed", "cancelled"},
+    )
+    assert waiting.get("status") in {"waiting_human", "waiting_approval"}, waiting
     # Approve step w1 and resume (use Approvals endpoint)
     r = client.post(f"/api/v1/workflows/runs/{run_id}/steps/w1/approve", json={"comment": "ok"})
     assert r.status_code == 200

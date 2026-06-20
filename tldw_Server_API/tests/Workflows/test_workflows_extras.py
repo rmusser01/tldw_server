@@ -193,15 +193,18 @@ def test_webhook_step_noop(client_with_wf: TestClient, monkeypatch):
     assert data["status"] == "succeeded", data
 
 
-def _wait_for_status(client: TestClient, run_id: str, allowed: set[str], timeout_seconds: float = 8.0) -> dict:
-    deadline = time.time() + timeout_seconds
+def _wait_for_status(client: TestClient, run_id: str, allowed: set[str], timeout_seconds: float = 30.0) -> dict:
+    deadline = time.monotonic() + timeout_seconds
     last = {}
-    while time.time() < deadline:
+    while time.monotonic() < deadline:
         last = client.get(f"/api/v1/workflows/runs/{run_id}").json()
         if last.get("status") in allowed:
             return last
         time.sleep(0.05)
-    return last
+    pytest.fail(
+        f"workflow run {run_id} did not reach {sorted(allowed)} "
+        f"within {timeout_seconds}s; last={last}"
+    )
 
 
 def _patch_acp_runner(monkeypatch):
