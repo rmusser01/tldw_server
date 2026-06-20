@@ -8,7 +8,7 @@ Reference directory: https://www.sourclip.com/resources/research-sources
 
 Add a shared research discovery chokepoint for open research graph sources. The new design consolidates the repo's scattered paper/source searches behind one internal module while preserving existing provider-specific endpoints as compatibility surfaces.
 
-The first implementation slice focuses on open research graph discovery: OpenAlex, Semantic Scholar, Crossref, arXiv, PubMed, Zenodo, Figshare, OSF, and Unpaywall-style open-access resolution. Standalone search and Deep Research both consume the same normalized discovery service. Users can review search results, resolve open-access/full-text candidates, and ingest approved items into Media DB. Deep Research uses the same service during collection and performs ingestion only after a source review checkpoint is approved.
+The staged design focuses on open research graph discovery: OpenAlex, Semantic Scholar, Crossref, arXiv, PubMed, Zenodo, Figshare, OSF, and Unpaywall-style open-access resolution. Standalone search and Deep Research both consume the same normalized discovery service. Users can review search results, resolve open-access/full-text candidates, and ingest approved items into Media DB. Deep Research uses the same service during collection and performs ingestion only after a source review checkpoint is approved. The first implementation plan should target Phase 1 unless the human requester explicitly asks for a multi-phase implementation plan.
 
 Sourclip is used as inspiration and seed material for a curated local catalog. It is not a runtime dependency.
 
@@ -89,6 +89,7 @@ Responsibilities:
   - total timeout
   - bounded concurrency
   - per-provider rate limits where configured
+- reject over-cap requests with a clear validation error instead of silently truncating category-expanded source selections
 - route each source to an adapter or fallback search implementation
 - normalize provider-specific payloads into one result contract
 - preserve sanitized provider metadata and adapter/catalog versions
@@ -144,8 +145,8 @@ The normalized discovery result should include:
 
 - stable `result_id`
 - canonical `fingerprint`
-- `source_id`
-- `provider`
+- `primary_source_id`
+- `primary_provider`
 - `discovery_mode`: `api`, `aggregator`, or `site_search`
 - title
 - authors
@@ -164,6 +165,7 @@ The normalized discovery result should include:
 - ranking signals
 - source trust/provenance labels
 - warnings
+- merged provenance entries
 - safe provider metadata
 - adapter version
 - catalog version
@@ -176,11 +178,28 @@ Identity rules:
 - Deep Research collection persists the same normalized records in run artifacts and checkpoint payloads, scoped by `session_id` and checkpoint id.
 - Ingest never relies on client-resubmitted metadata as authority. It loads the server-side discovery snapshot or Deep Research artifact, then revalidates source identity and full-text candidates before download.
 
+Merged provenance entry shape:
+
+- `source_id`
+- `provider`
+- `discovery_mode`
+- provider ids observed for this source
+- URL or landing page observed for this source
+- source-specific score or rank when available
+- source status and warnings
+- safe provider metadata
+- adapter version
+
+When dedupe merges multiple provider records into one normalized result, `primary_source_id` and `primary_provider` identify the record selected for display/ranking, while `merged_provenance[]` preserves every contributing provider/source record. Provider-specific scores remain scoped to provenance entries and are not promoted into a universal relevance score.
+
 OA/full-text candidate shape:
 
 - `candidate_id`
 - candidate type, such as `pdf`, `html_full_text`, `repository_file`, or `landing_page`
-- URL
+- safe URL or display URL, when the candidate URL is safe to expose
+- opaque resolver reference, when the raw candidate URL is signed, expiring, token-bearing, or otherwise sensitive
+- `url_redacted` flag
+- `requires_reresolution` flag
 - provider or resolver provenance
 - access status and license hints where available
 - content type hint where available
@@ -191,7 +210,8 @@ OA/full-text candidate shape:
 Candidate identity rules:
 
 - `candidate_id` is stable within a persisted discovery snapshot or Deep Research source artifact.
-- `candidate_id` is derived from result fingerprint, normalized candidate URL, candidate type, and resolver/provider provenance.
+- `candidate_id` is derived from result fingerprint, candidate type, resolver/provider provenance, and either a normalized safe candidate URL or an opaque resolver reference. It must not be derived from raw secret-bearing URL material.
+- Signed, expiring, token-bearing, or otherwise secret-bearing candidate URLs must be sanitized before API response, persistence, and logs. Responses and snapshots should expose a safe display URL or opaque resolver reference, not the raw sensitive URL. The stored candidate should keep enough resolver/provider provenance to re-resolve the URL at ingest time.
 - Ingest selections must identify both `result_id` and `candidate_id`; the service should not silently choose among multiple full-text candidates.
 - A result may expose `recommended_candidate_id` for UI convenience, but the ingest request/checkpoint approval still records the explicit candidate selected.
 
@@ -227,6 +247,8 @@ Input shape:
 - result limits
 - fallback policy
 - optional provider/source overrides bounded by the catalog capability model
+
+If category expansion or explicit source selection exceeds configured caps, the endpoint returns a validation error that includes the configured limit and selected count. It should not silently drop sources, because silent truncation would make source coverage and later citations misleading.
 
 Output shape:
 
@@ -343,6 +365,7 @@ Operational controls:
 - credentialed sources disabled unless configured
 - source-level timing and status metrics
 - catalog/config version persistence
+- sanitized API responses, persistence, and logging for candidate URLs that may contain credentials, signatures, or expiry tokens
 
 Ingest controls:
 
@@ -418,7 +441,22 @@ Phase 4: checkpoint-approved Deep Research ingest job before synthesis.
 
 Phase 5: existing compatibility endpoints delegate to the chokepoint where safe, and fallback site search is enabled source-by-source.
 
+## Implementation Planning Scope
+
+The next implementation plan should cover Phase 1 only by default: catalog, source router, discovery chokepoint, standalone search API, normalized metadata, OA candidate discovery, persisted discovery snapshots, and tests for that surface. Standalone ingest, Deep Research integration, compatibility wrapper delegation, and fallback site-search rollout should remain later phases unless the human requester asks for a larger plan.
+
 ## Acceptance Criteria
+
+### Phase 1 Acceptance Criteria
+
+- A single internal discovery service is the shared path for new standalone discovery.
+- Phase 1 supports the approved open research graph provider set through API-backed adapters where available.
+- Source catalog entries expose capabilities instead of requiring clients to guess behavior.
+- Discovery responses preserve normalized metadata, source provenance, adapter/catalog versions, warnings, OA candidates, and persisted `discovery_id` snapshots.
+- OA candidate URLs exposed in API responses and snapshots are safe URLs/display URLs or opaque resolver references; raw signed/token-bearing URLs are not exposed.
+- Fallback site search remains disabled by default and opt-in where configured.
+
+### Overall Design Acceptance Criteria
 
 - A single internal discovery service is the shared path for new standalone discovery and Deep Research source collection.
 - The first slice supports the approved open research graph provider set through API-backed adapters where available.

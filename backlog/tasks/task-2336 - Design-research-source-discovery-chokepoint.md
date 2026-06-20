@@ -37,7 +37,7 @@ Brainstorming/spec phase only. The approved design documents a shared research d
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design spec written at Docs/superpowers/specs/2026-06-20-research-source-discovery-chokepoint-design.md. Spec review loop ran three passes: the first two found blocking ambiguity around discovery result identity and OA candidate ingest handoff; the spec was revised to use persisted discovery snapshots, snapshot-scoped result IDs, deterministic fingerprints, explicit candidate IDs, and `{ result_id, candidate_id }` ingest selections. Third review approved with no blocking issues. This is a documentation/spec-only change; Bandit is not applicable because no Python/code paths were modified.
+Design spec written at Docs/superpowers/specs/2026-06-20-research-source-discovery-chokepoint-design.md. Initial spec review loop ran three passes: the first two found blocking ambiguity around discovery result identity and OA candidate ingest handoff; the spec was revised to use persisted discovery snapshots, snapshot-scoped result IDs, deterministic fingerprints, explicit candidate IDs, and `{ result_id, candidate_id }` ingest selections. Third review approved with no blocking issues. Post-user-review clarifications added Phase 1 planning scope, merged provenance entries for deduped results, over-cap source selection validation, and signed/token-bearing OA URL sanitization for API responses, snapshots, logs, candidate identity, and ingest re-resolution. Follow-up review approved with no blocking issues. This is a documentation/spec-only change; Bandit is not applicable because no Python/code paths were modified.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
