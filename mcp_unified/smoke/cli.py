@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 import sys
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, TextIO, cast
@@ -15,7 +16,11 @@ from loguru import logger
 
 from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
 from mcp_unified.smoke.reporting import SmokeReport, report_to_json
-from mcp_unified.smoke.scenarios import ScenarioMode, run_baseline_scenario
+from mcp_unified.smoke.scenarios import (
+    ScenarioMode,
+    run_baseline_scenario,
+    run_real_world_scenario,
+)
 from mcp_unified.smoke.transports import (
     InProcessGatewayTransport,
     LiveHttpTransport,
@@ -30,7 +35,7 @@ _EXIT_SCENARIO_FAILED = 1
 _EXIT_USAGE = 2
 _EXIT_TRANSPORT_FAILED = 3
 _EXIT_STRICT_CAPABILITY_UNAVAILABLE = 4
-_SCENARIO_CHOICES = ("baseline",)
+_SCENARIO_CHOICES = ("baseline", "real-world")
 _MODE_CHOICES = ("best-effort", "strict")
 
 
@@ -87,6 +92,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run against a live MCP HTTP endpoint.",
     )
     http.add_argument("--url", required=True, help="MCP HTTP JSON-RPC endpoint URL.")
+    http.add_argument(
+        "--batch-url",
+        help="Optional MCP HTTP JSON-RPC batch endpoint URL when it differs from --url.",
+    )
 
     websocket = subparsers.add_parser(
         "websocket",
@@ -207,28 +216,149 @@ def _build_common_parser(*, with_defaults: bool) -> argparse.ArgumentParser:
         default='{"topic":"smoke"}' if with_defaults else argparse.SUPPRESS,
         help="JSON object passed to the safe prompt get call.",
     )
+    parser.add_argument(
+        "--artifact-dir",
+        default=default,
+        help="Artifact root for the real-world scenario.",
+    )
+    parser.add_argument(
+        "--artifact-read-tool-name",
+        default="artifact.read" if with_defaults else argparse.SUPPRESS,
+        help="Read tool name for the real-world artifact chain.",
+    )
+    parser.add_argument(
+        "--artifact-summarize-tool-name",
+        default="artifact.summarize" if with_defaults else argparse.SUPPRESS,
+        help="Summarize tool name for the real-world artifact chain.",
+    )
+    parser.add_argument(
+        "--artifact-write-tool-name",
+        default="artifact.write" if with_defaults else argparse.SUPPRESS,
+        help="Write tool name for the real-world artifact chain.",
+    )
+    parser.add_argument(
+        "--artifact-stat-tool-name",
+        default="artifact.stat" if with_defaults else argparse.SUPPRESS,
+        help="Verification/stat tool name for the real-world artifact chain.",
+    )
+    parser.add_argument(
+        "--artifact-read-arguments-json",
+        default='{"path":"{input_path}"}' if with_defaults else argparse.SUPPRESS,
+        help="JSON object template passed to the read tool.",
+    )
+    parser.add_argument(
+        "--artifact-summarize-arguments-json",
+        default='{"source_path":"{input_path}"}' if with_defaults else argparse.SUPPRESS,
+        help="JSON object template passed to the summarize tool.",
+    )
+    parser.add_argument(
+        "--artifact-write-arguments-json",
+        default='{"path":"{output_path}","content":"{derived_content}"}'
+        if with_defaults
+        else argparse.SUPPRESS,
+        help="JSON object template passed to the write tool.",
+    )
+    parser.add_argument(
+        "--artifact-stat-arguments-json",
+        default='{"path":"{output_path}"}' if with_defaults else argparse.SUPPRESS,
+        help="JSON object template passed to the verification/stat tool.",
+    )
+    parser.add_argument(
+        "--real-llm-provider",
+        choices=("openai-compatible",),
+        default=default,
+        help="Optional real LLM provider to call in the real-world scenario.",
+    )
+    parser.add_argument(
+        "--real-llm-api-key-env",
+        default=default,
+        help="Environment variable name containing the real LLM API key.",
+    )
+    parser.add_argument(
+        "--real-llm-base-url",
+        default=default,
+        help="OpenAI-compatible base URL for the optional real LLM step.",
+    )
+    parser.add_argument(
+        "--real-llm-model",
+        default=default,
+        help="Model name for the optional real LLM step.",
+    )
     return parser
 
 
 async def _run(args: argparse.Namespace) -> SmokeReport:
-    if args.scenario != "baseline":
-        raise ValueError(f"unsupported smoke scenario: {args.scenario}")
+    scenario = cast(str, args.scenario)
+    mode = _scenario_mode(args.mode)
+    artifact_tempdir: tempfile.TemporaryDirectory[str] | None = None
+    if scenario == "real-world":
+        artifact_root, artifact_tempdir = _artifact_root_for_scenario(args)
+    else:
+        artifact_root = None
+    previous_artifact_root = os.environ.get("MCP_SMOKE_ARTIFACT_ROOT")
+    if artifact_root is not None:
+        os.environ["MCP_SMOKE_ARTIFACT_ROOT"] = str(artifact_root)
+    try:
+        transport = _build_transport(args, artifact_root=artifact_root)
+        if scenario == "baseline":
+            report = await run_baseline_scenario(
+                transport,
+                mode=mode,
+                safe_tool_name=args.safe_tool_name,
+                safe_tool_arguments=_json_object(
+                    args.safe_tool_arguments_json,
+                    "safe tool arguments",
+                ),
+                safe_resource_uri=args.safe_resource_uri,
+                safe_prompt_name=args.safe_prompt_name,
+                safe_prompt_arguments=_json_object(
+                    args.safe_prompt_arguments_json,
+                    "safe prompt arguments",
+                ),
+            )
+        elif scenario == "real-world":
+            report = await run_real_world_scenario(
+                transport,
+                mode=mode,
+                artifact_dir=artifact_root,
+                artifact_read_tool_name=args.artifact_read_tool_name,
+                artifact_summarize_tool_name=args.artifact_summarize_tool_name,
+                artifact_write_tool_name=args.artifact_write_tool_name,
+                artifact_stat_tool_name=args.artifact_stat_tool_name,
+                artifact_read_arguments=_json_object(
+                    args.artifact_read_arguments_json,
+                    "artifact read arguments",
+                ),
+                artifact_summarize_arguments=_json_object(
+                    args.artifact_summarize_arguments_json,
+                    "artifact summarize arguments",
+                ),
+                artifact_write_arguments=_json_object(
+                    args.artifact_write_arguments_json,
+                    "artifact write arguments",
+                ),
+                artifact_stat_arguments=_json_object(
+                    args.artifact_stat_arguments_json,
+                    "artifact stat arguments",
+                ),
+                real_llm_provider=args.real_llm_provider,
+                real_llm_api_key_env=args.real_llm_api_key_env,
+                real_llm_base_url=args.real_llm_base_url,
+                real_llm_model=args.real_llm_model,
+            )
+        else:
+            raise ValueError(f"unsupported smoke scenario: {scenario}")
+    finally:
+        if artifact_root is not None:
+            if previous_artifact_root is None:
+                os.environ.pop("MCP_SMOKE_ARTIFACT_ROOT", None)
+            else:
+                os.environ["MCP_SMOKE_ARTIFACT_ROOT"] = previous_artifact_root
+        if artifact_tempdir is not None:
+            artifact_tempdir.cleanup()
 
-    transport = _build_transport(args)
-    report = await run_baseline_scenario(
-        transport,
-        mode=_scenario_mode(args.mode),
-        safe_tool_name=args.safe_tool_name,
-        safe_tool_arguments=_json_object(args.safe_tool_arguments_json, "safe tool arguments"),
-        safe_resource_uri=args.safe_resource_uri,
-        safe_prompt_name=args.safe_prompt_name,
-        safe_prompt_arguments=_json_object(
-            args.safe_prompt_arguments_json,
-            "safe prompt arguments",
-        ),
-    )
-    report.metadata["scenario"] = args.scenario
-    report.metadata["mode"] = _scenario_mode(args.mode)
+    report.metadata["scenario"] = scenario
+    report.metadata["mode"] = mode
     if args.profile_id:
         report.metadata["profile_id"] = args.profile_id
     if args.debug_trace:
@@ -236,7 +366,11 @@ async def _run(args: argparse.Namespace) -> SmokeReport:
     return report
 
 
-def _build_transport(args: argparse.Namespace) -> McpSmokeTransport:
+def _build_transport(
+    args: argparse.Namespace,
+    *,
+    artifact_root: Path | None = None,
+) -> McpSmokeTransport:
     api_key = _env_value(args.api_key_env, "api key") if args.api_key_env else None
     bearer_token = (
         _env_value(args.bearer_token_env, "bearer token")
@@ -247,11 +381,15 @@ def _build_transport(args: argparse.Namespace) -> McpSmokeTransport:
     transport_name = cast(str, args.transport)
 
     if transport_name == "inprocess":
-        runtime = _build_inprocess_runtime(disable_resources=args.disable_resources)
+        runtime = _build_inprocess_runtime(
+            disable_resources=args.disable_resources,
+            artifact_root=artifact_root,
+        )
         return InProcessGatewayTransport(runtime)
     if transport_name == "http":
         return LiveHttpTransport(
             args.url,
+            batch_url=args.batch_url,
             bearer_token=bearer_token,
             api_key=api_key,
             profile_id=args.profile_id,
@@ -266,19 +404,31 @@ def _build_transport(args: argparse.Namespace) -> McpSmokeTransport:
             timeout=timeout,
         )
     if transport_name == "stdio":
+        env_allowlist = tuple(args.env)
+        if artifact_root is not None:
+            env_allowlist = tuple(
+                dict.fromkeys((*env_allowlist, "MCP_SMOKE_ARTIFACT_ROOT"))
+            )
         return StdioSubprocessTransport(
             args.command,
             args=tuple(args.arg),
             cwd=args.cwd,
-            env_allowlist=tuple(args.env),
+            env_allowlist=env_allowlist,
             startup_timeout=timeout,
             request_timeout=timeout,
         )
     raise ValueError(f"unsupported transport: {transport_name}")
 
 
-def _build_inprocess_runtime(*, disable_resources: bool) -> Any:
-    runtime = SmokeFixtureGatewayRuntime(include_denied_tool=True)
+def _build_inprocess_runtime(
+    *,
+    disable_resources: bool,
+    artifact_root: Path | None = None,
+) -> Any:
+    runtime = SmokeFixtureGatewayRuntime(
+        include_denied_tool=True,
+        artifact_root=artifact_root,
+    )
     if not disable_resources:
         return runtime
     return _NoResourceFixtureRuntime(runtime)
@@ -320,6 +470,21 @@ class _NoResourceFixtureRuntime:
 
     async def get_modules_health(self, context: Any) -> dict[str, Any]:
         return await self._runtime.get_modules_health(context)
+
+
+def _artifact_root_for_scenario(
+    args: argparse.Namespace,
+) -> tuple[Path, tempfile.TemporaryDirectory[str] | None]:
+    """Resolve the real-world artifact root and its optional cleanup handle."""
+    artifact_dir = getattr(args, "artifact_dir", None)
+    if artifact_dir:
+        root = Path(artifact_dir).expanduser()
+        tempdir = None
+    else:
+        tempdir = tempfile.TemporaryDirectory(prefix="mcp-smoke-real-world-")
+        root = Path(tempdir.name)
+    root.mkdir(parents=True, exist_ok=True)
+    return root.resolve(), tempdir
 
 
 def _scenario_mode(value: str) -> ScenarioMode:

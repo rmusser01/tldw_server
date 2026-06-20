@@ -17,11 +17,17 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, Security, WebSocket, status
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
 from pydantic import BaseModel, Field
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_db_transaction, RequirePermission, verify_jwt_and_fetch_user
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    get_auth_principal,
+    get_db_transaction,
+    verify_jwt_and_fetch_user,
+)
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import ToolCatalogResponse
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
@@ -42,7 +48,17 @@ from tldw_Server_API.app.core.feature_flags import is_mcp_hub_policy_enforcement
 from tldw_Server_API.app.core.MCP_unified import MCPRequest, MCPResponse, get_config, get_mcp_server
 from tldw_Server_API.app.core.MCP_unified.auth import UserRole
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import TokenData, get_jwt_manager
+from tldw_Server_API.app.core.MCP_unified.jsonrpc_transport import (
+    invalid_request_response,
+    mcp_response_to_json,
+    mcp_responses_to_json,
+    parse_jsonrpc_body,
+    prepare_jsonrpc_batch,
+    prepare_jsonrpc_request,
+    restore_explicit_null_jsonrpc_ids,
+)
 from tldw_Server_API.app.core.MCP_unified.monitoring.metrics import get_metrics_collector
+from tldw_Server_API.app.core.MCP_unified.protocol import _trusted_compat_claims_metadata
 from tldw_Server_API.app.core.MCP_unified.security.request_guards import enforce_http_security
 from tldw_Server_API.app.core.MCP_unified.server import _is_authnz_access_token
 from tldw_Server_API.app.core.Security.url_validation import assert_url_safe
@@ -196,6 +212,46 @@ def _should_use_single_user_api_key_compat() -> bool:
         return False
 
 
+def _single_user_test_key_compat_allowed() -> bool:
+    """Return True when SINGLE_USER_TEST_API_KEY may be used by mounted HTTP auth."""
+    if not is_test_mode():
+        return False
+    try:
+        cfg = get_config()
+    except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
+        cfg = None
+    env = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("ENV") or "").lower()
+    prod_flag = env_flag_enabled("tldw_production")
+    is_dev_ctx = bool(cfg and getattr(cfg, "debug_mode", False))
+    if os.getenv("PYTEST_CURRENT_TEST") is not None:
+        is_dev_ctx = True
+    try:
+        import sys as _sys
+
+        if "pytest" in _sys.modules:
+            is_dev_ctx = True
+    except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
+        logger.debug(
+            "MCP unified test key compatibility pytest detection failed",
+            exc_info=True,
+        )
+    if env in {"dev", "development", "test", "ci"}:
+        is_dev_ctx = True
+    if prod_flag:
+        is_dev_ctx = False
+    if not is_dev_ctx:
+        logger.error(
+            "TEST_MODE enabled outside dev/test context; refusing SINGLE_USER_TEST_API_KEY",
+            extra={
+                "audit": True,
+                "env": env,
+                "debug_mode": bool(cfg and getattr(cfg, "debug_mode", False)),
+            },
+        )
+        return False
+    return True
+
+
 def _get_client_ip(request: Optional[Request]) -> Optional[str]:
     """Extract client IP from the incoming request."""
     if request is None:
@@ -341,41 +397,7 @@ async def _resolve_token_data_compat(
             try:
                 if _should_use_single_user_api_key_compat():
                     settings = get_settings()
-                    test_mode = is_test_mode()
-                    if test_mode:
-                        # Guard against accidental production use of TEST_MODE-based
-                        # SINGLE_USER_TEST_API_KEY shortcuts. Only honor TEST_MODE
-                        # in clear dev/test contexts (debug or explicit env/pytest).
-                        try:
-                            cfg = get_config()
-                        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-                            cfg = None
-                        env = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("ENV") or "").lower()
-                        prod_flag = env_flag_enabled("tldw_production")
-                        is_dev_ctx = bool(cfg and getattr(cfg, "debug_mode", False))
-                        if os.getenv("PYTEST_CURRENT_TEST") is not None:
-                            is_dev_ctx = True
-                        try:
-                            import sys as _sys
-
-                            if "pytest" in _sys.modules:
-                                is_dev_ctx = True
-                        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-                            pass
-                        if env in {"dev", "development", "test", "ci"}:
-                            is_dev_ctx = True
-                        if prod_flag:
-                            is_dev_ctx = False
-                        if not is_dev_ctx:
-                            logger.error(
-                                "TEST_MODE enabled outside dev/test context; refusing SINGLE_USER_TEST_API_KEY",
-                                extra={
-                                    "audit": True,
-                                    "env": env,
-                                    "debug_mode": bool(cfg and getattr(cfg, "debug_mode", False)),
-                                },
-                            )
-                            test_mode = False
+                    test_mode = _single_user_test_key_compat_allowed()
                     allowed: set[str] = set()
                     if settings.SINGLE_USER_API_KEY:
                         allowed.add(settings.SINGLE_USER_API_KEY)
@@ -387,6 +409,15 @@ async def _resolve_token_data_compat(
                         client_ip = _get_client_ip(request)
                         if not is_single_user_ip_allowed(client_ip, settings):
                             return None
+                        auth_via = "single_user_api_key"
+                        test_key = os.getenv("SINGLE_USER_TEST_API_KEY") if test_mode else None
+                        if test_key and secrets.compare_digest(x_api_key, test_key):
+                            auth_via = "single_user_test_api_key"
+                        if request is not None:
+                            request.state.mcp_compat_auth_metadata = _trusted_compat_claims_metadata(
+                                auth_via=auth_via,
+                                compat_claims_source="mounted_http",
+                            )
                         roles = [UserRole.ADMIN.value]
                         perms = ["*"] if test_mode else []
                         return TokenData(
@@ -571,6 +602,14 @@ async def _attach_api_key_metadata(
                 exc_info=True,
             )
 
+    if http_request is not None:
+        try:
+            trusted_metadata = getattr(http_request.state, "mcp_compat_auth_metadata", None)
+        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
+            trusted_metadata = None
+        if isinstance(trusted_metadata, dict):
+            metadata.update(trusted_metadata)
+
     _attach_rg_ingress_metadata(metadata, http_request)
     _attach_workspace_ingress_metadata(metadata, http_request)
     return metadata
@@ -672,6 +711,11 @@ def _is_catalog_admin_context(
     return any(str(role).lower() == "admin" for role in roles)
 
 
+def _jsonrpc_error_response(response: MCPResponse) -> JSONResponse:
+    """Return an explicit JSON-RPC error response with normalized shape."""
+    return JSONResponse(mcp_response_to_json(response))
+
+
 # WebSocket endpoint
 
 
@@ -736,21 +780,22 @@ async def websocket_endpoint(
 
 @router.post(
     "/request",
-    response_model=MCPResponse,
     responses={
+        status.HTTP_200_OK: {
+            "description": "JSON-RPC response object.",
+        },
         status.HTTP_204_NO_CONTENT: {
             "description": "MCP request acknowledged with no response body.",
         },
     },
 )
 async def mcp_request(
-    request: MCPRequest,
     http_request: Request,
+    response: Response,
     client_id: Optional[str] = Query(None, description="Client identifier"),
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     mcp_session_id: Optional[str] = Header(None, alias="mcp-session-id"),
     config: Optional[str] = Query(None, description="Base64-encoded JSON safe config for this request"),
-    response: Response = None,
     _guard: None = Depends(enforce_http_security),
 ):
     """
@@ -759,6 +804,17 @@ async def mcp_request(
     This endpoint provides a simpler alternative to WebSocket for clients
     that don't need real-time bidirectional communication.
     """
+    raw_body = await http_request.body()
+    payload = parse_jsonrpc_body(raw_body)
+    if isinstance(payload, MCPResponse):
+        return _jsonrpc_error_response(payload)
+
+    request_plan = prepare_jsonrpc_request(payload)
+    if request_plan.error is not None or request_plan.request is None:
+        return _jsonrpc_error_response(
+            request_plan.error or invalid_request_response("Invalid request", request_id=None)
+        )
+
     server = get_mcp_server()
 
     # Ensure server is initialized
@@ -769,7 +825,6 @@ async def mcp_request(
     # Attach org/team metadata when auth via API key. Prefer any metadata attached
     # by the compatibility resolver to avoid re-validating the same key and
     # double-counting usage/audit; fall back to a direct lookup when needed.
-    # usage/audit; fall back to a direct lookup when needed.
     metadata = await _attach_api_key_metadata(auth, http_request)
 
     # Derive user id from the authenticated token user when present.
@@ -791,12 +846,11 @@ async def mcp_request(
 
     # Session lifecycle: if initialize and no session id provided, generate one and return header
     try:
-        if request.method == "initialize" and not mcp_session_id:
+        if isinstance(payload, dict) and payload.get("method") == "initialize" and not mcp_session_id:
             import uuid as _uuid
 
             mcp_session_id = _uuid.uuid4().hex
-            if response is not None:
-                response.headers["mcp-session-id"] = mcp_session_id
+            response.headers["mcp-session-id"] = mcp_session_id
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
         logger.debug("Failed to generate session ID for initialize request")
 
@@ -813,40 +867,36 @@ async def mcp_request(
         metadata["safe_config"] = safe_config
 
     resp_obj = await server.handle_http_request(
-        request, client_id=client_id, user_id=derived_user_id, metadata=metadata or None
+        request_plan.request, client_id=client_id, user_id=derived_user_id, metadata=metadata or None
     )
+    if request_plan.is_notification:
+        return Response(status_code=204)
     if resp_obj is None:
         return Response(status_code=204)
-    # Convert authorization errors to HTTP 403 with hint for HTTP clients
-    if resp_obj.error and resp_obj.error.code == -32001:
-        hint = None
-        try:
-            if request.method == "tools/call":
-                tname = (request.params or {}).get("name") if isinstance(request.params, dict) else None
-                if tname:
-                    hint = f"Permission denied. Ask an admin to grant tools.execute:{tname} or tools.execute:* to your role (Admin → Access Control)."
-        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-            hint = None
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "message": resp_obj.error.message or "Insufficient permissions",
-                "hint": hint or "Insufficient permissions for this operation",
-            },
-        )
-
-    return resp_obj
+    if request_plan.explicit_null_id:
+        restore_explicit_null_jsonrpc_ids(resp_obj, {request_plan.null_id_sentinel})
+    headers = dict(response.headers)
+    return JSONResponse(mcp_response_to_json(resp_obj), headers=headers)
 
 
-@router.post("/request/batch", response_model=list[MCPResponse])
+@router.post(
+    "/request/batch",
+    responses={
+        status.HTTP_200_OK: {
+            "description": "JSON-RPC response object or response batch.",
+        },
+        status.HTTP_204_NO_CONTENT: {
+            "description": "JSON-RPC notification batch acknowledged with no response body.",
+        },
+    },
+)
 async def mcp_request_batch(
-    requests: list[MCPRequest],
     http_request: Request,
+    response: Response,
     client_id: Optional[str] = Query(None, description="Client identifier"),
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     mcp_session_id: Optional[str] = Header(None, alias="mcp-session-id"),
     config: Optional[str] = Query(None, description="Base64-encoded JSON safe config for this request"),
-    response: Response = None,
     _guard: None = Depends(enforce_http_security),
 ):
     """
@@ -854,6 +904,17 @@ async def mcp_request_batch(
     Accepts a JSON array of JSON-RPC 2.0 requests and returns an array
     of responses. Notifications (no id) are dropped per spec.
     """
+    raw_body = await http_request.body()
+    payload = parse_jsonrpc_body(raw_body)
+    if isinstance(payload, MCPResponse):
+        return _jsonrpc_error_response(payload)
+    if not isinstance(payload, list):
+        return _jsonrpc_error_response(invalid_request_response("Invalid request: batch payload must be an array"))
+    if not payload:
+        return _jsonrpc_error_response(invalid_request_response("Invalid request: empty batch"))
+
+    batch_plan = prepare_jsonrpc_batch(payload)
+
     server = get_mcp_server()
     if not server.initialized:
         await server.initialize()
@@ -861,7 +922,6 @@ async def mcp_request_batch(
     # Attach org/team metadata when auth via API key. Prefer any metadata attached
     # by the compatibility resolver to avoid re-validating the same key and
     # double-counting usage/audit; fall back to a direct lookup when needed.
-    # usage/audit; fall back to a direct lookup when needed.
     metadata = await _attach_api_key_metadata(
         auth,
         http_request,
@@ -888,12 +948,14 @@ async def mcp_request_batch(
 
     # If any initialize request is present and no session id was provided, generate one.
     try:
-        if not mcp_session_id and any(req.method == "initialize" for req in requests):
+        if (
+            not mcp_session_id
+            and any(isinstance(item, dict) and item.get("method") == "initialize" for item in payload)
+        ):
             import uuid as _uuid
 
             mcp_session_id = _uuid.uuid4().hex
-            if response is not None:
-                response.headers["mcp-session-id"] = mcp_session_id
+            response.headers["mcp-session-id"] = mcp_session_id
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
         logger.debug("Failed to generate session ID for batch initialize")
 
@@ -909,11 +971,31 @@ async def mcp_request_batch(
     if safe_config:
         metadata["safe_config"] = safe_config
 
-    resp = await server.handle_http_batch(
-        requests, client_id=client_id, user_id=derived_user_id, metadata=metadata or None
-    )
-    # If only notifications were sent, return empty list
-    return resp or []
+    server_responses: list[MCPResponse] = []
+    if batch_plan.requests:
+        handled_responses = await server.handle_http_batch(
+            batch_plan.requests, client_id=client_id, user_id=derived_user_id, metadata=metadata or None
+        )
+        if handled_responses:
+            server_responses.extend(item for item in handled_responses if item.id is not None)
+
+    resp: list[MCPResponse] = []
+    server_response_index = 0
+    for entry_type, entry in batch_plan.entries:
+        if entry_type == "error":
+            if isinstance(entry, MCPResponse):
+                resp.append(entry)
+            continue
+        if server_response_index < len(server_responses):
+            resp.append(server_responses[server_response_index])
+            server_response_index += 1
+
+    if not resp:
+        return Response(status_code=204)
+
+    restore_explicit_null_jsonrpc_ids(resp, batch_plan.explicit_null_id_sentinels)
+    headers = dict(response.headers)
+    return JSONResponse(mcp_responses_to_json(resp), headers=headers)
 
 
 @router.get("/status", response_model=ServerStatusResponse)

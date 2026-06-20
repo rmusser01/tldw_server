@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import os
+import shutil
 from collections.abc import Collection
 from contextlib import suppress
 from typing import Any
@@ -178,6 +179,7 @@ class LiveHttpTransport:
         self,
         url: str,
         *,
+        batch_url: str | None = None,
         bearer_token: str | None = None,
         api_key: str | None = None,
         profile_id: str | None = None,
@@ -190,6 +192,7 @@ class LiveHttpTransport:
         response_max_bytes: int = _DEFAULT_RESPONSE_MAX_BYTES,
     ) -> None:
         self.url = url
+        self.batch_url = batch_url
         self.bearer_token = bearer_token
         self.api_key = api_key
         self.profile_id = profile_id
@@ -229,10 +232,11 @@ class LiveHttpTransport:
 
     async def _post(self, payload: JsonRpcPayload) -> object | None:
         attempt = 0
+        url = self._url_for_payload(payload)
         while True:
             try:
                 response = await (await self._started_client()).post(
-                    self.url,
+                    url,
                     json=payload,
                     headers=self._request_headers(),
                     timeout=self.timeout,
@@ -254,6 +258,11 @@ class LiveHttpTransport:
                     )
 
             return self._decode_response(response, payload)
+
+    def _url_for_payload(self, payload: JsonRpcPayload) -> str:
+        if isinstance(payload, list) and self.batch_url:
+            return self.batch_url
+        return self.url
 
     async def _started_client(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -664,6 +673,8 @@ class LiveWebSocketTransport:
                 "transport_malformed_websocket_frame",
                 "WebSocket transport received a non-object JSON-RPC message",
             )
+        if self._is_keepalive_message(message):
+            return
         if self._is_server_notification(message):
             return
         if not self._is_response_message(message):
@@ -813,6 +824,10 @@ class LiveWebSocketTransport:
         return isinstance(message.get("method"), str)
 
     @staticmethod
+    def _is_keepalive_message(message: dict[str, object]) -> bool:
+        return message == {"type": "ping"} or message == {"type": "pong"}
+
+    @staticmethod
     def _single_payload_method(payload: JsonRpcPayload) -> str | None:
         if isinstance(payload, dict):
             method = payload.get("method")
@@ -870,7 +885,7 @@ class StdioSubprocessTransport:
             try:
                 self._process = await asyncio.wait_for(
                     asyncio.create_subprocess_exec(
-                        self.command,
+                        self._resolved_command(),
                         *self.args,
                         cwd=self.cwd,
                         env=self._subprocess_env(),
@@ -1203,6 +1218,12 @@ class StdioSubprocessTransport:
 
     def _subprocess_env(self) -> dict[str, str]:
         return {name: os.environ[name] for name in self.env_allowlist if name in os.environ}
+
+    def _resolved_command(self) -> str:
+        """Resolve bare commands with the parent PATH before applying child env filtering."""
+        if os.path.dirname(self.command):
+            return self.command
+        return shutil.which(self.command) or self.command
 
     def _stderr_detail(self) -> str | None:
         if not self._stderr_buffer and not self._stderr_truncated:

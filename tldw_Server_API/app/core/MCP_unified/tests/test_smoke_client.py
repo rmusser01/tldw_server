@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
+import os
+import shutil
 import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -478,6 +481,117 @@ def test_smoke_cli_returns_zero_for_stdio_fixture_baseline(
     assert payload["transport"] == "StdioSubprocessTransport"  # nosec B101
 
 
+def test_smoke_cli_returns_zero_for_inprocess_real_world_scenario(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from mcp_unified.smoke.cli import main
+
+    exit_code = main(
+        [
+            "inprocess",
+            "--scenario",
+            "real-world",
+            "--artifact-dir",
+            str(tmp_path),
+            "--json-report",
+            "-",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    rendered = json.dumps(payload, sort_keys=True)
+    step_names = {step["name"] for step in payload["steps"]}
+
+    assert exit_code == 0  # nosec B101
+    assert payload["ok"] is True  # nosec B101
+    assert payload["scenario"] == "real-world"  # nosec B101
+    assert "artifact read" in step_names  # nosec B101
+    assert "artifact write" in step_names  # nosec B101
+    assert "artifact verification" in step_names  # nosec B101
+    assert str(tmp_path) not in rendered  # nosec B101
+
+
+def test_smoke_cli_removes_auto_created_real_world_artifact_dir(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp_unified.smoke import cli as smoke_cli
+
+    class _RecordingTemporaryDirectory:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.name = str(tmp_path / "auto-artifacts")
+            self.cleaned = False
+            created_dirs.append(self)
+
+        def cleanup(self) -> None:
+            self.cleaned = True
+            shutil.rmtree(self.name, ignore_errors=True)
+
+    created_dirs: list[_RecordingTemporaryDirectory] = []
+
+    monkeypatch.setattr(
+        smoke_cli.tempfile,
+        "TemporaryDirectory",
+        _RecordingTemporaryDirectory,
+    )
+
+    exit_code = smoke_cli.main(
+        [
+            "inprocess",
+            "--scenario",
+            "real-world",
+            "--json-report",
+            "-",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0  # nosec B101
+    assert payload["ok"] is True  # nosec B101
+    assert len(created_dirs) == 1  # nosec B101
+    temp_dir = created_dirs[0]
+    assert temp_dir.cleaned is True  # nosec B101
+    assert not Path(temp_dir.name).exists()  # nosec B101
+
+
+def test_smoke_cli_returns_zero_for_stdio_fixture_real_world_scenario(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from mcp_unified.smoke.cli import main
+
+    exit_code = main(
+        [
+            "stdio",
+            "--scenario",
+            "real-world",
+            "--command",
+            sys.executable,
+            "--arg",
+            str(FIXTURE_PATH),
+            "--cwd",
+            str(REPO_ROOT),
+            "--env",
+            "PYTHONPATH",
+            "--artifact-dir",
+            str(tmp_path),
+            "--json-report",
+            "-",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    rendered = json.dumps(payload, sort_keys=True)
+
+    assert exit_code == 0  # nosec B101
+    assert payload["ok"] is True  # nosec B101
+    assert payload["transport"] == "StdioSubprocessTransport"  # nosec B101
+    assert payload["scenario"] == "real-world"  # nosec B101
+    assert str(tmp_path) not in rendered  # nosec B101
+
+
 class _ExplodingItemsDict(dict):
     def __len__(self) -> int:
         return 1000
@@ -665,6 +779,24 @@ async def test_inprocess_gateway_transport_runs_ping() -> None:
 
 
 @pytest.mark.asyncio
+async def test_inprocess_gateway_transport_preserves_explicit_null_id_request() -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    transport = InProcessGatewayTransport(SmokeFixtureGatewayRuntime())
+    await transport.start()
+
+    try:
+        notification = await transport.request({"jsonrpc": "2.0", "method": "ping"})
+        explicit_null = await transport.request({"jsonrpc": "2.0", "method": "ping", "id": None})
+    finally:
+        await transport.close()
+
+    assert notification is None  # nosec B101
+    assert explicit_null == {"jsonrpc": "2.0", "result": {"pong": True}, "id": None}  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_inprocess_gateway_transport_exposes_fixture_tools_resources_and_prompts() -> None:
     from mcp_unified.smoke.client import McpSmokeClient
     from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
@@ -695,6 +827,68 @@ async def test_inprocess_gateway_transport_exposes_fixture_tools_resources_and_p
 
 
 @pytest.mark.asyncio
+async def test_fixture_artifact_tools_are_only_exposed_when_configured(
+    tmp_path: Path,
+) -> None:
+    from mcp_unified.smoke.client import McpSmokeClient
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    no_artifact_client = McpSmokeClient(
+        InProcessGatewayTransport(SmokeFixtureGatewayRuntime())
+    )
+    artifact_client = McpSmokeClient(
+        InProcessGatewayTransport(SmokeFixtureGatewayRuntime(artifact_root=tmp_path))
+    )
+
+    no_artifact_tools = await no_artifact_client.list_tools()
+    artifact_tools = await artifact_client.list_tools()
+
+    assert {tool["name"] for tool in no_artifact_tools["tools"]} == {  # nosec B101
+        "echo.search"
+    }
+    assert {tool["name"] for tool in artifact_tools["tools"]} >= {  # nosec B101
+        "artifact.read",
+        "artifact.summarize",
+        "artifact.write",
+        "artifact.stat",
+    }
+
+
+@pytest.mark.asyncio
+async def test_fixture_artifact_tool_chain_and_root_escape_protection(
+    tmp_path: Path,
+) -> None:
+    from mcp_unified.smoke.client import McpSmokeClient, McpSmokeClientError
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    (tmp_path / "input").mkdir()
+    (tmp_path / "input" / "brief.md").write_text("# Brief\n\nWrite stories.", encoding="utf-8")
+    client = McpSmokeClient(
+        InProcessGatewayTransport(SmokeFixtureGatewayRuntime(artifact_root=tmp_path))
+    )
+
+    read = await client.call_tool("artifact.read", {"path": "input/brief.md"})
+    summary = await client.call_tool(
+        "artifact.summarize",
+        {"source_path": "input/brief.md"},
+    )
+    summary_body = summary["structuredContent"]["summary_markdown"]
+    wrote = await client.call_tool(
+        "artifact.write",
+        {"path": "output/stories.md", "content": summary_body},
+    )
+    stat = await client.call_tool("artifact.stat", {"path": "output/stories.md"})
+
+    assert read["structuredContent"]["path"] == "input/brief.md"  # nosec B101
+    assert wrote["structuredContent"]["path"] == "output/stories.md"  # nosec B101
+    assert stat["structuredContent"]["exists"] is True  # nosec B101
+    with pytest.raises(McpSmokeClientError):
+        await client.call_tool("artifact.read", {"path": "../outside.md"})
+
+
+@pytest.mark.asyncio
 async def test_inprocess_fastapi_transport_uses_asgi_request_path() -> None:
     from mcp_unified.gateway.fastapi import create_gateway_app
     from mcp_unified.smoke.client import McpSmokeClient
@@ -704,6 +898,26 @@ async def test_inprocess_fastapi_transport_uses_asgi_request_path() -> None:
     app = create_gateway_app(SmokeFixtureGatewayRuntime(), prefix="/mcp")
     transport = InProcessFastApiTransport(app, request_path="/mcp/request")
     await transport.start()
+    client = McpSmokeClient(transport)
+
+    try:
+        assert await client.ping() == {"pong": True}  # nosec B101
+    finally:
+        await transport.close()
+
+
+@pytest.mark.asyncio
+async def test_smoke_gateway_fixture_app_runs_prefixed_ping() -> None:
+    from mcp_unified.smoke.client import McpSmokeClient
+    from mcp_unified.smoke.transports import InProcessFastApiTransport
+
+    fixture_path = Path(__file__).resolve().parent / "fixtures" / "smoke_gateway_app.py"
+    spec = importlib.util.spec_from_file_location("smoke_gateway_app_fixture", fixture_path)
+    assert spec is not None and spec.loader is not None  # nosec B101
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    transport = InProcessFastApiTransport(module.app, request_path="/mcp/request")
     client = McpSmokeClient(transport)
 
     try:
@@ -1148,6 +1362,54 @@ async def test_live_http_retry_replays_configured_idempotent_method() -> None:
 
 
 @pytest.mark.asyncio
+async def test_live_http_transport_uses_batch_url_for_batch_payloads() -> None:
+    from mcp_unified.smoke.transports import LiveHttpTransport
+
+    seen_paths: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads((await request.aread()).decode("utf-8"))
+        seen_paths.append(request.url.path)
+        if isinstance(payload, list):
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "jsonrpc": "2.0",
+                        "id": item["id"],
+                        "result": {"pong": True},
+                    }
+                    for item in payload
+                ],
+            )
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "result": {"pong": True},
+            },
+        )
+
+    transport = LiveHttpTransport(
+        "http://mcp.test/request",
+        batch_url="http://mcp.test/request/batch",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    await transport.request({"jsonrpc": "2.0", "id": "single", "method": "ping"})
+    await transport.request(
+        [
+            {"jsonrpc": "2.0", "id": "batch-1", "method": "ping"},
+            {"jsonrpc": "2.0", "id": "batch-2", "method": "ping"},
+        ]
+    )
+    await transport.close()
+
+    assert seen_paths == ["/request", "/request/batch"]  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_live_websocket_transport_correlates_out_of_order_responses() -> None:
     from mcp_unified.smoke.client import McpSmokeClient
     from mcp_unified.smoke.transports import LiveWebSocketTransport
@@ -1239,6 +1501,71 @@ async def test_live_websocket_transport_suppresses_server_notifications() -> Non
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         {"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_live_websocket_transport_ignores_exact_keepalive_messages() -> None:
+    from mcp_unified.smoke.client import McpSmokeClient
+    from mcp_unified.smoke.transports import LiveWebSocketTransport
+
+    received_payloads: list[dict[str, object]] = []
+
+    async def handler(websocket) -> None:
+        request = json.loads(await websocket.recv())
+        received_payloads.append(request)
+        await websocket.send(json.dumps({"type": "ping"}))
+        await websocket.send(json.dumps({"type": "pong"}))
+        await websocket.send(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request["id"],
+                    "result": {"pong": True},
+                }
+            )
+        )
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        transport = LiveWebSocketTransport(f"ws://127.0.0.1:{port}/mcp")
+        client = McpSmokeClient(transport)
+
+        try:
+            result = await client.ping()
+        finally:
+            await transport.close()
+
+    assert result == {"pong": True}  # nosec B101
+    assert received_payloads == [  # nosec B101
+        {"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_live_websocket_transport_rejects_keepalive_lookalikes() -> None:
+    from mcp_unified.smoke.transports import (
+        LiveWebSocketTransport,
+        McpSmokeTransportError,
+    )
+
+    async def handler(websocket) -> None:
+        await websocket.recv()
+        await websocket.send(json.dumps({"type": "ping", "id": "x"}))
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        transport = LiveWebSocketTransport(f"ws://127.0.0.1:{port}/mcp")
+
+        try:
+            with pytest.raises(
+                McpSmokeTransportError,
+                match="transport_malformed_websocket_frame",
+            ):
+                await transport.request(
+                    {"jsonrpc": "2.0", "id": "smoke-1", "method": "ping"}
+                )
+        finally:
+            await transport.close()
 
 
 @pytest.mark.asyncio
@@ -1447,6 +1774,34 @@ async def test_stdio_subprocess_transport_exchanges_object_payloads() -> None:
     assert initialized["serverInfo"]["name"] == "smoke-stdio-fixture"  # nosec B101
     assert ping == {"pong": True}  # nosec B101
     assert tools["tools"][0]["name"] == "echo.search"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_stdio_subprocess_transport_resolves_command_from_parent_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp_unified.smoke.client import McpSmokeClient
+    from mcp_unified.smoke.transports import StdioSubprocessTransport
+
+    executable = Path(sys.executable)
+    command_name = executable.name
+    existing_path = os.environ.get("PATH", "")
+    monkeypatch.setenv("PATH", f"{executable.parent}{os.pathsep}{existing_path}")
+
+    transport = StdioSubprocessTransport(
+        command=command_name,
+        args=[str(FIXTURE_PATH)],
+        cwd=str(REPO_ROOT),
+        env_allowlist=["PYTHONPATH"],
+    )
+    client = McpSmokeClient(transport)
+
+    try:
+        initialized = await client.initialize()
+    finally:
+        await transport.close()
+
+    assert initialized["serverInfo"]["name"] == "smoke-stdio-fixture"  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -1732,6 +2087,128 @@ async def test_baseline_scenario_passes_in_best_effort_mode() -> None:
         "malformed request",
         "policy denial",
     ]
+
+
+@pytest.mark.asyncio
+async def test_baseline_scenario_accepts_ping_metadata() -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.scenarios import run_baseline_scenario
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    class _PingMetadataTransport(InProcessGatewayTransport):
+        async def request(
+            self,
+            payload: dict[str, object] | list[object],
+        ) -> object | None:
+            response = await super().request(payload)
+            if isinstance(response, list):
+                for item in response:
+                    self._add_ping_metadata(item)
+                return response
+            self._add_ping_metadata(response)
+            return response
+
+        @staticmethod
+        def _add_ping_metadata(response: object | None) -> None:
+            if not isinstance(response, dict):
+                return
+            result = response.get("result")
+            if isinstance(result, dict) and result.get("pong") is True:
+                result["timestamp"] = "2026-06-20T00:00:00Z"
+
+    report = await run_baseline_scenario(
+        _PingMetadataTransport(SmokeFixtureGatewayRuntime(include_denied_tool=True)),
+        mode="best_effort",
+    )
+
+    assert report.ok is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_baseline_scenario_accepts_mounted_unknown_tool_error() -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.scenarios import run_baseline_scenario
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    class _MountedUnknownToolTransport(InProcessGatewayTransport):
+        async def request(
+            self,
+            payload: dict[str, object] | list[object],
+        ) -> object | None:
+            if (
+                isinstance(payload, dict)
+                and payload.get("id") == "smoke-unknown-tool"
+                and payload.get("method") == "tools/call"
+            ):
+                return {
+                    "jsonrpc": "2.0",
+                    "id": "smoke-unknown-tool",
+                    "error": {
+                        "code": -32602,
+                        "message": "Unknown tool: smoke.missing_tool",
+                    },
+                }
+            return await super().request(payload)
+
+    report = await run_baseline_scenario(
+        _MountedUnknownToolTransport(
+            SmokeFixtureGatewayRuntime(include_denied_tool=True)
+        ),
+        mode="best_effort",
+    )
+
+    assert report.ok is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_baseline_scenario_rejects_generic_invalid_params_for_unknown_tool() -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.scenarios import run_baseline_scenario
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    class _GenericInvalidParamsTransport(InProcessGatewayTransport):
+        async def request(
+            self,
+            payload: dict[str, object] | list[object],
+        ) -> object | None:
+            if isinstance(payload, dict) and payload.get("id") == "smoke-unknown-tool":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": "smoke-unknown-tool",
+                    "error": {"code": -32602, "message": "Invalid params"},
+                }
+            return await super().request(payload)
+
+    report = await run_baseline_scenario(
+        _GenericInvalidParamsTransport(
+            SmokeFixtureGatewayRuntime(include_denied_tool=True)
+        ),
+        mode="best_effort",
+    )
+    unknown_tool_step = next(
+        step for step in report.steps if step.name == "tools/call:unknown"
+    )
+
+    assert report.ok is False  # nosec B101
+    assert unknown_tool_step.reason_code == "unknown_tool_not_rejected"  # nosec B101
+
+
+def test_unknown_tool_relaxation_does_not_relax_unknown_method_errors() -> None:
+    from mcp_unified.smoke import scenarios
+
+    outcome = scenarios._expect_jsonrpc_error(  # nosec B101
+        {
+            "jsonrpc": "2.0",
+            "id": "smoke-unknown-method",
+            "error": {"code": -32602, "message": "Unknown tool: smoke.missing_tool"},
+        },
+        expected_id="smoke-unknown-method",
+        expected_code=-32601,
+        reason_code="unknown_method_not_rejected",
+    )
+
+    assert outcome.ok is False  # nosec B101
+    assert outcome.reason_code == "unknown_method_not_rejected"  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -2197,3 +2674,386 @@ async def test_baseline_scenario_rejects_malformed_error_envelopes(
     assert report.ok is False  # nosec B101
     assert target_step.ok is False  # nosec B101
     assert target_step.reason_code == "malformed_error_envelope"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_real_world_scenario_strict_fails_when_artifact_tools_are_missing(
+    tmp_path: Path,
+) -> None:
+    from mcp_unified.smoke.scenarios import run_real_world_scenario
+
+    class _NoArtifactToolsTransport:
+        async def start(self) -> None:
+            return None
+
+        async def request(
+            self,
+            payload: dict[str, object] | list[object],
+        ) -> object | None:
+            assert isinstance(payload, dict)  # nosec B101
+            method = payload.get("method")
+            if method == "initialize":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {
+                        "capabilities": {"tools": {"available": True}},
+                        "serverInfo": {"name": "unit", "version": "0"},
+                    },
+                }
+            if method == "tools/list":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    "result": {"tools": []},
+                }
+            return {"jsonrpc": "2.0", "id": payload["id"], "result": {"pong": True}}
+
+        async def notify(self, payload: dict[str, object]) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    report = await run_real_world_scenario(
+        _NoArtifactToolsTransport(),
+        mode="strict",
+        artifact_dir=tmp_path,
+    )
+    read_step = next(step for step in report.steps if step.name == "artifact read")
+
+    assert report.ok is False  # nosec B101
+    assert read_step.ok is False  # nosec B101
+    assert read_step.reason_code == "required_tool_unavailable"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_real_world_scenario_strict_fails_missing_requested_llm_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.scenarios import run_real_world_scenario
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    monkeypatch.delenv("TLDW_REAL_LLM_TEST_KEY", raising=False)
+    runtime = SmokeFixtureGatewayRuntime(artifact_root=tmp_path)
+
+    report = await run_real_world_scenario(
+        InProcessGatewayTransport(runtime),
+        mode="strict",
+        artifact_dir=tmp_path,
+        real_llm_provider="openai-compatible",
+        real_llm_api_key_env="TLDW_REAL_LLM_TEST_KEY",
+    )
+    llm_step = next(step for step in report.steps if step.name == "real LLM")
+
+    assert report.ok is False  # nosec B101
+    assert llm_step.ok is False  # nosec B101
+    assert llm_step.reason_code == "real_llm_env_missing"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_real_world_scenario_best_effort_skips_missing_requested_llm_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.scenarios import run_real_world_scenario
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    monkeypatch.delenv("TLDW_REAL_LLM_TEST_KEY", raising=False)
+    runtime = SmokeFixtureGatewayRuntime(artifact_root=tmp_path)
+
+    report = await run_real_world_scenario(
+        InProcessGatewayTransport(runtime),
+        mode="best_effort",
+        artifact_dir=tmp_path,
+        real_llm_provider="openai-compatible",
+        real_llm_api_key_env="TLDW_REAL_LLM_TEST_KEY",
+    )
+    llm_step = next(step for step in report.steps if step.name == "real LLM")
+
+    assert report.ok is True  # nosec B101
+    assert llm_step.ok is True  # nosec B101
+    assert llm_step.reason_code == "real_llm_env_missing"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_real_world_scenario_runs_with_live_http_transport(
+    tmp_path: Path,
+) -> None:
+    from mcp_unified.smoke.scenarios import run_real_world_scenario
+    from mcp_unified.smoke.transports import LiveHttpTransport
+
+    fixture = _RealWorldJsonRpcFixture(tmp_path)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        response = await fixture.handle(json.loads(request.content))
+        if response is None:
+            return httpx.Response(204)
+        return httpx.Response(200, json=response)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        report = await run_real_world_scenario(
+            LiveHttpTransport("https://mcp.test/request", http_client=client),
+            mode="strict",
+            artifact_dir=tmp_path,
+        )
+
+    assert report.ok is True  # nosec B101
+    assert fixture.methods[:3] == [  # nosec B101
+        "initialize",
+        "notifications/initialized",
+        "ping",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_real_world_scenario_runs_with_live_websocket_transport(
+    tmp_path: Path,
+) -> None:
+    from mcp_unified.smoke.scenarios import run_real_world_scenario
+    from mcp_unified.smoke.transports import LiveWebSocketTransport
+
+    fixture = _RealWorldJsonRpcFixture(tmp_path)
+
+    async def handler(websocket) -> None:
+        async for raw in websocket:
+            response = await fixture.handle(json.loads(raw))
+            if response is not None:
+                await websocket.send(json.dumps(response))
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        report = await run_real_world_scenario(
+            LiveWebSocketTransport(f"ws://127.0.0.1:{port}/mcp"),
+            mode="strict",
+            artifact_dir=tmp_path,
+        )
+
+    assert report.ok is True  # nosec B101
+    assert "artifact.write" in fixture.called_tools  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_real_world_scenario_real_llm_step_uses_mocked_openai_compatible_api(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.reporting import report_to_json
+    from mcp_unified.smoke.scenarios import run_real_world_scenario
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    secret = "test-openai-compatible-secret"
+    monkeypatch.setenv("TLDW_REAL_LLM_TEST_KEY", secret)
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.headers["Authorization"] == f"Bearer {secret}"  # nosec B101
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"status":"ok","note":"artifact inspected"}'
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    runtime = SmokeFixtureGatewayRuntime(artifact_root=tmp_path)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as llm_client:
+        report = await run_real_world_scenario(
+            InProcessGatewayTransport(runtime),
+            mode="strict",
+            artifact_dir=tmp_path,
+            real_llm_provider="openai-compatible",
+            real_llm_api_key_env="TLDW_REAL_LLM_TEST_KEY",
+            real_llm_base_url="https://llm.test/v1",
+            real_llm_model="smoke-model",
+            real_llm_http_client=llm_client,
+        )
+
+    payload = report_to_json(report)
+    rendered = json.dumps(payload, sort_keys=True)
+    llm_step = next(step for step in payload["steps"] if step["name"] == "real LLM")
+
+    assert report.ok is True  # nosec B101
+    assert len(requests) == 1  # nosec B101
+    assert str(requests[0].url) == "https://llm.test/v1/chat/completions"  # nosec B101
+    assert llm_step["status"] == "passed"  # nosec B101
+    assert llm_step["result_summary"]["provider"] == "openai-compatible"  # nosec B101
+    assert llm_step["result_summary"]["model"] == "smoke-model"  # nosec B101
+    assert secret not in rendered  # nosec B101
+    assert "artifact inspected" not in rendered  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_real_llm_response_size_bound_is_enforced_before_json_decode() -> None:
+    from mcp_unified.smoke.real_llm import call_openai_compatible
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"x" * (64 * 1024 + 1))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ValueError, match="real LLM response exceeded size bound"):
+            await call_openai_compatible(
+                api_key="test-secret",
+                prompt="Summarize the artifact.",
+                base_url="https://llm.test/v1",
+                http_client=client,
+            )
+
+
+@pytest.mark.asyncio
+async def test_real_world_scenario_does_not_reprocess_inserted_template_tokens(
+    tmp_path: Path,
+) -> None:
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.scenarios import run_real_world_scenario
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    class _PlaceholderSummaryRuntime(SmokeFixtureGatewayRuntime):
+        def _artifact_summarize(self, arguments: dict[str, object]) -> dict[str, object]:
+            result = super()._artifact_summarize(arguments)
+            placeholder_summary = "Derived summary keeps {artifact_read_text}"
+            content = result["content"]
+            assert isinstance(content, list)  # nosec B101
+            content[0]["text"] = placeholder_summary
+            structured = result["structuredContent"]
+            assert isinstance(structured, dict)  # nosec B101
+            structured["summary_markdown"] = placeholder_summary
+            return result
+
+    report = await run_real_world_scenario(
+        InProcessGatewayTransport(_PlaceholderSummaryRuntime(artifact_root=tmp_path)),
+        mode="strict",
+        artifact_dir=tmp_path,
+    )
+    output = (tmp_path / "output" / "user-stories.md").read_text(encoding="utf-8")
+
+    assert report.ok is True  # nosec B101
+    assert output == "Derived summary keeps {artifact_read_text}"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_real_world_scenario_removes_auto_created_artifact_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp_unified.smoke import scenarios
+    from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+    from mcp_unified.smoke.transports import InProcessGatewayTransport
+
+    class _RecordingTemporaryDirectory:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.name = str(tmp_path / "scenario-auto-artifacts")
+            self.cleaned = False
+            created_dirs.append(self)
+
+        def cleanup(self) -> None:
+            self.cleaned = True
+            shutil.rmtree(self.name, ignore_errors=True)
+
+    created_dirs: list[_RecordingTemporaryDirectory] = []
+
+    monkeypatch.setattr(
+        scenarios.tempfile,
+        "TemporaryDirectory",
+        _RecordingTemporaryDirectory,
+    )
+
+    report = await scenarios.run_real_world_scenario(
+        InProcessGatewayTransport(SmokeFixtureGatewayRuntime()),
+        mode="best_effort",
+    )
+
+    assert report.ok is True  # nosec B101
+    assert len(created_dirs) == 1  # nosec B101
+    temp_dir = created_dirs[0]
+    assert temp_dir.cleaned is True  # nosec B101
+    assert not Path(temp_dir.name).exists()  # nosec B101
+
+
+class _RealWorldJsonRpcFixture:
+    def __init__(self, artifact_root: Path) -> None:
+        from mcp_unified.smoke.fixtures import SmokeFixtureGatewayRuntime
+
+        self.runtime = SmokeFixtureGatewayRuntime(artifact_root=artifact_root)
+        self.methods: list[str] = []
+        self.called_tools: list[str] = []
+
+    async def handle(self, payload: object) -> object | None:
+        if isinstance(payload, list):
+            responses = [
+                response
+                for item in payload
+                if (response := await self.handle(item)) is not None
+            ]
+            return responses or None
+        if not isinstance(payload, dict):
+            return self._error(None, -32600, "Invalid Request")
+        method = payload.get("method")
+        request_id = payload.get("id")
+        if not isinstance(method, str):
+            return self._error(request_id, -32600, "Invalid Request")
+        self.methods.append(method)
+        if "id" not in payload:
+            return None
+        try:
+            result = await self._result(method, payload.get("params"))
+        except NotImplementedError:
+            return self._error(request_id, -32601, "Method not found")
+        return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+    async def _result(self, method: str, params: object) -> object:
+        if method == "initialize":
+            return {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {
+                    "tools": {"available": True},
+                    "resources": {"available": True},
+                    "prompts": {"available": True},
+                },
+                "serverInfo": {"name": "real-world-fixture", "version": "0"},
+            }
+        if method == "ping":
+            return {"pong": True}
+        if method == "tools/list":
+            return {"tools": await self.runtime.list_tools(None)}
+        if method == "tools/call":
+            params_dict = params if isinstance(params, dict) else {}
+            tool_name = params_dict.get("name")
+            arguments = params_dict.get("arguments")
+            if not isinstance(tool_name, str):
+                raise NotImplementedError
+            if not isinstance(arguments, dict):
+                arguments = {}
+            self.called_tools.append(tool_name)
+            return await self.runtime.call_tool(tool_name, arguments, None)
+        if method == "prompts/list":
+            return {"prompts": await self.runtime.list_prompts(None)}
+        if method == "prompts/get":
+            params_dict = params if isinstance(params, dict) else {}
+            name = params_dict.get("name")
+            arguments = params_dict.get("arguments")
+            if not isinstance(name, str):
+                raise NotImplementedError
+            if not isinstance(arguments, dict):
+                arguments = {}
+            return await self.runtime.get_prompt(name, arguments, None)
+        raise NotImplementedError
+
+    @staticmethod
+    def _error(request_id: object, code: int, message: str) -> dict[str, object]:
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {"code": code, "message": message},
+        }

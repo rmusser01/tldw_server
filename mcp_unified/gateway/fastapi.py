@@ -568,12 +568,14 @@ def _websocket_message_payload(message: dict[str, Any]) -> str | bytes | None:
     return None
 
 
-def _to_http_response(response: GatewayJSONRPCResult) -> GatewayJSONRPCResponse | list[GatewayJSONRPCResponse] | Response:
+def _to_http_response(response: GatewayJSONRPCResult) -> Response:
     """Convert a transport-neutral gateway response into FastAPI's HTTP contract."""
 
     if isinstance(response, GatewayNoResponse):
         return Response(status_code=204)
-    return response
+    if isinstance(response, list):
+        return JSONResponse(content=[_response_to_json(item) for item in response])
+    return JSONResponse(content=_response_to_json(response))
 
 
 def _profile_management_error_response(exc: GatewayProfileManagementError) -> JSONResponse:
@@ -1711,7 +1713,7 @@ def create_gateway_router(
 
         payload = await _parse_json_body(request)
         if isinstance(payload, _GATEWAY_RESPONSE_TYPES):
-            return payload
+            return _to_http_response(payload)
         response = await handle_jsonrpc(
             runtime,
             payload,

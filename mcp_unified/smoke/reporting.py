@@ -16,7 +16,10 @@ MAX_DEPTH = 5
 _SKIP_REASON_CODES = frozenset(
     {
         "capability_unavailable",
+        "artifact_input_unavailable",
         "not_configured",
+        "real_llm_env_missing",
+        "required_tool_unavailable",
         "safe_tool_unavailable",
     }
 )

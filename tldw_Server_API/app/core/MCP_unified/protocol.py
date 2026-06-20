@@ -26,8 +26,10 @@ from pydantic import BaseModel, Field
 
 try:
     from pydantic import field_validator, model_validator  # v2
+    _PYDANTIC_V2 = True
 except ImportError:  # Fallback for v1
     from pydantic import validator as field_validator  # type: ignore
+    _PYDANTIC_V2 = False
     try:
         from pydantic import root_validator as model_validator  # type: ignore
     except ImportError:
@@ -171,6 +173,28 @@ def _is_unexpected_keyword_type_error(exc: TypeError, keyword: str) -> bool:
     )
 
 
+def _jsonrpc_id_is_valid(value: Any) -> bool:
+    """Return True when a value is a valid JSON-RPC request id."""
+
+    return value is None or (not isinstance(value, bool) and isinstance(value, (str, int)))
+
+
+def _safe_jsonrpc_id(value: Any) -> str | int | None:
+    """Return a response-safe JSON-RPC id, normalizing invalid ids to null."""
+
+    if _jsonrpc_id_is_valid(value):
+        return value
+    return None
+
+
+def _validate_jsonrpc_id(value: Any) -> Any:
+    """Reject JSON-RPC ids before Pydantic can coerce booleans to integers."""
+
+    if not _jsonrpc_id_is_valid(value):
+        raise ValueError("JSON-RPC id must be a string, integer, or null")
+    return value
+
+
 async def _no_redis_client_factory(**_kwargs: Any) -> None:
     """Fallback Redis factory used when embedders do not provide Redis support."""
     return None
@@ -182,6 +206,19 @@ class MCPRequest(BaseModel):
     method: str = Field(..., min_length=1, max_length=100)
     params: Optional[dict[str, Any]] = None
     id: Optional[Union[str, int]] = None
+
+    if _PYDANTIC_V2:
+        @field_validator("id", mode="before")
+        @classmethod
+        def validate_id(cls, v):
+            """Validate JSON-RPC id before type coercion."""
+            return _validate_jsonrpc_id(v)
+    else:
+        @field_validator("id", pre=True)
+        @classmethod
+        def validate_id(cls, v):
+            """Validate JSON-RPC id before type coercion."""
+            return _validate_jsonrpc_id(v)
 
     @field_validator("method")
     @classmethod
@@ -199,6 +236,19 @@ class MCPRequest(BaseModel):
         if v is not None and not isinstance(v, dict):
             raise ValueError("Params must be a dictionary")
         return v
+
+
+def _mcp_request_has_id(request: Any) -> bool:
+    """Return whether a raw or modeled MCP request explicitly included an id."""
+
+    if isinstance(request, dict):
+        return "id" in request
+    if isinstance(request, MCPRequest):
+        fields_set = getattr(request, "model_fields_set", None)
+        if fields_set is None:
+            fields_set = getattr(request, "__fields_set__", set())
+        return "id" in fields_set
+    return False
 
 
 class MCPError(BaseModel):
@@ -255,6 +305,80 @@ class RequestContext:
             client_id=client_id,
             session_id=session_id,
         )
+
+
+class _TrustedCompatClaimsSentinel:
+    """Object-identity marker for server-created mounted auth compatibility claims."""
+
+    def __repr__(self) -> str:
+        return "<trusted_mcp_compat_auth>"
+
+
+_TRUSTED_COMPAT_CLAIMS_SENTINEL = _TrustedCompatClaimsSentinel()
+_TRUSTED_COMPAT_CLAIMS_SENTINEL_KEY = "_server_auth_compat_sentinel"
+_TRUSTED_COMPAT_AUTH_VIA = frozenset({"single_user_api_key", "single_user_test_api_key"})
+_TRUSTED_COMPAT_CLAIMS_SOURCES = frozenset({"mounted_http", "mounted_ws"})
+
+
+def _metadata_claim_values(value: Any) -> tuple[Any, ...]:
+    """Return metadata claim values without iterating strings character-by-character."""
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return tuple(value)
+    return ()
+
+
+def _trusted_compat_claims_metadata(*, auth_via: str, compat_claims_source: str) -> dict[str, Any]:
+    """Return server-only metadata for mounted single-user compatibility claims."""
+    if auth_via not in _TRUSTED_COMPAT_AUTH_VIA:
+        raise ValueError("Unsupported compatibility auth source")
+    if compat_claims_source not in _TRUSTED_COMPAT_CLAIMS_SOURCES:
+        raise ValueError("Unsupported compatibility claims source")
+    return {
+        "auth_via": auth_via,
+        "trusted_auth_claims": True,
+        "compat_claims_source": compat_claims_source,
+        _TRUSTED_COMPAT_CLAIMS_SENTINEL_KEY: _TRUSTED_COMPAT_CLAIMS_SENTINEL,
+    }
+
+
+def _metadata_has_admin_claims(metadata: dict[str, Any]) -> bool:
+    """Return True when trusted metadata carries wildcard or admin claims."""
+    roles = {
+        str(role).strip().lower()
+        for role in _metadata_claim_values(metadata.get("roles"))
+        if str(role).strip()
+    }
+    permissions = {
+        str(permission).strip().lower()
+        for permission in _metadata_claim_values(metadata.get("permissions"))
+        if str(permission).strip()
+    }
+    return "admin" in roles or "*" in permissions
+
+
+def _has_trusted_compat_claims(context: RequestContext) -> bool:
+    """Return True only for server-created mounted compatibility auth claims."""
+    metadata = getattr(context, "metadata", None)
+    if not isinstance(metadata, dict):
+        return False
+    server_auth_keys = {
+        key
+        for key in metadata
+        if isinstance(key, str) and key.startswith("_server_auth_")
+    }
+    if server_auth_keys != {_TRUSTED_COMPAT_CLAIMS_SENTINEL_KEY}:
+        return False
+    if metadata.get(_TRUSTED_COMPAT_CLAIMS_SENTINEL_KEY) is not _TRUSTED_COMPAT_CLAIMS_SENTINEL:
+        return False
+    if metadata.get("trusted_auth_claims") is not True:
+        return False
+    if metadata.get("auth_via") not in _TRUSTED_COMPAT_AUTH_VIA:
+        return False
+    if metadata.get("compat_claims_source") not in _TRUSTED_COMPAT_CLAIMS_SOURCES:
+        return False
+    return _metadata_has_admin_claims(metadata)
 
 
 @dataclass(frozen=True, slots=True)
@@ -633,6 +757,7 @@ class MCPProtocol:
         # a shutdown/re-init cycle is picked up automatically.
         self.handlers: dict[str, Callable] = {
             "initialize": self._handle_initialize,
+            "notifications/initialized": self._handle_initialized_notification,
             "ping": self._handle_ping,
             "tools/list": self._handle_tools_list,
             "tools/call": self._handle_tools_call,
@@ -1096,11 +1221,18 @@ class MCPProtocol:
 
     async def _has_module_permission(self, context: RequestContext, module_id: Optional[str]) -> bool:
         module_id_norm = module_id or ""
+        if _has_trusted_compat_claims(context):
+            return self._scope_allows(context, Resource.MODULE.value, module_id_norm or None)
         if not await self._rbac_check(context.user_id, Resource.MODULE, Action.READ, module_id_norm):
             return False
         return self._scope_allows(context, Resource.MODULE.value, module_id_norm or None)
 
     async def _has_tool_permission(self, context: RequestContext, tool_name: str, *, is_write: Optional[bool] = None) -> bool:
+        if _has_trusted_compat_claims(context):
+            for auth_name in self._tool_authorization_names(tool_name):
+                if self._scope_allows(context, Resource.TOOL.value, auth_name):
+                    return self._api_key_allows(context, is_write=is_write)
+            return False
         has_named_permission = False
         for auth_name in self._tool_authorization_names(tool_name):
             if not await self._rbac_check(context.user_id, Resource.TOOL, Action.EXECUTE, auth_name):
@@ -1931,24 +2063,38 @@ class MCPProtocol:
                 except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as e:
                     # If parsing fails at top-level, try to include an error response for that item
                     try:
-                        req_id = item.get("id") if isinstance(item, dict) else None
+                        req_id = _safe_jsonrpc_id(item.get("id")) if isinstance(item, dict) else None
                     except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
                         req_id = None
                     responses.append(self._error_response(ErrorCode.INVALID_REQUEST, str(e), req_id))
             # Per JSON-RPC, if the batch is empty or only notifications, return no response
             return responses if responses else None
 
+        raw_request_has_id = _mcp_request_has_id(request)
+
         # Parse single request if dict
         if isinstance(request, dict):
             try:
                 request = MCPRequest(**request)
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as e:
-                req_id = request.get("id") if isinstance(request, dict) else None
+                req_id = _safe_jsonrpc_id(request.get("id")) if isinstance(request, dict) else None
                 return self._error_response(
                     ErrorCode.INVALID_REQUEST,
                     f"Invalid request format: {str(e)}",
                     req_id
                 )
+
+        is_notification = isinstance(request, MCPRequest) and request.id is None and not raw_request_has_id
+
+        def pre_dispatch_error(
+            code: ErrorCode,
+            message: str,
+            request_id: Optional[Union[str, int]],
+            data: Optional[Any] = None,
+        ) -> MCPResponse | None:
+            if is_notification:
+                return None
+            return self._error_response(code, message, request_id, data=data)
 
         # Create context if not provided
         if context is None:
@@ -1988,7 +2134,7 @@ class MCPProtocol:
 
             # Validate JSON-RPC version
             if request.jsonrpc != "2.0":
-                return self._error_response(
+                return pre_dispatch_error(
                     ErrorCode.INVALID_REQUEST,
                     "Invalid JSON-RPC version",
                     request.id
@@ -2008,7 +2154,7 @@ class MCPProtocol:
                             start_ts=start_ts,
                             requested_tool_name=_name,
                         )
-                        return self._error_response(
+                        return pre_dispatch_error(
                             ErrorCode.INVALID_PARAMS,
                             "Tool name is required",
                             request.id,
@@ -2023,7 +2169,7 @@ class MCPProtocol:
                             start_ts=start_ts,
                             requested_tool_name=_name,
                         )
-                        return self._error_response(
+                        return pre_dispatch_error(
                             ErrorCode.INVALID_PARAMS,
                             "Invalid tool name",
                             request.id,
@@ -2038,7 +2184,7 @@ class MCPProtocol:
                             start_ts=start_ts,
                             requested_tool_name=_name,
                         )
-                        return self._error_response(
+                        return pre_dispatch_error(
                             ErrorCode.INTERNAL_ERROR,
                             "Invalid tool name",
                             request.id,
@@ -2052,12 +2198,12 @@ class MCPProtocol:
                     reason_code="invalid_tool_name",
                     start_ts=start_ts,
                 )
-                return self._error_response(ErrorCode.INVALID_PARAMS, "Invalid tool name", request.id)
+                return pre_dispatch_error(ErrorCode.INVALID_PARAMS, "Invalid tool name", request.id)
 
             # Find handler
             handler = self.handlers.get(request.method)
             if not handler:
-                return self._error_response(
+                return pre_dispatch_error(
                     ErrorCode.METHOD_NOT_FOUND,
                     f"Method not found: {request.method}",
                     request.id
@@ -2087,7 +2233,7 @@ class MCPProtocol:
                     reason_code="permission_denied",
                     start_ts=start_ts,
                 )
-                return self._error_response(
+                return pre_dispatch_error(
                     ErrorCode.AUTHORIZATION_ERROR,
                     "Insufficient permissions",
                     request.id,
@@ -2100,7 +2246,7 @@ class MCPProtocol:
                 "mcp.request",
                 {
                     "mcp.method": request.method,
-                    "mcp.request_id": str(request.id) if request.id is not None else "notification",
+                    "mcp.request_id": str(request.id) if request.id is not None else ("notification" if is_notification else "null"),
                     "mcp.user_id": str(context.user_id or ""),
                     "mcp.client_id": str(context.client_id or ""),
                     "mcp.session_id": str(context.session_id or ""),
@@ -2136,7 +2282,7 @@ class MCPProtocol:
                 self.metrics.record_request(method=request.method, duration=elapsed, status="success")
 
             # Notification: do not return a response
-            if request.id is None:
+            if is_notification:
                 return None
             # Return success response for standard requests
             return MCPResponse(result=result, id=request.id)
@@ -2159,12 +2305,12 @@ class MCPProtocol:
             raise
         except InvalidParamsException as ive:
             # Notification: do not return a response
-            if isinstance(request, MCPRequest) and request.id is None:
+            if is_notification:
                 return None
             return self._error_response(ErrorCode.INVALID_PARAMS, str(ive), request.id if isinstance(request, MCPRequest) else None)
         except PermissionError as perr:
             # Map policy/permission errors to AUTHORIZATION_ERROR
-            if isinstance(request, MCPRequest) and request.id is None:
+            if is_notification:
                 return None
             # Redact any secrets in message (defensive)
             msg = self._mask_secrets(str(perr))
@@ -2200,7 +2346,7 @@ class MCPProtocol:
                 pass
 
             # Notification: do not return a response
-            if isinstance(request, MCPRequest) and request.id is None:
+            if is_notification:
                 return None
             # Return error response with reduced leakage when not in debug mode
             try:
@@ -2230,7 +2376,7 @@ class MCPProtocol:
             with contextlib.suppress(_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS):
                 elapsed = max(0.0, time.time() - start_ts)
                 self.metrics.record_request(method=request.method, duration=elapsed, status="failure")
-            if isinstance(request, MCPRequest) and request.id is None:
+            if is_notification:
                 return None
             return self._error_response(
                 ErrorCode.INTERNAL_ERROR,
@@ -2352,7 +2498,7 @@ class MCPProtocol:
     ) -> bool:
         """Check if user is authorized for method"""
         # Public methods that don't require auth
-        public_methods = ["initialize", "ping"]
+        public_methods = ["initialize", "notifications/initialized", "ping"]
         method = request.method
         if method in public_methods:
             return True
@@ -2403,7 +2549,24 @@ class MCPProtocol:
                         resource_id = name
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
                 resource_id = None
-            if inspect.iscoroutinefunction(fn):
+            trusted_compat_allowed = False
+            if _has_trusted_compat_claims(context):
+                if resource == Resource.TOOL and action == Action.EXECUTE and isinstance(resource_id, str):
+                    trusted_compat_allowed = await self._has_tool_permission(context, resource_id)
+                elif resource == Resource.MODULE:
+                    trusted_compat_allowed = await self._has_module_permission(
+                        context,
+                        resource_id if isinstance(resource_id, str) else None,
+                    )
+                elif resource in {Resource.RESOURCE, Resource.PROMPT}:
+                    trusted_compat_allowed = self._scope_allows(
+                        context,
+                        resource.value,
+                        resource_id if isinstance(resource_id, str) else None,
+                    )
+            if trusted_compat_allowed:
+                allowed = True
+            elif inspect.iscoroutinefunction(fn):
                 allowed = await fn(context.user_id, resource, action, resource_id)
             else:
                 allowed = fn(context.user_id, resource, action, resource_id)
@@ -2471,6 +2634,15 @@ class MCPProtocol:
                 "version": "3.0.0"
             }
         }
+
+    async def _handle_initialized_notification(
+        self,
+        params: dict[str, Any],
+        context: RequestContext,
+    ) -> None:
+        """Accept the MCP initialized notification without side effects."""
+
+        return None
 
     async def _handle_ping(
         self,
