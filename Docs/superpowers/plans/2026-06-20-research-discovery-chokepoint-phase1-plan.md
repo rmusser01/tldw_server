@@ -1622,6 +1622,8 @@ git commit -m "docs: finalize research discovery implementation tracking"
 
 If Task 7 included code fixes, include those files and use a `fix:` commit message describing the defect.
 
+Post-review fix: final review found that free-text query/filter fields could carry embedded unsafe URL substrings even when URL-only metadata values were already sanitized. Commit `a348dc9e51` adds service-side validation that rejects unsafe URL-bearing query text and sanitized filter text before provider execution or snapshot persistence, plus endpoint error mapping for the new validation codes. Regression coverage verifies the router is not called for unsafe query/filter inputs.
+
 ## Completion Checklist
 
 - [x] Phase 1 endpoints are available at `GET /api/v1/research/sources` and `POST /api/v1/research/discovery/search`.
