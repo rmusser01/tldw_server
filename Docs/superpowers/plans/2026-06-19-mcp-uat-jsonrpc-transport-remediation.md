@@ -686,7 +686,7 @@ git commit -m "fix: align MCP smoke harness with strict transports"
 - No new files expected.
 - Run focused tests against all changed surfaces.
 
-- [ ] **Step 1: Run mounted JSON-RPC focused tests**
+- [x] **Step 1: Run mounted JSON-RPC focused tests**
 
 Run:
 
@@ -705,7 +705,9 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run standalone gateway and smoke tests**
+Result: PASS, `74 passed, 4 warnings`.
+
+- [x] **Step 2: Run standalone gateway and smoke tests**
 
 Run:
 
@@ -719,7 +721,11 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run auth and policy tests**
+Result: PASS under loopback-enabled execution, `280 passed, 6 warnings`.
+The first sandboxed run failed only because five live WebSocket tests could not
+bind `127.0.0.1`.
+
+- [x] **Step 3: Run auth and policy tests**
 
 Run:
 
@@ -734,7 +740,9 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit any test-only stabilization if needed**
+Result: PASS, `23 passed, 4 warnings`.
+
+- [x] **Step 4: Commit any test-only stabilization if needed**
 
 If tests require only fixture/test stabilization after implementation commits:
 
@@ -744,6 +752,11 @@ git commit -m "test: stabilize MCP UAT regression coverage"
 ```
 
 If no changes are needed, skip this commit and record the skip in the PR notes.
+
+Result: test-only stabilization was needed because the mounted WebSocket
+compatibility test helper mutated singleton server state directly. It now uses
+`monkeypatch` so subsequent mounted HTTP/batch tests are restored to their
+normal protocol instance.
 
 ## Task 9: Full UAT Matrix And Security Validation
 
