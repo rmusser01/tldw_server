@@ -881,7 +881,7 @@ git commit -m "feat: route research discovery providers"
 - Modify: `tldw_Server_API/app/core/DB_Management/ResearchSessionsDB.py`
 - Modify: `tldw_Server_API/tests/Research/test_research_sessions_db.py`
 
-- [ ] **Step 1: Write failing snapshot persistence tests**
+- [x] **Step 1: Write failing snapshot persistence tests**
 
 Add tests:
 
@@ -921,7 +921,7 @@ def test_discovery_snapshot_rejects_expired_rows(tmp_path):
     assert db.get_discovery_snapshot(snapshot.id, owner_user_id="1") is None
 ```
 
-- [ ] **Step 2: Run DB tests and verify red**
+- [x] **Step 2: Run DB tests and verify red**
 
 Run:
 
@@ -931,7 +931,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/tes
 
 Expected: FAIL for missing snapshot helpers.
 
-- [ ] **Step 3: Implement schema and row mapper**
+- [x] **Step 3: Implement schema and row mapper**
 
 In `ResearchSessionsDB.py`:
 
@@ -980,7 +980,7 @@ CREATE INDEX IF NOT EXISTS idx_research_discovery_snapshots_owner_expires
 
 Use ids shaped as `rd_<12 hex chars>`.
 
-- [ ] **Step 4: Run DB tests and verify green**
+- [x] **Step 4: Run DB tests and verify green**
 
 Run:
 
@@ -990,7 +990,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/tes
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit snapshot persistence slice**
+- [x] **Step 5: Commit snapshot persistence slice**
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/ResearchSessionsDB.py tldw_Server_API/tests/Research/test_research_sessions_db.py
