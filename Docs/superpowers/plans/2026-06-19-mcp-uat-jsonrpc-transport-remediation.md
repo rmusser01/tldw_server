@@ -200,7 +200,7 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_jsonrpc_transpo
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/jsonrpc_transport.py \
@@ -553,7 +553,7 @@ git commit -m "fix: align mounted MCP compatibility auth"
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_protocol_governance_preflight.py`
 
-- [ ] **Step 1: Write failing policy regression tests**
+- [x] **Step 1: Write failing policy regression tests**
 
 Add tests:
 
@@ -562,7 +562,7 @@ Add tests:
 
 Use existing patterns from `test_protocol_allowed_tools.py` around `_FailingPolicyResolver`.
 
-- [ ] **Step 2: Run policy tests and verify failures**
+- [x] **Step 2: Run policy tests and record red-check caveat**
 
 Run:
 
@@ -574,9 +574,11 @@ python -m pytest \
   -v
 ```
 
-Expected: FAIL on the import-cycle regression or missing coverage.
+Original expected result: FAIL on the import-cycle regression or missing coverage.
 
-- [ ] **Step 3: Break the import cycle minimally**
+Controller takeover note: the worker left the tests and implementation uncommitted before the red check could be reproduced locally; post-takeover verification used the focused Task 6 suite below and passed.
+
+- [x] **Step 3: Break the import cycle minimally**
 
 Preferred order:
 
@@ -586,7 +588,7 @@ Preferred order:
 
 Do not move host-specific resolver code into the standalone `mcp_unified` package.
 
-- [ ] **Step 4: Run policy tests and verify pass**
+- [x] **Step 4: Run policy tests and verify pass**
 
 Run the same command from Step 2.
 
