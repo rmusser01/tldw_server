@@ -330,6 +330,8 @@ def _items_from_list_payload(payload: list[object]) -> list[dict[str, Any]]:
     for item in payload:
         if not isinstance(item, dict):
             raise DiscoveryProviderError()
+        if not _is_record_shaped_payload(item):
+            raise DiscoveryProviderError()
         records.append(item)
     return records
 
