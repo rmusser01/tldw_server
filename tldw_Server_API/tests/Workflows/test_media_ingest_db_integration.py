@@ -15,6 +15,27 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 pytestmark = pytest.mark.integration
 
 
+def _wait_for_run_status(
+    client: TestClient,
+    run_id: str,
+    terminal_statuses: set[str],
+    timeout_s: float = 30.0,
+) -> dict:
+    deadline = time.monotonic() + timeout_s
+    last_data: dict | None = None
+    while time.monotonic() < deadline:
+        response = client.get(f"/api/v1/workflows/runs/{run_id}")
+        assert response.status_code == 200, response.text
+        last_data = response.json()
+        if last_data.get("status") in terminal_statuses:
+            return last_data
+        time.sleep(0.1)
+    pytest.fail(
+        f"workflow run {run_id} did not reach {sorted(terminal_statuses)} "
+        f"within {timeout_s}s; last={last_data}"
+    )
+
+
 @pytest.fixture()
 def client_with_wf(tmp_path, monkeypatch, auth_headers):
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))
@@ -83,14 +104,7 @@ def test_media_ingest_local_persists_to_db(client_with_wf: TestClient, tmp_path)
     }
     wid = client.post("/api/v1/workflows", json=definition).json()["id"]
     run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
-    # Wait for completion
-    for _ in range(100):
-        response = client.get(f"/api/v1/workflows/runs/{run_id}")
-        assert response.status_code == 200, response.text
-        data = response.json()
-        if data["status"] in ("succeeded", "failed"):
-            break
-        time.sleep(0.05)
+    data = _wait_for_run_status(client, run_id, {"succeeded", "failed"})
     assert data["status"] == "succeeded"
     out = data.get("outputs") or {}
     # Should include media_ids when indexing requested
