@@ -392,7 +392,9 @@ Metrics and logs should cover:
 
 Testing should prioritize the chokepoint contract.
 
-Unit tests:
+### Phase 1 Tests
+
+Phase 1 unit tests:
 
 - catalog id/category/capability validation
 - catalog versioning
@@ -403,14 +405,29 @@ Unit tests:
 - dedupe priority and deterministic ranking
 - OA candidate attachment
 - sanitized provenance metadata
+- signed/token-bearing OA URL sanitization for API responses
+- signed/token-bearing OA URL sanitization for persisted discovery snapshots
+- signed/token-bearing OA URL exclusion from logs
+- signed/token-bearing OA URL exclusion from `candidate_id` derivation
+- opaque resolver reference retention for later ingest re-resolution
 - source router behavior with fake adapters
 
-Provider adapter tests:
+Phase 1 provider adapter tests:
 
 - mocked HTTP/client functions for first-slice sources
 - reuse and extend existing sanitizer tests for OpenAlex, Semantic Scholar, Crossref, PubMed, arXiv, Zenodo, Figshare, OSF, and Unpaywall-style lookup
 
-Ingest tests:
+Phase 1 integration tests:
+
+- `GET /api/v1/research/sources`
+- `POST /api/v1/research/discovery/search`
+- persisted discovery snapshot creation and ownership checks
+- over-cap source/category selection validation
+- fallback site search disabled-by-default behavior
+
+### Later-Phase Tests
+
+Standalone ingest tests:
 
 - URL revalidation
 - duplicate checks
@@ -420,10 +437,8 @@ Ingest tests:
 - partial ingest failures
 - successful routing into existing Media DB ingestion helpers
 
-Integration tests:
+Later-phase integration tests:
 
-- `GET /api/v1/research/sources`
-- `POST /api/v1/research/discovery/search`
 - `POST /api/v1/research/discovery/ingest`
 - Deep Research source review checkpoint includes normalized results and ingest eligibility
 - checkpoint approval triggers an idempotent ingest phase
@@ -443,7 +458,7 @@ Phase 5: existing compatibility endpoints delegate to the chokepoint where safe,
 
 ## Implementation Planning Scope
 
-The next implementation plan should cover Phase 1 only by default: catalog, source router, discovery chokepoint, standalone search API, normalized metadata, OA candidate discovery, persisted discovery snapshots, and tests for that surface. Standalone ingest, Deep Research integration, compatibility wrapper delegation, and fallback site-search rollout should remain later phases unless the human requester asks for a larger plan.
+The next implementation plan should cover Phase 1 only by default: catalog, source router, discovery chokepoint, standalone search API, normalized metadata, OA candidate discovery, persisted discovery snapshots, and tests for that surface. The plan must decide the concrete discovery snapshot storage location/schema and default retention window. Standalone ingest, Deep Research integration, compatibility wrapper delegation, and fallback site-search rollout should remain later phases unless the human requester asks for a larger plan.
 
 ## Acceptance Criteria
 
