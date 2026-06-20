@@ -4,6 +4,8 @@ title: Address PR 2326 Explainer review feedback
 status: In Progress
 references:
 - https://github.com/rmusser01/tldw_server/pull/2326
+modified_files:
+- apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts
 ---
 
 ## Description

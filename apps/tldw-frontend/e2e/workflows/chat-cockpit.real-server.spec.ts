@@ -44,6 +44,13 @@ type RealChatModelSelection = {
   key: string;
 };
 
+type CockpitLayoutSeed = {
+  mode?: 'cockpit' | 'focus';
+  contextRailVisible?: boolean;
+  runtimeRailVisible?: boolean;
+  mobilePanel?: 'context' | 'runtime' | null;
+};
+
 type DisposableCharacter = {
   id: string;
   name: string;
@@ -65,6 +72,27 @@ const truncateForDiagnostics = (value: string, maxLength = 800): string =>
   value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const desktopCockpitLayoutSeed: CockpitLayoutSeed = {
+  mode: 'cockpit',
+  contextRailVisible: true,
+  runtimeRailVisible: true,
+  mobilePanel: 'context',
+};
+
+const mobileFocusWithCockpitPanelsSeed: CockpitLayoutSeed = {
+  mode: 'focus',
+  contextRailVisible: true,
+  runtimeRailVisible: true,
+  mobilePanel: 'context',
+};
+
+const mobileFocusOnlyLayoutSeed: CockpitLayoutSeed = {
+  mode: 'focus',
+  contextRailVisible: false,
+  runtimeRailVisible: false,
+  mobilePanel: 'context',
+};
 
 const parseApiJsonResponse = async <T>(
   response: APIResponse,
@@ -274,7 +302,7 @@ const seedRealServerConfig = async (
   options: {
     selectedModel?: RealChatModelSelection;
     persistedServerChatId?: string | null;
-    cockpitRailsVisible?: boolean;
+    cockpitLayout?: CockpitLayoutSeed | null;
   } = {}
 ) => {
   await page.addInitScript(
@@ -283,7 +311,7 @@ const seedRealServerConfig = async (
       configuredApiKey,
       configuredSelectedModel,
       configuredPersistedServerChatId,
-      configuredCockpitRailsVisible,
+      configuredCockpitLayout,
     }) => {
       const fnv1a36 = (value: string) => {
         let hash = 2166136261;
@@ -332,6 +360,10 @@ const seedRealServerConfig = async (
         chatStreamIdleTimeoutMs: 120_000,
       };
 
+      const writeJsonStorageValue = (key: string, value: unknown) => {
+        localStorage.setItem(key, JSON.stringify(value));
+      };
+
       localStorage.setItem('tldwConfig', JSON.stringify(config)); // lgtm[js/clear-text-storage-of-sensitive-data] test-only browser auth seed for real-server E2E
       localStorage.setItem('serverUrl', configuredServerUrl);
       localStorage.setItem('tldwServerUrl', configuredServerUrl);
@@ -342,10 +374,28 @@ const seedRealServerConfig = async (
       localStorage.setItem('__tldw_first_run_complete', 'true');
       localStorage.setItem('assistant_setup_dismissed', 'true');
       localStorage.setItem('playgroundComposerOptionsExpanded', 'true');
-      if (configuredCockpitRailsVisible) {
-        localStorage.setItem('playgroundChatContextRailVisible', 'true');
-        localStorage.setItem('playgroundChatRuntimeRailVisible', 'true');
-        localStorage.setItem('playgroundChatMobileCockpitPanel', 'context');
+      if (configuredCockpitLayout) {
+        if (configuredCockpitLayout.mode) {
+          writeJsonStorageValue('playgroundChatLayoutMode', configuredCockpitLayout.mode);
+        }
+        if (typeof configuredCockpitLayout.contextRailVisible === 'boolean') {
+          writeJsonStorageValue(
+            'playgroundChatContextRailVisible',
+            configuredCockpitLayout.contextRailVisible
+          );
+        }
+        if (typeof configuredCockpitLayout.runtimeRailVisible === 'boolean') {
+          writeJsonStorageValue(
+            'playgroundChatRuntimeRailVisible',
+            configuredCockpitLayout.runtimeRailVisible
+          );
+        }
+        if ('mobilePanel' in configuredCockpitLayout) {
+          writeJsonStorageValue(
+            'playgroundChatMobileCockpitPanel',
+            configuredCockpitLayout.mobilePanel
+          );
+        }
       }
       if (configuredPersistedServerChatId) {
         localStorage.setItem(
@@ -390,7 +440,7 @@ const seedRealServerConfig = async (
       configuredApiKey: apiKey,
       configuredSelectedModel: options.selectedModel || null,
       configuredPersistedServerChatId: options.persistedServerChatId ?? null,
-      configuredCockpitRailsVisible: options.cockpitRailsVisible ?? true,
+      configuredCockpitLayout: options.cockpitLayout ?? null,
     }
   );
 };
@@ -850,6 +900,7 @@ const openDesktopChatCockpit = async (
   await seedRealServerConfig(page, {
     selectedModel: selection,
     persistedServerChatId: options.persistedServerChatId ?? null,
+    cockpitLayout: desktopCockpitLayoutSeed,
   });
   await page.setViewportSize({ width: 1440, height: 960 });
   await page.goto('/chat', { waitUntil: 'domcontentloaded' });
@@ -1302,7 +1353,10 @@ test.describe('/chat cockpit real-server parity', () => {
     assertHealthResponse(health);
     const chatModelSelection = await getConfiguredChatModelSelection(request);
 
-    await seedRealServerConfig(page, { selectedModel: chatModelSelection });
+    await seedRealServerConfig(page, {
+      selectedModel: chatModelSelection,
+      cockpitLayout: desktopCockpitLayoutSeed,
+    });
     await page.setViewportSize({ width: 1440, height: 960 });
     await page.goto('/chat', { waitUntil: 'domcontentloaded' });
 
@@ -1389,7 +1443,10 @@ test.describe('/chat cockpit real-server parity', () => {
     expect(extractModels(models.body).length).toBeGreaterThan(0);
 
     const apiTracker = trackRealApiHits(page);
-    await seedRealServerConfig(page, { selectedModel: chatModelSelection });
+    await seedRealServerConfig(page, {
+      selectedModel: chatModelSelection,
+      cockpitLayout: desktopCockpitLayoutSeed,
+    });
     await page.setViewportSize({ width: 1440, height: 960 });
     await page.goto('/chat', { waitUntil: 'domcontentloaded' });
 
@@ -1638,7 +1695,10 @@ test.describe('/chat cockpit real-server parity', () => {
     const promptContent = 'Use concise cockpit proof wording.';
     const now = Date.now();
 
-    await seedRealServerConfig(page, { selectedModel: chatModelSelection });
+    await seedRealServerConfig(page, {
+      selectedModel: chatModelSelection,
+      cockpitLayout: desktopCockpitLayoutSeed,
+    });
     await page.setViewportSize({ width: 1440, height: 960 });
     await page.goto('/chat', { waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
@@ -1826,7 +1886,10 @@ test.describe('/chat cockpit real-server parity', () => {
     assertHealthResponse(health);
     const chatModelSelection = await getConfiguredChatModelSelection(request);
 
-    await seedRealServerConfig(page, { selectedModel: chatModelSelection });
+    await seedRealServerConfig(page, {
+      selectedModel: chatModelSelection,
+      cockpitLayout: mobileFocusWithCockpitPanelsSeed,
+    });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/chat', { waitUntil: 'domcontentloaded' });
 
@@ -2058,7 +2121,10 @@ test.describe('/chat cockpit real-server parity', () => {
     assertHealthResponse(health);
     const chatModelSelection = await getConfiguredChatModelSelection(request);
 
-    await seedRealServerConfig(page, { selectedModel: chatModelSelection });
+    await seedRealServerConfig(page, {
+      selectedModel: chatModelSelection,
+      cockpitLayout: mobileFocusOnlyLayoutSeed,
+    });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/chat', { waitUntil: 'domcontentloaded' });
 
@@ -2127,7 +2193,10 @@ test.describe('/chat cockpit real-server parity', () => {
         description: `Could not create disposable character via real server: status ${created.status}`,
       });
 
-      await seedRealServerConfig(page, { selectedModel: chatModelSelection });
+      await seedRealServerConfig(page, {
+        selectedModel: chatModelSelection,
+        cockpitLayout: desktopCockpitLayoutSeed,
+      });
       await page.setViewportSize({ width: 1440, height: 960 });
       await page.goto('/chat', { waitUntil: 'domcontentloaded' });
       await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
@@ -2157,7 +2226,10 @@ test.describe('/chat cockpit real-server parity', () => {
         )
       ).toBe(true);
 
-      await seedRealServerConfig(page, { selectedModel: chatModelSelection });
+      await seedRealServerConfig(page, {
+        selectedModel: chatModelSelection,
+        cockpitLayout: desktopCockpitLayoutSeed,
+      });
       await page.setViewportSize({ width: 1440, height: 960 });
       await page.goto('/chat', { waitUntil: 'domcontentloaded' });
 
@@ -2278,7 +2350,10 @@ test.describe('/chat cockpit real-server parity', () => {
     }
 
     if (!selectedPersona?.id || !selectedPersona?.name) {
-      await seedRealServerConfig(page, { selectedModel: chatModelSelection });
+      await seedRealServerConfig(page, {
+        selectedModel: chatModelSelection,
+        cockpitLayout: desktopCockpitLayoutSeed,
+      });
       await page.setViewportSize({ width: 1440, height: 960 });
       await page.goto('/chat', { waitUntil: 'domcontentloaded' });
       await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
@@ -2294,7 +2369,10 @@ test.describe('/chat cockpit real-server parity', () => {
     }
 
     try {
-      await seedRealServerConfig(page, { selectedModel: chatModelSelection });
+      await seedRealServerConfig(page, {
+        selectedModel: chatModelSelection,
+        cockpitLayout: desktopCockpitLayoutSeed,
+      });
       await page.setViewportSize({ width: 1440, height: 960 });
       await page.goto('/chat', { waitUntil: 'domcontentloaded' });
 
@@ -2507,7 +2585,7 @@ test.describe('/chat cockpit real-server parity', () => {
     const chatModelSelection = await getConfiguredChatModelSelection(request);
 
     const apiTracker = trackRealApiHits(page);
-    await seedRealServerConfig(page);
+    await seedRealServerConfig(page, { cockpitLayout: desktopCockpitLayoutSeed });
     await page.setViewportSize({ width: 1440, height: 960 });
     await page.goto('/chat', { waitUntil: 'domcontentloaded' });
 
