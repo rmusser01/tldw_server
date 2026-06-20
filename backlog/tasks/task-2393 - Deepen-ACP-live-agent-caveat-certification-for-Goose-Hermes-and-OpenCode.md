@@ -35,10 +35,7 @@ Track GitHub issue #2402: verify or explicitly preserve deeper live-agent caveat
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 - Evidence captured in `Docs/Development/ACP_Live_Agent_Caveat_Verification_2026_06_20.md`.
 - Goose, Hermes, and OpenCode each passed `workspace-live-e2e` with `workspace_env=pass`, `mcp_injection=pass`, `mcp_server_count=1`, structured completion, redacted support views, diagnostics endpoint, cancel, and close.
@@ -46,7 +43,7 @@ Track GitHub issue #2402: verify or explicitly preserve deeper live-agent caveat
 - Docs updated: `ACP_Compatibility_Matrix.md` upgrades only workspace/MCP checks and keeps `supported_with_caveats`; `ACP_Production_Readiness.md` links #2402 and the evidence note.
 - Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py -q` -> 49 passed, 6 warnings; `git diff --check` -> passed.
 - Bandit not run: documentation/Backlog-only branch, no Python code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -58,10 +55,6 @@ Track GitHub issue #2402: verify or explicitly preserve deeper live-agent caveat
 - Updated #2402: https://github.com/rmusser01/tldw_server/issues/2402#issuecomment-4759612261
 - Updated parent #2398: https://github.com/rmusser01/tldw_server/issues/2398#issuecomment-4759612213
 - Verification: three live workspace E2E runs passed; `python -m pytest tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py -q` -> 49 passed, 6 warnings; `git diff --check` -> passed. Bandit skipped because no Python code changed.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
