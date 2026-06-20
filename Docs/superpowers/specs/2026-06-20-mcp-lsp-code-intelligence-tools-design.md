@@ -95,6 +95,8 @@ with explicit per-tool deny rules, for example denying `lsp.format_preview` or
 - Paths go through the same normalization, traversal rejection, symlink checks,
   and deny-precedence behavior as filesystem tools.
 - Every file path argument requires an effective read grant.
+- Workspace-wide or index-style tools require an effective read grant for the
+  whole active workspace root in the first slice.
 - Results that mention additional files are filtered through the current
   request/profile path policy before returning.
 - Positions are zero-based LSP UTF-16 `line` and `character` offsets.
@@ -180,9 +182,10 @@ parameter metadata, and bounded documentation when available.
 ### `lsp.format_preview`
 
 Uses Ruff formatting. It never writes files. The public MCP response contract is
-a canonical unified diff preview plus metadata. The implementation may also
-include structured LSP text edits as optional supplemental data, but clients and
-tests should treat `unified_diff` as the stable preview payload.
+a canonical unified diff preview plus metadata. Structured LSP text edits are
+best-effort supplemental data and must be returned only when the request opts in
+to `include_text_edits`. Clients and baseline smoke tests should treat
+`unified_diff` as the stable preview payload.
 
 Preview output must include:
 
@@ -191,7 +194,7 @@ Preview output must include:
 - backend and formatter version metadata;
 - text edit count;
 - bounded `unified_diff`;
-- optional structured `text_edits`;
+- optional structured `text_edits` only when requested;
 - truncation flag when preview limits are hit.
 
 If a preview would exceed configured path or byte limits, return
@@ -205,9 +208,11 @@ server commands. It returns available actions and bounded proposed workspace
 edits. Applying an action is a later `fs.patch` or `fs.write` operation using
 the existing policy, hook, lock, and audit flow.
 
-The first slice should reject or omit code actions that require opaque
-`workspace/executeCommand` behavior unless they can be represented as explicit
-bounded text edits.
+The first slice must reject opaque `workspace/executeCommand` actions unless
+they can be represented as explicit bounded text edits. If Ruff reports only
+opaque command-shaped actions for a request, return a deterministic structured
+error such as `unsupported_action_shape` rather than silently omitting those
+actions.
 
 ## Architecture
 
@@ -250,6 +255,15 @@ bounded text edits.
 The process session can be workspace-scoped, but authorization is always
 request-scoped. The implementation must not reuse cached result payloads across
 profiles without rechecking path grants and result filtering.
+
+The LSP process itself is also a trust boundary. A long-lived server may parse,
+index, import-resolve, or cache files outside the single path returned in a tool
+response. For the first slice, any workspace-wide or index-style tool such as
+`lsp.workspace_symbols` requires an effective read grant for the whole active
+workspace root. File-scoped tools may run in the shared workspace session, but
+their requested path and returned locations still require request/profile-scoped
+grant checks. Future work may add grant-scoped sandboxed views, but this spec
+does not claim process-level isolation for partial path grants.
 
 Recommended cache key inputs:
 
@@ -317,6 +331,7 @@ Use structured reason codes and safe details:
 - `capability_unavailable`
 - `response_truncated`
 - `preview_too_large`
+- `unsupported_action_shape`
 - `unsupported_language`
 - `workspace_not_supported`
 - `config_error`
@@ -348,7 +363,7 @@ tool reporting contract:
 - tool name;
 - backend selected;
 - requested capability;
-- workspace identifier, not raw absolute path;
+- stable opaque workspace id or hash, never a raw absolute path;
 - relative file path when applicable;
 - language;
 - profile id or profile label where safe;
@@ -375,6 +390,11 @@ should be included.
 - Returned locations are filtered through profile path grants.
 - UTF-16 positions are validated.
 - Preview edit limits enforce max paths, max bytes, and truncation markers.
+- `lsp.format_preview` returns `text_edits` only when the request opts in.
+- `lsp.code_actions` returns `unsupported_action_shape` for opaque command-only
+  action results.
+- `lsp.workspace_symbols` requires a workspace-root read grant in the first
+  slice.
 - Error payloads are structured and redacted.
 
 ### Fake Backend Tests
@@ -440,10 +460,15 @@ Extend the MCP smoke harness with optional LSP scenarios:
 
 - `lsp.*` tools are available only when granted by profile policy.
 - File-scoped tools require effective read grants and filter returned paths.
+- Workspace-wide/index tools require effective workspace-root read grants in the
+  first slice.
 - Ruff-backed diagnostics and previews work when Ruff is installed.
 - pylsp-backed navigation works when pylsp is installed.
 - Missing Ruff or pylsp reports clean degraded capabilities.
 - Formatting and code actions never mutate files directly.
+- `format_preview` exposes `unified_diff` as the stable payload and returns
+  `text_edits` only when requested.
+- Opaque command-shaped code actions fail with `unsupported_action_shape`.
 - Results and errors are bounded and redact absolute paths/secrets.
 - Fake backend tests cover every tool and error family.
 - Env-gated real backend tests cover Ruff and pylsp happy paths.
