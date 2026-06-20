@@ -43,11 +43,14 @@ async def test_router_calls_adapter_for_selected_source():
 @pytest.mark.asyncio
 async def test_router_records_provider_error_without_leaking_exception_details():
     from tldw_Server_API.app.core.Research.discovery.catalog import default_source_catalog
-    from tldw_Server_API.app.core.Research.discovery.router import ResearchSourceRouter
+    from tldw_Server_API.app.core.Research.discovery.router import (
+        DiscoveryProviderError,
+        ResearchSourceRouter,
+    )
 
     class FailingAdapter:
         async def search(self, **_kwargs):
-            raise RuntimeError("secret token /private/key")
+            raise DiscoveryProviderError("secret token /private/key")
 
     catalog = default_source_catalog()
     router = ResearchSourceRouter(catalog=catalog, adapters={"openalex": FailingAdapter()})
@@ -62,6 +65,32 @@ async def test_router_records_provider_error_without_leaking_exception_details()
     assert records == []
     assert statuses[0].status == "provider_error"
     assert statuses[0].message == "Provider request failed."
+    assert "secret token" not in statuses[0].message
+    assert "/private/key" not in statuses[0].message
+
+
+@pytest.mark.asyncio
+async def test_router_reports_unexpected_adapter_bug_as_internal_error_without_leaking_details():
+    from tldw_Server_API.app.core.Research.discovery.catalog import default_source_catalog
+    from tldw_Server_API.app.core.Research.discovery.router import ResearchSourceRouter
+
+    class BuggyAdapter:
+        async def search(self, **_kwargs):
+            raise RuntimeError("secret token /private/key")
+
+    catalog = default_source_catalog()
+    router = ResearchSourceRouter(catalog=catalog, adapters={"openalex": BuggyAdapter()})
+
+    records, statuses = await router.search_sources(
+        query="machine learning",
+        sources=[catalog.get_source("openalex")],
+        per_source_limit=3,
+        filters={},
+    )
+
+    assert records == []
+    assert statuses[0].status == "internal_error"
+    assert statuses[0].message == "Discovery adapter failed unexpectedly."
     assert "secret token" not in statuses[0].message
     assert "/private/key" not in statuses[0].message
 
@@ -106,6 +135,7 @@ async def test_router_marks_source_timeout_without_blocking_other_sources():
         "openalex": "timeout",
         "crossref": "ok",
     }
+    assert statuses[0].warnings == ("provider_call_may_continue_after_timeout",)
 
 
 @pytest.mark.asyncio

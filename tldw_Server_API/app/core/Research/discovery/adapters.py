@@ -7,10 +7,32 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from .models import ResearchSourceCatalogEntry
-from .router import DiscoveryProviderAdapter
+from .router import DiscoveryProviderAdapter, DiscoveryProviderError
 
 
 SearchFunction = Callable[..., object]
+_ERROR_PAYLOAD_KEYS = frozenset({"detail", "error", "errors", "message"})
+_RECORD_SHAPED_KEYS = frozenset(
+    {
+        "abstract",
+        "arxiv",
+        "arxiv_id",
+        "authors",
+        "description",
+        "doi",
+        "externalids",
+        "id",
+        "paperid",
+        "pdf_url",
+        "pmcid",
+        "pmid",
+        "snippet",
+        "summary",
+        "title",
+        "uid",
+        "url",
+    }
+)
 
 
 class OpenAlexDiscoveryAdapter:
@@ -247,11 +269,10 @@ def _items_from_tuple_result(result: object) -> list[dict[str, Any]]:
     elif len(result) == 2:
         payload, error = result
     else:
-        payload = result[0] if result else None
-        error = None
+        raise DiscoveryProviderError()
 
     if error:
-        raise RuntimeError("Provider request failed.")
+        raise DiscoveryProviderError(str(error))
     return _items_from_payload(payload)
 
 
@@ -262,10 +283,9 @@ def _items_from_semantic_scholar_result(result: object) -> list[dict[str, Any]]:
         elif len(result) == 3:
             payload, _total, error = result
         else:
-            payload = result[0] if result else None
-            error = None
+            raise DiscoveryProviderError()
         if error:
-            raise RuntimeError("Provider request failed.")
+            raise DiscoveryProviderError(str(error))
     else:
         payload = result
 
@@ -286,8 +306,20 @@ def _items_from_payload(payload: object) -> list[dict[str, Any]]:
                 nested_hits = nested.get("hits")
                 if isinstance(nested_hits, list):
                     return [item for item in nested_hits if isinstance(item, dict)]
-        return [dict(payload)]
+        if _is_error_shaped_payload(payload):
+            raise DiscoveryProviderError()
+        if _is_record_shaped_payload(payload):
+            return [dict(payload)]
+        raise DiscoveryProviderError()
     return []
+
+
+def _is_error_shaped_payload(payload: Mapping[str, object]) -> bool:
+    return any(str(key).casefold() in _ERROR_PAYLOAD_KEYS for key in payload)
+
+
+def _is_record_shaped_payload(payload: Mapping[str, object]) -> bool:
+    return any(str(key).casefold() in _RECORD_SHAPED_KEYS for key in payload)
 
 
 def _normalize_records(

@@ -12,6 +12,22 @@ from .models import ResearchSourceCatalogEntry, SourceStatus
 
 
 DEFAULT_ADAPTER_VERSION = "research-discovery-router-v1"
+PROVIDER_REQUEST_FAILED_MESSAGE = "Provider request failed."
+INTERNAL_ADAPTER_ERROR_MESSAGE = "Discovery adapter failed unexpectedly."
+TIMEOUT_CONTINUATION_WARNING = "provider_call_may_continue_after_timeout"
+
+
+class DiscoveryProviderError(Exception):
+    """Sanitized exception for failures returned by external discovery providers."""
+
+    def __init__(
+        self,
+        _message: str | None = None,
+        *,
+        safe_message: str = PROVIDER_REQUEST_FAILED_MESSAGE,
+    ) -> None:
+        self.safe_message = safe_message
+        super().__init__(safe_message)
 
 
 class DiscoveryProviderAdapter(Protocol):
@@ -146,11 +162,23 @@ class ResearchSourceRouter:
                     timeout=self._per_source_timeout_seconds,
                 )
             except TimeoutError:
+                # asyncio.to_thread calls cannot be stopped once dispatched; the
+                # timeout only releases this router task back to the caller.
                 return [], SourceStatus(
                     source_id=source.source_id,
                     provider=provider,
                     status="timeout",
                     message="Provider request timed out.",
+                    result_count=0,
+                    elapsed_ms=_elapsed_ms(started_at),
+                    warnings=(TIMEOUT_CONTINUATION_WARNING,),
+                )
+            except DiscoveryProviderError as exc:
+                return [], SourceStatus(
+                    source_id=source.source_id,
+                    provider=provider,
+                    status="provider_error",
+                    message=exc.safe_message,
                     result_count=0,
                     elapsed_ms=_elapsed_ms(started_at),
                     warnings=(),
@@ -159,8 +187,8 @@ class ResearchSourceRouter:
                 return [], SourceStatus(
                     source_id=source.source_id,
                     provider=provider,
-                    status="provider_error",
-                    message="Provider request failed.",
+                    status="internal_error",
+                    message=INTERNAL_ADAPTER_ERROR_MESSAGE,
                     result_count=0,
                     elapsed_ms=_elapsed_ms(started_at),
                     warnings=(),
