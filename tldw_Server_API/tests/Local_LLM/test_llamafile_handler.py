@@ -252,12 +252,12 @@ async def test_llamafile_start_server_not_ready_terminates_process(monkeypatch, 
     monkeypatch.setattr(platform, "system", lambda: "Linux")
     import tldw_Server_API.app.core.Local_LLM.Llamafile_Handler as llamafile_mod
 
-    monkeypatch.setattr(llamafile_mod.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(llamafile_mod.os, "getpgid", lambda pid: pid, raising=False)
 
     def fail_killpg(*_args):
         raise AssertionError("fake subprocess cleanup must not signal a real process group")
 
-    monkeypatch.setattr(llamafile_mod.os, "killpg", fail_killpg)
+    monkeypatch.setattr(llamafile_mod.os, "killpg", fail_killpg, raising=False)
 
     with pytest.raises(ServerError):
         await handler.start_server("toy.gguf", server_args={"port": 8077})

@@ -526,12 +526,12 @@ async def test_llamacpp_start_server_not_ready(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(http_utils, "wait_for_http_ready", lambda *a, **k: asyncio.sleep(0, result=False))
     import tldw_Server_API.app.core.Local_LLM.LlamaCpp_Handler as llama_mod
 
-    monkeypatch.setattr(llama_mod.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(llama_mod.os, "getpgid", lambda pid: pid, raising=False)
 
     def fail_killpg(*_args):
         raise AssertionError("fake subprocess cleanup must not signal a real process group")
 
-    monkeypatch.setattr(llama_mod.os, "killpg", fail_killpg)
+    monkeypatch.setattr(llama_mod.os, "killpg", fail_killpg, raising=False)
 
     with pytest.raises(ServerError):
         await handler.start_server("toy.gguf", server_args={"port": 8099})

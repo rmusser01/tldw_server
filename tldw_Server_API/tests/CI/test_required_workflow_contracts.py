@@ -273,6 +273,18 @@ def test_legacy_ci_workflow_name_remains_stable_for_branch_protection() -> None:
     assert workflow["name"] == "CI"
 
 
+def test_character_chat_rate_limits_installs_portaudio_before_python_deps() -> None:
+    workflow = _load(".github/workflows/ci.yml")
+    steps = workflow["jobs"]["character-chat-rate-limits"]["steps"]
+    install_step = _get_step(steps, "Install FFmpeg and PortAudio (Linux)")
+    setup_step = _get_step(steps, "Setup Python and deps (uv)")
+
+    assert install_step["uses"] == "./.github/actions/setup-ffmpeg"
+    assert install_step["with"]["install-ffmpeg"] == "false"
+    assert install_step["with"]["install-portaudio"] == "true"
+    assert steps.index(install_step) < steps.index(setup_step)
+
+
 def test_full_suite_pytest_steps_do_not_leak_shared_postgres_dsn() -> None:
     workflow = _load(".github/workflows/ci.yml")
     jobs = workflow["jobs"]
