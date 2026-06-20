@@ -161,6 +161,10 @@ class ResearchSourceRouter:
                     ),
                     timeout=self._per_source_timeout_seconds,
                 )
+                enriched_records = [
+                    self._enrich_record(record=record, source=source, provider=provider)
+                    for record in _validate_adapter_records(raw_records)
+                ]
             except TimeoutError:
                 # asyncio.to_thread calls cannot be stopped once dispatched; the
                 # timeout only releases this router task back to the caller.
@@ -194,10 +198,6 @@ class ResearchSourceRouter:
                     warnings=(),
                 )
 
-        enriched_records = [
-            self._enrich_record(record=record, source=source, provider=provider)
-            for record in raw_records
-        ]
         return enriched_records, SourceStatus(
             source_id=source.source_id,
             provider=provider,
@@ -278,6 +278,15 @@ class ResearchSourceRouter:
 
 def _source_sort_key(source: ResearchSourceCatalogEntry) -> tuple[int, str]:
     return source.priority, source.source_id
+
+
+def _validate_adapter_records(records: object) -> list[dict[str, Any]]:
+    if not isinstance(records, list):
+        raise TypeError("adapter result must be a list")
+    for record in records:
+        if not isinstance(record, dict):
+            raise TypeError("adapter result records must be mappings")
+    return records
 
 
 def _elapsed_ms(started_at: float) -> float:

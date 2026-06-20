@@ -153,6 +153,54 @@ async def test_router_reports_unexpected_adapter_bug_as_internal_error_without_l
 
 
 @pytest.mark.asyncio
+async def test_router_reports_none_adapter_result_as_internal_error():
+    from tldw_Server_API.app.core.Research.discovery.catalog import default_source_catalog
+    from tldw_Server_API.app.core.Research.discovery.router import ResearchSourceRouter
+
+    class MalformedAdapter:
+        async def search(self, **_kwargs):
+            return None
+
+    catalog = default_source_catalog()
+    router = ResearchSourceRouter(catalog=catalog, adapters={"openalex": MalformedAdapter()})
+
+    records, statuses = await router.search_sources(
+        query="machine learning",
+        sources=[catalog.get_source("openalex")],
+        per_source_limit=3,
+        filters={},
+    )
+
+    assert records == []
+    assert statuses[0].status == "internal_error"
+    assert statuses[0].message == "Discovery adapter failed unexpectedly."
+
+
+@pytest.mark.asyncio
+async def test_router_reports_non_dict_adapter_records_as_internal_error():
+    from tldw_Server_API.app.core.Research.discovery.catalog import default_source_catalog
+    from tldw_Server_API.app.core.Research.discovery.router import ResearchSourceRouter
+
+    class MalformedAdapter:
+        async def search(self, **_kwargs):
+            return ["not-a-record"]
+
+    catalog = default_source_catalog()
+    router = ResearchSourceRouter(catalog=catalog, adapters={"openalex": MalformedAdapter()})
+
+    records, statuses = await router.search_sources(
+        query="machine learning",
+        sources=[catalog.get_source("openalex")],
+        per_source_limit=3,
+        filters={},
+    )
+
+    assert records == []
+    assert statuses[0].status == "internal_error"
+    assert statuses[0].message == "Discovery adapter failed unexpectedly."
+
+
+@pytest.mark.asyncio
 async def test_router_marks_source_timeout_without_blocking_other_sources():
     from tldw_Server_API.app.core.Research.discovery.catalog import default_source_catalog
     from tldw_Server_API.app.core.Research.discovery.router import ResearchSourceRouter
