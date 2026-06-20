@@ -61,14 +61,17 @@ _SENSITIVE_METADATA_KEY_PARTS = (
     "secret",
     "signature",
 )
-_SENSITIVE_URL_PATH_PARTS = (
+_SENSITIVE_URL_PATH_KEYS = {
     "access_token",
     "accesstoken",
     "api_key",
     "apikey",
+    "auth_token",
+    "authtoken",
     "authorization",
     "credential",
     "secret",
+    "sig",
     "signature",
     "token",
     "x_amz_credential",
@@ -79,7 +82,7 @@ _SENSITIVE_URL_PATH_PARTS = (
     "xamzsignature",
     "xgoogcredential",
     "xgoogsignature",
-)
+}
 _DOI_RE = re.compile(r"10\.\d{4,9}/\S+", re.IGNORECASE)
 _ARXIV_VERSION_RE = re.compile(r"v\d+$", re.IGNORECASE)
 
@@ -763,12 +766,31 @@ def _url_path_has_unsafe_material(path: str) -> bool:
     if ";" in decoded_path:
         return True
 
-    lower_path = decoded_path.lower()
-    normalized_path = re.sub(r"[^a-z0-9]+", "_", lower_path).strip("_")
-    compact_path = re.sub(r"[^a-z0-9]+", "", lower_path)
     return any(
-        part in normalized_path or part in compact_path
-        for part in _SENSITIVE_URL_PATH_PARTS
+        _url_path_segment_has_sensitive_key_value(segment)
+        for segment in decoded_path.split("/")
+    )
+
+
+def _url_path_segment_has_sensitive_key_value(segment: str) -> bool:
+    segment = segment.strip()
+    if not segment:
+        return False
+
+    for delimiter in ("=", ":"):
+        key, separator, _value = segment.partition(delimiter)
+        if separator and _is_sensitive_url_path_key(key):
+            return True
+    return _is_sensitive_url_path_key(segment)
+
+
+def _is_sensitive_url_path_key(value: str) -> bool:
+    key_text = value.strip().lower()
+    normalized = re.sub(r"[^a-z0-9]+", "_", key_text).strip("_")
+    compact = re.sub(r"[^a-z0-9]+", "", key_text)
+    return any(
+        variant in _SENSITIVE_URL_PATH_KEYS
+        for variant in (key_text, normalized, compact)
     )
 
 

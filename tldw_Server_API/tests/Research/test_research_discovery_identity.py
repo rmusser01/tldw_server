@@ -12,6 +12,19 @@ def test_fingerprint_prefers_doi_over_url_and_title():
     assert first.startswith("doi:")
 
 
+def test_canonicalize_url_allows_safe_filenames_with_sensitive_word_substrings():
+    from tldw_Server_API.app.core.Research.discovery.identity import canonicalize_url
+
+    assert (
+        canonicalize_url("https://repo.example/files/tokenization-paper.pdf")
+        == "https://repo.example/files/tokenization-paper.pdf"
+    )
+    assert (
+        canonicalize_url("https://repo.example/files/secret-sharing.pdf")
+        == "https://repo.example/files/secret-sharing.pdf"
+    )
+
+
 def test_merge_records_preserves_all_provenance_and_primary_source():
     from tldw_Server_API.app.core.Research.discovery.identity import normalize_and_merge_records
 
@@ -263,6 +276,22 @@ def test_oa_candidate_url_strips_unknown_tokenish_query_names():
     assert candidate.safe_url == "https://repo.example/files/paper.pdf"
     assert "authToken" not in candidate.candidate_id
     assert "SECRET" not in candidate.candidate_id
+
+
+def test_oa_candidate_allows_safe_filename_with_sensitive_word_substring():
+    from tldw_Server_API.app.core.Research.discovery.oa import build_oa_candidates
+
+    candidates = build_oa_candidates(
+        result_fingerprint="doi:10.1000/example",
+        source_id="openalex",
+        provider="openalex",
+        doi="10.1000/example",
+        raw_urls=["https://repo.example/files/tokenization-paper.pdf"],
+    )
+
+    candidate = candidates[0]
+    assert candidate.safe_url == "https://repo.example/files/tokenization-paper.pdf"
+    assert candidate.url_redacted is False
 
 
 def test_oa_candidate_drops_encoded_query_material_in_path():
