@@ -32,11 +32,14 @@ Close the current prepared-host evidence gap by running or documenting the image
   evidence gap in `Docs/Sandbox/vz-linux-prepared-host-evidence.md`.
 - Real smoke dry-run with default `python3` failed because macOS system Python
   3.9 cannot import the repo's Python 3.10+ dataclass usage; reran dry-run with
-  `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python`.
+  `<repo>/.venv/bin/python`.
 - First real smoke attempt built/signed the helper and passed helper-daemon
   smoke, but the long `${TMPDIR}`-style socket path failed helper startup with
   `socketPathTooLong`. Added a regression test and changed the wrapper default
   runtime root to a short `/tmp/tvz-e2e-*` path.
+- PR review follow-up hardened the wrapper default further to create a short
+  random `mktemp -d /tmp/tvz-e2e.XXXXXX` runtime directory instead of a
+  PID-derived directory.
 - A first default-path real smoke reached the real host smoke tests but had one
   non-reproduced stdout-buffer assertion failure while the other selected tests
   passed; rerunning the same default-path command passed.
@@ -58,15 +61,19 @@ Close the current prepared-host evidence gap by running or documenting the image
   smoke path keeps the canonical source bundle immutable while the disposable
   run bundle absorbs VM writes.
 - Fixed the lower-level smoke wrapper default runtime path to use short
-  `/tmp/tvz-e2e-*` directories, avoiding macOS AF_UNIX `socketPathTooLong`
-  failures from long per-user `${TMPDIR}` paths.
+  random `mktemp -d /tmp/tvz-e2e.XXXXXX` directories, avoiding macOS AF_UNIX
+  `socketPathTooLong` failures from long per-user `${TMPDIR}` paths and avoiding
+  predictable PID-derived paths in world-writable `/tmp`.
 - Updated the smoke README and evidence tracker guidance to recommend short
   runtime paths for helper sockets.
+- Addressed PR review follow-up by adding the missing regression-test docstring,
+  rejecting relative or filesystem-root default runtime roots, and redacting
+  newly added local-machine evidence paths.
 - Verification:
   `python -m pytest tools/vz-linux-image/tests/test_host_e2e_smoke_script.py -q --tb=short`
-  passed with `26 passed, 3 skipped`;
+  passed with `28 passed, 3 skipped`;
   `bash -n tools/vz-linux-image/scripts/run-host-e2e-smoke.sh` passed;
-  smoke dry-run showed default `/tmp/tvz-e2e-*/helper.sock`;
+  smoke dry-run showed default `/tmp/tvz-e2e.XXXXXX/helper.sock`;
   real prepared-host smoke using the new default path passed helper daemon smoke
   `2 passed` and real `vz_linux` host smoke `3 passed, 11 deselected`;
   `git diff --check` passed.

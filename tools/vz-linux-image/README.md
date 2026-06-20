@@ -209,8 +209,8 @@ not terminate VMs, delete session controls, or run image-store cleanup.
 
 Use a short runtime path for host smoke sockets. macOS AF_UNIX socket paths are
 length-limited, and the per-user `${TMPDIR}` path can be too long for the
-long-lived helper socket. The wrapper default intentionally uses a short
-`/tmp/tvz-e2e-*` runtime directory; examples use the same prefix when an
+long-lived helper socket. The wrapper default intentionally uses a short random
+`/tmp/tvz-e2e.XXXXXX` runtime directory; examples use the same prefix when an
 explicit runtime directory is needed.
 
 The smoke wrapper writes image-store metadata under

@@ -861,13 +861,14 @@ def test_host_e2e_smoke_script_default_socket_uses_private_runtime_dir(tmp_path:
 
     assert result.returncode == 0, result.stderr
     assert "TLDW_SANDBOX_MACOS_HELPER_SOCKET=" in result.stdout
-    assert "/tvz-e2e-" in result.stdout
+    assert "/tvz-e2e." in result.stdout
     assert "/helper.sock" in result.stdout
     assert "TLDW_SANDBOX_VZ_LINUX_SERIAL_LOG_DIR=" in result.stdout
     assert "/serial" in result.stdout
 
 
 def test_host_e2e_smoke_script_default_socket_ignores_long_tmpdir(tmp_path: Path) -> None:
+    """Default socket paths stay short enough to avoid macOS socketPathTooLong failures."""
     bundle = tmp_path / "bundle"
     bundle.mkdir()
     (bundle / "kernel").write_bytes(b"kernel")
@@ -898,11 +899,61 @@ def test_host_e2e_smoke_script_default_socket_ignores_long_tmpdir(tmp_path: Path
     socket_path = socket_match.group(1)
     if socket_path.startswith(str(long_tmp)):
         pytest.fail(f"default socket path still uses long TMPDIR: {socket_path}")
-    expected_prefix = os.path.join(os.sep, "tmp", "tvz-")
+    expected_prefix = os.path.join(os.sep, "tmp", "tvz-e2e.")
     if not socket_path.startswith(expected_prefix):
         pytest.fail(f"default socket path should use {expected_prefix}, got {socket_path}")
     if len(socket_path.encode("utf-8")) >= 100:
         pytest.fail(f"default socket path is too long for macOS AF_UNIX: {socket_path}")
+
+
+def test_host_e2e_smoke_script_rejects_relative_default_runtime_root(tmp_path: Path) -> None:
+    """Default runtime-root overrides must be absolute before default paths are derived."""
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    helper = tmp_path / "macos-vz-helper"
+
+    result = _run_smoke_script(
+        "--dry-run",
+        "--bundle",
+        str(bundle),
+        "--helper",
+        str(helper),
+        "--python",
+        sys.executable,
+        env_overrides={"TLDW_HOST_E2E_SMOKE_RUNTIME_ROOT": "relative-runtime-root"},
+    )
+
+    if result.returncode == 0:
+        pytest.fail("relative default runtime root should be rejected")
+    if "default runtime root must be an absolute path" not in result.stderr:
+        pytest.fail(result.stderr)
+
+
+def test_host_e2e_smoke_script_rejects_filesystem_root_default_runtime_root(tmp_path: Path) -> None:
+    """Default runtime-root overrides must not target filesystem root directly."""
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "kernel").write_bytes(b"kernel")
+    (bundle / "rootfs.img").write_bytes(b"rootfs")
+    helper = tmp_path / "macos-vz-helper"
+
+    result = _run_smoke_script(
+        "--dry-run",
+        "--bundle",
+        str(bundle),
+        "--helper",
+        str(helper),
+        "--python",
+        sys.executable,
+        env_overrides={"TLDW_HOST_E2E_SMOKE_RUNTIME_ROOT": os.sep},
+    )
+
+    if result.returncode == 0:
+        pytest.fail("filesystem-root default runtime root should be rejected")
+    if "default runtime root must not be filesystem root" not in result.stderr:
+        pytest.fail(result.stderr)
 
 
 def test_host_e2e_smoke_script_default_runtime_dir_is_private_for_real_run(tmp_path: Path) -> None:

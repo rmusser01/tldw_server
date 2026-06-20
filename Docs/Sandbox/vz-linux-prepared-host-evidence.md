@@ -117,7 +117,7 @@ triage issue.
   managed filesystem sandbox blocked the default Clang module cache under
   `~/.cache`; the rerun outside the sandbox completed.
 - Source bundle: `/private/tmp/tldw-vz-bundle`, a symlink to
-  `/Users/macbook-dev/Library/Application Support/tldw/sandbox-images/source-bundles/debian-bookworm-arm64/bundle`.
+  `$HOME/Library/Application Support/tldw/sandbox-images/source-bundles/debian-bookworm-arm64/bundle`.
   Source bundle hashes were identical before and after the real smoke:
   `kernel` SHA-256
   `6dc5255afb8c7722896b860e50a892c1a1f0e774a18338dc259e19736f27a3ef`,
@@ -150,9 +150,13 @@ triage issue.
   tools/vz-linux-image/scripts/run-host-e2e-smoke.sh \
     --bundle /private/tmp/tldw-vz-bundle \
     --entitlements tools/macos-vz-helper/macos-vz-helper.entitlements \
-    --python /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python \
+    --python <repo>/.venv/bin/python \
     --skip-build
   ```
+
+  The recorded runtime path used the then-current PID-based default directory
+  form. PR review follow-up hardened the wrapper default to create a short
+  random `mktemp -d /tmp/tvz-e2e.XXXXXX` directory before future captures.
 
 - Results: helper daemon smoke passed `2 passed`; real `vz_linux` host smoke
   passed `3 passed, 11 deselected`. The selected real-host tests covered

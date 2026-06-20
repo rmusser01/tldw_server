@@ -8,10 +8,9 @@ REPO_ROOT="$(cd "${IMAGE_DIR}/../.." && pwd)"
 SOURCE_BUNDLE_PATH=""
 BUNDLE_PATH=""
 DEFAULT_RUNTIME_ROOT="${TLDW_HOST_E2E_SMOKE_RUNTIME_ROOT:-/tmp}"
-DEFAULT_RUNTIME_ROOT="${DEFAULT_RUNTIME_ROOT%/}"
-DEFAULT_RUNTIME_DIR="${DEFAULT_RUNTIME_ROOT}/tvz-e2e-$$"
-SOCKET_PATH="${DEFAULT_RUNTIME_DIR}/helper.sock"
-SERIAL_LOG_DIR="${DEFAULT_RUNTIME_DIR}/serial"
+DEFAULT_RUNTIME_DIR=""
+SOCKET_PATH=""
+SERIAL_LOG_DIR=""
 IMAGE_STORE_ROOT=""
 SMOKE_RUN_ID="host-smoke-$$"
 PREPARE_SMOKE_BUNDLE_SCRIPT="${SCRIPT_DIR}/prepare-smoke-bundle.py"
@@ -96,6 +95,65 @@ run_cmd() {
 die() {
   echo "$*" >&2
   exit 1
+}
+
+normalize_default_runtime_root() {
+  local root="${DEFAULT_RUNTIME_ROOT}"
+  if [[ -z "${root}" ]]; then
+    echo "default runtime root must not be empty" >&2
+    return 1
+  fi
+  if [[ "${root}" != /* ]]; then
+    echo "default runtime root must be an absolute path: ${root}" >&2
+    return 1
+  fi
+  while [[ "${root}" != "/" && "${root}" == */ ]]; do
+    root="${root%/}"
+  done
+  if [[ "${root}" == "/" ]]; then
+    echo "default runtime root must not be filesystem root: ${root}" >&2
+    return 1
+  fi
+  DEFAULT_RUNTIME_ROOT="${root}"
+}
+
+ensure_default_runtime_dir() {
+  local root
+  if [[ -n "${DEFAULT_RUNTIME_DIR}" ]]; then
+    return 0
+  fi
+  normalize_default_runtime_root || return "$?"
+  root="${DEFAULT_RUNTIME_ROOT}"
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    DEFAULT_RUNTIME_DIR="${root}/tvz-e2e.XXXXXX"
+    return 0
+  fi
+  if [[ -L "${root}" ]]; then
+    die "default runtime root is a symlink: ${root}"
+  fi
+  if [[ ! -d "${root}" ]]; then
+    die "default runtime root does not exist: ${root}"
+  fi
+  DEFAULT_RUNTIME_DIR="$(mktemp -d "${root}/tvz-e2e.XXXXXX")" || die "failed to create default runtime directory under ${root}"
+  chmod 700 "${DEFAULT_RUNTIME_DIR}"
+}
+
+resolve_runtime_paths() {
+  if [[ -z "${SOCKET_PATH}" || -z "${SERIAL_LOG_DIR}" ]]; then
+    ensure_default_runtime_dir || return "$?"
+  fi
+  if [[ -z "${SOCKET_PATH}" ]]; then
+    SOCKET_PATH="${DEFAULT_RUNTIME_DIR}/helper.sock"
+  fi
+  if [[ -z "${SERIAL_LOG_DIR}" ]]; then
+    SERIAL_LOG_DIR="${DEFAULT_RUNTIME_DIR}/serial"
+  fi
+  if [[ -z "${IMAGE_STORE_ROOT}" ]]; then
+    IMAGE_STORE_ROOT="$(dirname "${SOCKET_PATH}")/image-store"
+  fi
+  if [[ -z "${EVIDENCE_DIR}" ]]; then
+    EVIDENCE_DIR="$(dirname "${SOCKET_PATH}")/evidence"
+  fi
 }
 
 cleanup() {
@@ -203,14 +261,6 @@ if [[ -z "${PYTHON_BIN}" ]]; then
   else
     PYTHON_BIN="python3"
   fi
-fi
-
-if [[ -z "${IMAGE_STORE_ROOT}" ]]; then
-  IMAGE_STORE_ROOT="$(dirname "${SOCKET_PATH}")/image-store"
-fi
-
-if [[ -z "${EVIDENCE_DIR}" ]]; then
-  EVIDENCE_DIR="$(dirname "${SOCKET_PATH}")/evidence"
 fi
 
 validate_inputs() {
@@ -425,6 +475,7 @@ print_evidence_env_hint() {
 }
 
 prepare_runtime_paths() {
+  resolve_runtime_paths || return "$?"
   if [[ "${DRY_RUN}" -eq 1 ]]; then
     return 0
   fi
