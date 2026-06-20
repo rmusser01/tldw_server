@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 
@@ -98,25 +101,31 @@ def _method_result(method: str, params: object) -> object:
     if method == "ping":
         return {"pong": True}
     if method == "tools/list":
-        return {
-            "tools": [
-                {
-                    "name": "echo.search",
-                    "description": "Echo a search query.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {"query": {"type": "string"}},
-                    },
-                }
-            ]
-        }
+        tools = [
+            {
+                "name": "echo.search",
+                "description": "Echo a search query.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
+            }
+        ]
+        if _artifact_root() is not None:
+            tools.extend(_artifact_tool_descriptors())
+        return {"tools": tools}
     if method == "tools/call":
         params_dict = _params_dict(params)
-        if params_dict.get("name") != "echo.search":
-            return _UNKNOWN_METHOD
+        tool_name = params_dict.get("name")
         arguments = params_dict.get("arguments", {})
-        query = arguments.get("query", "") if isinstance(arguments, dict) else ""
-        return {"content": [{"type": "text", "text": f"echo.search:{query}"}]}
+        if not isinstance(arguments, dict):
+            arguments = {}
+        if tool_name == "echo.search":
+            query = arguments.get("query", "")
+            return {"content": [{"type": "text", "text": f"echo.search:{query}"}]}
+        if isinstance(tool_name, str) and tool_name.startswith("artifact."):
+            return _artifact_tool_result(tool_name, arguments)
+        return _UNKNOWN_METHOD
     if method == "resources/list":
         return {
             "resources": [
@@ -163,6 +172,167 @@ def _params_dict(params: object) -> dict[str, Any]:
     if isinstance(params, dict):
         return params
     return {}
+
+
+def _artifact_root() -> Path | None:
+    value = os.environ.get("MCP_SMOKE_ARTIFACT_ROOT")
+    if not value:
+        return None
+    root = Path(value).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _artifact_tool_descriptors() -> list[dict[str, Any]]:
+    path_schema = {"type": "string", "minLength": 1}
+    return [
+        {
+            "name": "artifact.read",
+            "description": "Read a smoke artifact.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"path": path_schema},
+                "required": ["path"],
+            },
+        },
+        {
+            "name": "artifact.summarize",
+            "description": "Create a deterministic summary from a smoke artifact.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"source_path": path_schema},
+                "required": ["source_path"],
+            },
+        },
+        {
+            "name": "artifact.write",
+            "description": "Write a derived smoke artifact.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": path_schema,
+                    "content": {"type": "string"},
+                },
+                "required": ["path", "content"],
+            },
+        },
+        {
+            "name": "artifact.stat",
+            "description": "Return metadata for a smoke artifact.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"path": path_schema},
+                "required": ["path"],
+            },
+        },
+    ]
+
+
+def _artifact_tool_result(tool_name: str, arguments: dict[str, Any]) -> object:
+    if tool_name == "artifact.read":
+        relative_path, target = _artifact_target(arguments.get("path"))
+        body = target.read_text(encoding="utf-8")
+        return {
+            "content": [{"type": "text", "text": body}],
+            "structuredContent": {
+                "path": relative_path,
+                "bytes": len(body.encode("utf-8")),
+                "sha256": _sha256_text(body),
+                "text": body,
+            },
+        }
+    if tool_name == "artifact.summarize":
+        source_path = arguments.get("source_path", arguments.get("path"))
+        relative_path, target = _artifact_target(source_path)
+        body = target.read_text(encoding="utf-8")
+        summary = _summarize_artifact(body, relative_path)
+        return {
+            "content": [{"type": "text", "text": summary}],
+            "structuredContent": {
+                "source_path": relative_path,
+                "summary_markdown": summary,
+                "bytes": len(summary.encode("utf-8")),
+                "sha256": _sha256_text(summary),
+            },
+        }
+    if tool_name == "artifact.write":
+        relative_path, target = _artifact_target(arguments.get("path"))
+        content = arguments.get("content", arguments.get("text", ""))
+        if not isinstance(content, str):
+            raise ValueError("artifact_content_must_be_text")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        return {
+            "content": [{"type": "text", "text": f"wrote {relative_path}"}],
+            "structuredContent": {
+                "path": relative_path,
+                "bytes": len(content.encode("utf-8")),
+                "sha256": _sha256_text(content),
+            },
+        }
+    if tool_name == "artifact.stat":
+        relative_path, target = _artifact_target(arguments.get("path"))
+        exists = target.exists()
+        size = target.stat().st_size if exists else 0
+        digest = _sha256_bytes(target.read_bytes()) if exists and target.is_file() else None
+        return {
+            "content": [
+                {"type": "text", "text": f"{relative_path}: {'exists' if exists else 'missing'}"}
+            ],
+            "structuredContent": {
+                "path": relative_path,
+                "exists": exists,
+                "bytes": size,
+                "sha256": digest,
+            },
+        }
+    return _UNKNOWN_METHOD
+
+
+def _artifact_target(path_value: object) -> tuple[str, Path]:
+    root = _artifact_root()
+    if root is None:
+        raise ValueError("artifact_root_not_configured")
+    relative_path = _normalize_relative_artifact_path(path_value)
+    target = (root / relative_path).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("artifact_path_denied") from exc
+    return relative_path, target
+
+
+def _normalize_relative_artifact_path(path_value: object) -> str:
+    if not isinstance(path_value, str) or not path_value.strip():
+        raise ValueError("artifact_path_required")
+    candidate = Path(path_value)
+    if candidate.is_absolute() or any(part in {"", ".", ".."} for part in candidate.parts):
+        raise ValueError("artifact_path_denied")
+    return candidate.as_posix()
+
+
+def _summarize_artifact(body: str, relative_path: str) -> str:
+    words = [word.strip(".,:;!?()[]{}\"'").lower() for word in body.split()]
+    unique_words = len({word for word in words if word})
+    first_line = next((line.strip() for line in body.splitlines() if line.strip()), "")
+    if first_line.startswith("#"):
+        first_line = first_line.lstrip("#").strip()
+    title = first_line or "Untitled artifact"
+    return (
+        "# Smoke UAT Derived Artifact\n\n"
+        f"- Source: {relative_path}\n"
+        f"- Title: {title}\n"
+        f"- Word count: {len(words)}\n"
+        f"- Unique words: {unique_words}\n"
+    )
+
+
+def _sha256_text(value: str) -> str:
+    return _sha256_bytes(value.encode("utf-8"))
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
 
 
 def _error_response(request_id: object, code: int, message: str) -> dict[str, object]:

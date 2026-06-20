@@ -11,7 +11,7 @@ from mcp_unified.smoke.reporting import (
     report_to_json,
     summarize_result,
 )
-from mcp_unified.smoke.scenarios import run_baseline_scenario
+from mcp_unified.smoke.scenarios import run_baseline_scenario, run_real_world_scenario
 from mcp_unified.smoke.transports import (
     InProcessFastApiTransport,
     InProcessGatewayTransport,
@@ -38,5 +38,6 @@ __all__ = [
     "redact_detail",
     "report_to_json",
     "run_baseline_scenario",
+    "run_real_world_scenario",
     "summarize_result",
 ]
