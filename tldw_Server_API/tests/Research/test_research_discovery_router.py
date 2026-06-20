@@ -300,9 +300,7 @@ async def test_router_reports_policy_and_configuration_blocked_sources():
             access_level="credentialed_api" if requires_credentials else "public_api",
             enabled=enabled,
             configured=configured,
-            default_discovery_mode=discovery_mode
-            if discovery_mode is not None
-            else "api",
+            default_discovery_mode=discovery_mode if discovery_mode is not None else "api",
             fallback_enabled=False,
             priority=1,
             provider_adapter=adapter,

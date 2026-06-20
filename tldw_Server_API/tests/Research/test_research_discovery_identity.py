@@ -1,12 +1,8 @@
 def test_fingerprint_prefers_doi_over_url_and_title():
     from tldw_Server_API.app.core.Research.discovery.identity import build_fingerprint
 
-    first = build_fingerprint(
-        {"doi": "10.1000/Example", "url": "https://a.test/paper", "title": "A"}
-    )
-    second = build_fingerprint(
-        {"doi": "https://doi.org/10.1000/example", "url": "https://b.test/other", "title": "B"}
-    )
+    first = build_fingerprint({"doi": "10.1000/Example", "url": "https://a.test/paper", "title": "A"})
+    second = build_fingerprint({"doi": "https://doi.org/10.1000/example", "url": "https://b.test/other", "title": "B"})
 
     assert first == second
     assert first.startswith("doi:")
@@ -157,9 +153,7 @@ def test_normalize_and_merge_records_drops_unsafe_urls_from_safe_metadata_and_pr
     assert "href" not in result.safe_metadata
     assert result.safe_metadata["best_oa_location"] == {"host_type": "repository"}
     assert "href" not in result.merged_provenance[0].safe_metadata
-    assert result.merged_provenance[0].safe_metadata["best_oa_location"] == {
-        "host_type": "repository"
-    }
+    assert result.merged_provenance[0].safe_metadata["best_oa_location"] == {"host_type": "repository"}
     assert "SECRET" not in str(result.safe_metadata)
     assert "SECRET" not in str(result.merged_provenance[0].safe_metadata)
 

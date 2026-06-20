@@ -355,25 +355,16 @@ def _normalize_records(
 def _normalize_record(record: dict[str, Any], *, provider: str) -> dict[str, Any]:
     provider_ids = _provider_ids(record, provider=provider)
     abstract = _text(
-        record.get("abstract")
-        or record.get("snippet")
-        or record.get("summary")
-        or record.get("description")
+        record.get("abstract") or record.get("snippet") or record.get("summary") or record.get("description")
     )
 
-    arxiv_id = _text(
-        record.get("arxiv_id")
-        or record.get("arxiv")
-        or _semantic_external_id(record, "ArXiv")
-    )
+    arxiv_id = _text(record.get("arxiv_id") or record.get("arxiv") or _semantic_external_id(record, "ArXiv"))
     if provider == "arxiv" and not arxiv_id:
         arxiv_id = _text(record.get("id"))
 
     pmid = _text(record.get("pmid") or _semantic_external_id(record, "PubMed"))
     pmcid = _text(
-        record.get("pmcid")
-        or _semantic_external_id(record, "PubMedCentral")
-        or _semantic_external_id(record, "PMCID")
+        record.get("pmcid") or _semantic_external_id(record, "PubMedCentral") or _semantic_external_id(record, "PMCID")
     )
     doi = _text(record.get("doi") or _semantic_external_id(record, "DOI"))
     url = _text(record.get("url"))
@@ -416,18 +407,12 @@ def _provider_ids(record: dict[str, Any], *, provider: str) -> dict[str, str]:
         provider_ids["pmid"] = pmid
 
     pmcid = _text(
-        record.get("pmcid")
-        or _semantic_external_id(record, "PubMedCentral")
-        or _semantic_external_id(record, "PMCID")
+        record.get("pmcid") or _semantic_external_id(record, "PubMedCentral") or _semantic_external_id(record, "PMCID")
     )
     if pmcid:
         provider_ids["pmcid"] = pmcid
 
-    arxiv_id = _text(
-        record.get("arxiv_id")
-        or record.get("arxiv")
-        or _semantic_external_id(record, "ArXiv")
-    )
+    arxiv_id = _text(record.get("arxiv_id") or record.get("arxiv") or _semantic_external_id(record, "ArXiv"))
     if provider == "arxiv" and not arxiv_id:
         arxiv_id = record_id
     if arxiv_id:

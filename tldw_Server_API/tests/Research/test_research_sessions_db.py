@@ -104,10 +104,7 @@ def test_research_run_events_table_is_created_automatically(tmp_path):
 
     with sqlite3.connect(db_path) as conn:
         table_names = {
-            str(row[0])
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            ).fetchall()
+            str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
         }
 
     assert "research_run_events" in table_names

@@ -42,30 +42,20 @@ class ResearchSourceCatalog:
         categories: list[str],
     ) -> tuple[list[ResearchSourceCatalogEntry], SourceSelectionError | None]:
         """Expand source/category selections, dedupe, and enforce the source cap."""
-        unknown_source_ids = [
-            source_id for source_id in source_ids if source_id not in self._entries_by_id
-        ]
+        unknown_source_ids = [source_id for source_id in source_ids if source_id not in self._entries_by_id]
         if unknown_source_ids:
             return [], SourceSelectionError(
                 code="unknown_source",
-                message=(
-                    "Unknown research discovery source id(s): "
-                    f"{', '.join(unknown_source_ids)}."
-                ),
+                message=("Unknown research discovery source id(s): " f"{', '.join(unknown_source_ids)}."),
                 selected_count=len(unknown_source_ids),
                 limit=self.max_selected_sources,
             )
 
-        unknown_categories = [
-            category for category in categories if category not in self._categories
-        ]
+        unknown_categories = [category for category in categories if category not in self._categories]
         if unknown_categories:
             return [], SourceSelectionError(
                 code="unknown_category",
-                message=(
-                    "Unknown research discovery source category/categories: "
-                    f"{', '.join(unknown_categories)}."
-                ),
+                message=("Unknown research discovery source category/categories: " f"{', '.join(unknown_categories)}."),
                 selected_count=len(unknown_categories),
                 limit=self.max_selected_sources,
             )

@@ -260,13 +260,9 @@ class ResearchSessionsDB:
                     "ALTER TABLE research_sessions ADD COLUMN provider_overrides_json TEXT NOT NULL DEFAULT '{}'"
                 )
             if "follow_up_json" not in columns:
-                conn.execute(
-                    "ALTER TABLE research_sessions ADD COLUMN follow_up_json TEXT NOT NULL DEFAULT '{}'"
-                )
+                conn.execute("ALTER TABLE research_sessions ADD COLUMN follow_up_json TEXT NOT NULL DEFAULT '{}'")
             if "control_state" not in columns:
-                conn.execute(
-                    "ALTER TABLE research_sessions ADD COLUMN control_state TEXT NOT NULL DEFAULT 'running'"
-                )
+                conn.execute("ALTER TABLE research_sessions ADD COLUMN control_state TEXT NOT NULL DEFAULT 'running'")
             if "progress_percent" not in columns:
                 conn.execute("ALTER TABLE research_sessions ADD COLUMN progress_percent REAL")
             if "progress_message" not in columns:
@@ -287,19 +283,11 @@ class ResearchSessionsDB:
             autonomy_mode=str(row["autonomy_mode"]),
             limits_json=_parse_json_dict(row["limits_json"]),
             provider_overrides_json=(
-                _parse_json_dict(row["provider_overrides_json"])
-                if "provider_overrides_json" in keys
-                else {}
+                _parse_json_dict(row["provider_overrides_json"]) if "provider_overrides_json" in keys else {}
             ),
-            follow_up_json=(
-                _parse_json_dict(row["follow_up_json"])
-                if "follow_up_json" in keys
-                else {}
-            ),
+            follow_up_json=(_parse_json_dict(row["follow_up_json"]) if "follow_up_json" in keys else {}),
             control_state=(
-                str(row["control_state"])
-                if "control_state" in keys and row["control_state"] is not None
-                else "running"
+                str(row["control_state"]) if "control_state" in keys and row["control_state"] is not None else "running"
             ),
             progress_percent=(
                 float(row["progress_percent"])
@@ -407,9 +395,7 @@ class ResearchSessionsDB:
                 str(row["delivered_chat_message_id"]) if row["delivered_chat_message_id"] else None
             ),
             delivered_notification_id=(
-                int(row["delivered_notification_id"])
-                if row["delivered_notification_id"] is not None
-                else None
+                int(row["delivered_notification_id"]) if row["delivered_notification_id"] is not None else None
             ),
             last_error=str(row["last_error"]) if row["last_error"] else None,
             created_at=str(row["created_at"]),

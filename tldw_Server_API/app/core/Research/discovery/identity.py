@@ -124,8 +124,7 @@ def canonicalize_url(value: Any) -> str | None:
         return None
     netloc = hostname
     if port and not (
-        (parsed.scheme.lower() == "http" and port == 80)
-        or (parsed.scheme.lower() == "https" and port == 443)
+        (parsed.scheme.lower() == "http" and port == 80) or (parsed.scheme.lower() == "https" and port == 443)
     ):
         netloc = f"{hostname}:{port}"
 
@@ -152,9 +151,7 @@ def build_fingerprint(raw: dict[str, Any]) -> str:
     if pmcid:
         return f"pmcid:{pmcid}"
 
-    arxiv_id = _normalize_arxiv_id(
-        raw.get("arxiv_id") or raw.get("arxiv") or provider_ids.get("arxiv_id")
-    )
+    arxiv_id = _normalize_arxiv_id(raw.get("arxiv_id") or raw.get("arxiv") or provider_ids.get("arxiv_id"))
     if arxiv_id:
         return f"arxiv:{arxiv_id}"
 
@@ -231,10 +228,7 @@ def normalize_and_merge_records(
         fingerprint = build_fingerprint(record)
         groups.setdefault(fingerprint, []).append(record)
 
-    results = [
-        _build_discovery_result(fingerprint, group, catalog_version)
-        for fingerprint, group in groups.items()
-    ]
+    results = [_build_discovery_result(fingerprint, group, catalog_version) for fingerprint, group in groups.items()]
     return sorted(results, key=_result_sort_key)
 
 
@@ -275,8 +269,7 @@ def _build_discovery_result(
         published_at=_first_nonempty(ranked_records, "published_at")
         or _first_nonempty(ranked_records, "published")
         or _first_nonempty(ranked_records, "date"),
-        updated_at=_first_nonempty(ranked_records, "updated_at")
-        or _first_nonempty(ranked_records, "updated"),
+        updated_at=_first_nonempty(ranked_records, "updated_at") or _first_nonempty(ranked_records, "updated"),
         source_category=_coerce_string(primary.get("source_category") or primary.get("category")),
         oa_candidates=oa_candidates,
         recommended_candidate_id=recommended_candidate_id,
@@ -493,11 +486,7 @@ def _provider_ids(record: dict[str, Any]) -> dict[str, str]:
 
 
 def _provider_id_fingerprint(raw: dict[str, Any], provider_ids: dict[str, str]) -> str | None:
-    filtered = {
-        key: value
-        for key, value in provider_ids.items()
-        if key not in {"doi", "pmid", "pmcid", "arxiv_id"}
-    }
+    filtered = {key: value for key, value in provider_ids.items() if key not in {"doi", "pmid", "pmcid", "arxiv_id"}}
     if not filtered:
         return None
     source_scope = _provider(raw) or _source_id(raw)
@@ -592,16 +581,13 @@ def _authors(value: Any) -> tuple[str, ...]:
         authors: list[str] = []
         for item in value:
             if isinstance(item, Mapping):
-                name = (
-                    _coerce_string(item.get("name"))
-                    or " ".join(
-                        part
-                        for part in (
-                            _coerce_string(item.get("given")),
-                            _coerce_string(item.get("family")),
-                        )
-                        if part
+                name = _coerce_string(item.get("name")) or " ".join(
+                    part
+                    for part in (
+                        _coerce_string(item.get("given")),
+                        _coerce_string(item.get("family")),
                     )
+                    if part
                 )
             else:
                 name = _coerce_string(item)
@@ -675,9 +661,7 @@ def _warnings(record: dict[str, Any]) -> tuple[str, ...]:
     if isinstance(raw_warnings, str):
         return (raw_warnings,)
     if isinstance(raw_warnings, Iterable):
-        return tuple(
-            warning for item in raw_warnings if (warning := _coerce_string(item)) is not None
-        )
+        return tuple(warning for item in raw_warnings if (warning := _coerce_string(item)) is not None)
     return ()
 
 
@@ -702,9 +686,7 @@ def _dedupe_strings(values: Iterable[str]) -> list[str]:
 def _is_sensitive_metadata_key(key: Any) -> bool:
     key_variants = _metadata_key_variants(key)
     return bool(key_variants & _SENSITIVE_METADATA_KEY_ALIASES) or any(
-        part in variant
-        for variant in key_variants
-        for part in _SENSITIVE_METADATA_KEY_PARTS
+        part in variant for variant in key_variants for part in _SENSITIVE_METADATA_KEY_PARTS
     )
 
 
@@ -766,10 +748,7 @@ def _url_path_has_unsafe_material(path: str) -> bool:
     if ";" in decoded_path:
         return True
 
-    return any(
-        _url_path_segment_has_sensitive_key_value(segment)
-        for segment in decoded_path.split("/")
-    )
+    return any(_url_path_segment_has_sensitive_key_value(segment) for segment in decoded_path.split("/"))
 
 
 def _url_path_segment_has_sensitive_key_value(segment: str) -> bool:
@@ -788,10 +767,7 @@ def _is_sensitive_url_path_key(value: str) -> bool:
     key_text = value.strip().lower()
     normalized = re.sub(r"[^a-z0-9]+", "_", key_text).strip("_")
     compact = re.sub(r"[^a-z0-9]+", "", key_text)
-    return any(
-        variant in _SENSITIVE_URL_PATH_KEYS
-        for variant in (key_text, normalized, compact)
-    )
+    return any(variant in _SENSITIVE_URL_PATH_KEYS for variant in (key_text, normalized, compact))
 
 
 def _coerce_string(value: Any) -> str | None:

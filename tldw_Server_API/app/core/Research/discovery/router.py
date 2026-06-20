@@ -269,9 +269,7 @@ class ResearchSourceRouter:
         enriched["source_category"] = source.category
         enriched["provider"] = enriched.get("provider") or provider
         enriched["discovery_mode"] = source.default_discovery_mode
-        enriched["adapter_version"] = enriched.get("adapter_version") or (
-            f"{provider}:{DEFAULT_ADAPTER_VERSION}"
-        )
+        enriched["adapter_version"] = enriched.get("adapter_version") or (f"{provider}:{DEFAULT_ADAPTER_VERSION}")
         enriched["source_priority"] = source.priority
         return enriched
 
