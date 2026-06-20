@@ -9,13 +9,6 @@ labels:
 documentation:
 - Docs/superpowers/specs/2026-06-20-research-source-discovery-chokepoint-design.md
 - Docs/superpowers/plans/2026-06-20-research-discovery-chokepoint-phase1-plan.md
-- 'Task 6 endpoint slice: expose default source catalog and standalone discovery search
-  API under /api/v1/research with focused endpoint tests and route registration smoke.'
-- 'Task 6 verification: endpoint pytest red first failed on missing research_discovery
-  module/router spec; final pytest passed 10 tests. Route smoke printed content router
-  specs ok. Black --check passed for the four touched files after formatting. git
-  diff --check passed. Bandit endpoint/schema scan wrote /tmp/bandit_research_discovery_task6.json
-  with 0 findings.'
 modified_files:
 - Docs/superpowers/plans/2026-06-20-research-discovery-chokepoint-phase1-plan.md
 - tldw_Server_API/app/core/Research/discovery/__init__.py
@@ -76,6 +69,8 @@ Task 3 complete. Implemented the provider router and first-slice adapters throug
 Task 4 complete. Implemented owner-scoped, short-lived discovery snapshot persistence in `ResearchSessionsDB` with commit b5939d0d9b. Added `research_discovery_snapshots`, row mapping, public create/read helpers, and expired-row deletion. TDD red verification: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/test_research_sessions_db.py -v` initially failed for missing `create_discovery_snapshot`. Final verification: same command -> 7 passed, 7 warnings. Bandit: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/DB_Management/ResearchSessionsDB.py -f json -o /tmp/bandit_research_discovery_task4.json` -> 0 findings. `git diff --check -- tldw_Server_API/app/core/DB_Management/ResearchSessionsDB.py tldw_Server_API/tests/Research/test_research_sessions_db.py` returned clean.
 
 Task 5 complete. Implemented `ResearchDiscoveryService` orchestration with commit ea1aa9130b, including catalog selection/defaulting, router execution, total-budget timeout handling across provider search plus OA enrichment, off-thread OA resolver calls, sanitized warning/status/diagnostic metadata handling, metrics, effective config snapshots, and owner-scoped persisted discovery snapshots. TDD verification included a red regression for diagnostic status/error metadata leakage before the sanitizer fix. Final verification: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/test_research_discovery_service.py tldw_Server_API/tests/Research/test_research_discovery_identity.py tldw_Server_API/tests/Research/test_research_discovery_router.py tldw_Server_API/tests/Research/test_research_discovery_catalog.py -v` -> 56 passed, 7 warnings. Formatting: `source .venv/bin/activate && python -m black --check tldw_Server_API/app/core/Research/discovery/service.py tldw_Server_API/app/core/Research/discovery/models.py tldw_Server_API/app/core/Research/discovery/__init__.py tldw_Server_API/tests/Research/test_research_discovery_service.py` -> clean. Bandit: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Research/discovery/service.py tldw_Server_API/app/core/Research/discovery/models.py -f json -o /tmp/bandit_research_discovery_task5_after_status_fix2.json` -> 0 findings. `git diff --check` and staged diff check returned clean. Spec review and code-quality re-review both approved after fixes.
+
+Task 6 complete. Implemented the standalone research discovery API with commit 70bf2a1525, exposing the default source catalog and discovery search under `/api/v1/research` with focused endpoint tests and route registration smoke coverage. Verification: endpoint pytest red first failed on missing `research_discovery` module/router spec; final `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Research/test_research_discovery_endpoint.py -v` -> 10 passed, 7 warnings. Route smoke printed `content router specs ok`. Black `--check` passed for endpoint/schema/router/test files. `git diff --check` passed. Bandit endpoint/schema scan wrote `/tmp/bandit_research_discovery_task6_controller.json` with 0 findings. Spec review found the initial Task 6 tracking notes in Backlog frontmatter; this was corrected by moving them into implementation notes.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
