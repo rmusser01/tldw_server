@@ -309,6 +309,8 @@ def _items_from_payload(payload: object) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         return _items_from_list_payload(payload)
     if isinstance(payload, Mapping):
+        if _is_error_shaped_payload(payload):
+            raise DiscoveryProviderError()
         for key in ("data", "items", "results", "hits"):
             nested = payload.get(key)
             if isinstance(nested, list):
@@ -317,8 +319,6 @@ def _items_from_payload(payload: object) -> list[dict[str, Any]]:
                 nested_hits = nested.get("hits")
                 if isinstance(nested_hits, list):
                     return _items_from_list_payload(nested_hits)
-        if _is_error_shaped_payload(payload):
-            raise DiscoveryProviderError()
         if _is_record_shaped_payload(payload):
             return [dict(payload)]
         raise DiscoveryProviderError()
