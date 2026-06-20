@@ -417,7 +417,9 @@ print_evidence_plan() {
 }
 
 print_evidence_env_hint() {
-  printf 'export TLDW_SANDBOX_VZ_EVIDENCE_DIR=%q\n' "${EVIDENCE_DIR}"
+  if [[ -n "${EVIDENCE_DIR:-}" ]]; then
+    printf 'export TLDW_SANDBOX_VZ_EVIDENCE_DIR=%q\n' "${EVIDENCE_DIR}"
+  fi
 }
 
 prepare_runtime_paths() {

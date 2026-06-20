@@ -41,6 +41,7 @@ Docs/superpowers/plans/2026-06-19-vz-smoke-evidence-bundle-implementation-plan.m
 - Current `dev` already contained default evidence directory handling, expected sidecars, JSON evidence, private evidence directory checks, and failure-preserving cleanup evidence.
 - This slice was narrowed to the missing operator handoff contract: printing a sourceable `TLDW_SANDBOX_VZ_EVIDENCE_DIR` export in dry-run plans and after successful real-run evidence finalization.
 - Tests were added to assert help advertises `--evidence-dir PATH`, dry-run output includes the export for default and override paths, and real fake-helper runs print the export after writing evidence.
+- PR review follow-up rebased the branch onto latest `origin/dev`, added a module-level `unit` pytest marker, hardened the shell export helper for `set -u`, and changed tests/docs to validate bash-escaped `%q` output instead of raw path substrings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -49,7 +50,7 @@ Docs/superpowers/plans/2026-06-19-vz-smoke-evidence-bundle-implementation-plan.m
 - Added `print_evidence_env_hint()` to `run-host-e2e-smoke.sh` and call it from dry-run evidence planning and successful evidence finalization.
 - Updated host smoke wrapper tests for the env handoff contract.
 - Documented using the printed `TLDW_SANDBOX_VZ_EVIDENCE_DIR` value to surface local smoke evidence in `GET /api/v1/sandbox/admin/operator-status`.
-- Verification: focused wrapper tests passed (`25 passed, 3 skipped`), `bash -n` passed, `git diff --check` passed, and Bandit produced the same 122 findings as the `dev` baseline for the touched test file.
+- Verification after PR review fixes: focused wrapper tests passed (`25 passed, 3 skipped`), `bash -n` passed, `git diff --check` passed, and Bandit produced the same 122 findings as the `origin/dev` baseline for the touched test file.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
