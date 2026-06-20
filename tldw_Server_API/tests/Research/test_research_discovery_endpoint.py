@@ -4,7 +4,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.app.core.Research.discovery.models import (
     DiscoveryMetrics,
     DiscoveryOACandidate,
@@ -178,12 +178,11 @@ def test_content_router_specs_include_research_discovery():
     from tldw_Server_API.app.api.v1.router_groups.content import iter_content_router_specs
 
     specs = list(iter_content_router_specs())
-    spec = next(item for item in specs if item.name == "research_discovery")
+    spec = next(item for item in specs if item.prefix == "/api/v1/research" and item.tags == ("research-discovery",))
 
     assert spec.prefix == "/api/v1/research"
-    assert spec.route_key == "research"
     assert spec.tags == ("research-discovery",)
-    assert spec.resolve_router() is not None
+    assert spec.router is not None
 
 
 @pytest.mark.parametrize(
