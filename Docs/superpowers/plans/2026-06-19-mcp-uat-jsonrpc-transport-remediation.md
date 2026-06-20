@@ -384,7 +384,7 @@ git commit -m "fix: normalize mounted MCP WebSocket JSON-RPC handling"
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_smoke_client.py`
 
-- [ ] **Step 1: Write failing protocol and standalone tests**
+- [x] **Step 1: Write failing protocol and standalone tests**
 
 Protocol:
 
@@ -400,7 +400,7 @@ Standalone gateway:
 - stdio notification writes no line; explicit-null-id request writes one response line.
 - Id validation rejects `id: true` and non-integer number ids with `id: null`.
 
-- [ ] **Step 2: Run tests and verify failures**
+- [x] **Step 2: Run tests and verify failures**
 
 Run:
 
@@ -415,7 +415,7 @@ python -m pytest \
 
 Expected: FAIL where absent id and explicit null id are conflated or null fields remain serialized.
 
-- [ ] **Step 3: Implement notification/id-presence behavior**
+- [x] **Step 3: Implement notification/id-presence behavior**
 
 Mounted protocol:
 
@@ -431,13 +431,13 @@ Standalone:
 - Ensure `parse_json_payload()` parse-error responses keep `id: null`.
 - Keep pydantic v1/v2 compatibility.
 
-- [ ] **Step 4: Run tests and verify pass**
+- [x] **Step 4: Run tests and verify pass**
 
 Run the same command from Step 2.
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/protocol.py \
