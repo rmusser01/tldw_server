@@ -2,9 +2,9 @@
 """Run the gating CI checks locally, on any of linux/macOS/Windows.
 
 This mirrors the *blocking* lanes of ``.github/workflows/ci.yml`` so you can get
-the same signal locally and skip waiting on the remote GitHub runners. It is pure
-standard library and invokes tools through ``sys.executable -m ...`` so it works
-identically on a Windows Server box (no bash required).
+the same signal locally and skip waiting on the remote GitHub runners. It avoids
+shell-specific behavior and invokes tools through ``sys.executable -m ...`` so it
+works identically on a Windows Server box (no bash required).
 
 Tiers
 -----
@@ -44,13 +44,16 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
 import shutil
-import subprocess
+import subprocess  # nosec: B404
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from loguru import logger
 
 # Tool versions the remote CI pins (see the `lint` job). Local installs may
 # differ; we only warn so the script stays usable without an exact match.
@@ -66,10 +69,19 @@ GUARD_SCRIPTS = (
     "Helper_Scripts/checks/guard_no_nonempty_legacy_complete.py",
 )
 SYNTAX_GUARD = "Helper_Scripts/checks/check_python_syntax.py"
+CI_PYTEST_ENV_DEFAULTS = {
+    "PYTHONPATH": ".",
+    "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+    "TEST_MODE": "true",
+    "DISABLE_HEAVY_STARTUP": "1",
+    "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION": "python",
+}
 
 
 @dataclass
 class PhaseResult:
+    """Result metadata for one local CI phase."""
+
     name: str
     ok: bool
     seconds: float
@@ -79,6 +91,8 @@ class PhaseResult:
 
 @dataclass
 class Context:
+    """Shared execution context for local CI phases."""
+
     repo_root: Path
     base: str | None
     changed_py: list[str] = field(default_factory=list)
@@ -89,24 +103,47 @@ class Context:
 # Helpers
 # --------------------------------------------------------------------------- #
 def _c(text: str, color: str) -> str:
+    """Colorize ``text`` when stdout is a TTY and colors are enabled."""
     if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
         return text
     codes = {"green": "32", "red": "31", "yellow": "33", "cyan": "36", "bold": "1"}
     return f"\033[{codes.get(color, '0')}m{text}\033[0m"
 
 
-def _run(cmd: Sequence[str], cwd: Path) -> int:
-    print(_c("$ " + " ".join(cmd), "cyan"))
+def _emit(text: str, color: str = "") -> None:
+    """Emit a runner-owned status line through Loguru without extra formatting."""
+    logger.opt(raw=True).info(_c(text, color) + "\n")
+
+
+def _emit_error(text: str, color: str = "red") -> None:
+    """Emit a runner-owned error line through Loguru without extra formatting."""
+    logger.opt(raw=True).error(_c(text, color) + "\n")
+
+
+def _run(cmd: Sequence[str], cwd: Path, env: Mapping[str, str] | None = None) -> int:
+    """Run ``cmd`` in ``cwd`` with optional env overrides and return its status."""
+    _emit("$ " + " ".join(cmd), "cyan")
+    run_env = None
+    if env is not None:
+        run_env = os.environ.copy()
+        run_env.update(env)
     try:
-        return subprocess.run(list(cmd), cwd=str(cwd)).returncode
+        # Local CI intentionally runs explicit project command argv without a shell.
+        return subprocess.run(  # nosec: B603
+            list(cmd),
+            cwd=str(cwd),
+            env=run_env,
+        ).returncode
     except FileNotFoundError as exc:  # missing executable
-        print(_c(f"  command not found: {exc}", "red"), file=sys.stderr)
+        _emit_error(f"  command not found: {exc}")
         return 127
 
 
 def _capture(cmd: Sequence[str], cwd: Path) -> tuple[int, str]:
+    """Run ``cmd`` and return ``(exit_status, stdout)`` without streaming output."""
     try:
-        proc = subprocess.run(
+        # Local CI intentionally captures explicit project command argv without a shell.
+        proc = subprocess.run(  # nosec: B603
             list(cmd), cwd=str(cwd), capture_output=True, text=True
         )
         return proc.returncode, proc.stdout
@@ -144,15 +181,29 @@ def _maybe_reexec_into_venv(repo_root: Path) -> None:
         same = Path(sys.executable).resolve() == venv_py.resolve()
     if same:
         return
-    print(_c(f"Re-executing under project venv: {venv_py}", "cyan"))
+    _emit(f"Re-executing under project venv: {venv_py}", "cyan")
     env = dict(os.environ, TLDW_CI_REEXEC="1")
-    os.execve(str(venv_py), [str(venv_py), str(Path(__file__).resolve()), *sys.argv[1:]], env)
+    if sys.platform == "win32":
+        # Windows must wait for the trusted venv Python process and return its status.
+        raise SystemExit(
+            subprocess.call(  # nosec
+                [str(venv_py), str(Path(__file__).resolve()), *sys.argv[1:]],
+                env=env,
+            )
+        )
+    # POSIX re-exec replaces the current process with the trusted venv Python.
+    os.execve(  # nosec: B606
+        str(venv_py),
+        [str(venv_py), str(Path(__file__).resolve()), *sys.argv[1:]],
+        env,
+    )
 
 
 def _git_repo_root() -> Path:
+    """Return the absolute git repository root for the current working tree."""
     rc, out = _capture(["git", "rev-parse", "--show-toplevel"], Path.cwd())
     if rc != 0 or not out.strip():
-        print(_c("Not inside a git repository.", "red"), file=sys.stderr)
+        _emit_error("Not inside a git repository.")
         raise SystemExit(2)
     return Path(out.strip())
 
@@ -173,25 +224,38 @@ def _resolve_base(repo_root: Path, explicit: str | None) -> str | None:
 
 
 def _changed_python(repo_root: Path, base: str | None) -> list[str]:
+    """Return changed Python files relative to ``repo_root``."""
     files: set[str] = set()
     if base:
         rc, out = _capture(
-            ["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", f"{base}...HEAD", "--", "*.py"],
+            ["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", f"{base}...HEAD"],
             repo_root,
         )
         if rc == 0:
-            files.update(line for line in out.splitlines() if line.strip())
+            files.update(
+                path
+                for path in (line.strip() for line in out.splitlines())
+                if path.endswith(".py")
+            )
     # Always include working-tree + untracked changes so local edits count.
     rc, out = _capture(
-        ["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", "--", "*.py"], repo_root
+        ["git", "diff", "--name-only", "--diff-filter=ACMRTUXB"], repo_root
     )
     if rc == 0:
-        files.update(line for line in out.splitlines() if line.strip())
+        files.update(
+            path
+            for path in (line.strip() for line in out.splitlines())
+            if path.endswith(".py")
+        )
     rc, out = _capture(
-        ["git", "ls-files", "--others", "--exclude-standard", "--", "*.py"], repo_root
+        ["git", "ls-files", "--others", "--exclude-standard"], repo_root
     )
     if rc == 0:
-        files.update(line for line in out.splitlines() if line.strip())
+        files.update(
+            path
+            for path in (line.strip() for line in out.splitlines())
+            if path.endswith(".py")
+        )
     # Keep only files that still exist (skip deletions).
     return sorted(f for f in files if (repo_root / f).exists())
 
@@ -205,17 +269,20 @@ def _is_test_file(path: str) -> bool:
 
 
 def _py(*args: str) -> list[str]:
+    """Build a command that invokes the current Python interpreter."""
     return [sys.executable, *args]
 
 
 def _check_tool_version(repo_root: Path, module: str, expected: str) -> None:
+    """Warn when local tool versions differ from CI-pinned versions."""
     rc, out = _capture(_py("-m", module, "--version"), repo_root)
     if rc != 0:
         return
     if expected not in out:
         got = out.strip().splitlines()[0] if out.strip() else "unknown"
-        print(
-            _c(f"  note: local {module} ({got}) != CI pin {expected}; results may differ.", "yellow")
+        _emit(
+            f"  note: local {module} ({got}) != CI pin {expected}; results may differ.",
+            "yellow",
         )
 
 
@@ -223,12 +290,14 @@ def _check_tool_version(repo_root: Path, module: str, expected: str) -> None:
 # Phases
 # --------------------------------------------------------------------------- #
 def phase_compileall(ctx: Context) -> PhaseResult:
+    """Run the compileall syntax-check phase."""
     start = time.time()
     rc = _run(_py("-m", "compileall", "-q", APP_DIR), ctx.repo_root)
     return PhaseResult("compileall (syntax-check)", rc == 0, time.time() - start)
 
 
 def phase_ruff(ctx: Context, full: bool) -> PhaseResult:
+    """Run the non-blocking Ruff visibility phase."""
     # Non-blocking, mirroring the CI `lint` job (continue-on-error against a large
     # baseline). Reported for visibility but never fails the local run.
     start = time.time()
@@ -251,6 +320,7 @@ def phase_ruff(ctx: Context, full: bool) -> PhaseResult:
 
 
 def phase_guards(ctx: Context) -> PhaseResult:
+    """Run repository guard scripts that mirror pre-commit CI hooks."""
     start = time.time()
     ok = True
     for guard in GUARD_SCRIPTS:
@@ -266,23 +336,34 @@ def phase_guards(ctx: Context) -> PhaseResult:
 
 
 def _pytest_base_cmd(jobs: str) -> list[str]:
+    """Build the base pytest command for local CI."""
     cmd = _py("-m", "pytest", "-q", "--disable-warnings", "-p", "no:cacheprovider")
     if jobs and jobs != "0":
-        cmd += ["-n", jobs]
+        cmd += ["-p", "xdist.plugin", "-n", jobs]
     return cmd
 
 
+def _ci_pytest_env() -> dict[str, str]:
+    """Return pytest environment defaults aligned with GitHub CI."""
+    env = os.environ.copy()
+    for key, value in CI_PYTEST_ENV_DEFAULTS.items():
+        env.setdefault(key, value)
+    return env
+
+
 def phase_pytest(ctx: Context, paths: list[str], jobs: str, extra: list[str]) -> PhaseResult:
+    """Run pytest over selected paths."""
     start = time.time()
     if not paths:
         return PhaseResult("pytest", True, time.time() - start, skipped=True,
                            note="no test paths selected (touch a test file or use --lane/--full)")
     cmd = _pytest_base_cmd(jobs) + extra + paths
-    rc = _run(cmd, ctx.repo_root)
+    rc = _run(cmd, ctx.repo_root, env=_ci_pytest_env())
     return PhaseResult("pytest", rc == 0, time.time() - start)
 
 
 def phase_mypy(ctx: Context) -> PhaseResult:
+    """Run the non-blocking mypy visibility phase."""
     start = time.time()
     _check_tool_version(ctx.repo_root, "mypy", CI_MYPY_VERSION)
     rc = _run(_py("-m", "mypy", RUFF_TARGET), ctx.repo_root)
@@ -295,6 +376,7 @@ def phase_mypy(ctx: Context) -> PhaseResult:
 # Main
 # --------------------------------------------------------------------------- #
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    """Parse local CI command-line arguments."""
     p = argparse.ArgumentParser(
         description="Run the gating CI checks locally (compileall, ruff, guards, pytest).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -319,6 +401,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str]) -> int:
+    """Run local CI and return a process exit status."""
     args = parse_args(argv)
     repo_root = _git_repo_root()
     _maybe_reexec_into_venv(repo_root)  # never silently use system Python
@@ -328,20 +411,20 @@ def main(argv: list[str]) -> int:
     ctx = Context(repo_root=repo_root, base=base, changed_py=changed, changed_tests=changed_tests)
 
     if args.list_changed:
-        print(f"base: {base or '(working tree only)'}")
+        _emit(f"base: {base or '(working tree only)'}")
         for f in changed:
-            print(f"  {f}")
+            _emit(f"  {f}")
         return 0
 
     full = bool(args.full)
     lane = args.lane
-    extra = args.pytest_args.split() if args.pytest_args else []
+    extra = shlex.split(args.pytest_args, posix=(os.name != "nt")) if args.pytest_args else []
 
-    print(_c("=" * 70, "bold"))
+    _emit("=" * 70, "bold")
     tier_name = "lane" if lane else ("full" if full else "fast")
-    print(_c(f"Local CI — tier: {tier_name}   base: {base or '(working tree only)'}", "bold"))
-    print(_c(f"changed .py: {len(changed)}   changed tests: {len(changed_tests)}", "bold"))
-    print(_c("=" * 70, "bold"))
+    _emit(f"Local CI — tier: {tier_name}   base: {base or '(working tree only)'}", "bold")
+    _emit(f"changed .py: {len(changed)}   changed tests: {len(changed_tests)}", "bold")
+    _emit("=" * 70, "bold")
 
     results: list[PhaseResult] = []
     results.append(phase_compileall(ctx))
@@ -361,9 +444,9 @@ def main(argv: list[str]) -> int:
         results.append(phase_pytest(ctx, pytest_paths, args.jobs, extra))
 
     # Summary
-    print()
-    print(_c("-" * 70, "bold"))
-    print(_c("Summary", "bold"))
+    _emit("")
+    _emit("-" * 70, "bold")
+    _emit("Summary", "bold")
     failed = False
     for r in results:
         if r.skipped:
@@ -374,13 +457,13 @@ def main(argv: list[str]) -> int:
             status = _c("FAIL", "red")
             failed = True
         note = f"  ({r.note})" if r.note else ""
-        print(f"  {status}  {r.name:<28} {r.seconds:6.1f}s{note}")
-    print(_c("-" * 70, "bold"))
+        _emit(f"  {status}  {r.name:<28} {r.seconds:6.1f}s{note}")
+    _emit("-" * 70, "bold")
 
     if failed:
-        print(_c("Local CI FAILED — fix the above before pushing.", "red"))
+        _emit("Local CI FAILED — fix the above before pushing.", "red")
         return 1
-    print(_c("Local CI passed.", "green"))
+    _emit("Local CI passed.", "green")
     return 0
 
 

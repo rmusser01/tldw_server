@@ -2,8 +2,8 @@
 
 `Helper_Scripts/ci/run_local_ci.py` reproduces the **blocking** lanes of
 `.github/workflows/ci.yml` on your machine so you can get the same signal locally
-and avoid waiting on (or burning minutes in) the remote GitHub runners. It is
-pure standard library and works the same on Linux, macOS, and Windows Server.
+and avoid waiting on (or burning minutes in) the remote GitHub runners. It avoids
+shell-specific behavior and works the same on Linux, macOS, and Windows Server.
 
 ## One-time setup (uv venv — never the system Python)
 
@@ -41,7 +41,8 @@ Or call the script directly (Windows, or when you want flags):
 
 Useful flags: `--base <ref>` (diff base for change detection; defaults to the
 merge-base with `origin/dev`/`origin/main`), `--jobs auto|N|0` (xdist workers),
-`--mypy` (run mypy too, non-blocking), `--no-pytest`, `--list-changed`.
+`--pytest-args "<args>"` (parsed with platform shell quoting rules), `--mypy`
+(run mypy too, non-blocking), `--no-pytest`, `--list-changed`.
 
 ## How phases map to CI jobs
 

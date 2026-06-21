@@ -1,0 +1,51 @@
+---
+id: TASK-2396
+title: Address PR 2426 review comments and rebase local CI tooling
+status: In Progress
+references:
+- https://github.com/rmusser01/tldw_server/pull/2426
+modified_files:
+- Helper_Scripts/ci/run_local_ci.py
+- tldw_Server_API/tests/CI/test_run_local_ci.py
+- Docs/Development/Local-CI.md
+- Docs/superpowers/plans/2026-06-21-pr-2426-local-ci-review-rebase-plan.md
+- backlog/tasks/task-2396 - Address-PR-2426-review-comments-and-rebase-local-CI-tooling.md
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-06-21-pr-2426-local-ci-review-rebase-plan.md
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Rebased local-ci-tooling onto origin/dev (already up to date) and addressed PR 2426 review comments. Added focused tests for quoted pytest args, Python-side changed-file filtering, nested changed file detection, CI-like pytest env/xdist loading, Windows venv re-exec status propagation, Loguru output usage, and runner docstrings. Updated the runner to use Loguru for runner-owned messages, shlex for pytest args, CI pytest env defaults, explicit xdist loading, Python-side .py filtering, Windows subprocess.call re-exec, and docstrings throughout. Updated Local CI docs to remove the pure-stdlib claim and document pytest arg quoting. Verification: targeted pytest 8 passed; ruff changed Python files passed; compileall changed Python files passed; Bandit on Helper_Scripts/ci/run_local_ci.py reported 0 findings/errors; run_local_ci.py --fast --no-pytest passed.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->
