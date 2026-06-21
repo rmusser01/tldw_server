@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 from Helper_Scripts.ci import run_local_ci
 
 
@@ -179,6 +180,39 @@ def test_phase_pytest_does_not_load_xdist_when_jobs_disabled(
     assert "-n" not in cmd
 
 
+def test_phase_guards_full_run_checks_app_dir_even_with_changed_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Full runs send app/ to the syntax guard instead of changed files."""
+    syntax_guard = tmp_path / run_local_ci.SYNTAX_GUARD
+    syntax_guard.parent.mkdir(parents=True)
+    syntax_guard.write_text("")
+    captured: list[list[str]] = []
+
+    def fake_run(cmd: list[str], _cwd: Path) -> int:
+        captured.append(cmd)
+        return 0
+
+    monkeypatch.setattr(run_local_ci, "_run", fake_run)
+    ctx = run_local_ci.Context(
+        repo_root=tmp_path,
+        base=None,
+        changed_py=["Helper_Scripts/ci/run_local_ci.py"],
+    )
+
+    result = run_local_ci.phase_guards(ctx, full=True)
+
+    assert result.ok is True
+    assert captured == [
+        [
+            run_local_ci.sys.executable,
+            run_local_ci.SYNTAX_GUARD,
+            run_local_ci.APP_DIR,
+        ]
+    ]
+
+
 def test_windows_reexec_waits_and_exits_with_child_status(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -218,6 +252,15 @@ def test_windows_reexec_waits_and_exits_with_child_status(
     env = captured["env"]
     assert isinstance(env, dict)
     assert env["TLDW_CI_REEXEC"] == "1"
+
+
+def test_local_ci_pre_push_hook_uses_cross_platform_python_launcher() -> None:
+    """The local CI pre-push hook uses ``python`` instead of ``python3``."""
+    config = yaml.safe_load(Path(".pre-commit-config.yaml").read_text())
+    local_repo = next(repo for repo in config["repos"] if repo["repo"] == "local")
+    local_ci_hook = next(hook for hook in local_repo["hooks"] if hook["id"] == "local-ci-fast")
+
+    assert local_ci_hook["entry"].split()[0] == "python"
 
 
 def test_runner_owned_messages_use_loguru_instead_of_prints() -> None:

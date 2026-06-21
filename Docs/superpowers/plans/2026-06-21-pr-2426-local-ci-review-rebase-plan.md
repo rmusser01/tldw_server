@@ -60,3 +60,15 @@
 - [x] Run Bandit on the touched Python runner.
 - [x] Update `TASK-2396` with verification and final summary.
 - [x] Commit and push the rebased PR branch.
+
+## Stage 5: Follow-Up CodeRabbit Review
+
+**Goal:** Address the new CodeRabbit comments posted after the first review-fix push.
+**Success Criteria:** The pre-push hook uses a cross-platform Python launcher and full local CI runs send `app/` to the syntax guard even when changed files exist.
+**Tests:** `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/CI/test_run_local_ci.py -q`
+**Status:** Complete
+
+- [x] Add failing tests for `local-ci-fast` launcher portability and full-tier guard syntax scope.
+- [x] Change `local-ci-fast` from `python3` to `python`.
+- [x] Thread `full` context into `phase_guards`.
+- [x] Rerun targeted pytest, Ruff, compileall, Bandit, and local CI smoke verification.

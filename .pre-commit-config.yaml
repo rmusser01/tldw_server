@@ -35,10 +35,10 @@ repos:
       # pytest on changed tests). The runner auto-uses .venv, so it never runs
       # against system Python. Enable with:
       #   pre-commit install --hook-type pre-push
-      # (Windows: invoke the script directly, or swap python3 -> python.)
+      # The python launcher name is used for Windows/macOS/Linux compatibility.
       - id: local-ci-fast
         name: Local CI fast tier (pre-push)
-        entry: python3 Helper_Scripts/ci/run_local_ci.py --fast
+        entry: python Helper_Scripts/ci/run_local_ci.py --fast
         language: system
         pass_filenames: false
         always_run: true

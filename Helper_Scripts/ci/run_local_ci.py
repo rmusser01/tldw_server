@@ -319,7 +319,7 @@ def phase_ruff(ctx: Context, full: bool) -> PhaseResult:
     return PhaseResult("ruff (non-blocking)", True, time.time() - start, note=note)
 
 
-def phase_guards(ctx: Context) -> PhaseResult:
+def phase_guards(ctx: Context, full: bool = False) -> PhaseResult:
     """Run repository guard scripts that mirror pre-commit CI hooks."""
     start = time.time()
     ok = True
@@ -328,7 +328,7 @@ def phase_guards(ctx: Context) -> PhaseResult:
             rc = _run(_py(guard), ctx.repo_root)
             ok = ok and rc == 0
     # Syntax guard takes file paths; run on changed files (or app/ in full runs).
-    syntax_targets = ctx.changed_py or [APP_DIR]
+    syntax_targets = [APP_DIR] if full else (ctx.changed_py or [APP_DIR])
     if (ctx.repo_root / SYNTAX_GUARD).exists():
         rc = _run(_py(SYNTAX_GUARD, *syntax_targets), ctx.repo_root)
         ok = ok and rc == 0
@@ -430,7 +430,7 @@ def main(argv: list[str]) -> int:
     results.append(phase_compileall(ctx))
     if not lane:  # ruff covered by lint job; lane runs skip it for speed
         results.append(phase_ruff(ctx, full=full))
-    results.append(phase_guards(ctx))
+    results.append(phase_guards(ctx, full=full))
     if args.mypy:
         results.append(phase_mypy(ctx))
 
