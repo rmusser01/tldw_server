@@ -1,0 +1,21 @@
+# Shard-coverage IGNORE list — test files intentionally NOT run by the ci.yml
+# full-suite shards because another workflow runs them (e2e, jobs-suite, ...) or
+# they are quarantined. Permanent exclusions (distinct from the time-bounded
+# baseline backlog in shard_coverage_baseline.txt).
+#
+# Used by Helper_Scripts/ci/check_shard_coverage.py. One pattern per line.
+# Shell-glob matching: a '*' does not cross '/'; a bare directory matches all
+# files beneath it. '#' starts a comment.
+#
+# Add entries here only when a directory/file is genuinely covered elsewhere.
+# Prefer assigning files to a shard over ignoring them.
+
+# Run by jobs-suite.yml ("Run Jobs tests").
+tldw_Server_API/tests/Jobs
+# Run by e2e-required.yml and e2e-smoke.yml (pytest tldw_Server_API/tests/e2e --critical-only).
+tldw_Server_API/tests/e2e
+# E2E suites that require a live server harness, not the backend full-suite:
+#   server_e2e_tests spawns the API via tests/scripts/server_lifecycle (skips without it);
+#   frontend_e2e launches the Next.js dev server (npm run dev). Belong in dedicated e2e jobs.
+tldw_Server_API/tests/server_e2e_tests
+tldw_Server_API/tests/frontend_e2e

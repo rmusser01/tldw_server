@@ -1,14 +1,17 @@
 """Property-based tests for MarkdownTableAdapter validation behavior."""
 
 import pytest
-from hypothesis import given, strategies as st
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from tldw_Server_API.app.core.File_Artifacts.adapters.markdown_table_adapter import MarkdownTableAdapter
-
 
 pytestmark = pytest.mark.unit
 
 
+# too_slow input generation can fire on loaded CI runners; the strategy is fine,
+# the machine is just busy. Suppress the timing-sensitive health check.
+@settings(suppress_health_check=[HealthCheck.too_slow])
 @given(
     columns=st.lists(st.text(min_size=1, max_size=8), min_size=1, max_size=6, unique=True),
     rows=st.lists(st.lists(st.text(max_size=12), max_size=6), max_size=10),

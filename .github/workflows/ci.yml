@@ -59,6 +59,24 @@ jobs:
           ok = compileall.compile_dir('tldw_Server_API/app', force=True, quiet=1)
           sys.exit(0 if ok else 1)
           PY
+  shard-coverage:
+    name: Shard coverage guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install PyYAML
+        run: pip install pyyaml
+      - name: Verify every test file is assigned to a shard
+        # Fails if a NEW test file is in no full-suite shard (would be silently
+        # skipped). Known-unshared backlog is tracked in
+        # Helper_Scripts/ci/shard_coverage_baseline.txt; shrink it over time.
+        run: python Helper_Scripts/ci/check_shard_coverage.py
   quickstart-dry-run:
     name: Quickstart Dry-Run Smoke
     runs-on: ubuntu-latest
@@ -237,11 +255,26 @@ jobs:
             --cov=tldw_Server_API/cli/wizard --cov-report=term-missing --cov-fail-under=70
 
 
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend_changed: ${{ steps.detect.outputs.backend_changed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: detect
+        uses: ./.github/actions/detect-required-gate-changes
   full-suite-linux-311-smoke:
     name: Full Suite (Ubuntu / Python 3.11 / ${{ matrix.shard.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    needs: [lint, syntax-check]
+    needs: [lint, syntax-check, changes]
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -459,11 +492,84 @@ jobs:
     name: Full Suite shard (Ubuntu / Python 3.12 / ${{ matrix.shard.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    needs: [lint, syntax-check]
+    needs: [lint, syntax-check, changes]
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
       fail-fast: false
       matrix:
         shard:
+          - name: gap-verified-1
+            paths: >-
+              tldw_Server_API/tests/Audiobooks
+              tldw_Server_API/tests/Image_Generation
+          - name: gap-verified-2
+            paths: >-
+              tldw_Server_API/tests/Claims_Extraction
+              tldw_Server_API/tests/Discord
+              tldw_Server_API/tests/Files
+              tldw_Server_API/tests/Meetings
+              tldw_Server_API/tests/Notes_Tasks
+              tldw_Server_API/tests/Sync
+              tldw_Server_API/tests/Translation
+          - name: gap-verified-3
+            paths: >-
+              tldw_Server_API/tests/DataTables
+              tldw_Server_API/tests/Embeddings_isolated
+              tldw_Server_API/tests/Integrations
+              tldw_Server_API/tests/PrototypeWorkspaces
+              tldw_Server_API/tests/UserProfile
+              tldw_Server_API/tests/VN_Platform
+          - name: gap-verified-4
+            paths: >-
+              tldw_Server_API/tests/Governance
+              tldw_Server_API/tests/Ingestion_Sources
+              tldw_Server_API/tests/Items
+              tldw_Server_API/tests/Research_Workspace
+              tldw_Server_API/tests/Skills
+              tldw_Server_API/tests/StudyPacks
+              tldw_Server_API/tests/VN_Play
+              tldw_Server_API/tests/VN_Policy
+              tldw_Server_API/tests/scripts
+          - name: gap-verified-5
+            paths: >-
+              tldw_Server_API/tests/Agent_Orchestration
+              tldw_Server_API/tests/Chat_Workflows
+              tldw_Server_API/tests/Notes_Graph
+              tldw_Server_API/tests/Slides              tldw_Server_API/tests/Text2SQL
+              tldw_Server_API/tests/wizard
+          - name: gap-verified-6
+            paths: >-
+              tldw_Server_API/tests/API_Deps
+              tldw_Server_API/tests/AuthNZ_Federation
+              tldw_Server_API/tests/CodeGraph
+              tldw_Server_API/tests/MCP_Hub
+              tldw_Server_API/tests/MediaFiles
+              tldw_Server_API/tests/Scheduler
+              tldw_Server_API/tests/Slack
+              tldw_Server_API/tests/VN_Assets
+          - name: gap-verified-7
+            paths: >-
+              tldw_Server_API/tests/Guardian
+          - name: gap-verified-8
+            paths: >-
+              tldw_Server_API/tests/Storage
+              tldw_Server_API/tests/StudySuggestions
+              tldw_Server_API/tests/Quizzes
+          - name: gap-verified-9
+            paths: >-
+              tldw_Server_API/tests/Docs              tldw_Server_API/tests/performance
+          - name: gap-verified-10
+            paths: >-
+              tldw_Server_API/tests/Writing
+          - name: gap-verified-11
+            paths: >-
+              tldw_Server_API/tests/Sharing
+              tldw_Server_API/tests/VoiceAssistant
+          - name: gap-verified-12
+            paths: >-
+              tldw_Server_API/tests/Billing
+              tldw_Server_API/tests/CI
+              tldw_Server_API/tests/FileArtifacts
           - name: core-server-smoke
             paths: >-
               tldw_Server_API/tests/test_*.py
@@ -1425,6 +1531,7 @@ jobs:
               tldw_Server_API/tests/sandbox/test_runner_*.py
               tldw_Server_API/tests/sandbox/test_runtime_*.py
               tldw_Server_API/tests/sandbox/test_runtimes_*.py
+              tldw_Server_API/tests/sandbox/test_operator_*.py
               tldw_Server_API/tests/sandbox/test_seatbelt_*.py
               tldw_Server_API/tests/sandbox/test_vz_*.py
           - name: platform-sandbox-state-store
@@ -1741,21 +1848,95 @@ jobs:
       - name: Check Python 3.12 shard result
         shell: bash
         run: |
-          if [ "${{ needs['full-suite-linux-312-shards'].result }}" != "success" ]; then
-            echo "Python 3.12 full-suite shards finished with: ${{ needs['full-suite-linux-312-shards'].result }}"
+          r="${{ needs['full-suite-linux-312-shards'].result }}"
+          if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+            echo "Python 3.12 full-suite shards finished with: $r"
             exit 1
           fi
-          echo "Python 3.12 full-suite shards passed."
+          echo "Python 3.12 full-suite shards passed (or skipped via path filter)."
 
   full-suite-linux-313-shards:
     name: Full Suite shard (Ubuntu / Python 3.13 / ${{ matrix.shard.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    needs: [lint, syntax-check]
+    needs: [lint, syntax-check, changes]
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
       fail-fast: false
       matrix:
         shard:
+          - name: gap-verified-1
+            paths: >-
+              tldw_Server_API/tests/Audiobooks
+              tldw_Server_API/tests/Image_Generation
+          - name: gap-verified-2
+            paths: >-
+              tldw_Server_API/tests/Claims_Extraction
+              tldw_Server_API/tests/Discord
+              tldw_Server_API/tests/Files
+              tldw_Server_API/tests/Meetings
+              tldw_Server_API/tests/Notes_Tasks
+              tldw_Server_API/tests/Sync
+              tldw_Server_API/tests/Translation
+          - name: gap-verified-3
+            paths: >-
+              tldw_Server_API/tests/DataTables
+              tldw_Server_API/tests/Embeddings_isolated
+              tldw_Server_API/tests/Integrations
+              tldw_Server_API/tests/PrototypeWorkspaces
+              tldw_Server_API/tests/UserProfile
+              tldw_Server_API/tests/VN_Platform
+          - name: gap-verified-4
+            paths: >-
+              tldw_Server_API/tests/Governance
+              tldw_Server_API/tests/Ingestion_Sources
+              tldw_Server_API/tests/Items
+              tldw_Server_API/tests/Research_Workspace
+              tldw_Server_API/tests/Skills
+              tldw_Server_API/tests/StudyPacks
+              tldw_Server_API/tests/VN_Play
+              tldw_Server_API/tests/VN_Policy
+              tldw_Server_API/tests/scripts
+          - name: gap-verified-5
+            paths: >-
+              tldw_Server_API/tests/Agent_Orchestration
+              tldw_Server_API/tests/Chat_Workflows
+              tldw_Server_API/tests/Notes_Graph
+              tldw_Server_API/tests/Slides              tldw_Server_API/tests/Text2SQL
+              tldw_Server_API/tests/wizard
+          - name: gap-verified-6
+            paths: >-
+              tldw_Server_API/tests/API_Deps
+              tldw_Server_API/tests/AuthNZ_Federation
+              tldw_Server_API/tests/CodeGraph
+              tldw_Server_API/tests/MCP_Hub
+              tldw_Server_API/tests/MediaFiles
+              tldw_Server_API/tests/Scheduler
+              tldw_Server_API/tests/Slack
+              tldw_Server_API/tests/VN_Assets
+          - name: gap-verified-7
+            paths: >-
+              tldw_Server_API/tests/Guardian
+          - name: gap-verified-8
+            paths: >-
+              tldw_Server_API/tests/Storage
+              tldw_Server_API/tests/StudySuggestions
+              tldw_Server_API/tests/Quizzes
+          - name: gap-verified-9
+            paths: >-
+              tldw_Server_API/tests/Docs              tldw_Server_API/tests/performance
+          - name: gap-verified-10
+            paths: >-
+              tldw_Server_API/tests/Writing
+          - name: gap-verified-11
+            paths: >-
+              tldw_Server_API/tests/Sharing
+              tldw_Server_API/tests/VoiceAssistant
+          - name: gap-verified-12
+            paths: >-
+              tldw_Server_API/tests/Billing
+              tldw_Server_API/tests/CI
+              tldw_Server_API/tests/FileArtifacts
           - name: core-server-smoke
             paths: >-
               tldw_Server_API/tests/test_*.py
@@ -2717,6 +2898,7 @@ jobs:
               tldw_Server_API/tests/sandbox/test_runner_*.py
               tldw_Server_API/tests/sandbox/test_runtime_*.py
               tldw_Server_API/tests/sandbox/test_runtimes_*.py
+              tldw_Server_API/tests/sandbox/test_operator_*.py
               tldw_Server_API/tests/sandbox/test_seatbelt_*.py
               tldw_Server_API/tests/sandbox/test_vz_*.py
           - name: platform-sandbox-state-store
@@ -2977,18 +3159,20 @@ jobs:
       - name: Check Python 3.13 shard result
         shell: bash
         run: |
-          if [ "${{ needs['full-suite-linux-313-shards'].result }}" != "success" ]; then
-            echo "Python 3.13 full-suite shards finished with: ${{ needs['full-suite-linux-313-shards'].result }}"
+          r="${{ needs['full-suite-linux-313-shards'].result }}"
+          if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+            echo "Python 3.13 full-suite shards finished with: $r"
             exit 1
           fi
-          echo "Python 3.13 full-suite shards passed."
+          echo "Python 3.13 full-suite shards passed (or skipped via path filter)."
 
 
   full-suite-macos-312-shards:
     name: Full Suite shard (macos-latest / Python 3.12 / ${{ matrix.shard.name }})
     runs-on: macos-latest
     timeout-minutes: 35
-    needs: [lint, syntax-check]
+    needs: [lint, syntax-check, changes]
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -3954,6 +4138,7 @@ jobs:
               tldw_Server_API/tests/sandbox/test_runner_*.py
               tldw_Server_API/tests/sandbox/test_runtime_*.py
               tldw_Server_API/tests/sandbox/test_runtimes_*.py
+              tldw_Server_API/tests/sandbox/test_operator_*.py
               tldw_Server_API/tests/sandbox/test_seatbelt_*.py
               tldw_Server_API/tests/sandbox/test_vz_*.py
           - name: platform-sandbox-state-store
@@ -4141,17 +4326,19 @@ jobs:
       - name: Check macos-latest Python 3.12 shard result
         shell: bash
         run: |
-          if [ "${{ needs['full-suite-macos-312-shards'].result }}" != "success" ]; then
-            echo "macos-latest Python 3.12 full-suite shards finished with: ${{ needs['full-suite-macos-312-shards'].result }}"
+          r="${{ needs['full-suite-macos-312-shards'].result }}"
+          if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+            echo "macos-latest Python 3.12 full-suite shards finished with: $r"
             exit 1
           fi
-          echo "macos-latest Python 3.12 full-suite shards passed."
+          echo "macos-latest Python 3.12 full-suite shards passed (or skipped via path filter)."
 
   full-suite-windows-312-shards:
     name: Full Suite shard (windows-latest / Python 3.12 / ${{ matrix.shard.name }})
     runs-on: windows-latest
     timeout-minutes: 35
-    needs: [lint, syntax-check]
+    needs: [lint, syntax-check, changes]
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -5117,6 +5304,7 @@ jobs:
               tldw_Server_API/tests/sandbox/test_runner_*.py
               tldw_Server_API/tests/sandbox/test_runtime_*.py
               tldw_Server_API/tests/sandbox/test_runtimes_*.py
+              tldw_Server_API/tests/sandbox/test_operator_*.py
               tldw_Server_API/tests/sandbox/test_seatbelt_*.py
               tldw_Server_API/tests/sandbox/test_vz_*.py
           - name: platform-sandbox-state-store
@@ -5304,11 +5492,12 @@ jobs:
       - name: Check windows-latest Python 3.12 shard result
         shell: bash
         run: |
-          if [ "${{ needs['full-suite-windows-312-shards'].result }}" != "success" ]; then
-            echo "windows-latest Python 3.12 full-suite shards finished with: ${{ needs['full-suite-windows-312-shards'].result }}"
+          r="${{ needs['full-suite-windows-312-shards'].result }}"
+          if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+            echo "windows-latest Python 3.12 full-suite shards finished with: $r"
             exit 1
           fi
-          echo "windows-latest Python 3.12 full-suite shards passed."
+          echo "windows-latest Python 3.12 full-suite shards passed (or skipped via path filter)."
 
   full-suite-os-313-release-shards:
     name: Release Full Suite shard (${{ matrix.os }} / Python 3.13 / ${{ matrix.shard.name }})
@@ -6282,6 +6471,7 @@ jobs:
               tldw_Server_API/tests/sandbox/test_runner_*.py
               tldw_Server_API/tests/sandbox/test_runtime_*.py
               tldw_Server_API/tests/sandbox/test_runtimes_*.py
+              tldw_Server_API/tests/sandbox/test_operator_*.py
               tldw_Server_API/tests/sandbox/test_seatbelt_*.py
               tldw_Server_API/tests/sandbox/test_vz_*.py
           - name: platform-sandbox-state-store
@@ -6464,7 +6654,8 @@ jobs:
     name: Character Chat Rate-Limits (TEST_MODE=0)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [full-suite-linux-312-summary, full-suite-linux-313-summary]
+    needs: [full-suite-linux-312-summary, full-suite-linux-313-summary, changes]
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
     env:
       PYTHONPATH: .
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'

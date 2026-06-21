@@ -33,6 +33,21 @@ from tldw_Server_API.app.core.Chat.chat_service import (
 )
 
 
+class _StubAuditService:
+    """No-op audit service so mandatory moderation-audit writes succeed in tests.
+
+    moderate_input_messages fail-closes (MandatoryAuditWriteError) when a policy
+    matches and no audit service/context is provided; these tests only need the
+    write to succeed, not to assert on audit content.
+    """
+
+    async def log_event(self, **kwargs):
+        return None
+
+    async def flush(self, *, raise_on_failure=False):
+        return None
+
+
 # ── Fixtures ──────────────────────────────────────────────────
 
 
@@ -162,8 +177,8 @@ class TestGuardianOverlayBlocksInput:
                 moderation_service=moderation_svc,
                 topic_monitoring_service=None,
                 metrics=_make_metrics(),
-                audit_service=None,
-                audit_context=None,
+                audit_service=_StubAuditService(),
+                audit_context=SimpleNamespace(),
                 client_id="client1",
                 supervised_policy_engine=engine,
                 dependent_user_id="child1",
@@ -197,8 +212,8 @@ class TestGuardianOverlayRedactsInput:
             moderation_service=moderation_svc,
             topic_monitoring_service=None,
             metrics=_make_metrics(),
-            audit_service=None,
-            audit_context=None,
+            audit_service=_StubAuditService(),
+            audit_context=SimpleNamespace(),
             client_id="client1",
             supervised_policy_engine=engine,
             dependent_user_id="child1",
@@ -236,8 +251,8 @@ class TestGuardianOverlayPassesClean:
             moderation_service=moderation_svc,
             topic_monitoring_service=None,
             metrics=_make_metrics(),
-            audit_service=None,
-            audit_context=None,
+            audit_service=_StubAuditService(),
+            audit_context=SimpleNamespace(),
             client_id="client1",
             supervised_policy_engine=engine,
             dependent_user_id="child1",
@@ -273,8 +288,8 @@ class TestSelfMonitoringBlocksInput:
                 moderation_service=moderation_svc,
                 topic_monitoring_service=None,
                 metrics=_make_metrics(),
-                audit_service=None,
-                audit_context=None,
+                audit_service=_StubAuditService(),
+                audit_context=SimpleNamespace(),
                 client_id="user1",
                 self_monitoring_service=selfmon,
             )
@@ -307,8 +322,8 @@ class TestSelfMonitoringNotifyPasses:
             moderation_service=moderation_svc,
             topic_monitoring_service=None,
             metrics=_make_metrics(),
-            audit_service=None,
-            audit_context=None,
+            audit_service=_StubAuditService(),
+            audit_context=SimpleNamespace(),
             client_id="user1",
             self_monitoring_service=selfmon,
         )
@@ -359,8 +374,8 @@ class TestNoGuardianGracefulSkip:
             moderation_service=moderation_svc,
             topic_monitoring_service=None,
             metrics=_make_metrics(),
-            audit_service=None,
-            audit_context=None,
+            audit_service=_StubAuditService(),
+            audit_context=SimpleNamespace(),
             client_id="client1",
             supervised_policy_engine=None,
             self_monitoring_service=None,
@@ -448,8 +463,8 @@ class TestCombinedGuardianAndSelfMonitoring:
             moderation_service=moderation_svc,
             topic_monitoring_service=None,
             metrics=_make_metrics(),
-            audit_service=None,
-            audit_context=None,
+            audit_service=_StubAuditService(),
+            audit_context=SimpleNamespace(),
             client_id="child1",
             supervised_policy_engine=engine,
             self_monitoring_service=selfmon,
@@ -489,8 +504,8 @@ class TestCombinedGuardianAndSelfMonitoring:
                 moderation_service=moderation_svc,
                 topic_monitoring_service=None,
                 metrics=_make_metrics(),
-                audit_service=None,
-                audit_context=None,
+                audit_service=_StubAuditService(),
+                audit_context=SimpleNamespace(),
                 client_id="child1",
                 supervised_policy_engine=engine,
                 self_monitoring_service=selfmon,
@@ -579,8 +594,8 @@ class TestOutputSelfMonitoringE2E:
                 character_card_for_context=None,
                 chat_db=None,
                 save_message_fn=_noop_async,
-                audit_service=None,
-                audit_context=None,
+                audit_service=_StubAuditService(),
+                audit_context=SimpleNamespace(),
                 client_id="user1",
                 queue_execution_enabled=False,
                 enable_provider_fallback=False,
@@ -632,8 +647,8 @@ class TestOutputSelfMonitoringE2E:
             character_card_for_context=None,
             chat_db=None,
             save_message_fn=_noop_async,
-            audit_service=None,
-            audit_context=None,
+            audit_service=_StubAuditService(),
+            audit_context=SimpleNamespace(),
             client_id="user1",
             queue_execution_enabled=False,
             enable_provider_fallback=False,
@@ -688,8 +703,8 @@ class TestOutputSelfMonitoringE2E:
             character_card_for_context=None,
             chat_db=None,
             save_message_fn=_noop_async,
-            audit_service=None,
-            audit_context=None,
+            audit_service=_StubAuditService(),
+            audit_context=SimpleNamespace(),
             client_id="user1",
             queue_execution_enabled=False,
             enable_provider_fallback=False,
@@ -737,8 +752,8 @@ class TestChatTypePassthrough:
             moderation_service=moderation_svc,
             topic_monitoring_service=None,
             metrics=_make_metrics(),
-            audit_service=None,
-            audit_context=None,
+            audit_service=_StubAuditService(),
+            audit_context=SimpleNamespace(),
             client_id="user1",
             self_monitoring_service=selfmon,
             chat_type="regular",
@@ -755,8 +770,8 @@ class TestChatTypePassthrough:
                 moderation_service=moderation_svc,
                 topic_monitoring_service=None,
                 metrics=_make_metrics(),
-                audit_service=None,
-                audit_context=None,
+                audit_service=_StubAuditService(),
+                audit_context=SimpleNamespace(),
                 client_id="user1",
                 self_monitoring_service=selfmon,
                 chat_type="character",
@@ -801,8 +816,8 @@ class TestGuardianNotificationInPipeline:
                     moderation_service=moderation_svc,
                     topic_monitoring_service=None,
                     metrics=_make_metrics(),
-                    audit_service=None,
-                    audit_context=None,
+                    audit_service=_StubAuditService(),
+                    audit_context=SimpleNamespace(),
                     client_id="child1",
                     supervised_policy_engine=engine,
                     dependent_user_id="child1",
@@ -846,8 +861,8 @@ class TestTransparentBlockMessage:
                 moderation_service=moderation_svc,
                 topic_monitoring_service=None,
                 metrics=_make_metrics(),
-                audit_service=None,
-                audit_context=None,
+                audit_service=_StubAuditService(),
+                audit_context=SimpleNamespace(),
                 client_id="child1",
                 supervised_policy_engine=engine,
                 dependent_user_id="child1",

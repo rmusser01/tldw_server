@@ -55,6 +55,7 @@ async def test_return_download_link_persists_tts_audio(monkeypatch):
 
     req = OpenAISpeechRequest(
         input="hello world",
+        model="kokoro",
         stream=False,
         response_format="mp3",
         return_download_link=True,
@@ -89,6 +90,7 @@ async def test_return_download_link_rejected_for_streaming(monkeypatch):
 
     req = OpenAISpeechRequest(
         input="hello world",
+        model="kokoro",
         stream=True,
         response_format="mp3",
         return_download_link=True,

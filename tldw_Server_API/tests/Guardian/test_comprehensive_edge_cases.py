@@ -39,6 +39,17 @@ from tldw_Server_API.app.core.Monitoring.self_monitoring_service import (
     SelfMonitoringService,
 )
 
+
+class _StubAuditService:
+    """No-op audit service so mandatory moderation-audit writes succeed in tests."""
+
+    async def log_event(self, **kwargs):
+        return None
+
+    async def flush(self, *, raise_on_failure=False):
+        return None
+
+
 # ── Shared fixtures ─────────────────────────────────────────
 
 
@@ -782,8 +793,8 @@ class TestIntegrationPipeline:
             moderation_service=moderation_svc,
             topic_monitoring_service=None,
             metrics=MagicMock(),
-            audit_service=None,
-            audit_context=None,
+            audit_service=_StubAuditService(),
+            audit_context=SimpleNamespace(),
             client_id="user1",
             self_monitoring_service=svc,
         )
@@ -817,8 +828,8 @@ class TestIntegrationPipeline:
                 moderation_service=moderation_svc,
                 topic_monitoring_service=None,
                 metrics=MagicMock(),
-                audit_service=None,
-                audit_context=None,
+                audit_service=_StubAuditService(),
+                audit_context=SimpleNamespace(),
                 client_id="child1",
                 supervised_policy_engine=engine,
                 dependent_user_id="child1",
@@ -878,8 +889,8 @@ class TestIntegrationPipeline:
             moderation_service=moderation_svc,
             topic_monitoring_service=None,
             metrics=MagicMock(),
-            audit_service=None,
-            audit_context=None,
+            audit_service=_StubAuditService(),
+            audit_context=SimpleNamespace(),
             client_id="child1",
             supervised_policy_engine=engine,
             dependent_user_id="child1",
@@ -912,8 +923,8 @@ class TestIntegrationPipeline:
             moderation_service=moderation_svc,
             topic_monitoring_service=None,
             metrics=MagicMock(),
-            audit_service=None,
-            audit_context=None,
+            audit_service=_StubAuditService(),
+            audit_context=SimpleNamespace(),
             client_id="client1",
             supervised_policy_engine=None,
             self_monitoring_service=None,

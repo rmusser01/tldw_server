@@ -2386,8 +2386,14 @@ def test_quiz_json_import_roundtrip(client_with_quizzes_db: TestClient):
         int(answer["question_id"]): answer
         for answer in submit_payload["answers"]
     }
+    # The attempt endpoints declare response_model_exclude_none=True, which strips
+    # None-valued fields (e.g. source_type/source_id/source_url) from nested
+    # citations. Normalize the questions-endpoint citations the same way to compare.
     source_by_type = {
-        question["question_type"]: question["source_citations"]
+        question["question_type"]: [
+            {k: v for k, v in citation.items() if v is not None}
+            for citation in question["source_citations"]
+        ]
         for question in imported_questions
     }
     assert answer_by_question_id[question_ids_by_type["multiple_choice"]]["source_citations"] == source_by_type["multiple_choice"]

@@ -1,9 +1,10 @@
 import subprocess
+import sys
 
 
 def test_onboarding_command_boundary_script_passes() -> None:
     proc = subprocess.run(
-        ["python", "Helper_Scripts/docs/check_onboarding_command_boundaries.py"],
+        [sys.executable, "Helper_Scripts/docs/check_onboarding_command_boundaries.py"],
         capture_output=True,
         text=True,
         check=False,

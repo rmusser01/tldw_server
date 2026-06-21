@@ -24586,7 +24586,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         upd["interval_days"] if upd["queue_state"] == "review" else None,
                         upd["ef"],
                         upd["repetitions"],
-                        1 if upd["was_lapse"] else 0,
+                        bool(upd["was_lapse"]),
                         self.client_id,
                         scheduler_type,
                         previous_queue_state,
