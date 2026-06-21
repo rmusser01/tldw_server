@@ -1084,10 +1084,14 @@ git commit -m "docs(mcp): document LSP code intelligence tools"
 
 ### Task 9: Full Verification, Bandit, And Backlog Finalization
 
-**Files:**
-- Modify: `backlog/tasks/task-2281 - Add-LSP-backed-code-intelligence-MCP-tools.md`
+**Status:** Complete. Local verification on 2026-06-21: the focused LSP suite passed with 109 tests and 5 expected real-backend skips; the regression-adjacent MCP suite passed with 136 tests after rerunning with escalated loopback permissions for existing WebSocket bind tests; the explicitly enabled real-backend suite passed 11 tests with 5 skips; the LSP smoke CLI best-effort scenario passed against the in-process runtime with backend-unavailable/capability-unavailable best-effort notes; Bandit reported zero findings for the touched LSP/smoke/profile/server scope; `git diff --check` was clean.
 
-- [ ] **Step 1: Run focused LSP test suite**
+**Files:**
+- Modify: `Docs/superpowers/plans/2026-06-21-mcp-lsp-code-intelligence-tools-implementation-plan.md`
+- Modify: `backlog/tasks/task-2281 - Add-LSP-backed-code-intelligence-MCP-tools.md`
+- Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_server_batch_and_formatting.py`
+
+- [x] **Step 1: Run focused LSP test suite**
 
 Run:
 
@@ -1107,7 +1111,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS, with real backend tests skipped unless explicitly enabled.
 
-- [ ] **Step 2: Run regression-adjacent MCP tests**
+- [x] **Step 2: Run regression-adjacent MCP tests**
 
 Run:
 
@@ -1121,7 +1125,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run real backend tests if available**
+- [x] **Step 3: Run real backend tests if available**
 
 Run:
 
@@ -1132,17 +1136,17 @@ source .venv/bin/activate && TLDW_MCP_LSP_REAL_BACKENDS=1 python -m pytest \
 
 Expected: PASS or documented SKIP for missing `ruff`/`pylsp`.
 
-- [ ] **Step 4: Run smoke CLI best-effort scenario if implementation exposes local test runtime**
+- [x] **Step 4: Run smoke CLI best-effort scenario if implementation exposes local test runtime**
 
 Run:
 
 ```bash
-source .venv/bin/activate && python -m mcp_unified.smoke.cli --scenario lsp --mode best_effort
+source .venv/bin/activate && python -m mcp_unified.smoke.cli --scenario lsp --mode best-effort inprocess
 ```
 
 Expected: PASS or SKIP steps for missing optional backends; no raw absolute paths or secrets in output.
 
-- [ ] **Step 5: Run Bandit on touched Python scope**
+- [x] **Step 5: Run Bandit on touched Python scope**
 
 Run:
 
@@ -1158,7 +1162,7 @@ source .venv/bin/activate && python -m bandit -r \
 
 Expected: no new high/medium findings in touched code. Fix new findings before proceeding.
 
-- [ ] **Step 6: Update Backlog task**
+- [x] **Step 6: Update Backlog task**
 
 Record:
 
@@ -1168,7 +1172,7 @@ Record:
 - Bandit result path;
 - known limitations: Python-only, single-root, preview-only, file-level diagnostics.
 
-- [ ] **Step 7: Commit verification metadata**
+- [x] **Step 7: Commit verification metadata**
 
 ```bash
 git add 'backlog/tasks/task-2281 - Add-LSP-backed-code-intelligence-MCP-tools.md'
