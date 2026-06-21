@@ -15,7 +15,7 @@
 **Goal:** Confirm the branch is based on latest `origin/dev` and all current PR review threads are understood.
 **Success Criteria:** Rebase reports clean/up-to-date; review inventory covers Gemini and Qodo threads.
 **Tests:** `git rebase --autostash origin/dev`, PR review thread query.
-**Status:** In Progress
+**Status:** Complete
 
 - [x] Create Backlog task `TASK-2396` for this PR work.
 - [x] Fetch latest `dev` and PR refs.
@@ -59,4 +59,4 @@
 - [x] Run syntax/compile verification for the runner.
 - [x] Run Bandit on the touched Python runner.
 - [x] Update `TASK-2396` with verification and final summary.
-- [ ] Commit and push the rebased PR branch.
+- [x] Commit and push the rebased PR branch.
