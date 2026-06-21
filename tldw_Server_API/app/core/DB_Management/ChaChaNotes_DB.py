@@ -49,7 +49,7 @@ from collections.abc import Mapping
 from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
-from typing import Any, Callable, Protocol, TypeAlias  # noqa: E402
+from typing import Any, Callable, ClassVar, Protocol, TypeAlias  # noqa: E402
 
 from loguru import logger  # noqa: E402
 
@@ -605,6 +605,8 @@ class CharactersRAGDB:
     """
     _CURRENT_SCHEMA_VERSION = 50  # Schema v50 adds Workspace activity/index event storage
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
+    _SQLITE_SCHEMA_INIT_LOCKS_GUARD: ClassVar[threading.RLock] = threading.RLock()
+    _SQLITE_SCHEMA_INIT_LOCKS: ClassVar[dict[str, threading.RLock]] = {}
     _SQLITE_CORE_SCHEMA_TABLES = frozenset(
         {
             "character_cards",
@@ -10023,7 +10025,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _initialize_schema(self):
         if self.backend_type == BackendType.SQLITE:
-            self._initialize_schema_sqlite()
+            if self.is_memory_db:
+                self._initialize_schema_sqlite()
+            else:
+                with self._sqlite_schema_init_lock_for_path(self.db_path_str):
+                    self._initialize_schema_sqlite()
         elif self.backend_type == BackendType.POSTGRESQL:
             self._initialize_schema_postgres()
         else:
@@ -10033,6 +10039,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._ensure_message_metadata_table()
         self._ensure_persona_live_voice_session_summaries_table()
         self._ensure_conversation_settings_table()
+
+    @classmethod
+    def _sqlite_schema_init_lock_for_path(cls, db_path_str: str) -> threading.RLock:
+        """Return the process-local schema initialization lock for one SQLite DB path."""
+        with cls._SQLITE_SCHEMA_INIT_LOCKS_GUARD:
+            lock = cls._SQLITE_SCHEMA_INIT_LOCKS.get(db_path_str)
+            if lock is None:
+                lock = threading.RLock()
+                cls._SQLITE_SCHEMA_INIT_LOCKS[db_path_str] = lock
+            return lock
 
     def ensure_character_tables_ready(self) -> None:
         """

@@ -31,6 +31,18 @@ def _select_one(db: CharactersRAGDB) -> object:
     return row
 
 
+def test_chacha_schema_initialization_lock_is_shared_for_same_sqlite_path(tmp_path: Path) -> None:
+    db_path = str(tmp_path / "schema-lock.db")
+    other_path = str(tmp_path / "other-schema-lock.db")
+
+    first = CharactersRAGDB._sqlite_schema_init_lock_for_path(db_path)
+    second = CharactersRAGDB._sqlite_schema_init_lock_for_path(db_path)
+    other = CharactersRAGDB._sqlite_schema_init_lock_for_path(other_path)
+
+    assert first is second  # nosec B101
+    assert first is not other  # nosec B101
+
+
 def test_chacha_close_all_connections_keeps_shared_pool_usable_for_canonical_backend(tmp_path: Path) -> None:
     db_path = tmp_path / "chacha-shared.db"
     shared_backend = factory_mod.DatabaseBackendFactory.create_backend(
