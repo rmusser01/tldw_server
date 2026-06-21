@@ -670,8 +670,12 @@ class TestImportExport:
         assert body["can_overwrite"] is False
         assert body["existing_version"] is None
         assert any("frontmatter skill name" in error for error in body["errors"])
-        missing = client.get(f"{SKILLS_PREFIX}/invalid-name")
-        assert missing.status_code == 404
+        created = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "invalid-name", "content": "Created after invalid preview"},
+        )
+        assert created.status_code == 201, created.text
+        assert created.json()["version"] == 1
 
     def test_import_skill_file_preview_md_returns_metadata_without_importing(self, client, tmp_path):
         skill_file = tmp_path / "review-file-skill.md"
@@ -691,8 +695,15 @@ class TestImportExport:
         assert body["description"] == "From preview file"
         assert body["conflict"] is False
         assert body["can_overwrite"] is False
-        missing = client.get(f"{SKILLS_PREFIX}/review-file-skill")
-        assert missing.status_code == 404
+        imported = client.post(
+            f"{SKILLS_PREFIX}/import",
+            json={
+                "name": "review-file-skill",
+                "content": "---\ndescription: From preview file\n---\nFile preview content",
+            },
+        )
+        assert imported.status_code == 201, imported.text
+        assert imported.json()["version"] == 1
 
     def test_import_skill_file_preview_zip_sniffs_content_without_zip_filename(self, client):
         buffer = BytesIO()
@@ -712,8 +723,30 @@ class TestImportExport:
         assert body["valid"] is True
         assert body["name"] == "sniffed-skill"
         assert body["description"] == "Sniffed zip"
-        missing = client.get(f"{SKILLS_PREFIX}/sniffed-skill")
-        assert missing.status_code == 404
+        imported = client.post(
+            f"{SKILLS_PREFIX}/import",
+            json={
+                "name": "sniffed-skill",
+                "content": "---\ndescription: Sniffed zip\n---\nZip preview content",
+            },
+        )
+        assert imported.status_code == 201, imported.text
+        assert imported.json()["version"] == 1
+
+    def test_import_skill_file_zip_non_utf8_skill_md_returns_400(self, client):
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr("bad-encoding/SKILL.md", b"\xff\xfe\xfd\xfc")
+        zip_data = buffer.getvalue()
+
+        for path in ("import/file/preview", "import/file"):
+            r = client.post(
+                f"{SKILLS_PREFIX}/{path}",
+                files={"file": ("bad-encoding.zip", zip_data, "application/zip")},
+            )
+
+            assert r.status_code == 400, r.text
+            assert "UTF-8" in r.json()["detail"]
 
     def test_import_skill_file_preview_rejects_oversized_upload(self, client):
         too_large = b"a" * (MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES + 1)

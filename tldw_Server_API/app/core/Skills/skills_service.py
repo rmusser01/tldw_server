@@ -969,7 +969,10 @@ class SkillsService:
                     raise SkillValidationError(f"Invalid SKILL.md path in zip: '{skill_md_path}'")
 
                 # Read SKILL.md
-                content = zf.read(skill_md_path).decode("utf-8")
+                try:
+                    content = zf.read(skill_md_path).decode("utf-8")
+                except UnicodeDecodeError as e:
+                    raise SkillValidationError("SKILL.md in zip must be UTF-8 encoded text") from e
 
                 # Read supporting files
                 supporting_files: dict[str, str] = {}

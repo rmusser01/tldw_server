@@ -535,8 +535,7 @@ Preview content.
         assert result["can_overwrite"] is False
         assert result["existing_version"] is None
         assert not service._get_skill_dir("previewed-skill").exists()
-        with pytest.raises(SkillNotFoundError):
-            await service.get_skill("previewed-skill")
+        assert service._get_db().get_skill_registry("previewed-skill", include_deleted=True) is None
 
     @pytest.mark.asyncio
     async def test_preview_import_skill_reports_conflict_without_overwriting(self, service):
@@ -574,6 +573,7 @@ Preview content.
         assert result["existing_version"] is None
         assert any("frontmatter skill name" in error for error in result["errors"])
         assert not service._get_skill_dir("invalid-name").exists()
+        assert service._get_db().get_skill_registry("invalid-name", include_deleted=True) is None
 
     @pytest.mark.asyncio
     async def test_preview_import_skill_returns_parse_errors_without_writing(self, service, monkeypatch):
@@ -590,6 +590,7 @@ Preview content.
         assert result["conflict"] is False
         assert result["errors"] == ["Invalid skill content: invalid frontmatter"]
         assert not service._get_skill_dir("parsed").exists()
+        assert service._get_db().get_skill_registry("parsed", include_deleted=True) is None
 
     @pytest.mark.asyncio
     async def test_export_skill(self, service):
