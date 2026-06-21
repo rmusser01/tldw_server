@@ -25,6 +25,7 @@ from .backends import (
 )
 from .config import DEFAULT_LSP_CONFIG, LspRuntimeConfig
 from .errors import LSP_REASON_CODES, LspToolError, redact_lsp_detail
+from .jsonrpc import LspJsonRpcClient
 from .models import (
     LspBackendStatus,
     LspCodeAction,
@@ -44,6 +45,7 @@ from .models import (
 )
 from .router import LspCapabilityRouter
 from .service import LspCodeIntelligenceService
+from .sessions import LspManagedSession, LspSessionManager
 
 __all__ = [
     "CodeActionsRequest",
@@ -71,6 +73,8 @@ __all__ = [
     "LspCodeAction",
     "LspCodeActionsResult",
     "LspCodeIntelligenceService",
+    "LspJsonRpcClient",
+    "LspManagedSession",
     "LspDiagnostic",
     "LspDiagnosticsResult",
     "LspHover",
@@ -80,6 +84,7 @@ __all__ = [
     "LspPreview",
     "LspRange",
     "LspRuntimeConfig",
+    "LspSessionManager",
     "LspSignatureHelp",
     "LspSymbol",
     "LspSymbolsResult",

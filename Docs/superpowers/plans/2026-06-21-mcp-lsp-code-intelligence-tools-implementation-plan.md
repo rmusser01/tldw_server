@@ -403,6 +403,8 @@ git commit -m "feat(mcp): add LSP capability router"
 
 ### Task 3: Async LSP JSON-RPC Client And Session Manager
 
+**Status:** Complete. Local verification on 2026-06-21: `test_lsp_models.py`, `test_lsp_router.py`, `test_lsp_backends_fake.py`, `test_lsp_jsonrpc.py`, and `test_lsp_sessions.py` passed with 73 tests; Ruff passed on touched LSP Python files/tests; Bandit reported zero findings for `mcp_unified/lsp`; `git diff --check` was clean.
+
 **Files:**
 - Create: `mcp_unified/lsp/jsonrpc.py`
 - Create: `mcp_unified/lsp/sessions.py`
@@ -410,7 +412,7 @@ git commit -m "feat(mcp): add LSP capability router"
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_lsp_jsonrpc.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_lsp_sessions.py`
 
-- [ ] **Step 1: Write failing JSON-RPC framing tests**
+- [x] **Step 1: Write failing JSON-RPC framing tests**
 
 Use the fake stdio server fixture to verify:
 
@@ -420,7 +422,7 @@ Use the fake stdio server fixture to verify:
 - timeout raises `backend_timeout`.
 - `shutdown` and `exit` are sent during close.
 
-- [ ] **Step 2: Run the failing JSON-RPC tests**
+- [x] **Step 2: Run the failing JSON-RPC tests**
 
 Run:
 
@@ -431,7 +433,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: FAIL because the client/fixture do not exist.
 
-- [ ] **Step 3: Implement fake LSP stdio server fixture**
+- [x] **Step 3: Implement fake LSP stdio server fixture**
 
 The fixture script should:
 
@@ -440,7 +442,7 @@ The fixture script should:
 - optionally sleep or crash based on a request parameter for tests;
 - write diagnostics only to stderr.
 
-- [ ] **Step 4: Implement `LspJsonRpcClient`**
+- [x] **Step 4: Implement `LspJsonRpcClient`**
 
 Use `asyncio.create_subprocess_exec(*argv, cwd=workspace_root, stdin=PIPE, stdout=PIPE, stderr=PIPE)`.
 
@@ -455,7 +457,7 @@ Requirements:
 - `close()` is exception-safe and terminates the process if graceful shutdown fails;
 - stderr capture is bounded by config.
 
-- [ ] **Step 5: Write failing session manager tests**
+- [x] **Step 5: Write failing session manager tests**
 
 Cover:
 
@@ -477,7 +479,7 @@ async def test_session_manager_evicts_idle_sessions(tmp_path):
     assert manager.active_session_count == 0
 ```
 
-- [ ] **Step 6: Implement `LspSessionManager`**
+- [x] **Step 6: Implement `LspSessionManager`**
 
 Cache key:
 
@@ -488,7 +490,7 @@ Cache key:
 
 Do not include profile id in the process cache key. Authorization is request-scoped later.
 
-- [ ] **Step 7: Run targeted tests**
+- [x] **Step 7: Run targeted tests**
 
 Run:
 
@@ -500,7 +502,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit Task 3**
+- [x] **Step 8: Commit Task 3**
 
 ```bash
 git add mcp_unified/lsp tldw_Server_API/app/core/MCP_unified/tests/test_lsp_jsonrpc.py tldw_Server_API/app/core/MCP_unified/tests/test_lsp_sessions.py tldw_Server_API/app/core/MCP_unified/tests/fixtures/fake_lsp_stdio_server.py

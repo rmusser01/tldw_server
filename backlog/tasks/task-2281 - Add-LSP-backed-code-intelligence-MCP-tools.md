@@ -30,10 +30,15 @@ modified_files:
 - mcp_unified/lsp/backends.py
 - mcp_unified/lsp/router.py
 - mcp_unified/lsp/service.py
+- mcp_unified/lsp/jsonrpc.py
+- mcp_unified/lsp/sessions.py
 - mcp_unified/pyproject.toml
 - tldw_Server_API/app/core/MCP_unified/tests/test_lsp_models.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_lsp_router.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_lsp_backends_fake.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_lsp_jsonrpc.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_lsp_sessions.py
+- tldw_Server_API/app/core/MCP_unified/tests/fixtures/fake_lsp_stdio_server.py
 - Docs/superpowers/plans/2026-06-21-mcp-lsp-code-intelligence-tools-implementation-plan.md
 ---
 
@@ -70,5 +75,5 @@ Before implementing LSP-backed MCP tools, build or at least plan the MCP smoke c
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Progress so far: Task 1 added LSP public model/config/error contracts, package metadata for mcp_unified.lsp, and targeted model contract tests. Task 2 added deterministic fake LSP backends, capability routing for the first-slice lsp.* tools, and the host-neutral service facade/status surface. Verification on 2026-06-21: test_lsp_models.py, test_lsp_router.py, and test_lsp_backends_fake.py passed with 65 tests; Ruff passed on touched LSP Python files/tests; Bandit on mcp_unified/lsp reported zero findings; git diff --check was clean. Used the repository root virtualenv because this worktree has no local .venv directory.
+Progress so far: Task 1 added LSP public model/config/error contracts, package metadata for mcp_unified.lsp, and targeted model contract tests. Task 2 added deterministic fake LSP backends, capability routing for the first-slice lsp.* tools, and the host-neutral service facade/status surface. Task 3 added the async stdio JSON-RPC client, fake LSP stdio fixture, and per-workspace session manager with idle eviction and exception-safe stop-all. Verification on 2026-06-21: test_lsp_models.py, test_lsp_router.py, test_lsp_backends_fake.py, test_lsp_jsonrpc.py, and test_lsp_sessions.py passed with 73 tests; Ruff passed on touched LSP Python files/tests; Bandit on mcp_unified/lsp reported zero findings; git diff --check was clean. Used the repository root virtualenv because this worktree has no local .venv directory.
 <!-- SECTION:FINAL_SUMMARY:END -->
