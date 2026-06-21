@@ -19,6 +19,7 @@ from mcp_unified.smoke.reporting import SmokeReport, report_to_json
 from mcp_unified.smoke.scenarios import (
     ScenarioMode,
     run_baseline_scenario,
+    run_lsp_scenario,
     run_real_world_scenario,
 )
 from mcp_unified.smoke.transports import (
@@ -35,7 +36,7 @@ _EXIT_SCENARIO_FAILED = 1
 _EXIT_USAGE = 2
 _EXIT_TRANSPORT_FAILED = 3
 _EXIT_STRICT_CAPABILITY_UNAVAILABLE = 4
-_SCENARIO_CHOICES = ("baseline", "real-world")
+_SCENARIO_CHOICES = ("baseline", "real-world", "lsp")
 _MODE_CHOICES = ("best-effort", "strict")
 
 
@@ -291,15 +292,15 @@ async def _run(args: argparse.Namespace) -> SmokeReport:
     scenario = cast(str, args.scenario)
     mode = _scenario_mode(args.mode)
     artifact_tempdir: tempfile.TemporaryDirectory[str] | None = None
-    if scenario == "real-world":
-        artifact_root, artifact_tempdir = _artifact_root_for_scenario(args)
+    if scenario in {"real-world", "lsp"}:
+        artifact_root, artifact_tempdir = _artifact_root_for_scenario(args, scenario=scenario)
     else:
         artifact_root = None
     previous_artifact_root = os.environ.get("MCP_SMOKE_ARTIFACT_ROOT")
     if artifact_root is not None:
         os.environ["MCP_SMOKE_ARTIFACT_ROOT"] = str(artifact_root)
     try:
-        transport = _build_transport(args, artifact_root=artifact_root)
+        transport = _build_transport(args, artifact_root=artifact_root, scenario=scenario)
         if scenario == "baseline":
             report = await run_baseline_scenario(
                 transport,
@@ -346,6 +347,12 @@ async def _run(args: argparse.Namespace) -> SmokeReport:
                 real_llm_base_url=args.real_llm_base_url,
                 real_llm_model=args.real_llm_model,
             )
+        elif scenario == "lsp":
+            report = await run_lsp_scenario(
+                transport,
+                mode=mode,
+                workspace_root=artifact_root,
+            )
         else:
             raise ValueError(f"unsupported smoke scenario: {scenario}")
     finally:
@@ -370,6 +377,7 @@ def _build_transport(
     args: argparse.Namespace,
     *,
     artifact_root: Path | None = None,
+    scenario: str = "baseline",
 ) -> McpSmokeTransport:
     api_key = _env_value(args.api_key_env, "api key") if args.api_key_env else None
     bearer_token = (
@@ -384,6 +392,7 @@ def _build_transport(
         runtime = _build_inprocess_runtime(
             disable_resources=args.disable_resources,
             artifact_root=artifact_root,
+            scenario=scenario,
         )
         return InProcessGatewayTransport(runtime)
     if transport_name == "http":
@@ -424,7 +433,12 @@ def _build_inprocess_runtime(
     *,
     disable_resources: bool,
     artifact_root: Path | None = None,
+    scenario: str = "baseline",
 ) -> Any:
+    if scenario == "lsp":
+        from mcp_unified.lsp.gateway_runtime import LspGatewayRuntime
+
+        return LspGatewayRuntime(workspace_root=artifact_root)
     runtime = SmokeFixtureGatewayRuntime(
         include_denied_tool=True,
         artifact_root=artifact_root,
@@ -474,14 +488,17 @@ class _NoResourceFixtureRuntime:
 
 def _artifact_root_for_scenario(
     args: argparse.Namespace,
+    *,
+    scenario: str,
 ) -> tuple[Path, tempfile.TemporaryDirectory[str] | None]:
-    """Resolve the real-world artifact root and its optional cleanup handle."""
+    """Resolve a scenario workspace root and its optional cleanup handle."""
     artifact_dir = getattr(args, "artifact_dir", None)
     if artifact_dir:
         root = Path(artifact_dir).expanduser()
         tempdir = None
     else:
-        tempdir = tempfile.TemporaryDirectory(prefix="mcp-smoke-real-world-")
+        prefix = "mcp-smoke-lsp-" if scenario == "lsp" else "mcp-smoke-real-world-"
+        tempdir = tempfile.TemporaryDirectory(prefix=prefix)
         root = Path(tempdir.name)
     root.mkdir(parents=True, exist_ok=True)
     return root.resolve(), tempdir

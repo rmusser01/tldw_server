@@ -876,6 +876,8 @@ git commit -m "feat(mcp): expose LSP tools in tldw MCP"
 
 ### Task 7: Standalone Gateway Runtime And Smoke/UAT Scenario
 
+**Status:** Complete. Local verification on 2026-06-21: the new Task 7 tests passed with 7 tests; the plan-targeted suite (`test_lsp_gateway_runtime.py`, `test_lsp_smoke_scenario.py`, `test_lsp_module.py`, `test_smoke_client.py`) passed with 115 tests after rerunning with escalated loopback permissions for existing WebSocket bind tests; the focused `test_lsp_*.py` suite passed with 111 tests and 5 expected env-gated skips; Ruff passed on touched files; Bandit reported zero findings for `mcp_unified/lsp`, `mcp_unified/smoke/scenarios.py`, and `mcp_unified/smoke/cli.py`; `git diff --check` was clean.
+
 **Files:**
 - Create: `mcp_unified/lsp/gateway_runtime.py`
 - Modify: `mcp_unified/smoke/scenarios.py`
@@ -883,7 +885,7 @@ git commit -m "feat(mcp): expose LSP tools in tldw MCP"
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_lsp_gateway_runtime.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_lsp_smoke_scenario.py`
 
-- [ ] **Step 1: Write failing standalone runtime tests**
+- [x] **Step 1: Write failing standalone runtime tests**
 
 Use fake backends:
 
@@ -898,7 +900,7 @@ async def test_lsp_gateway_runtime_calls_status():
     assert result["status"] in {"healthy", "degraded"}
 ```
 
-- [ ] **Step 2: Implement `LspGatewayRuntime`**
+- [x] **Step 2: Implement `LspGatewayRuntime`**
 
 This runtime is for standalone smoke/UAT and embedders who want only LSP tools.
 It should:
@@ -910,7 +912,7 @@ It should:
 - default the predicate to allowing all workspace-relative paths under the configured workspace and document that embedders with profile policy should wrap or override it;
 - use workspace root from constructor/config and reject missing workspace with `workspace_not_supported`.
 
-- [ ] **Step 3: Write failing smoke scenario tests**
+- [x] **Step 3: Write failing smoke scenario tests**
 
 Add `run_lsp_scenario()` with fake runtime/transport. It should:
 
@@ -924,18 +926,18 @@ Add `run_lsp_scenario()` with fake runtime/transport. It should:
 - run against a standalone `LspGatewayRuntime` transport in unit tests;
 - run against a tldw-hosted MCP test app/runtime with `LSPModule` enabled and fake service injection.
 
-- [ ] **Step 4: Implement smoke scenario and CLI flag**
+- [x] **Step 4: Implement smoke scenario and CLI flag**
 
 Add CLI scenario choice:
 
 ```bash
-mcp-unified-smoke --scenario lsp --mode best_effort
+mcp-unified-smoke --scenario lsp --mode best-effort
 mcp-unified-smoke --scenario lsp --mode strict
 ```
 
 Keep existing baseline and real-world scenarios unchanged.
 
-- [ ] **Step 5: Run targeted tests**
+- [x] **Step 5: Run targeted tests**
 
 Run:
 
@@ -949,7 +951,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 7**
+- [x] **Step 6: Commit Task 7**
 
 ```bash
 git add mcp_unified/lsp/gateway_runtime.py mcp_unified/smoke/scenarios.py mcp_unified/smoke/cli.py tldw_Server_API/app/core/MCP_unified/tests/test_lsp_gateway_runtime.py tldw_Server_API/app/core/MCP_unified/tests/test_lsp_smoke_scenario.py

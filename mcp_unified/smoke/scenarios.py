@@ -12,6 +12,12 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Literal
 
+from mcp_unified.lsp.backends import (
+    LSP_DIAGNOSTICS_TOOL,
+    LSP_DOCUMENT_SYMBOLS_TOOL,
+    LSP_STATUS_TOOL,
+    LSP_TOOL_NAMES,
+)
 from mcp_unified.smoke.client import McpSmokeClient
 from mcp_unified.smoke.exceptions import McpSmokeClientError, McpSmokeTransportError
 from mcp_unified.smoke.reporting import (
@@ -46,6 +52,25 @@ Build a local-first research notebook for analysts who collect video, audio,
 web pages, and PDFs. Users need fast search, cited answers, exportable notes,
 and safe automation that cannot touch files outside their workspace.
 """
+_DEFAULT_LSP_FIXTURE_PATH = "src/lsp_smoke_fixture.py"
+_LSP_FIXTURE_SOURCE = '''"""LSP smoke fixture."""
+
+
+def greet(name: str) -> str:
+    return f"hello {name}"
+
+
+MESSAGE = greet("codex")
+'''
+_LSP_BACKEND_UNAVAILABLE_REASON_CODES = frozenset(
+    {
+        "backend_missing",
+        "backend_unhealthy",
+        "backend_timeout",
+        "capability_unavailable",
+        "workspace_not_supported",
+    }
+)
 
 
 async def run_baseline_scenario(
@@ -285,6 +310,94 @@ async def run_real_world_scenario(
         report.ok = all(step.ok for step in report.steps)
         if temporary_artifact_root is not None:
             temporary_artifact_root.cleanup()
+
+    return report
+
+
+async def run_lsp_scenario(
+    transport: McpSmokeTransport,
+    *,
+    mode: ScenarioMode = "best_effort",
+    workspace_root: str | Path | None = None,
+    fixture_path: str = _DEFAULT_LSP_FIXTURE_PATH,
+) -> SmokeReport:
+    """Run an LSP-focused MCP UAT scenario with an isolated Python fixture."""
+
+    if mode not in {"best_effort", "strict"}:
+        raise ValueError("mode must be 'best_effort' or 'strict'")
+
+    temporary_workspace_root: tempfile.TemporaryDirectory[str] | None = None
+    if workspace_root is None:
+        temporary_workspace_root = tempfile.TemporaryDirectory(prefix="mcp-smoke-lsp-")
+        lsp_workspace_root = _prepare_lsp_workspace(temporary_workspace_root.name)
+    else:
+        lsp_workspace_root = _prepare_lsp_workspace(workspace_root)
+
+    started_at = datetime.now(UTC).isoformat()
+    report = SmokeReport(
+        transport=transport.__class__.__name__,
+        started_at=started_at,
+        metadata={
+            "mode": mode,
+            "scenario": "lsp",
+            "fixture_path": fixture_path,
+        },
+    )
+    started = perf_counter()
+    client = McpSmokeClient(transport)
+    state: dict[str, Any] = {
+        "capabilities": {},
+        "tools": [],
+        "workspace_root": lsp_workspace_root,
+        "fixture_path": fixture_path,
+    }
+
+    await transport.start()
+    try:
+        await _record_step(report, "initialize", lambda: _step_initialize(client, state))
+        await _record_step(
+            report,
+            "notifications/initialized",
+            lambda: _step_initialized_notification(client),
+        )
+        await _record_step(report, "tools/list", lambda: _step_tools_list(client, state))
+        await _record_step(
+            report,
+            "lsp required tools",
+            lambda: _step_lsp_required_tools(state, mode),
+        )
+        await _record_step(
+            report,
+            "lsp fixture setup",
+            lambda: _step_lsp_fixture_setup(state, mode),
+        )
+        await _record_step(
+            report,
+            "lsp status",
+            lambda: _step_lsp_status(client, state, mode),
+            method="tools/call",
+        )
+        await _record_step(
+            report,
+            "lsp diagnostics",
+            lambda: _step_lsp_diagnostics(client, state, mode),
+            method="tools/call",
+        )
+        await _record_step(
+            report,
+            "lsp document symbols",
+            lambda: _step_lsp_document_symbols(client, state, mode),
+            method="tools/call",
+        )
+    finally:
+        server_info = state.get("server_info")
+        if isinstance(server_info, dict):
+            report.metadata["server_info"] = server_info
+        await transport.close()
+        report.elapsed_ms = _elapsed_ms(started)
+        report.ok = all(step.ok for step in report.steps)
+        if temporary_workspace_root is not None:
+            temporary_workspace_root.cleanup()
 
     return report
 
@@ -717,6 +830,186 @@ async def _step_real_llm(state: dict[str, Any], mode: ScenarioMode) -> object:
     return result
 
 
+async def _step_lsp_required_tools(state: dict[str, Any], mode: ScenarioMode) -> object:
+    missing = sorted(LSP_TOOL_NAMES - _available_tool_names(state))
+    if not missing:
+        return {"required_tools": sorted(LSP_TOOL_NAMES)}
+    detail = {"missing": missing, "missing_count": len(missing)}
+    if mode == "strict":
+        return _failure("required_tool_unavailable", detail=detail)
+    return _skip("required_tool_unavailable", detail=detail)
+
+
+async def _step_lsp_fixture_setup(state: dict[str, Any], mode: ScenarioMode) -> object:
+    workspace_root = state.get("workspace_root")
+    fixture_path = state.get("fixture_path")
+    if not isinstance(workspace_root, Path) or not isinstance(fixture_path, str):
+        if mode == "strict":
+            return _failure("lsp_fixture_unavailable")
+        return _skip("lsp_fixture_unavailable")
+    try:
+        await asyncio.to_thread(_seed_lsp_fixture, workspace_root, fixture_path)
+    except OSError as exc:
+        return _failure(
+            "lsp_fixture_setup_failed",
+            detail={"type": exc.__class__.__name__, "message": str(exc)},
+        )
+    return {
+        "fixture_path": fixture_path,
+        "bytes": len(_LSP_FIXTURE_SOURCE.encode("utf-8")),
+    }
+
+
+async def _step_lsp_status(
+    client: McpSmokeClient,
+    state: dict[str, Any],
+    mode: ScenarioMode,
+) -> object:
+    unavailable = _unavailable_tool_outcome(LSP_STATUS_TOOL, state, mode)
+    if unavailable is not None:
+        return unavailable
+    result = await _call_lsp_tool(client, LSP_STATUS_TOOL, {}, mode)
+    if isinstance(result, _StepOutcome):
+        return result
+    structured = _extract_structured_content(result)
+    if not isinstance(structured, dict) or not isinstance(structured.get("status"), str):
+        return _failure("invalid_lsp_status_result", detail=result)
+    state["lsp_status"] = structured
+    return _lsp_step_detail(LSP_STATUS_TOOL, structured)
+
+
+async def _step_lsp_diagnostics(
+    client: McpSmokeClient,
+    state: dict[str, Any],
+    mode: ScenarioMode,
+) -> object:
+    unavailable = _unavailable_tool_outcome(LSP_DIAGNOSTICS_TOOL, state, mode)
+    if unavailable is not None:
+        return unavailable
+    fixture_path = state.get("fixture_path")
+    if not isinstance(fixture_path, str):
+        if mode == "strict":
+            return _failure("lsp_fixture_unavailable")
+        return _skip("lsp_fixture_unavailable")
+    result = await _call_lsp_tool(
+        client,
+        LSP_DIAGNOSTICS_TOOL,
+        {"path": fixture_path},
+        mode,
+    )
+    if isinstance(result, _StepOutcome):
+        return result
+    structured = _extract_structured_content(result)
+    if not isinstance(structured, dict) or not isinstance(structured.get("diagnostics"), list):
+        return _failure("invalid_lsp_diagnostics_result", detail=result)
+    return _lsp_step_detail(LSP_DIAGNOSTICS_TOOL, structured)
+
+
+async def _step_lsp_document_symbols(
+    client: McpSmokeClient,
+    state: dict[str, Any],
+    mode: ScenarioMode,
+) -> object:
+    unavailable = _unavailable_tool_outcome(LSP_DOCUMENT_SYMBOLS_TOOL, state, mode)
+    if unavailable is not None:
+        return unavailable
+    if not _lsp_capability_available(state, LSP_DOCUMENT_SYMBOLS_TOOL):
+        detail = {"tool": LSP_DOCUMENT_SYMBOLS_TOOL}
+        if mode == "strict":
+            return _failure("lsp_capability_unavailable", detail=detail)
+        return _skip("lsp_capability_unavailable", detail=detail)
+    fixture_path = state.get("fixture_path")
+    if not isinstance(fixture_path, str):
+        if mode == "strict":
+            return _failure("lsp_fixture_unavailable")
+        return _skip("lsp_fixture_unavailable")
+    result = await _call_lsp_tool(
+        client,
+        LSP_DOCUMENT_SYMBOLS_TOOL,
+        {"path": fixture_path},
+        mode,
+    )
+    if isinstance(result, _StepOutcome):
+        return result
+    structured = _extract_structured_content(result)
+    if not isinstance(structured, dict) or not isinstance(structured.get("symbols"), list):
+        return _failure("invalid_lsp_symbols_result", detail=result)
+    return _lsp_step_detail(LSP_DOCUMENT_SYMBOLS_TOOL, structured)
+
+
+async def _call_lsp_tool(
+    client: McpSmokeClient,
+    tool_name: str,
+    arguments: dict[str, object],
+    mode: ScenarioMode,
+) -> dict[str, object] | _StepOutcome:
+    try:
+        result = await client.call_tool(tool_name, arguments)
+    except McpSmokeClientError as exc:
+        return _failure(
+            "lsp_tool_call_failed",
+            detail={"message": str(exc), "error": exc.error, "tool": tool_name},
+            error_code=_client_error_code(exc),
+        )
+    if not isinstance(result, dict) or not isinstance(result.get("content"), list):
+        return _failure("invalid_lsp_tool_result", detail=result)
+    if result.get("isError") is True:
+        return _lsp_tool_error_outcome(tool_name, result, mode)
+    return result
+
+
+def _lsp_tool_error_outcome(
+    tool_name: str,
+    result: dict[str, object],
+    mode: ScenarioMode,
+) -> _StepOutcome:
+    structured = _extract_structured_content(result)
+    reason_code = structured.get("reason_code") if isinstance(structured, dict) else None
+    detail = {
+        "tool": tool_name,
+        "reason_code": reason_code if isinstance(reason_code, str) else "unknown",
+    }
+    if mode == "best_effort" and reason_code in _LSP_BACKEND_UNAVAILABLE_REASON_CODES:
+        return _skip("lsp_backend_unavailable", detail=detail)
+    return _failure("lsp_tool_failed", detail=detail)
+
+
+def _extract_structured_content(result: dict[str, object]) -> object:
+    return result.get("structuredContent")
+
+
+def _lsp_capability_available(state: dict[str, Any], tool_name: str) -> bool:
+    status = state.get("lsp_status")
+    if not isinstance(status, dict):
+        return False
+    capabilities = status.get("capabilities")
+    if not isinstance(capabilities, dict):
+        return False
+    available = capabilities.get("available")
+    return isinstance(available, list) and tool_name in available
+
+
+def _lsp_step_detail(tool_name: str, structured: dict[str, object]) -> dict[str, object]:
+    detail: dict[str, object] = {"tool": tool_name}
+    if isinstance(structured.get("status"), str):
+        detail["status"] = structured["status"]
+    if isinstance(structured.get("diagnostics"), list):
+        detail["diagnostic_count"] = len(structured["diagnostics"])
+    if isinstance(structured.get("symbols"), list):
+        detail["symbol_count"] = len(structured["symbols"])
+    capabilities = structured.get("capabilities")
+    if isinstance(capabilities, dict):
+        available = capabilities.get("available")
+        missing = capabilities.get("missing")
+        if isinstance(available, list):
+            detail["available_capability_count"] = len(available)
+        if isinstance(missing, list):
+            detail["missing_capability_count"] = len(missing)
+    if "filtered_count" in structured:
+        detail["filtered_count"] = structured["filtered_count"]
+    return detail
+
+
 def _outcome_to_step(
     name: str,
     outcome: object,
@@ -949,6 +1242,18 @@ def _prepare_artifact_root(artifact_dir: str | Path | None) -> Path:
     return root.resolve()
 
 
+def _prepare_lsp_workspace(workspace_root: str | Path) -> Path:
+    root = Path(workspace_root).expanduser()
+    root.mkdir(parents=True, exist_ok=True)
+    return root.resolve()
+
+
+def _seed_lsp_fixture(workspace_root: Path, fixture_path: str) -> None:
+    target = workspace_root / fixture_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_LSP_FIXTURE_SOURCE, encoding="utf-8")
+
+
 def _unavailable_tool_outcome(
     tool_name: object,
     state: dict[str, Any],
@@ -1063,4 +1368,9 @@ def _elapsed_ms(started: float) -> float:
     return round((perf_counter() - started) * 1000, 3)
 
 
-__all__ = ["ScenarioMode", "run_baseline_scenario", "run_real_world_scenario"]
+__all__ = [
+    "ScenarioMode",
+    "run_baseline_scenario",
+    "run_lsp_scenario",
+    "run_real_world_scenario",
+]
