@@ -1,6 +1,6 @@
 import React from "react"
 import { useMutation } from "@tanstack/react-query"
-import { Button, Input, Modal, Tag } from "antd"
+import { Alert, Button, Input, Modal, Tag } from "antd"
 import { useTranslation } from "react-i18next"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { SkillExecutionResult } from "@/types/skill"
@@ -32,23 +32,28 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
     }
   })
 
-  const handlePreview = () => {
+  const handleRunTest = () => {
     if (skillName) {
       executeMutation.mutate()
     }
   }
 
+  const errorMessage =
+    executeMutation.error instanceof Error
+      ? executeMutation.error.message
+      : t("option:skills.testRunError", { defaultValue: "Execution failed" })
+
   return (
     <Modal
-      title={t("option:skills.previewTitle", {
-        defaultValue: "Preview Skill",
+      title={t("option:skills.testRunTitle", {
+        defaultValue: "Test run",
         name: skillName
       })}
       open={Boolean(skillName)}
       onCancel={onClose}
       footer={null}
       width={640}
-      destroyOnClose
+      destroyOnHidden
     >
       <div className="flex flex-col gap-4">
         <div>
@@ -63,22 +68,27 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
             placeholder={t("option:skills.previewArgsPlaceholder", {
               defaultValue: "Enter test arguments..."
             })}
-            onPressEnter={handlePreview}
+            onPressEnter={handleRunTest}
           />
         </div>
 
+        <p className="m-0 text-sm text-text-muted">
+          {t("option:skills.testRunDisclosure", {
+            defaultValue:
+              "This renders the skill with your arguments. Fork-mode skills may call the configured model and allowed tools."
+          })}
+        </p>
+
         <Button
           type="primary"
-          onClick={handlePreview}
+          onClick={handleRunTest}
           loading={executeMutation.isPending}
         >
-          {t("option:skills.previewRun", { defaultValue: "Preview" })}
+          {t("option:skills.testRunAction", { defaultValue: "Run test" })}
         </Button>
 
         {executeMutation.isError && (
-          <div className="rounded border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
-            {(executeMutation.error as any)?.message || "Execution failed"}
-          </div>
+          <Alert role="alert" type="error" showIcon title={errorMessage} />
         )}
 
         {result && (

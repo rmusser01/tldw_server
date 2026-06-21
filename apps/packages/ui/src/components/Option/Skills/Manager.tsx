@@ -746,10 +746,10 @@ export const SkillsManager: React.FC = () => {
       width: 180,
       render: (_: unknown, record: SkillSummary) => (
         <div className="flex items-center gap-1">
-          <Tooltip title={t("option:skills.preview", { defaultValue: "Preview" })}>
+          <Tooltip title={t("option:skills.testRun", { defaultValue: "Test run" })}>
             <Button
-              aria-label={t("option:skills.previewSkill", {
-                defaultValue: `Preview ${record.name}`,
+              aria-label={t("option:skills.testRunSkill", {
+                defaultValue: `Test run ${record.name}`,
                 name: record.name
               })}
               type="text"
