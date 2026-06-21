@@ -587,6 +587,25 @@ describe("SkillsManager imports", () => {
     })
   })
 
+  it("labels the row execution action as a test run", async () => {
+    tldwClientMock.listSkills.mockResolvedValue({
+      skills: [makeSkill(1)],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+
+    renderManager()
+
+    expect(await screen.findByText("1 skill")).toBeInTheDocument()
+    const testRunButton = screen.getByRole("button", { name: "Test run skill-1" })
+    expect(screen.queryByRole("button", { name: "Preview skill-1" })).not.toBeInTheDocument()
+
+    fireEvent.click(testRunButton)
+    expect(screen.getByTestId("skill-preview-open")).toHaveTextContent("skill-1")
+  })
+
   it("clears server-backed mode sorting when the mode column is hidden", async () => {
     tldwClientMock.listSkills.mockResolvedValue({
       skills: [
