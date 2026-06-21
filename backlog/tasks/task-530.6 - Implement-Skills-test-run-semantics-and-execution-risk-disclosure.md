@@ -4,13 +4,15 @@ title: Implement Skills test-run semantics and execution-risk disclosure
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-21 16:22'
+updated_date: '2026-06-21 16:38'
 labels:
   - skills
   - webui
   - ux
   - safe-operations
 dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/pull/2423'
 parent_task_id: TASK-530
 priority: high
 ordinal: 530.6
