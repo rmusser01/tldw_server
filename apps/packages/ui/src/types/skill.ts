@@ -90,6 +90,23 @@ export interface SkillImportRequest {
   overwrite?: boolean
 }
 
+export interface SkillImportPreviewResponse {
+  valid: boolean
+  errors: string[]
+  name: string | null
+  description: string | null
+  argument_hint: string | null
+  disable_model_invocation: boolean | null
+  user_invocable: boolean | null
+  allowed_tools: string[] | null
+  model: string | null
+  context: SkillContext | null
+  supporting_file_count: number
+  conflict: boolean
+  can_overwrite: boolean
+  existing_version: number | null
+}
+
 export interface SkillContextPayload {
   available_skills: SkillSummary[]
   context_text: string

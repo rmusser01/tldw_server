@@ -4,8 +4,10 @@
 #
 
 import os
+import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -27,6 +29,7 @@ os.environ["ROUTES_DISABLE"] = ",".join(sorted(_routes_disable))
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+from tldw_Server_API.app.api.v1.endpoints.skills import MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -611,6 +614,160 @@ class TestDeleteSkill:
 
 
 class TestImportExport:
+    def test_import_skill_preview_json_returns_metadata_and_conflict(self, client):
+        client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "preview-conflict", "content": "Original"},
+        )
+
+        r = client.post(
+            f"{SKILLS_PREFIX}/import/preview",
+            json={
+                "content": (
+                    "---\n"
+                    "name: preview-conflict\n"
+                    "description: Reviewed import\n"
+                    "argument-hint: \"[topic]\"\n"
+                    "allowed-tools: Read, Grep\n"
+                    "context: fork\n"
+                    "---\n"
+                    "Preview content"
+                ),
+                "supporting_files": {"ref.md": "Reference"},
+            },
+        )
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["valid"] is True
+        assert body["errors"] == []
+        assert body["name"] == "preview-conflict"
+        assert body["description"] == "Reviewed import"
+        assert body["argument_hint"] == "[topic]"
+        assert body["allowed_tools"] == ["Read", "Grep"]
+        assert body["context"] == "fork"
+        assert body["supporting_file_count"] == 1
+        assert body["conflict"] is True
+        assert body["can_overwrite"] is True
+        assert body["existing_version"] == 1
+        persisted = client.get(f"{SKILLS_PREFIX}/preview-conflict")
+        assert persisted.status_code == 200
+        assert persisted.json()["content"] == "Original"
+
+    def test_import_skill_preview_invalid_content_returns_review_error(self, client):
+        r = client.post(
+            f"{SKILLS_PREFIX}/import/preview",
+            json={
+                "content": "---\nname: Invalid_Name!\n---\nInvalid content",
+            },
+        )
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["valid"] is False
+        assert body["name"] is None
+        assert body["conflict"] is False
+        assert body["can_overwrite"] is False
+        assert body["existing_version"] is None
+        assert any("frontmatter skill name" in error for error in body["errors"])
+        created = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "invalid-name", "content": "Created after invalid preview"},
+        )
+        assert created.status_code == 201, created.text
+        assert created.json()["version"] == 1
+
+    def test_import_skill_file_preview_md_returns_metadata_without_importing(self, client, tmp_path):
+        skill_file = tmp_path / "review-file-skill.md"
+        skill_file.write_text("---\ndescription: From preview file\n---\nFile preview content")
+
+        with open(skill_file, "rb") as f:
+            r = client.post(
+                f"{SKILLS_PREFIX}/import/file/preview",
+                files={"file": ("review-file-skill.md", f, "text/markdown")},
+            )
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["valid"] is True
+        assert body["errors"] == []
+        assert body["name"] == "review-file-skill"
+        assert body["description"] == "From preview file"
+        assert body["conflict"] is False
+        assert body["can_overwrite"] is False
+        imported = client.post(
+            f"{SKILLS_PREFIX}/import",
+            json={
+                "name": "review-file-skill",
+                "content": "---\ndescription: From preview file\n---\nFile preview content",
+            },
+        )
+        assert imported.status_code == 201, imported.text
+        assert imported.json()["version"] == 1
+
+    def test_import_skill_file_preview_zip_sniffs_content_without_zip_filename(self, client):
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr(
+                "sniffed-skill/SKILL.md",
+                "---\nname: sniffed-skill\ndescription: Sniffed zip\n---\nZip preview content",
+            )
+
+        r = client.post(
+            f"{SKILLS_PREFIX}/import/file/preview",
+            files={"file": ("skill.bundle", buffer.getvalue(), "application/octet-stream")},
+        )
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["valid"] is True
+        assert body["name"] == "sniffed-skill"
+        assert body["description"] == "Sniffed zip"
+        imported = client.post(
+            f"{SKILLS_PREFIX}/import",
+            json={
+                "name": "sniffed-skill",
+                "content": "---\ndescription: Sniffed zip\n---\nZip preview content",
+            },
+        )
+        assert imported.status_code == 201, imported.text
+        assert imported.json()["version"] == 1
+
+    def test_import_skill_file_zip_non_utf8_skill_md_returns_400(self, client):
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr("bad-encoding/SKILL.md", b"\xff\xfe\xfd\xfc")
+        zip_data = buffer.getvalue()
+
+        for path in ("import/file/preview", "import/file"):
+            r = client.post(
+                f"{SKILLS_PREFIX}/{path}",
+                files={"file": ("bad-encoding.zip", zip_data, "application/zip")},
+            )
+
+            assert r.status_code == 400, r.text
+            assert "UTF-8" in r.json()["detail"]
+
+    def test_import_skill_file_preview_rejects_oversized_upload(self, client):
+        too_large = b"a" * (MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES + 1)
+
+        r = client.post(
+            f"{SKILLS_PREFIX}/import/file/preview",
+            files={"file": ("too-large.md", too_large, "text/markdown")},
+        )
+
+        assert r.status_code == 413, r.text
+        assert "exceeds" in r.json()["detail"]
+
+    def test_import_skill_file_preview_rejects_non_utf8_non_zip_upload(self, client):
+        r = client.post(
+            f"{SKILLS_PREFIX}/import/file/preview",
+            files={"file": ("payload.bin", b"\xff\xfe\xfd\xfc", "application/octet-stream")},
+        )
+
+        assert r.status_code == 400, r.text
+        assert "UTF-8" in r.json()["detail"]
+
     def test_import_skill_json(self, client):
         r = client.post(
             f"{SKILLS_PREFIX}/import",

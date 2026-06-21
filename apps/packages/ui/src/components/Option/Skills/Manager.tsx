@@ -38,6 +38,7 @@ import { SkillPreview } from "./SkillPreview"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import type {
   SkillContext,
+  SkillImportPreviewResponse,
   SkillListOrder,
   SkillListSort,
   SkillSummary,
@@ -68,6 +69,12 @@ interface SkillsSuccessAction {
 interface SeedSkillsResult {
   count?: number
   seeded?: unknown
+}
+
+interface FileImportReview {
+  file: File
+  preview: SkillImportPreviewResponse
+  overwrite: boolean
 }
 
 type SkillContextFilter = "all" | SkillContext
@@ -210,11 +217,16 @@ export const SkillsManager: React.FC = () => {
   const [sortState, setSortState] = React.useState<SkillSortState>({})
   const [drawerOpen, setDrawerOpen] = React.useState(false)
   const [importTextOpen, setImportTextOpen] = React.useState(false)
+  const [importTextPreview, setImportTextPreview] =
+    React.useState<SkillImportPreviewResponse | null>(null)
+  const [fileImportReview, setFileImportReview] =
+    React.useState<FileImportReview | null>(null)
   const [editingSkill, setEditingSkill] = React.useState<SkillResponse | null>(null)
   const [previewSkill, setPreviewSkill] = React.useState<string | null>(null)
   const [successAction, setSuccessAction] =
     React.useState<SkillsSuccessAction | null>(null)
   const [importTextForm] = Form.useForm<ImportTextFormValues>()
+  const importTextOverwrite = Form.useWatch("overwrite", importTextForm)
 
   const offset = (page - 1) * pageSize
   const searchQuery = debouncedSearch.trim()
@@ -410,6 +422,44 @@ export const SkillsManager: React.FC = () => {
     }
   })
 
+  const showImportSuccess = (result: unknown, fallbackName?: string) => {
+    queryClient.invalidateQueries({ queryKey: ["skills"] })
+    const skillName = getResponseSkillName(result) ?? fallbackName
+    if (skillName) {
+      setSuccessAction({
+        title: t("option:skills.importSuccess", { defaultValue: "Skill imported" }),
+        description: t("option:skills.importSuccessActionDesc", {
+          defaultValue:
+            "Next, test it here or open the skill to confirm the imported details."
+        }),
+        skillName,
+        viewLabel: t("option:skills.viewSkill", { defaultValue: "View skill" })
+      })
+    }
+    notification.success({
+      message: t("option:skills.importSuccess", { defaultValue: "Skill imported" })
+    })
+  }
+
+  const previewImportTextMutation = useMutation({
+    mutationFn: (payload: {
+      name?: string
+      content: string
+    }) => tldwClient.previewSkillImport(payload),
+    onSuccess: (result) => {
+      setImportTextPreview(result)
+      importTextForm.setFieldValue("overwrite", false)
+    },
+    onError: (err: any) => {
+      notification.error({
+        message: t("option:skills.importPreviewError", {
+          defaultValue: "Failed to review skill import"
+        }),
+        description: err?.message
+      })
+    }
+  })
+
   const importTextMutation = useMutation({
     mutationFn: (payload: {
       name?: string
@@ -417,24 +467,41 @@ export const SkillsManager: React.FC = () => {
       overwrite?: boolean
     }) => tldwClient.importSkill(payload),
     onSuccess: (result, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["skills"] })
       setImportTextOpen(false)
+      setImportTextPreview(null)
       importTextForm.resetFields()
-      const skillName = getResponseSkillName(result) ?? variables.name
-      if (skillName) {
-        setSuccessAction({
-          title: t("option:skills.importSuccess", { defaultValue: "Skill imported" }),
-          description: t("option:skills.importSuccessActionDesc", {
-            defaultValue:
-              "Next, test it here or open the skill to confirm the imported details."
-          }),
-          skillName,
-          viewLabel: t("option:skills.viewSkill", { defaultValue: "View skill" })
-        })
-      }
-      notification.success({
-        message: t("option:skills.importSuccess", { defaultValue: "Skill imported" })
+      showImportSuccess(result, variables.name)
+    },
+    onError: (err: any) => {
+      notification.error({
+        message: t("option:skills.importError", { defaultValue: "Failed to import skill" }),
+        description: err?.message
       })
+    }
+  })
+
+  const previewImportFileMutation = useMutation({
+    mutationFn: (file: File) => tldwClient.previewSkillImportFile(file),
+    onSuccess: (preview, file) => {
+      setSuccessAction(null)
+      setFileImportReview({ file, preview, overwrite: false })
+    },
+    onError: (err: any) => {
+      notification.error({
+        message: t("option:skills.importPreviewError", {
+          defaultValue: "Failed to review skill import"
+        }),
+        description: err?.message
+      })
+    }
+  })
+
+  const importFileMutation = useMutation({
+    mutationFn: ({ file, overwrite }: { file: File; overwrite: boolean }) =>
+      tldwClient.importSkillFile(file, { overwrite }),
+    onSuccess: (result) => {
+      setFileImportReview(null)
+      showImportSuccess(result)
     },
     onError: (err: any) => {
       notification.error({
@@ -540,35 +607,13 @@ export const SkillsManager: React.FC = () => {
   }
 
   const handleImportFile = async (file: File) => {
-    try {
-      const result = await tldwClient.importSkillFile(file)
-      queryClient.invalidateQueries({ queryKey: ["skills"] })
-      const skillName = getResponseSkillName(result)
-      if (skillName) {
-        setSuccessAction({
-          title: t("option:skills.importSuccess", { defaultValue: "Skill imported" }),
-          description: t("option:skills.importSuccessActionDesc", {
-            defaultValue:
-              "Next, test it here or open the skill to confirm the imported details."
-          }),
-          skillName,
-          viewLabel: t("option:skills.viewSkill", { defaultValue: "View skill" })
-        })
-      }
-      notification.success({
-        message: t("option:skills.importSuccess", { defaultValue: "Skill imported" })
-      })
-    } catch (err: any) {
-      notification.error({
-        message: t("option:skills.importError", { defaultValue: "Failed to import skill" }),
-        description: err?.message
-      })
-    }
+    previewImportFileMutation.mutate(file)
     return false // prevent antd Upload default behavior
   }
 
   const openImportTextModal = () => {
     setSuccessAction(null)
+    setImportTextPreview(null)
     importTextForm.resetFields()
     importTextForm.setFieldsValue({ overwrite: false, content: "" })
     setImportTextOpen(true)
@@ -582,13 +627,22 @@ export const SkillsManager: React.FC = () => {
         content: string
         overwrite?: boolean
       } = {
-        content: values.content,
-        overwrite: Boolean(values.overwrite)
+        content: values.content
       }
       const trimmedName = values.name?.trim()
       if (trimmedName) {
         payload.name = trimmedName
       }
+      if (!importTextPreview?.valid) {
+        await previewImportTextMutation.mutateAsync(payload)
+        return
+      }
+      if (importTextPreview.conflict && !values.overwrite) {
+        return
+      }
+      payload.overwrite = importTextPreview.conflict
+        ? Boolean(values.overwrite)
+        : false
       await importTextMutation.mutateAsync(payload)
     } catch {
       // validation errors handled by antd
@@ -915,6 +969,138 @@ export const SkillsManager: React.FC = () => {
   }
 
   const tableSize = tableDensity === "compact" ? "small" : "middle"
+  const importTextCanSubmit =
+    Boolean(importTextPreview?.valid)
+    && (!importTextPreview?.conflict || Boolean(importTextOverwrite))
+  const importTextOkLabel = importTextPreview?.valid
+    ? t("option:skills.importSkill", { defaultValue: "Import skill" })
+    : t("option:skills.reviewImport", { defaultValue: "Review import" })
+  const importFileOkLabel = t("option:skills.importSkill", { defaultValue: "Import skill" })
+
+  const renderImportReview = (preview: SkillImportPreviewResponse) => {
+    const statusLabel = !preview.valid
+      ? t("option:skills.importReviewNeedsFixes", { defaultValue: "Needs fixes" })
+      : preview.conflict
+        ? t("option:skills.importReviewConflict", { defaultValue: "Conflict" })
+        : t("option:skills.importReviewReady", { defaultValue: "Ready" })
+    const statusColor = !preview.valid ? "error" : preview.conflict ? "warning" : "success"
+
+    return (
+      <div
+        className="mt-3 rounded-md border border-border bg-surface p-3"
+        aria-live="polite"
+      >
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="m-0 text-sm font-semibold text-text">
+            {t("option:skills.importReviewTitle", { defaultValue: "Import review" })}
+          </h3>
+          <Tag color={statusColor}>{statusLabel}</Tag>
+        </div>
+
+        {!preview.valid ? (
+          <div className="rounded-md border border-danger/30 bg-danger/10 p-2 text-sm text-text">
+            <p className="m-0 font-medium">
+              {t("option:skills.importReviewErrors", {
+                defaultValue: "Fix these issues before importing."
+              })}
+            </p>
+            <ul className="mb-0 mt-1 pl-5">
+              {(preview.errors.length ? preview.errors : [
+                t("option:skills.importReviewUnknownError", {
+                  defaultValue: "The skill could not be validated."
+                })
+              ]).map((error, index) => (
+                <li key={`${error}-${index}`}>{error}</li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <>
+            <dl className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-xs font-semibold uppercase text-text-muted">
+                  {t("option:skills.nameLabel", { defaultValue: "Name" })}
+                </dt>
+                <dd className="m-0 break-all font-mono text-text">
+                  {preview.name ?? t("option:skills.importReviewMissingName", {
+                    defaultValue: "Not resolved"
+                  })}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold uppercase text-text-muted">
+                  {t("option:skills.mode", { defaultValue: "Mode" })}
+                </dt>
+                <dd className="m-0 text-text">{preview.context ?? "inline"}</dd>
+              </div>
+              {preview.description && (
+                <div className="sm:col-span-2">
+                  <dt className="text-xs font-semibold uppercase text-text-muted">
+                    {t("option:skills.description", { defaultValue: "Description" })}
+                  </dt>
+                  <dd className="m-0 text-text">{preview.description}</dd>
+                </div>
+              )}
+              {preview.argument_hint && (
+                <div>
+                  <dt className="text-xs font-semibold uppercase text-text-muted">
+                    {t("option:skills.argumentHint", { defaultValue: "Argument hint" })}
+                  </dt>
+                  <dd className="m-0 font-mono text-text">{preview.argument_hint}</dd>
+                </div>
+              )}
+              <div>
+                <dt className="text-xs font-semibold uppercase text-text-muted">
+                  {t("option:skills.supportingFiles", { defaultValue: "Supporting files" })}
+                </dt>
+                <dd className="m-0 text-text">{preview.supporting_file_count}</dd>
+              </div>
+              {preview.model && (
+                <div>
+                  <dt className="text-xs font-semibold uppercase text-text-muted">
+                    {t("option:skills.model", { defaultValue: "Model" })}
+                  </dt>
+                  <dd className="m-0 font-mono text-text">{preview.model}</dd>
+                </div>
+              )}
+              {preview.allowed_tools?.length ? (
+                <div className="sm:col-span-2">
+                  <dt className="text-xs font-semibold uppercase text-text-muted">
+                    {t("option:skills.allowedTools", { defaultValue: "Allowed tools" })}
+                  </dt>
+                  <dd className="m-0 text-text">{preview.allowed_tools.join(", ")}</dd>
+                </div>
+              ) : null}
+            </dl>
+
+            {preview.conflict && (
+              <div className="mt-3 rounded-md border border-warn/40 bg-warn/10 p-2 text-sm text-text">
+                <p className="m-0 font-semibold">
+                  {t("option:skills.importConflictTitle", {
+                    defaultValue: "Existing skill detected"
+                  })}
+                </p>
+                <p className="m-0 text-text-muted">
+                  {t("option:skills.importConflictDescription", {
+                    defaultValue:
+                      "Importing will replace the active skill only if overwrite is enabled."
+                  })}
+                </p>
+                {preview.existing_version != null && (
+                  <p className="m-0 mt-1 font-mono text-xs text-text-muted">
+                    {t("option:skills.importConflictVersion", {
+                      defaultValue: `Version ${preview.existing_version}`,
+                      version: preview.existing_version
+                    })}
+                  </p>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -1236,10 +1422,19 @@ export const SkillsManager: React.FC = () => {
           defaultValue: "Import Skill from Text"
         })}
         open={importTextOpen}
-        onCancel={() => setImportTextOpen(false)}
+        onCancel={() => {
+          setImportTextOpen(false)
+          setImportTextPreview(null)
+        }}
         onOk={handleImportTextSubmit}
-        okText={t("option:skills.import", { defaultValue: "Import" })}
-        okButtonProps={{ loading: importTextMutation.isPending }}
+        okText={importTextOkLabel}
+        okButtonProps={{
+          "aria-label": importTextOkLabel,
+          loading:
+            importTextMutation.isPending
+            || (!importTextPreview && previewImportTextMutation.isPending),
+          disabled: Boolean(importTextPreview?.valid) && !importTextCanSubmit
+        }}
         destroyOnHidden
       >
         <Form
@@ -1247,6 +1442,12 @@ export const SkillsManager: React.FC = () => {
           layout="vertical"
           initialValues={{ overwrite: false }}
           autoComplete="off"
+          onValuesChange={(changedValues) => {
+            if ("name" in changedValues || "content" in changedValues) {
+              setImportTextPreview(null)
+              importTextForm.setFieldValue("overwrite", false)
+            }
+          }}
         >
           <Form.Item
             name="name"
@@ -1292,16 +1493,87 @@ export const SkillsManager: React.FC = () => {
             <Input.TextArea rows={14} className="font-mono text-xs" />
           </Form.Item>
 
-          <Form.Item
-            name="overwrite"
-            valuePropName="checked"
-            label={t("option:skills.importOverwrite", {
-              defaultValue: "Overwrite existing skill"
-            })}
-          >
-            <Switch />
-          </Form.Item>
+          {importTextPreview && renderImportReview(importTextPreview)}
+
+          {importTextPreview?.valid && importTextPreview.conflict && (
+            <Form.Item
+              name="overwrite"
+              valuePropName="checked"
+              label={t("option:skills.importOverwrite", {
+                defaultValue: "Overwrite existing skill"
+              })}
+              extra={t("option:skills.importOverwriteRequired", {
+                defaultValue:
+                  "Required because this import matches an active skill name."
+              })}
+            >
+              <Switch
+                aria-label={t("option:skills.importOverwrite", {
+                  defaultValue: "Overwrite existing skill"
+                })}
+              />
+            </Form.Item>
+          )}
         </Form>
+      </Modal>
+
+      <Modal
+        title={t("option:skills.importFileReviewTitle", {
+          defaultValue: "Review Skill Import"
+        })}
+        open={Boolean(fileImportReview)}
+        onCancel={() => setFileImportReview(null)}
+        onOk={() => {
+          if (!fileImportReview?.preview.valid) return
+          if (fileImportReview.preview.conflict && !fileImportReview.overwrite) return
+          importFileMutation.mutate({
+            file: fileImportReview.file,
+            overwrite: fileImportReview.preview.conflict
+              ? fileImportReview.overwrite
+              : false
+          })
+        }}
+        okText={importFileOkLabel}
+        okButtonProps={{
+          "aria-label": importFileOkLabel,
+          loading: importFileMutation.isPending,
+          disabled:
+            !fileImportReview?.preview.valid
+            || Boolean(fileImportReview.preview.conflict && !fileImportReview.overwrite)
+        }}
+        destroyOnHidden
+      >
+        {fileImportReview && (
+          <div className="flex flex-col gap-3">
+            <p className="m-0 text-sm text-text-muted">
+              {t("option:skills.importFileReviewSource", {
+                defaultValue: "Selected file:"
+              })}{" "}
+              <span className="font-mono text-text">{fileImportReview.file.name}</span>
+            </p>
+            {renderImportReview(fileImportReview.preview)}
+            {fileImportReview.preview.valid && fileImportReview.preview.conflict && (
+              <div className="flex items-center gap-2">
+                <Switch
+                  aria-label={t("option:skills.importOverwrite", {
+                    defaultValue: "Overwrite existing skill"
+                  })}
+                  checked={fileImportReview.overwrite}
+                  onChange={(checked) => {
+                    setFileImportReview((current) =>
+                      current ? { ...current, overwrite: checked } : current
+                    )
+                  }}
+                />
+                <span className="text-sm text-text">
+                  {t("option:skills.importOverwrite", {
+                    defaultValue: "Overwrite existing skill"
+                  })}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
 
       <SkillDrawer

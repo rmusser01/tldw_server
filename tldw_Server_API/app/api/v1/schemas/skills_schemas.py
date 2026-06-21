@@ -267,6 +267,36 @@ class SkillImportRequest(BaseModel):
         return validated  # type: ignore[return-value]
 
 
+class SkillImportPreviewRequest(BaseModel):
+    """Request to preview a skill import from text content."""
+    name: str | None = Field(
+        None,
+        min_length=1,
+        max_length=64,
+        description="Optional skill name override (uses frontmatter name if omitted)",
+    )
+    content: str = Field(..., min_length=1, max_length=500000, description="SKILL.md content")
+    supporting_files: dict[str, str] | None = Field(None, description="Additional files")
+
+
+class SkillImportPreviewResponse(BaseModel):
+    """Read-only preview of an import before it mutates stored skills."""
+    valid: bool = Field(..., description="Whether the import can be submitted")
+    errors: list[str] = Field(default_factory=list, description="Validation errors to fix before import")
+    name: str | None = Field(None, description="Resolved skill name")
+    description: str | None = Field(None, description="Parsed skill description")
+    argument_hint: str | None = Field(None, description="Parsed argument hint")
+    disable_model_invocation: bool | None = Field(None, description="Whether model invocation is disabled")
+    user_invocable: bool | None = Field(None, description="Whether users can invoke the skill directly")
+    allowed_tools: list[str] | None = Field(None, description="Parsed allowed tools")
+    model: str | None = Field(None, description="Parsed model override")
+    context: SkillContext | None = Field(None, description="Parsed execution context")
+    supporting_file_count: int = Field(0, description="Number of supporting files included in the import")
+    conflict: bool = Field(False, description="Whether an active skill with this name already exists")
+    can_overwrite: bool = Field(False, description="Whether overwrite can be offered for this preview")
+    existing_version: int | None = Field(None, description="Existing skill version when a conflict exists")
+
+
 class SkillContextPayload(BaseModel):
     """Skill context for injection into chat."""
     available_skills: list[SkillSummary] = Field(..., description="Skills available for invocation")
