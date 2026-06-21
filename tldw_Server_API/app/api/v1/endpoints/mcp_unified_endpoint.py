@@ -716,6 +716,27 @@ def _jsonrpc_error_response(response: MCPResponse) -> JSONResponse:
     return JSONResponse(mcp_response_to_json(response))
 
 
+def _mcp_permission_detail(response: MCPResponse, *, hint: str) -> dict[str, str] | None:
+    """Return an HTTP-friendly permission detail for MCP authorization errors."""
+    if response.error is None or response.error.code != -32001:
+        return None
+    return {
+        "message": response.error.message or "Insufficient permissions",
+        "hint": hint,
+    }
+
+
+def _is_anonymous_mcp_request(http_request: Request, auth: McpAuthContext) -> bool:
+    """Return True when no MCP HTTP authentication material was provided."""
+    if auth.user is not None or auth.principal is not None or auth.raw_api_key:
+        return False
+    try:
+        return not bool(http_request.headers.get("authorization"))
+    except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Failed to inspect MCP HTTP authorization header")
+    return False
+
+
 # WebSocket endpoint
 
 
@@ -875,6 +896,13 @@ async def mcp_request(
         return Response(status_code=204)
     if request_plan.explicit_null_id:
         restore_explicit_null_jsonrpc_ids(resp_obj, {request_plan.null_id_sentinel})
+    if request_plan.request.method == "tools/list" and _is_anonymous_mcp_request(http_request, auth):
+        permission_detail = _mcp_permission_detail(
+            resp_obj,
+            hint="Permission denied for listing tools. Contact an admin.",
+        )
+        if permission_detail is not None:
+            raise HTTPException(status_code=403, detail=permission_detail)
     headers = dict(response.headers)
     return JSONResponse(mcp_response_to_json(resp_obj), headers=headers)
 
