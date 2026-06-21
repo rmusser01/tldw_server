@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from mcp_unified.lsp import (
+    LspBackendStatus,
     LspCodeAction,
     LspCodeActionsResult,
     LspDiagnostic,
@@ -184,9 +185,42 @@ def test_lsp_result_shapes_are_json_serializable():
         LspLocationsResult(locations=[location]).to_dict(),
         LspHover(contents="int", range=lsp_range).to_dict(),
         LspSignatureHelp(signatures=["func(x: int)"]).to_dict(),
+        LspBackendStatus(name="ruff", healthy=True, capabilities=["diagnostics"]).to_dict(),
         LspPreview(path="pkg/app.py", text_edits=[edit], preview="x").to_dict(),
         LspCodeActionsResult(actions=[LspCodeAction(title="fix", edits=[edit])]).to_dict(),
     ]
 
     for payload in payloads:
         assert json.dumps(payload, sort_keys=True)
+
+
+def test_lsp_location_rejects_non_json_direct_path_field():
+    location = LspLocation(path=Path("pkg/app.py"), range=LspRange(LspPosition(1, 2), LspPosition(1, 5)))
+
+    with pytest.raises(TypeError):
+        location.to_dict()
+
+
+def test_lsp_signature_help_rejects_non_json_signature_items():
+    signature_help = LspSignatureHelp(signatures=[Path("pkg/app.py")])
+
+    with pytest.raises(TypeError):
+        signature_help.to_dict()
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        LspBackendStatus(name=Path("ruff"), healthy=True),
+        LspBackendStatus(name=1, healthy=True),
+        LspBackendStatus(name="ruff", healthy=True, capabilities=[Path("diagnostics")]),
+        LspBackendStatus(name="ruff", healthy=True, capabilities=[1]),
+        LspBackendStatus(name="ruff", healthy=True, version=Path("0.13")),
+        LspBackendStatus(name="ruff", healthy=True, version=1),
+        LspBackendStatus(name="ruff", healthy=True, detail=Path("stderr")),
+        LspBackendStatus(name="ruff", healthy=True, detail=1),
+    ],
+)
+def test_lsp_backend_status_rejects_non_json_direct_fields(status):
+    with pytest.raises(TypeError):
+        status.to_dict()

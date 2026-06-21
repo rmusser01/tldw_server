@@ -44,6 +44,21 @@ def _to_json_value(value: object) -> JsonValue:
     raise TypeError(f"{type(value).__name__} is not JSON-serializable")
 
 
+def _to_optional_string(name: str, value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be a string")
+    return value
+
+
+def _to_string_sequence(name: str, value: Sequence[object]) -> list[str]:
+    values = list(value)
+    if not all(isinstance(item, str) for item in values):
+        raise TypeError(f"{name} must contain only strings")
+    return sorted(values)
+
+
 @dataclass(frozen=True, slots=True)
 class LspPosition:
     """Zero-based UTF-16 LSP document position."""
@@ -56,7 +71,7 @@ class LspPosition:
         _validate_non_negative_int("character", self.character)
 
     def to_dict(self) -> JsonDict:
-        return {"line": self.line, "character": self.character}
+        return {"line": _to_dict(self.line), "character": _to_dict(self.character)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +80,7 @@ class LspRange:
     end: LspPosition
 
     def to_dict(self) -> JsonDict:
-        return {"start": self.start.to_dict(), "end": self.end.to_dict()}
+        return {"start": _to_dict(self.start), "end": _to_dict(self.end)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +89,7 @@ class LspLocation:
     range: LspRange
 
     def to_dict(self) -> JsonDict:
-        return {"path": self.path, "range": self.range.to_dict()}
+        return {"path": _to_dict(self.path), "range": _to_dict(self.range)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,12 +103,12 @@ class LspDiagnostic:
 
     def to_dict(self) -> JsonDict:
         return {
-            "path": self.path,
-            "range": self.range.to_dict(),
-            "message": self.message,
-            "severity": self.severity,
-            "code": self.code,
-            "source": self.source,
+            "path": _to_dict(self.path),
+            "range": _to_dict(self.range),
+            "message": _to_dict(self.message),
+            "severity": _to_dict(self.severity),
+            "code": _to_dict(self.code),
+            "source": _to_dict(self.source),
         }
 
 
@@ -106,10 +121,10 @@ class LspSymbol:
 
     def to_dict(self) -> JsonDict:
         return {
-            "name": self.name,
-            "kind": self.kind,
-            "location": self.location.to_dict(),
-            "container_name": self.container_name,
+            "name": _to_dict(self.name),
+            "kind": _to_dict(self.kind),
+            "location": _to_dict(self.location),
+            "container_name": _to_dict(self.container_name),
         }
 
 
@@ -121,9 +136,9 @@ class LspHover:
 
     def to_dict(self) -> JsonDict:
         return {
-            "contents": self.contents,
-            "range": self.range.to_dict() if self.range else None,
-            "truncated": self.truncated,
+            "contents": _to_dict(self.contents),
+            "range": _to_dict(self.range) if self.range else None,
+            "truncated": _to_dict(self.truncated),
         }
 
 
@@ -135,9 +150,9 @@ class LspSignatureHelp:
 
     def to_dict(self) -> JsonDict:
         return {
-            "signatures": list(self.signatures),
-            "active_signature": self.active_signature,
-            "active_parameter": self.active_parameter,
+            "signatures": _to_dict(list(self.signatures)),
+            "active_signature": _to_dict(self.active_signature),
+            "active_parameter": _to_dict(self.active_parameter),
         }
 
 
@@ -151,11 +166,11 @@ class LspBackendStatus:
 
     def to_dict(self) -> JsonDict:
         return {
-            "name": self.name,
-            "healthy": self.healthy,
-            "capabilities": sorted(self.capabilities),
-            "version": self.version,
-            "detail": self.detail,
+            "name": _to_optional_string("name", self.name),
+            "healthy": _to_dict(self.healthy),
+            "capabilities": _to_string_sequence("capabilities", self.capabilities),
+            "version": _to_optional_string("version", self.version),
+            "detail": _to_optional_string("detail", self.detail),
         }
 
 
@@ -165,7 +180,7 @@ class LspTextEdit:
     new_text: str
 
     def to_dict(self) -> JsonDict:
-        return {"range": self.range.to_dict(), "new_text": self.new_text}
+        return {"range": _to_dict(self.range), "new_text": _to_dict(self.new_text)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,10 +192,10 @@ class LspPreview:
 
     def to_dict(self) -> JsonDict:
         return {
-            "path": self.path,
+            "path": _to_dict(self.path),
             "text_edits": [_to_dict(edit) for edit in self.text_edits],
-            "preview": self.preview,
-            "truncated": self.truncated,
+            "preview": _to_dict(self.preview),
+            "truncated": _to_dict(self.truncated),
         }
 
 
@@ -194,8 +209,8 @@ class LspCodeAction:
 
     def to_dict(self) -> JsonDict:
         return {
-            "title": self.title,
-            "kind": self.kind,
+            "title": _to_dict(self.title),
+            "kind": _to_dict(self.kind),
             "diagnostics": [_to_dict(diagnostic) for diagnostic in self.diagnostics],
             "edits": [_to_dict(edit) for edit in self.edits],
             "data": _to_dict(self.data),
@@ -210,7 +225,7 @@ class LspDiagnosticsResult:
     def to_dict(self) -> JsonDict:
         return {
             "diagnostics": [_to_dict(diagnostic) for diagnostic in self.diagnostics],
-            "truncated": self.truncated,
+            "truncated": _to_dict(self.truncated),
         }
 
 
@@ -220,7 +235,7 @@ class LspSymbolsResult:
     truncated: bool = False
 
     def to_dict(self) -> JsonDict:
-        return {"symbols": [_to_dict(symbol) for symbol in self.symbols], "truncated": self.truncated}
+        return {"symbols": [_to_dict(symbol) for symbol in self.symbols], "truncated": _to_dict(self.truncated)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,7 +246,7 @@ class LspLocationsResult:
     def to_dict(self) -> JsonDict:
         return {
             "locations": [_to_dict(location) for location in self.locations],
-            "truncated": self.truncated,
+            "truncated": _to_dict(self.truncated),
         }
 
 
@@ -241,4 +256,4 @@ class LspCodeActionsResult:
     truncated: bool = False
 
     def to_dict(self) -> JsonDict:
-        return {"actions": [_to_dict(action) for action in self.actions], "truncated": self.truncated}
+        return {"actions": [_to_dict(action) for action in self.actions], "truncated": _to_dict(self.truncated)}
