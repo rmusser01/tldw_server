@@ -147,3 +147,45 @@ def test_first_time_audio_guides_have_core_sections() -> None:
         text = Path(guide).read_text(encoding="utf-8")
         for item in required_content:
             _require(item in text, f"{guide} missing expected content: {item}")
+
+
+def test_p1_p2_onboarding_repair_contract() -> None:
+    readme = Path("README.md").read_text(encoding="utf-8")
+    quickstart = Path("Docs/Getting_Started/QUICKSTART.md").read_text(encoding="utf-8")
+    local_profile = Path("Docs/Getting_Started/Profile_Local_Single_User.md").read_text(
+        encoding="utf-8"
+    )
+    troubleshooting = Path("Docs/Getting_Started/TROUBLESHOOTING.md").read_text(
+        encoding="utf-8"
+    )
+
+    _require(
+        "After cloning, you can run the optional Makefile helper checks" in readme,
+        "README should not present quickstart-prereqs as the first fresh-checkout step",
+    )
+    _require(
+        "python -m tldw_Server_API.app.core.AuthNZ.initialize --non-interactive"
+        in quickstart,
+        "QUICKSTART manual local setup should initialize single-user auth before uvicorn",
+    )
+    _require(
+        "cp .env.local.example .env.local" in local_profile
+        and "bun install" in local_profile
+        and "bun run dev -- -p 8080" in local_profile,
+        "Local profile should include complete WebUI setup commands before starting Bun",
+    )
+    _require(
+        "backend/operator recovery surface" in quickstart,
+        "QUICKSTART should frame /setup as a recovery/operator surface, not the normal first-run path",
+    )
+    _require(
+        "browser-visible copy of the single-user API key" in troubleshooting,
+        "Troubleshooting should explain NEXT_PUBLIC_X_API_KEY as local single-user bootstrap auth",
+    )
+    _require(
+        "Dockerfiles/docker-compose.single-user.yml" in troubleshooting
+        and "Dockerfiles/docker-compose.webui.yml" in troubleshooting
+        and "Dockerfiles/docker-compose.yml ^" not in troubleshooting
+        and "docker-compose.webui.yml up -d --build" not in troubleshooting,
+        "Windows/no-make troubleshooting should use current compose files and avoid stale cmd.exe continuations",
+    )

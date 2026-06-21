@@ -178,6 +178,9 @@ source .venv/bin/activate        # Windows: .venv\Scripts\Activate.ps1
 pip install --upgrade pip
 pip install -e .
 cp tldw_Server_API/Config_Files/.env.example tldw_Server_API/Config_Files/.env
+python -m tldw_Server_API.cli.wizard.cli init --profile local-single --env-file tldw_Server_API/Config_Files/.env --default --yes
+# Lower-level equivalent if you already edited .env manually:
+# python -m tldw_Server_API.app.core.AuthNZ.initialize --non-interactive
 python -m uvicorn tldw_Server_API.app.main:app --reload
 ```
 
@@ -259,9 +262,11 @@ curl -sS -X POST http://localhost:8000/api/v1/media/search \
 
 ---
 
-## Guided Setup Wizard (Optional)
+## Backend Setup Recovery Surface (Optional)
 
-For a visual configuration experience, edit `tldw_Server_API/Config_Files/config.txt`:
+The normal solo first-run path is the WebUI at http://localhost:8080 after your selected profile verifies. Use the WebUI first-time setup flow for provider/chat setup, then complete the first successful chat gate and add your first source.
+
+The backend `/setup` page is a backend/operator recovery surface for cases where the WebUI setup flow cannot save provider settings or you need direct server-side recovery. To enable it, edit `tldw_Server_API/Config_Files/config.txt`:
 
 ```ini
 [Setup]
@@ -269,7 +274,7 @@ enable_first_time_setup = true
 setup_completed = false
 ```
 
-Restart the server, then visit http://localhost:8000/setup. The wizard walks you through provider configuration, audio setup, and more.
+Restart the server, then visit http://localhost:8000/setup.
 
 ---
 
@@ -317,7 +322,7 @@ docker compose --env-file tldw_Server_API/Config_Files/.env \
 - **Chat**: Open the WebUI and send a message, or use the `/api/v1/chat/completions` endpoint
 - **Ingest media**: Upload a PDF, paste a YouTube URL, or use the `/api/v1/media/process` endpoint
 - **Speech**: Set up audio with the [CPU](./First_Time_Audio_Setup_CPU.md) or [GPU/Accelerated](./First_Time_Audio_Setup_GPU_Accelerated.md) audio guide
-- **Setup wizard**: Try the guided wizard at http://localhost:8000/setup
+- **Setup recovery**: Use the backend/operator recovery surface at http://localhost:8000/setup only when the WebUI setup flow is unavailable or cannot save settings
 - **API reference**: Browse the full API at http://localhost:8000/docs
 
 ---
