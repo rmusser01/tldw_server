@@ -35,6 +35,9 @@ help:
 	@echo "  make tooling-install         Install test/smoke extras"
 	@echo "  make tooling-smoke           Run unified smoke checks"
 	@echo "  make lint-changed            Lint only changed files"
+	@echo "  make ci-local                Run gating CI checks locally (fast tier)"
+	@echo "  make ci-local-full           Run the full suite locally (-n auto)"
+	@echo "  make ci-local-lane LANE=...  Run one test area locally"
 	@echo "  make release                 Cut a patch release from main"
 	@echo "  make release-patch           Cut a patch release from main"
 	@echo "  make release-minor           Cut a minor release from main"
@@ -454,6 +457,27 @@ BASE ?=
 
 lint-changed:
 	@bash Helper_Scripts/Testing-related/lint-changed.sh $(BASE)
+
+# -----------------------------------------------------------------------------
+# Local CI — reproduce the gating GitHub checks before pushing
+# -----------------------------------------------------------------------------
+.PHONY: ci-local ci-local-full ci-local-lane
+
+# Prefer the project venv python ($(VENV_PYTHON)); fall back to $(PYTHON).
+CI_LOCAL_PYTHON ?= $(shell [ -x "$(VENV_PYTHON)" ] && echo "$(VENV_PYTHON)" || echo "$(PYTHON)")
+RUN_LOCAL_CI ?= $(CI_LOCAL_PYTHON) Helper_Scripts/ci/run_local_ci.py
+CI_ARGS ?=
+LANE ?=
+
+ci-local:            ## Fast tier: compileall + ruff(changed) + guards + pytest(changed)
+	$(RUN_LOCAL_CI) --fast $(CI_ARGS)
+
+ci-local-full:       ## Full tier: compileall + ruff(all) + guards + whole suite (-n auto)
+	$(RUN_LOCAL_CI) --full $(CI_ARGS)
+
+ci-local-lane:       ## One area: make ci-local-lane LANE=tldw_Server_API/tests/Security
+	@test -n "$(LANE)" || (echo "Usage: make ci-local-lane LANE=<path> [CI_ARGS=...]" && exit 2)
+	$(RUN_LOCAL_CI) --lane $(LANE) $(CI_ARGS)
 
 # -----------------------------------------------------------------------------
 # Chat Streaming Load Harness (Scenario A starter)
