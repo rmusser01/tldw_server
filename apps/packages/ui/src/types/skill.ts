@@ -70,6 +70,7 @@ export interface SkillUpdate {
 
 export interface SkillExecuteRequest {
   args?: string | null
+  dry_run?: boolean
 }
 
 export interface SkillExecutionResult {
@@ -79,6 +80,7 @@ export interface SkillExecutionResult {
   model_override: string | null
   execution_mode: SkillContext
   fork_output: string | null
+  dry_run: boolean
 }
 
 export interface SkillImportRequest {

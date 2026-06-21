@@ -3,7 +3,7 @@ import { buildQuery } from "../client-utils"
 import { appendPathQuery } from "../path-utils"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import type { OffsetPaginationMeta } from "@/services/response-envelope"
-import type { SkillsListParams, SkillsListResponse } from "@/types/skill"
+import type { SkillExecutionResult, SkillsListParams, SkillsListResponse } from "@/types/skill"
 
 /**
  * Minimal interface for the TldwApiClient methods referenced via `this`.
@@ -18,6 +18,10 @@ export interface TldwApiClientCore {
 
 type SkillsListPayload = SkillsListResponse & {
   pagination?: OffsetPaginationMeta
+}
+
+export interface ExecuteSkillOptions {
+  dryRun?: boolean
 }
 
 export type WorkspaceArtifactJsonRecord = Record<string, unknown>
@@ -880,18 +884,22 @@ export const workspaceApiMethods = {
   async executeSkill(
     this: TldwApiClientCore,
     name: string,
-    args?: string
-  ): Promise<any> {
+    args?: string,
+    options?: ExecuteSkillOptions
+  ): Promise<SkillExecutionResult> {
     const base = await this.resolveApiPath("skills.execute", [
       "/api/v1/skills/{name}/execute",
       "/api/v1/skills/{name}/execute/"
     ])
     const path = this.fillPathParams(base, name)
-    return await bgRequest<any>({
+    return await bgRequest<SkillExecutionResult>({
       path,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: { args: args || "" }
+      body: {
+        args: args || "",
+        dry_run: Boolean(options?.dryRun)
+      }
     })
   },
 

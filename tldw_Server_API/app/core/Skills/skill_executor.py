@@ -30,6 +30,7 @@ class SkillExecutionResult:
     model_override: Optional[str] = None
     execution_mode: str = "inline"  # "inline" or "fork"
     fork_output: Optional[str] = None
+    dry_run: bool = False
 
 
 @dataclass
@@ -287,6 +288,7 @@ class SkillExecutor:
         skill_data: dict[str, Any],
         arguments: str,
         context: Optional[RequestContext] = None,
+        dry_run: bool = False,
     ) -> SkillExecutionResult:
         """
         Execute a skill.
@@ -295,6 +297,7 @@ class SkillExecutor:
             skill_data: The skill data dict (from SkillsService.get_skill)
             arguments: Arguments to pass to the skill
             context: Request context for execution
+            dry_run: If true, render prompt metadata without model/tool execution
 
         Returns:
             SkillExecutionResult with rendered prompt and metadata
@@ -311,6 +314,17 @@ class SkillExecutor:
         # Resolve allowed tools
         available = context.available_tools if context else None
         resolved_tools = self.resolve_allowed_tools(allowed_tools, available)
+
+        if dry_run:
+            return SkillExecutionResult(
+                skill_name=skill_name,
+                rendered_prompt=rendered,
+                allowed_tools=resolved_tools,
+                model_override=model,
+                execution_mode="fork" if execution_context == "fork" else "inline",
+                fork_output=None,
+                dry_run=True,
+            )
 
         if execution_context == "fork":
             return await self._execute_forked(
@@ -346,6 +360,7 @@ class SkillExecutor:
             allowed_tools=allowed_tools,
             model_override=model,
             execution_mode="inline",
+            dry_run=False,
         )
 
     async def _execute_forked(
@@ -478,6 +493,7 @@ class SkillExecutor:
             model_override=None,
             execution_mode="fork",
             fork_output=final_output,
+            dry_run=False,
         )
 
 

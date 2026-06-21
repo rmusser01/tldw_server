@@ -864,6 +864,46 @@ class TestExecuteSkill:
         assert result["skill_name"] == "exec-skill"
         assert "my test args" in result["rendered_prompt"]
         assert result["execution_mode"] == "inline"
+        assert result["dry_run"] is False
+
+    def test_execute_skill_forwards_and_returns_dry_run(self, client, monkeypatch):
+        client.post(
+            f"{SKILLS_PREFIX}/",
+            json={
+                "name": "dry-run-exec-skill",
+                "content": "---\ncontext: fork\n---\nDo: $ARGUMENTS",
+            },
+        )
+        observed = {}
+
+        async def fake_execute(self, *, skill_data, arguments, context, dry_run):
+            observed["dry_run"] = dry_run
+            observed["arguments"] = arguments
+            return SimpleNamespace(
+                skill_name=skill_data["name"],
+                rendered_prompt=f"rendered {arguments}",
+                allowed_tools=[],
+                model_override=None,
+                execution_mode="fork",
+                fork_output=None,
+                dry_run=dry_run,
+            )
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.endpoints.skills.SkillExecutor.execute",
+            fake_execute,
+        )
+
+        r = client.post(
+            f"{SKILLS_PREFIX}/dry-run-exec-skill/execute",
+            json={"args": "safe args", "dry_run": True},
+        )
+
+        assert r.status_code == 200, r.text
+        result = r.json()
+        assert observed == {"dry_run": True, "arguments": "safe args"}
+        assert result["dry_run"] is True
+        assert result["fork_output"] is None
 
     def test_execute_skill_sanitizes_skills_error(self, client, monkeypatch):
         async def _boom(self, name):  # noqa: ANN001, ANN202
@@ -896,8 +936,9 @@ class TestExecuteSkill:
         assert create_resp.status_code == 201, create_resp.text
         observed = {}
 
-        async def fake_execute(self, *, skill_data, arguments, context):
+        async def fake_execute(self, *, skill_data, arguments, context, dry_run):
             observed["user_id"] = context.user_id if context else None
+            observed["dry_run"] = dry_run
             return SimpleNamespace(
                 skill_name=skill_data["name"],
                 rendered_prompt=f"rendered {arguments}",
@@ -905,6 +946,7 @@ class TestExecuteSkill:
                 model_override=None,
                 execution_mode="inline",
                 fork_output=None,
+                dry_run=False,
             )
 
         monkeypatch.setattr(
@@ -919,6 +961,7 @@ class TestExecuteSkill:
 
         assert r.status_code == 200, r.text
         assert observed["user_id"] == TEST_USER_ID
+        assert observed["dry_run"] is False
 
 
 class TestContextPayload:

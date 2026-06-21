@@ -535,6 +535,7 @@ async def execute_skill(
             skill_data=skill_data,
             arguments=request.args or "",
             context=ctx,
+            dry_run=request.dry_run,
         )
 
         return SkillExecutionResult(
@@ -544,6 +545,7 @@ async def execute_skill(
             model_override=result.model_override,
             execution_mode=result.execution_mode,
             fork_output=result.fork_output,
+            dry_run=result.dry_run,
         )
     except SkillNotFoundError:
         raise HTTPException(

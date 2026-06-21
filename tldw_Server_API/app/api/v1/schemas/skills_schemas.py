@@ -219,6 +219,10 @@ class SkillsListResponse(BaseModel):
 class SkillExecuteRequest(BaseModel):
     """Request to execute/preview a skill."""
     args: str | None = Field(None, max_length=10000, description="Arguments to pass to the skill")
+    dry_run: bool = Field(
+        False,
+        description="Render the skill prompt without invoking model, fork, or tool execution",
+    )
 
 
 class SkillExecutionResult(BaseModel):
@@ -229,6 +233,7 @@ class SkillExecutionResult(BaseModel):
     model_override: str | None = Field(None, description="Model override if specified")
     execution_mode: SkillContext = Field(..., description="How the skill was executed")
     fork_output: str | None = Field(None, description="Output from fork execution (if applicable)")
+    dry_run: bool = Field(False, description="Whether the result came from a dry render")
 
     model_config = ConfigDict(from_attributes=True)
 
