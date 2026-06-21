@@ -616,11 +616,13 @@ git commit -m "feat(mcp): add Ruff and pylsp backends"
 
 ### Task 5: Result Filtering Contract
 
+**Status:** Complete. Local verification on 2026-06-21: Task 5 filtering tests passed with 7 tests; the focused LSP suite passed with 91 tests and 5 env-gated skips; Ruff passed on touched LSP files/tests; Bandit reported zero findings for `mcp_unified/lsp`; `git diff --check` was clean.
+
 **Files:**
 - Create: `mcp_unified/lsp/filtering.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_lsp_filtering.py`
 
-- [ ] **Step 1: Write failing filtering tests**
+- [x] **Step 1: Write failing filtering tests**
 
 Create fake result payloads for all path-bearing result families:
 
@@ -654,7 +656,7 @@ def test_filter_preview_rejects_when_any_affected_path_is_denied():
     assert exc.value.reason_code == "path_denied"
 ```
 
-- [ ] **Step 2: Run failing filtering tests**
+- [x] **Step 2: Run failing filtering tests**
 
 Run:
 
@@ -665,7 +667,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: FAIL because `mcp_unified.lsp.filtering` does not exist.
 
-- [ ] **Step 3: Implement `filtering.py`**
+- [x] **Step 3: Implement `filtering.py`**
 
 Expose:
 
@@ -683,7 +685,7 @@ Rules:
 - no raw absolute paths are added to error detail;
 - workspace-root/index-style tools can use `require_workspace_root_allowed=True` or a separate helper to fail fast when root read is not granted.
 
-- [ ] **Step 4: Run filtering tests**
+- [x] **Step 4: Run filtering tests**
 
 Run:
 
@@ -694,7 +696,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit Task 5**
+- [x] **Step 5: Commit Task 5**
 
 ```bash
 git add mcp_unified/lsp/filtering.py tldw_Server_API/app/core/MCP_unified/tests/test_lsp_filtering.py

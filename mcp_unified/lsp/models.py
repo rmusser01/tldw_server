@@ -221,11 +221,13 @@ class LspCodeAction:
 class LspDiagnosticsResult:
     diagnostics: Sequence[LspDiagnostic]
     truncated: bool = False
+    filtered_count: int = 0
 
     def to_dict(self) -> JsonDict:
         return {
             "diagnostics": [_to_dict(diagnostic) for diagnostic in self.diagnostics],
             "truncated": _to_dict(self.truncated),
+            "filtered_count": _to_dict(self.filtered_count),
         }
 
 
@@ -233,20 +235,27 @@ class LspDiagnosticsResult:
 class LspSymbolsResult:
     symbols: Sequence[LspSymbol]
     truncated: bool = False
+    filtered_count: int = 0
 
     def to_dict(self) -> JsonDict:
-        return {"symbols": [_to_dict(symbol) for symbol in self.symbols], "truncated": _to_dict(self.truncated)}
+        return {
+            "symbols": [_to_dict(symbol) for symbol in self.symbols],
+            "truncated": _to_dict(self.truncated),
+            "filtered_count": _to_dict(self.filtered_count),
+        }
 
 
 @dataclass(frozen=True, slots=True)
 class LspLocationsResult:
     locations: Sequence[LspLocation]
     truncated: bool = False
+    filtered_count: int = 0
 
     def to_dict(self) -> JsonDict:
         return {
             "locations": [_to_dict(location) for location in self.locations],
             "truncated": _to_dict(self.truncated),
+            "filtered_count": _to_dict(self.filtered_count),
         }
 
 
@@ -254,6 +263,11 @@ class LspLocationsResult:
 class LspCodeActionsResult:
     actions: Sequence[LspCodeAction]
     truncated: bool = False
+    path: str | None = None
 
     def to_dict(self) -> JsonDict:
-        return {"actions": [_to_dict(action) for action in self.actions], "truncated": _to_dict(self.truncated)}
+        return {
+            "actions": [_to_dict(action) for action in self.actions],
+            "truncated": _to_dict(self.truncated),
+            "path": _to_dict(self.path),
+        }

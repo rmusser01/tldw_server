@@ -101,7 +101,7 @@ class RuffLspBackend:
         actions, saw_opaque = _code_actions(response, uri=uri)
         if not actions and saw_opaque:
             raise LspToolError("unsupported_action_shape", "Ruff returned only opaque command-shaped actions")
-        return LspCodeActionsResult(actions=tuple(actions), truncated=False)
+        return LspCodeActionsResult(actions=tuple(actions), truncated=False, path=request.file_path)
 
     async def _request(self, method: str, params: object | None = None) -> object:
         await self._ensure_initialized()

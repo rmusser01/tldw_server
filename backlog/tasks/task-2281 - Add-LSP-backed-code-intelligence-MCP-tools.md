@@ -33,6 +33,7 @@ modified_files:
 - mcp_unified/lsp/jsonrpc.py
 - mcp_unified/lsp/sessions.py
 - mcp_unified/lsp/executables.py
+- mcp_unified/lsp/filtering.py
 - mcp_unified/lsp/pylsp.py
 - mcp_unified/lsp/ruff.py
 - mcp_unified/pyproject.toml
@@ -42,6 +43,7 @@ modified_files:
 - tldw_Server_API/app/core/MCP_unified/tests/test_lsp_jsonrpc.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_lsp_sessions.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_lsp_real_backends.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_lsp_filtering.py
 - tldw_Server_API/app/core/MCP_unified/tests/fixtures/fake_lsp_stdio_server.py
 - Docs/superpowers/plans/2026-06-21-mcp-lsp-code-intelligence-tools-implementation-plan.md
 ---
@@ -79,5 +81,5 @@ Before implementing LSP-backed MCP tools, build or at least plan the MCP smoke c
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Progress so far: Task 1 added LSP public model/config/error contracts, package metadata for mcp_unified.lsp, and targeted model contract tests. Task 2 added deterministic fake LSP backends, capability routing for the first-slice lsp.* tools, and the host-neutral service facade/status surface. Task 3 added the async stdio JSON-RPC client, fake LSP stdio fixture, and per-workspace session manager with idle eviction and exception-safe stop-all. Task 4 added executable resolution, real Ruff and pylsp backend adapters, JSON-RPC notification waiting for diagnostics, env-gated real-backend tests, and a workspace-boundary guard that rejects traversal/absolute path escapes before backend reads or URI generation. Verification on 2026-06-21: focused LSP tests passed with 84 tests and 5 env-gated skips; the explicit TLDW_MCP_LSP_REAL_BACKENDS=1 run passed with 11 tests and 5 skips because ruff/pylsp are not installed on PATH; Ruff passed on touched LSP Python files/tests; Bandit on mcp_unified/lsp reported zero findings; git diff --check was clean. Used the repository root virtualenv because this worktree has no local .venv directory.
+Progress so far: Task 1 added LSP public model/config/error contracts, package metadata for mcp_unified.lsp, and targeted model contract tests. Task 2 added deterministic fake LSP backends, capability routing for the first-slice lsp.* tools, and the host-neutral service facade/status surface. Task 3 added the async stdio JSON-RPC client, fake LSP stdio fixture, and per-workspace session manager with idle eviction and exception-safe stop-all. Task 4 added executable resolution, real Ruff and pylsp backend adapters, JSON-RPC notification waiting for diagnostics, env-gated real-backend tests, and a workspace-boundary guard that rejects traversal/absolute path escapes before backend reads or URI generation. Task 5 added the LSP result path-filtering contract: read-only path lists are filtered with filtered_count metadata, while edit-preview/code-action results fail closed on denied or unknown affected paths. Verification on 2026-06-21: focused LSP tests passed with 91 tests and 5 env-gated skips; the explicit TLDW_MCP_LSP_REAL_BACKENDS=1 run passed with 11 tests and 5 skips because ruff/pylsp are not installed on PATH; Ruff passed on touched LSP Python files/tests; Bandit on mcp_unified/lsp reported zero findings; git diff --check was clean. Used the repository root virtualenv because this worktree has no local .venv directory.
 <!-- SECTION:FINAL_SUMMARY:END -->

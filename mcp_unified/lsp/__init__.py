@@ -26,6 +26,7 @@ from .backends import (
 from .config import DEFAULT_LSP_CONFIG, LspRuntimeConfig
 from .errors import LSP_REASON_CODES, LspToolError, redact_lsp_detail
 from .executables import LspExecutableResolver, ResolvedLspExecutable
+from .filtering import PathAllowPredicate, filter_lsp_result_paths
 from .jsonrpc import LspJsonRpcClient
 from .models import (
     LspBackendStatus,
@@ -94,11 +95,13 @@ __all__ = [
     "LspSymbolsResult",
     "LspTextEdit",
     "LspToolError",
+    "PathAllowPredicate",
     "PositionRequest",
     "PylspLspBackend",
     "ReferencesRequest",
     "ResolvedLspExecutable",
     "RuffLspBackend",
     "WorkspaceSymbolsRequest",
+    "filter_lsp_result_paths",
     "redact_lsp_detail",
 ]

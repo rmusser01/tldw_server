@@ -253,6 +253,7 @@ class FakeLspBackend:
                     edits=(LspTextEdit(range=request.range or _sample_range(), new_text="fixed"),),
                 ),
             ),
+            path=request.file_path,
             truncated=self._is_truncated("code_actions"),
         )
 
