@@ -700,6 +700,26 @@ class MCPServer:
                     })
                     logger.info("MCP_ENABLE_GIT_MODULE=true; queuing GitModule for registration")
 
+            # 6a) Optional: LSP code intelligence module - disabled by default
+            if self._env_flag_enabled("MCP_ENABLE_LSP_MODULE"):
+                if not any(m.get("id") == "lsp" for m in modules_to_load if isinstance(m, dict)):
+                    modules_to_load.append({
+                        "id": "lsp",
+                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.lsp_module:LSPModule",
+                        "enabled": True,
+                        "name": "LSP Code Intelligence",
+                        "version": "1.0.0",
+                        "department": "code",
+                        "settings": {
+                            "request_timeout_seconds": "${MCP_LSP_REQUEST_TIMEOUT_SECONDS:-5}",
+                            "startup_timeout_seconds": "${MCP_LSP_STARTUP_TIMEOUT_SECONDS:-10}",
+                            "idle_ttl_seconds": "${MCP_LSP_IDLE_TTL_SECONDS:-300}",
+                            "ruff_command": "${MCP_LSP_RUFF_COMMAND:-}",
+                            "pylsp_command": "${MCP_LSP_PYLSP_COMMAND:-}",
+                        },
+                    })
+                    logger.info("MCP_ENABLE_LSP_MODULE=true; queuing LSPModule for registration")
+
             # 6b) Optional: Web fetch module - disabled by default (external network).
             if self._env_flag_enabled("MCP_ENABLE_WEB_FETCH_MODULE"):
                 if not any(m.get("id") == "web_fetch" for m in modules_to_load if isinstance(m, dict)):

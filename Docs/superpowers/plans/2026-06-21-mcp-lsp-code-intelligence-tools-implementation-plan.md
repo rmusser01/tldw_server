@@ -707,13 +707,16 @@ git commit -m "feat(mcp): add LSP result filtering"
 
 ### Task 6: tldw-hosted `LSPModule` And Path Governance
 
+**Status:** Complete. Local verification on 2026-06-21: `test_lsp_module.py`, `test_lsp_module_registration.py`, and `test_protocol_scope_enforcement.py` passed with 20 tests; the focused LSP suite passed with 111 tests and 5 env-gated skips; Ruff passed on touched LSP files/tests; Bandit reported zero findings for `mcp_unified/lsp` plus the hosted LSP module; `git diff --check` was clean. Existing protocol scope tests covered the protocol side, so no redundant `test_protocol_scope_enforcement.py` edits were needed.
+
 **Files:**
 - Create: `tldw_Server_API/app/core/MCP_unified/modules/implementations/lsp_module.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/server.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_lsp_module.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_protocol_scope_enforcement.py`
+- Test: `tldw_Server_API/app/core/MCP_unified/tests/test_lsp_module_registration.py`
 
-- [ ] **Step 1: Write failing tool definition tests**
+- [x] **Step 1: Write failing tool definition tests**
 
 Assert `get_tools()` exposes:
 
@@ -737,7 +740,7 @@ Each definition must include:
 - `path_scope_action: "read"` where applicable;
 - category `retrieval` for read/navigation tools and `analysis` or `retrieval` for preview tools.
 
-- [ ] **Step 2: Write failing path-scope candidate tests**
+- [x] **Step 2: Write failing path-scope candidate tests**
 
 Cases:
 
@@ -753,7 +756,7 @@ async def test_lsp_workspace_symbols_requires_workspace_root_read_candidate():
     assert candidates[0].source == "lsp.workspace_symbols"
 ```
 
-- [ ] **Step 3: Run failing module tests**
+- [x] **Step 3: Run failing module tests**
 
 Run:
 
@@ -764,7 +767,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: FAIL because `LSPModule` does not exist.
 
-- [ ] **Step 4: Write failing tldw-hosted execution tests with fake service**
+- [x] **Step 4: Write failing tldw-hosted execution tests with fake service**
 
 Add tests using an injected fake service:
 
@@ -785,7 +788,7 @@ If existing policy APIs make direct effective path checks hard inside module tes
 Do not skip post-result filtering just because protocol preflight passed: LSP
 responses can include additional paths that were not part of the initial request.
 
-- [ ] **Step 5: Implement `LSPModule`**
+- [x] **Step 5: Implement `LSPModule`**
 
 Constructor:
 
@@ -815,7 +818,7 @@ policy-evaluated allowlist. Later policy APIs can replace this helper, but the
 first implementation must never return an LSP path that is outside the
 request-scoped allow predicate.
 
-- [ ] **Step 6: Implement validation**
+- [x] **Step 6: Implement validation**
 
 `validate_tool_arguments()` should reject:
 
@@ -825,7 +828,7 @@ request-scoped allow predicate.
 - `include_text_edits` non-boolean values;
 - invalid limits.
 
-- [ ] **Step 7: Add optional server registration**
+- [x] **Step 7: Add optional server registration**
 
 In `server.py`, add after safe read/code modules:
 
@@ -850,7 +853,7 @@ if self._env_flag_enabled("MCP_ENABLE_LSP_MODULE"):
 
 Keep disabled by default.
 
-- [ ] **Step 8: Run module and protocol scope tests**
+- [x] **Step 8: Run module and protocol scope tests**
 
 Run:
 
@@ -862,7 +865,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit Task 6**
+- [x] **Step 9: Commit Task 6**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/modules/implementations/lsp_module.py tldw_Server_API/app/core/MCP_unified/server.py tldw_Server_API/app/core/MCP_unified/tests/test_lsp_module.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_scope_enforcement.py
