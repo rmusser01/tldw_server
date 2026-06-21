@@ -52,6 +52,8 @@ Implemented a read-only Skills import preview contract and review-first UI flow.
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Verification completed: `python -m pytest tldw_Server_API/tests/Skills/unit/test_skills_service.py tldw_Server_API/tests/Skills/integration/test_skills_api.py -q` passed with 104 tests; `bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx --reporter=dot` passed with 24 tests; Bandit on touched backend Skills code exited 0 with no findings in /tmp/bandit_skills_import_review_TASK_530_8.json.
 
+PR follow-up on 2026-06-21: rebased against `origin/dev` with no conflicts, then addressed the unresolved Gemini review threads by making import review error list keys duplicate-safe, preserving stack traces for unexpected preview endpoint failures with `logger.exception`, and changing import previews to use the standard registry sync instead of forced sync. Fresh verification passed: `python -m pytest tldw_Server_API/tests/Skills/unit/test_skills_service.py tldw_Server_API/tests/Skills/integration/test_skills_api.py -q` (104 passed, 6 warnings), `bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx --reporter=dot` (24 passed), `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/skills.py tldw_Server_API/app/core/Skills/skills_service.py -f json -o /tmp/bandit_task_530_8_review_fixes.json` (exit 0, no results/errors).
+
 Known skips/blockers: none.
 
 PR: https://github.com/rmusser01/tldw_server/pull/2425

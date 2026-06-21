@@ -1009,8 +1009,8 @@ export const SkillsManager: React.FC = () => {
                 t("option:skills.importReviewUnknownError", {
                   defaultValue: "The skill could not be validated."
                 })
-              ]).map((error) => (
-                <li key={error}>{error}</li>
+              ]).map((error, index) => (
+                <li key={`${error}-${index}`}>{error}</li>
               ))}
             </ul>
           </div>

@@ -916,7 +916,7 @@ class SkillsService:
         except SkillValidationError as e:
             return self._invalid_import_preview([str(e)])
 
-        await self._sync_registry_async(force=True)
+        await self._sync_registry_async()
         db = self._get_db()
         existing = db.get_skill_registry(skill_name, include_deleted=True)
         active_existing = bool(existing and not existing.get("deleted"))

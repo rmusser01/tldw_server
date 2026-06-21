@@ -375,7 +375,7 @@ async def preview_import_skill(
             supporting_files=request.supporting_files,
         )
     except SkillsError as e:
-        logger.error("Error previewing skill import")
+        logger.exception("Error previewing skill import")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to preview skill import",
@@ -455,7 +455,7 @@ async def preview_import_skill_from_file(
             detail=str(e),
         ) from e
     except SkillsError as e:
-        logger.error("Error previewing skill import from file")
+        logger.exception("Error previewing skill import from file")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to preview skill import from file",
