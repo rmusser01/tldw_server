@@ -99,5 +99,5 @@
 - [x] Run all targeted verification commands from this plan.
 - [x] Inspect `git diff` and remove unrelated/generated artifacts.
 - [x] Update Backlog `TASK-530.8` with touched files and verification results.
-- [ ] Commit with a `TASK-530.8` message.
-- [ ] Push `codex/skills-import-review` and open a PR against `dev`.
+- [x] Commit with a `TASK-530.8` message.
+- [x] Push `codex/skills-import-review` and open a PR against `dev`.

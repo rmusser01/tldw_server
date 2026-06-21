@@ -1,10 +1,10 @@
 ---
 id: TASK-530.8
 title: Implement Skills import review and conflict handling
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-21 18:58'
+updated_date: '2026-06-21 19:02'
 labels:
   - skills
   - webui
@@ -53,6 +53,8 @@ Implemented a read-only Skills import preview contract and review-first UI flow.
 Verification completed: `python -m pytest tldw_Server_API/tests/Skills/unit/test_skills_service.py tldw_Server_API/tests/Skills/integration/test_skills_api.py -q` passed with 104 tests; `bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx --reporter=dot` passed with 24 tests; Bandit on touched backend Skills code exited 0 with no findings in /tmp/bandit_skills_import_review_TASK_530_8.json.
 
 Known skips/blockers: none.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2425
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
