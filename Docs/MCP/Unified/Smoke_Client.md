@@ -21,6 +21,17 @@ The baseline scenario exercises:
 - malformed request handling
 - optional policy-denial checks when the transport fixture exposes one
 
+The LSP scenario exercises:
+
+- `initialize`
+- `notifications/initialized`
+- `tools/list`
+- required `lsp.*` tool visibility
+- isolated Python fixture setup
+- `lsp.status`
+- `lsp.diagnostics`
+- `lsp.document_symbols` when the backend capability is available
+
 The report is redacted and bounded so it can be attached to PRs, CI artifacts,
 or Backlog task notes without including tool arguments, file contents, local
 absolute paths, bearer tokens, API keys, or long payloads.
@@ -37,6 +48,18 @@ Run the deterministic in-process fixture:
 
 ```bash
 mcp-unified-smoke inprocess --json-report -
+```
+
+Run the LSP scenario against an isolated in-process workspace fixture:
+
+```bash
+mcp-unified-smoke inprocess --scenario lsp --json-report -
+```
+
+Run the LSP scenario in strict mode:
+
+```bash
+mcp-unified-smoke inprocess --scenario lsp --mode strict --json-report -
 ```
 
 Run a live HTTP endpoint:
@@ -117,6 +140,11 @@ mcp-unified-smoke http \
 CLI does not retry by default. Treat non-idempotent `tools/call` results as
 single-attempt operations unless a future wrapper explicitly scopes retries to
 idempotent methods.
+
+For the `lsp` scenario, `--artifact-dir` is used as the isolated workspace root
+where the smoke client creates its Python fixture. With live HTTP, WebSocket, or
+stdio transports, make sure the target MCP server is configured to use the same
+workspace root before running strict mode.
 
 ## Reports
 

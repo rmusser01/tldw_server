@@ -39,7 +39,12 @@ modified_files:
 - mcp_unified/lsp/gateway_runtime.py
 - mcp_unified/smoke/scenarios.py
 - mcp_unified/smoke/cli.py
+- mcp_unified/profiles/presets.py
+- mcp_unified/package_metadata.py
+- mcp_unified/README.md
+- mcp_unified/USER_GUIDE.md
 - mcp_unified/pyproject.toml
+- Docs/MCP/Unified/Smoke_Client.md
 - tldw_Server_API/app/core/MCP_unified/tests/test_lsp_models.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_lsp_router.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_lsp_backends_fake.py
@@ -53,6 +58,8 @@ modified_files:
 - tldw_Server_API/app/core/MCP_unified/tests/test_lsp_module_registration.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_lsp_gateway_runtime.py
 - tldw_Server_API/app/core/MCP_unified/tests/test_lsp_smoke_scenario.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
 - tldw_Server_API/app/core/MCP_unified/tests/fixtures/fake_lsp_stdio_server.py
 - Docs/superpowers/plans/2026-06-21-mcp-lsp-code-intelligence-tools-implementation-plan.md
 ---
@@ -96,5 +103,5 @@ Progress so far: Task 1 added LSP public model/config/error contracts, package m
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Task 7 complete: added host-neutral LspGatewayRuntime, LSP smoke/UAT scenario, CLI scenario dispatch, isolated Python fixture setup, best-effort backend-unavailable skips, and strict required-tool failures. Verification on 2026-06-21: Task 7 tests passed with 7 tests; targeted LSP/smoke suite passed with 115 tests after escalated loopback permissions for existing WebSocket bind tests; focused test_lsp_*.py suite passed with 111 tests and 5 expected env-gated real-backend skips; Ruff passed on touched files; Bandit reported zero findings for touched LSP/smoke code; git diff --check was clean.
+Task 8 complete: added LSP tooling metadata to code-oriented built-in presets, using deferred code_intelligence progressive disclosure to preserve the 24-tool direct surface cap; documented LSP install/enablement/smoke usage in package README, user guide, and smoke client guide; aligned package metadata and runtime package-boundary tests with the lsp optional extra and base dependency metadata. Verification on 2026-06-21: profile preset tests passed with 28 tests; targeted Task 8 pytest group passed with 37 tests; package metadata release-gate tests passed; standalone artifact gate passed with 4 tests; Ruff passed on touched Python files; Bandit reported zero findings for touched package code; git diff --check was clean.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

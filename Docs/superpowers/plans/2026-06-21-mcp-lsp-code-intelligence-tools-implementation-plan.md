@@ -962,14 +962,18 @@ git commit -m "feat(mcp): add LSP smoke scenario"
 
 ### Task 8: Profile Presets, Docs, And Operator Guidance
 
+**Status:** Complete. Local verification on 2026-06-21: profile preset tests passed with 28 tests; the Task 8 targeted pytest group passed with 37 tests; package metadata release-gate tests passed; the standalone artifact gate passed with 4 tests; Ruff passed on touched Python files; Bandit reported zero findings for touched package code; `git diff --check` was clean. Implementation note: `code_intelligence` is intentionally deferred rather than direct because several code-oriented presets are already near the 24-tool direct disclosure cap.
+
 **Files:**
 - Modify: `mcp_unified/profiles/presets.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py`
 - Modify: `mcp_unified/README.md`
 - Modify: `mcp_unified/USER_GUIDE.md`
 - Modify: `Docs/MCP/Unified/Smoke_Client.md`
+- Modify: `mcp_unified/package_metadata.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py`
 
-- [ ] **Step 1: Write failing profile preset tests**
+- [x] **Step 1: Write failing profile preset tests**
 
 Add `_LSP_TOOLS` expected set:
 
@@ -1002,7 +1006,7 @@ Likely presets:
 - `sdet`
 - `merge-conflict-resolver`
 
-- [ ] **Step 2: Update preset tooling metadata**
+- [x] **Step 2: Update preset tooling metadata**
 
 Add:
 
@@ -1027,15 +1031,17 @@ Add enabled capability:
 "code_intelligence.lsp"
 ```
 
-Add direct category:
+Add deferred category:
 
 ```python
 "code_intelligence"
 ```
 
-Keep process/shell risk classes unchanged.
+Keep process/shell risk classes unchanged. Do not put all ten LSP tools in the
+direct category by default; they remain available through progressive
+disclosure/tool search.
 
-- [ ] **Step 3: Update docs**
+- [x] **Step 3: Update docs**
 
 `mcp_unified/README.md`:
 
@@ -1056,7 +1062,7 @@ Keep process/shell risk classes unchanged.
 - document `--scenario lsp`;
 - document env-gated real backend tests and strict/best-effort modes.
 
-- [ ] **Step 4: Run docs/profile tests**
+- [x] **Step 4: Run docs/profile tests**
 
 Run:
 
@@ -1067,7 +1073,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit Task 8**
+- [x] **Step 5: Commit Task 8**
 
 ```bash
 git add mcp_unified/profiles/presets.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py mcp_unified/README.md mcp_unified/USER_GUIDE.md Docs/MCP/Unified/Smoke_Client.md

@@ -372,6 +372,7 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
         "sqlite",
         "federation",
         "gateway",
+        "lsp",
         "dev",
     }
     assert all(
@@ -538,7 +539,7 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
         "mcp_unified": ["py.typed", "README.md", "USER_GUIDE.md"],
     }
 
-    assert _dependency_names(project["dependencies"]) == set(metadata.CORE_DEPENDENCIES)
+    assert _dependency_names(project["dependencies"]) == set(metadata.BASE_DEPENDENCIES)
 
     optional_dependencies = project["optional-dependencies"]
     assert set(optional_dependencies) == set(metadata.OPTIONAL_EXTRAS)

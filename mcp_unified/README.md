@@ -29,6 +29,9 @@ surface for early standalone gateway work.
   read-before-mutate workflows. The memory backend is the default.
   An optional SQLite backend can coordinate cooperating processes that point at
   the same local database file.
+- Optional Python LSP code-intelligence runtime and smoke scenario for
+  diagnostics, symbols, definitions, references, hover, signature help, format
+  previews, and explicit code-action previews.
 - Package CLIs: `mcp-unified-gateway` for local config management and remote
   gateway runtime operations, plus `mcp-unified-smoke` for JSON-RPC gateway
   smoke validation.
@@ -67,6 +70,12 @@ tools:
 python -m pip install -e "mcp_unified[gateway,dev]"
 ```
 
+For Python LSP-backed code intelligence, install the LSP extra as well:
+
+```bash
+python -m pip install -e "mcp_unified[gateway,lsp]"
+```
+
 The package dependency groups intentionally stay small. Heavy `tldw-server`
 runtime stacks such as media ingestion, transcription, RAG, and WebUI
 dependencies are outside this package boundary.
@@ -89,6 +98,12 @@ Run the deterministic in-process smoke scenario:
 
 ```bash
 mcp-unified-smoke inprocess --json-report -
+```
+
+Run the LSP smoke scenario against an isolated workspace fixture:
+
+```bash
+mcp-unified-smoke inprocess --scenario lsp --json-report -
 ```
 
 Validate a gateway config file:
