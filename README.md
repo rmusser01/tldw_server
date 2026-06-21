@@ -1140,7 +1140,7 @@ SQLite is the default; PostgreSQL is supported for AuthNZ, the content DBs (Medi
 `TLDW_CONTENT_DB_BACKEND=postgresql`), Jobs, and the Scheduler. Redis is an optional backend for
 caching, queues, and rate limiting.
 
-> Note: Collections, Watchlists, and Meetings persist **inside `Media_DB_v2.db`**, and VN Assets /
+> Note: Collections, Watchlists, and Meetings persist **inside the per-user media content DB**, and VN Assets /
 > VN Play persist **inside `ChaChaNotes.db`** — they are modules that write to those DBs, not
 > separate database files.
 
@@ -1185,7 +1185,7 @@ flowchart LR
   ResourceGov["Resource Governance"]:::core
 
   subgraph PERUSER["Per-user SQLite (Databases/user_databases/<user_id>/)"]
-    dbMedia[("Media_DB_v2.db")]:::db
+    dbMedia[("Media content DB")]:::db
     dbChaCha[("ChaChaNotes.db")]:::db
     dbPrompts[("prompts_user_dbs/user_prompts_v2.sqlite")]:::db
     dbPromptStudio[("prompt_studio_dbs/prompt_studio.db")]:::db
