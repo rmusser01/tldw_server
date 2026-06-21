@@ -31,6 +31,18 @@ repos:
         entry: python3 Helper_Scripts/checks/check_python_syntax.py
         language: system
         types: [python]
+      # Pre-push only: reproduce the gating CI lanes (compileall + guards +
+      # pytest on changed tests). The runner auto-uses .venv, so it never runs
+      # against system Python. Enable with:
+      #   pre-commit install --hook-type pre-push
+      # The python launcher name is used for Windows/macOS/Linux compatibility.
+      - id: local-ci-fast
+        name: Local CI fast tier (pre-push)
+        entry: python Helper_Scripts/ci/run_local_ci.py --fast
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [push]
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.6.9
     hooks:
