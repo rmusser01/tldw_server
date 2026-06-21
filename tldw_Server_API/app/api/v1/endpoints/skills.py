@@ -39,6 +39,8 @@ from tldw_Server_API.app.api.v1.schemas.skills_schemas import (
     SkillCreate,
     SkillExecuteRequest,
     SkillExecutionResult,
+    SkillImportPreviewRequest,
+    SkillImportPreviewResponse,
     SkillImportRequest,
     SkillListOrder,
     SkillListSort,
@@ -358,6 +360,28 @@ async def delete_skill(
         ) from e
 
 
+@router.post("/import/preview", response_model=SkillImportPreviewResponse)
+async def preview_import_skill(
+    request: SkillImportPreviewRequest,
+    service: SkillsService = Depends(get_skills_service),
+):
+    """
+    Preview a skill import from SKILL.md content without mutating stored skills.
+    """
+    try:
+        return await service.preview_import_skill(
+            content=request.content,
+            name=request.name,
+            supporting_files=request.supporting_files,
+        )
+    except SkillsError as e:
+        logger.error("Error previewing skill import")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to preview skill import",
+        ) from e
+
+
 @router.post("/import", response_model=SkillResponse, status_code=status.HTTP_201_CREATED)
 async def import_skill(
     request: SkillImportRequest,
@@ -391,6 +415,50 @@ async def import_skill(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to import skill",
+        ) from e
+
+
+@router.post("/import/file/preview", response_model=SkillImportPreviewResponse)
+async def preview_import_skill_from_file(
+    file: UploadFile = File(..., description="SKILL.md file or zip archive"),
+    service: SkillsService = Depends(get_skills_service),
+):
+    """
+    Preview a skill import from an uploaded file without mutating stored skills.
+
+    Accepts either a SKILL.md file or a zip archive containing a skill directory.
+    """
+    try:
+        content = await file.read()
+
+        if file.filename and file.filename.lower().endswith(".zip"):
+            return await service.preview_import_from_zip(content)
+
+        try:
+            text_content = content.decode("utf-8")
+        except UnicodeDecodeError:
+            raise SkillValidationError("File must be UTF-8 encoded text or a zip archive") from None
+
+        name = None
+        if file.filename:
+            name = Path(file.filename).stem.lower()
+            if name == "skill":
+                name = None
+
+        return await service.preview_import_skill(
+            content=text_content,
+            name=name,
+        )
+    except SkillValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except SkillsError as e:
+        logger.error("Error previewing skill import from file")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to preview skill import from file",
         ) from e
 
 

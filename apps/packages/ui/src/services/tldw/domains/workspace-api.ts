@@ -3,7 +3,12 @@ import { buildQuery } from "../client-utils"
 import { appendPathQuery } from "../path-utils"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import type { OffsetPaginationMeta } from "@/services/response-envelope"
-import type { SkillExecutionResult, SkillsListParams, SkillsListResponse } from "@/types/skill"
+import type {
+  SkillExecutionResult,
+  SkillImportPreviewResponse,
+  SkillsListParams,
+  SkillsListResponse
+} from "@/types/skill"
 
 /**
  * Minimal interface for the TldwApiClient methods referenced via `this`.
@@ -834,13 +839,54 @@ export const workspaceApiMethods = {
     })
   },
 
-  async importSkillFile(
+  async previewSkillImport(
+    this: TldwApiClientCore,
+    payload: {
+      name?: string
+      content: string
+      supporting_files?: Record<string, string> | null
+    }
+  ): Promise<SkillImportPreviewResponse> {
+    const base = await this.resolveApiPath("skills.import.preview", [
+      "/api/v1/skills/import/preview",
+      "/api/v1/skills/import/preview/"
+    ])
+    return await bgRequest<SkillImportPreviewResponse>({
+      path: base,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async previewSkillImportFile(
     this: TldwApiClientCore,
     file: File
+  ): Promise<SkillImportPreviewResponse> {
+    const data = await file.arrayBuffer()
+    return await this.upload<SkillImportPreviewResponse>({
+      path: "/api/v1/skills/import/file/preview" as AllowedPath,
+      method: "POST",
+      fileFieldName: "file",
+      file: {
+        name: file.name || "skill-import",
+        type: file.type || "application/octet-stream",
+        data
+      }
+    })
+  },
+
+  async importSkillFile(
+    this: TldwApiClientCore,
+    file: File,
+    options?: {
+      overwrite?: boolean
+    }
   ): Promise<any> {
     const data = await file.arrayBuffer()
+    const query = buildQuery({ overwrite: options?.overwrite })
     return await this.upload<any>({
-      path: "/api/v1/skills/import/file" as AllowedPath,
+      path: appendPathQuery("/api/v1/skills/import/file" as AllowedPath, query),
       method: "POST",
       fileFieldName: "file",
       file: {

@@ -851,21 +851,100 @@ class SkillsService:
 
         return await self.create_skill(skill_name, content, normalized_supporting_files)
 
-    async def import_from_zip(
+    def _invalid_import_preview(self, errors: list[str]) -> dict[str, Any]:
+        """Build a non-mutating import preview for invalid input."""
+        return {
+            "valid": False,
+            "errors": errors,
+            "name": None,
+            "description": None,
+            "argument_hint": None,
+            "disable_model_invocation": None,
+            "user_invocable": None,
+            "allowed_tools": None,
+            "model": None,
+            "context": None,
+            "supporting_file_count": 0,
+            "conflict": False,
+            "can_overwrite": False,
+            "existing_version": None,
+        }
+
+    async def preview_import_skill(
         self,
-        zip_data: bytes,
-        overwrite: bool = False,
+        content: str,
+        name: Optional[str] = None,
+        supporting_files: Optional[dict[str, str]] = None,
     ) -> dict[str, Any]:
         """
-        Import a skill from a zip file.
+        Preview a skill import without creating, deleting, or overwriting files.
 
         Args:
-            zip_data: Zip file bytes
-            overwrite: If True, overwrite existing skill
+            content: SKILL.md content
+            name: Optional skill name override
+            supporting_files: Additional files to validate with the import
 
         Returns:
-            Imported skill data
+            Import review data with parsed metadata, validation errors, and
+            conflict state.
         """
+        try:
+            parsed = self._parser.parse_content(content, default_name=name)
+        except Exception as e:
+            return self._invalid_import_preview([f"Invalid skill content: {e}"])
+
+        try:
+            if parsed.frontmatter.name:
+                self._normalize_and_validate_skill_name(
+                    parsed.frontmatter.name,
+                    source="frontmatter skill name",
+                )
+
+            requested_name: Optional[str] = None
+            if name is not None:
+                requested_name = self._normalize_and_validate_skill_name(name)
+
+            skill_name = requested_name or parsed.frontmatter.name
+            if not skill_name:
+                raise SkillValidationError("Skill name must be specified in frontmatter or as parameter")
+
+            skill_name = self._normalize_and_validate_skill_name(skill_name)
+            normalized_supporting_files = self._normalize_supporting_files(
+                supporting_files,
+                allow_deletes=False,
+            ) if supporting_files else {}
+        except SkillValidationError as e:
+            return self._invalid_import_preview([str(e)])
+
+        await self._sync_registry_async(force=True)
+        db = self._get_db()
+        existing = db.get_skill_registry(skill_name, include_deleted=True)
+        active_existing = bool(existing and not existing.get("deleted"))
+        existing_version = int(existing.get("version") or 1) if active_existing else None
+        fm = parsed.frontmatter
+
+        return {
+            "valid": True,
+            "errors": [],
+            "name": skill_name,
+            "description": fm.description,
+            "argument_hint": fm.argument_hint,
+            "disable_model_invocation": fm.disable_model_invocation,
+            "user_invocable": fm.user_invocable,
+            "allowed_tools": fm.allowed_tools,
+            "model": fm.model,
+            "context": fm.context,
+            "supporting_file_count": len(normalized_supporting_files),
+            "conflict": active_existing,
+            "can_overwrite": active_existing,
+            "existing_version": existing_version,
+        }
+
+    def _extract_zip_import_payload(
+        self,
+        zip_data: bytes,
+    ) -> tuple[str, Optional[str], Optional[dict[str, str]]]:
+        """Extract SKILL.md content, name, and supporting files from zip bytes."""
         try:
             with zipfile.ZipFile(BytesIO(zip_data), "r") as zf:
                 # Find SKILL.md
@@ -930,15 +1009,53 @@ class SkillsService:
                         source="skill name from zip",
                     )
 
-                return await self.import_skill(
-                    content=content,
-                    name=skill_name,
-                    supporting_files=supporting_files or None,
-                    overwrite=overwrite,
-                )
+                return content, skill_name, supporting_files or None
 
         except zipfile.BadZipFile:
             raise SkillValidationError("Invalid zip file") from None
+
+    async def preview_import_from_zip(
+        self,
+        zip_data: bytes,
+    ) -> dict[str, Any]:
+        """
+        Preview a skill import from a zip file without mutating stored skills.
+
+        Args:
+            zip_data: Zip file bytes
+
+        Returns:
+            Import review data
+        """
+        content, skill_name, supporting_files = self._extract_zip_import_payload(zip_data)
+        return await self.preview_import_skill(
+            content=content,
+            name=skill_name,
+            supporting_files=supporting_files,
+        )
+
+    async def import_from_zip(
+        self,
+        zip_data: bytes,
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """
+        Import a skill from a zip file.
+
+        Args:
+            zip_data: Zip file bytes
+            overwrite: If True, overwrite existing skill
+
+        Returns:
+            Imported skill data
+        """
+        content, skill_name, supporting_files = self._extract_zip_import_payload(zip_data)
+        return await self.import_skill(
+            content=content,
+            name=skill_name,
+            supporting_files=supporting_files,
+            overwrite=overwrite,
+        )
 
     async def export_skill(self, name: str) -> bytes:
         """

@@ -611,6 +611,86 @@ class TestDeleteSkill:
 
 
 class TestImportExport:
+    def test_import_skill_preview_json_returns_metadata_and_conflict(self, client):
+        client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "preview-conflict", "content": "Original"},
+        )
+
+        r = client.post(
+            f"{SKILLS_PREFIX}/import/preview",
+            json={
+                "content": (
+                    "---\n"
+                    "name: preview-conflict\n"
+                    "description: Reviewed import\n"
+                    "argument-hint: \"[topic]\"\n"
+                    "allowed-tools: Read, Grep\n"
+                    "context: fork\n"
+                    "---\n"
+                    "Preview content"
+                ),
+                "supporting_files": {"ref.md": "Reference"},
+            },
+        )
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["valid"] is True
+        assert body["errors"] == []
+        assert body["name"] == "preview-conflict"
+        assert body["description"] == "Reviewed import"
+        assert body["argument_hint"] == "[topic]"
+        assert body["allowed_tools"] == ["Read", "Grep"]
+        assert body["context"] == "fork"
+        assert body["supporting_file_count"] == 1
+        assert body["conflict"] is True
+        assert body["can_overwrite"] is True
+        assert body["existing_version"] == 1
+        persisted = client.get(f"{SKILLS_PREFIX}/preview-conflict")
+        assert persisted.status_code == 200
+        assert persisted.json()["content"] == "Original"
+
+    def test_import_skill_preview_invalid_content_returns_review_error(self, client):
+        r = client.post(
+            f"{SKILLS_PREFIX}/import/preview",
+            json={
+                "content": "---\nname: Invalid_Name!\n---\nInvalid content",
+            },
+        )
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["valid"] is False
+        assert body["name"] is None
+        assert body["conflict"] is False
+        assert body["can_overwrite"] is False
+        assert body["existing_version"] is None
+        assert any("frontmatter skill name" in error for error in body["errors"])
+        missing = client.get(f"{SKILLS_PREFIX}/invalid-name")
+        assert missing.status_code == 404
+
+    def test_import_skill_file_preview_md_returns_metadata_without_importing(self, client, tmp_path):
+        skill_file = tmp_path / "review-file-skill.md"
+        skill_file.write_text("---\ndescription: From preview file\n---\nFile preview content")
+
+        with open(skill_file, "rb") as f:
+            r = client.post(
+                f"{SKILLS_PREFIX}/import/file/preview",
+                files={"file": ("review-file-skill.md", f, "text/markdown")},
+            )
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["valid"] is True
+        assert body["errors"] == []
+        assert body["name"] == "review-file-skill"
+        assert body["description"] == "From preview file"
+        assert body["conflict"] is False
+        assert body["can_overwrite"] is False
+        missing = client.get(f"{SKILLS_PREFIX}/review-file-skill")
+        assert missing.status_code == 404
+
     def test_import_skill_json(self, client):
         r = client.post(
             f"{SKILLS_PREFIX}/import",

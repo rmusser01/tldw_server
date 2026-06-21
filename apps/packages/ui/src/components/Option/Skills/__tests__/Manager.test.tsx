@@ -9,6 +9,8 @@ const tldwClientMock = vi.hoisted(() => ({
   getSkill: vi.fn(),
   deleteSkill: vi.fn(),
   exportSkill: vi.fn(),
+  previewSkillImport: vi.fn(),
+  previewSkillImportFile: vi.fn(),
   importSkill: vi.fn(),
   importSkillFile: vi.fn(),
   seedSkills: vi.fn()
@@ -103,6 +105,38 @@ describe("SkillsManager imports", () => {
       total: 0,
       limit: 10,
       offset: 0
+    })
+    tldwClientMock.previewSkillImport.mockResolvedValue({
+      valid: true,
+      errors: [],
+      name: "imported-skill",
+      description: "imported",
+      argument_hint: null,
+      disable_model_invocation: false,
+      user_invocable: true,
+      allowed_tools: null,
+      model: null,
+      context: "inline",
+      supporting_file_count: 0,
+      conflict: false,
+      can_overwrite: false,
+      existing_version: null
+    })
+    tldwClientMock.previewSkillImportFile.mockResolvedValue({
+      valid: true,
+      errors: [],
+      name: "imported-file-skill",
+      description: "file import",
+      argument_hint: null,
+      disable_model_invocation: false,
+      user_invocable: true,
+      allowed_tools: null,
+      model: null,
+      context: "inline",
+      supporting_file_count: 0,
+      conflict: false,
+      can_overwrite: false,
+      existing_version: null
     })
     tldwClientMock.importSkill.mockResolvedValue({ name: "imported-skill" })
     tldwClientMock.importSkillFile.mockResolvedValue({ name: "imported-file-skill" })
@@ -867,7 +901,7 @@ describe("SkillsManager imports", () => {
     expect(screen.queryByRole("columnheader", { name: /Mode/ })).not.toBeInTheDocument()
   })
 
-  it("imports a skill from text via importSkill", async () => {
+  it("previews a text import before importing the skill", async () => {
     renderManager()
 
     await waitFor(() => {
@@ -888,7 +922,18 @@ describe("SkillsManager imports", () => {
       }
     })
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "Import" }))
+    fireEvent.click(within(dialog).getByRole("button", { name: "Review import" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.previewSkillImport).toHaveBeenCalledWith({
+        content: "---\nname: imported-skill\ndescription: imported\n---\n\nBody",
+      })
+    })
+    expect(tldwClientMock.importSkill).not.toHaveBeenCalled()
+    expect(await within(dialog).findByText("Import review")).toBeInTheDocument()
+    expect(within(dialog).getByText("imported-skill")).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Import skill" }))
 
     await waitFor(() => {
       expect(tldwClientMock.importSkill).toHaveBeenCalledWith({
@@ -909,6 +954,22 @@ describe("SkillsManager imports", () => {
   })
 
   it("falls back to the validated import name when the API returns an invalid name", async () => {
+    tldwClientMock.previewSkillImport.mockResolvedValueOnce({
+      valid: true,
+      errors: [],
+      name: "fallback-skill",
+      description: "imported",
+      argument_hint: null,
+      disable_model_invocation: false,
+      user_invocable: true,
+      allowed_tools: null,
+      model: null,
+      context: "inline",
+      supporting_file_count: 0,
+      conflict: false,
+      can_overwrite: false,
+      existing_version: null
+    })
     tldwClientMock.importSkill.mockResolvedValueOnce({ name: "Imported Skill" })
 
     renderManager()
@@ -933,7 +994,9 @@ describe("SkillsManager imports", () => {
       }
     })
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "Import" }))
+    fireEvent.click(within(dialog).getByRole("button", { name: "Review import" }))
+    expect(await within(dialog).findByText("Import review")).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole("button", { name: "Import skill" }))
 
     const successActions = await screen.findByTestId("skills-success-actions")
     fireEvent.click(within(successActions).getByRole("button", { name: "View skill" }))
@@ -943,7 +1006,70 @@ describe("SkillsManager imports", () => {
     })
   })
 
-  it("keeps file import flow functional via importSkillFile", async () => {
+  it("requires overwrite confirmation after a conflicting text import preview", async () => {
+    tldwClientMock.previewSkillImport.mockResolvedValueOnce({
+      valid: true,
+      errors: [],
+      name: "existing-skill",
+      description: "replacement",
+      argument_hint: null,
+      disable_model_invocation: false,
+      user_invocable: true,
+      allowed_tools: null,
+      model: null,
+      context: "inline",
+      supporting_file_count: 0,
+      conflict: true,
+      can_overwrite: true,
+      existing_version: 3
+    })
+
+    renderManager()
+
+    await waitFor(() => {
+      expect(tldwClientMock.listSkills).toHaveBeenCalled()
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Import" }))
+    fireEvent.click(await screen.findByText("Import Text"))
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Import Skill from Text"
+    })
+    expect(
+      within(dialog).queryByRole("switch", { name: "Overwrite existing skill" })
+    ).not.toBeInTheDocument()
+
+    fireEvent.change(within(dialog).getByLabelText("SKILL.md Content"), {
+      target: {
+        value: "---\nname: existing-skill\ndescription: replacement\n---\n\nReplacement"
+      }
+    })
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Review import" }))
+
+    expect(await within(dialog).findByText("Existing skill detected")).toBeInTheDocument()
+    expect(within(dialog).getByText("Version 3")).toBeInTheDocument()
+    const importButton = within(dialog).getByRole("button", { name: "Import skill" })
+    expect(importButton).toBeDisabled()
+
+    fireEvent.click(within(dialog).getByRole("switch", { name: "Overwrite existing skill" }))
+    await waitFor(() => {
+      expect(
+        within(dialog).getByRole("button", { name: "Import skill" })
+      ).not.toBeDisabled()
+    })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Import skill" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.importSkill).toHaveBeenCalledWith({
+        content: "---\nname: existing-skill\ndescription: replacement\n---\n\nReplacement",
+        overwrite: true
+      })
+    })
+  })
+
+  it("previews a file import before importing the uploaded file", async () => {
     renderManager()
 
     await waitFor(() => {
@@ -959,7 +1085,19 @@ describe("SkillsManager imports", () => {
     fireEvent.change(input as HTMLInputElement, { target: { files: [file] } })
 
     await waitFor(() => {
-      expect(tldwClientMock.importSkillFile).toHaveBeenCalledWith(file)
+      expect(tldwClientMock.previewSkillImportFile).toHaveBeenCalledWith(file)
+    })
+    expect(tldwClientMock.importSkillFile).not.toHaveBeenCalled()
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Review Skill Import"
+    })
+    expect(within(dialog).getByText("imported-file-skill")).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Import skill" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.importSkillFile).toHaveBeenCalledWith(file, { overwrite: false })
     })
   })
 

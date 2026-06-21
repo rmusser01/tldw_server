@@ -503,6 +503,78 @@ New content.
             await service.import_skill(content="New", name="existing", overwrite=False)
 
     @pytest.mark.asyncio
+    async def test_preview_import_skill_returns_metadata_without_writing(self, service):
+        """Previewing an import should parse metadata without creating the skill."""
+        content = """---
+name: previewed-skill
+description: Preview this skill
+argument-hint: "[topic]"
+allowed-tools: Read, Grep
+model: test-model
+context: fork
+---
+
+Preview content.
+"""
+        result = await service.preview_import_skill(
+            content=content,
+            supporting_files={"ref.md": "Reference content"},
+        )
+
+        assert result["valid"] is True
+        assert result["errors"] == []
+        assert result["name"] == "previewed-skill"
+        assert result["description"] == "Preview this skill"
+        assert result["argument_hint"] == "[topic]"
+        assert result["allowed_tools"] == ["Read", "Grep"]
+        assert result["model"] == "test-model"
+        assert result["context"] == "fork"
+        assert result["supporting_file_count"] == 1
+        assert result["conflict"] is False
+        assert result["can_overwrite"] is False
+        assert result["existing_version"] is None
+        assert not service._get_skill_dir("previewed-skill").exists()
+        with pytest.raises(SkillNotFoundError):
+            await service.get_skill("previewed-skill")
+
+    @pytest.mark.asyncio
+    async def test_preview_import_skill_reports_conflict_without_overwriting(self, service):
+        """Preview should report conflicts without mutating the existing skill."""
+        existing = await service.create_skill("existing", "Original")
+        skill_file = service._get_skill_dir("existing") / "SKILL.md"
+        original_disk_content = skill_file.read_text(encoding="utf-8")
+
+        result = await service.preview_import_skill(
+            content="---\ndescription: Replacement\n---\nReplacement content",
+            name="existing",
+        )
+
+        assert result["valid"] is True
+        assert result["name"] == "existing"
+        assert result["description"] == "Replacement"
+        assert result["conflict"] is True
+        assert result["can_overwrite"] is True
+        assert result["existing_version"] == existing["version"]
+        assert skill_file.read_text(encoding="utf-8") == original_disk_content
+        persisted = await service.get_skill("existing")
+        assert persisted["content"] == "Original"
+
+    @pytest.mark.asyncio
+    async def test_preview_import_skill_returns_validation_errors_without_writing(self, service):
+        """Preview should return validation errors instead of mutating invalid imports."""
+        result = await service.preview_import_skill(
+            content="---\nname: Invalid_Name!\n---\nInvalid content",
+        )
+
+        assert result["valid"] is False
+        assert result["name"] is None
+        assert result["conflict"] is False
+        assert result["can_overwrite"] is False
+        assert result["existing_version"] is None
+        assert any("frontmatter skill name" in error for error in result["errors"])
+        assert not service._get_skill_dir("invalid-name").exists()
+
+    @pytest.mark.asyncio
     async def test_export_skill(self, service):
         """Test exporting a skill as zip."""
         await service.create_skill(
