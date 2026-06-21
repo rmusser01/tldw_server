@@ -1414,7 +1414,7 @@ def test_publish_versions_manifest_snapshot_and_policy_evaluate(
     assert policy_response.json()["decision"] == "allow"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_audio_ref_resolver_requires_generated_file_ownership_and_audio_mime() -> None:
     class FakeFilesRepo:
         async def get_files_by_ids(self, file_ids: list[int]) -> list[dict[str, Any]]:

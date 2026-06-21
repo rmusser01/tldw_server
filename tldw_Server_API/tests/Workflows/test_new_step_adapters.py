@@ -90,20 +90,28 @@ def _run_data_from_overridden_db(client: TestClient, run_id: str) -> dict | None
 
 def _wait_terminal(client: TestClient, run_id: str, timeout=5.0):
     deadline = time.time() + timeout
+    last_data = None
+    last_status_code = None
     while time.time() < deadline:
         r = client.get(f"/api/v1/workflows/runs/{run_id}")
+        last_status_code = r.status_code
         if r.status_code == 404:
             data = _run_data_from_overridden_db(client, run_id)
+            last_data = data
             if data and data["status"] in ("succeeded", "failed", "cancelled"):
                 return data
             time.sleep(0.05)
             continue
         r.raise_for_status()
         data = r.json()
+        last_data = data
         if data["status"] in ("succeeded", "failed", "cancelled"):
             return data
         time.sleep(0.05)
-    raise AssertionError("run did not complete")
+    raise AssertionError(
+        f"run did not complete within {timeout}s; "
+        f"last_status_code={last_status_code}; last_data={last_data!r}"
+    )
 
 
 def test_rss_fetch_step_test_mode(client_with_wf: TestClient):
@@ -215,7 +223,11 @@ def test_kanban_step_crud(client_with_wf: TestClient):
         ],
     }
     wid = client.post("/api/v1/workflows", json=definition).json()["id"]
-    run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {"name": "Kanban"}}).json()["run_id"]
+    run_id = client.post(
+        f"/api/v1/workflows/{wid}/run",
+        json={"inputs": {"name": "Kanban"}},
+        params={"mode": "sync"},
+    ).json()["run_id"]
     data = _wait_terminal(client, run_id)
     assert data["status"] == "succeeded"
     out = data.get("outputs") or {}

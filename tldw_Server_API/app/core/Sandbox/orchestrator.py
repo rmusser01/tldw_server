@@ -1246,13 +1246,17 @@ class SandboxOrchestrator:
                 with contextlib.suppress(_SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS):
                     self._store.increment_user_artifact_bytes(owner, -len(data))
                 continue
-            persisted[path] = data
+            persisted[rel] = data
 
         with self._lock:
             self._artifacts[run_id] = persisted
 
     def list_artifacts(self, run_id: str) -> dict[str, int]:
         self._maybe_prune_expired_artifacts()
+        with self._lock:
+            mapping = self._artifacts.get(run_id)
+            if mapping is not None:
+                return {k: len(v) for k, v in mapping.items()}
         # Try filesystem, fallback to memory
         owner = None
         try:

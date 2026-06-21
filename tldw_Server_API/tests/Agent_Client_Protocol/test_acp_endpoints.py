@@ -884,6 +884,7 @@ def test_acp_session_updates(client_user_only, stub_runner_client):
     ]
 
 
+@pytest.mark.usefixtures("stub_runner_client")
 def test_acp_session_new_error(client_user_only, monkeypatch, tmp_path):
     import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
 

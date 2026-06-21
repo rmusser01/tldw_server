@@ -80,3 +80,43 @@ def test_artifacts_list_perf_large_tree(tmp_path: Path, monkeypatch) -> None:
         assert len(items) == len(files)
         # Generous threshold to avoid flakiness in CI
         assert dt < 5.0, f"artifact listing too slow: {dt:.3f}s for {len(files)} files"
+
+
+def test_artifacts_list_uses_cached_sizes_before_filesystem_walk(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SANDBOX_SHARED_ARTIFACTS_DIR", str(tmp_path))
+
+    with _client(monkeypatch) as client:
+        body = {
+            "spec_version": "1.0",
+            "runtime": "docker",
+            "base_image": "python:3.11-slim",
+            "command": ["bash", "-lc", "echo done"],
+            "timeout_sec": 5,
+        }
+        r = client.post("/api/v1/sandbox/runs", json=body)
+        assert r.status_code == 200
+        run_id = r.json()["id"]
+
+        from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+        from tldw_Server_API.app.core.Sandbox import orchestrator as orchestrator_module
+
+        sb._service._orch.store_artifacts(  # type: ignore[attr-defined]
+            run_id,
+            {
+                "nested/out.txt": b"hello",
+                "summary.txt": b"ok",
+            },
+        )
+
+        def _unexpected_walk(*_args, **_kwargs):
+            raise AssertionError("cached artifact listing should not walk the filesystem")
+
+        monkeypatch.setattr(orchestrator_module.os, "walk", _unexpected_walk)
+
+        lr = client.get(f"/api/v1/sandbox/runs/{run_id}/artifacts")
+        assert lr.status_code == 200
+        items = lr.json().get("items", [])
+        assert sorted((item["path"], item["size"]) for item in items) == [
+            ("nested/out.txt", 5),
+            ("summary.txt", 2),
+        ]

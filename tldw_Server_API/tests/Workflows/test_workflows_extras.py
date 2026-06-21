@@ -245,6 +245,7 @@ def test_l1_acp_pipeline_template_run_succeeds(client_with_wf: TestClient, monke
     run_resp = client.post(
         f"/api/v1/workflows/{workflow_id}/run",
         json={"inputs": {"task": "domain-only task", "workspace_id": "ws-1", "workspace_group_id": "wg-1"}},
+        params={"mode": "sync"},
     )
     assert run_resp.status_code == 200, run_resp.text
     run_id = run_resp.json()["run_id"]
@@ -320,6 +321,7 @@ def test_l1_acp_pipeline_persists_schema_version_on_acp_steps(client_with_wf: Te
     run_id = client.post(
         f"/api/v1/workflows/{workflow_id}/run",
         json={"inputs": {"task": "domain-only task", "workspace_id": "ws-1", "workspace_group_id": "wg-1"}},
+        params={"mode": "sync"},
     ).json()["run_id"]
 
     terminal = _wait_for_status(client, run_id, {"succeeded", "failed"})

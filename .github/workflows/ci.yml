@@ -250,7 +250,7 @@ jobs:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
         run: |
           # Keep this as a non-regression floor until wizard CLI coverage is expanded.
-          pytest -q --maxfail=1 --disable-warnings -p pytest_cov -p pytest_asyncio.plugin \
+          pytest -q --disable-warnings -p pytest_cov -p pytest_asyncio.plugin \
             tldw_Server_API/tests/wizard \
             --cov=tldw_Server_API/cli/wizard --cov-report=term-missing --cov-fail-under=70
 
@@ -474,7 +474,7 @@ jobs:
           mkdir -p "${RESULTS_DIR}"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
-          pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             ${{ matrix.shard.paths }} \
             --durations=50 \
@@ -1811,7 +1811,7 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
-          pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
             --durations=50 \
@@ -1824,7 +1824,7 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
-          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             tldw_Server_API/tests/Media \
             tldw_Server_API/tests/MediaIngestion_NEW \
@@ -3122,7 +3122,7 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
-          pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
             --durations=50 \
@@ -3135,7 +3135,7 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
-          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             tldw_Server_API/tests/Media \
             tldw_Server_API/tests/MediaIngestion_NEW \
@@ -4289,7 +4289,7 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
-          pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
             --durations=50 \
@@ -4302,7 +4302,7 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
-          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             tldw_Server_API/tests/Media \
             tldw_Server_API/tests/MediaIngestion_NEW \
@@ -5455,7 +5455,7 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
-          pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
             --durations=50 \
@@ -5468,7 +5468,7 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
-          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             tldw_Server_API/tests/Media \
             tldw_Server_API/tests/MediaIngestion_NEW \
@@ -6622,7 +6622,7 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
-          pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
             --durations=50 \
@@ -6635,7 +6635,7 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
-          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+          TLDW_DISABLE_LEGACY_MEDIA=1 pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "not jobs and not e2e" \
             tldw_Server_API/tests/Media \
             tldw_Server_API/tests/MediaIngestion_NEW \
@@ -6690,11 +6690,15 @@ jobs:
         shell: bash
         run: |
           echo "TEST_MODE currently set to: ${TEST_MODE}"
-          pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
-            tldw_Server_API/tests/Character_Chat -rs
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            tldw_Server_API/tests/Character_Chat/test_rate_limits_specific.py \
+            tldw_Server_API/tests/Character_Chat/test_world_book_and_limits.py::test_legacy_complete_endpoint_rate_limit \
+            tldw_Server_API/tests/Character_Chat/test_world_book_negatives_and_new_endpoint.py::test_rate_limits_max_messages_and_chats_and_completions_endpoint \
+            -rs
       - name: Run Character_Chat_NEW rate-limit tests with TEST_MODE=0
         shell: bash
         run: |
           echo "TEST_MODE currently set to: ${TEST_MODE}"
-          pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
-            tldw_Server_API/tests/Character_Chat_NEW -rs
+          pytest -q --disable-warnings -p pytest_asyncio.plugin -m rate_limit \
+            tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py \
+            -rs

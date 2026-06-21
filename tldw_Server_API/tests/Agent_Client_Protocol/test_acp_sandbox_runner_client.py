@@ -438,6 +438,8 @@ async def test_create_session_rejects_unavailable_vz_macos_runtime(monkeypatch) 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_create_session_rejects_seatbelt_without_standard_opt_in(monkeypatch) -> None:
+    import tldw_Server_API.app.core.Agent_Client_Protocol.sandbox_runner_client as src
+
     manager = ACPSandboxRunnerManager(
         ACPSandboxConfig(
             enabled=True,
@@ -450,6 +452,18 @@ async def test_create_session_rejects_seatbelt_without_standard_opt_in(monkeypat
     monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "1")
     monkeypatch.setenv("TLDW_SANDBOX_SEATBELT_AVAILABLE", "1")
     monkeypatch.delenv("TLDW_SANDBOX_SEATBELT_STANDARD_ENABLED", raising=False)
+    monkeypatch.setattr(
+        src,
+        "collect_runtime_preflights",
+        lambda *, network_policy=None: {
+            RuntimeType.seatbelt: RuntimePreflightResult(
+                runtime=RuntimeType.seatbelt,
+                available=True,
+                supported_trust_levels=["trusted"],
+                enforcement_ready={"deny_all": True, "allowlist": True},
+            )
+        },
+    )
 
     with pytest.raises(ACPResponseError, match="seatbelt_standard_disabled"):
         await manager.create_session(cwd="/workspace", user_id=7)

@@ -285,6 +285,19 @@ def test_character_chat_rate_limits_installs_portaudio_before_python_deps() -> N
     assert steps.index(install_step) < steps.index(setup_step)
 
 
+def test_character_chat_rate_limits_job_is_scoped_to_rate_limit_tests() -> None:
+    workflow = _load(".github/workflows/ci.yml")
+    steps = workflow["jobs"]["character-chat-rate-limits"]["steps"]
+    legacy_run = _get_step(steps, "Run Character_Chat rate-limit tests with TEST_MODE=0")["run"]
+    new_run = _get_step(steps, "Run Character_Chat_NEW rate-limit tests with TEST_MODE=0")["run"]
+
+    assert "tldw_Server_API/tests/Character_Chat/test_rate_limits_specific.py" in legacy_run
+    assert "tldw_Server_API/tests/Character_Chat -rs" not in legacy_run
+    assert "-m rate_limit" in new_run
+    assert "tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_api.py" in new_run
+    assert "tldw_Server_API/tests/Character_Chat_NEW -rs" not in new_run
+
+
 def test_full_suite_pytest_steps_do_not_leak_shared_postgres_dsn() -> None:
     workflow = _load(".github/workflows/ci.yml")
     jobs = workflow["jobs"]
