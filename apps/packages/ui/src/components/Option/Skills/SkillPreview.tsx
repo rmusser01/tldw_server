@@ -10,6 +10,8 @@ interface SkillPreviewProps {
   onClose: () => void
 }
 
+type SkillRunMode = "dry-run" | "test-run"
+
 export const SkillPreview: React.FC<SkillPreviewProps> = ({
   skillName,
   onClose
@@ -17,32 +19,40 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
   const { t } = useTranslation(["option", "common"])
   const [args, setArgs] = React.useState("")
   const [result, setResult] = React.useState<SkillExecutionResult | null>(null)
-  const testRunPendingRef = React.useRef(false)
+  const [activeRunMode, setActiveRunMode] = React.useState<SkillRunMode | null>(null)
+  const skillRunPendingRef = React.useRef(false)
 
   React.useEffect(() => {
     if (!skillName) {
       setArgs("")
       setResult(null)
-      testRunPendingRef.current = false
+      setActiveRunMode(null)
+      skillRunPendingRef.current = false
     }
   }, [skillName])
 
   const executeMutation = useMutation({
-    mutationFn: () => tldwClient.executeSkill(skillName!, args),
+    mutationFn: ({ dryRun }: { dryRun: boolean }) =>
+      tldwClient.executeSkill(skillName!, args, { dryRun }),
     onSuccess: (data: SkillExecutionResult) => {
       setResult(data)
     },
     onSettled: () => {
-      testRunPendingRef.current = false
+      skillRunPendingRef.current = false
+      setActiveRunMode(null)
     }
   })
 
-  const handleRunTest = () => {
-    if (!skillName || testRunPendingRef.current || executeMutation.isPending) return
+  const handleRun = (dryRun: boolean) => {
+    if (!skillName || skillRunPendingRef.current || executeMutation.isPending) return
 
-    testRunPendingRef.current = true
-    executeMutation.mutate()
+    skillRunPendingRef.current = true
+    setActiveRunMode(dryRun ? "dry-run" : "test-run")
+    executeMutation.mutate({ dryRun })
   }
+
+  const handleRunTest = () => handleRun(false)
+  const handleRenderOnly = () => handleRun(true)
 
   const errorMessage =
     executeMutation.error instanceof Error
@@ -86,14 +96,23 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
           })}
         </p>
 
-        <Button
-          type="primary"
-          onClick={handleRunTest}
-          loading={executeMutation.isPending}
-          disabled={executeMutation.isPending}
-        >
-          {t("option:skills.testRunAction", { defaultValue: "Run test" })}
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            onClick={handleRenderOnly}
+            loading={executeMutation.isPending && activeRunMode === "dry-run"}
+            disabled={executeMutation.isPending}
+          >
+            {t("option:skills.renderOnlyAction", { defaultValue: "Render prompt only" })}
+          </Button>
+          <Button
+            type="primary"
+            onClick={handleRunTest}
+            loading={executeMutation.isPending && activeRunMode === "test-run"}
+            disabled={executeMutation.isPending}
+          >
+            {t("option:skills.testRunAction", { defaultValue: "Run test" })}
+          </Button>
+        </div>
 
         {executeMutation.isError && (
           <Alert role="alert" type="error" showIcon title={errorMessage} />
@@ -102,6 +121,11 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
         {result && (
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
+              <Tag color={result.dry_run ? "default" : "green"}>
+                {result.dry_run
+                  ? t("option:skills.dryRenderResult", { defaultValue: "Dry render" })
+                  : t("option:skills.executedResult", { defaultValue: "Executed test" })}
+              </Tag>
               <Tag color={result.execution_mode === "fork" ? "blue" : "green"}>
                 {result.execution_mode}
               </Tag>

@@ -81,7 +81,8 @@ describe("SkillPreview test-run semantics", () => {
       allowed_tools: ["search"],
       model_override: null,
       execution_mode: "fork",
-      fork_output: "Summary output"
+      fork_output: "Summary output",
+      dry_run: false
     })
   })
 
@@ -99,6 +100,7 @@ describe("SkillPreview test-run semantics", () => {
         "This renders the skill with your arguments. Fork-mode skills may call the configured model and allowed tools."
       )
     ).toBeInTheDocument()
+    expect(within(dialog).getByRole("button", { name: "Render prompt only" })).toBeInTheDocument()
     expect(within(dialog).getByRole("button", { name: "Run test" })).toBeInTheDocument()
     expect(within(dialog).queryByRole("button", { name: "Preview" })).not.toBeInTheDocument()
   })
@@ -113,8 +115,43 @@ describe("SkillPreview test-run semantics", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Run test" }))
 
     await waitFor(() => {
-      expect(tldwClientMock.executeSkill).toHaveBeenCalledWith("summarize", "chapter 1")
+      expect(tldwClientMock.executeSkill).toHaveBeenCalledWith(
+        "summarize",
+        "chapter 1",
+        { dryRun: false }
+      )
     })
+  })
+
+  it("renders the prompt only without executing fork output", async () => {
+    tldwClientMock.executeSkill.mockResolvedValueOnce({
+      skill_name: "summarize",
+      rendered_prompt: "Summarize chapter 1",
+      allowed_tools: ["search"],
+      model_override: null,
+      execution_mode: "fork",
+      fork_output: null,
+      dry_run: true
+    })
+
+    renderPreview()
+
+    const dialog = screen.getByRole("dialog", { name: "Test run" })
+    fireEvent.change(within(dialog).getByPlaceholderText("Enter test arguments..."), {
+      target: { value: "chapter 1" }
+    })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Render prompt only" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.executeSkill).toHaveBeenCalledWith(
+        "summarize",
+        "chapter 1",
+        { dryRun: true }
+      )
+    })
+
+    expect(await within(dialog).findByText("Dry render")).toBeInTheDocument()
+    expect(within(dialog).queryByText("Fork Output")).not.toBeInTheDocument()
   })
 
   it("prevents duplicate skill executions while a test run is pending", async () => {
@@ -125,6 +162,7 @@ describe("SkillPreview test-run semantics", () => {
       model_override: null
       execution_mode: "fork"
       fork_output: string
+      dry_run: false
     }) => void = () => {}
     tldwClientMock.executeSkill.mockImplementationOnce(
       () =>
@@ -153,7 +191,8 @@ describe("SkillPreview test-run semantics", () => {
       allowed_tools: ["search"],
       model_override: null,
       execution_mode: "fork",
-      fork_output: "Summary output"
+      fork_output: "Summary output",
+      dry_run: false
     })
   })
 

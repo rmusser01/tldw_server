@@ -289,6 +289,52 @@ class TestSkillExecution:
         assert result.fork_output == "fork output"
 
     @pytest.mark.asyncio
+    async def test_execute_dry_run_renders_fork_without_model_or_tools(self, executor, monkeypatch):
+        """Dry-rendering a fork skill must not invoke model calls or tool execution."""
+        skill_data = {
+            "name": "fork-dry-run-skill",
+            "content": "Forked task: $ARGUMENTS",
+            "context": "fork",
+            "allowed_tools": ["Read", "Grep"],
+            "model": "gpt-4",
+        }
+
+        async def _unexpected_chat_call(**_kwargs):
+            raise AssertionError("dry_run must not call the model adapter")
+
+        from tldw_Server_API.app.core.Chat import chat_service as chat_service_mod
+        monkeypatch.setattr(chat_service_mod, "perform_chat_api_call_async", _unexpected_chat_call)
+
+        class _UnexpectedToolExecutor:
+            async def list_tools(self, **_kwargs):
+                raise AssertionError("dry_run must not list tools")
+
+            async def execute(self, **_kwargs):
+                raise AssertionError("dry_run must not execute tools")
+
+        ctx = RequestContext(
+            user_id=1,
+            default_provider="openai",
+            available_tools=["Read", "Grep"],
+            tool_executor=_UnexpectedToolExecutor(),
+        )
+
+        result = await executor.execute(
+            skill_data,
+            "task-args",
+            context=ctx,
+            dry_run=True,
+        )
+
+        assert result.skill_name == "fork-dry-run-skill"
+        assert result.rendered_prompt == "Forked task: task-args"
+        assert result.allowed_tools == ["Read", "Grep"]
+        assert result.model_override == "gpt-4"
+        assert result.execution_mode == "fork"
+        assert result.fork_output is None
+        assert result.dry_run is True
+
+    @pytest.mark.asyncio
     async def test_execute_with_model_override(self, executor):
         """Test that model override is preserved."""
         skill_data = {
