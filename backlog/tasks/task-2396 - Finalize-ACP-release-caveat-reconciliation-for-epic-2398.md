@@ -8,6 +8,7 @@ labels:
 - github-2398
 references:
 - https://github.com/rmusser01/tldw_server/issues/2398
+- https://github.com/rmusser01/tldw_server/pull/2422
 modified_files:
 - IMPLEMENTATION_PLAN_acp_final_reconciliation_2398.md
 - Docs/Development/ACP_Release_Caveat_Closeout_2026_06_21.md
@@ -24,6 +25,7 @@ documentation:
   search passed with the old non-empty MCP caveat only on Codex as expected; Bandit
   was run on the touched pytest file and reported the existing B101 test assert baseline
   only with no new assert statements added.
+- PR - https://github.com/rmusser01/tldw_server/pull/2422
 ---
 
 ## Description
