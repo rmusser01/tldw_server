@@ -108,6 +108,50 @@ jobs:
 
           bash tools/vz-linux-image/scripts/run-host-e2e-smoke.sh "${args[@]}"
 
+      - name: Summarize smoke evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          evidence_dir="${RUNNER_TEMP}/tldw-vz-helper-ci/evidence"
+          summary_script="tools/vz-linux-image/scripts/summarize-host-e2e-evidence.py"
+          append_summary_warning() {
+            local message="$1"
+            if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+              {
+                echo "# VZ Linux Host Smoke Evidence Summary"
+                echo
+                echo "> Advisory only: ${message}"
+              } >> "${GITHUB_STEP_SUMMARY}" 2>/dev/null || true
+            fi
+            echo "warning: ${message}" >&2
+          }
+
+          python_bin=""
+          if command -v python >/dev/null 2>&1; then
+            python_bin="$(command -v python)"
+          elif command -v python3 >/dev/null 2>&1; then
+            python_bin="$(command -v python3)"
+          fi
+
+          if [[ -f "${summary_script}" ]]; then
+            :
+          else
+            append_summary_warning "evidence summary script is unavailable; inspect uploaded artifacts when present"
+            exit 0
+          fi
+          if [[ -z "${python_bin}" ]]; then
+            append_summary_warning "python interpreter is unavailable; inspect uploaded artifacts when present"
+            exit 0
+          fi
+
+          "${python_bin}" "${summary_script}" --evidence-dir "${evidence_dir}"
+          summary_status=$?
+          if [[ ${summary_status} -ne 0 ]]; then
+            append_summary_warning "evidence summary failed with exit ${summary_status}; inspect uploaded artifacts/logs when present"
+          fi
+          exit 0
+
       - name: Upload smoke evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

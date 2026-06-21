@@ -2,15 +2,20 @@ import io
 import json
 import zipfile
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.main import app
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.endpoints import chatbooks as chatbooks_endpoints
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     close_all_chacha_db_instances,
-    get_chacha_db_for_user,
 )
+
+
+class _DummyAuditService:
+    async def log_event(self, *args, **kwargs) -> None:
+        return None
 
 
 @pytest.fixture()
@@ -20,6 +25,7 @@ def client(tmp_path_factory, monkeypatch):
     db_instance = CharactersRAGDB(db_path=str(db_path), client_id="chatbooks-preview-test")
 
     monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_dir / "user_databases"))
 
     async def override_user():
         return User(id=1, username="tester", is_active=True)
@@ -27,15 +33,17 @@ def client(tmp_path_factory, monkeypatch):
     def override_db():
         return db_instance
 
-    app.dependency_overrides[get_request_user] = override_user
-    app.dependency_overrides[get_chacha_db_for_user] = override_db
+    app = FastAPI()
+    app.include_router(chatbooks_endpoints.router, prefix="/api/v1")
+    app.dependency_overrides[chatbooks_endpoints.get_request_user] = override_user
+    app.dependency_overrides[chatbooks_endpoints.get_chacha_db] = override_db
+    app.dependency_overrides[chatbooks_endpoints.get_audit_service_for_user] = lambda: _DummyAuditService()
 
     try:
         with TestClient(app) as c:
             yield c
     finally:
-        app.dependency_overrides.pop(get_request_user, None)
-        app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        app.dependency_overrides.clear()
         try:
             db_instance.close_all_connections()
         except Exception:

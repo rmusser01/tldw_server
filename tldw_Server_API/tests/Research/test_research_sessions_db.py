@@ -104,10 +104,7 @@ def test_research_run_events_table_is_created_automatically(tmp_path):
 
     with sqlite3.connect(db_path) as conn:
         table_names = {
-            str(row[0])
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            ).fetchall()
+            str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
         }
 
     assert "research_run_events" in table_names
@@ -144,3 +141,77 @@ def test_list_sessions_is_owner_scoped_and_sorted_by_created_at_desc(tmp_path):
     assert [session.id for session in sessions] == [newer.id, older.id]
     assert [session.query for session in sessions] == ["Newer run", "Older run"]
     assert all(session.owner_user_id == "1" for session in sessions)
+
+
+def test_discovery_snapshot_round_trip_is_owner_scoped(tmp_path):
+    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
+
+    db = ResearchSessionsDB(tmp_path / "research.db")
+    snapshot = db.create_discovery_snapshot(
+        owner_user_id="1",
+        query="open access batteries",
+        request_json={"query": "open access batteries"},
+        response_json={"results": [{"result_id": "res_1"}]},
+        effective_config_json={"source_ids": ["openalex"]},
+        catalog_version="research-discovery-v1",
+        retention_hours=24,
+    )
+
+    stored = db.get_discovery_snapshot(snapshot.id, owner_user_id="1")
+
+    assert snapshot.id.startswith("rd_")
+    assert stored is not None
+    assert stored.owner_user_id == "1"
+    assert stored.query == "open access batteries"
+    assert stored.request_json["query"] == "open access batteries"
+    assert stored.response_json["results"][0]["result_id"] == "res_1"
+    assert stored.effective_config_json["source_ids"] == ["openalex"]
+    assert stored.catalog_version == "research-discovery-v1"
+    assert db.get_discovery_snapshot(snapshot.id, owner_user_id="2") is None
+
+
+def test_discovery_snapshot_rejects_expired_rows(tmp_path):
+    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
+
+    db = ResearchSessionsDB(tmp_path / "research.db")
+    snapshot = db.create_discovery_snapshot(
+        owner_user_id="1",
+        query="expired",
+        request_json={},
+        response_json={},
+        effective_config_json={},
+        catalog_version="research-discovery-v1",
+        retention_hours=-1,
+    )
+
+    assert db.get_discovery_snapshot(snapshot.id, owner_user_id="1") is None
+
+
+def test_delete_expired_discovery_snapshots_only_removes_expired_rows(tmp_path):
+    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
+
+    db = ResearchSessionsDB(tmp_path / "research.db")
+    expired = db.create_discovery_snapshot(
+        owner_user_id="1",
+        query="expired",
+        request_json={},
+        response_json={},
+        effective_config_json={},
+        catalog_version="research-discovery-v1",
+        retention_hours=-1,
+    )
+    active = db.create_discovery_snapshot(
+        owner_user_id="1",
+        query="active",
+        request_json={},
+        response_json={},
+        effective_config_json={},
+        catalog_version="research-discovery-v1",
+        retention_hours=24,
+    )
+
+    deleted_count = db.delete_expired_discovery_snapshots()
+
+    assert deleted_count == 1
+    assert db.get_discovery_snapshot(expired.id, owner_user_id="1") is None
+    assert db.get_discovery_snapshot(active.id, owner_user_id="1") is not None

@@ -15,16 +15,25 @@ From the repository root:
 python -m pip install -e "mcp_unified[gateway]"
 ```
 
-For development and artifact checks:
+For development and artifact checks, install both the gateway runtime and
+development tools:
 
 ```bash
-python -m pip install -e "mcp_unified[dev]"
+python -m pip install -e "mcp_unified[gateway,dev]"
 ```
 
 Confirm the CLI is available:
 
 ```bash
 mcp-unified-gateway package-info
+```
+
+For a quick standalone JSON-RPC smoke check, confirm the smoke client is also
+available and run the deterministic in-process fixture:
+
+```bash
+mcp-unified-smoke --help
+mcp-unified-smoke inprocess --json-report -
 ```
 
 ## 2. Choose A Store

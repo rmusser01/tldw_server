@@ -61,6 +61,12 @@ from .chatbook_models import (
     ImportJob,
     ImportStatus,
     ImportStatusData,
+    coerce_chatbook_export_version,
+)
+from .chatbook_format_v1_1 import (
+    build_file_inventory,
+    build_preview_report,
+    validate_v1_1_before_import,
 )
 
 # Unified audit logging is handled at the API layer. The service no longer
@@ -324,6 +330,11 @@ class ChatbookService:
             if limit is not None:
                 return limit
         return None
+
+    @staticmethod
+    def _coerce_format_version(format_version: ChatbookVersion | str | None) -> ChatbookVersion:
+        """Normalize service callers to the canonical ChatbookVersion enum."""
+        return coerce_chatbook_export_version(format_version)
 
     @staticmethod
     def _truthy_env(name: str, default: bool = False) -> bool:
@@ -1271,6 +1282,7 @@ class ChatbookService:
         include_generated_content: bool = True,
         tags: list[str] | None = None,
         categories: list[str] | None = None,
+        format_version: ChatbookVersion = ChatbookVersion.V1,
         async_mode: bool = False,
         request_id: str | None = None
     ) -> tuple[bool, str, str | None]:
@@ -1288,11 +1300,13 @@ class ChatbookService:
             include_generated_content: Include generated documents
             tags: Chatbook tags
             categories: Chatbook categories
+            format_version: Chatbook manifest format version to produce
             async_mode: Run as background job
 
         Returns:
             Tuple of (success, message, job_id or file_path)
         """
+        format_version = self._coerce_format_version(format_version)
         if async_mode:
             # Create job and run asynchronously
             # If using Prompt Studio backend, create PS job first and reuse its id
@@ -1308,6 +1322,7 @@ class ChatbookService:
                     "include_generated_content": include_generated_content,
                     "tags": tags or [],
                     "categories": categories or [],
+                    "format_version": format_version.value,
                 }
                 try:
                     ps_job = self._ps_job_adapter.create_export_job(payload, request_id=request_id)
@@ -1350,6 +1365,7 @@ class ChatbookService:
                         "include_generated_content": include_generated_content,
                         "tags": tags or [],
                         "categories": categories or [],
+                        "format_version": format_version.value if hasattr(format_version, "value") else str(format_version),
                     }
                     job_created = self._core_jobs.create_job(
                         domain="chatbooks",
@@ -1385,7 +1401,8 @@ class ChatbookService:
             return await self._create_chatbook_sync_wrapper(
                 name, description, content_selections,
                 author, include_media, media_quality, include_embeddings,
-                include_generated_content, tags, categories
+                include_generated_content, tags, categories,
+                format_version=format_version,
             )
 
     def _with_transaction(self, func, *args, **kwargs):
@@ -1585,7 +1602,8 @@ class ChatbookService:
         include_embeddings: bool = False,
         include_generated_content: bool = True,
         tags: list[str] | None = None,
-        categories: list[str] | None = None
+        categories: list[str] | None = None,
+        format_version: ChatbookVersion = ChatbookVersion.V1
     ) -> tuple[bool, str, str | None]:
         """
         Wrapper for synchronous chatbook creation.
@@ -1603,7 +1621,7 @@ class ChatbookService:
 
             # Initialize manifest
             manifest = ChatbookManifest(
-                version=ChatbookVersion.V1,
+                version=self._coerce_format_version(format_version),
                 name=name,
                 description=description,
                 author=author,
@@ -1618,6 +1636,28 @@ class ChatbookService:
                 metadata=self._default_chatbook_template_metadata(),
             )
             manifest.binary_limits = self._get_binary_limits_bytes()
+            if manifest.version == ChatbookVersion.V1_1:
+                manifest.features_used = [
+                    "content_envelopes",
+                    "file_inventory",
+                    "integrity_metadata",
+                    "representations",
+                    "lossiness_metadata",
+                ]
+                manifest.producer = {"name": "tldw_server"}
+                manifest.source_instance = {}
+                manifest.compatibility = {
+                    "min_reader_version": "1.1.0",
+                    "recommended_reader_version": "1.1.0",
+                    "unsupported_feature_behavior": "warn_lossy_import",
+                    "v1_compatibility": {
+                        "fallback": (
+                            "Readers that only support v1.0 may use the core manifest fields "
+                            "and ignore v1.1 metadata, with possible loss of representation "
+                            "and integrity details."
+                        )
+                    },
+                }
 
             # Collect content
             content = ChatbookContent()
@@ -1707,6 +1747,9 @@ class ChatbookService:
 
             # Create README asynchronously
             await self._create_readme_async(work_dir, manifest)
+            if manifest.version == ChatbookVersion.V1_1:
+                manifest.file_inventory = await asyncio.to_thread(build_file_inventory, work_dir)
+                await _write_manifest()
 
             # Create archive in secure export directory
             output_filename = self._build_export_filename(name, timestamp)
@@ -1754,7 +1797,8 @@ class ChatbookService:
         include_embeddings: bool,
         include_generated_content: bool,
         tags: list[str],
-        categories: list[str]
+        categories: list[str],
+        format_version: ChatbookVersion = ChatbookVersion.V1
     ):
         """
         Asynchronously create a chatbook with job tracking.
@@ -1780,7 +1824,8 @@ class ChatbookService:
             success, message, file_path = await self._create_chatbook_sync_wrapper(
                 name, description, content_selections,
                 author, include_media, media_quality, include_embeddings,
-                include_generated_content, tags, categories
+                include_generated_content, tags, categories,
+                format_version=format_version,
             )
 
             if success:
@@ -2142,9 +2187,24 @@ class ChatbookService:
                 manifest_data = json.load(f)
 
             manifest = ChatbookManifest.from_dict(manifest_data)
+            import_warnings: list[str] = []
+
+            if manifest.version == ChatbookVersion.V1_1:
+                ok, v1_1_warnings, v1_1_errors = validate_v1_1_before_import(
+                    manifest,
+                    extract_dir,
+                )
+                import_warnings.extend(v1_1_warnings)
+                if not ok:
+                    first_error = v1_1_errors[0] if v1_1_errors else "validation failed"
+                    return False, f"Chatbook v1.1 validation failed: {first_error}", {
+                        "imported_items": {},
+                        "warnings": import_warnings,
+                        "errors": v1_1_errors,
+                    }
 
             # Check version compatibility (V1 and V1_LEGACY are both compatible)
-            compatible_versions = {ChatbookVersion.V1, ChatbookVersion.V1_LEGACY}
+            compatible_versions = {ChatbookVersion.V1, ChatbookVersion.V1_LEGACY, ChatbookVersion.V1_1}
             if manifest.version not in compatible_versions:
                 logger.warning(f"Chatbook version {manifest.version.value} may not be fully compatible")
 
@@ -2165,6 +2225,7 @@ class ChatbookService:
                 status=ImportStatus.IN_PROGRESS,
                 chatbook_path=file_path
             )
+            import_status.warnings.extend(import_warnings)
 
             import_status.total_items = sum(len(ids) for ids in content_selections.values())
 
@@ -3311,13 +3372,35 @@ class ChatbookService:
         Returns:
             Tuple of (manifest, error_message)
         """
+        manifest, error, _report = self._preview_chatbook_internal(file_path, include_report=False)
+        return manifest, error
+
+    def preview_chatbook_with_report(
+        self,
+        file_path: str,
+    ) -> tuple[ChatbookManifest | None, str | None, dict[str, Any] | None]:
+        """
+        Preview a chatbook and return a v1.1 report when the manifest loads.
+
+        The original preview_chatbook two-tuple is intentionally preserved for
+        existing callers.
+        """
+        return self._preview_chatbook_internal(file_path, include_report=True)
+
+    def _preview_chatbook_internal(
+        self,
+        file_path: str,
+        *,
+        include_report: bool,
+    ) -> tuple[ChatbookManifest | None, str | None, dict[str, Any] | None]:
+        """Shared safe extraction flow for chatbook preview variants."""
         extract_dir: Path | None = None
         try:
             try:
                 resolved_path = self._resolve_import_archive_path(file_path)
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
                 logger.warning(f"Chatbooks preview rejected file path: {exc}")
-                return None, "Invalid or potentially malicious archive file"
+                return None, "Invalid or potentially malicious archive file", None
             file_path = str(resolved_path)
 
             # Defense-in-depth: validate the archive before extraction.
@@ -3325,7 +3408,7 @@ class ChatbookService:
             from .chatbook_validators import ChatbookValidator
             ok, err = ChatbookValidator.validate_zip_file(file_path)
             if not ok:
-                return None, err or "Invalid archive"
+                return None, err or "Invalid archive", None
             # Extract to temporary directory with UUID to prevent collisions
             extract_dir = self.temp_dir / f"preview_{uuid4().hex}"
 
@@ -3339,7 +3422,7 @@ class ChatbookService:
                 for member in zf.namelist():
                     # Validate path using path-component aware check
                     if self._is_unsafe_archive_path(member):
-                        return None, "Unsafe path in archive detected"
+                        return None, "Unsafe path in archive detected", None
 
                     # Additional check: ensure the normalized target stays within extract_dir
                     os.path.normpath(member)
@@ -3348,10 +3431,10 @@ class ChatbookService:
                     try:
                         common = os.path.commonpath([extract_dir_resolved, target_path])
                         if common != extract_dir_resolved:
-                            return None, "Path traversal attempt detected"
+                            return None, "Path traversal attempt detected", None
                     except ValueError:
                         # commonpath raises ValueError if paths are on different drives (Windows)
-                        return None, "Path traversal attempt detected"
+                        return None, "Path traversal attempt detected", None
 
                 # Safe to extract after validation
                 zf.extractall(extract_dir)
@@ -3359,19 +3442,20 @@ class ChatbookService:
             # Load manifest
             manifest_path = extract_dir / "manifest.json"
             if not manifest_path.exists():
-                return None, "Invalid chatbook: manifest.json not found"
+                return None, "Invalid chatbook: manifest.json not found", None
 
             try:
                 with open(manifest_path, encoding='utf-8') as f:
                     manifest_data = json.load(f)
                 manifest = ChatbookManifest.from_dict(manifest_data)
             except (json.JSONDecodeError, KeyError, TypeError, ValueError, ValidationError):
-                return None, "Invalid chatbook manifest"
+                return None, "Invalid chatbook manifest", None
 
-            return manifest, None
+            report = build_preview_report(manifest, extract_dir) if include_report else None
+            return manifest, None, report
 
         except zipfile.BadZipFile:
-            return None, "Invalid archive"
+            return None, "Invalid archive", None
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error previewing chatbook: {e}")
             raise

@@ -417,8 +417,8 @@ def test_default_agents_yaml_includes_codex_backend_live_e2e_metadata() -> None:
     assert "codex/acp-codex-orchestration-progress" in entry.compatibility_notes
 
 
-def test_default_agents_yaml_keeps_aider_blocked_without_acp_entrypoint() -> None:
-    """Aider can be locally configured while remaining blocked for ACP certification."""
+def test_default_agents_yaml_keeps_aider_as_unverified_adapter_candidate() -> None:
+    """Aider can expose an adapter candidate while remaining uncertified for ACP support."""
     from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
 
     real_yaml = os.path.join(
@@ -431,15 +431,20 @@ def test_default_agents_yaml_keeps_aider_blocked_without_acp_entrypoint() -> Non
     entry = registry.get_entry("aider")
 
     assert entry is not None
-    assert entry.entrypoint_strategy == "documented_candidate"
+    assert entry.entrypoint_strategy == "external_acp_adapter"
     assert entry.command == "aider"
-    assert entry.acp_command == ""
+    assert entry.acp_command == "aider-acp"
     assert entry.acp_args == []
+    assert entry.adapter_source == "jorgejhms/aider-acp"
+    assert entry.adapter_docs_url == "https://github.com/jorgejhms/aider-acp"
+    assert entry.adapter_package == "aider-acp"
+    assert entry.adapter_version_policy == "operator_managed"
+    assert entry.adapter_install_source == "operator_managed"
+    assert entry.credential_policy == "delegated_to_adapter"
     assert entry.support_state == "documented_unverified"
     assert entry.verification_level == "documented_only"
-    assert entry.certification_blocker == "entrypoint_strategy_missing"
-    assert "local llama.cpp" in entry.compatibility_notes
-    assert "no ACP-compatible" in entry.compatibility_notes
+    assert "external adapter candidate" in entry.compatibility_notes
+    assert "not installed or live-E2E certified" in entry.compatibility_notes
 
 
 def test_default_runner_home_config_exposes_goose_backend_profile() -> None:

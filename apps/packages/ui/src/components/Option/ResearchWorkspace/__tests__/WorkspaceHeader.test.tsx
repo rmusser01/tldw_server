@@ -40,6 +40,12 @@ const mockNormalizeWorkspaceBannerImage = vi.fn()
 const mockTrackResearchWorkspaceTelemetry = vi.fn()
 const mockGetResearchWorkspaceTelemetryState = vi.fn()
 const mockResetResearchWorkspaceTelemetryState = vi.fn()
+const workspaceContextMocks = vi.hoisted(() => ({
+  useActiveWorkspaceContext: vi.fn()
+}))
+const translationMock = vi.hoisted(() => ({
+  keys: [] as string[]
+}))
 
 const now = new Date("2026-02-18T12:00:00.000Z")
 
@@ -179,6 +185,59 @@ const ACP_PROJECTS_FOR_ALPHA_URL =
 const ACP_SESSIONS_FOR_ALPHA_URL =
   "http://127.0.0.1:8000/api/v1/acp/sessions?workspace_id=workspace-alpha&limit=6"
 
+const sourceSummaryFixture = {
+  total: 0,
+  selected: 0,
+  queryable: 0,
+  partially_queryable: 0,
+  processing: 0,
+  failed: 0,
+  missing: 0
+}
+
+const makeActiveWorkspaceContext = (
+  overrides: Record<string, unknown> = {}
+) => ({
+  state: "ready",
+  workspaceId: "workspace-alpha",
+  workspace: {
+    id: "workspace-alpha",
+    name: "Canonical Alpha",
+    label: "Canonical Alpha",
+    profile: "research",
+    archived: false,
+    deleted: false,
+    studyMaterialsPolicy: "workspace",
+    statusLabel: "Active",
+    version: 3,
+    lastModified: "2026-02-18T12:00:00.000Z"
+  },
+  attentionState: "ready",
+  resolution: { status: "complete", partial_errors: [] },
+  projectRoot: null,
+  sourceSummary: sourceSummaryFixture,
+  capabilities: null,
+  allowedActions: {},
+  partialErrors: [],
+  recovery: {
+    reasonCode: "allowed",
+    severity: "info",
+    message: "Workspace action is available.",
+    nextStepLabel: null,
+    nextStepHref: null
+  },
+  ...overrides
+})
+
+const makeActiveWorkspaceHookResult = (
+  contextOverrides: Record<string, unknown> = {}
+) => ({
+  context: makeActiveWorkspaceContext(contextOverrides),
+  loading: false,
+  error: null,
+  refresh: vi.fn()
+})
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -189,6 +248,7 @@ vi.mock("react-i18next", () => ({
             defaultValue?: string
           }
     ) => {
+      translationMock.keys.push(key)
       if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
       if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
       return key
@@ -270,6 +330,8 @@ vi.mock("../workspace-banner-image", () => ({
   }
 }))
 
+vi.mock("@/services/workspace-context", () => workspaceContextMocks)
+
 vi.mock("../WorkspaceSandboxDiagnosticsPanel", () => ({
   WorkspaceSandboxDiagnosticsPanel: ({ workspaceId }: { workspaceId: string }) => (
     <div data-testid="workspace-sandbox-diagnostics-panel">
@@ -305,6 +367,10 @@ if (!(globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver) {
 describe("WorkspaceHeader workspace browser modal", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    translationMock.keys = []
+    workspaceContextMocks.useActiveWorkspaceContext.mockReturnValue(
+      makeActiveWorkspaceHookResult()
+    )
     window.localStorage.clear()
     clearWorkspaceUndoActionsForTests()
     registryStateOverrides.missingDegraded = false
@@ -537,6 +603,130 @@ describe("WorkspaceHeader workspace browser modal", () => {
       "min-w-0",
       "max-w-full"
     )
+  })
+
+  it("renders server-authoritative workspace context", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    expect(
+      await screen.findByText("Server Workspace")
+    ).toBeInTheDocument()
+    expect(screen.getByText("Canonical Alpha")).toBeInTheDocument()
+    expect(screen.getByText("Server context ready")).toBeInTheDocument()
+    expect(translationMock.keys).toContain(
+      "playground:workspace.serverContextReady"
+    )
+    expect(translationMock.keys).not.toContain(
+      "playground:workspace.Servercontextready"
+    )
+    expect(workspaceContextMocks.useActiveWorkspaceContext).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "workspace-alpha" })
+    )
+  })
+
+  it("renders shared recovery copy when server workspace context fails", async () => {
+    workspaceContextMocks.useActiveWorkspaceContext.mockReturnValue(
+      makeActiveWorkspaceHookResult({
+        state: "error",
+        workspaceId: null,
+        workspace: null,
+        recovery: {
+          reasonCode: "workspace_context_error",
+          severity: "error",
+          message: "Server Workspace context is unavailable right now.",
+          nextStepLabel: "Open Workspaces",
+          nextStepHref: "#/workspaces"
+        }
+      })
+    )
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    expect(
+      await screen.findByText("Server Workspace context is unavailable right now.")
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: "Open Workspaces" })
+    ).toHaveAttribute("href", "#/workspaces")
+  })
+
+  it("labels archived server workspace context explicitly", async () => {
+    workspaceContextMocks.useActiveWorkspaceContext.mockReturnValue(
+      makeActiveWorkspaceHookResult({
+        state: "ready",
+        attentionState: "archived",
+        workspace: {
+          ...(makeActiveWorkspaceContext().workspace as Record<string, unknown>),
+          archived: true,
+          statusLabel: "Archived"
+        },
+        recovery: {
+          reasonCode: "workspace_archived",
+          severity: "warning",
+          message: "This server Workspace is archived. Restore it before making changes.",
+          nextStepLabel: "Open Workspaces",
+          nextStepHref: "#/workspaces"
+        }
+      })
+    )
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    expect(await screen.findByText("Server context archived")).toBeInTheDocument()
+    expect(screen.queryByText("Server context ready")).not.toBeInTheDocument()
+  })
+
+  it("does not filter the workspace browser list by active server context", async () => {
+    workspaceContextMocks.useActiveWorkspaceContext.mockReturnValue(
+      makeActiveWorkspaceHookResult({
+        workspaceId: "workspace-alpha",
+        workspace: {
+          ...(makeActiveWorkspaceContext().workspace as Record<string, unknown>),
+          id: "workspace-alpha",
+          label: "Canonical Alpha"
+        }
+      })
+    )
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspaces" }))
+    fireEvent.click(await screen.findByText("View all workspaces"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "All Workspaces"
+    })
+    expect(within(modal).getByText("Alpha Research")).toBeInTheDocument()
+    expect(within(modal).getByText("Beta Deep Dive")).toBeInTheDocument()
+    expect(within(modal).getByText("Gamma Notes")).toBeInTheDocument()
   })
 
   it("opens view-all modal and filters workspaces by search query", async () => {
@@ -1557,13 +1747,18 @@ describe("WorkspaceHeader workspace browser modal", () => {
       within(modal).getByText("Identified two release blockers.")
     ).toBeInTheDocument()
 
-    fireEvent.click(within(modal).getByRole("button", { name: "Open Agent Tasks" }))
-    expect(mockNavigate).toHaveBeenCalledWith("/agent-tasks?workspace=workspace-alpha")
-
     fireEvent.click(within(modal).getByRole("button", { name: "Open diagnostics" }))
-    expect(mockNavigate).toHaveBeenCalledWith(
+    expect(mockNavigate).toHaveBeenNthCalledWith(
+      1,
       "/acp-playground?session=sess-alpha&view=diagnostics"
     )
+
+    fireEvent.click(within(modal).getByRole("button", { name: "Open Agent Tasks" }))
+    expect(mockNavigate).toHaveBeenNthCalledWith(
+      2,
+      "/agent-tasks?workspace=workspace-alpha"
+    )
+    expect(mockNavigate).toHaveBeenCalledTimes(2)
   })
 
   it("shows direct workspace ACP sessions when Agent Tasks history has no runs", async () => {

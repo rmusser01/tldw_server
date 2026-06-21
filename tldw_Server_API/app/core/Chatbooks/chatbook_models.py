@@ -42,7 +42,32 @@ class ChatbookVersion(str, Enum):
     """
     V1 = "1.0.0"  # Primary V1 format using semantic versioning
     V1_LEGACY = "1.0"  # Legacy format for backward compatibility
+    V1_1 = "1.1.0"  # Backward-compatible format with manifest metadata additions
     V2 = "2.0.0"  # Future version with enhanced features
+
+
+def coerce_chatbook_export_version(format_version: ChatbookVersion | str | None) -> ChatbookVersion:
+    """Return the canonical ChatbookVersion currently supported for produced exports."""
+    if format_version is None:
+        return ChatbookVersion.V1
+
+    try:
+        version = format_version if isinstance(format_version, ChatbookVersion) else ChatbookVersion(str(format_version))
+    except ValueError as exc:
+        raise ValueError(
+            f"Unsupported chatbook export format_version: {format_version!r}. "
+            "Supported export versions are 1.0.0 and 1.1.0."
+        ) from exc
+
+    if version is ChatbookVersion.V1_LEGACY:
+        return ChatbookVersion.V1
+    if version in {ChatbookVersion.V1, ChatbookVersion.V1_1}:
+        return version
+
+    raise ValueError(
+        f"Unsupported chatbook export format_version: {version.value!r}. "
+        "Supported export versions are 1.0.0 and 1.1.0."
+    )
 
 
 class ContentType(str, Enum):
@@ -231,6 +256,13 @@ class ChatbookManifest:
     binary_limits: dict[str, int] = field(default_factory=dict)
     truncation: dict[str, Any] = field(default_factory=dict)
 
+    # v1.1 manifest metadata
+    features_used: list[str] = field(default_factory=list)
+    producer: dict[str, Any] = field(default_factory=dict)
+    source_instance: dict[str, Any] = field(default_factory=dict)
+    compatibility: dict[str, Any] = field(default_factory=dict)
+    file_inventory: list[dict[str, Any]] = field(default_factory=list)
+
     def to_dict(self) -> dict:
         """Convert manifest to dictionary for JSON serialization."""
         metadata: dict[str, Any] = {
@@ -246,8 +278,11 @@ class ChatbookManifest:
         if self.binary_limits:
             metadata["binary_limits"] = self.binary_limits
 
+        version_value = self.version.value if hasattr(self.version, 'value') else str(self.version)
+        is_v1_1_manifest = version_value == ChatbookVersion.V1_1.value
+
         payload = {
-            "version": self.version.value if hasattr(self.version, 'value') else str(self.version),
+            "version": version_value,
             "name": self.name,
             "description": self.description,
             "author": self.author,
@@ -283,6 +318,12 @@ class ChatbookManifest:
         }
         if self.truncation:
             payload["truncation"] = self.truncation
+        if is_v1_1_manifest:
+            payload["features_used"] = self.features_used
+            payload["producer"] = self.producer
+            payload["source_instance"] = self.source_instance
+            payload["compatibility"] = self.compatibility
+            payload["file_inventory"] = self.file_inventory
         return payload
 
     @classmethod
@@ -333,7 +374,12 @@ class ChatbookManifest:
             metadata=extra_metadata,
             binary_limits=binary_limits,
             truncation=truncation,
-            user_id=user.get("user_id")
+            user_id=user.get("user_id"),
+            features_used=data.get("features_used", []),
+            producer=data.get("producer", {}),
+            source_instance=data.get("source_instance", {}),
+            compatibility=data.get("compatibility", {}),
+            file_inventory=data.get("file_inventory", []),
         )
 
 
@@ -492,6 +538,7 @@ class ImportConflict:
 __all__ = [
     'ChatbookVersion',
     'ContentType',
+    'coerce_chatbook_export_version',
     'ExportStatus',
     'ImportStatus',
     'ConflictResolution',

@@ -10,9 +10,13 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.MCP_unified.command_runtime.adapters import (
+    AdapterContext,
+    PhaseOneCommandAdapters,
     derive_step_idempotency_key,
 )
 from tldw_Server_API.app.core.MCP_unified.command_runtime.executor import CommandRuntimeExecutor
+from tldw_Server_API.app.core.MCP_unified.command_runtime.parser import parse_command
+from tldw_Server_API.app.core.MCP_unified.command_runtime.registry import build_default_registry
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import (
     run_command_module as run_command_module_module,
@@ -190,7 +194,7 @@ def _build_module(protocol: _ProtocolStub) -> RunCommandModule:
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_run_module_exposes_governed_bash_and_shell_alias_tools() -> None:
     protocol = _ProtocolStub()
     module = _build_module(protocol)
@@ -213,6 +217,10 @@ async def test_run_module_exposes_governed_bash_and_shell_alias_tools() -> None:
         assert "retain_output_artifacts" in alias["inputSchema"]["properties"]
         assert "sandboxSessionId" in alias["inputSchema"]["properties"]
         assert "sandbox_session_id" in alias["inputSchema"]["properties"]
+        assert "envFile" in alias["inputSchema"]["properties"]
+        assert "env_file" in alias["inputSchema"]["properties"]
+        assert "shellName" in alias["inputSchema"]["properties"]
+        assert "shell_name" in alias["inputSchema"]["properties"]
 
 
 @pytest.mark.asyncio
@@ -370,6 +378,143 @@ async def test_run_cwd_preserves_whitespace_in_relative_file_arguments() -> None
     ]
 
 
+@pytest.mark.unit
+async def test_run_cd_carries_virtual_cwd_to_later_governed_steps() -> None:
+    """Virtual cd should scope later governed file commands in the same run chain."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-cd-carry", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": "cd docs ; cat notes.txt"}, context=context)
+
+    assert "hello" in rendered
+    assert "[exit:0 |" in rendered
+    assert [call.params["name"] for call in protocol.prepare_calls] == ["fs.read"]
+    assert protocol.prepare_calls[0].params["arguments"] == {"path": "docs/notes.txt"}
+
+
+@pytest.mark.unit
+async def test_run_pwd_reports_carried_virtual_cwd() -> None:
+    """Virtual pwd should report the current workspace-relative cwd."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-pwd-carry", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": "cd docs/sub ; pwd"}, context=context)
+
+    assert rendered.split("\n[exit:0 |", 1)[0] == "docs/sub\n"
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
+
+
+@pytest.mark.unit
+async def test_run_cd_parent_segments_stay_bounded_to_workspace_root() -> None:
+    """Virtual cd parent traversal should work only inside the workspace root."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-cd-parent", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": "cd docs/sub ; cd .. ; pwd"}, context=context)
+
+    assert rendered.split("\n[exit:0 |", 1)[0] == "docs\n"
+
+    denied = await module.execute_tool("run", {"command": "cd .."}, context=context)
+
+    assert "cd path must stay within the workspace root" in denied
+    assert "[exit:2 |" in denied
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
+
+
+@pytest.mark.unit
+async def test_run_cd_usage_error_does_not_abort_later_semicolon_governed_steps() -> None:
+    """A failing cd should not short-circuit later semicolon-separated governed commands."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-cd-usage-continues", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": "cd .. ; cat notes.txt"}, context=context)
+
+    assert "hello" in rendered
+    assert "[exit:0 |" in rendered
+    assert [call.params["name"] for call in protocol.prepare_calls] == ["fs.read"]
+    assert protocol.prepare_calls[0].params["arguments"] == {"path": "notes.txt"}
+
+
+@pytest.mark.unit
+async def test_command_adapters_normalize_backslash_cwd_before_cd_carry_over() -> None:
+    """Adapter-managed cwd should stay portable when initialized with Windows separators."""
+
+    protocol = _ProtocolStub()
+    visible = build_default_registry().visible_commands({"fs.read", "fs.read_text"})
+    adapters = PhaseOneCommandAdapters(
+        AdapterContext(
+            protocol=protocol,
+            request_context=RequestContext(request_id="run-cd-backslash-cwd", user_id="1", client_id="unit"),
+            visible_commands=visible,
+            cwd=r"docs\windows",
+        )
+    )
+
+    await adapters.preflight_chain(parse_command("cd nested ; cat notes.txt"))
+
+    assert protocol.prepare_calls[0].params["arguments"] == {
+        "path": "docs/windows/nested/notes.txt",
+    }
+
+
+@pytest.mark.unit
+async def test_run_cd_participates_in_nested_idempotency_keys() -> None:
+    """Dynamic cwd changes should avoid nested idempotency collisions."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-cd-idempotency", user_id="1", client_id="unit")
+
+    await module.execute_tool(
+        "run",
+        {"command": "cd docs ; cat notes.txt", "idempotencyKey": "parent-idem-cd"},
+        context=context,
+    )
+    await module.execute_tool(
+        "run",
+        {"command": "cd src ; cat notes.txt", "idempotencyKey": "parent-idem-cd"},
+        context=context,
+    )
+
+    assert protocol.prepare_calls[0].idempotency_key != protocol.prepare_calls[1].idempotency_key
+    assert protocol.prepare_calls[0].idempotency_key.startswith("parent-idem-cd:")
+    assert protocol.prepare_calls[1].idempotency_key.startswith("parent-idem-cd:")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd docs | pwd",
+        "cat missing.txt && cd docs ; cat notes.txt",
+        "cat missing.txt || cd docs ; cat notes.txt",
+    ],
+)
+@pytest.mark.unit
+async def test_run_cd_fails_closed_for_ambiguous_control_flow(command: str) -> None:
+    """Stateful cd should not be allowed where preflight cannot model control flow."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-cd-invalid-flow", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool("run", {"command": command}, context=context)
+
+    assert "cd is only supported as a semicolon-separated command" in rendered
+    assert "[exit:2 |" in rendered
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
+
+
 @pytest.mark.asyncio
 async def test_run_cwd_participates_in_nested_idempotency_keys() -> None:
     """Cwd scopes should salt nested idempotency keys."""
@@ -409,6 +554,59 @@ def test_scoped_parent_idempotency_key_uses_unambiguous_scope_serialization() ->
     )
 
     assert newline_encoded_key != component_key
+
+
+@pytest.mark.unit
+async def test_run_shell_name_participates_in_nested_idempotency_scope() -> None:
+    """Explicit shell selection should scope nested idempotency without changing backend routing."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-shell-name-idem", user_id="1", client_id="unit")
+
+    await module.execute_tool(
+        "run",
+        {"command": "cat notes.txt", "shellName": "bash", "idempotencyKey": "parent-idem-shell"},
+        context=context,
+    )
+    await module.execute_tool(
+        "run",
+        {"command": "cat notes.txt", "shellName": "powershell", "idempotencyKey": "parent-idem-shell"},
+        context=context,
+    )
+
+    first_key = protocol.prepare_calls[0].idempotency_key
+    second_key = protocol.prepare_calls[1].idempotency_key
+    assert first_key != second_key
+    assert first_key is not None and first_key.startswith("parent-idem-shell:")
+    assert second_key is not None and second_key.startswith("parent-idem-shell:")
+    assert [call.params["name"] for call in protocol.prepare_calls] == ["fs.read", "fs.read"]
+
+
+@pytest.mark.parametrize(
+    "tool_name, arguments",
+    [
+        ("run", {"command": "ls", "shellName": ""}),
+        ("run", {"command": "ls", "shellName": "zsh"}),
+        ("run", {"command": "ls", "shellName": 123}),
+        ("run", {"command": "ls", "shellName": "bash", "shell_name": "powershell"}),
+        ("bash", {"command": "ls", "shellName": "powershell"}),
+        ("powershell", {"command": "ls", "shell_name": "bash"}),
+        ("pwsh", {"command": "ls", "shellName": "powershell"}),
+    ],
+)
+@pytest.mark.unit
+async def test_run_rejects_invalid_or_conflicting_shell_name_arguments(
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> None:
+    """Shell selection must be explicit, known, and compatible with pinned aliases."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+
+    with pytest.raises(ValueError, match="shellName|shell_name"):
+        await module.execute_tool(tool_name, arguments, context=RequestContext(request_id="run-shell-name-invalid"))
 
 
 @pytest.mark.asyncio
@@ -451,6 +649,286 @@ async def test_run_sandbox_session_id_uses_session_backed_sandbox_run() -> None:
         "session_id": "sandbox-session-1",
         "command": ["python", "-V"],
     }
+
+
+@pytest.mark.unit
+async def test_run_env_file_is_forwarded_only_to_sandbox_run_without_rendering_values(tmp_path: Path) -> None:
+    """envFile should load workspace env values into sandbox.run without rendering secrets."""
+
+    class _SandboxProtocolStub(_ProtocolStub):
+        async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
+            del params, context
+            return {"tools": [{"name": "sandbox.run", "module": "sandbox", "canExecute": True}]}
+
+        async def execute_prepared_tool_call(self, prepared: _PreparedCall) -> dict[str, Any]:
+            self.execute_calls.append(prepared)
+            return {"content": [{"type": "json", "json": {"status": "completed"}}], "tool": "sandbox.run"}
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    env_file = workspace_root / ".env.sandbox"
+    env_file.write_text(
+        "\n".join(
+            [
+                "# comment",
+                "API_TOKEN=super-secret",
+                "export FEATURE_FLAG=enabled",
+                "QUOTED=\"two words\"",
+                "SINGLE='single quoted'",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    protocol = _SandboxProtocolStub()
+    module = RunCommandModule(
+        ModuleConfig(
+            name="run",
+            settings={
+                "protocol": protocol,
+                "workspace_root_resolver": _WorkspaceRootResolverStub(workspace_root),
+            },
+        )
+    )
+    context = RequestContext(request_id="run-env-file", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool(
+        "run",
+        {"command": "sandbox python app.py", "envFile": ".env.sandbox"},
+        context=context,
+    )
+
+    assert "[exit:0 |" in rendered
+    assert "super-secret" not in rendered
+    assert protocol.prepare_calls[0].params["name"] == "sandbox.run"
+    assert protocol.prepare_calls[0].params["arguments"] == {
+        "base_image": "python:3.11",
+        "command": ["python", "app.py"],
+        "env": {
+            "API_TOKEN": "super-secret",
+            "FEATURE_FLAG": "enabled",
+            "QUOTED": "two words",
+            "SINGLE": "single quoted",
+        },
+    }
+
+
+@pytest.mark.unit
+async def test_run_env_file_uses_cwd_to_resolve_workspace_relative_file(tmp_path: Path) -> None:
+    """envFile should resolve beneath cwd without escaping the workspace root."""
+
+    class _SandboxProtocolStub(_ProtocolStub):
+        async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
+            del params, context
+            return {"tools": [{"name": "sandbox.run", "module": "sandbox", "canExecute": True}]}
+
+        async def execute_prepared_tool_call(self, prepared: _PreparedCall) -> dict[str, Any]:
+            self.execute_calls.append(prepared)
+            return {"content": [{"type": "json", "json": {"ok": True}}], "tool": "sandbox.run"}
+
+    workspace_root = tmp_path / "workspace"
+    (workspace_root / "apps" / "api").mkdir(parents=True)
+    (workspace_root / "apps" / "api" / ".env").write_text("APP_ENV=test\n", encoding="utf-8")
+    protocol = _SandboxProtocolStub()
+    module = RunCommandModule(
+        ModuleConfig(
+            name="run",
+            settings={
+                "protocol": protocol,
+                "workspace_root_resolver": _WorkspaceRootResolverStub(workspace_root),
+            },
+        )
+    )
+    context = RequestContext(request_id="run-env-file-cwd", user_id="1", client_id="unit")
+
+    await module.execute_tool(
+        "run",
+        {"command": "sandbox python app.py", "cwd": "apps/api", "envFile": ".env"},
+        context=context,
+    )
+
+    assert protocol.prepare_calls[0].params["arguments"]["env"] == {"APP_ENV": "test"}
+
+
+@pytest.mark.unit
+async def test_run_env_file_participates_in_nested_idempotency_keys_without_secret_values(tmp_path: Path) -> None:
+    """Env-file content changes should alter nested idempotency without exposing values in keys."""
+
+    class _SandboxProtocolStub(_ProtocolStub):
+        async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
+            del params, context
+            return {"tools": [{"name": "sandbox.run", "module": "sandbox", "canExecute": True}]}
+
+        async def execute_prepared_tool_call(self, prepared: _PreparedCall) -> dict[str, Any]:
+            self.execute_calls.append(prepared)
+            return {"content": [{"type": "json", "json": {"ok": True}}], "tool": "sandbox.run"}
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    env_file = workspace_root / ".env"
+    env_file.write_text("TOKEN=first-secret\n", encoding="utf-8")
+    protocol = _SandboxProtocolStub()
+    module = RunCommandModule(
+        ModuleConfig(
+            name="run",
+            settings={
+                "protocol": protocol,
+                "workspace_root_resolver": _WorkspaceRootResolverStub(workspace_root),
+            },
+        )
+    )
+    context = RequestContext(request_id="run-env-file-idem", user_id="1", client_id="unit")
+
+    await module.execute_tool(
+        "run",
+        {"command": "sandbox python -V", "envFile": ".env", "idempotencyKey": "parent-idem-env"},
+        context=context,
+    )
+    env_file.write_text("TOKEN=second-secret\n", encoding="utf-8")
+    await module.execute_tool(
+        "run",
+        {"command": "sandbox python -V", "envFile": ".env", "idempotencyKey": "parent-idem-env"},
+        context=context,
+    )
+
+    first_key = protocol.prepare_calls[0].idempotency_key
+    second_key = protocol.prepare_calls[1].idempotency_key
+    assert first_key != second_key
+    assert first_key is not None and first_key.startswith("parent-idem-env:")
+    assert second_key is not None and second_key.startswith("parent-idem-env:")
+    assert "first-secret" not in first_key
+    assert "second-secret" not in second_key
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"command": "sandbox python -V", "envFile": ""},
+        {"command": "sandbox python -V", "envFile": 123},
+        {"command": "sandbox python -V", "envFile": "/tmp/.env"},
+        {"command": "sandbox python -V", "envFile": "../.env"},
+        {"command": "sandbox python -V", "envFile": "~/.env"},
+        {"command": "sandbox python -V", "envFile": ".env", "env_file": "other.env"},
+    ],
+)
+@pytest.mark.unit
+async def test_run_rejects_invalid_env_file_arguments(arguments: dict[str, Any]) -> None:
+    """envFile aliases must be safe, relative, and consistent."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+
+    with pytest.raises(ValueError, match="envFile|env_file"):
+        await module.execute_tool("run", arguments, context=RequestContext(request_id="run-env-file-invalid"))
+
+
+@pytest.mark.unit
+async def test_run_env_file_rejects_non_sandbox_command_chains(tmp_path: Path) -> None:
+    """envFile should fail closed instead of being silently ignored outside sandbox steps."""
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
+    protocol = _ProtocolStub()
+    module = RunCommandModule(
+        ModuleConfig(
+            name="run",
+            settings={
+                "protocol": protocol,
+                "workspace_root_resolver": _WorkspaceRootResolverStub(workspace_root),
+            },
+        )
+    )
+
+    rendered = await module.execute_tool(
+        "run",
+        {"command": "ls", "envFile": ".env"},
+        context=RequestContext(request_id="run-env-file-non-sandbox"),
+    )
+
+    assert "envFile is only supported for command chains that include sandbox" in rendered
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
+
+
+@pytest.mark.unit
+async def test_run_env_file_rejects_malformed_files(tmp_path: Path) -> None:
+    """Malformed env files should fail before any sandbox tool call is prepared."""
+
+    class _SandboxProtocolStub(_ProtocolStub):
+        async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
+            del params, context
+            return {"tools": [{"name": "sandbox.run", "module": "sandbox", "canExecute": True}]}
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    (workspace_root / ".env").write_text("GOOD=value\nNO_EQUALS\n", encoding="utf-8")
+    protocol = _SandboxProtocolStub()
+    module = RunCommandModule(
+        ModuleConfig(
+            name="run",
+            settings={
+                "protocol": protocol,
+                "workspace_root_resolver": _WorkspaceRootResolverStub(workspace_root),
+            },
+        )
+    )
+
+    rendered = await module.execute_tool(
+        "run",
+        {"command": "sandbox python -V", "envFile": ".env"},
+        context=RequestContext(request_id="run-env-file-malformed"),
+    )
+
+    assert "envFile line 2 must be KEY=value" in rendered
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
+
+
+@pytest.mark.unit
+def test_run_env_file_parser_accepts_bom_and_rejects_unicode_keys() -> None:
+    """Env parser should handle UTF-8 BOMs but enforce ASCII variable names."""
+
+    parsed = RunCommandModule._parse_env_file_bytes(b"\xef\xbb\xbfAPI_TOKEN=ok\n")
+
+    assert parsed == {"API_TOKEN": "ok"}
+    with pytest.raises(run_command_module_module.RunEnvFileValidationError, match="invalid variable name"):
+        RunCommandModule._parse_env_file_bytes("ÄPI_TOKEN=bad\n".encode())
+    with pytest.raises(run_command_module_module.RunEnvFileValidationError, match="invalid variable name"):
+        RunCommandModule._parse_env_file_bytes("ＡPI_TOKEN=bad\n".encode())
+
+
+@pytest.mark.unit
+def test_run_env_file_reader_uses_descriptor_read_without_path_read_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Env reader should not re-open the path after descriptor validation."""
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("API_TOKEN=ok\n", encoding="utf-8")
+
+    def _fail_read_bytes(_path: Path) -> bytes:
+        raise AssertionError("Path.read_bytes must not be used for envFile reads")
+
+    monkeypatch.setattr(Path, "read_bytes", _fail_read_bytes)
+
+    assert RunCommandModule._read_env_file_bytes(env_file) == b"API_TOKEN=ok\n"
+
+
+@pytest.mark.unit
+def test_run_env_file_reader_maps_open_errors(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Env reader should surface OSError as a structured env-file validation error."""
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("API_TOKEN=ok\n", encoding="utf-8")
+
+    def _raise_open(*_args: Any, **_kwargs: Any) -> int:
+        raise PermissionError("blocked")
+
+    monkeypatch.setattr(run_command_module_module.os, "open", _raise_open)
+
+    with pytest.raises(run_command_module_module.RunEnvFileValidationError, match="could not be read"):
+        RunCommandModule._read_env_file_bytes(env_file)
 
 
 @pytest.mark.asyncio
@@ -564,6 +1042,96 @@ async def test_shell_alias_rejects_unsupported_raw_shell_syntax_before_backend_c
     assert "[exit:2 |" in rendered
     assert protocol.prepare_calls == []
     assert protocol.execute_calls == []
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments", "expected_message"),
+    [
+        (
+            "powershell",
+            {"command": "& ./script.ps1"},
+            "Unsupported PowerShell feature: invocation operator",
+        ),
+        (
+            "pwsh",
+            {"command": "& ./script.ps1"},
+            "Unsupported PowerShell feature: invocation operator",
+        ),
+        (
+            "run",
+            {"command": "ForEach-Object { Get-ChildItem }", "shellName": "powershell"},
+            "Unsupported PowerShell feature: script blocks",
+        ),
+    ],
+)
+@pytest.mark.unit
+async def test_powershell_shell_selection_rejects_unsupported_platform_syntax_before_backend_calls(
+    tool_name: str,
+    arguments: dict[str, Any],
+    expected_message: str,
+) -> None:
+    """PowerShell-only raw shell syntax must fail before any governed backend call."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-powershell-unsupported", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool(tool_name, arguments, context=context)
+
+    assert expected_message in rendered
+    assert "[exit:2 |" in rendered
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
+
+
+@pytest.mark.unit
+async def test_powershell_shell_selection_allows_brace_quantifier_search_pattern() -> None:
+    """Brace quantifiers in virtual CLI arguments are not PowerShell script blocks."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-powershell-brace-pattern", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool(
+        "run",
+        {"command": "rg foo{2} src", "shellName": "powershell"},
+        context=context,
+    )
+
+    assert "[exit:0 |" in rendered
+    assert [call.params["name"] for call in protocol.prepare_calls] == ["fs.grep"]
+    assert protocol.prepare_calls[0].params["arguments"] == {"pattern": "foo{2}", "base_path": "src"}
+
+
+@pytest.mark.unit
+async def test_powershell_redirection_is_not_reported_as_invocation_operator() -> None:
+    """PowerShell redirection containing & should keep the generic redirection diagnostic."""
+
+    protocol = _ProtocolStub()
+    module = _build_module(protocol)
+    context = RequestContext(request_id="run-powershell-redirection", user_id="1", client_id="unit")
+
+    rendered = await module.execute_tool(
+        "run",
+        {"command": "cat notes.txt 2>&1", "shellName": "powershell"},
+        context=context,
+    )
+
+    assert "Unsupported shell feature: redirection" in rendered
+    assert "Unsupported PowerShell feature: invocation operator" not in rendered
+    assert "[exit:2 |" in rendered
+    assert protocol.prepare_calls == []
+    assert protocol.execute_calls == []
+
+
+@pytest.mark.unit
+def test_powershell_single_quoted_backtick_does_not_escape_closing_quote() -> None:
+    """PowerShell treats backticks as literals inside single-quoted strings."""
+
+    message = RunCommandModule._unsupported_powershell_feature_message("rg '`' & src")
+
+    assert message is not None
+    assert "Unsupported PowerShell feature: invocation operator" in message
 
 
 @pytest.mark.asyncio

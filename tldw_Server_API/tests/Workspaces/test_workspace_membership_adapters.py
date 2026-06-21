@@ -370,6 +370,7 @@ class FakeChaChaDB:
         self.memberships: dict[tuple[str, str, str], dict[str, object]] = {}
         self.last_add_data: dict[str, object] | None = None
         self.last_list_resource_key: tuple[str, str] | None = None
+        self.activity_events: list[dict[str, object]] = []
         self.list_workspace_calls = 0
         self.summary_calls = 0
         self._clock = 0
@@ -567,6 +568,27 @@ class FakeChaChaDB:
         row["updated_at"] = self._timestamp()
         row["version"] = int(row.get("version", 1)) + 1
         return dict(row)
+
+    def record_workspace_activity_event(
+        self,
+        workspace_id: str,
+        data: dict[str, object],
+        *,
+        user_id: str | None = None,
+        return_row: bool = True,
+    ) -> dict[str, object] | None:
+        event = {
+            "workspace_id": workspace_id,
+            "actor_user_id": user_id,
+            "created_at": self._timestamp(),
+            "event_id": f"event-{len(self.activity_events) + 1}",
+            "version": 1,
+            **dict(data),
+        }
+        self.activity_events.append(event)
+        if not return_row:
+            return None
+        return dict(event)
 
 
 def _membership_row(
@@ -1285,6 +1307,39 @@ def test_link_membership_idempotent_retry_does_not_invoke_reserved_on_link_hook(
     assert first_payload["resource_id"] == "42"
     assert retry_payload["resource_id"] == "42"
     assert adapter.linked == []
+    assert [event["event_type"] for event in db.activity_events] == ["membership.linked"]
+
+
+def test_link_membership_records_created_and_restored_activity_events() -> None:
+    db = FakeChaChaDB()
+    db.memberships[("workspace-1", "media", "41")] = _membership_row(resource_id="41", deleted=True)
+    adapter = RecordingAdapter()
+    service = WorkspaceMembershipService(db, adapters={"media": adapter})
+
+    service.link_membership(
+        "workspace-1",
+        {"resource_type": "media", "resource_id": "0042", "role": "source", "transfer_policy": "copy"},
+        user_id="user-1",
+        media_db=object(),
+    )
+    service.link_membership(
+        "workspace-1",
+        {"resource_type": "media", "resource_id": "0041", "role": "source"},
+        user_id="user-2",
+        media_db=object(),
+    )
+
+    assert [event["event_type"] for event in db.activity_events] == [
+        "membership.linked",
+        "membership.restored",
+    ]
+    linked, restored = db.activity_events
+    assert linked["resource_type"] == "media"
+    assert linked["resource_id"] == "42"
+    assert linked["metadata"] == {"role": "source", "transfer_policy": "copy"}
+    assert linked["actor_user_id"] == "user-1"
+    assert restored["resource_id"] == "41"
+    assert restored["actor_user_id"] == "user-2"
 
 
 def test_get_membership_returns_unresolved_summary_when_media_db_is_unavailable() -> None:
@@ -1335,6 +1390,10 @@ def test_unlink_membership_soft_deletes_active_membership_and_calls_adapter_hook
     assert payload["deleted"] is True
     assert db.memberships[("workspace-1", "media", "42")]["deleted"] is True
     assert adapter.unlinked == [db.memberships[("workspace-1", "media", "42")]]
+    assert [event["event_type"] for event in db.activity_events] == ["membership.unlinked"]
+    assert db.activity_events[0]["resource_type"] == "media"
+    assert db.activity_events[0]["resource_id"] == "42"
+    assert db.activity_events[0]["metadata"] == {"role": "source", "transfer_policy": "link"}
 
 
 def test_unlink_membership_noops_without_adapter_hook_for_missing_or_deleted_membership() -> None:

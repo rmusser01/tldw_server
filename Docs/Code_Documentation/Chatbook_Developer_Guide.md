@@ -67,6 +67,7 @@ tldw_Server_API/app/core/Chatbooks/
 ├── __init__.py
 ├── chatbook_service.py       # Main service class
 ├── chatbook_models.py        # Data models and enums
+├── chatbook_format_v1_1.py   # v1.1 feature registry, envelopes, inventory, preview/import validation
 ├── chatbook_validators.py    # Input validation
 ├── quota_manager.py          # User quota management
 ├── jobs_adapter.py          # Core Jobs adapter (queue/status integration)
@@ -83,6 +84,7 @@ tldw_Server_API/app/api/v1/
 
 - **chatbook_service.py**: Core business logic for export/import operations
 - **chatbook_models.py**: Defines ChatbookManifest, ExportJob, ImportJob models
+- **chatbook_format_v1_1.py**: Shared helpers for the v1.1 format contract
 - **chatbook_validators.py**: Input validation and sanitization
 - **quota_manager.py**: Manages user quotas and rate limiting
 - **jobs_adapter.py**: Core Jobs integration for enqueueing and status mapping
@@ -196,6 +198,58 @@ def preview_chatbook(
 ) -> Tuple[Optional[ChatbookManifest], Optional[str]]:
     """Preview chatbook contents without importing."""
 ```
+
+### Chatbook v1.1 Format Helpers
+
+`chatbook_format_v1_1.py` owns the shared v1.1 contract logic so producer,
+preview, and importer behavior stays consistent:
+
+- `FEATURE_REGISTRY` and `ensure_known_features()` define stable feature tokens
+  and report unsupported features without crashing on malformed manifest input.
+- `sha256_file()` and `build_file_inventory()` hash bundled files and omit
+  `manifest.json` and archive checksum sidecars to avoid self-referential
+  hashes.
+- `build_content_envelope()` creates the content-envelope shape used by v1.1
+  producers for structured payloads, rendered representations, integrity,
+  lossiness, source references, and redaction metadata.
+- `build_preview_report()` creates the deterministic preview report fields:
+  `compatibility`, `features`, `integrity`, `lossiness`, `source_refs`,
+  `warnings`, and `errors`.
+- `validate_v1_1_before_import()` converts preview/inventory findings into
+  pre-write import warnings or blocking errors according to the manifest
+  compatibility policy.
+
+Keep new v1.1 behaviors in this module when they are shared across content
+types. Content-specific exporters and importers should call these helpers
+instead of duplicating feature checks, hash formats, or report shapes.
+
+### Chatbook v1.1 Flow
+
+Export remains v1.0.0 by default. `CreateChatbookRequest.format_version` and
+`ChatbookService.create_chatbook(..., format_version=...)` are coerced through
+the shared version helper; v1.1 output is produced only when callers request
+`"1.1.0"`.
+
+For v1.1 export, `ChatbookService` builds the normal v1-compatible manifest and
+then adds `features_used`, `producer`, `source_instance`, `compatibility`, and
+`file_inventory`. Producer-specific content envelopes can be added
+incrementally for content types that have stable structured restore payloads;
+until then, content payloads keep the v1-compatible `file_path` layout.
+
+Preview keeps `preview_chatbook()` as the legacy two-tuple. The API endpoint
+prefers `preview_chatbook_with_report()`, which reuses the safe extraction flow
+and adds the v1.1 preview report from `build_preview_report()`. This keeps
+existing service doubles and v1.0 clients compatible while exposing v1.1
+feature, integrity, lossiness, and source-reference summaries.
+
+Import parses the manifest and runs `validate_v1_1_before_import()` immediately
+for v1.1 archives, before building selections or calling content import methods.
+Validation checks inventory hashes, missing listed files, unsafe inventory
+paths, unsupported feature policy, and required inventory coverage for each
+payload path that can be imported. Coverage includes explicit
+`ContentItem.file_path` values where applicable, legacy fallback paths used by
+current importers, and bundled conversation image attachment paths discovered
+from verified conversation payloads.
 
 ### Chatbook Models
 
@@ -667,6 +721,20 @@ if ContentType.CUSTOM_TYPE in content_selections:
         work_dir, manifest, content
     )
 ```
+
+5. **Add v1.1 Coverage When Applicable**:
+- Exporters that produce v1.1 content should call `build_content_envelope()`
+  and store the result in `content_items[].metadata.envelope`.
+- Keep v1-compatible `file_path` and `checksum` populated when there is a
+  bundled primary payload.
+- Add rendered, binary, attachment, or external-reference representations to
+  the envelope instead of inventing ad hoc metadata fields.
+- Ensure every bundled file is covered by `file_inventory`; `build_file_inventory()`
+  handles the final archive-wide inventory.
+- Extend `validate_v1_1_before_import()` when a new importer reads fallback
+  paths, attachment paths, or representation paths before writing.
+- Add tests that prove missing inventory coverage, missing files, and checksum
+  mismatches fail before import writes.
 
 ### Adding Export Formats
 

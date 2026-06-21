@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter, useLocation } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import AgentTasksPage from "../index"
+import AgentTasksPage, { buildTaskDetailRequestUrl } from "../index"
 
 const storageMocks = vi.hoisted(() => ({
   useStorage: vi.fn()
@@ -37,8 +37,8 @@ vi.mock("@/services/tldw/deployment-mode", () => ({
   isHostedTldwDeployment: () => deploymentMocks.isHostedTldwDeployment()
 }))
 
-const PROJECTS_URL =
-  "http://127.0.0.1:8000/api/v1/agent-orchestration/projects"
+const API_BASE = "http://127.0.0.1:8000/api/v1/agent-orchestration"
+const PROJECTS_URL = `${API_BASE}/projects`
 const PROJECTS_FOR_ALPHA_URL =
   `${PROJECTS_URL}?canonical_workspace_id=workspace-alpha&canonical_workspace_source=research_workspace`
 const PROJECTS_FOR_BETA_URL =
@@ -282,6 +282,16 @@ describe("AgentTasksPage connection and payload normalization", () => {
         throw new Error(`unexpected fetch: ${url}`)
       })
     )
+  })
+
+  it("builds task detail URLs with optional redacted run summaries", () => {
+    expect(buildTaskDetailRequestUrl(API_BASE, 11)).toBe(`${API_BASE}/tasks/11`)
+    expect(
+      buildTaskDetailRequestUrl(API_BASE, 11, { runSummaryMode: "full" })
+    ).toBe(`${API_BASE}/tasks/11`)
+    expect(
+      buildTaskDetailRequestUrl(API_BASE, 11, { runSummaryMode: "redacted" })
+    ).toBe(`${API_BASE}/tasks/11?run_summary_mode=redacted`)
   })
 
   it("loads projects and tasks from canonical config-backed requests even when legacy storage is stale", async () => {

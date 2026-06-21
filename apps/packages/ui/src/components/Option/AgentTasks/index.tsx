@@ -124,6 +124,8 @@ type ReviewItem = {
   created_at?: string | null
 }
 
+type RunSummaryMode = "full" | "redacted"
+
 type TaskDetailItem = TaskItem & {
   reviews?: ReviewItem[]
 }
@@ -215,6 +217,21 @@ const buildProjectsRequestUrl = (
     canonical_workspace_source: CANONICAL_WORKSPACE_SOURCE
   })
   return `${apiBase}/projects?${params.toString()}`
+}
+
+export const buildTaskDetailRequestUrl = (
+  apiBase: string,
+  taskId: number,
+  options?: { runSummaryMode?: RunSummaryMode }
+): string => {
+  const url = `${apiBase}/tasks/${taskId}`
+  if (!options?.runSummaryMode || options.runSummaryMode === "full") {
+    return url
+  }
+  const params = new URLSearchParams({
+    run_summary_mode: options.runSummaryMode
+  })
+  return `${url}?${params.toString()}`
 }
 
 const createUnsupportedError = (): Error & { code: string } =>
@@ -602,7 +619,7 @@ export const AgentTasksPage: React.FC = () => {
     setError(null)
     try {
       const headers = getHeaders(apiTransport)
-      const res = await fetch(`${apiBase}/tasks/${taskId}`, {
+      const res = await fetch(buildTaskDetailRequestUrl(apiBase, taskId), {
         headers,
         signal: controller.signal
       })

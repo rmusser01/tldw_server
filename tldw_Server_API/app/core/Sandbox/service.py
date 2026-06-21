@@ -47,6 +47,8 @@ from .models import (
     SessionSpec,
     TrustLevel,
 )
+from .operator_evidence import collect_operator_evidence
+from .operator_status import build_operator_status
 from .orchestrator import SandboxOrchestrator, SessionActiveRunsConflict
 from .policy import SandboxPolicy, SandboxPolicyConfig, compute_policy_hash
 from .runners.docker_runner import DockerRunner, docker_available
@@ -77,6 +79,16 @@ from .vz_reconciliation import (
     REASON_UNKNOWN_OWNERSHIP,
     STATUS_OWNED_ORPHAN,
     collect_vz_reconciliation,
+)
+
+_SANDBOX_OPERATOR_STATUS_OPERATIONAL_EXCEPTIONS = (
+    ConnectionError,
+    OSError,
+    TimeoutError,
+    ValueError,
+    MacOSVirtualizationHelperFailure,
+    MacOSVirtualizationHelperProtocolError,
+    MacOSVirtualizationHelperUnavailable,
 )
 
 _SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS = (
@@ -1143,6 +1155,53 @@ class SandboxService:
             },
             "runtimes": runtime_rows,
         }
+
+    def operator_status(
+        self,
+        *,
+        startup_warning_summary: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Return a read-only consolidated sandbox operator status projection."""
+
+        runtime_diagnostics: dict[str, object] | None
+        macos_diagnostics: dict[str, object] | None
+        try:
+            runtime_diagnostics = self.runtime_diagnostics_summary()
+        except _SANDBOX_OPERATOR_STATUS_OPERATIONAL_EXCEPTIONS as exc:
+            logger.opt(exception=exc).warning(
+                "Sandbox operator status runtime diagnostics unavailable"
+            )
+            runtime_diagnostics = {
+                "_section_error": "runtime_diagnostics_failed"
+            }
+        try:
+            macos_diagnostics = self.macos_diagnostics()
+        except _SANDBOX_OPERATOR_STATUS_OPERATIONAL_EXCEPTIONS as exc:
+            logger.opt(exception=exc).warning(
+                "Sandbox operator status macOS diagnostics unavailable"
+            )
+            macos_diagnostics = {
+                "_section_error": "macos_diagnostics_failed"
+            }
+        try:
+            evidence_summary = collect_operator_evidence()
+        except _SANDBOX_OPERATOR_STATUS_OPERATIONAL_EXCEPTIONS as exc:
+            logger.opt(exception=exc).warning(
+                "Sandbox operator status evidence unavailable"
+            )
+            evidence_summary = {
+                "configured": True,
+                "source": "host_smoke_evidence",
+                "available": False,
+                "valid": False,
+                "reasons": ["evidence_collection_failed"],
+            }
+        return build_operator_status(
+            runtime_diagnostics=runtime_diagnostics,
+            macos_diagnostics=macos_diagnostics,
+            startup_warning_summary=startup_warning_summary,
+            evidence_summary=evidence_summary,
+        )
 
     @staticmethod
     def _runtime_diagnostics_item(row: dict[str, object]) -> dict[str, object]:

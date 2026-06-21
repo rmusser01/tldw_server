@@ -15,7 +15,7 @@ Payload fields:
 - chatbooks_job_id: str (required)
 - name, description, author, tags, categories
 - content_selections: {content_type: [ids]}
-- include_media, media_quality, include_embeddings, include_generated_content
+- include_media, media_quality, include_embeddings, include_generated_content, format_version
 - file_token (preferred) or file_path (legacy), source_format, selected_openwebui_user_id,
   conflict_resolution, prefix_imported, import_media, import_embeddings
 
@@ -40,6 +40,7 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ContentType,
     ExportStatus,
     ImportStatus,
+    coerce_chatbook_export_version,
 )
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.Chatbooks.openwebui_hydration_jobs import (
@@ -238,6 +239,20 @@ async def _handle_export(service: ChatbookService, payload: dict[str, Any], job_
         raise ChatbooksJobError("export job already claimed", retryable=True, backoff_seconds=5)
 
     selections = _map_content_selections(payload.get("content_selections") or {})
+    try:
+        format_version = coerce_chatbook_export_version(payload.get("format_version"))
+    except ValueError as exc:
+        ej = None
+        try:
+            ej = service._get_export_job(job_id)
+        except Exception as lookup_err:
+            logger.debug(f"Chatbooks Jobs worker: failed to load export job {job_id}: {lookup_err}")
+        if ej:
+            ej.status = ExportStatus.FAILED
+            ej.completed_at = datetime.now(timezone.utc)
+            ej.error_message = str(exc)
+            service._save_export_job(ej)
+        raise ChatbooksJobError(str(exc), retryable=False) from exc
     ok, msg, file_path = await service._create_chatbook_sync_wrapper(
         name=payload.get("name"),
         description=payload.get("description"),
@@ -249,6 +264,7 @@ async def _handle_export(service: ChatbookService, payload: dict[str, Any], job_
         include_generated_content=bool(payload.get("include_generated_content", True)),
         tags=payload.get("tags") or [],
         categories=payload.get("categories") or [],
+        format_version=format_version,
     )
 
     if not ok:

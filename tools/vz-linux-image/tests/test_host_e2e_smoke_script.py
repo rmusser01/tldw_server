@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import signal
 import socket
 import subprocess
@@ -14,9 +15,12 @@ from pathlib import Path
 import pytest
 
 
+pytestmark = pytest.mark.unit
+
 IMAGE_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = IMAGE_DIR.parents[1]
 SMOKE_SCRIPT = IMAGE_DIR / "scripts" / "run-host-e2e-smoke.sh"
+EVIDENCE_EXPORT_PREFIX = "export TLDW_SANDBOX_VZ_EVIDENCE_DIR="
 EVIDENCE_FILES = {
     "host-smoke-evidence.json",
     "source-bundle-hashes-before.txt",
@@ -44,6 +48,24 @@ def _planned_evidence_files(stdout: str) -> set[str]:
         for line in stdout.splitlines()
         if line.startswith("evidence file: ")
     }
+
+
+def _assert_evidence_export_value(stdout: str, expected: Path | str) -> None:
+    """Assert that stdout includes a sourceable evidence-dir export with the expected value."""
+    lines = [line for line in stdout.splitlines() if line.startswith(EVIDENCE_EXPORT_PREFIX)]
+    if len(lines) != 1:
+        pytest.fail(f"expected exactly one evidence export line, found {len(lines)}")
+    try:
+        tokens = shlex.split(lines[0])
+    except ValueError as exc:
+        pytest.fail(f"evidence export line is not shell-parseable: {exc}")
+    if len(tokens) != 2 or tokens[0] != "export" or "=" not in tokens[1]:
+        pytest.fail(f"unexpected evidence export format: {lines[0]}")
+    name, value = tokens[1].split("=", 1)
+    if name != "TLDW_SANDBOX_VZ_EVIDENCE_DIR":
+        pytest.fail(f"unexpected evidence export variable: {name}")
+    if value != str(expected):
+        pytest.fail(f"expected evidence export {expected!s}, got {value}")
 
 
 def _assert_owner_only(path: Path) -> None:
@@ -78,6 +100,8 @@ def test_host_e2e_smoke_script_help_mentions_required_bundle() -> None:
     assert "Usage:" in result.stdout
     assert "--bundle PATH" in result.stdout
     assert "Canonical source vz_linux bundle" in result.stdout
+    if "--evidence-dir PATH" not in result.stdout:
+        pytest.fail("help output is missing --evidence-dir PATH")
     assert "--include-failure-drills" in result.stdout
 
 
@@ -195,6 +219,7 @@ def test_host_e2e_smoke_script_dry_run_prints_default_evidence_bundle(tmp_path: 
     evidence_dir = Path(evidence_dir_text)
     assert evidence_dir.name == "evidence"
     assert not evidence_dir.exists()
+    _assert_evidence_export_value(result.stdout, evidence_dir_text)
     expected_paths = {f"{evidence_dir_text}/{evidence_file}" for evidence_file in EVIDENCE_FILES}
     assert expected_paths <= _planned_evidence_files(result.stdout)
 
@@ -206,7 +231,7 @@ def test_host_e2e_smoke_script_dry_run_accepts_evidence_dir_override(tmp_path: P
     (bundle / "kernel").write_bytes(b"kernel")
     (bundle / "rootfs.img").write_bytes(b"rootfs")
     helper = tmp_path / "macos-vz-helper"
-    evidence_dir = tmp_path / "custom-evidence"
+    evidence_dir = tmp_path / "custom evidence"
 
     result = _run_smoke_script(
         "--dry-run",
@@ -222,6 +247,7 @@ def test_host_e2e_smoke_script_dry_run_accepts_evidence_dir_override(tmp_path: P
 
     assert result.returncode == 0, result.stderr
     assert f"evidence directory: {evidence_dir}" in result.stdout
+    _assert_evidence_export_value(result.stdout, evidence_dir)
     assert not evidence_dir.exists()
     expected_paths = {str(evidence_dir / evidence_file) for evidence_file in EVIDENCE_FILES}
     assert expected_paths <= _planned_evidence_files(result.stdout)
@@ -363,7 +389,7 @@ def test_host_e2e_smoke_script_real_run_writes_evidence_bundle(tmp_path: Path) -
     )
     tmp_dir = tmp_path / "tmp"
     tmp_dir.mkdir()
-    evidence_dir = tmp_path / "evidence"
+    evidence_dir = tmp_path / "evidence with spaces"
     fake_python = tmp_path / "fake-python"
     fake_helper = tmp_path / "fake-helper"
     fake_python.write_text(
@@ -429,6 +455,7 @@ def test_host_e2e_smoke_script_real_run_writes_evidence_bundle(tmp_path: Path) -
         assert f"{_sha256_file(kernel)}  kernel" in source_before_hashes
         assert f"{_sha256_file(rootfs)}  rootfs.img" in source_after_hashes
         assert f"{_sha256_file(rootfs)}  rootfs.img" in run_hashes
+        _assert_evidence_export_value(result.stdout, evidence_dir)
         evidence = json.loads((evidence_dir / "host-smoke-evidence.json").read_text(encoding="utf-8"))
     finally:
         for unreadable_log in tmp_dir.glob("**/unreadable.log"):

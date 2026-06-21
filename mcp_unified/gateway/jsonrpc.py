@@ -95,6 +95,31 @@ class GatewayNoResponse:
     """Sentinel for JSON-RPC notifications that intentionally produce no response."""
 
 
+@dataclass(frozen=True, slots=True)
+class GatewayJSONRPCEnvelope:
+    """Raw request metadata that pydantic request models intentionally discard."""
+
+    payload: dict[str, Any]
+    has_id: bool
+    request_id: str | int | None
+
+    @property
+    def is_notification(self) -> bool:
+        """Return True when the request omitted the id member."""
+
+        return not self.has_id
+
+
+def _request_id_label(*, has_id: bool, request_id: str | int | None) -> str:
+    """Return the request-id label used for runtime context metadata."""
+
+    if request_id is not None:
+        return str(request_id)
+    if has_id:
+        return "null"
+    return "notification"
+
+
 GatewayJSONRPCResponse = GatewayJSONRPCSuccessResponse | GatewayJSONRPCErrorResponse
 GatewayJSONRPCResult = GatewayJSONRPCResponse | list[GatewayJSONRPCResponse] | GatewayNoResponse
 GATEWAY_RESPONSE_TYPES = (GatewayJSONRPCSuccessResponse, GatewayJSONRPCErrorResponse)
@@ -145,6 +170,29 @@ def jsonrpc_error(
 
 def response_to_json(response: GatewayJSONRPCResponse) -> dict[str, Any]:
     """Return a JSON-serializable response mapping for transport sends."""
+
+    if isinstance(response, GatewayJSONRPCSuccessResponse):
+        return _json_compatible(
+            {
+                "jsonrpc": response.jsonrpc,
+                "result": response.result,
+                "id": response.id,
+            }
+        )
+    if isinstance(response, GatewayJSONRPCErrorResponse):
+        error: dict[str, Any] = {
+            "code": response.error.code,
+            "message": response.error.message,
+        }
+        if response.error.data is not None:
+            error["data"] = response.error.data
+        return _json_compatible(
+            {
+                "jsonrpc": response.jsonrpc,
+                "error": error,
+                "id": response.id,
+            }
+        )
 
     try:
         return response.model_dump(mode="json")  # type: ignore[attr-defined]
@@ -205,6 +253,7 @@ def request_context(
     path: str,
     client_host: str | None = None,
     metadata: dict[str, Any] | None = None,
+    request_id_label: str | None = None,
 ) -> GatewayRequestContext:
     """Derive the host-neutral gateway request context from a JSON-RPC request."""
 
@@ -222,7 +271,7 @@ def request_context(
     if client_host is not None:
         context_metadata["client_host"] = client_host
     return GatewayRequestContext(
-        request_id=str(payload.id if payload.id is not None else "notification"),
+        request_id=request_id_label or str(payload.id if payload.id is not None else "notification"),
         metadata=context_metadata,
     )
 
@@ -253,13 +302,20 @@ async def dispatch_jsonrpc(
     path: str,
     client_host: str | None = None,
     metadata: dict[str, Any] | None = None,
+    request_id_label: str | None = None,
 ) -> Any:
     """Dispatch one validated JSON-RPC request to the injected runtime."""
 
     method = payload.method
     params = object_or_empty(payload.params, "params must be an object")
 
-    context = request_context(payload, path=path, client_host=client_host, metadata=metadata)
+    context = request_context(
+        payload,
+        path=path,
+        client_host=client_host,
+        metadata=metadata,
+        request_id_label=request_id_label,
+    )
 
     if method == "initialize":
         return await handle_initialize(runtime)
@@ -306,6 +362,14 @@ def validate_jsonrpc_request(payload: dict[str, Any]) -> GatewayJSONRPCRequest:
         return GatewayJSONRPCRequest.parse_obj(payload)
 
 
+def parse_raw_envelope(payload: dict[str, Any]) -> GatewayJSONRPCEnvelope:
+    """Preserve raw JSON-RPC id presence before request model validation."""
+
+    has_id = "id" in payload
+    request_id = validate_request_id(payload.get("id"))
+    return GatewayJSONRPCEnvelope(payload=payload, has_id=has_id, request_id=request_id)
+
+
 async def handle_single_jsonrpc(
     runtime: GatewayRuntime,
     payload: Any,
@@ -320,14 +384,14 @@ async def handle_single_jsonrpc(
         return jsonrpc_error(INVALID_REQUEST, "Request must be an object", None)
 
     try:
-        request_id = validate_request_id(payload.get("id"))
+        envelope = parse_raw_envelope(payload)
     except ValueError as exc:
         return jsonrpc_error(INVALID_REQUEST, str(exc), None)
 
     try:
         gateway_request = validate_jsonrpc_request(payload)
     except ValidationError as exc:
-        return jsonrpc_error(INVALID_REQUEST, "Invalid request", request_id, data=exc.errors())
+        return jsonrpc_error(INVALID_REQUEST, "Invalid request", envelope.request_id, data=exc.errors())
 
     try:
         result = await dispatch_jsonrpc(
@@ -336,26 +400,30 @@ async def handle_single_jsonrpc(
             path=path,
             client_host=client_host,
             metadata=metadata,
+            request_id_label=_request_id_label(
+                has_id=envelope.has_id,
+                request_id=envelope.request_id,
+            ),
         )
     except GatewayPolicyDenied as exc:
-        error = jsonrpc_error(POLICY_DENIED, str(exc), request_id, data=exc.to_error_data())
+        error = jsonrpc_error(POLICY_DENIED, str(exc), envelope.request_id, data=exc.to_error_data())
     except ValueError as exc:
-        error = jsonrpc_error(INVALID_PARAMS, str(exc), request_id)
+        error = jsonrpc_error(INVALID_PARAMS, str(exc), envelope.request_id)
     except NotImplementedError:
-        error = jsonrpc_error(METHOD_NOT_FOUND, f"Method not found: {gateway_request.method}", request_id)
+        error = jsonrpc_error(METHOD_NOT_FOUND, f"Method not found: {gateway_request.method}", envelope.request_id)
     except _GATEWAY_RUNTIME_ERRORS as exc:  # noqa: BLE001 - JSON-RPC requires mapping runtime failures to -32603.
         logger.opt(exception=True).error(
             "Gateway runtime error while handling method={!r} request_id={!r}",
             gateway_request.method,
-            request_id,
+            envelope.request_id,
         )
-        error = jsonrpc_error(INTERNAL_ERROR, "Internal server error", request_id, data=exc.__class__.__name__)
+        error = jsonrpc_error(INTERNAL_ERROR, "Internal server error", envelope.request_id, data=exc.__class__.__name__)
     else:
-        if request_id is None:
+        if envelope.is_notification:
             return GatewayNoResponse()
-        return jsonrpc_result(result, request_id)
+        return jsonrpc_result(result, envelope.request_id)
 
-    if request_id is None:
+    if envelope.is_notification:
         return GatewayNoResponse()
     return error
 
@@ -414,6 +482,7 @@ __all__ = [
     "POLICY_DENIED",
     "GatewayJSONRPCError",
     "GatewayJSONRPCErrorResponse",
+    "GatewayJSONRPCEnvelope",
     "GatewayJSONRPCRequest",
     "GatewayJSONRPCResponse",
     "GatewayJSONRPCResult",
@@ -426,6 +495,7 @@ __all__ = [
     "jsonrpc_error",
     "jsonrpc_result",
     "parse_json_payload",
+    "parse_raw_envelope",
     "request_context",
     "response_to_json",
     "runtime_name",

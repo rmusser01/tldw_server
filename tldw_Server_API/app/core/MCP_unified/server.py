@@ -9,6 +9,7 @@ import ipaddress
 import json
 import os
 import re
+import secrets
 from collections import deque
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
@@ -19,12 +20,22 @@ from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.exceptions import AuthenticationError
+from tldw_Server_API.app.core.AuthNZ.ip_allowlist import is_single_user_ip_allowed
 from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings, is_single_user_profile_mode
 
 from .auth.rate_limiter import RateLimitExceeded
 from .config import get_config, validate_config
 from .interfaces.runtime import MCPRuntimeDependencies, WebSocketStream
-from .protocol import MCPProtocol, MCPRequest, MCPResponse, RequestContext
+from .jsonrpc_transport import (
+    invalid_request_response,
+    is_jsonrpc_keepalive,
+    mcp_response_to_json,
+    mcp_responses_to_json,
+    parse_error_response,
+    safe_jsonrpc_id,
+)
+from .protocol import MCPError, MCPProtocol, MCPRequest, MCPResponse, RequestContext, _trusted_compat_claims_metadata
 from .security.ip_filter import get_ip_access_controller
 from .security.request_guards import enforce_client_certificate_headers
 
@@ -54,6 +65,7 @@ _MCP_SERVER_NONCRITICAL_EXCEPTIONS = (
 _AUTHNZ_TOKEN_DETECTION_EXCEPTIONS = _MCP_SERVER_NONCRITICAL_EXCEPTIONS + (AuthenticationError,)
 
 _ENV_PLACEHOLDER_RE = re.compile(r"^\$\{(?P<name>[A-Z0-9_]+)(?::-(?P<default>.*))?\}$")
+_JSONRPC_EXPLICIT_NULL_ID_PREFIX = "__tldw_ws_jsonrpc_explicit_null_id_"
 
 
 def _is_authnz_access_token(token: str) -> bool:
@@ -94,6 +106,44 @@ def _resolve_env_placeholders(value: Any) -> Any:
 def _normalize_optional_text(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _is_absent_id_jsonrpc_notification(payload: Any) -> bool:
+    """Return True for JSON-RPC notifications that must not emit WS responses."""
+    return (
+        isinstance(payload, dict)
+        and payload.get("jsonrpc") == "2.0"
+        and isinstance(payload.get("method"), str)
+        and "id" not in payload
+    )
+
+
+def _jsonrpc_explicit_null_id_sentinel() -> str:
+    """Return a request-local sentinel for explicit JSON-RPC null ids."""
+    return f"{_JSONRPC_EXPLICIT_NULL_ID_PREFIX}{secrets.token_hex(8)}__"
+
+
+def _replace_explicit_null_jsonrpc_ids(payload: Any, sentinels: set[str]) -> Any:
+    """Preserve explicit JSON-RPC null ids through protocol notification handling."""
+    if isinstance(payload, dict):
+        if payload.get("jsonrpc") == "2.0" and "id" in payload and payload.get("id") is None:
+            request_payload = dict(payload)
+            sentinel = _jsonrpc_explicit_null_id_sentinel()
+            sentinels.add(sentinel)
+            request_payload["id"] = sentinel
+            return request_payload
+        return payload
+    if isinstance(payload, list):
+        return [_replace_explicit_null_jsonrpc_ids(item, sentinels) for item in payload]
+    return payload
+
+
+def _restore_explicit_null_jsonrpc_ids(response: MCPResponse | list[MCPResponse], sentinels: set[str]) -> None:
+    """Restore transport-level explicit null ids before JSON serialization."""
+    responses = response if isinstance(response, list) else [response]
+    for item in responses:
+        if isinstance(item.id, str) and item.id in sentinels:
+            item.id = None
 
 
 class _JWTManagerProxy:
@@ -305,6 +355,68 @@ class MCPServer:
             return bool(self.environment_flags_provider.is_explicit_pytest_runtime())
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
             return False
+
+    def _should_use_single_user_api_key_compat(self) -> bool:
+        """Return whether mounted WS should accept single-user API-key compatibility."""
+        flag = os.getenv("MCP_SINGLE_USER_COMPAT_SHIM", "").strip().lower()
+        if flag in {"0", "false", "off"}:
+            return False
+        try:
+            return bool(is_single_user_profile_mode())
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            logger.debug("MCP WS single-user profile detection failed closed", exc_info=True)
+            return False
+
+    def _single_user_test_key_compat_allowed(self) -> bool:
+        """Return True when SINGLE_USER_TEST_API_KEY may be accepted by mounted WS."""
+        if not self._is_test_mode():
+            return False
+        env = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("ENV") or "").lower()
+        prod_flag = self._env_flag_enabled("tldw_production")
+        is_dev_ctx = bool(getattr(self.config, "debug_mode", False))
+        if self._is_explicit_pytest_runtime():
+            is_dev_ctx = True
+        if env in {"dev", "development", "test", "ci"}:
+            is_dev_ctx = True
+        if prod_flag:
+            is_dev_ctx = False
+        if not is_dev_ctx:
+            logger.error(
+                "TEST_MODE enabled outside dev/test context; refusing SINGLE_USER_TEST_API_KEY",
+                extra={
+                    "audit": True,
+                    "env": env,
+                    "debug_mode": bool(getattr(self.config, "debug_mode", False)),
+                },
+            )
+            return False
+        return True
+
+    def _single_user_compat_auth_via(self, api_key: Optional[str], *, client_ip: Optional[str]) -> Optional[str]:
+        """Return mounted WS single-user compatibility auth source for an API key."""
+        if not api_key or not self._should_use_single_user_api_key_compat():
+            return None
+        try:
+            settings = get_settings()
+            primary_key = getattr(settings, "SINGLE_USER_API_KEY", None)
+            test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
+            auth_via: Optional[str] = None
+            if primary_key and secrets.compare_digest(api_key, str(primary_key)):
+                auth_via = "single_user_api_key"
+            elif test_key and self._single_user_test_key_compat_allowed() and secrets.compare_digest(api_key, test_key):
+                auth_via = "single_user_test_api_key"
+            if auth_via is None:
+                return None
+            if not is_single_user_ip_allowed(client_ip, settings):
+                logger.warning(
+                    "Single-user MCP WebSocket API key rejected due to client IP allowlist",
+                    extra={"audit": True, "client_ip": client_ip or "unknown"},
+                )
+                return None
+            return auth_via
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            logger.debug("MCP WS single-user API-key compatibility check failed closed", exc_info=True)
+            return None
 
     def _is_truthy(self, value: Any) -> bool:
         """Return host-normalized truthiness, with a neutral local fallback."""
@@ -1047,41 +1159,60 @@ class MCPServer:
 
         # API key auth (optional)
         if api_key and not user_id:
-            try:
-                # Enforce allowed IPs for API keys by forwarding resolved client IP
-                info = await self.auth_provider.validate_api_key(
-                    api_key,
-                    ip_address=client_ip,
+            compat_auth_via = self._single_user_compat_auth_via(api_key, client_ip=client_ip)
+            if compat_auth_via is not None:
+                settings = get_settings()
+                user_id = str(getattr(settings, "SINGLE_USER_FIXED_ID", "1"))
+                metadata.update(
+                    _trusted_compat_claims_metadata(
+                        auth_via=compat_auth_via,
+                        compat_claims_source="mounted_ws",
+                    )
                 )
-                if info and info.get('user_id'):
-                    user_id = str(info['user_id'])
-                    # Attach org/team context
-                    if info.get('org_id') is not None:
-                        metadata['org_id'] = info.get('org_id')
-                    if info.get('team_id') is not None:
-                        metadata['team_id'] = info.get('team_id')
-                    roles = metadata.setdefault('roles', [])
-                    if 'api_client' not in roles:
-                        roles.append('api_client')
-                    try:
-                        scopes = self._extract_api_key_permissions(info)
-                        if scopes:
-                            metadata["api_key_scopes"] = list(scopes)
-                            metadata["auth_via"] = "api_key"
-                            perms = metadata.setdefault('permissions', [])
-                            for scope in scopes:
-                                if scope not in perms:
-                                    perms.append(scope)
-                    except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-                        pass
-                    logger.info(f"WebSocket authenticated via API key for user: {user_id}")
-                else:
+                roles = metadata.setdefault("roles", [])
+                if "admin" not in roles:
+                    roles.append("admin")
+                if compat_auth_via == "single_user_test_api_key":
+                    perms = metadata.setdefault("permissions", [])
+                    if "*" not in perms:
+                        perms.append("*")
+                logger.info("WebSocket authenticated via mounted single-user compatibility key")
+            else:
+                try:
+                    # Enforce allowed IPs for API keys by forwarding resolved client IP
+                    info = await self.auth_provider.validate_api_key(
+                        api_key,
+                        ip_address=client_ip,
+                    )
+                    if info and info.get('user_id'):
+                        user_id = str(info['user_id'])
+                        # Attach org/team context
+                        if info.get('org_id') is not None:
+                            metadata['org_id'] = info.get('org_id')
+                        if info.get('team_id') is not None:
+                            metadata['team_id'] = info.get('team_id')
+                        roles = metadata.setdefault('roles', [])
+                        if 'api_client' not in roles:
+                            roles.append('api_client')
+                        try:
+                            scopes = self._extract_api_key_permissions(info)
+                            if scopes:
+                                metadata["api_key_scopes"] = list(scopes)
+                                metadata["auth_via"] = "api_key"
+                                perms = metadata.setdefault('permissions', [])
+                                for scope in scopes:
+                                    if scope not in perms:
+                                        perms.append(scope)
+                        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+                            pass
+                        logger.info(f"WebSocket authenticated via API key for user: {user_id}")
+                    else:
+                        await websocket.close(code=1008, reason="Authentication failed")
+                        return
+                except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
+                    logger.warning(f"WebSocket API key authentication failed: {self._mask_secrets(str(e))}")
                     await websocket.close(code=1008, reason="Authentication failed")
                     return
-            except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
-                logger.warning(f"WebSocket API key authentication failed: {self._mask_secrets(str(e))}")
-                await websocket.close(code=1008, reason="Authentication failed")
-                return
 
         # Optionally require authentication for WS (production hardening)
         ws_auth_required = self.config.ws_auth_required
@@ -1222,31 +1353,33 @@ class MCPServer:
                 with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
                     stream.mark_activity()
             except json.JSONDecodeError as e:
-                await stream.send_json({
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32700,
-                        "message": f"Parse error: {str(e)}"
-                    }
-                })
+                await stream.send_json(mcp_response_to_json(parse_error_response(f"Parse error: {str(e)}")))
                 continue
 
             # Check message size
             message_size = len(json.dumps(data))
             if message_size > self.config.ws_max_message_size:
-                await stream.send_json({
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32600,
-                        "message": "Message too large"
-                    },
-                    "id": data.get("id") if isinstance(data, dict) else None
-                })
+                await stream.send_json(
+                    mcp_response_to_json(
+                        invalid_request_response(
+                            "Message too large",
+                            request_id=safe_jsonrpc_id(data.get("id")) if isinstance(data, dict) else None,
+                        )
+                    )
+                )
                 continue
 
-            # Handle ping/pong
-            if isinstance(data, dict) and data.get("type") == "pong":
+            # Exact transport keepalives are consumed by the WebSocket transport.
+            if is_jsonrpc_keepalive(data):
                 continue
+
+            if isinstance(data, dict) and data.get("jsonrpc") != "2.0":
+                await stream.send_json(mcp_response_to_json(invalid_request_response("Invalid request")))
+                continue
+
+            is_notification = _is_absent_id_jsonrpc_notification(data)
+            explicit_null_id_sentinels: set[str] = set()
+            protocol_data = _replace_explicit_null_jsonrpc_ids(data, explicit_null_id_sentinels)
 
             # Per-session rate limit: requests per window
             try:
@@ -1258,14 +1391,14 @@ class MCPServer:
                 while connection.request_times and (now_ts - connection.request_times[0]) > window:
                     connection.request_times.popleft()
                 if len(connection.request_times) > threshold:
-                    await stream.send_json({
-                        "jsonrpc": "2.0",
-                        "error": {
-                            "code": -32002,
-                            "message": "Session rate limit exceeded"
-                        },
-                        "id": data.get("id") if isinstance(data, dict) else None
-                    })
+                    await stream.send_json(
+                        mcp_response_to_json(
+                            MCPResponse(
+                                error=MCPError(code=-32002, message="Session rate limit exceeded"),
+                                id=safe_jsonrpc_id(data.get("id")) if isinstance(data, dict) else None,
+                            )
+                        )
+                    )
                     with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
                         self.metrics_collector.record_ws_session_closure("session_rate")
                     # Close with 1013 (try again later), matching prior behavior
@@ -1287,9 +1420,9 @@ class MCPServer:
                     cwd=connection.cwd,
                 )
                 # If this is initialize, capture clientInfo and optional config
-                if isinstance(data, dict) and data.get("method") == "initialize":
+                if isinstance(protocol_data, dict) and protocol_data.get("method") == "initialize":
                     try:
-                        params = data.get("params") or {}
+                        params = protocol_data.get("params") or {}
                         client_info = params.get("clientInfo") or {}
                         if isinstance(client_info, dict):
                             sess.client_info.update(client_info)
@@ -1314,14 +1447,14 @@ class MCPServer:
             except PermissionError:
                 # Session ownership mismatch - return authorization error and close
                 with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
-                    await stream.send_json({
-                        "jsonrpc": "2.0",
-                        "error": {
-                            "code": -32001,
-                            "message": "Session is bound to a different user"
-                        },
-                        "id": data.get("id") if isinstance(data, dict) else None
-                    })
+                    await stream.send_json(
+                        mcp_response_to_json(
+                            MCPResponse(
+                                error=MCPError(code=-32001, message="Session is bound to a different user"),
+                                id=safe_jsonrpc_id(data.get("id")) if isinstance(data, dict) else None,
+                            )
+                        )
+                    )
                 with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
                     await stream.ws.close(code=1008, reason="Session ownership mismatch")
                 break
@@ -1343,7 +1476,7 @@ class MCPServer:
             except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
                 pass
             context = RequestContext(
-                request_id=data.get("id", "unknown") if isinstance(data, dict) else "unknown",
+                request_id=protocol_data.get("id", "unknown") if isinstance(protocol_data, dict) else "unknown",
                 user_id=connection.user_id,
                 client_id=connection.client_id,
                 session_id=connection.session_id,
@@ -1353,7 +1486,7 @@ class MCPServer:
 
             # Process MCP request (supports single, notification, and batch)
             try:
-                response = await self.protocol.process_request(data, context)
+                response = await self.protocol.process_request(protocol_data, context)
                 # Persist seen URIs back into session (if updated by tools)
                 try:
                     if sess and isinstance(context.metadata, dict):
@@ -1368,32 +1501,35 @@ class MCPServer:
                 if response is None:
                     # Notification - no reply
                     continue
-                if isinstance(response, list):
-                    await stream.send_json([r.model_dump() for r in response])
-                else:
-                    await stream.send_json(response.model_dump())
+                if is_notification:
+                    continue
+                _restore_explicit_null_jsonrpc_ids(response, explicit_null_id_sentinels)
+                await stream.send_json(mcp_responses_to_json(response))
             except RateLimitExceeded as e:
-                await stream.send_json({
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32002,
-                        "message": f"Rate limit exceeded. Retry after {e.retry_after} seconds",
-                        "data": {
-                            "hint": "Reduce request frequency or wait before retrying."
-                        }
-                    },
-                    "id": data.get("id") if isinstance(data, dict) else None
-                })
+                await stream.send_json(
+                    mcp_response_to_json(
+                        MCPResponse(
+                            error=MCPError(
+                                code=-32002,
+                                message=f"Rate limit exceeded. Retry after {e.retry_after} seconds",
+                                data={
+                                    "hint": "Reduce request frequency or wait before retrying."
+                                },
+                            ),
+                            id=safe_jsonrpc_id(data.get("id")) if isinstance(data, dict) else None,
+                        )
+                    )
+                )
             except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
                 logger.error(f"Error processing WebSocket message: {self._mask_secrets(str(e))}")
-                await stream.send_json({
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32603,
-                        "message": "Internal error"
-                    },
-                    "id": data.get("id") if isinstance(data, dict) else None
-                })
+                await stream.send_json(
+                    mcp_response_to_json(
+                        MCPResponse(
+                            error=MCPError(code=-32603, message="Internal error"),
+                            id=safe_jsonrpc_id(data.get("id")) if isinstance(data, dict) else None,
+                        )
+                    )
+                )
 
     def _ip_bucket(self, ip: str) -> str:
         """Return a coarse bucket label for an IP to avoid high-cardinality metrics."""

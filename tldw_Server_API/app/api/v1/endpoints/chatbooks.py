@@ -447,6 +447,7 @@ async def create_chatbook(
             include_generated_content=request_data.include_generated_content,
             tags=request_data.tags,
             categories=request_data.categories,
+            format_version=request_data.format_version,
             async_mode=request_data.async_mode,
             request_id=rid,
         )
@@ -1053,8 +1054,14 @@ async def preview_chatbook(
                 openwebui_db_preview=preview_data,
             )
 
-        # Preview chatbook
-        manifest, error = service.preview_chatbook(str(temp_file))
+        # Preview chatbook. Prefer the v1.1 report helper, but keep fallback
+        # support for service doubles that only implement the legacy two-tuple.
+        preview_with_report = getattr(service, "preview_chatbook_with_report", None)
+        if callable(preview_with_report):
+            manifest, error, preview_report = preview_with_report(str(temp_file))
+        else:
+            manifest, error = service.preview_chatbook(str(temp_file))
+            preview_report = None
 
         # Cleanup temp file
         try:
@@ -1131,7 +1138,12 @@ async def preview_chatbook(
             )
         except _CHATBOOKS_NONCRITICAL_EXCEPTIONS as audit_err:
             logger.warning(f"Failed to log audit event for preview: {audit_err}")
-        return PreviewChatbookResponse(source_format=source_format, manifest=manifest_response)
+        response_payload = {"source_format": source_format, "manifest": manifest_response}
+        if preview_report:
+            response_payload.update(
+                {key: value for key, value in preview_report.items() if key != "manifest"}
+            )
+        return PreviewChatbookResponse(**response_payload)
 
     except HTTPException:
         raise

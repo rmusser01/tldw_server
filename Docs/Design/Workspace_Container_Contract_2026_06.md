@@ -192,18 +192,20 @@ Phase 2 names these resource types and membership expectations:
 | Media and sources | `media`, `workspace_source` | Media DB and Workspaces source selection | `media` links global media records; `workspace_source` links workspace source rows that own ordering, selection, and readiness projection. |
 | Artifacts | `workspace_artifact` | Workspaces artifact store | Workspace-owned generated or promoted artifact; includes lineage/review/export metadata. |
 | Chats | `chat` | Chat/ChaChaNotes | Conversation resource. Global chats may be linked; workspace-scoped chats belong to exactly one workspace. Moving a chat across workspaces is a fork/copy with provenance, not silent reassignment. |
-| Prompts | `prompt` (future) | Prompt Library | Prompt record stays globally browsable; workspace membership gates active use in the selected context. |
-| Workflows | `workflow` (future) | Workflows/Scheduler | Workflow definition or launch context; launch requires active workspace and runtime readiness when applicable. |
-| Watchlists | `watchlist` (future) | Watchlists/Jobs or Scheduler | Watchlist definition or run context; run requires active workspace and runtime readiness when applicable. |
-| ACP sessions/runs | `acp_session` (future) | ACP/Agent Orchestration | Links canonical workspace to ACP execution workspace, project, task, run, or session metadata. ACP remains execution owner. |
-| Sandbox sessions/runs | `sandbox_session` (future) | Sandbox | Links workspace to sandbox root/session diagnostics. Sandbox remains runtime/admission owner. |
+| Prompts | `prompt` | Prompt Library | Prompt record stays globally browsable; workspace membership gates active use in the selected context. |
+| Workflows | `workflow` | Workflows/Scheduler | Workflow definition or launch context; launch requires active workspace and runtime readiness when applicable. |
+| Watchlists | `watchlist` | Watchlists/Jobs or Scheduler | Watchlist definition or run context; run requires active workspace and runtime readiness when applicable. |
+| ACP sessions | `acp_session` | ACP/Agent Orchestration | Links canonical workspace to ACP session metadata through a Workspace runtime binding. ACP remains execution owner. |
+| ACP runs | `acp_run` (future) | ACP/Agent Orchestration | Reserved for run-level metadata after ACP run descriptors have a stable owning-domain contract. |
+| Sandbox sessions | `sandbox_session` | Sandbox | Links workspace to sandbox session diagnostics through a Workspace runtime binding. Sandbox remains runtime/admission owner. |
 | Project files | `project_file` (future) | Workspaces file inventory | Metadata-only path entry under a Workspace-owned root. Not source content and not a trust grant. |
 
 The current backend supports `workspace_note`, `media`, `workspace_source`,
-`workspace_artifact`, and `chat`. `membership_models.py` already reserves
-future values for `note`, `prompt`, `workflow`, `watchlist`, `acp_session`,
-`sandbox_session`, `project_file`, and study-related resources. Child issues
-must add owning-domain adapters before those future values become writable.
+`workspace_artifact`, `chat`, `prompt`, `workflow`, `watchlist`,
+`acp_session`, and `sandbox_session`. `membership_models.py` still reserves
+future values for `note`, `acp_run`, `project_file`, `study_deck`, `quiz`, and
+`study_pack`. Future child issues must add owning-domain adapters before those
+reserved values become writable.
 
 ## Transfer Policies
 
@@ -343,6 +345,7 @@ Secret handling:
 | `/api/v1/workspace-eligibility/check` | Shared active-context eligibility contract. |
 | `/api/v1/workspaces/{id}/memberships` | Generic association table for supported resource types. |
 | `/api/v1/workspaces/{id}/context` | Read model for Workspace Core shell state, source summary, capabilities, active operations, and membership summary. |
+| `/api/v1/workspaces/{id}/runtime-bindings` | Secret-safe runtime binding descriptor list/create/read/archive routes for repo/path/ACP/Sandbox/MCP-adjacent state. |
 | `/api/v1/workspaces/{id}/roots` | Workspace-owned project root read model with redacted path hints. |
 | `/api/v1/workspaces/{id}/file-inventory/*` | Metadata-only project-root inventory. Not source content indexing and not a trust grant. |
 | Sharing | Out of Phase 2 scope. Future sharing must consume the same `workspace_id` and membership model rather than inventing a parallel shared workspace identity. |
@@ -356,27 +359,57 @@ Secret handling:
 
 ## Activity And Index Contract
 
-The Workspace activity/index view should be an inspection surface, not a clone
-of every owner domain UI.
+`GET /api/v1/workspaces/{workspace_id}/index` is the concrete #1994
+inspection/navigation contract. It is a server-owned read model over existing
+Workspace registry data and owner-domain membership summaries. It is not a new
+Workspace dashboard and must not implement edit/detail behavior that belongs to
+Media, Notes, Chat, Prompts, Workflows, Watchlists, ACP, Sandbox, MCP, or Jobs.
 
-It should expose:
+The response shape is versioned with `schema_version: 1` and includes:
 
-- workspace identity, profile, authority/status, archive/delete state.
-- membership counts and membership pages by resource type/role/state.
-- runtime binding descriptors and readiness.
-- recent membership changes, imports, root changes, runtime binding changes,
-  active-context denials, and recovery actions.
-- links back to owning domain routes for full edit/detail behavior.
+- `workspace`: workspace identity, profile, archive/delete state, and version.
+- `membership_summary`: active membership totals by resource type and role.
+- `resource_groups`: bounded resolved membership previews grouped by resource
+  type. Each group includes an `owner_surface` `{label, href}` supplied by the
+  server so clients can navigate back to the owning UI.
+- `runtime_summary`: descriptor-only runtime binding totals, status counts, and
+  redacted binding payloads.
+- `warnings`: recovery/navigation hints for archived/deleted workspaces,
+  unresolved resource previews, and missing/degraded runtime bindings.
+- `recent_activity`: bounded newest-first activity rows.
+- `partial_errors`: reserved list for future dependency-specific partial read
+  failures.
 
-It should not:
+Current activity categories and event types:
 
-- duplicate Media, Notes, Chat, Prompts, Workflows, Watchlists, ACP, Sandbox, or
-  Jobs management UIs.
-- expose secret metadata, raw filesystem paths, file contents, prompt bodies, or
-  model outputs.
-- treat activity/index membership as an authorization grant.
+| Category | Event types | Source |
+| --- | --- | --- |
+| `membership` | `membership.linked`, `membership.restored`, `membership.unlinked` | Workspace membership service write paths. |
+| `runtime_binding` | `runtime_binding.upserted`, `runtime_binding.archived` | Runtime binding endpoint helper write paths. |
 
-Child issue #1994 owns the concrete activity/index API and UI contract.
+Current warning reason codes:
+
+| Reason code | Meaning |
+| --- | --- |
+| `workspace_archived` | Workspace is inspectable but write/active-context actions are blocked. |
+| `workspace_deleted` | Deleted workspace state is exposed only for recovery-safe inspection. |
+| `resource_unresolved` | A linked owner-domain resource could not be resolved for preview. |
+| `resource_<state>` | A resolved resource preview reported a non-available state. |
+| `runtime_binding_missing` | A runtime binding points at a missing runtime/path/session. |
+| `runtime_binding_<status>` | A runtime binding reported another degraded status such as blocked, detached, conflict, unavailable, or unsupported. |
+
+Security constraints:
+
+- Activity metadata is bounded JSON and must omit secret-shaped keys, API keys,
+  tokens, passwords, private keys, raw env values, prompt bodies, model outputs,
+  file contents, and unredacted absolute paths.
+- Runtime binding rows in the index use the same redacted descriptor contract as
+  `/runtime-bindings`; the index must not become a secret store or runtime
+  admission authority.
+- Resource previews are summaries only. Clients must open the owner `href` for
+  full content, editing, execution, or recovery actions.
+- Unknown warning reason codes are forward-compatible and should be displayed as
+  generic warnings by clients rather than rejected.
 
 ## Open Questions And Assigned Follow-Ups
 
@@ -384,8 +417,8 @@ All known open implementation questions are assigned to child issues:
 
 | Question | Owner issue |
 | --- | --- |
-| Exact runtime binding descriptor schema, statuses, portability fields, and redaction behavior | [#1991](https://github.com/rmusser01/tldw_server/issues/1991) |
-| Owning-domain adapters for prompts, workflows, watchlists, ACP sessions/runs, sandbox sessions/runs, and remaining resource types | [#2378](https://github.com/rmusser01/tldw_server/issues/2378) |
+| Runtime consumer resume/import semantics beyond the descriptor read model | Follow-up after [#1991](https://github.com/rmusser01/tldw_server/issues/1991) evidence |
+| Owning-domain adapters for global notes, ACP runs, project files, and study-related resource types | Follow-up after [#1995](https://github.com/rmusser01/tldw_server/issues/1995) evidence |
 | Frontend route/store contract for active workspace context, global browsing labels, and eligibility UX | [#1993](https://github.com/rmusser01/tldw_server/issues/1993) |
 | Workspace activity/index contract and inspection UI | [#1994](https://github.com/rmusser01/tldw_server/issues/1994) |
 | End-to-end single-user evidence across create/import, attach, runtime context, activity, and recovery | [#1995](https://github.com/rmusser01/tldw_server/issues/1995) |

@@ -14,6 +14,8 @@ from .executor import HandlerInvocationContext
 from .models import CommandChain, CommandSpillReference, CommandStepResult
 from .registry import CommandDescriptor
 
+_CWD_UNSET = object()
+
 
 @dataclass(slots=True)
 class AdapterContext:
@@ -25,6 +27,8 @@ class AdapterContext:
     parent_idempotency_key: str | None = None
     cwd: str | None = None
     sandbox_session_id: str | None = None
+    sandbox_env: Mapping[str, str] | None = None
+    shell_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,8 +113,18 @@ class PhaseOneCommandAdapters:
 
     def __init__(self, context: AdapterContext) -> None:
         self.context = context
+        self._initial_cwd = context.cwd
+        self._current_cwd = context.cwd
         self._preflighted: dict[tuple[str, int], _PreparedStep] = {}
         self._next_step_index = 0
+
+    def validate_chain(self, chain: CommandChain) -> CommandStepResult | None:
+        """Return a fail-closed result when stateful cwd commands are ambiguous."""
+
+        error = self._validate_cd_flow(chain)
+        if error is None:
+            return None
+        return CommandStepResult(stderr=error.message, exit_code=error.exit_code)
 
     def requires_whole_chain_preflight(self, chain: CommandChain) -> bool:
         """Return True when the chain includes any governed command."""
@@ -127,8 +141,13 @@ class PhaseOneCommandAdapters:
     async def preflight_chain(self, chain: CommandChain) -> None:
         """Prepare all governed steps before execution starts."""
 
+        flow_error = self.validate_chain(chain)
+        if flow_error is not None:
+            raise PreflightCommandError(flow_error)
+
         handled_exceptions = self._handled_governed_exceptions()
         step_index = 0
+        current_cwd = self._initial_cwd
         for segment in chain.segments:
             for invocation in segment.commands:
                 argv = list(invocation.argv)
@@ -140,10 +159,14 @@ class PhaseOneCommandAdapters:
                         self._unknown_command_result(argv[0])
                     )
                 if descriptor.pure_transform:
+                    if argv[0] == "cd":
+                        cd_target = self._cd_target(argv, current_cwd)
+                        if not isinstance(cd_target, _UsageError):
+                            current_cwd = cd_target
                     step_index += 1
                     continue
 
-                plan_or_error = self._governed_plan(argv)
+                plan_or_error = self._governed_plan(argv, cwd=current_cwd)
                 if isinstance(plan_or_error, _UsageError):
                     raise PreflightCommandError(
                         CommandStepResult(stderr=plan_or_error.message, exit_code=plan_or_error.exit_code)
@@ -152,11 +175,7 @@ class PhaseOneCommandAdapters:
                     prepared = await self.context.protocol.prepare_tool_call(
                         params={"name": plan_or_error.tool_name, "arguments": dict(plan_or_error.arguments)},
                         context=self.context.request_context,
-                        idempotency_key=derive_step_idempotency_key(
-                            self.context.parent_idempotency_key,
-                            argv,
-                            step_index,
-                        ),
+                        idempotency_key=self._step_idempotency_key(argv, step_index, current_cwd),
                     )
                 except handled_exceptions as exc:
                     if self._is_passthrough_governed_exception(exc):
@@ -183,7 +202,7 @@ class PhaseOneCommandAdapters:
             return self._unknown_command_result(argv[0])
 
         if descriptor.pure_transform:
-            return self._execute_pure_transform(argv, stdin)
+            return self._execute_pure_transform(argv, stdin, handler_context)
 
         return await self._execute_governed(argv, step_index)
 
@@ -194,17 +213,13 @@ class PhaseOneCommandAdapters:
             prepared_key = (signature, step_index)
             prepared_step = self._preflighted.pop(prepared_key, None)
             if prepared_step is None:
-                plan_or_error = self._governed_plan(argv)
+                plan_or_error = self._governed_plan(argv, cwd=self._current_cwd)
                 if isinstance(plan_or_error, _UsageError):
                     return CommandStepResult(stderr=plan_or_error.message, exit_code=plan_or_error.exit_code)
                 prepared = await self.context.protocol.prepare_tool_call(
                     params={"name": plan_or_error.tool_name, "arguments": dict(plan_or_error.arguments)},
                     context=self.context.request_context,
-                    idempotency_key=derive_step_idempotency_key(
-                        self.context.parent_idempotency_key,
-                        argv,
-                        step_index,
-                    ),
+                    idempotency_key=self._step_idempotency_key(argv, step_index, self._current_cwd),
                 )
                 prepared_step = _PreparedStep(prepared=prepared, plan=plan_or_error)
 
@@ -224,10 +239,21 @@ class PhaseOneCommandAdapters:
         self._next_step_index += 1
         return step_index
 
-    def _execute_pure_transform(self, argv: list[str], stdin: Any) -> CommandStepResult:
+    def _execute_pure_transform(
+        self,
+        argv: list[str],
+        stdin: Any,
+        handler_context: Any | None = None,
+    ) -> CommandStepResult:
+        """Execute one pure in-memory transform or virtual cwd command."""
+
         command = argv[0]
         if command == "grep":
             return self._pure_grep(argv, stdin)
+        if command == "pwd":
+            return self._pure_pwd(argv)
+        if command == "cd":
+            return self._pure_cd(argv, handler_context)
         if command == "head":
             return self._pure_head(argv, stdin)
         if command == "tail":
@@ -236,12 +262,14 @@ class PhaseOneCommandAdapters:
             return self._pure_json(argv, stdin)
         return CommandStepResult(stderr=f"Unknown command: {command}", exit_code=127)
 
-    def _governed_plan(self, argv: list[str]) -> _GovernedCallPlan | _UsageError:
+    def _governed_plan(self, argv: list[str], *, cwd: str | None = None) -> _GovernedCallPlan | _UsageError:
+        """Build the governed backend call plan for one virtual CLI command."""
+
         command = argv[0]
         if command == "ls":
             if len(argv) > 2:
                 return _UsageError("usage: ls [path]")
-            path = self._path_with_cwd(argv[1] if len(argv) == 2 else ".")
+            path = self._path_with_cwd(argv[1] if len(argv) == 2 else ".", cwd)
             if isinstance(path, _UsageError):
                 return path
             return _GovernedCallPlan(
@@ -255,7 +283,7 @@ class PhaseOneCommandAdapters:
             tool_name = self._visible_backend_tool("cat", ("fs.read", "fs.read_text"))
             if tool_name is None:
                 return _UsageError(self._unknown_command_message(command), exit_code=127)
-            path = self._path_with_cwd(argv[1])
+            path = self._path_with_cwd(argv[1], cwd)
             if isinstance(path, _UsageError):
                 return path
             return _GovernedCallPlan(
@@ -266,7 +294,7 @@ class PhaseOneCommandAdapters:
         if command == "write":
             if len(argv) < 3:
                 return _UsageError("usage: write <path> <content>")
-            path = self._path_with_cwd(argv[1])
+            path = self._path_with_cwd(argv[1], cwd)
             if isinstance(path, _UsageError):
                 return path
             return _GovernedCallPlan(
@@ -277,7 +305,7 @@ class PhaseOneCommandAdapters:
         if command == "write-create":
             if len(argv) < 3:
                 return _UsageError("usage: write-create <path> <content>")
-            path = self._path_with_cwd(argv[1])
+            path = self._path_with_cwd(argv[1], cwd)
             if isinstance(path, _UsageError):
                 return path
             return _GovernedCallPlan(
@@ -288,7 +316,7 @@ class PhaseOneCommandAdapters:
         if command == "stat":
             if len(argv) != 2:
                 return _UsageError("usage: stat <path>")
-            path = self._path_with_cwd(argv[1])
+            path = self._path_with_cwd(argv[1], cwd)
             if isinstance(path, _UsageError):
                 return path
             return _GovernedCallPlan(
@@ -300,7 +328,7 @@ class PhaseOneCommandAdapters:
             if len(argv) not in {2, 3}:
                 return _UsageError(f"usage: {command} <pattern> [base_path]")
             arguments = {"pattern": argv[1]}
-            base_path = self._path_with_cwd(argv[2]) if len(argv) == 3 else self.context.cwd
+            base_path = self._path_with_cwd(argv[2], cwd) if len(argv) == 3 else cwd
             if isinstance(base_path, _UsageError):
                 return base_path
             if base_path:
@@ -314,7 +342,7 @@ class PhaseOneCommandAdapters:
             if len(argv) not in {2, 3}:
                 return _UsageError(f"usage: {command} <pattern> [base_path]")
             arguments = {"pattern": argv[1]}
-            base_path = self._path_with_cwd(argv[2]) if len(argv) == 3 else self.context.cwd
+            base_path = self._path_with_cwd(argv[2], cwd) if len(argv) == 3 else cwd
             if isinstance(base_path, _UsageError):
                 return base_path
             if base_path:
@@ -334,6 +362,8 @@ class PhaseOneCommandAdapters:
             if len(argv) < 2:
                 return _UsageError("usage: sandbox <command...>")
             arguments: dict[str, Any] = {"command": argv[1:]}
+            if self.context.sandbox_env:
+                arguments["env"] = dict(self.context.sandbox_env)
             if self.context.sandbox_session_id:
                 arguments["session_id"] = self.context.sandbox_session_id
             else:
@@ -362,19 +392,34 @@ class PhaseOneCommandAdapters:
     def _unavailable_backend_error(tool_name: str) -> _UsageError:
         return _UsageError(f"{tool_name} unavailable in this context")
 
-    def _path_with_cwd(self, path: str) -> str | _UsageError:
+    def _path_with_cwd(self, path: str, cwd: str | None | object = _CWD_UNSET) -> str | _UsageError:
         """Apply the current cwd to relative path tokens without mutating token text."""
 
-        cwd = self.context.cwd
+        current_cwd = self._current_cwd if cwd is _CWD_UNSET else cwd
         text = "." if path is None or path == "" else str(path)
-        if not cwd or self._is_anchored_path(text):
+        if not current_cwd or self._is_anchored_path(text):
             return text
         normalized = self._normalize_relative_path(text)
         if isinstance(normalized, _UsageError):
             return normalized
         if normalized == ".":
-            return cwd
-        return f"{cwd}/{normalized}"
+            return current_cwd
+        return f"{current_cwd}/{normalized}"
+
+    def _step_idempotency_key(self, argv: list[str], step_index: int, cwd: str | None) -> str | None:
+        """Derive an idempotency key that includes dynamic cwd changes."""
+
+        parent_key = self.context.parent_idempotency_key
+        if parent_key and cwd != self._initial_cwd:
+            scope_payload = json.dumps(
+                {"cwd": cwd or "."},
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            scope_digest = hashlib.sha256(scope_payload.encode("utf-8")).hexdigest()[:16]
+            parent_key = f"{parent_key}:cwd:{scope_digest}"
+        return derive_step_idempotency_key(parent_key, argv, step_index)
 
     @classmethod
     def _normalize_relative_path(cls, path: str) -> str | _UsageError:
@@ -403,6 +448,52 @@ class PhaseOneCommandAdapters:
             return False
         windows_path = PureWindowsPath(text)
         return bool(PurePosixPath(text).is_absolute() or windows_path.is_absolute() or windows_path.drive)
+
+    def _validate_cd_flow(self, chain: CommandChain) -> _UsageError | None:
+        """Reject cd forms whose state cannot be safely modeled before execution."""
+
+        message = "cd is only supported as a semicolon-separated command in v1"
+        for segment_index, segment in enumerate(chain.segments):
+            for invocation in segment.commands:
+                argv = list(invocation.argv)
+                if not argv or argv[0] != "cd":
+                    continue
+                if len(segment.commands) != 1:
+                    return _UsageError(message)
+                previous_link = chain.links[segment_index - 1] if segment_index > 0 else None
+                next_link = chain.links[segment_index] if segment_index < len(chain.links) else None
+                if previous_link in {"&&", "||"} or next_link in {"&&", "||"}:
+                    return _UsageError(message)
+        return None
+
+    def _cd_target(self, argv: list[str], cwd: str | None) -> str | None | _UsageError:
+        """Resolve a cd invocation to the next bounded virtual cwd."""
+
+        if len(argv) > 2:
+            return _UsageError("usage: cd [path]")
+        if len(argv) == 1:
+            return None
+        return self._resolve_virtual_cwd(argv[1], cwd)
+
+    @classmethod
+    def _resolve_virtual_cwd(cls, path: str, cwd: str | None) -> str | None | _UsageError:
+        """Resolve one virtual cd target without escaping the workspace root."""
+
+        text = "." if path is None or path == "" else str(path)
+        if cls._is_anchored_path(text) or text.startswith("~"):
+            return _UsageError("cd path must be workspace-relative")
+
+        parts = [] if not cwd else [part for part in str(cwd).replace("\\", "/").split("/") if part]
+        for raw_part in text.replace("\\", "/").split("/"):
+            if not raw_part or raw_part == ".":
+                continue
+            if raw_part == "..":
+                if not parts:
+                    return _UsageError("cd path must stay within the workspace root")
+                parts.pop()
+                continue
+            parts.append(raw_part)
+        return "/".join(parts) if parts else None
 
     def _knowledge_plan(self, argv: list[str]) -> _GovernedCallPlan | _UsageError:
         if len(argv) < 2:
@@ -485,6 +576,27 @@ class PhaseOneCommandAdapters:
                 renderer=self._render_json_payload,
             )
         return _UsageError("usage: mcp <tools|modules|catalogs>")
+
+    def _pure_pwd(self, argv: list[str]) -> CommandStepResult:
+        """Print the current virtual workspace directory."""
+
+        if len(argv) != 1:
+            return CommandStepResult(stderr="usage: pwd", exit_code=2)
+        return CommandStepResult(stdout=f"{self._current_cwd or '.'}\n", stderr="", exit_code=0)
+
+    def _pure_cd(self, argv: list[str], handler_context: Any | None) -> CommandStepResult:
+        """Change the virtual cwd for later commands in this run invocation."""
+
+        if isinstance(handler_context, HandlerInvocationContext) and handler_context.command_index != 0:
+            return CommandStepResult(
+                stderr="cd is only supported as a semicolon-separated command in v1",
+                exit_code=2,
+            )
+        target = self._cd_target(argv, self._current_cwd)
+        if isinstance(target, _UsageError):
+            return CommandStepResult(stderr=target.message, exit_code=target.exit_code)
+        self._current_cwd = target
+        return CommandStepResult(stdout="", stderr="", exit_code=0)
 
     def _pure_grep(self, argv: list[str], stdin: Any) -> CommandStepResult:
         if len(argv) < 2:

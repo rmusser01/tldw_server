@@ -213,6 +213,7 @@ Current limitations:
   - `/api/v1/sandbox/runtimes`
   - `/api/v1/admin/startup-warnings`
   - `/api/v1/sandbox/admin/runtime-diagnostics`
+  - `/api/v1/sandbox/admin/operator-status`
   - `/api/v1/sandbox/admin/macos-diagnostics`
   - `/api/v1/sandbox/admin/macos-image-store/cleanup-plan`
   - `POST /api/v1/sandbox/admin/macos-image-store/cleanup`
@@ -236,6 +237,18 @@ the same compact `startup_warning_summary` used by macOS diagnostics. Today
 repair support remains scoped to `vz_linux`; this summary does
 not add generic repair or reconciliation behavior for Docker, Firecracker, Lima,
 `seatbelt`, `worktree`, or `vz_macos`.
+`/api/v1/sandbox/admin/operator-status` is an admin-only read-only consolidated
+operator projection over those existing sources of truth. Its top-level payload
+includes `source`, `overall_status`, `overall_severity`, `summary`, `sections`,
+`recommended_actions`, and `notes`; common sections include
+`runtime_readiness`, `macos_vz`, `image_store`, `reconciliation`, `evidence`,
+`security_boundaries`, and `startup_warnings`. It does not start or stop helpers,
+run repair, run image-store cleanup, launch real VMs, install launchd services,
+or create image/evidence directories. Treat it as dashboard triage, then drill
+down through `/api/v1/sandbox/admin/runtime-diagnostics`,
+`/api/v1/sandbox/admin/macos-diagnostics`,
+`/api/v1/sandbox/admin/macos-image-store/cleanup-plan`, and dry-run-first repair
+or cleanup endpoints.
 Run status responses preserve raw `phase`, `message`, and `exit_code` while
 adding additive `status_reason_code` for stable client grouping of queued,
 completed, timeout, cancellation, policy, runtime-unavailable, nonzero-exit, and

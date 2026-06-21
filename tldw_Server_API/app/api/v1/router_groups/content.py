@@ -52,6 +52,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             route_key="research",
         ),
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.research_discovery",
+            log_name="research_discovery",
+            prefix=f"{API_V1_PREFIX}/research",
+            tags=("research-discovery",),
+            route_key="research",
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.research_runs",
             log_name="research_runs",
             prefix=f"{API_V1_PREFIX}",

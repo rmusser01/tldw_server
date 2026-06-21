@@ -87,6 +87,13 @@ pip install -e ".[acp]"
 
 ### Optional: Sandbox Mode (Run ACP in Containers)
 
+Current release evidence verifies the Docker sandbox runtime lifecycle on one
+macOS/Docker Desktop host. Lima and Apple Virtualization Framework are not
+certified by that evidence, and named downstream agents still need their own
+sandbox run before their compatibility row can claim sandbox support. See
+[ACP Sandbox Host Runtime Verification - 2026-06-19](../../Development/ACP_Sandbox_Host_Runtime_Verification_2026_06_19.md)
+for the exact host, runtime, commands, and caveats.
+
 To run the ACP agent inside a sandbox container and access it via web SSH:
 
 1. Build the ACP image:
@@ -362,6 +369,22 @@ When you're done:
      -H "Content-Type: application/json" \
      -d '{"session_id": "your-session-id"}'
    ```
+
+### Retention And Support-Safe Views
+
+ACP keeps full-fidelity session history for authenticated owner/operator
+drill-through. Closed or errored sessions are purged after
+`ACP_SESSION_RETENTION_DAYS` once the background ACP retention maintenance task
+runs; audit events are purged separately by `ACP_AUDIT_RETENTION_DAYS`.
+
+Use `?redacted=true` on session detail, event, and artifact endpoints when you
+need support-safe output. Redacted views scrub transcript content, raw payloads,
+secret-looking values, and local filesystem paths, but they are not a general
+DLP guarantee. Agent Tasks task detail supports `?run_summary_mode=redacted`
+when support/export workflows need run-status, count, and session-link summaries
+without prompt/result previews. Use the session redacted endpoints for detailed
+transcript, event, or artifact drill-through. For the release policy, see
+[ACP Production Readiness](../../Development/ACP_Production_Readiness.md).
 
 ## Alternative Agents
 

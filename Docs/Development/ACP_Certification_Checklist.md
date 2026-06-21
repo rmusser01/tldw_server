@@ -207,13 +207,20 @@ Run this when changing a candidate agent row from `documented_unverified` to
 
 Live E2E evidence should include the JSON manifest plus command output summary,
 not raw secrets or full transcript payloads. Use `?redacted=true` support views
-for transcript and artifact snippets in public evidence.
+for transcript and artifact snippets in public evidence. Do not use Agent Tasks
+prompt/result previews as public evidence; they are bounded owner-scoped
+diagnosis snippets, not the support-safe redaction surface. The release
+retention/redaction boundaries are summarized in
+[ACP Production Readiness](ACP_Production_Readiness.md).
 
 ## Sandbox Checklist
 
 Run this only when a support claim includes sandbox behavior:
 
 - Record sandbox runtime (`docker`, `lima`, `vz`, or other configured backend).
+- Link release-host runtime evidence when the claim depends on generic runtime
+  support. The current Docker evidence is recorded in
+  [ACP Sandbox Host Runtime Verification - 2026-06-19](ACP_Sandbox_Host_Runtime_Verification_2026_06_19.md).
 - Confirm missing runtime/configuration fails closed with actionable setup
   guidance.
 - Confirm workspace bind/mount behavior, cwd, env, and network policy.
@@ -221,7 +228,10 @@ Run this only when a support claim includes sandbox behavior:
   from downstream-agent protocol errors.
 
 Sandbox evidence can be separate from host live E2E evidence. A host-supported
-agent is not sandbox-supported until these checks pass.
+agent is not sandbox-supported until these checks pass. A generic Docker
+lifecycle pass does not promote any named agent to `sandbox_tested`; use
+`workspace-live-e2e` with `ACP_E2E_EXPECT_SANDBOX=1` for agent-specific sandbox
+claims.
 
 ## Evidence Record
 

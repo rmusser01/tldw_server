@@ -1,10 +1,10 @@
 ---
-id: TASK-2384
+id: TASK-2396
 title: Stabilize workflow media ingest chunking CI test
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-21 03:05'
+updated_date: '2026-06-21 03:16'
 labels:
   - ci
   - tests
@@ -45,6 +45,16 @@ Verification:
 - compileall on touched tests: passed.
 - git diff --check on touched tests/task: passed.
 - Bandit on touched tests wrote /tmp/bandit_ci2258_workflow_tests.json; findings were existing low-severity pytest assert/test-token patterns only.
+
+Merged origin/dev into PR #2258 and resolved the lone MCP server import conflict by keeping both the AuthNZ JWT token-detection imports from the PR branch and the single-user IP/settings imports from dev.
+
+Post-merge verification after merging origin/dev:
+- product-workflows-api shard command: 77 passed, 2 skipped.
+- product-workflows-storage shard command: 29 passed, 6 skipped.
+- MCP mounted JSON-RPC/auth targeted command: 19 passed.
+- compileall on MCP server and touched workflow tests: passed.
+- git diff --cached --check: passed.
+- Bandit including MCP server and touched workflow tests wrote /tmp/bandit_ci2258_post_merge.json; MCP server had no findings, remaining findings are existing low-severity pytest assert/test-token patterns in workflow tests.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
