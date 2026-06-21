@@ -21,6 +21,7 @@ documentation:
 - Docs/superpowers/plans/2026-06-19-mcp-smoke-client-transport-harness-implementation-plan.md
 - Docs/MCP/Unified/Smoke_Client.md
 - Docs/superpowers/specs/2026-06-20-mcp-lsp-code-intelligence-tools-design.md
+- Docs/superpowers/plans/2026-06-21-mcp-lsp-code-intelligence-tools-implementation-plan.md
 ---
 
 ## Description
