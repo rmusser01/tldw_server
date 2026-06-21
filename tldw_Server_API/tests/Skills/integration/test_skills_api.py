@@ -8,6 +8,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi import Request
@@ -867,6 +868,7 @@ class TestExecuteSkill:
         assert result["dry_run"] is False
 
     def test_execute_skill_forwards_and_returns_dry_run(self, client, monkeypatch):
+        """Verify the API forwards dry_run to the executor and returns it to clients."""
         client.post(
             f"{SKILLS_PREFIX}/",
             json={
@@ -876,7 +878,15 @@ class TestExecuteSkill:
         )
         observed = {}
 
-        async def fake_execute(self, *, skill_data, arguments, context, dry_run):
+        async def fake_execute(
+            self: object,
+            *,
+            skill_data: dict[str, Any],
+            arguments: str,
+            context: object | None,
+            dry_run: bool,
+        ) -> SimpleNamespace:
+            """Capture endpoint-to-executor dry-run arguments without executing a skill."""
             observed["dry_run"] = dry_run
             observed["arguments"] = arguments
             return SimpleNamespace(
@@ -936,7 +946,15 @@ class TestExecuteSkill:
         assert create_resp.status_code == 201, create_resp.text
         observed = {}
 
-        async def fake_execute(self, *, skill_data, arguments, context, dry_run):
+        async def fake_execute(
+            self: object,
+            *,
+            skill_data: dict[str, Any],
+            arguments: str,
+            context: Any | None,
+            dry_run: bool,
+        ) -> SimpleNamespace:
+            """Capture principal context propagation while bypassing real execution."""
             observed["user_id"] = context.user_id if context else None
             observed["dry_run"] = dry_run
             return SimpleNamespace(

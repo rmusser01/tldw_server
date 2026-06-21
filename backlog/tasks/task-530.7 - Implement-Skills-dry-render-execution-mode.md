@@ -61,9 +61,9 @@ Changed:
 - Added focused backend and frontend regression coverage.
 
 Verification:
-- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Skills/unit/test_skill_executor.py tldw_Server_API/tests/Skills/integration/test_skills_api.py -q (78 passed)
+- source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Skills/unit/test_skill_executor.py tldw_Server_API/tests/Skills/integration/test_skills_api.py -q (78 passed)
 - bunx vitest run src/components/Option/Skills/__tests__/SkillPreview.test.tsx src/services/tldw/domains/__tests__/workspace-api.skills.test.ts --reporter=dot (6 passed)
-- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/skills.py tldw_Server_API/app/api/v1/schemas/skills_schemas.py tldw_Server_API/app/core/Skills -f json -o /tmp/bandit_skills_dry_render_TASK_530_7.json (0 findings)
+- source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/skills.py tldw_Server_API/app/api/v1/schemas/skills_schemas.py tldw_Server_API/app/core/Skills -f json -o /tmp/bandit_skills_dry_render_TASK_530_7.json (0 findings)
 - git diff --check (passed)
 
 Known skips/blockers:
