@@ -144,6 +144,36 @@ async def test_success_transition_is_guarded(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_duplicate_start_does_not_fail_completed_run(tmp_path) -> None:
+    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+    run_id = f"run-{uuid.uuid4().hex}"
+    db.create_run(
+        run_id=run_id,
+        tenant_id="default",
+        user_id="1",
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={
+            "name": "duplicate-start",
+            "version": 1,
+            "steps": [
+                {"id": "s1", "type": "log", "config": {"message": "hello"}},
+            ],
+        },
+    )
+    db.update_run_status(run_id, status="succeeded", outputs={"logged": True})
+
+    engine = engine_mod.WorkflowEngine(db)
+    await engine.start_run(run_id)
+
+    run = db.get_run(run_id)
+    assert run is not None
+    assert run.status == "succeeded"
+    assert run.error is None
+
+
+@pytest.mark.asyncio
 async def test_wait_transition_is_guarded(tmp_path, monkeypatch) -> None:
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))
     run_id = f"run-{uuid.uuid4().hex}"

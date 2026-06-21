@@ -558,8 +558,21 @@ class WorkflowEngine:
             _finalize(False)
             finalized = True
             return
-        if str(getattr(preflight_run, "status", "") or "") == "cancelled":
+        preflight_status = str(getattr(preflight_run, "status", "") or "").strip()
+        if preflight_status == "cancelled":
             _finalize(False)
+            finalized = True
+            return
+        if preflight_status and preflight_status != "queued":
+            self._append_event(
+                run_id,
+                "duplicate_start_ignored",
+                {"status": preflight_status, "mode": str(mode)},
+            )
+            if preflight_status in {"succeeded", "failed"}:
+                _finalize(True)
+            else:
+                self._clear_tenant_cache(run_id)
             finalized = True
             return
 

@@ -267,6 +267,51 @@ def test_persona_websocket_plan_and_confirm(monkeypatch):
             assert evt_res["output"] == evt_res["result"]
 
 
+def test_persona_tool_result_handles_empty_mcp_response(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
+
+    class _FakeServer:
+        def __init__(self):
+            self.initialized = True
+
+        async def initialize(self):
+            self.initialized = True
+
+        async def handle_http_request(self, request, user_id=None, metadata=None):
+            return None
+
+    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+
+    with TestClient(fastapi_app) as c:
+        with c.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            session_id = "sess_empty_mcp_response"
+            ws.send_text(
+                json.dumps(
+                    {"type": "user_message", "session_id": session_id, "text": "https://example.com"}
+                )
+            )
+            plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan", timeout=8.0)
+            first_idx = int(plan["steps"][0]["idx"])
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "confirm_plan",
+                        "session_id": session_id,
+                        "plan_id": plan["plan_id"],
+                        "approved_steps": [first_idx],
+                    }
+                )
+            )
+
+            _ = _recv_until(ws, lambda d: d.get("event") == "tool_call")
+            evt_res = _recv_until(ws, lambda d: d.get("event") == "tool_result")
+
+    assert evt_res.get("ok") is False
+    assert evt_res.get("reason_code") == "TOOL_EXECUTION_EMPTY_RESPONSE"
+    assert evt_res.get("output") is None
+
+
 def test_persona_ws_persistence_offloads_to_thread(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 
