@@ -1,14 +1,14 @@
 ---
 id: TASK-2396
 title: Stabilize workflow media ingest chunking CI test
-status: Done
+status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-21 03:16'
+updated_date: 2026-06-21 03:16
 labels:
-  - ci
-  - tests
-  - workflows
+- ci
+- tests
+- workflows
 dependencies: []
 priority: high
 ---
@@ -72,3 +72,9 @@ Stabilized both direct PR #2258 workflow shard failures. Media ingest polling no
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Package-gate fix: represented standalone MCP base dependencies separately from the core extra, added smoke transport dependencies (httpx, websockets) to the gateway extra metadata, and asserted the package-info CLI exposes the base dependency list. Local verification: artifact gate .github/tests/test_mcp_unified_artifact_gate.py passed 4/4; runtime package boundary plus package-info test passed 35/35; compileall and git diff --check passed; Bandit output written to /tmp/bandit_ci2258_mcp_package_metadata.json with zero findings in mcp_unified/package_metadata.py and only existing low-severity test-file patterns elsewhere.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

@@ -2449,6 +2449,7 @@ def test_gateway_cli_package_info_reports_release_gate(
     assert payload["publishing_status"] == "not-published"
     assert payload["license_expression"] == "GPL-3.0-only"
     assert payload["dependency_version_policy"] == "names-only"
+    assert {"httpx", "websockets"}.issubset(payload["base_dependencies"])
     assert "gateway" in payload["optional_extras"]
 
 
