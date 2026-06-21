@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.Skills.exceptions import (
     SkillConflictError,
     SkillNotFoundError,
+    SkillParseError,
     SkillValidationError,
 )
 from tldw_Server_API.app.core.Skills.skills_service import SkillMetadata, SkillsService
@@ -573,6 +574,22 @@ Preview content.
         assert result["existing_version"] is None
         assert any("frontmatter skill name" in error for error in result["errors"])
         assert not service._get_skill_dir("invalid-name").exists()
+
+    @pytest.mark.asyncio
+    async def test_preview_import_skill_returns_parse_errors_without_writing(self, service, monkeypatch):
+        """Domain parse failures should return review errors without masking server bugs broadly."""
+        def fail_parse(*args, **kwargs):
+            raise SkillParseError("invalid frontmatter")
+
+        monkeypatch.setattr(service._parser, "parse_content", fail_parse)
+
+        result = await service.preview_import_skill(content="---\nname: parsed\n---\ncontent")
+
+        assert result["valid"] is False
+        assert result["name"] is None
+        assert result["conflict"] is False
+        assert result["errors"] == ["Invalid skill content: invalid frontmatter"]
+        assert not service._get_skill_dir("parsed").exists()
 
     @pytest.mark.asyncio
     async def test_export_skill(self, service):

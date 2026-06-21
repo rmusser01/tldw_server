@@ -37,6 +37,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.Skills.exceptions import (
     SkillConflictError,
     SkillNotFoundError,
+    SkillParseError,
     SkillsError,
     SkillStorageError,
     SkillValidationError,
@@ -890,7 +891,7 @@ class SkillsService:
         """
         try:
             parsed = self._parser.parse_content(content, default_name=name)
-        except Exception as e:
+        except SkillParseError as e:
             return self._invalid_import_preview([f"Invalid skill content: {e}"])
 
         try:

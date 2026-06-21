@@ -4,8 +4,10 @@
 #
 
 import os
+import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -27,6 +29,7 @@ os.environ["ROUTES_DISABLE"] = ",".join(sorted(_routes_disable))
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+from tldw_Server_API.app.api.v1.endpoints.skills import MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -690,6 +693,47 @@ class TestImportExport:
         assert body["can_overwrite"] is False
         missing = client.get(f"{SKILLS_PREFIX}/review-file-skill")
         assert missing.status_code == 404
+
+    def test_import_skill_file_preview_zip_sniffs_content_without_zip_filename(self, client):
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr(
+                "sniffed-skill/SKILL.md",
+                "---\nname: sniffed-skill\ndescription: Sniffed zip\n---\nZip preview content",
+            )
+
+        r = client.post(
+            f"{SKILLS_PREFIX}/import/file/preview",
+            files={"file": ("skill.bundle", buffer.getvalue(), "application/octet-stream")},
+        )
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["valid"] is True
+        assert body["name"] == "sniffed-skill"
+        assert body["description"] == "Sniffed zip"
+        missing = client.get(f"{SKILLS_PREFIX}/sniffed-skill")
+        assert missing.status_code == 404
+
+    def test_import_skill_file_preview_rejects_oversized_upload(self, client):
+        too_large = b"a" * (MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES + 1)
+
+        r = client.post(
+            f"{SKILLS_PREFIX}/import/file/preview",
+            files={"file": ("too-large.md", too_large, "text/markdown")},
+        )
+
+        assert r.status_code == 413, r.text
+        assert "exceeds" in r.json()["detail"]
+
+    def test_import_skill_file_preview_rejects_non_utf8_non_zip_upload(self, client):
+        r = client.post(
+            f"{SKILLS_PREFIX}/import/file/preview",
+            files={"file": ("payload.bin", b"\xff\xfe\xfd\xfc", "application/octet-stream")},
+        )
+
+        assert r.status_code == 400, r.text
+        assert "UTF-8" in r.json()["detail"]
 
     def test_import_skill_json(self, client):
         r = client.post(
