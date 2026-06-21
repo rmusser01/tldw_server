@@ -35,6 +35,8 @@ class LspJsonRpcClient:
         self._reader_task: asyncio.Task[None] | None = None
         self._stderr_task: asyncio.Task[None] | None = None
         self._pending: dict[int, asyncio.Future[JsonRpcPayload]] = {}
+        self._notifications: list[JsonRpcPayload] = []
+        self._notification_waiters: list[tuple[str, asyncio.Future[JsonRpcPayload]]] = []
         self._next_id = 1
         self._stderr = bytearray()
         self._close_errors: list[str] = []
@@ -122,6 +124,28 @@ class LspJsonRpcClient:
             payload["params"] = params
         await self._write_payload(payload)
 
+    async def wait_for_notification(self, method: str, *, timeout_seconds: float | None = None) -> JsonRpcPayload:
+        """Wait for the next notification with the given method."""
+
+        for index, notification in enumerate(self._notifications):
+            if notification.get("method") == method:
+                return self._notifications.pop(index)
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[JsonRpcPayload] = loop.create_future()
+        self._notification_waiters.append((method, future))
+        try:
+            return await asyncio.wait_for(
+                future,
+                timeout=self.config.request_timeout_seconds if timeout_seconds is None else timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            self._notification_waiters = [
+                (waiter_method, waiter_future)
+                for waiter_method, waiter_future in self._notification_waiters
+                if waiter_future is not future
+            ]
+            raise LspToolError("backend_timeout", f"LSP notification timed out: {method}") from exc
+
     def stderr_text(self, *, workspace_root: Path | None = None) -> str:
         """Return bounded, redacted stderr text captured from the subprocess."""
 
@@ -170,6 +194,8 @@ class LspJsonRpcClient:
                     future = self._pending.pop(request_id, None)
                     if future is not None and not future.done():
                         future.set_result(payload)
+                elif isinstance(payload.get("method"), str):
+                    self._handle_notification(payload)
         except (LspToolError, json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
             self._fail_pending(
                 LspToolError(
@@ -199,6 +225,19 @@ class LspJsonRpcClient:
             self._pending.pop(request_id, None)
             if not future.done():
                 future.set_exception(exc)
+        for _method, future in list(self._notification_waiters):
+            if not future.done():
+                future.set_exception(exc)
+        self._notification_waiters.clear()
+
+    def _handle_notification(self, payload: JsonRpcPayload) -> None:
+        method = payload.get("method")
+        for index, (waiter_method, future) in enumerate(list(self._notification_waiters)):
+            if waiter_method == method and not future.done():
+                future.set_result(payload)
+                self._notification_waiters.pop(index)
+                return
+        self._notifications.append(payload)
 
     async def _close_process(self, process: asyncio.subprocess.Process) -> None:
         if process.stdin is not None:

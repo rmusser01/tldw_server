@@ -25,6 +25,7 @@ from .backends import (
 )
 from .config import DEFAULT_LSP_CONFIG, LspRuntimeConfig
 from .errors import LSP_REASON_CODES, LspToolError, redact_lsp_detail
+from .executables import LspExecutableResolver, ResolvedLspExecutable
 from .jsonrpc import LspJsonRpcClient
 from .models import (
     LspBackendStatus,
@@ -43,7 +44,9 @@ from .models import (
     LspSymbolsResult,
     LspTextEdit,
 )
+from .pylsp import PylspLspBackend
 from .router import LspCapabilityRouter
+from .ruff import RuffLspBackend
 from .service import LspCodeIntelligenceService
 from .sessions import LspManagedSession, LspSessionManager
 
@@ -73,6 +76,7 @@ __all__ = [
     "LspCodeAction",
     "LspCodeActionsResult",
     "LspCodeIntelligenceService",
+    "LspExecutableResolver",
     "LspJsonRpcClient",
     "LspManagedSession",
     "LspDiagnostic",
@@ -91,7 +95,10 @@ __all__ = [
     "LspTextEdit",
     "LspToolError",
     "PositionRequest",
+    "PylspLspBackend",
     "ReferencesRequest",
+    "ResolvedLspExecutable",
+    "RuffLspBackend",
     "WorkspaceSymbolsRequest",
     "redact_lsp_detail",
 ]

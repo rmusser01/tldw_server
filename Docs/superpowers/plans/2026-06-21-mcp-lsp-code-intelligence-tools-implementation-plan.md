@@ -513,17 +513,19 @@ git commit -m "feat(mcp): add LSP process sessions"
 
 ### Task 4: Executable Resolver And Real Ruff/pylsp Backends
 
+**Status:** Complete. Local verification on 2026-06-21: the focused LSP suite passed with 84 tests and 5 env-gated skips; the explicit real-backend env run passed with 11 tests and 5 skips because `ruff`/`pylsp` are not installed on PATH; Ruff passed on touched LSP files/tests; Bandit reported zero findings for `mcp_unified/lsp`; `git diff --check` was clean. Added a workspace-boundary guard so backend file reads and URIs reject path traversal or absolute-path escapes before invoking LSP.
+
 **Files:**
 - Create: `mcp_unified/lsp/executables.py`
 - Create: `mcp_unified/lsp/ruff.py`
 - Create: `mcp_unified/lsp/pylsp.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_lsp_real_backends.py`
 
-- [ ] **Step 1: Write failing executable resolver tests**
+- [x] **Step 1: Write failing executable resolver tests**
 
 Cover explicit config, virtualenv discovery, PATH discovery, and missing executable status. Use temporary executable stubs; do not require real Ruff/pylsp for resolver unit cases.
 
-- [ ] **Step 2: Implement `LspExecutableResolver`**
+- [x] **Step 2: Implement `LspExecutableResolver`**
 
 Resolution order:
 
@@ -537,7 +539,7 @@ Reject:
 - wrapper commands such as `npx`, `docker`, `devbox`, unless later explicitly designed;
 - non-executable paths.
 
-- [ ] **Step 3: Write env-gated real backend tests**
+- [x] **Step 3: Write env-gated real backend tests**
 
 Use `pytest.mark.skipif` unless:
 
@@ -555,7 +557,7 @@ Real tests:
 - pylsp definition resolves a local function call.
 - missing Ruff or missing pylsp degrades status without failing the whole service.
 
-- [ ] **Step 4: Implement Ruff backend**
+- [x] **Step 4: Implement Ruff backend**
 
 Use `ruff server` through `LspJsonRpcClient`. First-slice requirements:
 
@@ -566,7 +568,7 @@ Use `ruff server` through `LspJsonRpcClient`. First-slice requirements:
 - code actions return explicit text-edit previews only;
 - opaque command-only actions raise `unsupported_action_shape`.
 
-- [ ] **Step 5: Implement pylsp backend**
+- [x] **Step 5: Implement pylsp backend**
 
 Use `pylsp` through `LspJsonRpcClient`. Implement:
 
@@ -579,7 +581,7 @@ Use `pylsp` through `LspJsonRpcClient`. Implement:
 
 Normalize all returned URIs to workspace-relative paths and preserve UTF-16 LSP positions.
 
-- [ ] **Step 6: Run fake and resolver tests**
+- [x] **Step 6: Run fake and resolver tests**
 
 Run:
 
@@ -592,7 +594,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS, with real backend tests skipped unless env-gated.
 
-- [ ] **Step 7: Run real backend tests when tools are available**
+- [x] **Step 7: Run real backend tests when tools are available**
 
 Run:
 
@@ -603,7 +605,7 @@ source .venv/bin/activate && TLDW_MCP_LSP_REAL_BACKENDS=1 python -m pytest \
 
 Expected: PASS or documented SKIP for missing `ruff`/`pylsp`.
 
-- [ ] **Step 8: Commit Task 4**
+- [x] **Step 8: Commit Task 4**
 
 ```bash
 git add mcp_unified/lsp tldw_Server_API/app/core/MCP_unified/tests/test_lsp_real_backends.py
