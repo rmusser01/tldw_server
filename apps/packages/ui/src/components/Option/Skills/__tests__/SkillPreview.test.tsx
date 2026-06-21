@@ -117,6 +117,46 @@ describe("SkillPreview test-run semantics", () => {
     })
   })
 
+  it("prevents duplicate skill executions while a test run is pending", async () => {
+    let resolveExecution: (value: {
+      skill_name: string
+      rendered_prompt: string
+      allowed_tools: string[]
+      model_override: null
+      execution_mode: "fork"
+      fork_output: string
+    }) => void = () => {}
+    tldwClientMock.executeSkill.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveExecution = resolve
+        })
+    )
+
+    renderPreview()
+
+    const dialog = screen.getByRole("dialog", { name: "Test run" })
+    const argsInput = within(dialog).getByPlaceholderText("Enter test arguments...")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Run test" }))
+
+    await waitFor(() => {
+      expect(tldwClientMock.executeSkill).toHaveBeenCalledTimes(1)
+    })
+
+    expect(argsInput).toBeDisabled()
+    fireEvent.keyDown(argsInput, { key: "Enter", code: "Enter", charCode: 13 })
+    expect(tldwClientMock.executeSkill).toHaveBeenCalledTimes(1)
+
+    resolveExecution({
+      skill_name: "summarize",
+      rendered_prompt: "Summarize chapter 1",
+      allowed_tools: ["search"],
+      model_override: null,
+      execution_mode: "fork",
+      fork_output: "Summary output"
+    })
+  })
+
   it("renders execution failures as alerts", async () => {
     tldwClientMock.executeSkill.mockRejectedValueOnce(new Error("Model unavailable"))
     renderPreview()

@@ -17,11 +17,13 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
   const { t } = useTranslation(["option", "common"])
   const [args, setArgs] = React.useState("")
   const [result, setResult] = React.useState<SkillExecutionResult | null>(null)
+  const testRunPendingRef = React.useRef(false)
 
   React.useEffect(() => {
     if (!skillName) {
       setArgs("")
       setResult(null)
+      testRunPendingRef.current = false
     }
   }, [skillName])
 
@@ -29,13 +31,17 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
     mutationFn: () => tldwClient.executeSkill(skillName!, args),
     onSuccess: (data: SkillExecutionResult) => {
       setResult(data)
+    },
+    onSettled: () => {
+      testRunPendingRef.current = false
     }
   })
 
   const handleRunTest = () => {
-    if (skillName) {
-      executeMutation.mutate()
-    }
+    if (!skillName || testRunPendingRef.current || executeMutation.isPending) return
+
+    testRunPendingRef.current = true
+    executeMutation.mutate()
   }
 
   const errorMessage =
@@ -69,6 +75,7 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
               defaultValue: "Enter test arguments..."
             })}
             onPressEnter={handleRunTest}
+            disabled={executeMutation.isPending}
           />
         </div>
 
@@ -83,6 +90,7 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
           type="primary"
           onClick={handleRunTest}
           loading={executeMutation.isPending}
+          disabled={executeMutation.isPending}
         >
           {t("option:skills.testRunAction", { defaultValue: "Run test" })}
         </Button>
