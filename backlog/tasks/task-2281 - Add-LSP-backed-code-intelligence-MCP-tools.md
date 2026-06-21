@@ -22,6 +22,13 @@ documentation:
 - Docs/MCP/Unified/Smoke_Client.md
 - Docs/superpowers/specs/2026-06-20-mcp-lsp-code-intelligence-tools-design.md
 - Docs/superpowers/plans/2026-06-21-mcp-lsp-code-intelligence-tools-implementation-plan.md
+modified_files:
+- mcp_unified/lsp/__init__.py
+- mcp_unified/lsp/config.py
+- mcp_unified/lsp/errors.py
+- mcp_unified/lsp/models.py
+- mcp_unified/pyproject.toml
+- tldw_Server_API/app/core/MCP_unified/tests/test_lsp_models.py
 ---
 
 ## Description
@@ -53,3 +60,9 @@ Before implementing LSP-backed MCP tools, build or at least plan the MCP smoke c
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Task 1 complete: added LSP public model/config/error contracts, package metadata for mcp_unified.lsp and lsp extra dependencies, and targeted model contract tests. Verification: targeted pytest passed with 3 tests; Bandit on mcp_unified/lsp reported zero findings. Used repository root virtualenv because this worktree has no local .venv directory.
+<!-- SECTION:FINAL_SUMMARY:END -->
