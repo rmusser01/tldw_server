@@ -45,7 +45,10 @@ def redact_lsp_detail(
             safe_detail = safe_detail.replace(workspace_text, "<workspace>")
 
     if len(safe_detail) > max_length:
-        return safe_detail[:max_length] + "...<truncated>"
+        suffix = "..."
+        if max_length <= len(suffix):
+            return suffix[:max_length]
+        return safe_detail[: max_length - len(suffix)] + suffix
     return safe_detail
 
 
@@ -69,4 +72,5 @@ class LspToolError(RuntimeError):
         """Return a deterministic JSON-serializable error payload."""
 
         safe_detail = redact_lsp_detail(self.detail, workspace_root=workspace_root)
-        return {"reason_code": self.reason_code, "message": str(self), "detail": safe_detail}
+        safe_message = redact_lsp_detail(str(self), workspace_root=workspace_root)
+        return {"reason_code": self.reason_code, "message": safe_message, "detail": safe_detail}

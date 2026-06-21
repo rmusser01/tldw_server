@@ -3,27 +3,45 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from math import isfinite
 from typing import Any, Mapping, Sequence
 
 
 JsonDict = dict[str, object]
+JsonValue = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 
 
 def _validate_non_negative_int(name: str, value: int) -> None:
-    if not isinstance(value, int):
+    if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{name} must be an int")
     if value < 0:
         raise ValueError(f"{name} must be zero or greater")
 
 
-def _to_dict(value: object) -> object:
+def _to_dict(value: object) -> JsonValue:
     if hasattr(value, "to_dict"):
-        return value.to_dict()  # type: ignore[no-any-return]
+        return _to_json_value(value.to_dict())
+    return _to_json_value(value)
+
+
+def _to_json_value(value: object) -> JsonValue:
+    if value is None or isinstance(value, (bool, str, int)):
+        return value
+    if isinstance(value, float):
+        if not isfinite(value):
+            raise TypeError("JSON value must not be NaN or infinity")
+        return value
     if isinstance(value, Mapping):
-        return {str(key): _to_dict(item) for key, item in value.items()}
+        normalized: dict[str, JsonValue] = {}
+        keys = list(value)
+        if not all(isinstance(key, str) for key in keys):
+            raise TypeError("JSON object keys must be strings")
+        for key in sorted(keys):
+            normalized[key] = _to_json_value(value[key])
+        return normalized
     if isinstance(value, (list, tuple)):
-        return [_to_dict(item) for item in value]
-    return value
+        return [_to_json_value(item) for item in value]
+    raise TypeError(f"{type(value).__name__} is not JSON-serializable")
 
 
 @dataclass(frozen=True, slots=True)
