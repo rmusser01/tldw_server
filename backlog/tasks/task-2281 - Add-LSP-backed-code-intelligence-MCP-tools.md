@@ -16,6 +16,7 @@ dependencies:
 references:
 - https://code.claude.com/docs/en/tools-reference
 - TASK-2387
+- https://github.com/rmusser01/tldw_server/pull/2421
 documentation:
 - Docs/superpowers/specs/2026-06-19-mcp-smoke-client-transport-harness-design.md
 - Docs/superpowers/plans/2026-06-19-mcp-smoke-client-transport-harness-implementation-plan.md
@@ -104,5 +105,9 @@ Progress so far: Task 1 added LSP public model/config/error contracts, package m
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Task 8 complete: added LSP tooling metadata to code-oriented built-in presets, using deferred code_intelligence progressive disclosure to preserve the 24-tool direct surface cap; documented LSP install/enablement/smoke usage in package README, user guide, and smoke client guide; aligned package metadata and runtime package-boundary tests with the lsp optional extra and base dependency metadata. Verification on 2026-06-21: profile preset tests passed with 28 tests; targeted Task 8 pytest group passed with 37 tests; package metadata release-gate tests passed; standalone artifact gate passed with 4 tests; Ruff passed on touched Python files; Bandit reported zero findings for touched package code; git diff --check was clean.
+
 Task 9 complete: ran final LSP verification and backlog closeout. Focused LSP suite: 109 passed, 5 skipped. Regression-adjacent MCP suite: initial sandbox run hit local WebSocket bind PermissionError; escalated loopback rerun passed 136 tests. Explicit TLDW_MCP_LSP_REAL_BACKENDS=1 run: 11 passed, 5 skipped. LSP smoke CLI best-effort in-process scenario passed with backend_missing/capability_unavailable best-effort notes where optional backends were unavailable. Bandit report /tmp/bandit_mcp_lsp_code_intelligence.json has zero findings. Known limitations remain Python-only first slice, single workspace root, preview-only edit actions, and file-level diagnostics dependent on optional Ruff/pylsp availability. Also corrected an older formatting regression test to assert the current eval-metadata-enriched dict result contract.
+
+Draft PR opened for review: https://github.com/rmusser01/tldw_server/pull/2421. Branch was rebased cleanly onto latest origin/dev before PR creation and post-rebase verification passed: focused LSP/package suite 111 passed, 5 skipped; regression-adjacent MCP suite 136 passed; explicit real-backend suite 11 passed, 5 skipped; LSP smoke CLI passed; Ruff passed; Bandit post-rebase report /tmp/bandit_mcp_lsp_code_intelligence_post_rebase.json has zero findings; git diff --check was clean.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
