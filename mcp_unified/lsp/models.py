@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from math import isfinite
-from typing import Any, Mapping, Sequence
-
+from typing import Any
 
 JsonDict = dict[str, object]
 JsonValue = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]

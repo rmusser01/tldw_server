@@ -1,5 +1,28 @@
 """Public model and error contracts for MCP LSP tooling."""
 
+from .backends import (
+    LSP_CODE_ACTIONS_TOOL,
+    LSP_DEFINITION_TOOL,
+    LSP_DIAGNOSTICS_TOOL,
+    LSP_DOCUMENT_SYMBOLS_TOOL,
+    LSP_FORMAT_PREVIEW_TOOL,
+    LSP_HOVER_TOOL,
+    LSP_OPERATION_TOOLS,
+    LSP_REFERENCES_TOOL,
+    LSP_SIGNATURE_HELP_TOOL,
+    LSP_STATUS_TOOL,
+    LSP_TOOL_NAMES,
+    LSP_WORKSPACE_SYMBOLS_TOOL,
+    CodeActionsRequest,
+    DiagnosticsRequest,
+    DocumentSymbolsRequest,
+    FakeLspBackend,
+    FormatPreviewRequest,
+    LspBackend,
+    PositionRequest,
+    ReferencesRequest,
+    WorkspaceSymbolsRequest,
+)
 from .config import DEFAULT_LSP_CONFIG, LspRuntimeConfig
 from .errors import LSP_REASON_CODES, LspToolError, redact_lsp_detail
 from .models import (
@@ -19,13 +42,35 @@ from .models import (
     LspSymbolsResult,
     LspTextEdit,
 )
+from .router import LspCapabilityRouter
+from .service import LspCodeIntelligenceService
 
 __all__ = [
+    "CodeActionsRequest",
     "DEFAULT_LSP_CONFIG",
+    "DiagnosticsRequest",
+    "DocumentSymbolsRequest",
+    "FakeLspBackend",
+    "FormatPreviewRequest",
+    "LSP_CODE_ACTIONS_TOOL",
+    "LSP_DEFINITION_TOOL",
+    "LSP_DIAGNOSTICS_TOOL",
+    "LSP_DOCUMENT_SYMBOLS_TOOL",
+    "LSP_FORMAT_PREVIEW_TOOL",
+    "LSP_HOVER_TOOL",
+    "LSP_OPERATION_TOOLS",
     "LSP_REASON_CODES",
+    "LSP_REFERENCES_TOOL",
+    "LSP_SIGNATURE_HELP_TOOL",
+    "LSP_STATUS_TOOL",
+    "LSP_TOOL_NAMES",
+    "LSP_WORKSPACE_SYMBOLS_TOOL",
+    "LspBackend",
     "LspBackendStatus",
+    "LspCapabilityRouter",
     "LspCodeAction",
     "LspCodeActionsResult",
+    "LspCodeIntelligenceService",
     "LspDiagnostic",
     "LspDiagnosticsResult",
     "LspHover",
@@ -40,5 +85,8 @@ __all__ = [
     "LspSymbolsResult",
     "LspTextEdit",
     "LspToolError",
+    "PositionRequest",
+    "ReferencesRequest",
+    "WorkspaceSymbolsRequest",
     "redact_lsp_detail",
 ]

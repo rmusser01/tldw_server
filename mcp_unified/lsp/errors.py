@@ -6,7 +6,6 @@ from pathlib import Path
 
 from .config import DEFAULT_LSP_CONFIG
 
-
 LSP_REASON_CODES = frozenset(
     {
         "tool_not_granted",

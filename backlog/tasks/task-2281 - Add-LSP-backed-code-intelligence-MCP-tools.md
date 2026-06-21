@@ -27,8 +27,14 @@ modified_files:
 - mcp_unified/lsp/config.py
 - mcp_unified/lsp/errors.py
 - mcp_unified/lsp/models.py
+- mcp_unified/lsp/backends.py
+- mcp_unified/lsp/router.py
+- mcp_unified/lsp/service.py
 - mcp_unified/pyproject.toml
 - tldw_Server_API/app/core/MCP_unified/tests/test_lsp_models.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_lsp_router.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_lsp_backends_fake.py
+- Docs/superpowers/plans/2026-06-21-mcp-lsp-code-intelligence-tools-implementation-plan.md
 ---
 
 ## Description
@@ -64,5 +70,5 @@ Before implementing LSP-backed MCP tools, build or at least plan the MCP smoke c
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Task 1 complete: added LSP public model/config/error contracts, package metadata for mcp_unified.lsp and lsp extra dependencies, and targeted model contract tests. Verification: targeted pytest passed with 3 tests; Bandit on mcp_unified/lsp reported zero findings. Used repository root virtualenv because this worktree has no local .venv directory.
+Progress so far: Task 1 added LSP public model/config/error contracts, package metadata for mcp_unified.lsp, and targeted model contract tests. Task 2 added deterministic fake LSP backends, capability routing for the first-slice lsp.* tools, and the host-neutral service facade/status surface. Verification on 2026-06-21: test_lsp_models.py, test_lsp_router.py, and test_lsp_backends_fake.py passed with 65 tests; Ruff passed on touched LSP Python files/tests; Bandit on mcp_unified/lsp reported zero findings; git diff --check was clean. Used the repository root virtualenv because this worktree has no local .venv directory.
 <!-- SECTION:FINAL_SUMMARY:END -->

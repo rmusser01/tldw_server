@@ -84,6 +84,8 @@ Create tests:
 
 ### Task 1: Package Metadata, Models, Errors, And Limits
 
+**Status:** Complete. Local verification on 2026-06-21: `test_lsp_models.py` passed with 40 tests, Bandit reported zero findings for `mcp_unified/lsp`, and `git diff --check` was clean.
+
 **Files:**
 - Create: `mcp_unified/lsp/__init__.py`
 - Create: `mcp_unified/lsp/errors.py`
@@ -92,7 +94,7 @@ Create tests:
 - Modify: `mcp_unified/pyproject.toml`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_lsp_models.py`
 
-- [ ] **Step 1: Write failing tests for the public model contract**
+- [x] **Step 1: Write failing tests for the public model contract**
 
 Add tests covering:
 
@@ -113,7 +115,7 @@ def test_lsp_error_payload_redacts_absolute_paths(tmp_path):
     assert payload["reason_code"] == "backend_unhealthy"
 ```
 
-- [ ] **Step 2: Run the failing model tests**
+- [x] **Step 2: Run the failing model tests**
 
 Run:
 
@@ -123,7 +125,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unifi
 
 Expected: FAIL because `mcp_unified.lsp` does not exist yet.
 
-- [ ] **Step 3: Implement `errors.py`**
+- [x] **Step 3: Implement `errors.py`**
 
 Define:
 
@@ -158,7 +160,7 @@ class LspToolError(RuntimeError):
 
 Redaction rule: replace the workspace root string with `<workspace>` and truncate detail to the configured safe detail length.
 
-- [ ] **Step 4: Implement `models.py`**
+- [x] **Step 4: Implement `models.py`**
 
 Include frozen/slotted dataclasses or Pydantic models:
 
@@ -181,7 +183,7 @@ class LspLocation:
 
 Also add diagnostics, symbols, hover, signature, status, preview, and code-action result shapes. Keep `to_dict()` methods deterministic and JSON-serializable.
 
-- [ ] **Step 5: Implement `config.py`**
+- [x] **Step 5: Implement `config.py`**
 
 Define `LspRuntimeConfig` with conservative defaults:
 
@@ -199,7 +201,7 @@ max_stderr_bytes = 8_000
 
 Include `from_mapping(settings: Mapping[str, object])`.
 
-- [ ] **Step 6: Update package metadata**
+- [x] **Step 6: Update package metadata**
 
 Modify `mcp_unified/pyproject.toml`:
 
@@ -224,7 +226,7 @@ packages = [
 Do not remove existing package entries such as `mcp_unified.gateway`,
 `mcp_unified.profiles`, `mcp_unified.smoke`, or storage/reporting packages.
 
-- [ ] **Step 7: Run targeted tests**
+- [x] **Step 7: Run targeted tests**
 
 Run:
 
@@ -234,7 +236,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/app/core/MCP_unifi
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit Task 1**
+- [x] **Step 8: Commit Task 1**
 
 ```bash
 git add mcp_unified/lsp mcp_unified/pyproject.toml tldw_Server_API/app/core/MCP_unified/tests/test_lsp_models.py
@@ -245,6 +247,8 @@ git commit -m "feat(mcp): add LSP model contracts"
 
 ### Task 2: Fake Backends, Capability Router, And Service Contract
 
+**Status:** Complete. Local verification on 2026-06-21: `test_lsp_models.py`, `test_lsp_router.py`, and `test_lsp_backends_fake.py` passed with 65 tests; Ruff passed on the touched LSP Python files/tests; Bandit reported zero findings for `mcp_unified/lsp`; `git diff --check` was clean.
+
 **Files:**
 - Create: `mcp_unified/lsp/backends.py`
 - Create: `mcp_unified/lsp/router.py`
@@ -252,7 +256,7 @@ git commit -m "feat(mcp): add LSP model contracts"
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_lsp_router.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_lsp_backends_fake.py`
 
-- [ ] **Step 1: Write failing router tests**
+- [x] **Step 1: Write failing router tests**
 
 Cover:
 
@@ -295,7 +299,7 @@ async def test_router_covers_every_lsp_tool(tool_name, expected_backend):
     assert result["backend"] == expected_backend
 ```
 
-- [ ] **Step 2: Run the failing router tests**
+- [x] **Step 2: Run the failing router tests**
 
 Run:
 
@@ -307,7 +311,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: FAIL because router/backend modules do not exist.
 
-- [ ] **Step 3: Implement backend protocol and fake backend**
+- [x] **Step 3: Implement backend protocol and fake backend**
 
 `LspBackend` protocol must expose:
 
@@ -352,7 +356,7 @@ The fake backend suite must cover:
 - limit/truncation metadata;
 - backend unhealthy and backend crash/degraded status.
 
-- [ ] **Step 4: Implement capability router**
+- [x] **Step 4: Implement capability router**
 
 Capability mapping:
 
@@ -370,13 +374,13 @@ PYLSP_TOOLS = {
 
 Return structured `backend_missing`, `backend_unhealthy`, or `capability_unavailable` errors.
 
-- [ ] **Step 5: Implement service facade with backend injection**
+- [x] **Step 5: Implement service facade with backend injection**
 
 `LspCodeIntelligenceService` should accept a router/session manager and expose methods that match the ten tool names. Keep profile/path authorization out of this class; the tldw module handles it.
 
 Add `status()` tests that assert backend provenance, version/config metadata when supplied by fakes, install hints for missing backends, degraded capability status, and redaction of absolute executable paths.
 
-- [ ] **Step 6: Run targeted tests**
+- [x] **Step 6: Run targeted tests**
 
 Run:
 
@@ -388,7 +392,7 @@ source .venv/bin/activate && python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 2**
+- [x] **Step 7: Commit Task 2**
 
 ```bash
 git add mcp_unified/lsp tldw_Server_API/app/core/MCP_unified/tests/test_lsp_router.py tldw_Server_API/app/core/MCP_unified/tests/test_lsp_backends_fake.py

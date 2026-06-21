@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, fields
-from typing import Mapping
-
 
 _FLOAT_FIELDS = frozenset({"request_timeout_seconds", "startup_timeout_seconds"})
 _INT_FIELDS = frozenset(
@@ -51,7 +50,7 @@ class LspRuntimeConfig:
                 raise ValueError(f"{field_name} must be greater than zero")
 
     @classmethod
-    def from_mapping(cls, settings: Mapping[str, object]) -> "LspRuntimeConfig":
+    def from_mapping(cls, settings: Mapping[str, object]) -> LspRuntimeConfig:
         """Build a config from a mapping, ignoring unknown keys."""
 
         field_names = {field.name for field in fields(cls)}
