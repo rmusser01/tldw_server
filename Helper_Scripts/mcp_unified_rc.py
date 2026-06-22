@@ -251,6 +251,7 @@ def run_command(
 
     started = time.perf_counter()
     run_env = {**os.environ, "PIP_DISABLE_PIP_VERSION_CHECK": "1"}
+    run_env.pop("PYTHONPATH", None)
     if env:
         run_env.update(env)
     redacted_command = [redact_text(part) for part in command]

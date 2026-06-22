@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from Helper_Scripts import mcp_unified_rc
 
@@ -23,6 +24,30 @@ def test_redact_text_removes_secret_like_values() -> None:
     assert "abc123" not in redacted  # nosec B101
     assert "json-value" not in redacted  # nosec B101
     assert "normal=value" in redacted  # nosec B101
+
+
+def test_run_command_clears_inherited_pythonpath(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    captured_env: dict[str, str] = {}
+
+    def fake_run(*args: Any, **kwargs: Any) -> Any:
+        captured_env.update(kwargs["env"])
+        return mcp_unified_rc.subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout="ok",
+            stderr="",
+        )
+
+    monkeypatch.setenv("PYTHONPATH", "/repo/apps/mcp-unified/src")
+    monkeypatch.setattr(mcp_unified_rc.subprocess, "run", fake_run)
+
+    result = mcp_unified_rc.run_command(["python", "-c", "print('ok')"], cwd=tmp_path)
+
+    assert result.returncode == 0  # nosec B101
+    assert "PYTHONPATH" not in captured_env  # nosec B101
 
 
 def test_result_recorder_writes_json_and_markdown(tmp_path: Path) -> None:
