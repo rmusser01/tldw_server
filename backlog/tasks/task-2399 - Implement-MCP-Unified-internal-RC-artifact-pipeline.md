@@ -38,6 +38,8 @@ Execute the approved implementation plan for moving the standalone MCP package u
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation started using subagent-driven development after the design/spec and implementation plan were approved and re-reviewed. Worktree: codex/mcp-unified-internal-rc-spec.
+
+Task 1 worker completed package relocation in commit `92283dc17f`. Focused relocation tests passed: 3 passed, 4 warnings, using the root project virtualenv. The worker added root pytest `pythonpath` for `apps/mcp-unified/src`, which appears necessary because many MCP tests import `mcp_unified` directly after the root package directory is removed. Duplicate worker-created task `TASK-2400` was removed as redundant with `TASK-2399`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
