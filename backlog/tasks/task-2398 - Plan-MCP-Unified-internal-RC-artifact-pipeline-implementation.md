@@ -36,12 +36,14 @@ Write the implementation plan for moving the standalone MCP package project unde
 Implementation-plan task started after user approved the revised design spec. Scope remains planning only; no implementation code changes in this task.
 
 Plan written under `Docs/superpowers/plans/2026-06-22-mcp-unified-internal-rc-artifact-pipeline-implementation-plan.md`. Self-review checked spec coverage, unresolved-marker scan, path consistency, and command specificity.
+
+Additional pre-execution review completed after the user selected subagent-driven execution. Integrated fixes for: post-move import path setup, sdist old-root detection, artifact hash evidence, `twine check`, no-deps `python -S` install smoke, all extras in the matrix, stdio/HTTP/WebSocket smoke coverage, root PyPI publish-workflow guardrails, UAT loader `sys.modules` handling, and final compileall validation.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created the implementation plan for relocating the standalone package under `apps/mcp-unified/`, updating package-boundary tests, adding the internal RC harness, wiring Make and CI, updating installed-wheel UAT, and running final validation/security checks. No implementation code was changed in this planning task.
+Created and reviewed the implementation plan for relocating the standalone package under `apps/mcp-unified/`, updating package-boundary tests, adding the internal RC harness, wiring Make and CI, updating installed-wheel UAT, and running final validation/security checks. No implementation code was changed in this planning task.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

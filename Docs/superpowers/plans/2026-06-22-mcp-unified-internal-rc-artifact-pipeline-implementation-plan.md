@@ -38,18 +38,26 @@
 
 - [ ] **Step 1: Write the failing app-location boundary test**
 
-Replace the path constants at the top of `tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py` with:
+Move `import mcp_unified` below the repository/path constants so the test file
+continues to import the package after the source tree moves under `apps/`.
+The import prelude should be:
 
 ```python
 REPO_ROOT = Path(__file__).resolve().parents[5]
 STANDALONE_PROJECT_ROOT = REPO_ROOT / "apps" / "mcp-unified"
-PACKAGE_ROOT = STANDALONE_PROJECT_ROOT / "src" / "mcp_unified"
+STANDALONE_SRC_ROOT = STANDALONE_PROJECT_ROOT / "src"
+PACKAGE_ROOT = STANDALONE_SRC_ROOT / "mcp_unified"
 STANDALONE_PYPROJECT = STANDALONE_PROJECT_ROOT / "pyproject.toml"
 PY_TYPED_MARKER = PACKAGE_ROOT / "py.typed"
 PACKAGE_README = STANDALONE_PROJECT_ROOT / "README.md"
 PACKAGE_USER_GUIDE = STANDALONE_PROJECT_ROOT / "USER_GUIDE.md"
 PACKAGE_RESOURCE_README = PACKAGE_ROOT / "README.md"
 PACKAGE_RESOURCE_USER_GUIDE = PACKAGE_ROOT / "USER_GUIDE.md"
+
+if str(STANDALONE_SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(STANDALONE_SRC_ROOT))
+
+import mcp_unified
 ```
 
 Add this test below the constants:
@@ -230,9 +238,12 @@ assert any(member.endswith("/pyproject.toml") for member in members)  # nosec B1
 assert any(member.endswith("/README.md") for member in members)  # nosec B101
 assert any(member.endswith("/USER_GUIDE.md") for member in members)  # nosec B101
 assert any("/src/mcp_unified/__init__.py" in member for member in members)  # nosec B101
-assert not any(member.startswith("tldw_Server_API/") for member in members)  # nosec B101
-assert not any(member.startswith("apps/tldw-frontend/") for member in members)  # nosec B101
-assert not any(member.startswith("mcp_unified/") for member in members)  # nosec B101
+assert not any("/tldw_Server_API/" in member for member in members)  # nosec B101
+assert not any("/apps/tldw-frontend/" in member for member in members)  # nosec B101
+assert not any(
+    "/mcp_unified/__init__.py" in member and "/src/mcp_unified/" not in member
+    for member in members
+)  # nosec B101
 ```
 
 - [ ] **Step 4: Update wheel docs assertions**
@@ -370,6 +381,33 @@ def test_result_recorder_marks_required_failure(tmp_path: Path) -> None:
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["ok"] is False
     assert payload["summary"] == {"passed": 0, "failed": 1, "skipped": 0}
+
+
+def test_result_recorder_includes_artifact_hashes(tmp_path: Path) -> None:
+    artifact = tmp_path / "mcp_unified-0.1.0-py3-none-any.whl"
+    artifact.write_text("wheel-content", encoding="utf-8")
+    recorder = mcp_unified_rc.RcEvidenceRecorder(
+        evidence_dir=tmp_path / "evidence",
+        package_name="mcp-unified",
+        package_version="0.1.0",
+        package_status="internal-experimental",
+        publishing_status="not-published",
+        commit="abc1234",
+        source_path="apps/mcp-unified",
+        layout="src",
+    )
+
+    recorder.record_artifact(kind="wheel", path=artifact)
+    json_path, _markdown_path = recorder.write()
+
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["artifacts"] == [
+        {
+            "kind": "wheel",
+            "filename": "mcp_unified-0.1.0-py3-none-any.whl",
+            "sha256": mcp_unified_rc.sha256_file(artifact),
+        }
+    ]
 ```
 
 - [ ] **Step 2: Run harness tests and verify they fail**
@@ -449,6 +487,7 @@ class RcEvidenceRecorder:
     source_path: str
     layout: str
     results: list[dict[str, Any]] = field(default_factory=list)
+    artifacts: list[dict[str, str]] = field(default_factory=list)
 
     def record(
         self,
@@ -474,6 +513,15 @@ class RcEvidenceRecorder:
             entry["details"] = details
         self.results.append(entry)
 
+    def record_artifact(self, *, kind: str, path: Path) -> None:
+        self.artifacts.append(
+            {
+                "kind": kind,
+                "filename": path.name,
+                "sha256": sha256_file(path),
+            }
+        )
+
     def write(self) -> tuple[Path, Path]:
         self.evidence_dir.mkdir(parents=True, exist_ok=True)
         summary = {
@@ -493,6 +541,7 @@ class RcEvidenceRecorder:
                 "status": self.package_status,
                 "publishing_status": self.publishing_status,
             },
+            "artifacts": self.artifacts,
             "environment": {
                 "os": platform.system(),
                 "python": platform.python_version(),
@@ -593,12 +642,12 @@ if __name__ == "__main__":
 
 Implement each `run_*` function by calling existing CLIs and tests first. Keep advanced behavior small in this slice:
 
-- `run_build`: `python -m build --wheel --sdist --outdir .artifacts/mcp-unified-rc/dist apps/mcp-unified`
-- `run_artifact_gate`: `python -m pytest -c apps/mcp-unified/pytest-artifact-gate.ini .github/tests/test_mcp_unified_artifact_gate.py -q`
-- `run_install_smoke`: create a temporary venv, install the newest wheel from `dist_dir`, then run `python -c "import mcp_unified"` and both CLI help commands.
-- `run_extras_matrix`: loop over `core`, `gateway`, `sqlite`, and `dev`, creating one temporary venv per extra.
+- `run_build`: clean `.artifacts/mcp-unified-rc/dist`, run `python -m build --wheel --sdist --outdir .artifacts/mcp-unified-rc/dist apps/mcp-unified`, then call `record_artifact` for the single built wheel and single built sdist.
+- `run_artifact_gate`: run `python -m twine check .artifacts/mcp-unified-rc/dist/*` and `python -m pytest -c apps/mcp-unified/pytest-artifact-gate.ini .github/tests/test_mcp_unified_artifact_gate.py -q`.
+- `run_install_smoke`: run two fresh-environment checks. First install the newest wheel with `--no-deps --target` into a temporary directory stored as `target_dir`, then build the `python -S -c` script with `str(target_dir)` inserted into `sys.path` before importing `mcp_unified`; run that command from a temporary working directory outside the repository. Second create a virtual environment, install the newest wheel normally, then run `python -c "import mcp_unified"`, `mcp-unified-gateway package-info`, and `mcp-unified-smoke --help`.
+- `run_extras_matrix`: loop over `core`, `fastapi`, `sqlite`, `federation`, `gateway`, and `dev`, creating one temporary venv per extra and running `python -c "import mcp_unified"` after install.
 - `run_cli_uat`: call `Helper_Scripts/Testing-related/mcp_standalone_user_guide_uat.py` with the built wheel once Task 5 adds wheel mode.
-- `run_smoke_uat`: run `mcp-unified-smoke inprocess --json-report .artifacts/mcp-unified-rc/smoke-inprocess.json` from the install-smoke venv.
+- `run_smoke_uat`: run `mcp-unified-smoke inprocess --json-report .artifacts/mcp-unified-rc/smoke-inprocess.json`; run stdio, HTTP, and WebSocket smoke through the existing fixture-backed user-guide UAT harness when wheel mode is available; record `runtime_transport` skips with reasons only when local loopback/process startup is unavailable.
 - `run_all`: run the other required phases and return nonzero if any required phase records `failed`.
 
 - [ ] **Step 6: Run harness tests**
@@ -626,6 +675,7 @@ git commit -m "feat(mcp): add internal RC harness"
 **Files:**
 - Modify: `Makefile`
 - Modify: `.github/workflows/pypi-package.yml`
+- Modify: `.github/workflows/publish-pypi.yml`
 - Create: `.github/workflows/mcp-unified-rc.yml`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py`
 
@@ -657,6 +707,16 @@ def test_mcp_unified_make_targets_do_not_call_root_pypi_check() -> None:
     assert "mcp-unified-rc:" in makefile  # nosec B101
     mcp_section = makefile.split("# MCP Unified standalone RC", 1)[1]
     assert "pypi-check" not in mcp_section  # nosec B101
+
+
+def test_root_pypi_publish_workflow_is_labeled_for_tldw_server() -> None:
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "publish-pypi.yml"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    serialized = json.dumps(workflow)
+
+    assert workflow["name"] == "Publish tldw-server PyPI Package"  # nosec B101
+    assert "mcp-unified" not in serialized  # nosec B101
+    assert "tldw-server-pypi-dist" in serialized  # nosec B101
 ```
 
 - [ ] **Step 2: Run the workflow/Makefile tests and verify they fail**
@@ -765,9 +825,25 @@ jobs:
 
 - [ ] **Step 5: Retire MCP-specific work from the root PyPI package workflow**
 
-In `.github/workflows/pypi-package.yml`, remove `mcp_unified/**` from triggers, remove `pip install -e "mcp_unified[dev]"`, remove the artifact-gate pytest step, and keep `make pypi-check` as root `tldw-server` validation. Rename the artifact upload name from `pypi-dist` only if the workflow name stays ambiguous; use `tldw-server-pypi-dist` when renaming.
+In `.github/workflows/pypi-package.yml`, rename the workflow to `tldw-server PyPI Package Check`, remove `mcp_unified/**` from triggers, remove `pip install -e "mcp_unified[dev]"`, remove the artifact-gate pytest step, keep `make pypi-check` as root `tldw-server` validation, and rename the upload artifact to `tldw-server-pypi-dist`.
 
-- [ ] **Step 6: Run workflow/Makefile tests**
+- [ ] **Step 6: Make the root publishing workflow unambiguous**
+
+In `.github/workflows/publish-pypi.yml`, rename the workflow to:
+
+```yaml
+name: Publish tldw-server PyPI Package
+```
+
+Rename both upload/download artifact references from `pypi-dist` to:
+
+```yaml
+tldw-server-pypi-dist
+```
+
+Do not add any `mcp-unified` build, install, or upload step to this workflow.
+
+- [ ] **Step 7: Run workflow/Makefile tests**
 
 Run:
 
@@ -776,17 +852,18 @@ source .venv/bin/activate
 python -m pytest \
   tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py::test_mcp_unified_rc_workflow_uses_private_permissions \
   tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py::test_mcp_unified_make_targets_do_not_call_root_pypi_check \
+  tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py::test_root_pypi_publish_workflow_is_labeled_for_tldw_server \
   -v
 ```
 
-Expected: both tests pass.
+Expected: all three tests pass.
 
-- [ ] **Step 7: Commit Make and CI changes**
+- [ ] **Step 8: Commit Make and CI changes**
 
 Run:
 
 ```bash
-git add Makefile .github/workflows/pypi-package.yml .github/workflows/mcp-unified-rc.yml tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
+git add Makefile .github/workflows/pypi-package.yml .github/workflows/publish-pypi.yml .github/workflows/mcp-unified-rc.yml tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
 git commit -m "ci(mcp): add internal RC workflow"
 ```
 
@@ -803,11 +880,13 @@ In `test_mcp_unified_rc_harness.py`, add a file-path loader because `Testing-rel
 ```python
 def _load_user_guide_harness() -> object:
     import importlib.util
+    import sys
 
     path = Path("Helper_Scripts/Testing-related/mcp_standalone_user_guide_uat.py").resolve()
     spec = importlib.util.spec_from_file_location("_mcp_standalone_user_guide_uat", path)
     assert spec is not None and spec.loader is not None  # nosec B101
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -933,6 +1012,17 @@ git commit -m "test(mcp): run UAT against built wheels"
 
 - [ ] **Step 1: Run package boundary tests**
 
+Run a syntax check first so the package move did not leave stale import paths:
+
+```bash
+source .venv/bin/activate
+python -m compileall Helper_Scripts/mcp_unified_rc.py Helper_Scripts/Testing-related/mcp_standalone_user_guide_uat.py apps/mcp-unified/src/mcp_unified tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
+```
+
+Expected: exits 0.
+
+- [ ] **Step 2: Run package boundary tests**
+
 Run:
 
 ```bash
@@ -942,7 +1032,7 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package
 
 Expected: all tests pass or package build tests skip only when offline build tools are missing.
 
-- [ ] **Step 2: Run RC harness tests**
+- [ ] **Step 3: Run RC harness tests**
 
 Run:
 
@@ -953,7 +1043,7 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_mcp_unified_rc_
 
 Expected: all tests pass.
 
-- [ ] **Step 3: Run the artifact gate**
+- [ ] **Step 4: Run the artifact gate**
 
 Run:
 
@@ -964,7 +1054,7 @@ python -m pytest -c apps/mcp-unified/pytest-artifact-gate.ini .github/tests/test
 
 Expected: all artifact-gate tests pass.
 
-- [ ] **Step 4: Run the local RC target**
+- [ ] **Step 5: Run the local RC target**
 
 Run:
 
@@ -980,7 +1070,7 @@ Expected: exits 0 and writes:
 .artifacts/mcp-unified-rc/mcp-unified-rc-summary.md
 ```
 
-- [ ] **Step 5: Run Bandit on touched Python scope**
+- [ ] **Step 6: Run Bandit on touched Python scope**
 
 Run:
 
@@ -991,7 +1081,7 @@ python -m bandit -r Helper_Scripts/mcp_unified_rc.py Helper_Scripts/Testing-rela
 
 Expected: exits 0 or reports only accepted test-harness subprocess assertions already marked with `# nosec`.
 
-- [ ] **Step 6: Commit final validation fixes**
+- [ ] **Step 7: Commit final validation fixes**
 
 If validation required any fixes, run:
 
