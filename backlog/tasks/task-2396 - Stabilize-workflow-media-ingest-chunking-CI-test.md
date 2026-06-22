@@ -4,7 +4,7 @@ title: Stabilize workflow media ingest chunking CI test
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: 2026-06-21 21:49
+updated_date: 2026-06-22 11:40
 labels:
 - ci
 - tests
@@ -32,6 +32,7 @@ modified_files:
 - tldw_Server_API/tests/Workflows/adapters/test_audio_adapters.py
 - tldw_Server_API/tests/Workflows/test_adapter_path_security.py
 - tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py
+- tldw_Server_API/tests/Workflows/test_workflows_fuzz.py
 ---
 
 ## Description
@@ -124,4 +125,5 @@ Investigated completed CI run 27925713474. Non-pass results were: Windows py3.12
 Verification for the STT wrapper fix: test_audio_adapters.py passed 80 tests; test_adapter_path_security.py plus test_new_step_adapters.py passed 143 tests; the exact adapters-core shard command passed 1048 tests in 26.39s without --maxfail; compileall on touched files passed; git diff --check passed; Bandit on production stt.py wrote /tmp/bandit_ci2258_stt_wrapper_prod.json with zero findings; Bandit on touched tests with existing B101/B404 test-only warnings excluded wrote /tmp/bandit_ci2258_stt_wrapper_tests_skip_existing.json and exited 0; import sanity check confirmed importing the STT adapter leaves Audio_Transcription_Lib unloaded until the wrapper is called.
 Fresh run 27955578114 on head b6ecf7bc1d was still queued/in progress at inspection time, not fully complete: 188 success, 1 failure, 19 in_progress, 512 queued, 1 skipped. The completed failure was Windows py3.12 core-utils-tooling job 82723353348. Root cause: test_stdio_sequence_runner_times_out_on_partial_line_and_cleans_up used timeout_seconds=0.01, and Windows CI can spend that budget starting the fake process/stdout reader before the first stdin frame is written, producing 'timed out before initialize' and len(written)==0. The test now patches the helper module's monotonic clock so the first frame is written and the timeout branch fires deterministically without changing production helper behavior.
 Verification for the ACP smoke timeout test fix: the focused failing test passed; the full test_acp_certification_smoke.py file passed 49 tests; the exact local core-utils-tooling shard command passed 803 tests with 2 skipped and 26 warnings without --maxfail; compileall on the touched test passed; git diff --check passed; Bandit on test_acp_certification_smoke.py with B101 skipped wrote /tmp/bandit_ci2258_acp_smoke_test.json with zero findings.
+Completed CI run 27960286317 was inspected before making another push. The only failed leaf jobs were macOS py3.12 rag-new-unit-cache-vector job 82744740262, which failed before tests on astral-sh/setup-uv downloading uv-aarch64-apple-darwin.tar.gz with read ETIMEDOUT/request timeout, and Ubuntu py3.12 product-workflows-runtime job 82744765690, which failed test_workflows_fuzz.py::test_definition_fuzz_linear_or_branch with Hypothesis FlakyFailure after an async workflow run stayed running until the 10s poll timeout. The aggregate macOS and Ubuntu Full Suite checks reflected those two leaf failures. Root-cause hypothesis for the actionable failure: the fuzz property test validates workflow definition acceptance/execution behavior, not scheduler latency, so using the default async execution path lets CI load leak into the assertion. The test now uses the endpoint's sync mode, matching neighboring deterministic workflow tests. Verification: focused fuzz property test passed; full test_workflows_fuzz.py file passed 2 tests; product-workflows-runtime shard command passed 57 tests without --maxfail; compileall on the touched test passed; git diff --check passed; Bandit on test_workflows_fuzz.py with B101/B108 skipped wrote /tmp/bandit_ci2258_workflows_fuzz_sync.json with zero findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

@@ -118,7 +118,11 @@ def test_definition_fuzz_linear_or_branch(
     if r.status_code != 201:
         return
     wid = r.json()["id"]
-    rr = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}})
+    rr = client.post(
+        f"/api/v1/workflows/{wid}/run",
+        params={"mode": "sync"},
+        json={"inputs": {}},
+    )
     assert rr.status_code == 200
     _wait_for_terminal(client, rr.json()["run_id"])
 
