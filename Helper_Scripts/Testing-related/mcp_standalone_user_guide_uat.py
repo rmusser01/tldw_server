@@ -133,7 +133,7 @@ def package_install_spec(
     """
 
     if wheel_path is not None:
-        return [str(wheel_path)]
+        return [str(wheel_path.resolve())]
     project = default_package_project(repo_root)
     if editable:
         return ["-e", f"{project}[gateway]"]

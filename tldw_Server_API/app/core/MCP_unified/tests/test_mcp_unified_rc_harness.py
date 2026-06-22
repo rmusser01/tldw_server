@@ -42,6 +42,7 @@ def test_default_paths_point_to_apps_package() -> None:
 def test_user_guide_uat_install_spec_uses_apps_project_by_default() -> None:
     harness = _load_user_guide_harness()
     wheel = Path("/tmp/mcp_unified-0.1.0-py3-none-any.whl")  # nosec B108
+    relative_wheel = Path("dist/mcp_unified-0.1.0-py3-none-any.whl")
 
     assert harness.default_package_project(Path("/repo")) == Path("/repo/apps/mcp-unified")  # nosec B101
     assert harness.package_install_spec(
@@ -58,12 +59,17 @@ def test_user_guide_uat_install_spec_uses_apps_project_by_default() -> None:
         repo_root=Path("/repo"),
         wheel_path=wheel,
         editable=False,
-    ) == [str(wheel)]  # nosec B101
+    ) == [str(wheel.resolve())]  # nosec B101
     assert harness.package_install_spec(
         repo_root=Path("/repo"),
         wheel_path=wheel,
         editable=True,
-    ) == [str(wheel)]  # nosec B101
+    ) == [str(wheel.resolve())]  # nosec B101
+    assert harness.package_install_spec(
+        repo_root=Path("/repo"),
+        wheel_path=relative_wheel,
+        editable=False,
+    ) == [str(relative_wheel.resolve())]  # nosec B101
 
 
 def test_redact_text_removes_secret_like_values() -> None:
