@@ -624,7 +624,18 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
     assert project["license"]["text"] == metadata.LICENSE_EXPRESSION
     assert project["scripts"]["mcp-unified-gateway"] == "mcp_unified.gateway.cli:main"
     setuptools_config = pyproject["tool"]["setuptools"]
-    assert "mcp_unified.filesystem_locks" in setuptools_config["packages"]  # nosec B101
+    assert setuptools_config["packages"] == [  # nosec B101
+        "mcp_unified",
+        "mcp_unified.federation",
+        "mcp_unified.filesystem_locks",
+        "mcp_unified.gateway",
+        "mcp_unified.interfaces",
+        "mcp_unified.profiles",
+        "mcp_unified.smoke",
+        "mcp_unified.storage",
+        "mcp_unified.tool_hooks",
+        "mcp_unified.tool_use_reporting",
+    ]
     assert setuptools_config["package-dir"] == {"": "src"}  # nosec B101
     assert pyproject["tool"]["setuptools"]["package-data"] == {  # nosec B101
         "mcp_unified": ["py.typed", "README.md", "USER_GUIDE.md"],
