@@ -163,7 +163,7 @@ def build_uat_plan(
                 "pip",
                 "install",
                 "-e",
-                f"{repo_root / 'mcp_unified'}[gateway]",
+                f"{repo_root / 'apps' / 'mcp-unified'}[gateway]",
             ],
             cwd=workspace,
         ),
@@ -605,7 +605,7 @@ def run_uat(context: UatRunContext) -> dict[str, Any]:
         "duration_ms": _elapsed_ms(started),
         "workspace": "<redacted-path>",
         "repo_root": "<redacted-path>",
-        "guide": "mcp_unified/USER_GUIDE.md",
+        "guide": "apps/mcp-unified/USER_GUIDE.md",
         "steps": [_step_result_payload(result, context) for result in results],
         "summary": {
             "passed": sum(1 for result in results if result.status == "passed"),
@@ -980,7 +980,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--repo-root",
         type=Path,
         default=Path(__file__).resolve().parents[2],
-        help="Repository root containing the mcp_unified package directory.",
+        help="Repository root containing the apps/mcp-unified standalone project.",
     )
     parser.add_argument(
         "--workspace",

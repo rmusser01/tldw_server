@@ -12,14 +12,14 @@ The package is currently internal/experimental and distributed with the
 From the repository root:
 
 ```bash
-python -m pip install -e "mcp_unified[gateway]"
+python -m pip install -e "apps/mcp-unified[gateway]"
 ```
 
 For development and artifact checks, install both the gateway runtime and
 development tools:
 
 ```bash
-python -m pip install -e "mcp_unified[gateway,dev]"
+python -m pip install -e "apps/mcp-unified[gateway,dev]"
 ```
 
 Confirm the CLI is available:

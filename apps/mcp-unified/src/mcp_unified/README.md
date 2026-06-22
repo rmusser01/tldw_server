@@ -57,14 +57,14 @@ recognize the inline type annotations when consuming built artifacts.
 Use the package-local project file when testing the standalone boundary:
 
 ```bash
-python -m pip install -e "mcp_unified[gateway]"
+python -m pip install -e "apps/mcp-unified[gateway]"
 ```
 
 For test and packaging work, install both the gateway runtime and development
 tools:
 
 ```bash
-python -m pip install -e "mcp_unified[gateway,dev]"
+python -m pip install -e "apps/mcp-unified[gateway,dev]"
 ```
 
 The package dependency groups intentionally stay small. Heavy `tldw-server`
@@ -263,7 +263,7 @@ Run the isolated artifact gate used by CI:
 
 ```bash
 python -m pytest \
-  -c mcp_unified/pytest-artifact-gate.ini \
+  -c apps/mcp-unified/pytest-artifact-gate.ini \
   .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_distribution_metadata_matches_extras \
   .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_sdist_contains_only_package_boundary \
   .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_artifacts_include_typed_marker \
