@@ -44,6 +44,10 @@ Implementation started using subagent-driven development after the design/spec a
 Task 1 worker completed package relocation in commit `92283dc17f`. Focused relocation tests passed: 3 passed, 4 warnings, using the root project virtualenv. The worker added root pytest `pythonpath` for `apps/mcp-unified/src`, which appears necessary because many MCP tests import `mcp_unified` directly after the root package directory is removed. Duplicate worker-created task `TASK-2400` was removed as redundant with `TASK-2399`.
 
 Task 1 spec-review fixes landed in commit `4bc8507199`: subprocess import environments now include the relocated standalone src path, artifact build/install helpers copy from `apps/mcp-unified`, and artifact-gate workflow paths point at `apps/mcp-unified/pytest-artifact-gate.ini`. Worker reported `test_runtime_package_boundary.py`: 35 passed, 5 warnings. Duplicate worker-created task `TASK-2400` was removed again as redundant with `TASK-2399`.
+
+Task 1 docs/UAT path fixes landed in commit `c74b870faf`: README, user guide, package-resource docs, and the standalone user-guide UAT helper now use `apps/mcp-unified` paths. Worker reported docs boundary test passed, UAT helper `--help` passed, and Bandit on the UAT helper passed.
+
+Task 1 root packaging/tooling cleanup landed in commit `974114f2da`: root `pyproject.toml` no longer advertises standalone MCP console scripts, root package discovery no longer includes `mcp_unified`, Ruff/mypy paths point at the app package source, and admin docs use app package paths. Worker reported `test_runtime_package_boundary.py`: 36 passed, 5 warnings. Task 1 passed spec review and code-quality review after these fixes.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
