@@ -22,6 +22,13 @@ development tools:
 python -m pip install -e "mcp_unified[gateway,dev]"
 ```
 
+For optional Python code-intelligence tools backed by Ruff and
+python-lsp-server, install the LSP extra:
+
+```bash
+python -m pip install -e "mcp_unified[gateway,lsp]"
+```
+
 Confirm the CLI is available:
 
 ```bash
@@ -407,6 +414,69 @@ Documentation Writer do not receive Git tools by default.
 For native browser inspection, prefer the Chrome DevTools Protocol path first.
 The stable exact target for that path is
 `ChromeDevTools/chrome-devtools-mcp`.
+
+### LSP Code Intelligence
+
+The package can expose Python-first `lsp.*` code-intelligence tools through the
+standalone LSP gateway runtime or the `tldw-server` hosted MCP module.
+
+Available tools:
+
+- `lsp.status` - inspect Ruff and pylsp backend availability.
+- `lsp.diagnostics` - return bounded diagnostics for one Python workspace file.
+- `lsp.document_symbols` - list symbols declared in one Python file.
+- `lsp.workspace_symbols` - search symbols across the active workspace.
+- `lsp.definition` - resolve a symbol definition from a file position.
+- `lsp.references` - list reference locations for a symbol position.
+- `lsp.hover` - return hover/type information for a position.
+- `lsp.signature_help` - return function signature help at a position.
+- `lsp.format_preview` - preview formatting edits without writing files.
+- `lsp.code_actions` - preview explicit code-action edits without writing files.
+
+Install support:
+
+```bash
+python -m pip install -e "mcp_unified[gateway,lsp]"
+```
+
+For the `tldw-server` hosted MCP module, enable it explicitly:
+
+```bash
+export MCP_ENABLE_LSP_MODULE=true
+```
+
+Optional executable overrides:
+
+```bash
+export MCP_LSP_RUFF_COMMAND=/path/to/ruff
+export MCP_LSP_PYLSP_COMMAND=/path/to/pylsp
+```
+
+The standalone runtime allows all workspace-relative paths under its configured
+workspace by default. Hosts with profile/path policy should wrap it or inject a
+path allow predicate. The hosted `tldw-server` module routes file-scoped tools
+through path-scope checks and filters returned LSP paths before returning them.
+All LSP edit-producing operations are preview-only; apply changes through
+`fs.patch`, `fs.edit`, or `fs.write` after normal file policy checks.
+
+Run the LSP smoke scenario:
+
+```bash
+mcp-unified-smoke inprocess --scenario lsp --json-report -
+```
+
+Use strict mode when missing LSP tools or unavailable backends should fail the
+run:
+
+```bash
+mcp-unified-smoke inprocess --scenario lsp --mode strict --json-report -
+```
+
+Built-in Architect, Merge Conflict Resolver, Project Researcher, Code Reviewer,
+DevOps Engineer, Backend Engineer, Frontend Engineer, QA Engineer, and SDET
+presets include `lsp.*` tooling metadata under the deferred
+`code_intelligence` category. This keeps the first tool surface bounded while
+making LSP tools discoverable through profile tool search.
 
 ### Native CDP Browser Inspection
 

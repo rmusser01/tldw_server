@@ -192,6 +192,18 @@ _FILES_WRITE_TOOLS = [*_FILES_EDIT_TOOLS, "fs.write"]
 _LEGACY_FILES_READ_TOOLS = ["fs.read_text"]
 _LEGACY_FILES_WRITE_TOOLS = ["fs.write_text"]
 _CODE_READ_TOOLS = ["code.search", "code.symbols", "code.references"]
+_LSP_TOOLS = [
+    "lsp.status",
+    "lsp.diagnostics",
+    "lsp.document_symbols",
+    "lsp.workspace_symbols",
+    "lsp.definition",
+    "lsp.references",
+    "lsp.hover",
+    "lsp.signature_help",
+    "lsp.format_preview",
+    "lsp.code_actions",
+]
 _DOCS_READ_TOOLS = ["docs.search", "docs.read"]
 _DOCS_WRITE_TOOLS = [*_DOCS_READ_TOOLS, "docs.write"]
 _GIT_READ_TOOLS = [
@@ -277,12 +289,13 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         preset_id="architect",
         name="Architect",
         description="Reviews architecture with code search, documentation, and read-only filesystem access.",
-        capabilities=["code_search", "docs.read", "filesystem.read", "git.read"],
+        capabilities=["code_search", "docs.read", "filesystem.read", "git.read", "code_intelligence.lsp"],
         tooling_metadata_document=tooling_metadata(
             enabled_tools=[
                 *_TOOL_DISCOVERY_TOOLS,
                 *_FILES_READ_TOOLS,
                 *_CODE_READ_TOOLS,
+                *_LSP_TOOLS,
                 *_DOCS_READ_TOOLS,
                 *_GIT_READ_TOOLS,
             ],
@@ -292,9 +305,10 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "filesystem.read",
                 "git.read",
                 "architecture.review",
+                "code_intelligence.lsp",
             ],
             direct_categories=["files", "tool_discovery", "code", "docs", "git"],
-            deferred_categories=["web_search", "browser", "diagramming"],
+            deferred_categories=["code_intelligence", "web_search", "browser", "diagramming"],
             recommended_tools=[
                 recommended_tool(
                     "architecture.decision_record.draft",
@@ -317,7 +331,14 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         preset_id="merge-conflict-resolver",
         name="Merge Conflict Resolver",
         description="Inspects git state and writes repo-scoped conflict resolutions with approval gates.",
-        capabilities=["git.status", "git.diff", "git.read", "filesystem.read", "repo.write_scoped"],
+        capabilities=[
+            "git.status",
+            "git.diff",
+            "git.read",
+            "filesystem.read",
+            "repo.write_scoped",
+            "code_intelligence.lsp",
+        ],
         risk_classes=["mutating"],
         approval_policy={
             "required_for": ["repo.write_scoped", "git.destructive"],
@@ -329,6 +350,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 *_TOOL_DISCOVERY_TOOLS,
                 *_GIT_READ_TOOLS,
                 *_FILES_WRITE_TOOLS,
+                *_LSP_TOOLS,
             ],
             enabled_capabilities=[
                 "git.status",
@@ -336,9 +358,10 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "git.read",
                 "filesystem.read",
                 "repo.write_scoped",
+                "code_intelligence.lsp",
             ],
             direct_categories=["git", "files", "tool_discovery"],
-            deferred_categories=["safe_test_runner", "issue_tracker", "browser"],
+            deferred_categories=["code_intelligence", "safe_test_runner", "issue_tracker", "browser"],
             recommended_tools=[
                 recommended_tool(
                     "git.conflict_resolution.plan",
@@ -404,17 +427,23 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         preset_id="project-researcher",
         name="Project Researcher",
         description="Searches and reads the codebase without write or execution capabilities.",
-        capabilities=["code_search", "filesystem.read", "docs.read"],
+        capabilities=["code_search", "filesystem.read", "docs.read", "code_intelligence.lsp"],
         tooling_metadata_document=tooling_metadata(
             enabled_tools=[
                 *_TOOL_DISCOVERY_TOOLS,
                 *_FILES_READ_TOOLS,
                 *_CODE_READ_TOOLS,
+                *_LSP_TOOLS,
                 *_DOCS_READ_TOOLS,
             ],
-            enabled_capabilities=["code_search", "filesystem.read", "docs.read"],
+            enabled_capabilities=[
+                "code_search",
+                "filesystem.read",
+                "docs.read",
+                "code_intelligence.lsp",
+            ],
             direct_categories=["files", "code", "docs", "tool_discovery"],
-            deferred_categories=["web_search", "browser", "citations"],
+            deferred_categories=["code_intelligence", "web_search", "browser", "citations"],
             recommended_tools=[
                 recommended_tool(
                     "project.map.generate",
@@ -478,12 +507,20 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         preset_id="code-reviewer",
         name="Code Reviewer",
         description="Reviews diffs, code, and test results without write access.",
-        capabilities=["code_search", "diff.read", "git.read", "tests.read", "filesystem.read"],
+        capabilities=[
+            "code_search",
+            "diff.read",
+            "git.read",
+            "tests.read",
+            "filesystem.read",
+            "code_intelligence.lsp",
+        ],
         tooling_metadata_document=tooling_metadata(
             enabled_tools=[
                 *_TOOL_DISCOVERY_TOOLS,
                 *_FILES_READ_TOOLS,
                 *_CODE_READ_TOOLS,
+                *_LSP_TOOLS,
                 *_GIT_READ_TOOLS,
                 *_TEST_READ_TOOLS,
             ],
@@ -493,9 +530,10 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "git.read",
                 "tests.read",
                 "filesystem.read",
+                "code_intelligence.lsp",
             ],
             direct_categories=["files", "code", "git", "tests", "tool_discovery"],
-            deferred_categories=["browser", "issue_tracker", "safe_test_runner"],
+            deferred_categories=["code_intelligence", "browser", "issue_tracker", "safe_test_runner"],
             recommended_tools=[
                 recommended_tool(
                     "review.findings.draft",
@@ -518,7 +556,14 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         preset_id="devops-engineer",
         name="DevOps Engineer",
         description="Inspects deployment, logs, and infrastructure state with approval for mutating actions.",
-        capabilities=["deploy.inspect", "logs.read", "infra.read", "infra.mutate_scoped", "git.read"],
+        capabilities=[
+            "deploy.inspect",
+            "logs.read",
+            "infra.read",
+            "infra.mutate_scoped",
+            "git.read",
+            "code_intelligence.lsp",
+        ],
         risk_classes=["mutating"],
         approval_policy={
             "required_for": ["infra.mutate_scoped", "deployment.mutate"],
@@ -529,14 +574,21 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             enabled_tools=[
                 *_TOOL_DISCOVERY_TOOLS,
                 *_GIT_READ_TOOLS,
+                *_LSP_TOOLS,
                 "deploy.status",
                 "deploy.logs.read",
                 "infra.inspect",
                 "logs.search",
             ],
-            enabled_capabilities=["deploy.inspect", "logs.read", "infra.read", "git.read"],
+            enabled_capabilities=[
+                "deploy.inspect",
+                "logs.read",
+                "infra.read",
+                "git.read",
+                "code_intelligence.lsp",
+            ],
             direct_categories=["deployments", "logs", "infra", "git", "tool_discovery"],
-            deferred_categories=["issue_tracker", "safe_test_runner", "browser"],
+            deferred_categories=["code_intelligence", "issue_tracker", "safe_test_runner", "browser"],
             recommended_tools=[
                 recommended_tool(
                     "deploy.plan.preview",
@@ -559,7 +611,14 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         preset_id="backend-engineer",
         name="Backend Engineer",
         description="Reads and writes backend source with scoped test/build commands behind approval.",
-        capabilities=["source.write_scoped", "code_search", "git.read", "tests.request", "backend.inspect"],
+        capabilities=[
+            "source.write_scoped",
+            "code_search",
+            "git.read",
+            "tests.request",
+            "backend.inspect",
+            "code_intelligence.lsp",
+        ],
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
         requires_workspace_binding=True,
@@ -568,6 +627,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 *_TOOL_DISCOVERY_TOOLS,
                 *_FILES_WRITE_TOOLS,
                 *_CODE_READ_TOOLS,
+                *_LSP_TOOLS,
                 *_GIT_READ_TOOLS,
                 *_TEST_REQUEST_TOOLS,
                 "api.schema.inspect",
@@ -578,6 +638,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "git.read",
                 "tests.request",
                 "backend.inspect",
+                "code_intelligence.lsp",
             ],
             direct_categories=[
                 "files",
@@ -588,6 +649,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             ],
             deferred_categories=[
                 "tests",
+                "code_intelligence",
                 "safe_test_runner",
                 "issue_tracker",
                 "browser",
@@ -625,6 +687,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             "app_state.read",
             "frontend.inspect",
             "tests.request",
+            "code_intelligence.lsp",
         ],
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
@@ -634,6 +697,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 *_TOOL_DISCOVERY_TOOLS,
                 *_FILES_WRITE_TOOLS,
                 *_CODE_READ_TOOLS,
+                *_LSP_TOOLS,
                 *_GIT_READ_TOOLS,
                 *_TEST_REQUEST_TOOLS,
                 *_BROWSER_READ_TOOLS,
@@ -649,6 +713,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "browser.debug",
                 "screenshots.capture",
                 "app_state.read",
+                "code_intelligence.lsp",
             ],
             direct_categories=[
                 "files",
@@ -659,6 +724,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             ],
             deferred_categories=[
                 "tests",
+                "code_intelligence",
                 "git",
                 "safe_test_runner",
                 "issue_tracker",
@@ -687,11 +753,20 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
         preset_id="qa-engineer",
         name="QA Engineer",
         description="Debugs running applications with browser, logs, screenshots, and read-only app state.",
-        capabilities=["browser.inspect", "browser.debug", "logs.read", "screenshots.capture", "app_state.read", "git.read"],
+        capabilities=[
+            "browser.inspect",
+            "browser.debug",
+            "logs.read",
+            "screenshots.capture",
+            "app_state.read",
+            "git.read",
+            "code_intelligence.lsp",
+        ],
         tooling_metadata_document=tooling_metadata(
             enabled_tools=[
                 *_TOOL_DISCOVERY_TOOLS,
                 *_GIT_READ_TOOLS,
+                *_LSP_TOOLS,
                 *_BROWSER_READ_TOOLS,
                 "logs.search",
                 "screenshots.list",
@@ -705,9 +780,10 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "screenshots.capture",
                 "app_state.read",
                 "git.read",
+                "code_intelligence.lsp",
             ],
             direct_categories=["browser", "logs", "screenshots", "app_state", "git", "tool_discovery"],
-            deferred_categories=["safe_test_runner", "issue_tracker"],
+            deferred_categories=["code_intelligence", "safe_test_runner", "issue_tracker"],
             recommended_tools=[
                 recommended_tool(
                     "test_cases.generate",
@@ -740,6 +816,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
             "browser.debug",
             "screenshots.capture",
             "app_state.read",
+            "code_intelligence.lsp",
         ],
         risk_classes=["mutating"],
         approval_policy=_WRITE_APPROVAL_POLICY,
@@ -749,6 +826,7 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 *_TOOL_DISCOVERY_TOOLS,
                 *_FILES_WRITE_TOOLS,
                 *_CODE_READ_TOOLS,
+                *_LSP_TOOLS,
                 *_GIT_READ_TOOLS,
                 *_TEST_REQUEST_TOOLS,
                 *_BROWSER_READ_TOOLS,
@@ -764,9 +842,10 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "browser.debug",
                 "screenshots.capture",
                 "app_state.read",
+                "code_intelligence.lsp",
             ],
             direct_categories=["files", "code", "tests", "browser", "tool_discovery"],
-            deferred_categories=["git", "safe_test_runner", "issue_tracker"],
+            deferred_categories=["code_intelligence", "git", "safe_test_runner", "issue_tracker"],
             recommended_tools=[
                 recommended_tool(
                     "tests.plan.generate",

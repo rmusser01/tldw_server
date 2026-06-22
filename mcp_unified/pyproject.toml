@@ -46,6 +46,10 @@ gateway = [
   "uvicorn[standard]>=0.23.0",
   "websockets>=12.0",
 ]
+lsp = [
+  "ruff>=0.13",
+  "python-lsp-server>=1.14",
+]
 dev = [
   "pytest>=9.0.3",
   "pytest-asyncio>=1.3.0",
@@ -64,6 +68,7 @@ packages = [
   "mcp_unified.filesystem_locks",
   "mcp_unified.gateway",
   "mcp_unified.interfaces",
+  "mcp_unified.lsp",
   "mcp_unified.profiles",
   "mcp_unified.smoke",
   "mcp_unified.storage",
@@ -77,6 +82,7 @@ mcp_unified = "."
 "mcp_unified.filesystem_locks" = "filesystem_locks"
 "mcp_unified.gateway" = "gateway"
 "mcp_unified.interfaces" = "interfaces"
+"mcp_unified.lsp" = "lsp"
 "mcp_unified.profiles" = "profiles"
 "mcp_unified.smoke" = "smoke"
 "mcp_unified.storage" = "storage"

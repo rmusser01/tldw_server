@@ -1,15 +1,15 @@
 import os
-from typing import Dict, Any, List
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
 
-from tldw_Server_API.app.core.MCP_unified.server import MCPServer
-from tldw_Server_API.app.core.MCP_unified.protocol import MCPRequest
+from tldw_Server_API.app.core.MCP_unified import config as config_module
 from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule, ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.registry import reset_module_registry
-from tldw_Server_API.app.core.MCP_unified import config as config_module
 from tldw_Server_API.app.core.MCP_unified.monitoring import metrics as metrics_module
+from tldw_Server_API.app.core.MCP_unified.protocol import MCPRequest
+from tldw_Server_API.app.core.MCP_unified.server import MCPServer
 
 
 class _AllowAll:
@@ -26,10 +26,10 @@ def _ensure_env() -> None:
 class DictResultModule(BaseModule):
     async def on_initialize(self) -> None: ...
     async def on_shutdown(self) -> None: ...
-    async def check_health(self) -> Dict[str, bool]:
+    async def check_health(self) -> dict[str, bool]:
         return {"ok": True}
 
-    async def get_tools(self) -> List[Dict[str, Any]]:
+    async def get_tools(self) -> list[dict[str, Any]]:
         return [
             {
                 "name": "dict.echo",
@@ -42,7 +42,7 @@ class DictResultModule(BaseModule):
             }
         ]
 
-    async def execute_tool(self, tool_name: str, arguments: Dict[str, Any], context: Any | None = None) -> Any:
+    async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
         if tool_name == "dict.echo":
             return {"ok": True, "x": arguments.get("x")}
         raise ValueError(tool_name)
@@ -68,7 +68,13 @@ async def test_tools_call_dict_result_is_json_content():
     content = resp.result.get("content")
     assert isinstance(content, list) and content
     assert content[0].get("type") == "json"
-    assert content[0].get("json") == {"ok": True, "x": 7}
+    result_json = content[0].get("json")
+    assert isinstance(result_json, dict)
+    assert result_json["ok"] is True
+    assert result_json["x"] == 7
+    assert result_json["eval"]["tool_name"] == "dict.echo"
+    assert result_json["eval"]["result_kind"] == "dict_result"
+    assert resp.result["eval"]["tool_name"] == "dict.echo"
 
     await server.shutdown()
     await reset_module_registry()
@@ -79,7 +85,7 @@ async def test_safe_config_clamped_without_session():
     _ensure_env()
     server = MCPServer()
 
-    async def _ping(params: Dict[str, Any], context):
+    async def _ping(params: dict[str, Any], context):
         return {"safe_config": context.metadata.get("safe_config")}
 
     server.protocol.handlers["ping"] = _ping  # type: ignore[assignment]
@@ -113,7 +119,7 @@ async def test_batch_session_semantics_enforced_and_seen_uris_saved():
     _ensure_env()
     server = MCPServer()
 
-    async def _ping(params: Dict[str, Any], context):
+    async def _ping(params: dict[str, Any], context):
         seen = context.metadata.get("seen_uris")
         if not isinstance(seen, list):
             seen = []

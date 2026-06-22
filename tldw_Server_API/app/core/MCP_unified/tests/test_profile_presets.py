@@ -66,6 +66,7 @@ TOOL_CATEGORY_BY_PREFIX = {
     "infra": "infra",
     "kanban": "issues",
     "logs": "logs",
+    "lsp": "code_intelligence",
     "memory": "memory",
     "profile": "tool_discovery",
     "screenshots": "screenshots",
@@ -76,6 +77,31 @@ TOOL_CATEGORY_BY_PREFIX = {
     "tool_search": "tool_discovery",
     "ui": "frontend",
     "web": "web",
+}
+
+LSP_TOOLS = {
+    "lsp.status",
+    "lsp.diagnostics",
+    "lsp.document_symbols",
+    "lsp.workspace_symbols",
+    "lsp.definition",
+    "lsp.references",
+    "lsp.hover",
+    "lsp.signature_help",
+    "lsp.format_preview",
+    "lsp.code_actions",
+}
+
+LSP_TOOLING_PRESET_IDS = {
+    "architect",
+    "merge-conflict-resolver",
+    "project-researcher",
+    "code-reviewer",
+    "devops-engineer",
+    "backend-engineer",
+    "frontend-engineer",
+    "qa-engineer",
+    "sdet",
 }
 
 
@@ -208,8 +234,8 @@ def test_filesystem_read_presets_include_helper_tools() -> None:
 
 def test_filesystem_tool_buckets_prefer_canonical_safe_tools() -> None:
     assert presets._FILES_READ_TOOLS == ["fs.list", "fs.read", "fs.stat", "fs.glob", "fs.grep"]  # nosec B101
-    assert presets._FILES_EDIT_TOOLS == [*presets._FILES_READ_TOOLS, "fs.patch"]  # nosec B101
-    assert presets._FILES_WRITE_TOOLS == [*presets._FILES_EDIT_TOOLS, "fs.write"]  # nosec B101
+    assert [*presets._FILES_READ_TOOLS, "fs.patch"] == presets._FILES_EDIT_TOOLS  # nosec B101
+    assert [*presets._FILES_EDIT_TOOLS, "fs.write"] == presets._FILES_WRITE_TOOLS  # nosec B101
     assert presets._LEGACY_FILES_READ_TOOLS == ["fs.read_text"]  # nosec B101
     assert presets._LEGACY_FILES_WRITE_TOOLS == ["fs.write_text"]  # nosec B101
 
@@ -338,6 +364,30 @@ def test_git_capable_presets_include_native_read_tools() -> None:
         assert "git.read" in preset.profile.policy_document.capabilities  # nosec B101
         assert "git" not in tooling["progressive_disclosure"]["direct_categories"]  # nosec B101
         assert "git" in tooling["progressive_disclosure"]["deferred_categories"]  # nosec B101
+
+
+def test_code_intelligence_presets_include_deferred_lsp_tools() -> None:
+    for preset_id in LSP_TOOLING_PRESET_IDS:
+        preset = presets.get_builtin_preset(preset_id)
+        assert preset is not None  # nosec B101
+
+        tooling = preset.profile.metadata["tooling"]
+        progressive_disclosure = tooling["progressive_disclosure"]
+        policy = preset.profile.policy_document
+
+        assert set(tooling["enabled_tools"]) >= LSP_TOOLS  # nosec B101
+        assert "code_intelligence.lsp" in tooling["enabled_capabilities"]  # nosec B101
+        assert "code_intelligence.lsp" in policy.capabilities  # nosec B101
+        assert LSP_TOOLS.isdisjoint(policy.allowed_tools)  # nosec B101
+        assert "code_intelligence" in progressive_disclosure["deferred_categories"]  # nosec B101
+
+    for preset_id in ("product-owner", "documentation-writer", "deep-researcher"):
+        preset = presets.get_builtin_preset(preset_id)
+        assert preset is not None  # nosec B101
+
+        tooling = preset.profile.metadata["tooling"]
+        assert LSP_TOOLS.isdisjoint(tooling["enabled_tools"])  # nosec B101
+        assert "code_intelligence.lsp" not in tooling["enabled_capabilities"]  # nosec B101
 
 
 def test_product_owner_and_documentation_writer_do_not_enable_git_by_default() -> None:

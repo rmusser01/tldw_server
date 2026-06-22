@@ -18,6 +18,11 @@ CORE_DEPENDENCIES: Final = (
     "loguru",
     "pyyaml",
 )
+BASE_DEPENDENCIES: Final = (
+    *CORE_DEPENDENCIES,
+    "httpx",
+    "websockets",
+)
 FASTAPI_DEPENDENCIES: Final = (
     "fastapi",
     "starlette",
@@ -28,7 +33,13 @@ GATEWAY_DEPENDENCIES: Final = (
     *CORE_DEPENDENCIES,
     *FASTAPI_DEPENDENCIES,
     *SQLITE_DEPENDENCIES,
+    "httpx",
     "uvicorn",
+    "websockets",
+)
+LSP_DEPENDENCIES: Final = (
+    "ruff",
+    "python-lsp-server",
 )
 DEV_DEPENDENCIES: Final = (
     "pytest",
@@ -43,6 +54,7 @@ OPTIONAL_EXTRAS: Final = MappingProxyType(
         "sqlite": SQLITE_DEPENDENCIES,
         "federation": FEDERATION_DEPENDENCIES,
         "gateway": GATEWAY_DEPENDENCIES,
+        "lsp": LSP_DEPENDENCIES,
         "dev": DEV_DEPENDENCIES,
     }
 )

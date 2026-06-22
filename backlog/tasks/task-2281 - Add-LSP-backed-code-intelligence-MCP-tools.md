@@ -16,10 +16,54 @@ dependencies:
 references:
 - https://code.claude.com/docs/en/tools-reference
 - TASK-2387
+- https://github.com/rmusser01/tldw_server/pull/2421
 documentation:
 - Docs/superpowers/specs/2026-06-19-mcp-smoke-client-transport-harness-design.md
 - Docs/superpowers/plans/2026-06-19-mcp-smoke-client-transport-harness-implementation-plan.md
 - Docs/MCP/Unified/Smoke_Client.md
+- Docs/superpowers/specs/2026-06-20-mcp-lsp-code-intelligence-tools-design.md
+- Docs/superpowers/plans/2026-06-21-mcp-lsp-code-intelligence-tools-implementation-plan.md
+modified_files:
+- mcp_unified/lsp/__init__.py
+- mcp_unified/lsp/config.py
+- mcp_unified/lsp/errors.py
+- mcp_unified/lsp/models.py
+- mcp_unified/lsp/backends.py
+- mcp_unified/lsp/router.py
+- mcp_unified/lsp/service.py
+- mcp_unified/lsp/jsonrpc.py
+- mcp_unified/lsp/sessions.py
+- mcp_unified/lsp/executables.py
+- mcp_unified/lsp/filtering.py
+- mcp_unified/lsp/pylsp.py
+- mcp_unified/lsp/ruff.py
+- mcp_unified/lsp/gateway_runtime.py
+- mcp_unified/smoke/scenarios.py
+- mcp_unified/smoke/cli.py
+- mcp_unified/profiles/presets.py
+- mcp_unified/package_metadata.py
+- mcp_unified/README.md
+- mcp_unified/USER_GUIDE.md
+- mcp_unified/pyproject.toml
+- Docs/MCP/Unified/Smoke_Client.md
+- Docs/superpowers/plans/2026-06-21-mcp-lsp-code-intelligence-tools-implementation-plan.md
+- tldw_Server_API/app/core/MCP_unified/modules/implementations/lsp_module.py
+- tldw_Server_API/app/core/MCP_unified/server.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_lsp_models.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_lsp_router.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_lsp_backends_fake.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_lsp_jsonrpc.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_lsp_sessions.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_lsp_real_backends.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_lsp_filtering.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_lsp_module.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_lsp_module_registration.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_lsp_gateway_runtime.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_lsp_smoke_scenario.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_server_batch_and_formatting.py
+- tldw_Server_API/app/core/MCP_unified/tests/fixtures/fake_lsp_stdio_server.py
 ---
 
 ## Description
@@ -51,3 +95,19 @@ Before implementing LSP-backed MCP tools, build or at least plan the MCP smoke c
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Progress so far: Task 1 added LSP public model/config/error contracts, package metadata for mcp_unified.lsp, and targeted model contract tests. Task 2 added deterministic fake LSP backends, capability routing for the first-slice lsp.* tools, and the host-neutral service facade/status surface. Task 3 added the async stdio JSON-RPC client, fake LSP stdio fixture, and per-workspace session manager with idle eviction and exception-safe stop-all. Task 4 added executable resolution, real Ruff and pylsp backend adapters, JSON-RPC notification waiting for diagnostics, env-gated real-backend tests, and a workspace-boundary guard that rejects traversal/absolute path escapes before backend reads or URI generation. Task 5 added the LSP result path-filtering contract: read-only path lists are filtered with filtered_count metadata, while edit-preview/code-action results fail closed on denied or unknown affected paths. Task 6 added the tldw-hosted LSPModule, module-derived read path-scope candidates, conservative post-result filtering, argument validation, server opt-in registration via MCP_ENABLE_LSP_MODULE, and registration tests. Verification on 2026-06-21: focused LSP tests passed with 111 tests and 5 env-gated skips; the explicit TLDW_MCP_LSP_REAL_BACKENDS=1 run passed with 11 tests and 5 skips because ruff/pylsp are not installed on PATH; Ruff passed on touched LSP Python files/tests; Bandit on mcp_unified/lsp plus the hosted LSP module reported zero findings; git diff --check was clean. Used the repository root virtualenv because this worktree has no local .venv directory.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Task 8 complete: added LSP tooling metadata to code-oriented built-in presets, using deferred code_intelligence progressive disclosure to preserve the 24-tool direct surface cap; documented LSP install/enablement/smoke usage in package README, user guide, and smoke client guide; aligned package metadata and runtime package-boundary tests with the lsp optional extra and base dependency metadata. Verification on 2026-06-21: profile preset tests passed with 28 tests; targeted Task 8 pytest group passed with 37 tests; package metadata release-gate tests passed; standalone artifact gate passed with 4 tests; Ruff passed on touched Python files; Bandit reported zero findings for touched package code; git diff --check was clean.
+
+Task 9 complete: ran final LSP verification and backlog closeout. Focused LSP suite: 109 passed, 5 skipped. Regression-adjacent MCP suite: initial sandbox run hit local WebSocket bind PermissionError; escalated loopback rerun passed 136 tests. Explicit TLDW_MCP_LSP_REAL_BACKENDS=1 run: 11 passed, 5 skipped. LSP smoke CLI best-effort in-process scenario passed with backend_missing/capability_unavailable best-effort notes where optional backends were unavailable. Bandit report /tmp/bandit_mcp_lsp_code_intelligence.json has zero findings. Known limitations remain Python-only first slice, single workspace root, preview-only edit actions, and file-level diagnostics dependent on optional Ruff/pylsp availability. Also corrected an older formatting regression test to assert the current eval-metadata-enriched dict result contract.
+
+Draft PR opened for review: https://github.com/rmusser01/tldw_server/pull/2421. Branch was rebased cleanly onto latest origin/dev before PR creation and post-rebase verification passed: focused LSP/package suite 111 passed, 5 skipped; regression-adjacent MCP suite 136 passed; explicit real-backend suite 11 passed, 5 skipped; LSP smoke CLI passed; Ruff passed; Bandit post-rebase report /tmp/bandit_mcp_lsp_code_intelligence_post_rebase.json has zero findings; git diff --check was clean.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
