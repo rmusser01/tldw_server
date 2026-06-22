@@ -28,6 +28,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility.
     import tomli as tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
+ROOT_PYPROJECT = REPO_ROOT / "pyproject.toml"
 STANDALONE_PROJECT_ROOT = REPO_ROOT / "apps" / "mcp-unified"
 STANDALONE_SRC_ROOT = STANDALONE_PROJECT_ROOT / "src"
 PACKAGE_ROOT = STANDALONE_SRC_ROOT / "mcp_unified"
@@ -70,6 +71,14 @@ def _load_standalone_pyproject() -> dict[str, object]:
 
     assert STANDALONE_PYPROJECT.is_file()
     with STANDALONE_PYPROJECT.open("rb") as pyproject_file:
+        return tomllib.load(pyproject_file)
+
+
+def _load_root_pyproject() -> dict[str, object]:
+    """Load the root tldw-server pyproject document."""
+
+    assert ROOT_PYPROJECT.is_file()
+    with ROOT_PYPROJECT.open("rb") as pyproject_file:
         return tomllib.load(pyproject_file)
 
 
@@ -627,6 +636,21 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
         standalone_dependency_names.update(_dependency_names(dependencies))
 
     assert forbidden_dependency_names.isdisjoint(standalone_dependency_names)
+
+
+def test_mcp_unified_console_scripts_are_standalone_package_owned() -> None:
+    """Root package must not advertise standalone MCP Unified console scripts."""
+
+    standalone_project = _load_standalone_pyproject()["project"]
+    root_project = _load_root_pyproject()["project"]
+
+    standalone_scripts = standalone_project["scripts"]
+    root_scripts = root_project["scripts"]
+
+    assert standalone_scripts["mcp-unified-gateway"] == "mcp_unified.gateway.cli:main"  # nosec B101
+    assert standalone_scripts["mcp-unified-smoke"] == "mcp_unified.smoke.cli:main"  # nosec B101
+    assert "mcp-unified-gateway" not in root_scripts  # nosec B101
+    assert "mcp-unified-smoke" not in root_scripts  # nosec B101
 
 
 def test_mcp_unified_standalone_distribution_metadata_matches_extras(

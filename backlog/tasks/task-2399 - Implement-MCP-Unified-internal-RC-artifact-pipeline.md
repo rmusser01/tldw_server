@@ -22,6 +22,8 @@ modified_files:
 - .github/workflows/pypi-package.yml
 - .github/workflows/publish-pypi.yml
 - .github/workflows/mcp-unified-rc.yml
+- pyproject.toml
+- Docs/MCP_UNIFIED_STANDALONE_GATEWAY_ADMIN.md
 ---
 
 ## Description

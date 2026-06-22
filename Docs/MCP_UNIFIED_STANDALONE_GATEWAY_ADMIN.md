@@ -14,7 +14,7 @@ being hardened.
 The current package metadata uses the canonical repository license expression
 `GPL-3.0-only`. Downstream projects should treat the boundary as an in-repo
 integration surface until a publishing workflow is explicitly enabled. The
-package-local descriptor lives at `mcp_unified/pyproject.toml` and is checked
+package-local descriptor lives at `apps/mcp-unified/pyproject.toml` and is checked
 by the package-boundary tests before publishing is considered.
 
 Inspect the current release-readiness metadata with:
@@ -25,7 +25,7 @@ mcp-unified-gateway package-info
 
 The dependency groups in that payload intentionally use a `names-only` policy.
 They identify the minimal standalone-package surface without duplicating the
-version floors carried by `mcp_unified/pyproject.toml`. The package also ships
+version floors carried by `apps/mcp-unified/pyproject.toml`. The package also ships
 `mcp_unified/py.typed` as a PEP 561 typed-package marker so downstream type
 checkers can recognize that the package exposes inline type information.
 
@@ -34,7 +34,7 @@ package dependencies:
 
 ```bash
 python -m pytest \
-  -c mcp_unified/pytest-artifact-gate.ini \
+  -c apps/mcp-unified/pytest-artifact-gate.ini \
   .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_distribution_metadata_matches_extras \
   .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_sdist_contains_only_package_boundary \
   .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_artifacts_include_typed_marker \
@@ -46,8 +46,8 @@ That gate builds the package-local wheel and sdist with `python -m build
 --no-isolation`, then checks the wheel metadata, console script entry point,
 optional extras, dependency boundary, typed-package marker, and sdist contents.
 The `PyPI Package Check` GitHub Actions workflow runs the same focused non-host
-test path for `mcp_unified/**` changes before it builds the root `tldw-server`
-distribution. It uses `mcp_unified/pytest-artifact-gate.ini` to avoid repo-wide
+test path for `apps/mcp-unified/**` changes before it builds the root `tldw-server`
+distribution. It uses `apps/mcp-unified/pytest-artifact-gate.ini` to avoid repo-wide
 pytest plugins, host package imports, and host conftests, validates artifacts,
 and does not publish `mcp-unified`.
 
