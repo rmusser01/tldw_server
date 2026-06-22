@@ -11,9 +11,8 @@ from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_rou
 from tldw_Server_API.app.api.v1.endpoints import audio as audio_endpoints
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.TTS.adapters.base import TTSResponse
-from tldw_Server_API.app.core.TTS.adapters.pocket_tts_cpp_runtime import (
-    PROVIDER_MANAGED_VOICE_TOKEN_KEY,
-)
+from tldw_Server_API.app.core.TTS.adapters import pocket_tts_cpp_runtime
+from tldw_Server_API.app.core.TTS.adapters.pocket_tts_cpp_runtime import PROVIDER_MANAGED_VOICE_TOKEN_KEY
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 from tldw_Server_API.app.core.TTS.voice_manager import VoiceReferenceMetadata
 
@@ -315,9 +314,21 @@ def test_pocket_tts_cpp_custom_voice_resolution_uses_stable_path_and_reference_t
     def _fake_get_voice_manager():
         return _FakeVoiceManager()
 
+    async def _fake_normalize_reference_audio_to_wav(audio_bytes, *, sample_rate=24000, channels=1):
+        assert audio_bytes == expected_wav
+        assert sample_rate == 24000
+        assert channels == 1
+        return expected_wav
+
     monkeypatch.setattr(
         "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
         _fake_get_voice_manager,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        pocket_tts_cpp_runtime,
+        "normalize_reference_audio_to_wav",
+        _fake_normalize_reference_audio_to_wav,
         raising=True,
     )
 

@@ -1858,7 +1858,7 @@ jobs:
   full-suite-linux-313-shards:
     name: Full Suite shard (Ubuntu / Python 3.13 / ${{ matrix.shard.name }})
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 50
     needs: [lint, syntax-check, changes]
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
     strategy:

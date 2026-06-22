@@ -63,10 +63,11 @@ def client_with_wf(tmp_path, monkeypatch, auth_headers):
     app.dependency_overrides[get_auth_principal] = override_principal
     app.dependency_overrides[wf_mod._get_db] = override_db
 
+    client = TestClient(app, headers=auth_headers)
     try:
-        with TestClient(app, headers=auth_headers) as client:
-            yield client
+        yield client
     finally:
+        client.close()
         app.dependency_overrides.clear()
         db.close()
 

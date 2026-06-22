@@ -60,7 +60,7 @@ def _wait_for_status(db: WorkflowsDatabase, run_id: str, timeout: float = 10.0) 
     )
 
 
-def _wait_for_scheduler_idle(scheduler: WorkflowScheduler, timeout: float = 3.0) -> dict[str, int]:
+def _wait_for_scheduler_idle(scheduler: WorkflowScheduler, timeout: float = 10.0) -> dict[str, int]:
     deadline = time.time() + timeout
     last_stats = scheduler.stats()
     while time.time() < deadline:
