@@ -185,6 +185,22 @@ def _assert_subprocess_succeeded(
         )
 
 
+def _subprocess_env_with_standalone_src(
+    extra_env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Return subprocess env with relocated standalone src on PYTHONPATH."""
+
+    env = os.environ.copy()
+    pythonpath_entries = [str(STANDALONE_SRC_ROOT)]
+    existing_pythonpath = env.get("PYTHONPATH")
+    if existing_pythonpath:
+        pythonpath_entries.append(existing_pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_entries)
+    if extra_env:
+        env.update(extra_env)
+    return env
+
+
 def _build_standalone_distributions(tmp_path: Path) -> tuple[Path, Path]:
     """Build standalone MCP Unified wheel and sdist into a temporary directory."""
 
@@ -192,7 +208,7 @@ def _build_standalone_distributions(tmp_path: Path) -> tuple[Path, Path]:
 
     package_source = tmp_path / "mcp_unified_source"
     shutil.copytree(
-        PACKAGE_ROOT,
+        STANDALONE_PROJECT_ROOT,
         package_source,
         ignore=shutil.ignore_patterns(
             "__pycache__",
@@ -219,11 +235,12 @@ def _build_standalone_distributions(tmp_path: Path) -> tuple[Path, Path]:
         check=False,
         capture_output=True,
         text=True,
-        env={
-            **os.environ,
-            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-            "PIP_NO_INDEX": "1",
-        },
+        env=_subprocess_env_with_standalone_src(
+            {
+                "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+                "PIP_NO_INDEX": "1",
+            }
+        ),
     )
     _assert_subprocess_succeeded(result, "python -m build")
 
@@ -526,6 +543,7 @@ def test_mcp_unified_reporting_imports_do_not_eagerly_load_db_adapters() -> None
         check=False,
         capture_output=True,
         text=True,
+        env=_subprocess_env_with_standalone_src(),
     )
 
     assert result.returncode == 0, result.stdout + result.stderr  # nosec B101
@@ -553,6 +571,7 @@ def test_filesystem_lock_star_import_does_not_eagerly_load_sqlite_backend() -> N
         check=True,
         capture_output=True,
         text=True,
+        env=_subprocess_env_with_standalone_src(),
     )
 
     assert json.loads(result.stdout) == []  # nosec B101
@@ -578,7 +597,7 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
         "mcp_unified": ["py.typed", "README.md", "USER_GUIDE.md"],
     }
 
-    assert _dependency_names(project["dependencies"]) == set(metadata.BASE_DEPENDENCIES)
+    assert _dependency_names(project["dependencies"]) == set(metadata.PROJECT_DEPENDENCIES)
 
     optional_dependencies = project["optional-dependencies"]
     assert set(optional_dependencies) == set(metadata.OPTIONAL_EXTRAS)
@@ -706,22 +725,20 @@ def test_mcp_unified_standalone_artifacts_include_package_docs(
 def test_pypi_workflow_runs_mcp_unified_standalone_artifact_gate() -> None:
     """PyPI validation workflow must also gate package-local mcp_unified changes."""
 
-    artifact_gate_config = "mcp_unified/pytest-artifact-gate.ini"
-    config_path = PACKAGE_ROOT.parent / artifact_gate_config
+    artifact_gate_config = "apps/mcp-unified/pytest-artifact-gate.ini"
+    config_path = STANDALONE_PROJECT_ROOT / "pytest-artifact-gate.ini"
     assert config_path.is_file()  # nosec B101
     pytest_config = configparser.ConfigParser()
     pytest_config.read(config_path, encoding="utf-8")
     assert "--noconftest" in pytest_config["pytest"]["addopts"]  # nosec B101
 
-    workflow_path = (
-        PACKAGE_ROOT.parent / ".github" / "workflows" / "pypi-package.yml"
-    )
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "pypi-package.yml"
     assert workflow_path.is_file()  # nosec B101
     workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
     triggers = workflow.get("on") or workflow.get(True)
 
-    assert "mcp_unified/**" in triggers["pull_request"]["paths"]  # nosec B101
-    assert "mcp_unified/**" in triggers["push"]["paths"]  # nosec B101
+    assert "apps/mcp-unified/**" in triggers["pull_request"]["paths"]  # nosec B101
+    assert "apps/mcp-unified/**" in triggers["push"]["paths"]  # nosec B101
 
     steps = workflow["jobs"]["build-and-check"]["steps"]
     run_blocks = [step.get("run", "") for step in steps]
@@ -758,7 +775,7 @@ def test_mcp_unified_standalone_package_installs_without_root_dependencies(
     _require_offline_build_tools()
     package_source = tmp_path / "mcp_unified_source"
     shutil.copytree(
-        PACKAGE_ROOT,
+        STANDALONE_PROJECT_ROOT,
         package_source,
         ignore=shutil.ignore_patterns(
             "__pycache__",
@@ -768,11 +785,12 @@ def test_mcp_unified_standalone_package_installs_without_root_dependencies(
     )
     wheel_dir = tmp_path / "dist"
     wheel_dir.mkdir()
-    build_env = {
-        **os.environ,
-        "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-        "PIP_NO_INDEX": "1",
-    }
+    build_env = _subprocess_env_with_standalone_src(
+        {
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+            "PIP_NO_INDEX": "1",
+        }
+    )
     build_result = subprocess.run(
         [
             sys.executable,
@@ -880,6 +898,7 @@ def test_mcp_unified_core_import_smoke_stays_minimal() -> None:
         check=True,
         capture_output=True,
         text=True,
+        env=_subprocess_env_with_standalone_src(),
     )
 
     assert json.loads(result.stdout) == []
@@ -917,6 +936,7 @@ def test_package_imports_do_not_eagerly_load_sqlite_backend(
         check=True,
         capture_output=True,
         text=True,
+        env=_subprocess_env_with_standalone_src(),
     )
 
     assert json.loads(result.stdout) == []
@@ -1043,6 +1063,7 @@ def test_gateway_external_runtime_adapter_import_does_not_import_fastapi_transpo
         check=True,
         capture_output=True,
         text=True,
+        env=_subprocess_env_with_standalone_src(),
     )
 
     assert result.stdout.strip() == "False"

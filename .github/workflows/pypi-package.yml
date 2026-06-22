@@ -9,7 +9,7 @@ on:
       - pyproject.toml
       - README.md
       - .github/tests/**
-      - mcp_unified/**
+      - apps/mcp-unified/**
       - tldw_Server_API/**
       - .github/workflows/pypi-package.yml
   push:
@@ -19,7 +19,7 @@ on:
       - pyproject.toml
       - README.md
       - .github/tests/**
-      - mcp_unified/**
+      - apps/mcp-unified/**
       - tldw_Server_API/**
       - .github/workflows/pypi-package.yml
   workflow_dispatch:
@@ -50,12 +50,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install build twine setuptools wheel
-          pip install -e "mcp_unified[dev]"
+          pip install -e "apps/mcp-unified[dev]"
 
       - name: Validate MCP Unified standalone artifacts
         run: |
           python -m pytest \
-            -c mcp_unified/pytest-artifact-gate.ini \
+            -c apps/mcp-unified/pytest-artifact-gate.ini \
             .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_distribution_metadata_matches_extras \
             .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_sdist_contains_only_package_boundary \
             .github/tests/test_mcp_unified_artifact_gate.py::test_mcp_unified_standalone_artifacts_include_typed_marker \
