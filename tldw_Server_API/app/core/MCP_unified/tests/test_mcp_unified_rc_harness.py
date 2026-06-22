@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -159,6 +160,131 @@ def test_run_command_clears_inherited_pythonpath(
 
     assert result.returncode == 0  # nosec B101
     assert "PYTHONPATH" not in captured_env  # nosec B101
+
+
+def test_rc_create_venv_uses_symlinks_on_posix(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeEnvBuilder:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+        def create(self, venv_dir: Path) -> None:
+            captured["venv_dir"] = venv_dir
+
+    monkeypatch.setattr(mcp_unified_rc.venv, "EnvBuilder", FakeEnvBuilder)
+    recorder = mcp_unified_rc.RcEvidenceRecorder(
+        evidence_dir=tmp_path,
+        package_name="mcp-unified",
+        package_version="0.1.0",
+        package_status="internal-experimental",
+        publishing_status="not-published",
+        commit="abc1234",
+        source_path="apps/mcp-unified",
+        layout="src",
+    )
+
+    created = mcp_unified_rc._create_venv(
+        tmp_path / ".venv",
+        recorder,
+        phase="install_smoke",
+        name="normal_venv",
+    )
+
+    assert created is True  # nosec B101
+    assert captured["with_pip"] is True  # nosec B101
+    assert captured["clear"] is True  # nosec B101
+    assert captured["symlinks"] is (os.name != "nt")  # nosec B101
+    assert captured["venv_dir"] == tmp_path / ".venv"  # nosec B101
+
+
+def test_rc_pip_dependency_outage_records_optional_skip(tmp_path: Path) -> None:
+    recorder = mcp_unified_rc.RcEvidenceRecorder(
+        evidence_dir=tmp_path,
+        package_name="mcp-unified",
+        package_version="0.1.0",
+        package_status="internal-experimental",
+        publishing_status="not-published",
+        commit="abc1234",
+        source_path="apps/mcp-unified",
+        layout="src",
+    )
+    result = mcp_unified_rc.RcCommandResult(
+        command=["python", "-m", "pip", "install", "mcp_unified.whl"],
+        cwd=str(tmp_path),
+        returncode=1,
+        stdout="Processing mcp_unified.whl",
+        stderr=(
+            "Failed to establish a new connection: [Errno 8] nodename nor "
+            "servname provided, or not known\n"
+            "ERROR: Could not find a version that satisfies the requirement "
+            "pydantic>=2.0.0"
+        ),
+        duration_ms=10,
+    )
+
+    mcp_unified_rc._record_pip_install_result(
+        recorder,
+        phase="install_smoke",
+        name="normal_install",
+        result=result,
+    )
+
+    assert recorder.results == [  # nosec B101
+        {
+            "phase": "install_smoke",
+            "name": "normal_install",
+            "status": "skipped",
+            "duration_ms": 10,
+            "required": False,
+            "reason": "dependency resolution unavailable in this environment",
+            "details": {"command": result.as_dict()},
+        }
+    ]
+
+
+def test_rc_pip_dependency_outage_is_required_failure_in_ci(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    recorder = mcp_unified_rc.RcEvidenceRecorder(
+        evidence_dir=tmp_path,
+        package_name="mcp-unified",
+        package_version="0.1.0",
+        package_status="internal-experimental",
+        publishing_status="not-published",
+        commit="abc1234",
+        source_path="apps/mcp-unified",
+        layout="src",
+    )
+    result = mcp_unified_rc.RcCommandResult(
+        command=["python", "-m", "pip", "install", "mcp_unified.whl"],
+        cwd=str(tmp_path),
+        returncode=1,
+        stdout="Processing mcp_unified.whl",
+        stderr=(
+            "Failed to establish a new connection: [Errno 8] nodename nor "
+            "servname provided, or not known\n"
+            "ERROR: Could not find a version that satisfies the requirement "
+            "pydantic>=2.0.0"
+        ),
+        duration_ms=10,
+    )
+
+    mcp_unified_rc._record_pip_install_result(
+        recorder,
+        phase="install_smoke",
+        name="normal_install",
+        result=result,
+    )
+
+    assert recorder.results[0]["status"] == "failed"  # nosec B101
+    assert recorder.results[0]["required"] is True  # nosec B101
+    assert recorder.has_required_failures() is True  # nosec B101
 
 
 def test_result_recorder_writes_json_and_markdown(tmp_path: Path) -> None:

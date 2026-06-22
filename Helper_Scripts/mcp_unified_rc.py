@@ -37,6 +37,19 @@ EVIDENCE_JSON = "mcp-unified-rc-evidence.json"
 EVIDENCE_MARKDOWN = "mcp-unified-rc-summary.md"
 PACKAGE_IMPORT_NAME = "mcp_unified"
 OPTIONAL_EXTRAS = ("core", "fastapi", "sqlite", "federation", "gateway", "dev")
+PIP_DEPENDENCY_FAILURE_MARKERS = (
+    "could not find a version that satisfies the requirement",
+    "no matching distribution found",
+)
+PIP_NETWORK_FAILURE_MARKERS = (
+    "failed to establish a new connection",
+    "name or service not known",
+    "nodename nor servname",
+    "temporary failure in name resolution",
+    "connection refused",
+    "connection timed out",
+)
+PIP_DEPENDENCY_OUTAGE_REASON = "dependency resolution unavailable in this environment"
 
 SECRET_KEY_VALUE_PATTERN = re.compile(
     r"(?i)\b(api[_-]?key|token|secret|password|bearer[_-]?token)\b"
@@ -634,7 +647,7 @@ def _run_extras_matrix(paths: RcPaths, recorder: RcEvidenceRecorder) -> None:
                 cwd=temp_dir,
                 timeout=300,
             )
-            _record_command_result(
+            _record_pip_install_result(
                 recorder,
                 phase="extras_matrix",
                 name=f"{extra}_install",
@@ -706,7 +719,7 @@ def _run_smoke_uat(paths: RcPaths, recorder: RcEvidenceRecorder) -> None:
             cwd=temp_dir,
             timeout=300,
         )
-        _record_command_result(
+        _record_pip_install_result(
             recorder,
             phase="smoke_uat",
             name="normal_install",
@@ -765,7 +778,7 @@ def _run_normal_install_checks(
             cwd=temp_dir,
             timeout=300,
         )
-        _record_command_result(
+        _record_pip_install_result(
             recorder,
             phase=phase,
             name="normal_install",
@@ -858,6 +871,40 @@ def _record_command_result(
     )
 
 
+def _record_pip_install_result(
+    recorder: RcEvidenceRecorder,
+    *,
+    phase: str,
+    name: str,
+    result: RcCommandResult,
+) -> None:
+    """Record dependency-resolving pip installs, allowing local offline skips."""
+
+    if _pip_dependency_resolution_unavailable(result):
+        recorder.record(
+            phase=phase,
+            name=name,
+            status="skipped",
+            duration_ms=result.duration_ms,
+            reason=PIP_DEPENDENCY_OUTAGE_REASON,
+            details={"command": result.as_dict()},
+            required=False,
+        )
+        return
+    _record_command_result(recorder, phase=phase, name=name, result=result)
+
+
+def _pip_dependency_resolution_unavailable(result: RcCommandResult) -> bool:
+    """Return whether pip failed only because this local run cannot reach indexes."""
+
+    if result.returncode == 0 or os.environ.get("GITHUB_ACTIONS"):
+        return False
+    output = f"{result.stdout}\n{result.stderr}".lower()
+    return any(marker in output for marker in PIP_DEPENDENCY_FAILURE_MARKERS) and any(
+        marker in output for marker in PIP_NETWORK_FAILURE_MARKERS
+    )
+
+
 def _create_venv(
     venv_dir: Path,
     recorder: RcEvidenceRecorder,
@@ -867,7 +914,11 @@ def _create_venv(
 ) -> bool:
     started = time.perf_counter()
     try:
-        venv.EnvBuilder(with_pip=True, clear=True).create(venv_dir)
+        venv.EnvBuilder(
+            with_pip=True,
+            clear=True,
+            symlinks=os.name != "nt",
+        ).create(venv_dir)
     except Exception as exc:  # pragma: no cover - platform/environment-specific.
         recorder.record(
             phase=phase,
