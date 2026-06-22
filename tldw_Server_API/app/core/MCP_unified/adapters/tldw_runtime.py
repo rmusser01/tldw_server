@@ -342,19 +342,18 @@ class TldwPermissionSeeder:
     """Seed MCP compatibility permissions through the current AuthNZ database."""
 
     async def seed_default_tool_permissions(self) -> None:
-        """Ensure the legacy wildcard tool execution permission exists."""
+        """Ensure MCP startup permissions and default role grants exist."""
         from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-        from tldw_Server_API.app.services.admin_roles_permissions_service import (
-            ensure_permission,
+        from tldw_Server_API.app.core.AuthNZ.rbac_seed import (
+            ensure_baseline_rbac_seed,
         )
 
         pool = await get_db_pool()
         async with pool.acquire() as conn:
-            await ensure_permission(
+            await ensure_baseline_rbac_seed(
                 conn,
-                "tools.execute:*",
-                "Wildcard tool execution",
-                category="tools",
+                include_mcp_permissions=True,
+                is_postgres=callable(getattr(conn, "fetch", None)),
             )
 
 

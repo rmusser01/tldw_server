@@ -14,6 +14,18 @@ from ....DB_Management.Prompts_DB import PromptsDatabase
 from ...persona_scope import assert_identifier_in_scope
 from ..base import BaseModule, create_tool_definition
 from ..disk_space import get_free_disk_space_gb
+from .prompts_catalog import (
+    CONFIG_PROMPT_PREFIX,
+    LIBRARY_PROMPT_PREFIX,
+    ConfigPromptCatalogSource,
+    MCPPromptFormatter,
+    PromptCatalogCursor,
+    PromptCatalogError,
+    UserPromptCatalogSource,
+    clamp_prompt_page_size,
+    decode_prompt_cursor,
+    encode_prompt_cursor,
+)
 
 _PROMPTS_HEALTHCHECK_EXCEPTIONS = (
     OSError,
@@ -28,6 +40,19 @@ _PROMPTS_CLOSE_EXCEPTIONS = (OSError, RuntimeError, SQLiteError, TypeError, Valu
 class PromptsModule(BaseModule):
     async def on_initialize(self) -> None:
         logger.info(f"Initializing Prompts module: {self.name}")
+        settings = self.config.settings or {}
+        self._prompt_list_page_size = clamp_prompt_page_size(settings.get("prompt_list_page_size", 50))
+        try:
+            max_rendered_prompt_chars = int(settings.get("max_rendered_prompt_chars", 100000) or 100000)
+        except (TypeError, ValueError):
+            max_rendered_prompt_chars = 100000
+        self._prompt_formatter = MCPPromptFormatter(max_rendered_chars=max_rendered_prompt_chars)
+        self._user_prompt_source = UserPromptCatalogSource(self._prompt_formatter)
+        config_prompts = settings.get("config_prompts")
+        self._config_prompt_source = ConfigPromptCatalogSource(
+            self._prompt_formatter,
+            config_prompts if isinstance(config_prompts, dict) else {},
+        )
 
     async def on_shutdown(self) -> None:
         logger.info(f"Shutting down Prompts module: {self.name}")
@@ -102,6 +127,73 @@ class PromptsModule(BaseModule):
         if tool_name == "prompts.get":
             return await self._get(args, context)
         raise ValueError(f"Unknown tool: {tool_name}")
+
+    async def get_prompts_for_context(self, context: Any, params: dict[str, Any]) -> dict[str, Any]:
+        """List MCP prompts visible to the request context."""
+
+        cursor = decode_prompt_cursor((params or {}).get("cursor"))
+        page_size = getattr(self, "_prompt_list_page_size", 50)
+        library_result = await asyncio.to_thread(
+            self._user_prompt_source.list_prompts,
+            context=context,
+            cursor=cursor,
+            limit=page_size,
+        )
+
+        prompts = list(library_result.prompts)
+        warnings = list(library_result.warnings)
+        next_cursor = library_result.next_cursor
+        remaining = page_size - len(prompts)
+
+        if remaining > 0 and library_result.next_cursor is None:
+            config_result = await asyncio.to_thread(
+                self._config_prompt_source.list_prompts,
+                cursor=cursor,
+                limit=remaining,
+            )
+            prompts.extend(config_result.prompts)
+            warnings.extend(config_result.warnings)
+            next_cursor = config_result.next_cursor
+        elif (
+            remaining == 0
+            and library_result.next_cursor is None
+            and self._config_prompt_source.has_entries_after(cursor.config_index)
+        ):
+            next_cursor = PromptCatalogCursor(
+                library_done=True,
+                config_index=cursor.config_index,
+            )
+
+        result: dict[str, Any] = {"prompts": prompts}
+        encoded_cursor = encode_prompt_cursor(next_cursor)
+        if encoded_cursor:
+            result["nextCursor"] = encoded_cursor
+        if warnings:
+            result["_meta"] = {"tldw": {"warnings": warnings}}
+        return result
+
+    async def get_prompt_for_context(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context: Any,
+    ) -> dict[str, Any]:
+        """Get one MCP prompt by catalog namespace for the request context."""
+
+        if isinstance(name, str) and name.startswith(LIBRARY_PROMPT_PREFIX):
+            return await asyncio.to_thread(
+                self._user_prompt_source.get_prompt,
+                context=context,
+                name=name,
+                arguments=arguments,
+            )
+        if isinstance(name, str) and name.startswith(CONFIG_PROMPT_PREFIX):
+            return await asyncio.to_thread(
+                self._config_prompt_source.get_prompt,
+                name=name,
+                arguments=arguments,
+            )
+        raise PromptCatalogError("prompt_not_found", "Prompt not found")
 
     def _open_db(self, context: Any) -> PromptsDatabase:
         if context is None or not getattr(context, "db_paths", None):

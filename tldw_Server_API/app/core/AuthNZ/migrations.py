@@ -1012,6 +1012,39 @@ def migration_087_expand_share_tokens_resource_type_for_prototypes(conn: sqlite3
     )
 
 
+def migration_089_seed_mcp_prompts_read_permission(conn: sqlite3.Connection) -> None:
+    """Seed prompts.read and default role grants for existing SQLite AuthNZ DBs."""
+    logger.info("Migration 089: START seed MCP prompts.read permission")
+
+    if not (
+        _sqlite_table_exists(conn, "roles")
+        and _sqlite_table_exists(conn, "permissions")
+        and _sqlite_table_exists(conn, "role_permissions")
+    ):
+        logger.info("Migration 089: RBAC tables missing; skipping prompts.read seed")
+        return
+
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO permissions (name, description, category)
+        VALUES (?, ?, ?)
+        """,
+        ("prompts.read", "Read MCP prompts", "prompts"),
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT r.id, p.id
+        FROM roles r
+        JOIN permissions p ON p.name = ?
+        WHERE r.name IN (?, ?, ?)
+        """,
+        ("prompts.read", "admin", "user", "moderator"),
+    )
+    conn.commit()
+    logger.info("Migration 089: Seeded MCP prompts.read permission")
+
+
 def rollback_086_drop_prototype_workspace_tables(conn: sqlite3.Connection) -> None:
     """Rollback migration 086 by dropping prototype workspace metadata tables."""
     conn.execute("DROP TABLE IF EXISTS prototype_promotion_requests")
@@ -1267,7 +1300,9 @@ def migration_014_seed_roles_permissions(conn: sqlite3.Connection) -> None:
         ('moderation.review.read','Read moderation review items','moderation'),
         ('moderation.review.decide','Decide moderation review items','moderation'),
         ('moderation.review.bulk_decide','Bulk decide moderation review items','moderation'),
-        ('moderation.audit.read','Read moderation review audit events','moderation')
+        ('moderation.audit.read','Read moderation review audit events','moderation'),
+        # MCP prompt catalog
+        ('prompts.read','Read MCP prompts','prompts'),
     ]
     for name, description, category in perms:
         conn.execute(
@@ -1300,7 +1335,7 @@ def migration_014_seed_roles_permissions(conn: sqlite3.Connection) -> None:
     # Baseline user permissions
     baseline = [
         'media.create','media.read','media.update','media.transcribe',
-        'users.read'
+        'users.read','prompts.read'
     ]
     for code in baseline:
         pid = _id('permissions', code)
@@ -5270,6 +5305,11 @@ def get_authnz_migrations() -> list[Migration]:
             88,
             "Add llm_usage_log cache accounting columns",
             migration_088_add_llm_usage_cache_accounting_columns,
+        ),
+        Migration(
+            89,
+            "Seed MCP prompts.read permission",
+            migration_089_seed_mcp_prompts_read_permission,
         ),
     ]
 

@@ -1,7 +1,7 @@
 # MCP Prompt Catalog Support Design
 
 Date: 2026-06-22
-Status: Draft for spec review
+Status: Implemented in TASK-2344
 Backlog: TASK-2342
 Related follow-up: TASK-2341
 MCP reference: https://modelcontextprotocol.io/specification/2025-06-18/server/prompts
@@ -147,15 +147,18 @@ The cursor is opaque to clients. Use base64url JSON with this internal shape:
 ```json
 {
   "v": 1,
-  "library_after_name": "casefolded last prompt name",
+  "library_after_name": "last prompt name",
   "library_after_uuid": "last-library-prompt-uuid",
+  "library_done": false,
   "config_index": 0
 }
 ```
 
-Malformed, unsupported, or tampered cursors return JSON-RPC invalid params.
+Malformed, unsupported, or tampered cursors return JSON-RPC invalid params. `library_after_name` and `library_after_uuid` must be both present or both absent; partial keyset cursors are invalid. `library_done: true` means the cursor has moved into the config-prompt segment and the next list call must skip user-library rows. Cursors with `library_done: true` must not also contain library keyset fields. A nonzero `config_index` is valid only when `library_done: true`.
 
-Library pagination uses keyset semantics over `(normalized_name, uuid)` rather than raw offsets, so prompt inserts/deletes/renames between pages are best-effort but do not depend on unstable row offsets. Config pagination uses the allowlist index because config ordering is fixed by server config.
+Library pagination uses keyset semantics over `(name COLLATE NOCASE, uuid)` rather than raw offsets, so prompt inserts/deletes/renames between pages are best-effort but do not depend on unstable row offsets. Config pagination uses the allowlist index because config ordering is fixed by server config.
+
+When the user-library page exactly fills `prompt_list_page_size` but the library source has no additional rows, the server must still emit a cursor into the config segment when allowlisted config entries remain. Otherwise config prompts can be hidden forever behind an exactly full library page.
 
 Each prompt definition includes:
 
@@ -246,6 +249,8 @@ MCP prompt argument values must be strings in v1. Non-string argument values ret
 Any authenticated MCP caller with `prompts.read` may call `prompts/list` and `prompts/get`.
 
 Protocol-level prompt access must not also require `modules.read`. The `library:` and `config:` namespaces exposed by `PromptsModule` are gated by `Resource.PROMPT` read permission, API-key read allowance, and prompt/resource scopes. Existing module-level permission checks can remain for module management APIs and for unrelated static prompt providers, but they must not block `PromptsModule` prompt catalog access when `prompts.read` is granted.
+
+The protocol layer should use a dedicated namespaced prompt permission path for `library:` and `config:` names. That path must require `Resource.PROMPT` read and must not fall back to module permission. The legacy `_has_prompt_permission()` module fallback can remain only for static context-free prompt providers.
 
 User-library prompts are restricted to the authenticated user's Prompts DB through `RequestContext.db_paths["prompts"]`. The caller must not be able to provide or override DB paths through MCP prompt arguments.
 

@@ -135,6 +135,28 @@ def test_default_mcp_modules_config_declares_codegraph_disabled():
     )
 
 
+def test_default_mcp_modules_config_declares_prompts_module_with_empty_config_allowlist() -> None:
+    config_path = Path("tldw_Server_API/Config_Files/mcp_modules.yaml")
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    module_ids = [module["id"] for module in data["modules"]]
+    modules = {module["id"]: module for module in data["modules"]}
+
+    prompts_module = modules["prompts"]
+
+    assert module_ids[module_ids.index("notes") + 1] == "prompts"  # nosec B101
+    assert prompts_module["class"] == (  # nosec B101
+        "tldw_Server_API.app.core.MCP_unified.modules.implementations.prompts_module:PromptsModule"
+    )
+    assert prompts_module["enabled"] is True  # nosec B101
+    assert prompts_module["name"] == "Prompts"  # nosec B101
+    assert prompts_module["version"] == "1.0.0"  # nosec B101
+    assert prompts_module["department"] == "knowledge"  # nosec B101
+    assert prompts_module["max_concurrent"] == 10  # nosec B101
+    assert prompts_module["settings"]["prompt_list_page_size"] == 50  # nosec B101
+    assert prompts_module["settings"]["max_rendered_prompt_chars"] == 100000  # nosec B101
+    assert prompts_module["settings"]["config_prompts"] == {"enabled": True, "entries": []}  # nosec B101
+
+
 @pytest.mark.asyncio
 async def test_server_skips_disabled_codegraph_module_from_config(monkeypatch, tmp_path: Path) -> None:
     from tldw_Server_API.app.core.MCP_unified.server import MCPServer
