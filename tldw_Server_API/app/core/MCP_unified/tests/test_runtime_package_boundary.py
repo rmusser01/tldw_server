@@ -824,11 +824,19 @@ def test_mcp_unified_rc_workflow_uses_private_permissions() -> None:
     workflow_path = REPO_ROOT / ".github" / "workflows" / "mcp-unified-rc.yml"
     workflow = _load_workflow(workflow_path)
     serialized_workflow = yaml.safe_dump(workflow, sort_keys=True)
+    run_blocks = [
+        step.get("run", "")
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+    ]
+    install_runs = "\n".join(run_blocks)
 
     assert workflow["permissions"] == {"contents": "read"}  # nosec B101
     assert "id-token" not in workflow["permissions"]  # nosec B101
     assert "apps/mcp-unified" in serialized_workflow  # nosec B101
     assert "make mcp-unified-rc" in serialized_workflow  # nosec B101
+    assert 'pip install -e "apps/mcp-unified' not in install_runs  # nosec B101
+    assert "pip install -e apps/mcp-unified" not in install_runs  # nosec B101
 
 
 def test_mcp_unified_make_targets_do_not_call_root_pypi_check() -> None:
@@ -847,6 +855,43 @@ def test_mcp_unified_make_targets_do_not_call_root_pypi_check() -> None:
     assert section_marker in makefile  # nosec B101
     mcp_unified_section = makefile.split(section_marker, 1)[1]
     assert "pypi-check" not in mcp_unified_section  # nosec B101
+    for phase in (
+        "build",
+        "artifact-gate",
+        "install-smoke",
+        "cli-uat",
+        "smoke-uat",
+        "extras-matrix",
+        "all",
+    ):
+        assert f"$(MCP_UNIFIED_RC) {phase}" in mcp_unified_section  # nosec B101
+
+
+def test_root_pypi_package_workflow_is_tldw_server_only() -> None:
+    """Root package-check workflow must not carry MCP Unified artifact gates."""
+
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "pypi-package.yml"
+    workflow = _load_workflow(workflow_path)
+    serialized_workflow = yaml.safe_dump(workflow, sort_keys=True)
+    triggers = workflow.get("on") or workflow.get(True)
+    run_blocks = [
+        step.get("run", "")
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+    ]
+    upload_names = [
+        step.get("with", {}).get("name")
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+        if "upload-artifact" in str(step.get("uses", ""))
+    ]
+
+    assert workflow["name"] == "tldw-server PyPI Package Check"  # nosec B101
+    assert "apps/mcp-unified/**" not in triggers["pull_request"]["paths"]  # nosec B101
+    assert "apps/mcp-unified/**" not in triggers["push"]["paths"]  # nosec B101
+    assert "test_mcp_unified_artifact_gate.py" not in serialized_workflow  # nosec B101
+    assert not any("apps/mcp-unified" in run_block for run_block in run_blocks)  # nosec B101
+    assert "tldw-server-pypi-dist" in upload_names  # nosec B101
 
 
 def test_root_pypi_publish_workflow_is_labeled_for_tldw_server() -> None:
