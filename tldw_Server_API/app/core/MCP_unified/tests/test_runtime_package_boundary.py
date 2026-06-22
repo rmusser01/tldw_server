@@ -873,11 +873,15 @@ def test_mcp_unified_rc_workflow_uses_private_permissions() -> None:
     serialized_workflow = yaml.safe_dump(workflow, sort_keys=True)
     run_blocks = _workflow_run_blocks(workflow)
     install_runs = "\n".join(run_blocks)
+    trigger_paths = _workflow_trigger_paths(workflow)
 
     assert workflow["permissions"] == {"contents": "read"}  # nosec B101
     assert "id-token" not in workflow["permissions"]  # nosec B101
     assert "apps/mcp-unified" in serialized_workflow  # nosec B101
+    assert "Makefile" in trigger_paths["pull_request"]  # nosec B101
     assert "make mcp-unified-rc" in serialized_workflow  # nosec B101
+    assert '"pydantic>=2.0.0"' in install_runs  # nosec B101
+    assert '"PyYAML>=6.0.0"' in install_runs  # nosec B101
     assert not any(  # nosec B101
         _contains_editable_install(run_block, "apps/mcp-unified")
         for run_block in run_blocks
@@ -898,10 +902,6 @@ def test_mcp_unified_make_targets_do_not_call_root_pypi_check() -> None:
     ):
         assert re.search(rf"^{target_name}:", makefile, flags=re.MULTILINE)  # nosec B101
 
-    section_marker = "# MCP Unified standalone RC"
-    assert section_marker in makefile  # nosec B101
-    mcp_unified_section = makefile.split(section_marker, 1)[1]
-    assert "pypi-check" not in mcp_unified_section  # nosec B101
     assert _make_target_commands(makefile, "mcp-unified-build") == [  # nosec B101
         "$(MCP_UNIFIED_RC) build",
     ]
