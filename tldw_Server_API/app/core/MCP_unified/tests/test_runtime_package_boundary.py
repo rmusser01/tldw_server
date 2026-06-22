@@ -18,7 +18,6 @@ from email.parser import Parser
 from importlib import metadata as importlib_metadata
 from pathlib import Path
 
-import mcp_unified
 import pytest
 import yaml
 from pydantic import ValidationError
@@ -28,13 +27,33 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility.
     import tomli as tomllib
 
-PACKAGE_ROOT = Path(mcp_unified.__file__).resolve().parent
-STANDALONE_PYPROJECT = PACKAGE_ROOT / "pyproject.toml"
+REPO_ROOT = Path(__file__).resolve().parents[5]
+STANDALONE_PROJECT_ROOT = REPO_ROOT / "apps" / "mcp-unified"
+STANDALONE_SRC_ROOT = STANDALONE_PROJECT_ROOT / "src"
+PACKAGE_ROOT = STANDALONE_SRC_ROOT / "mcp_unified"
+STANDALONE_PYPROJECT = STANDALONE_PROJECT_ROOT / "pyproject.toml"
 PY_TYPED_MARKER = PACKAGE_ROOT / "py.typed"
-PACKAGE_README = PACKAGE_ROOT / "README.md"
-PACKAGE_USER_GUIDE = PACKAGE_ROOT / "USER_GUIDE.md"
+PACKAGE_README = STANDALONE_PROJECT_ROOT / "README.md"
+PACKAGE_USER_GUIDE = STANDALONE_PROJECT_ROOT / "USER_GUIDE.md"
+PACKAGE_RESOURCE_README = PACKAGE_ROOT / "README.md"
+PACKAGE_RESOURCE_USER_GUIDE = PACKAGE_ROOT / "USER_GUIDE.md"
+
+if str(STANDALONE_SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(STANDALONE_SRC_ROOT))
+
+import mcp_unified
+
 REQUIRES_DIST_NAME_PATTERN = re.compile(r"^\s*([A-Za-z0-9_.-]+)")
 REQUIRES_DIST_EXTRA_PATTERN = re.compile(r"extra\s*==\s*['\"]([^'\"]+)['\"]")
+
+
+def test_mcp_unified_package_project_lives_under_apps() -> None:
+    """The standalone project must live under apps/mcp-unified."""
+
+    assert STANDALONE_PROJECT_ROOT.is_dir()  # nosec B101
+    assert STANDALONE_PYPROJECT.is_file()  # nosec B101
+    assert PACKAGE_ROOT.is_dir()  # nosec B101
+    assert not (REPO_ROOT / "mcp_unified").exists()  # nosec B101
 
 
 def _dependency_package_name(dependency: str) -> str:
@@ -440,9 +459,16 @@ def test_mcp_unified_package_docs_are_local_to_package_boundary() -> None:
 
     assert PACKAGE_README.is_file()  # nosec B101
     assert PACKAGE_USER_GUIDE.is_file()  # nosec B101
+    assert PACKAGE_RESOURCE_README.is_file()  # nosec B101
+    assert PACKAGE_RESOURCE_USER_GUIDE.is_file()  # nosec B101
 
     readme = PACKAGE_README.read_text(encoding="utf-8")
     user_guide = PACKAGE_USER_GUIDE.read_text(encoding="utf-8")
+    resource_readme = PACKAGE_RESOURCE_README.read_text(encoding="utf-8")
+    resource_user_guide = PACKAGE_RESOURCE_USER_GUIDE.read_text(encoding="utf-8")
+
+    assert resource_readme == readme  # nosec B101
+    assert resource_user_guide == user_guide  # nosec B101
 
     assert "# MCP Unified" in readme  # nosec B101
     assert "USER_GUIDE.md" in readme  # nosec B101
@@ -547,9 +573,7 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
     assert project["scripts"]["mcp-unified-gateway"] == "mcp_unified.gateway.cli:main"
     setuptools_config = pyproject["tool"]["setuptools"]
     assert "mcp_unified.filesystem_locks" in setuptools_config["packages"]  # nosec B101
-    assert setuptools_config["package-dir"]["mcp_unified.filesystem_locks"] == (  # nosec B101
-        "filesystem_locks"
-    )
+    assert setuptools_config["package-dir"] == {"": "src"}  # nosec B101
     assert pyproject["tool"]["setuptools"]["package-data"] == {  # nosec B101
         "mcp_unified": ["py.typed", "README.md", "USER_GUIDE.md"],
     }

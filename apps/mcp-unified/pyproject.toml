@@ -72,16 +72,7 @@ packages = [
 ]
 
 [tool.setuptools.package-dir]
-mcp_unified = "."
-"mcp_unified.federation" = "federation"
-"mcp_unified.filesystem_locks" = "filesystem_locks"
-"mcp_unified.gateway" = "gateway"
-"mcp_unified.interfaces" = "interfaces"
-"mcp_unified.profiles" = "profiles"
-"mcp_unified.smoke" = "smoke"
-"mcp_unified.storage" = "storage"
-"mcp_unified.tool_hooks" = "tool_hooks"
-"mcp_unified.tool_use_reporting" = "tool_use_reporting"
+"" = "src"
 
 [tool.setuptools.package-data]
 mcp_unified = ["py.typed", "README.md", "USER_GUIDE.md"]

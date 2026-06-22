@@ -567,6 +567,7 @@ tldw_Server_API = [
 # Tools - Tests
 ###########################
 [tool.pytest.ini_options]
+pythonpath = ["apps/mcp-unified/src"]
 filterwarnings = [
     "ignore::DeprecationWarning:pkg_resources:",
     "ignore::DeprecationWarning:speechbrain.pretrained:",
