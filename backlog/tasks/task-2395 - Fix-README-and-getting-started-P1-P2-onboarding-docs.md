@@ -4,7 +4,7 @@ title: Fix README and getting-started P1/P2 onboarding docs
 status: Done
 assignee: []
 created_date: '2026-06-21 23:46'
-updated_date: '2026-06-21 23:50'
+updated_date: '2026-06-22 00:01'
 labels:
   - docs
   - onboarding
@@ -41,6 +41,8 @@ Implemented docs repairs for P1/P2 onboarding review: README preflight wording, 
 Verification: source .venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Docs/test_onboarding_guides_structure.py tldw_Server_API/tests/Docs/test_onboarding_entrypoints.py tldw_Server_API/tests/Docs/test_onboarding_default_contract.py tldw_Server_API/tests/Docs/test_quickstart_same_origin_docs.py tldw_Server_API/tests/Docs/test_public_onboarding_profile_parity.py tldw_Server_API/tests/Docs/test_published_onboarding_parity.py => 30 passed. Local Markdown path check for edited files => MISSING_LINKS=0. Bandit: source .venv/bin/activate && python -m bandit -r tldw_Server_API/tests/Docs/test_onboarding_guides_structure.py -f json -o /tmp/bandit_task_2395.json => 0 issues. Bandit not applicable to Markdown-only touched docs.
 
 Known skips/blockers: no app/server runtime smoke was started because this change only edits documentation and a docs contract test. No subagent code-reviewer was spawned because the available subagent tool requires the user to explicitly request delegation; local verification was run instead.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2427
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
