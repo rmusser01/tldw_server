@@ -27,6 +27,11 @@ _MAX_CAPTURE_CHARS = 6000
 _DEFAULT_TIMEOUT_SECONDS = 120.0
 _FIXTURE_HOST = "127.0.0.1"
 _SERVER_STOP_TIMEOUT_SECONDS = 5.0
+_LOCAL_ABSOLUTE_PATH_PATTERN = re.compile(
+    r"(?<![:/])/(?:Users|private|var|tmp|Volumes|home|opt|usr|workspace|runner)/"
+    r"[^\s\"',}\]]+"
+)
+_WINDOWS_ABSOLUTE_PATH_PATTERN = re.compile(r"(?i)\b[A-Z]:\\[^\s\"',}\]]+")
 
 _STDIO_FIXTURE_SOURCE = '''\
 from __future__ import annotations
@@ -133,7 +138,7 @@ def package_install_spec(
     """
 
     if wheel_path is not None:
-        return [str(wheel_path.resolve())]
+        return [f"{wheel_path.resolve()}[gateway]"]
     project = default_package_project(repo_root)
     if editable:
         return ["-e", f"{project}[gateway]"]
@@ -177,6 +182,7 @@ def build_uat_plan(
                 python_executable,
                 "-m",
                 "venv",
+                *(["--symlinks"] if os.name != "nt" else []),
                 str(venv_dir),
             ],
             cwd=workspace,
@@ -586,6 +592,8 @@ def redact_text(
     for path in sorted({str(path) for path in sensitive_paths if path}, key=len, reverse=True):
         if path:
             redacted = redacted.replace(path, "<redacted-path>")
+    redacted = _LOCAL_ABSOLUTE_PATH_PATTERN.sub("<redacted-path>", redacted)
+    redacted = _WINDOWS_ABSOLUTE_PATH_PATTERN.sub("<redacted-path>", redacted)
     for secret in sorted({secret for secret in secrets if secret}, key=len, reverse=True):
         redacted = redacted.replace(secret, "<redacted-secret>")
     redacted = re.sub(

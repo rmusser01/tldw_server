@@ -60,17 +60,17 @@ def test_user_guide_uat_install_spec_uses_apps_project_by_default() -> None:
         repo_root=Path("/repo"),
         wheel_path=wheel,
         editable=False,
-    ) == [str(wheel.resolve())]  # nosec B101
+    ) == [f"{wheel.resolve()}[gateway]"]  # nosec B101
     assert harness.package_install_spec(
         repo_root=Path("/repo"),
         wheel_path=wheel,
         editable=True,
-    ) == [str(wheel.resolve())]  # nosec B101
+    ) == [f"{wheel.resolve()}[gateway]"]  # nosec B101
     assert harness.package_install_spec(
         repo_root=Path("/repo"),
         wheel_path=relative_wheel,
         editable=False,
-    ) == [str(relative_wheel.resolve())]  # nosec B101
+    ) == [f"{relative_wheel.resolve()}[gateway]"]  # nosec B101
 
 
 def test_user_guide_uat_plan_uses_package_install_args(tmp_path: Path) -> None:
@@ -95,6 +95,27 @@ def test_user_guide_uat_plan_uses_package_install_args(tmp_path: Path) -> None:
         "install",
         *install_args,
     ]
+
+
+def test_user_guide_uat_plan_uses_symlinked_venv_on_posix(tmp_path: Path) -> None:
+    harness = _load_user_guide_harness()
+
+    plan = harness.build_uat_plan(
+        repo_root=Path("/repo"),
+        workspace=tmp_path,
+        python_executable="python",
+        gateway_executable="mcp-unified-gateway",
+        smoke_executable="mcp-unified-smoke",
+        gateway_url=None,
+        package_install_args=["/repo/apps/mcp-unified[gateway]"],
+    )
+
+    create_step = next(step for step in plan if step.step_id == "create_venv")
+    expected_command = ["python", "-m", "venv"]
+    if os.name != "nt":
+        expected_command.append("--symlinks")
+    expected_command.append(str(tmp_path / ".venv"))
+    assert create_step.command == expected_command  # nosec B101
 
 
 def test_user_guide_uat_result_payload_redacts_reason(tmp_path: Path) -> None:
@@ -125,6 +146,45 @@ def test_user_guide_uat_result_payload_redacts_reason(tmp_path: Path) -> None:
     assert "secret-admin-key" not in payload["reason"]  # nosec B101
     assert "<redacted-path>" in payload["reason"]  # nosec B101
     assert "<redacted-secret>" in payload["reason"]  # nosec B101
+
+
+def test_user_guide_uat_result_payload_redacts_absolute_paths(tmp_path: Path) -> None:
+    harness = _load_user_guide_harness()
+    context = harness.UatRunContext(
+        repo_root=Path("/repo"),
+        workspace=tmp_path,
+        bootstrap_python="python",
+        gateway_url=None,
+        admin_key=None,
+        timeout_seconds=1.0,
+        package_install_args=["/repo/apps/mcp-unified[gateway]"],
+        secrets=[],
+    )
+    result = harness.UatStepResult(
+        step_id="install_package_boundary",
+        description="Install package.",
+        status="failed",
+        required=True,
+        duration_ms=1.0,
+        command=[
+            "/Users/example/.pyenv/versions/3.12/bin/python",
+            "-m",
+            "pip",
+            "install",
+            str(tmp_path / "mcp_unified-0.1.0-py3-none-any.whl"),
+        ],
+        stderr=(
+            "WARNING: The directory '/Users/example/Library/Caches/pip' is not writable. "
+            f"Temporary wheel path: {tmp_path / 'mcp.whl'}"
+        ),
+    )
+
+    payload = harness._step_result_payload(result, context)
+    rendered = json.dumps(payload)
+
+    assert "/Users/" not in rendered  # nosec B101
+    assert str(tmp_path) not in rendered  # nosec B101
+    assert "<redacted-path>" in rendered  # nosec B101
 
 
 def test_redact_text_removes_secret_like_values() -> None:
@@ -241,7 +301,7 @@ def test_rc_pip_dependency_outage_records_optional_skip(tmp_path: Path) -> None:
             "duration_ms": 10,
             "required": False,
             "reason": "dependency resolution unavailable in this environment",
-            "details": {"command": result.as_dict()},
+            "details": {"command": mcp_unified_rc._command_result_as_evidence(result, recorder)},
         }
     ]
 
@@ -285,6 +345,231 @@ def test_rc_pip_dependency_outage_is_required_failure_in_ci(
     assert recorder.results[0]["status"] == "failed"  # nosec B101
     assert recorder.results[0]["required"] is True  # nosec B101
     assert recorder.has_required_failures() is True  # nosec B101
+
+
+def test_rc_user_guide_uat_dependency_outage_records_optional_skip(tmp_path: Path) -> None:
+    report_path = tmp_path / "user-guide-uat.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "ok": False,
+                "summary": {"passed": 1, "failed": 1, "skipped": 0},
+                "steps": [
+                    {
+                        "id": "install_package_boundary",
+                        "status": "failed",
+                        "stderr": (
+                            "Failed to establish a new connection: [Errno 8] "
+                            "nodename nor servname provided, or not known\n"
+                            "ERROR: Could not find a version that satisfies the "
+                            "requirement pydantic>=2.0.0"
+                        ),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    recorder = mcp_unified_rc.RcEvidenceRecorder(
+        evidence_dir=tmp_path,
+        package_name="mcp-unified",
+        package_version="0.1.0",
+        package_status="internal-experimental",
+        publishing_status="not-published",
+        commit="abc1234",
+        source_path="apps/mcp-unified",
+        layout="src",
+    )
+    result = mcp_unified_rc.RcCommandResult(
+        command=["python", "Helper_Scripts/Testing-related/mcp_standalone_user_guide_uat.py"],
+        cwd=str(tmp_path),
+        returncode=1,
+        stdout="",
+        stderr="",
+        duration_ms=10,
+    )
+
+    mcp_unified_rc._record_user_guide_uat_result(
+        recorder,
+        phase="cli_uat",
+        name="user_guide_wheel_mode",
+        result=result,
+        report_path=report_path,
+    )
+
+    assert recorder.results[0]["status"] == "skipped"  # nosec B101
+    assert recorder.results[0]["required"] is False  # nosec B101
+    assert recorder.results[0]["reason"] == "dependency resolution unavailable in this environment"  # nosec B101
+    assert recorder.has_required_failures() is False  # nosec B101
+
+
+def test_rc_cli_uat_runs_user_guide_wheel_mode(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    paths = mcp_unified_rc.RcPaths.from_repo_root(tmp_path)
+    paths.dist_dir.mkdir(parents=True)
+    wheel = paths.dist_dir / "mcp_unified-0.1.0-py3-none-any.whl"
+    wheel.write_text("placeholder", encoding="utf-8")
+    commands: list[list[str]] = []
+    recorder = mcp_unified_rc.RcEvidenceRecorder(
+        evidence_dir=paths.evidence_dir,
+        package_name="mcp-unified",
+        package_version="0.1.0",
+        package_status="internal-experimental",
+        publishing_status="not-published",
+        commit="abc1234",
+        source_path="apps/mcp-unified",
+        layout="src",
+    )
+
+    def fail_normal_install_checks(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("cli UAT must use the user-guide wheel-mode harness")
+
+    def fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        timeout: int = 180,
+        env: dict[str, str] | None = None,
+    ) -> mcp_unified_rc.RcCommandResult:
+        commands.append(command)
+        report_path = Path(command[command.index("--json-report") + 1])
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(
+            json.dumps({"ok": True, "summary": {"passed": 30, "failed": 0, "skipped": 1}, "steps": []}),
+            encoding="utf-8",
+        )
+        return mcp_unified_rc.RcCommandResult(
+            command=command,
+            cwd=str(cwd),
+            returncode=0,
+            stdout="",
+            stderr="",
+            duration_ms=10,
+        )
+
+    monkeypatch.setattr(mcp_unified_rc, "_run_normal_install_checks", fail_normal_install_checks)
+    monkeypatch.setattr(mcp_unified_rc, "run_command", fake_run_command)
+
+    mcp_unified_rc._run_cli_uat(paths, recorder)
+
+    assert len(commands) == 1  # nosec B101
+    command = commands[0]
+    assert "Helper_Scripts/Testing-related/mcp_standalone_user_guide_uat.py" in command  # nosec B101
+    assert "--wheel" in command  # nosec B101
+    assert str(wheel) in command  # nosec B101
+    assert "--json-report" in command  # nosec B101
+    assert recorder.results[0]["phase"] == "cli_uat"  # nosec B101
+    assert recorder.results[0]["name"] == "user_guide_wheel_mode"  # nosec B101
+    assert recorder.results[0]["status"] == "passed"  # nosec B101
+
+
+def test_rc_smoke_uat_runs_user_guide_transport_checks(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    paths = mcp_unified_rc.RcPaths.from_repo_root(tmp_path)
+    paths.dist_dir.mkdir(parents=True)
+    wheel = paths.dist_dir / "mcp_unified-0.1.0-py3-none-any.whl"
+    wheel.write_text("placeholder", encoding="utf-8")
+    commands: list[list[str]] = []
+    recorder = mcp_unified_rc.RcEvidenceRecorder(
+        evidence_dir=paths.evidence_dir,
+        package_name="mcp-unified",
+        package_version="0.1.0",
+        package_status="internal-experimental",
+        publishing_status="not-published",
+        commit="abc1234",
+        source_path="apps/mcp-unified",
+        layout="src",
+    )
+
+    def fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        timeout: int = 180,
+        env: dict[str, str] | None = None,
+    ) -> mcp_unified_rc.RcCommandResult:
+        commands.append(command)
+        report_path = Path(command[command.index("--json-report") + 1])
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(
+            json.dumps(
+                {
+                    "ok": True,
+                    "summary": {"passed": 30, "failed": 0, "skipped": 1},
+                    "steps": [
+                        {"id": "smoke_stdio_subprocess", "status": "passed"},
+                        {"id": "smoke_http", "status": "passed"},
+                        {"id": "smoke_websocket", "status": "passed"},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return mcp_unified_rc.RcCommandResult(
+            command=command,
+            cwd=str(cwd),
+            returncode=0,
+            stdout="",
+            stderr="",
+            duration_ms=10,
+        )
+
+    monkeypatch.setattr(mcp_unified_rc, "run_command", fake_run_command)
+
+    mcp_unified_rc._run_smoke_uat(paths, recorder)
+
+    assert len(commands) == 1  # nosec B101
+    command = commands[0]
+    assert "Helper_Scripts/Testing-related/mcp_standalone_user_guide_uat.py" in command  # nosec B101
+    assert "--wheel" in command  # nosec B101
+    assert str(wheel) in command  # nosec B101
+    assert recorder.results[0]["phase"] == "smoke_uat"  # nosec B101
+    assert recorder.results[0]["name"] == "user_guide_smoke_transports"  # nosec B101
+    assert recorder.results[0]["status"] == "passed"  # nosec B101
+
+
+def test_rc_evidence_redacts_local_absolute_paths(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    evidence_dir = repo_root / ".artifacts" / "mcp-unified-rc"
+    local_repo_path = repo_root / "apps" / "mcp-unified" / "pyproject.toml"
+    local_temp_path = "/private/var/folders/example/mcp/.venv/bin/python"
+    recorder = mcp_unified_rc.RcEvidenceRecorder(
+        evidence_dir=evidence_dir,
+        package_name="mcp-unified",
+        package_version="0.1.0",
+        package_status="internal-experimental",
+        publishing_status="not-published",
+        commit="abc1234",
+        source_path="apps/mcp-unified",
+        layout="src",
+        repo_root=repo_root,
+    )
+    result = mcp_unified_rc.RcCommandResult(
+        command=[str(local_repo_path), local_temp_path],
+        cwd="/private/var/folders/example/mcp/work",
+        returncode=1,
+        stdout=f"reading {local_repo_path}",
+        stderr=f"failed at {local_temp_path}",
+        duration_ms=10,
+    )
+
+    mcp_unified_rc._record_command_result(
+        recorder,
+        phase="install_smoke",
+        name="path_redaction",
+        result=result,
+    )
+    json_path, _markdown_path = recorder.write()
+
+    rendered = json_path.read_text(encoding="utf-8")
+    assert str(repo_root) not in rendered  # nosec B101
+    assert "/private/var/folders" not in rendered  # nosec B101
+    assert "<repo>" in rendered  # nosec B101
+    assert "<redacted-path>" in rendered  # nosec B101
 
 
 def test_result_recorder_writes_json_and_markdown(tmp_path: Path) -> None:

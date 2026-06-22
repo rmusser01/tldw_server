@@ -37,6 +37,7 @@ EVIDENCE_JSON = "mcp-unified-rc-evidence.json"
 EVIDENCE_MARKDOWN = "mcp-unified-rc-summary.md"
 PACKAGE_IMPORT_NAME = "mcp_unified"
 OPTIONAL_EXTRAS = ("core", "fastapi", "sqlite", "federation", "gateway", "dev")
+USER_GUIDE_UAT_SCRIPT = Path("Helper_Scripts") / "Testing-related" / "mcp_standalone_user_guide_uat.py"
 PIP_DEPENDENCY_FAILURE_MARKERS = (
     "could not find a version that satisfies the requirement",
     "no matching distribution found",
@@ -50,6 +51,11 @@ PIP_NETWORK_FAILURE_MARKERS = (
     "connection timed out",
 )
 PIP_DEPENDENCY_OUTAGE_REASON = "dependency resolution unavailable in this environment"
+LOCAL_ABSOLUTE_PATH_PATTERN = re.compile(
+    r"(?<![:/])/(?:Users|private|var|tmp|Volumes|home|opt|usr|workspace|runner)/"
+    r"[^\s\"',}\]]+"
+)
+WINDOWS_ABSOLUTE_PATH_PATTERN = re.compile(r"(?i)\b[A-Z]:\\[^\s\"',}\]]+")
 
 SECRET_KEY_VALUE_PATTERN = re.compile(
     r"(?i)\b(api[_-]?key|token|secret|password|bearer[_-]?token)\b"
@@ -128,6 +134,7 @@ class RcEvidenceRecorder:
     known_limitations: list[str] = field(default_factory=list)
     results: list[dict[str, Any]] = field(default_factory=list)
     artifacts: list[dict[str, str]] = field(default_factory=list)
+    repo_root: Path | None = None
 
     def record(
         self,
@@ -152,9 +159,9 @@ class RcEvidenceRecorder:
             "required": required,
         }
         if reason:
-            entry["reason"] = reason
+            entry["reason"] = _sanitize_evidence_value(reason, self)
         if details:
-            entry["details"] = details
+            entry["details"] = _sanitize_evidence_value(details, self)
         self.results.append(entry)
 
     def record_artifact(self, *, kind: str, path: Path) -> None:
@@ -204,7 +211,7 @@ class RcEvidenceRecorder:
                 "system": platform.system(),
                 "machine": platform.machine(),
                 "python": platform.python_version(),
-                "python_executable": sys.executable,
+                "python_executable": _redact_evidence_text(sys.executable, self),
                 "runner": "github-actions" if os.environ.get("GITHUB_ACTIONS") else "local",
             },
             "results": self.results,
@@ -241,6 +248,38 @@ def redact_text(value: str) -> str:
         redacted,
     )
     return redacted
+
+
+def _sanitize_evidence_value(value: Any, recorder: RcEvidenceRecorder) -> Any:
+    """Return a JSON-safe value with local paths and secrets redacted."""
+
+    if isinstance(value, str):
+        return _redact_evidence_text(value, recorder)
+    if isinstance(value, list):
+        return [_sanitize_evidence_value(item, recorder) for item in value]
+    if isinstance(value, tuple):
+        return [_sanitize_evidence_value(item, recorder) for item in value]
+    if isinstance(value, dict):
+        return {
+            str(key): _sanitize_evidence_value(item, recorder)
+            for key, item in value.items()
+        }
+    return value
+
+
+def _redact_evidence_text(value: str, recorder: RcEvidenceRecorder) -> str:
+    """Redact secrets and local absolute filesystem paths from evidence text."""
+
+    redacted = redact_text(value)
+    replacements: list[tuple[str, str]] = []
+    if recorder.repo_root is not None:
+        replacements.append((str(recorder.repo_root), "<repo>"))
+    replacements.append((str(recorder.evidence_dir), "<evidence>"))
+    for path, marker in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
+        if path:
+            redacted = redacted.replace(path, marker)
+    redacted = LOCAL_ABSOLUTE_PATH_PATTERN.sub("<redacted-path>", redacted)
+    return WINDOWS_ABSOLUTE_PATH_PATTERN.sub("<redacted-path>", redacted)
 
 
 def sha256_file(path: Path) -> str:
@@ -679,20 +718,12 @@ def _run_cli_uat(paths: RcPaths, recorder: RcEvidenceRecorder) -> None:
             reason="no built wheel found; run build first",
         )
         return
-    _run_normal_install_checks(
+    _run_user_guide_wheel_uat(
         paths,
         recorder,
         wheel,
         phase="cli_uat",
-        command_checks=("gateway_package_info",),
-    )
-    recorder.record(
-        phase="cli_uat",
         name="user_guide_wheel_mode",
-        status="skipped",
-        duration_ms=0,
-        reason="full user-guide UAT wheel mode is scheduled for the later UAT harness task",
-        required=False,
     )
 
 
@@ -707,51 +738,91 @@ def _run_smoke_uat(paths: RcPaths, recorder: RcEvidenceRecorder) -> None:
             reason="no built wheel found; run build first",
         )
         return
-
-    with tempfile.TemporaryDirectory(prefix="mcp-unified-rc-smoke-") as temp_name:
-        temp_dir = Path(temp_name)
-        venv_dir = temp_dir / ".venv"
-        if not _create_venv(venv_dir, recorder, phase="smoke_uat", name="smoke_venv"):
-            return
-        python_path = _venv_executable(venv_dir, "python")
-        install_result = run_command(
-            [str(python_path), "-m", "pip", "install", str(wheel)],
-            cwd=temp_dir,
-            timeout=300,
-        )
-        _record_pip_install_result(
-            recorder,
-            phase="smoke_uat",
-            name="normal_install",
-            result=install_result,
-        )
-        if install_result.returncode != 0:
-            return
-        report_path = paths.evidence_dir / "smoke-inprocess.json"
-        smoke_result = run_command(
-            [
-                str(_venv_executable(venv_dir, "mcp-unified-smoke")),
-                "inprocess",
-                "--json-report",
-                str(report_path),
-            ],
-            cwd=temp_dir,
-            timeout=180,
-        )
-        _record_command_result(
-            recorder,
-            phase="smoke_uat",
-            name="smoke_inprocess",
-            result=smoke_result,
-            details={"json_report": str(report_path)},
-        )
-    recorder.record(
+    _run_user_guide_wheel_uat(
+        paths,
+        recorder,
+        wheel,
         phase="smoke_uat",
-        name="live_transport_smoke",
-        status="skipped",
-        duration_ms=0,
-        reason="stdio/http/websocket installed-wheel UAT is deferred until fixture-backed wheel mode is available",
-        required=False,
+        name="user_guide_smoke_transports",
+    )
+
+
+def _run_user_guide_wheel_uat(
+    paths: RcPaths,
+    recorder: RcEvidenceRecorder,
+    wheel: Path,
+    *,
+    phase: str,
+    name: str,
+) -> None:
+    """Run the standalone user-guide UAT harness against the built wheel."""
+
+    report_path = paths.evidence_dir / f"{phase}-{name}.json"
+    with tempfile.TemporaryDirectory(prefix=f"mcp-unified-rc-{phase}-") as temp_name:
+        workspace = Path(temp_name) / "workspace"
+        command = [
+            sys.executable,
+            str(USER_GUIDE_UAT_SCRIPT),
+            "--repo-root",
+            str(paths.repo_root),
+            "--wheel",
+            str(wheel),
+            "--workspace",
+            str(workspace),
+            "--json-report",
+            str(report_path),
+        ]
+        result = run_command(command, cwd=paths.repo_root, timeout=900)
+    _record_user_guide_uat_result(
+        recorder,
+        phase=phase,
+        name=name,
+        result=result,
+        report_path=report_path,
+    )
+
+
+def _record_user_guide_uat_result(
+    recorder: RcEvidenceRecorder,
+    *,
+    phase: str,
+    name: str,
+    result: RcCommandResult,
+    report_path: Path,
+) -> None:
+    """Record the user-guide UAT command and its structured report summary."""
+
+    report = _read_json_file(report_path)
+    details: dict[str, Any] = {"json_report": str(report_path)}
+    if isinstance(report, dict):
+        details["uat_summary"] = report.get("summary")
+        details["uat_ok"] = report.get("ok")
+        details["uat_failed_steps"] = [
+            step.get("id")
+            for step in report.get("steps", [])
+            if isinstance(step, dict) and step.get("status") == "failed"
+        ]
+
+    if _uat_dependency_resolution_unavailable(result, report):
+        recorder.record(
+            phase=phase,
+            name=name,
+            status="skipped",
+            duration_ms=result.duration_ms,
+            reason=PIP_DEPENDENCY_OUTAGE_REASON,
+            details={
+                "command": _command_result_as_evidence(result, recorder),
+                **details,
+            },
+            required=False,
+        )
+        return
+    _record_command_result(
+        recorder,
+        phase=phase,
+        name=name,
+        result=result,
+        details=details,
     )
 
 
@@ -843,8 +914,9 @@ def _new_recorder(paths: RcPaths) -> RcEvidenceRecorder:
         },
         known_limitations=[
             "Internal RC only: this harness does not upload or publish to TestPyPI or PyPI.",
-            "Full user-guide wheel-mode UAT is deferred to the later UAT harness task.",
+            "Remote runtime UAT requires MCP_UNIFIED_GATEWAY_URL or --gateway-url and is optional in local RC runs.",
         ],
+        repo_root=paths.repo_root,
     )
 
 
@@ -857,7 +929,7 @@ def _record_command_result(
     required: bool = True,
     details: dict[str, Any] | None = None,
 ) -> None:
-    result_details = {"command": result.as_dict()}
+    result_details = {"command": _command_result_as_evidence(result, recorder)}
     if details:
         result_details.update(details)
     recorder.record(
@@ -869,6 +941,15 @@ def _record_command_result(
         details=result_details,
         required=required,
     )
+
+
+def _command_result_as_evidence(
+    result: RcCommandResult,
+    recorder: RcEvidenceRecorder,
+) -> dict[str, Any]:
+    """Return a command result payload safe for persisted evidence."""
+
+    return _sanitize_evidence_value(result.as_dict(), recorder)
 
 
 def _record_pip_install_result(
@@ -887,7 +968,7 @@ def _record_pip_install_result(
             status="skipped",
             duration_ms=result.duration_ms,
             reason=PIP_DEPENDENCY_OUTAGE_REASON,
-            details={"command": result.as_dict()},
+            details={"command": _command_result_as_evidence(result, recorder)},
             required=False,
         )
         return
@@ -900,9 +981,38 @@ def _pip_dependency_resolution_unavailable(result: RcCommandResult) -> bool:
     if result.returncode == 0 or os.environ.get("GITHUB_ACTIONS"):
         return False
     output = f"{result.stdout}\n{result.stderr}".lower()
+    return _dependency_resolution_unavailable_text(output)
+
+
+def _uat_dependency_resolution_unavailable(
+    result: RcCommandResult,
+    report: Any,
+) -> bool:
+    """Return whether user-guide UAT failed only because indexes were unreachable."""
+
+    if result.returncode == 0 or os.environ.get("GITHUB_ACTIONS"):
+        return False
+    output = f"{result.stdout}\n{result.stderr}\n{json.dumps(report, sort_keys=True, default=str)}".lower()
+    return _dependency_resolution_unavailable_text(output)
+
+
+def _dependency_resolution_unavailable_text(output: str) -> bool:
+    """Return whether output contains dependency and network failure markers."""
+
     return any(marker in output for marker in PIP_DEPENDENCY_FAILURE_MARKERS) and any(
         marker in output for marker in PIP_NETWORK_FAILURE_MARKERS
     )
+
+
+def _read_json_file(path: Path) -> Any:
+    """Read a JSON file if present, returning ``None`` for missing or invalid files."""
+
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
 
 
 def _create_venv(
