@@ -2,20 +2,23 @@
 
 ## Problem Statement
 
-The `mcp_unified` directory is becoming a standalone package boundary for the
-MCP Unified gateway, profile, policy, storage, reporting, smoke, and external
-server runtime surfaces. It is not ready for public PyPI publishing yet, but it
-does need a reliable internal release-candidate path that proves a built wheel
-and source distribution can be installed and operated outside the repository
-checkout.
+The MCP Unified gateway, profile, policy, storage, reporting, smoke, and
+external server runtime surfaces are becoming a standalone package boundary.
+That package project should live under `apps/mcp-unified/`, while keeping the
+Python import package named `mcp_unified` and the distribution named
+`mcp-unified`. It is not ready for public PyPI publishing yet, but it does need
+a reliable internal release-candidate path that proves a built wheel and source
+distribution can be installed and operated outside the repository checkout.
 
 Current repository state makes the boundary easy to confuse:
 
-- the standalone package descriptor lives at `mcp_unified/pyproject.toml`;
+- the standalone package descriptor currently lives at
+  `mcp_unified/pyproject.toml`, but the target location is
+  `apps/mcp-unified/pyproject.toml`;
 - root `pyproject.toml` describes the full `tldw-server` package;
 - root `make pypi-check` builds the root package, not the nested standalone
   MCP package;
-- `mcp_unified/package_metadata.py` still declares
+- `mcp_unified/package_metadata.py` currently declares
   `PACKAGE_STATUS = "internal-experimental"` and
   `PUBLISHING_STATUS = "not-published"`;
 - package-boundary tests and artifact-gate tests already exist, but they are
@@ -26,9 +29,12 @@ PyPI publishing should be considered.
 
 ## Goals
 
-- Build private wheel and sdist artifacts from `mcp_unified/pyproject.toml`.
+- Build private wheel and sdist artifacts from
+  `apps/mcp-unified/pyproject.toml`.
 - Keep standalone MCP artifact creation separate from root `tldw-server`
   packaging.
+- Keep the standalone project under `apps/` so it follows the repository's
+  app/package boundary convention.
 - Validate package metadata, extras, entry points, package data, typed marker,
   README, license metadata, and artifact boundaries.
 - Install the built wheel into clean environments and run UAT from installed
@@ -50,11 +56,13 @@ PyPI publishing should be considered.
 - Changing public install documentation to imply `pip install mcp-unified` is
   available from PyPI.
 - Building or validating the root `tldw-server` package.
+- Keeping root `mcp_unified/` as a second canonical package source after the
+  package project moves under `apps/`.
 - Reworking standalone gateway feature behavior unrelated to packaging and UAT.
 
 ## Current State Findings
 
-The package-local descriptor already defines:
+The current package-local descriptor already defines:
 
 - package name `mcp-unified`;
 - Python support `>=3.10`;
@@ -70,23 +78,74 @@ The repository already has useful validation pieces:
   contains metadata, artifact, install, and workflow assertions;
 - `.github/tests/test_mcp_unified_artifact_gate.py` loads a subset of those
   artifact assertions without importing host pytest fixtures;
-- `.github/workflows/pypi-package.yml` runs a package artifact gate for
-  `mcp_unified/**` changes.
+- `.github/workflows/pypi-package.yml` currently runs a package artifact gate
+  for `mcp_unified/**` changes and will need to follow the package project to
+  `apps/mcp-unified/**`.
 
 The missing piece is a cohesive RC harness and workflow that use the nested
-package as the only build subject, then install and UAT the produced wheel.
+package as the only build subject, then install and UAT the produced wheel. The
+spec also needs to remove root-path assumptions before implementation, because
+the canonical standalone project should be `apps/mcp-unified/`.
+
+## Target Package Location And Layout
+
+The canonical standalone package project should be:
+
+```text
+apps/mcp-unified/
+```
+
+Distribution and import names stay stable:
+
+- distribution name: `mcp-unified`;
+- Python import package: `mcp_unified`;
+- console scripts: `mcp-unified-gateway` and `mcp-unified-smoke`.
+
+Target layout:
+
+```text
+apps/mcp-unified/
+  pyproject.toml
+  README.md
+  USER_GUIDE.md
+  src/
+    mcp_unified/
+      __init__.py
+      py.typed
+      package_metadata.py
+      ...
+```
+
+Use a `src/` layout because it makes accidental in-repository imports less
+likely to hide missing wheel files during packaging tests. If implementation
+discovers a hard blocker that requires a non-`src` layout, revise this spec
+before implementing the different layout.
+
+README and user-guide handling needs an explicit rule after moving to `src/`.
+Project-level `README.md` and `USER_GUIDE.md` should live at
+`apps/mcp-unified/` for packaging metadata and human browsing. If runtime code
+loads either file through `importlib.resources`, package-scoped copies or an
+equivalent package-data rule must be added under `src/mcp_unified/`. The
+artifact gate should check both intended surfaces: README rendering from
+project metadata and runtime resource availability if the CLI depends on it.
+
+The root `mcp_unified/` directory should not remain as another importable
+package source. A short-lived compatibility shim is acceptable only if needed
+for a staged PR, but the internal RC gate must fail while both canonical source
+trees exist.
 
 ## Internal RC Artifact Contract
 
 An internal MCP Unified RC consists of:
 
-- one wheel built from `mcp_unified/pyproject.toml`;
-- one source distribution built from `mcp_unified/pyproject.toml`;
+- one wheel built from `apps/mcp-unified/pyproject.toml`;
+- one source distribution built from `apps/mcp-unified/pyproject.toml`;
 - SHA256 hashes for both artifacts;
 - a JSON evidence report;
 - a Markdown evidence summary;
 - captured command results with redacted logs;
 - package metadata snapshot;
+- package source path snapshot, expected to be `apps/mcp-unified`;
 - environment summary;
 - known limitations and expected skips.
 
@@ -119,11 +178,14 @@ Helper_Scripts/mcp_unified_rc.py
 The harness should depend only on the Python standard library plus explicitly
 installed packaging or dev tools. It must not import `tldw_Server_API`, root
 test fixtures, broad repository configuration, or application runtime modules.
+It should keep the package project root in one constant, expected to be
+`apps/mcp-unified`, so Make targets, CI, artifact checks, and evidence reports
+cannot drift onto different paths.
 
 The harness should expose subcommands:
 
 - `build`: clean package-local RC output and build wheel plus sdist from
-  `mcp_unified/pyproject.toml`;
+  `apps/mcp-unified/pyproject.toml`;
 - `artifact-gate`: validate built artifact metadata and boundaries;
 - `install-smoke`: run clean-environment install and import checks;
 - `extras-matrix`: install selected extras in clean environments and run
@@ -174,8 +236,9 @@ Add a dedicated non-publishing workflow, for example:
 Triggers:
 
 - `workflow_dispatch`;
-- pull requests touching `mcp_unified/**`, package-boundary tests, smoke
-  harness code, package docs, RC harness code, or the RC workflow;
+- pull requests touching `apps/mcp-unified/**`, package-boundary tests, smoke
+  harness code, package docs, RC harness code, the old root `mcp_unified/**`
+  path during migration, or the RC workflow;
 - optionally pushes to `dev` after the pipeline is stable.
 
 Permissions:
@@ -220,15 +283,20 @@ Jobs:
 Required:
 
 - wheel and sdist build from nested package only;
+- build invocation uses `apps/mcp-unified` as the project root;
 - wheel name is `mcp-unified`;
 - wheel version matches `mcp_unified.__version__` and
-  `mcp_unified/pyproject.toml`;
+  `apps/mcp-unified/pyproject.toml`;
 - entry points include `mcp-unified-gateway` and `mcp-unified-smoke`;
-- extras in wheel metadata match `mcp_unified/package_metadata.py`;
+- extras in wheel metadata match
+  `apps/mcp-unified/src/mcp_unified/package_metadata.py` after the move;
 - README and user guide are included;
+- project README renders through package metadata, and runtime README/user-guide
+  resources are included if any installed CLI path reads them at runtime;
 - `py.typed` is included;
 - sdist excludes `tldw_Server_API`, WebUI files, media/RAG/STT assets, and
   unrelated repository paths;
+- sdist excludes a root-level `mcp_unified/` source tree after migration;
 - `twine check` passes.
 
 ### Phase 2: Fresh Install And Import
@@ -237,6 +305,8 @@ Required:
 
 - install wheel with `--no-deps` into an isolated target and import from a
   `python -S` process outside the repository;
+- run import checks from a temporary working directory with no repository
+  package path on `PYTHONPATH`;
 - install wheel normally into a clean virtual environment and run:
   - `python -c "import mcp_unified"`;
   - `mcp-unified-gateway package-info`;
@@ -341,6 +411,8 @@ The JSON report should include:
     "name": "mcp-unified",
     "version": "0.1.0",
     "commit": "3b4b6a4",
+    "source_path": "apps/mcp-unified",
+    "layout": "src",
     "status": "internal-experimental",
     "publishing_status": "not-published"
   },
@@ -420,6 +492,12 @@ Mitigation: standalone-specific build targets, nested-package artifact
 assertions, artifact names that include `mcp-unified`, and root workflow
 guardrails.
 
+Risk: both root `mcp_unified/` and `apps/mcp-unified/` remain importable.
+
+Mitigation: artifact-gate checks should assert there is exactly one canonical
+standalone package source tree before RC status can pass, and fresh-install
+checks must run outside the repository checkout.
+
 Risk: editable install hides missing wheel files.
 
 Mitigation: all RC UAT installs from the built wheel.
@@ -428,6 +506,12 @@ Risk: standalone package pulls in root dependencies.
 
 Mitigation: wheel metadata checks, clean environment install checks, negative
 dependency checks, and import checks outside the repo checkout.
+
+Risk: moving to `src/` drops README/user-guide runtime resources that were
+previously included by the root package-dir mapping.
+
+Mitigation: explicitly test README rendering and any runtime
+`importlib.resources` usage for documentation files.
 
 Risk: optional backend availability creates false failures.
 
@@ -467,6 +551,10 @@ Public publishing remains explicitly out of scope for the internal RC slice.
 ## Acceptance Criteria
 
 - A dedicated internal RC harness design exists and avoids root package imports.
+- The canonical standalone package project is specified as `apps/mcp-unified/`
+  with stable distribution name `mcp-unified` and import name `mcp_unified`.
+- The spec rejects a long-lived second canonical source tree at root
+  `mcp_unified/`.
 - Local standalone-specific build/check/UAT commands are specified.
 - CI workflow responsibilities and permissions are specified.
 - Artifact validation and installed-wheel UAT are separated into clear phases.
