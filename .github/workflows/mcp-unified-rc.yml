@@ -1,0 +1,53 @@
+name: MCP Unified Internal RC
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+    paths:
+      - apps/mcp-unified/**
+      - Helper_Scripts/mcp_unified_rc.py
+      - Helper_Scripts/Testing-related/mcp_standalone_user_guide_uat.py
+      - .github/tests/test_mcp_unified_artifact_gate.py
+      - tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
+      - tldw_Server_API/app/core/MCP_unified/tests/test_mcp_unified_rc_harness.py
+      - .github/workflows/mcp-unified-rc.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-unified-rc-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  internal-rc:
+    name: Build, install, and UAT standalone MCP package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install packaging tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine setuptools wheel pytest pytest-asyncio bandit
+          python -m pip install -e "apps/mcp-unified[dev]"
+
+      - name: Run internal RC
+        run: make mcp-unified-rc
+
+      - name: Upload MCP Unified RC artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: mcp-unified-rc
+          path: .artifacts/mcp-unified-rc/**
+          if-no-files-found: error

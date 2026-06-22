@@ -809,47 +809,56 @@ def test_mcp_unified_standalone_artifacts_include_package_docs(
     assert "src/mcp_unified/filesystem_locks/__init__.py" in sdist_members  # nosec B101
 
 
-def test_pypi_workflow_runs_mcp_unified_standalone_artifact_gate() -> None:
-    """PyPI validation workflow must also gate package-local mcp_unified changes."""
+def _load_workflow(path: Path) -> dict[str, object]:
+    """Load a GitHub Actions workflow document."""
 
-    artifact_gate_config = "apps/mcp-unified/pytest-artifact-gate.ini"
-    config_path = STANDALONE_PROJECT_ROOT / "pytest-artifact-gate.ini"
-    assert config_path.is_file()  # nosec B101
-    pytest_config = configparser.ConfigParser()
-    pytest_config.read(config_path, encoding="utf-8")
-    assert "--noconftest" in pytest_config["pytest"]["addopts"]  # nosec B101
+    assert path.is_file()  # nosec B101
+    workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(workflow, dict)  # nosec B101
+    return workflow
 
-    workflow_path = REPO_ROOT / ".github" / "workflows" / "pypi-package.yml"
-    assert workflow_path.is_file()  # nosec B101
-    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
-    triggers = workflow.get("on") or workflow.get(True)
 
-    assert "apps/mcp-unified/**" in triggers["pull_request"]["paths"]  # nosec B101
-    assert "apps/mcp-unified/**" in triggers["push"]["paths"]  # nosec B101
+def test_mcp_unified_rc_workflow_uses_private_permissions() -> None:
+    """Internal RC workflow must stay private and source-scoped."""
 
-    steps = workflow["jobs"]["build-and-check"]["steps"]
-    run_blocks = [step.get("run", "") for step in steps]
-    artifact_gate_test_path = ".github/tests/test_mcp_unified_artifact_gate.py"
-    artifact_gate_nodeids = (
-        "test_mcp_unified_standalone_distribution_metadata_matches_extras",
-        "test_mcp_unified_standalone_sdist_contains_only_package_boundary",
-        "test_mcp_unified_standalone_artifacts_include_typed_marker",
-        "test_mcp_unified_standalone_artifacts_include_package_docs",
-    )
-    assert any(
-        all(f"{artifact_gate_test_path}::{nodeid}" in run_block for nodeid in artifact_gate_nodeids)
-        and f"-c {artifact_gate_config}" in run_block
-        for run_block in run_blocks
-    )  # nosec B101
-    assert any(
-        run_block.strip() == "make pypi-check"
-        for run_block in run_blocks
-    )  # nosec B101
-    assert any(
-        str(step.get("uses", "")).startswith("actions/upload-artifact@")
-        and step.get("with", {}).get("path") == "dist/*"
-        for step in steps
-    )  # nosec B101
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "mcp-unified-rc.yml"
+    workflow = _load_workflow(workflow_path)
+    serialized_workflow = yaml.safe_dump(workflow, sort_keys=True)
+
+    assert workflow["permissions"] == {"contents": "read"}  # nosec B101
+    assert "id-token" not in workflow["permissions"]  # nosec B101
+    assert "apps/mcp-unified" in serialized_workflow  # nosec B101
+    assert "make mcp-unified-rc" in serialized_workflow  # nosec B101
+
+
+def test_mcp_unified_make_targets_do_not_call_root_pypi_check() -> None:
+    """Standalone RC targets must not delegate to the root PyPI package check."""
+
+    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    for target_name in (
+        "mcp-unified-build",
+        "mcp-unified-check",
+        "mcp-unified-uat",
+        "mcp-unified-rc",
+    ):
+        assert re.search(rf"^{target_name}:", makefile, flags=re.MULTILINE)  # nosec B101
+
+    section_marker = "# MCP Unified standalone RC"
+    assert section_marker in makefile  # nosec B101
+    mcp_unified_section = makefile.split(section_marker, 1)[1]
+    assert "pypi-check" not in mcp_unified_section  # nosec B101
+
+
+def test_root_pypi_publish_workflow_is_labeled_for_tldw_server() -> None:
+    """Root publish workflow must stay unambiguous about tldw-server artifacts."""
+
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "publish-pypi.yml"
+    workflow = _load_workflow(workflow_path)
+    serialized_workflow = yaml.safe_dump(workflow, sort_keys=True)
+
+    assert workflow["name"] == "Publish tldw-server PyPI Package"  # nosec B101
+    assert "mcp-unified" not in serialized_workflow  # nosec B101
+    assert "tldw-server-pypi-dist" in serialized_workflow  # nosec B101
 
 
 @pytest.mark.smoke
