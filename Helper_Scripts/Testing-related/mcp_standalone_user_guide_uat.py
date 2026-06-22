@@ -982,7 +982,15 @@ def _step_result_payload(result: UatStepResult, context: UatRunContext) -> dict[
             secrets=context.secrets,
             sensitive_paths=[context.workspace, context.repo_root],
         ),
-        "reason": result.reason,
+        "reason": (
+            redact_text(
+                result.reason,
+                secrets=context.secrets,
+                sensitive_paths=[context.workspace, context.repo_root],
+            )
+            if result.reason
+            else None
+        ),
     }
 
 

@@ -59,6 +59,7 @@ Task 4 quality-review fixes: added `Makefile` to the private RC workflow trigger
 
 Task 5 completed in this worktree: updated the standalone user-guide UAT harness to install either the non-editable apps/mcp-unified[gateway] project, an editable local project for guide iteration, or a built wheel for installed-artifact UAT. Added RC harness coverage that loads the hyphenated Testing-related UAT script by file path via importlib and sys.modules. Wheel install args take precedence over --editable when both are supplied. Verification: focused RC harness pytest passed (7 passed, 4 warnings); UAT harness --help passed and shows --wheel/--editable; Bandit on touched files passed with zero findings; git diff --check passed.
 Task 5 spec-review hardening: wheel install paths are resolved before being passed to pip so relative `--wheel` arguments remain valid after the UAT harness switches into its isolated workspace. Verification: focused RC harness pytest passed (7 passed, 4 warnings); `git diff --check` passed.
+Task 5 quality-review fixes: UAT result `reason` values are now redacted in report payloads, and RC harness tests assert package install args reach the generated pip install step. Verification: focused RC harness pytest passed (9 passed, 4 warnings); UAT harness `--help` passed; Bandit on touched files passed with zero findings; `git diff --check` passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

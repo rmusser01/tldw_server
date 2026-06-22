@@ -72,6 +72,60 @@ def test_user_guide_uat_install_spec_uses_apps_project_by_default() -> None:
     ) == [str(relative_wheel.resolve())]  # nosec B101
 
 
+def test_user_guide_uat_plan_uses_package_install_args(tmp_path: Path) -> None:
+    harness = _load_user_guide_harness()
+    install_args = [str(tmp_path / "mcp_unified-0.1.0-py3-none-any.whl")]
+
+    plan = harness.build_uat_plan(
+        repo_root=Path("/repo"),
+        workspace=tmp_path,
+        python_executable="python",
+        gateway_executable="mcp-unified-gateway",
+        smoke_executable="mcp-unified-smoke",
+        gateway_url=None,
+        package_install_args=install_args,
+    )
+
+    install_step = next(step for step in plan if step.step_id == "install_package_boundary")
+    assert install_step.command == [  # nosec B101
+        str(harness._venv_python(tmp_path / ".venv")),
+        "-m",
+        "pip",
+        "install",
+        *install_args,
+    ]
+
+
+def test_user_guide_uat_result_payload_redacts_reason(tmp_path: Path) -> None:
+    harness = _load_user_guide_harness()
+    wheel_path = tmp_path / "dist" / "mcp_unified-0.1.0-py3-none-any.whl"
+    context = harness.UatRunContext(
+        repo_root=Path("/repo"),
+        workspace=tmp_path,
+        bootstrap_python="python",
+        gateway_url="https://example.invalid",
+        admin_key="secret-admin-key",
+        timeout_seconds=1.0,
+        package_install_args=[str(wheel_path)],
+        secrets=["secret-admin-key"],
+    )
+    result = harness.UatStepResult(
+        step_id="install_package_boundary",
+        description="Install package.",
+        status="failed",
+        required=True,
+        duration_ms=1.0,
+        reason=f"TimeoutExpired: {wheel_path} Bearer secret-admin-key",
+    )
+
+    payload = harness._step_result_payload(result, context)
+
+    assert str(wheel_path) not in payload["reason"]  # nosec B101
+    assert "secret-admin-key" not in payload["reason"]  # nosec B101
+    assert "<redacted-path>" in payload["reason"]  # nosec B101
+    assert "<redacted-secret>" in payload["reason"]  # nosec B101
+
+
 def test_redact_text_removes_secret_like_values() -> None:
     raw = 'token=abc123\nAPI_KEY=secret-value\n{"secret": "json-value"}\nnormal=value'
 
