@@ -114,13 +114,13 @@ async def test_stt_transcribe_accepts_inside_base(monkeypatch, tmp_path):
     inside = user_dir / "valid.wav"
     inside.write_bytes(b"RIFF\x00\x00\x00WAVEfmt ")
 
-    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Lib as stt_mod
+    from tldw_Server_API.app.core.Workflows.adapters.audio import stt as stt_adapter
 
     def _fake_speech_to_text(*_args, **_kwargs):
 
         return ([{"Text": "hello"}], "en")
 
-    monkeypatch.setattr(stt_mod, "speech_to_text", _fake_speech_to_text, raising=True)
+    monkeypatch.setattr(stt_adapter, "_speech_to_text", _fake_speech_to_text, raising=True)
 
     result = await wf_adapters.run_stt_transcribe_adapter(
         {"file_uri": f"file://{inside}"},
@@ -164,12 +164,12 @@ async def test_stt_transcribe_unsafe_access_allows_allowlist(monkeypatch, tmp_pa
     outside = tmp_path / "outside.wav"
     outside.write_bytes(b"RIFF\x00\x00\x00WAVEfmt ")
 
-    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Transcription_Lib as stt_mod
+    from tldw_Server_API.app.core.Workflows.adapters.audio import stt as stt_adapter
 
     def _fake_speech_to_text(*_args, **_kwargs):
         return ([{"Text": "hello"}], "en")
 
-    monkeypatch.setattr(stt_mod, "speech_to_text", _fake_speech_to_text, raising=True)
+    monkeypatch.setattr(stt_adapter, "_speech_to_text", _fake_speech_to_text, raising=True)
 
     result = await wf_adapters.run_stt_transcribe_adapter(
         {"file_uri": f"file://{outside}"},

@@ -363,7 +363,7 @@ async def test_stt_adapter_valid_config(monkeypatch, tmp_path):
         return segments
 
     with patch(
-        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib.speech_to_text",
+        "tldw_Server_API.app.core.Workflows.adapters.audio.stt._speech_to_text",
         mock_speech_to_text,
     ):
         config = {"file_uri": f"file://{audio_file}", "model": "large-v3"}
@@ -459,7 +459,7 @@ async def test_stt_adapter_with_diarization(monkeypatch, tmp_path):
         return segments
 
     with patch(
-        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib.speech_to_text",
+        "tldw_Server_API.app.core.Workflows.adapters.audio.stt._speech_to_text",
         mock_speech_to_text,
     ):
         config = {
@@ -489,7 +489,7 @@ async def test_stt_adapter_handles_stt_error(monkeypatch, tmp_path):
         raise RuntimeError("STT service failed at /private/model-cache.bin")
 
     with patch(
-        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib.speech_to_text",
+        "tldw_Server_API.app.core.Workflows.adapters.audio.stt._speech_to_text",
         mock_speech_to_text,
     ):
         config = {"file_uri": f"file://{audio_file}"}

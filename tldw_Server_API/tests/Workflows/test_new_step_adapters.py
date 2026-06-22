@@ -260,8 +260,8 @@ def test_stt_transcribe_with_mock(monkeypatch, tmp_path, client_with_wf: TestCli
     fake_wav = tmp_path / "fake.wav"
     fake_wav.write_bytes(b"RIFF\x00\x00\x00WAVEfmt ")
 
-    # Patch speech_to_text to avoid heavy deps
-    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as ATL
+    # Patch the adapter-local wrapper so this test does not import the heavy STT backend.
+    import tldw_Server_API.app.core.Workflows.adapters.audio.stt as stt_adapter
     def _fake_stt(
         path,
         whisper_model="large-v3",
@@ -279,7 +279,7 @@ def test_stt_transcribe_with_mock(monkeypatch, tmp_path, client_with_wf: TestCli
         assert selected_source_lang is None
         segments = [{"Text": "hello world", "start_seconds": 0.0, "end_seconds": 1.0}]
         return (segments, 'en') if return_language else segments
-    monkeypatch.setattr(ATL, "speech_to_text", _fake_stt)
+    monkeypatch.setattr(stt_adapter, "_speech_to_text", _fake_stt)
 
     definition = {
         "name": "stt",
