@@ -129,6 +129,8 @@ Protocol prompt names are routed by stable namespace prefix:
 
 `PromptsModule` owns these namespaces. Other future static prompt modules can still use the existing static registry path.
 
+For `prompts/get`, the protocol handler must dispatch `library:` and `config:` names directly to `PromptsModule` before consulting the global prompt registry. The global prompt registry is only appropriate for static, context-free prompt providers.
+
 ### Listing Prompts
 
 `prompts/list` supports cursor pagination.
@@ -145,12 +147,15 @@ The cursor is opaque to clients. Use base64url JSON with this internal shape:
 ```json
 {
   "v": 1,
-  "library_offset": 50,
-  "config_offset": 0
+  "library_after_name": "casefolded last prompt name",
+  "library_after_uuid": "last-library-prompt-uuid",
+  "config_index": 0
 }
 ```
 
 Malformed, unsupported, or tampered cursors return JSON-RPC invalid params.
+
+Library pagination uses keyset semantics over `(normalized_name, uuid)` rather than raw offsets, so prompt inserts/deletes/renames between pages are best-effort but do not depend on unstable row offsets. Config pagination uses the allowlist index because config ordering is fixed by server config.
 
 Each prompt definition includes:
 
@@ -234,11 +239,13 @@ Legacy library prompts and config prompts use the existing legacy variable extra
 
 Arguments in `prompts/list` are marked required when the source declares them required. Legacy/config extracted placeholders are treated as required in v1 because no default-value contract exists for them.
 
-Unknown extra arguments are ignored unless the structured prompt assembler already rejects them. Missing required arguments return invalid params.
+MCP prompt argument values must be strings in v1. Non-string argument values return invalid params instead of being implicitly coerced. Unknown extra arguments are ignored unless the structured prompt assembler already rejects them. Missing required arguments return invalid params.
 
 ## Permissions And Scope
 
 Any authenticated MCP caller with `prompts.read` may call `prompts/list` and `prompts/get`.
+
+Protocol-level prompt access must not also require `modules.read`. The `library:` and `config:` namespaces exposed by `PromptsModule` are gated by `Resource.PROMPT` read permission, API-key read allowance, and prompt/resource scopes. Existing module-level permission checks can remain for module management APIs and for unrelated static prompt providers, but they must not block `PromptsModule` prompt catalog access when `prompts.read` is granted.
 
 User-library prompts are restricted to the authenticated user's Prompts DB through `RequestContext.db_paths["prompts"]`. The caller must not be able to provide or override DB paths through MCP prompt arguments.
 
@@ -263,23 +270,28 @@ Add the `prompts` module to `tldw_Server_API/Config_Files/mcp_modules.yaml`:
     max_rendered_prompt_chars: 100000
     config_prompts:
       enabled: true
-      entries:
-        - id: rag.retrieval_guidance
-          module: rag
-          key: retrieval_guidance
-          title: Retrieval Guidance
-        - id: chat.summary
-          title: Conversation Summary
-          messages:
-            - role: system
-              module: chat
-              key: summary_system
-            - role: user
-              module: chat
-              key: summary_user
+      entries: []
+      # Example entries; replace entries: [] with entries like these to publish
+      # config prompts through MCP.
+      # entries:
+      #   - id: rag.retrieval_guidance
+      #     module: rag
+      #     key: retrieval_guidance
+      #     title: Retrieval Guidance
+      #   - id: chat.summary
+      #     title: Conversation Summary
+      #     messages:
+      #       - role: system
+      #         module: chat
+      #         key: summary_system
+      #       - role: user
+      #         module: chat
+      #         key: summary_user
 ```
 
 Config entries are explicit. The server must not publish every prompt-loader file or every key in a file by default.
+
+The shipped default configuration should keep `config_prompts.entries` empty. Config prompt publication is opt-in by replacing the empty list with explicit entries.
 
 Single config entries use:
 
@@ -307,7 +319,7 @@ Allowed config roles are `system`, `developer`, `user`, and `assistant`; they ar
 - Permission denied: MCP permission error.
 - Config allowlist entry points to a missing file/key: omit from list; direct get returns invalid params.
 - User Prompts DB unavailable: direct library get returns internal error with sanitized message.
-- User Prompts DB unavailable during list: list may still return allowlisted config prompts and log sanitized metadata.
+- User Prompts DB unavailable during list: return allowlisted config prompts when available, and include a sanitized `_meta.tldw.warnings` entry such as `{"source": "library", "code": "prompt_db_unavailable"}`.
 - Rendered output exceeds `max_rendered_prompt_chars`: invalid params if caused by supplied arguments; otherwise internal error with sanitized message.
 
 Error messages must not include prompt bodies, rendered prompt text, argument values, or override file paths.
@@ -360,17 +372,22 @@ Protocol tests:
 - `initialize` returns `{"prompts": {"listChanged": false}}`
 - `prompts/list`
 - `prompts/get`
+- direct namespace dispatch for `library:` and `config:` before global prompt registry lookup
 - malformed cursor handling
 - cursor resume across library and config sources
+- keyset cursor behavior when prompts are inserted or deleted between pages
 - permission denied
+- `prompts.read` grants prompt access without requiring `modules.read`
 - unknown prompt
 - missing argument mapping
+- non-string argument value mapping
 - output-size error mapping
+- partial list warning metadata when the library source fails but config prompts are returned
 
 Integration tests:
 
 - use `/api/v1/mcp/request` for both protocol-level `prompts/list` and `prompts/get`
-- keep `GET /api/v1/mcp/prompts` list-only in v1
+- keep `GET /api/v1/mcp/prompts` list-only in v1 and add a `cursor` query parameter that maps to protocol-level `prompts/list`
 - cover context DB-path isolation at unit/protocol level
 - check the existing multi-user fixtures during implementation planning; if they support isolated user Prompt DB setup, add an integration test proving user A cannot list or get user B's library prompt
 - if the existing fixtures do not support that setup, record the limitation in the test module and in the Backlog task verification notes
@@ -383,6 +400,7 @@ Security tests:
 ## Rollout And Compatibility
 
 - Add the `prompts` module to `mcp_modules.yaml`.
+- Ship `config_prompts.entries` empty by default so config prompt exposure remains opt-in.
 - Keep tool-level `prompts.search` and `prompts.get` unchanged.
 - Document the distinction between protocol-level `prompts/get` and tool-level `prompts.get`.
 - Add MCP prompt support behind normal module enablement config, not a new global flag.
@@ -406,10 +424,15 @@ User prompt protocol names use UUIDs, so prompt renames do not break MCP clients
 - `initialize` advertises `prompts.listChanged: false`.
 - `prompts/list` returns paginated, permission-filtered prompt definitions from the user prompt library and allowlisted config prompt entries.
 - `prompts/get` renders `library:<uuid>` prompts and `config:<module>.<key-or-group>` prompts with strict argument validation.
+- `library:` and `config:` prompt names route directly to `PromptsModule` before global prompt registry lookup.
+- `prompts.read` is sufficient for protocol-level prompt catalog access and does not require `modules.read`.
 - User prompt-library entries include all readable, non-deleted prompts and exclude deleted prompts.
 - Prompt Studio prompts are not listed or retrievable.
-- Config prompts are excluded unless explicitly allowlisted in the `prompts` module settings.
+- Config prompts are excluded unless explicitly allowlisted in the `prompts` module settings, and the shipped default allowlist is empty.
 - Prompt names are stable and namespace-prefixed.
 - MCP messages use only spec-compliant `user` and `assistant` roles.
+- MCP prompt arguments reject non-string values with invalid params.
+- `GET /api/v1/mcp/prompts` remains list-only but supports cursor pagination.
+- Partial list results include sanitized warning metadata when a source fails.
 - Existing tool-level `prompts.search` and `prompts.get` behavior remains compatible.
 - Prompt bodies, rendered arguments, and override file paths are not exposed in logs or errors.

@@ -31,7 +31,7 @@ Design the v1 MCP prompt support slice that exposes all readable non-deleted use
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Design spec written and self-reviewed. Scope covers Approach B: Prompt Catalog Adapter Layer behind PromptsModule. Approach C broad registry follow-up is tracked separately by TASK-2341.
+Design spec written, reviewed, and revised after spec review findings. Scope covers Approach B: Prompt Catalog Adapter Layer behind PromptsModule. Approach C broad registry follow-up is tracked separately by TASK-2341.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -43,7 +43,7 @@ Design spec written and self-reviewed. Scope covers Approach B: Prompt Catalog A
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Spec drafted for user review at Docs/superpowers/specs/2026-06-22-mcp-prompt-catalog-support-design.md. Verification performed: placeholder/ambiguity scan found no remaining TBD/TODO/FIXME/loose review terms after cleanup. Bandit not applicable because this change is documentation/task tracking only.
+Spec drafted and revised for user review at Docs/superpowers/specs/2026-06-22-mcp-prompt-catalog-support-design.md. Review fixes addressed: prompts.read without modules.read, direct namespace dispatch before global registry lookup, empty default config prompt allowlist, keyset cursor semantics, string-only MCP arguments, cursor support on the list-only HTTP convenience route, and sanitized partial-list warnings. Verification performed: placeholder/ambiguity scan found no remaining TBD/TODO/FIXME/loose review terms after cleanup; git diff --check passed. Bandit not applicable because this change is documentation/task tracking only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
