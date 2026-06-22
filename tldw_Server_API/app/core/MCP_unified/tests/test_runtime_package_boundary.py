@@ -818,25 +818,72 @@ def _load_workflow(path: Path) -> dict[str, object]:
     return workflow
 
 
+def _workflow_run_blocks(workflow: dict[str, object]) -> list[str]:
+    """Return shell run blocks from every workflow job step."""
+
+    return [
+        str(step.get("run", ""))
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+    ]
+
+
+def _workflow_trigger_paths(workflow: dict[str, object]) -> dict[str, list[str]]:
+    """Return GitHub workflow trigger paths with YAML boolean-key fallback."""
+
+    triggers = workflow.get("on") or workflow.get(True)
+    assert isinstance(triggers, dict)  # nosec B101
+    return {
+        trigger_name: trigger_config.get("paths", [])
+        for trigger_name, trigger_config in triggers.items()
+        if isinstance(trigger_config, dict)
+    }
+
+
+def _contains_editable_install(run_block: str, package_path: str) -> bool:
+    """Return whether a shell run block editable-installs a package path."""
+
+    editable_pattern = re.compile(
+        rf"(?:^|\s)(?:-e|--editable)(?:\s+|=)[\"']?{re.escape(package_path)}"
+    )
+    return bool(editable_pattern.search(run_block))
+
+
+def _make_target_commands(makefile: str, target_name: str) -> list[str]:
+    """Return tab-indented command lines for one Makefile target."""
+
+    match = re.search(
+        rf"(?ms)^{re.escape(target_name)}:\n"
+        r"(?P<body>(?:\t[^\n]*\n)+)",
+        makefile,
+    )
+    assert match is not None, f"missing Makefile target: {target_name}"  # nosec B101
+    return [
+        line.removeprefix("\t").strip()
+        for line in match.group("body").splitlines()
+        if line.startswith("\t") and line.strip()
+    ]
+
+
 def test_mcp_unified_rc_workflow_uses_private_permissions() -> None:
     """Internal RC workflow must stay private and source-scoped."""
 
     workflow_path = REPO_ROOT / ".github" / "workflows" / "mcp-unified-rc.yml"
     workflow = _load_workflow(workflow_path)
     serialized_workflow = yaml.safe_dump(workflow, sort_keys=True)
-    run_blocks = [
-        step.get("run", "")
-        for job in workflow["jobs"].values()
-        for step in job["steps"]
-    ]
+    run_blocks = _workflow_run_blocks(workflow)
     install_runs = "\n".join(run_blocks)
 
     assert workflow["permissions"] == {"contents": "read"}  # nosec B101
     assert "id-token" not in workflow["permissions"]  # nosec B101
     assert "apps/mcp-unified" in serialized_workflow  # nosec B101
     assert "make mcp-unified-rc" in serialized_workflow  # nosec B101
-    assert 'pip install -e "apps/mcp-unified' not in install_runs  # nosec B101
-    assert "pip install -e apps/mcp-unified" not in install_runs  # nosec B101
+    assert not any(  # nosec B101
+        _contains_editable_install(run_block, "apps/mcp-unified")
+        for run_block in run_blocks
+    )
+    assert "pip install -e" not in install_runs  # nosec B101
+    assert "pip install --editable" not in install_runs  # nosec B101
 
 
 def test_mcp_unified_make_targets_do_not_call_root_pypi_check() -> None:
@@ -855,16 +902,22 @@ def test_mcp_unified_make_targets_do_not_call_root_pypi_check() -> None:
     assert section_marker in makefile  # nosec B101
     mcp_unified_section = makefile.split(section_marker, 1)[1]
     assert "pypi-check" not in mcp_unified_section  # nosec B101
-    for phase in (
-        "build",
-        "artifact-gate",
-        "install-smoke",
-        "cli-uat",
-        "smoke-uat",
-        "extras-matrix",
-        "all",
-    ):
-        assert f"$(MCP_UNIFIED_RC) {phase}" in mcp_unified_section  # nosec B101
+    assert _make_target_commands(makefile, "mcp-unified-build") == [  # nosec B101
+        "$(MCP_UNIFIED_RC) build",
+    ]
+    assert _make_target_commands(makefile, "mcp-unified-check") == [  # nosec B101
+        "$(MCP_UNIFIED_RC) build",
+        "$(MCP_UNIFIED_RC) artifact-gate",
+        "$(MCP_UNIFIED_RC) install-smoke",
+    ]
+    assert _make_target_commands(makefile, "mcp-unified-uat") == [  # nosec B101
+        "$(MCP_UNIFIED_RC) cli-uat",
+        "$(MCP_UNIFIED_RC) smoke-uat",
+        "$(MCP_UNIFIED_RC) extras-matrix",
+    ]
+    assert _make_target_commands(makefile, "mcp-unified-rc") == [  # nosec B101
+        "$(MCP_UNIFIED_RC) all",
+    ]
 
 
 def test_root_pypi_package_workflow_is_tldw_server_only() -> None:
@@ -873,12 +926,8 @@ def test_root_pypi_package_workflow_is_tldw_server_only() -> None:
     workflow_path = REPO_ROOT / ".github" / "workflows" / "pypi-package.yml"
     workflow = _load_workflow(workflow_path)
     serialized_workflow = yaml.safe_dump(workflow, sort_keys=True)
-    triggers = workflow.get("on") or workflow.get(True)
-    run_blocks = [
-        step.get("run", "")
-        for job in workflow["jobs"].values()
-        for step in job["steps"]
-    ]
+    trigger_paths = _workflow_trigger_paths(workflow)
+    run_blocks = _workflow_run_blocks(workflow)
     upload_names = [
         step.get("with", {}).get("name")
         for job in workflow["jobs"].values()
@@ -887,10 +936,14 @@ def test_root_pypi_package_workflow_is_tldw_server_only() -> None:
     ]
 
     assert workflow["name"] == "tldw-server PyPI Package Check"  # nosec B101
-    assert "apps/mcp-unified/**" not in triggers["pull_request"]["paths"]  # nosec B101
-    assert "apps/mcp-unified/**" not in triggers["push"]["paths"]  # nosec B101
+    assert "apps/mcp-unified/**" not in trigger_paths["pull_request"]  # nosec B101
+    assert "apps/mcp-unified/**" not in trigger_paths["push"]  # nosec B101
+    assert "mcp_unified/**" not in trigger_paths["pull_request"]  # nosec B101
+    assert "mcp_unified/**" not in trigger_paths["push"]  # nosec B101
     assert "test_mcp_unified_artifact_gate.py" not in serialized_workflow  # nosec B101
     assert not any("apps/mcp-unified" in run_block for run_block in run_blocks)  # nosec B101
+    assert not any("mcp_unified[dev]" in run_block for run_block in run_blocks)  # nosec B101
+    assert not any("mcp_unified/" in run_block for run_block in run_blocks)  # nosec B101
     assert "tldw-server-pypi-dist" in upload_names  # nosec B101
 
 
