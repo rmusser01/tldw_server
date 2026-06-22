@@ -110,8 +110,34 @@ class UatRunContext:
     gateway_url: str | None
     admin_key: str | None
     timeout_seconds: float
+    package_install_args: list[str]
     secrets: list[str] = field(default_factory=list)
     processes: dict[str, subprocess.Popen[str]] = field(default_factory=dict)
+
+
+def default_package_project(repo_root: Path) -> Path:
+    """Return the standalone MCP package project path."""
+
+    return repo_root / "apps" / "mcp-unified"
+
+
+def package_install_spec(
+    *,
+    repo_root: Path,
+    wheel_path: Path | None,
+    editable: bool,
+) -> list[str]:
+    """Return pip install arguments for the standalone package under test.
+
+    Wheel installs take precedence over editable source installs.
+    """
+
+    if wheel_path is not None:
+        return [str(wheel_path)]
+    project = default_package_project(repo_root)
+    if editable:
+        return ["-e", f"{project}[gateway]"]
+    return [f"{project}[gateway]"]
 
 
 def build_uat_plan(
@@ -122,6 +148,7 @@ def build_uat_plan(
     gateway_executable: str,
     smoke_executable: str,
     gateway_url: str | None,
+    package_install_args: list[str],
     fixture_port: int | None = None,
 ) -> list[UatStep]:
     """Build the ordered standalone user-guide UAT command plan."""
@@ -162,8 +189,7 @@ def build_uat_plan(
                 "-m",
                 "pip",
                 "install",
-                "-e",
-                f"{repo_root / 'apps' / 'mcp-unified'}[gateway]",
+                *package_install_args,
             ],
             cwd=workspace,
         ),
@@ -593,6 +619,7 @@ def run_uat(context: UatRunContext) -> dict[str, Any]:
         gateway_executable=gateway_executable,
         smoke_executable=smoke_executable,
         gateway_url=context.gateway_url,
+        package_install_args=context.package_install_args,
     )
     try:
         results = [_run_step(step, context) for step in plan]
@@ -623,6 +650,11 @@ def main(argv: list[str] | None = None) -> int:
     gateway_url = args.gateway_url or os.getenv("MCP_UNIFIED_GATEWAY_URL")
     admin_key = os.getenv("MCP_UNIFIED_GATEWAY_ADMIN_KEY")
     secrets = [admin_key] if admin_key else []
+    package_install_args = package_install_spec(
+        repo_root=repo_root,
+        wheel_path=args.wheel,
+        editable=args.editable,
+    )
 
     if args.workspace:
         workspace = args.workspace.resolve()
@@ -634,6 +666,7 @@ def main(argv: list[str] | None = None) -> int:
                 gateway_url=gateway_url,
                 admin_key=admin_key,
                 timeout_seconds=args.timeout_seconds,
+                package_install_args=package_install_args,
                 secrets=secrets,
             )
         )
@@ -647,6 +680,7 @@ def main(argv: list[str] | None = None) -> int:
                     gateway_url=gateway_url,
                     admin_key=admin_key,
                     timeout_seconds=args.timeout_seconds,
+                    package_install_args=package_install_args,
                     secrets=secrets,
                 )
             )
@@ -991,6 +1025,19 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--json-report",
         type=Path,
         help="Path to write the redacted JSON report. Defaults to stdout.",
+    )
+    parser.add_argument(
+        "--wheel",
+        type=Path,
+        help="Built wheel to install for installed-artifact UAT.",
+    )
+    parser.add_argument(
+        "--editable",
+        action="store_true",
+        help=(
+            "Install the app package project in editable mode for local guide iteration. "
+            "Ignored when --wheel is supplied."
+        ),
     )
     parser.add_argument(
         "--gateway-url",

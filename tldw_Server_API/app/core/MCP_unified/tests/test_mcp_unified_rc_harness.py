@@ -1,10 +1,34 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 from Helper_Scripts import mcp_unified_rc
+
+REPO_ROOT = Path(__file__).resolve().parents[5]
+USER_GUIDE_UAT_PATH = (
+    REPO_ROOT
+    / "Helper_Scripts"
+    / "Testing-related"
+    / "mcp_standalone_user_guide_uat.py"
+)
+
+
+def _load_user_guide_harness() -> ModuleType:
+    spec = importlib.util.spec_from_file_location(
+        "_mcp_standalone_user_guide_uat",
+        USER_GUIDE_UAT_PATH,
+    )
+    assert spec is not None  # nosec B101
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    assert spec.loader is not None  # nosec B101
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_default_paths_point_to_apps_package() -> None:
@@ -13,6 +37,33 @@ def test_default_paths_point_to_apps_package() -> None:
     assert paths.package_project == Path("/repo/apps/mcp-unified")  # nosec B101
     assert paths.package_src == Path("/repo/apps/mcp-unified/src/mcp_unified")  # nosec B101
     assert paths.evidence_dir == Path("/repo/.artifacts/mcp-unified-rc")  # nosec B101
+
+
+def test_user_guide_uat_install_spec_uses_apps_project_by_default() -> None:
+    harness = _load_user_guide_harness()
+    wheel = Path("/tmp/mcp_unified-0.1.0-py3-none-any.whl")  # nosec B108
+
+    assert harness.default_package_project(Path("/repo")) == Path("/repo/apps/mcp-unified")  # nosec B101
+    assert harness.package_install_spec(
+        repo_root=Path("/repo"),
+        wheel_path=None,
+        editable=False,
+    ) == ["/repo/apps/mcp-unified[gateway]"]  # nosec B101
+    assert harness.package_install_spec(
+        repo_root=Path("/repo"),
+        wheel_path=None,
+        editable=True,
+    ) == ["-e", "/repo/apps/mcp-unified[gateway]"]  # nosec B101
+    assert harness.package_install_spec(
+        repo_root=Path("/repo"),
+        wheel_path=wheel,
+        editable=False,
+    ) == [str(wheel)]  # nosec B101
+    assert harness.package_install_spec(
+        repo_root=Path("/repo"),
+        wheel_path=wheel,
+        editable=True,
+    ) == [str(wheel)]  # nosec B101
 
 
 def test_redact_text_removes_secret_like_values() -> None:
