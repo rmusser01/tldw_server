@@ -1464,6 +1464,13 @@ def test_stdio_sequence_runner_fails_when_session_new_omits_session_id(
 def test_stdio_sequence_runner_times_out_on_partial_line_and_cleans_up(monkeypatch) -> None:
     module = _load_module()
     written = []
+    # Force timeout after the first write instead of depending on scheduler timing.
+    monotonic_values = iter([100.0, 100.0, 100.02])
+    monkeypatch.setattr(
+        module,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(monotonic_values, 100.02)),
+    )
 
     class _Pipe:
         def __init__(self):
