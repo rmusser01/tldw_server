@@ -339,10 +339,34 @@ def _wheel_extra_dependency_names(
 
 
 def _read_sdist_members(sdist: Path) -> set[str]:
-    """Return normalized member names from a standalone source distribution."""
+    """Return archive member names from a standalone source distribution."""
 
     with tarfile.open(sdist, "r:gz") as archive:
         return {member.name for member in archive.getmembers()}
+
+
+def _sdist_project_members(sdist_members: set[str]) -> set[str]:
+    """Return sdist members relative to the distribution project root."""
+
+    members = {
+        member.removeprefix("./").strip("/")
+        for member in sdist_members
+        if member.removeprefix("./").strip("/")
+    }
+    if "pyproject.toml" in members:
+        return members
+
+    distribution_roots = {
+        member.split("/", 1)[0]
+        for member in members
+    }
+    assert len(distribution_roots) == 1, sorted(distribution_roots)  # nosec B101
+    distribution_root = next(iter(distribution_roots))
+    return {
+        member.removeprefix(f"{distribution_root}/")
+        for member in members
+        if member != distribution_root
+    }
 
 
 @pytest.fixture(scope="module")
@@ -675,6 +699,10 @@ def test_mcp_unified_standalone_distribution_metadata_matches_extras(
         entry_points["console_scripts"]["mcp-unified-gateway"]
         == "mcp_unified.gateway.cli:main"
     )  # nosec B101
+    assert (
+        entry_points["console_scripts"]["mcp-unified-smoke"]
+        == "mcp_unified.smoke.cli:main"
+    )  # nosec B101
 
     forbidden_dependency_names = {
         "chromadb",
@@ -700,17 +728,44 @@ def test_mcp_unified_standalone_sdist_contains_only_package_boundary(
     """Built standalone sdist must not include the host server package tree."""
 
     _wheel, sdist = standalone_distributions
-    members = _read_sdist_members(sdist)
+    members = _sdist_project_members(_read_sdist_members(sdist))
 
-    assert any(member.endswith("/pyproject.toml") for member in members)  # nosec B101
-    assert any(member.endswith("/__init__.py") for member in members)  # nosec B101
-    assert any(  # nosec B101
-        member.endswith("/filesystem_locks/__init__.py")
+    allowed_project_root_members = {
+        "PKG-INFO",
+        "README.md",
+        "USER_GUIDE.md",
+        "pyproject.toml",
+        "setup.cfg",
+        "src",
+    }
+    project_root_members = {
+        member.split("/", 1)[0]
         for member in members
+    }
+    assert project_root_members <= allowed_project_root_members  # nosec B101
+
+    forbidden_host_root_members = {
+        ".github",
+        "Databases",
+        "Dockerfiles",
+        "Docs",
+        "Helper_Scripts",
+        "apps",
+        "mock_openai_server",
+        "models",
+        "tldw_Server_API",
+    }
+    forbidden_members = sorted(
+        member
+        for member in members
+        if member.split("/", 1)[0] in forbidden_host_root_members
     )
-    assert any(member.endswith("/gateway/cli.py") for member in members)  # nosec B101
-    assert not any("/tldw_Server_API/" in member for member in members)  # nosec B101
-    assert not any("/apps/tldw-frontend/" in member for member in members)  # nosec B101
+    assert forbidden_members == []  # nosec B101
+
+    assert "pyproject.toml" in members  # nosec B101
+    assert "src/mcp_unified/__init__.py" in members  # nosec B101
+    assert "src/mcp_unified/filesystem_locks/__init__.py" in members  # nosec B101
+    assert "src/mcp_unified/gateway/cli.py" in members  # nosec B101
 
 
 def test_mcp_unified_standalone_artifacts_include_typed_marker(
@@ -720,10 +775,10 @@ def test_mcp_unified_standalone_artifacts_include_typed_marker(
 
     wheel, sdist = standalone_distributions
     wheel_members = _read_wheel_members(wheel)
-    sdist_members = _read_sdist_members(sdist)
+    sdist_members = _sdist_project_members(_read_sdist_members(sdist))
 
     assert "mcp_unified/py.typed" in wheel_members  # nosec B101
-    assert any(member.endswith("/py.typed") for member in sdist_members)  # nosec B101
+    assert "src/mcp_unified/py.typed" in sdist_members  # nosec B101
 
 
 def test_mcp_unified_standalone_artifacts_include_package_docs(
@@ -733,17 +788,14 @@ def test_mcp_unified_standalone_artifacts_include_package_docs(
 
     wheel, sdist = standalone_distributions
     wheel_members = _read_wheel_members(wheel)
-    sdist_members = _read_sdist_members(sdist)
+    sdist_members = _sdist_project_members(_read_sdist_members(sdist))
 
     assert "mcp_unified/README.md" in wheel_members  # nosec B101
     assert "mcp_unified/USER_GUIDE.md" in wheel_members  # nosec B101
     assert "mcp_unified/filesystem_locks/__init__.py" in wheel_members  # nosec B101
-    assert any(member.endswith("/README.md") for member in sdist_members)  # nosec B101
-    assert any(member.endswith("/USER_GUIDE.md") for member in sdist_members)  # nosec B101
-    assert any(  # nosec B101
-        member.endswith("/filesystem_locks/__init__.py")
-        for member in sdist_members
-    )
+    assert "src/mcp_unified/README.md" in sdist_members  # nosec B101
+    assert "src/mcp_unified/USER_GUIDE.md" in sdist_members  # nosec B101
+    assert "src/mcp_unified/filesystem_locks/__init__.py" in sdist_members  # nosec B101
 
 
 def test_pypi_workflow_runs_mcp_unified_standalone_artifact_gate() -> None:

@@ -48,6 +48,7 @@ Task 1 spec-review fixes landed in commit `4bc8507199`: subprocess import enviro
 Task 1 docs/UAT path fixes landed in commit `c74b870faf`: README, user guide, package-resource docs, and the standalone user-guide UAT helper now use `apps/mcp-unified` paths. Worker reported docs boundary test passed, UAT helper `--help` passed, and Bandit on the UAT helper passed.
 
 Task 1 root packaging/tooling cleanup landed in commit `974114f2da`: root `pyproject.toml` no longer advertises standalone MCP console scripts, root package discovery no longer includes `mcp_unified`, Ruff/mypy paths point at the app package source, and admin docs use app package paths. Worker reported `test_runtime_package_boundary.py`: 36 passed, 5 warnings. Task 1 passed spec review and code-quality review after these fixes.
+Task 2 completed in this worktree: tightened MCP Unified standalone artifact boundary tests for the apps/mcp-unified project root, added normalized sdist project-root member checks, asserted the built-wheel mcp-unified-smoke console script, and updated the artifact-gate shim wording. Verification: selected pytest nodeids passed (5 passed, 4 warnings); artifact-gate shim pytest passed (4 passed, 2 warnings); git diff --check passed. Bandit was run on the two touched files and exited nonzero due the existing low-severity test-module baseline findings (B101/B404/B603/B105); the new Task 2 assertion lines are nosec-marked and did not add report entries.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
