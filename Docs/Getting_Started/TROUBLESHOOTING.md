@@ -256,7 +256,7 @@ pip install "numpy<2"
 
 ```powershell
 if (!(Test-Path "tldw_Server_API/Config_Files/.env")) { Copy-Item "tldw_Server_API/Config_Files/.env.example" "tldw_Server_API/Config_Files/.env" }
-py -3.12 -m venv .setup-venv
+py -m venv .setup-venv
 .\.setup-venv\Scripts\python -m pip install --upgrade pip setuptools wheel
 .\.setup-venv\Scripts\python -m pip install "typer>=0.12.0" "loguru>=0.7.0" "httpx>=0.24.0" "python-dotenv>=1.0.0" "cryptography>=41.0.0"
 .\.setup-venv\Scripts\python -m tldw_Server_API.cli.wizard.cli init --profile docker-single-webui --env-file tldw_Server_API/Config_Files/.env --default --yes
