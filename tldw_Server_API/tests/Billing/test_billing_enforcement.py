@@ -41,6 +41,7 @@ from tldw_Server_API.app.core.Billing.enforcement import (
     billing_enabled,
     enforcement_enabled,
 )
+from tldw_Server_API.app.core.Billing import enforcement as enforcement_module
 from tldw_Server_API.app.core.Billing.plan_limits import (
     PlanTier,
     PlanLimits,
@@ -426,6 +427,50 @@ class TestBillingEnforcer:
         assert usage.api_calls_today == 2_147_483_647
         assert usage.llm_tokens_month == 2_147_483_647
         assert usage.rag_queries_today == 2_147_483_647
+
+    @pytest.mark.asyncio
+    async def test_get_org_usage_fail_closed_handles_helper_internal_source_errors(self, monkeypatch):
+        """Closed failure mode should not let source helpers turn backend errors into zero usage."""
+        leaked_secret = "sk-usage-secret"
+        leaked_path = "/private/billing/usage.db"
+        messages: list[str] = []
+
+        async def _raise_db_pool_error():
+            raise RuntimeError(f"usage backend unavailable token={leaked_secret} path={leaked_path}")
+
+        class _FailingLedger:
+            async def initialize(self):
+                raise RuntimeError(f"ledger unavailable token={leaked_secret} path={leaked_path}")
+
+        def _record_log_message(message, *args, **_kwargs):
+            messages.append(" ".join([str(message), *(str(arg) for arg in args)]))
+
+        monkeypatch.setenv("BILLING_ENFORCEMENT_FAILURE_MODE", "closed")
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
+            _raise_db_pool_error,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger.ResourceDailyLedger",
+            _FailingLedger,
+            raising=False,
+        )
+        monkeypatch.setattr(enforcement_module.logger, "debug", _record_log_message)
+        monkeypatch.setattr(enforcement_module.logger, "error", _record_log_message)
+        monkeypatch.setattr(enforcement_module.logger, "warning", _record_log_message)
+
+        enforcer = BillingEnforcer()
+        usage = await enforcer.get_org_usage(org_id=77)
+
+        assert usage.org_id == 77
+        assert usage.api_calls_today == 2_147_483_647
+        assert usage.llm_tokens_month == 2_147_483_647
+        assert usage.rag_queries_today == 2_147_483_647
+        joined = "\n".join(messages)
+        assert leaked_secret not in joined
+        assert leaked_path not in joined
+        assert "usage backend unavailable" not in joined
 
     @pytest.mark.asyncio
     async def test_check_feature_access_enabled(self, enforcer):
