@@ -133,6 +133,27 @@ describe("ImportExportTab decomposition", () => {
     expect(screen.getByTestId("mock-image-occlusion-panel")).toBeVisible()
   })
 
+  it("groups setup work into accessible task-first sections", () => {
+    mocks.useImportLimitsQuery.mockReturnValue({
+      data: null
+    })
+
+    render(<ImportExportTab />)
+
+    expect(
+      screen.getByRole("region", {
+        name: "Create and generate"
+      })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("region", {
+        name: "Import and export"
+      })
+    ).toBeInTheDocument()
+    expect(screen.getByText("Import/export summary")).toBeInTheDocument()
+    expect(screen.queryByText("Transfer summary")).not.toBeInTheDocument()
+  })
+
   it("labels the task switcher with all available transfer tasks", () => {
     mocks.useImportLimitsQuery.mockReturnValue({
       data: null
@@ -166,6 +187,43 @@ describe("ImportExportTab decomposition", () => {
     expect(screen.getByTestId("flashcards-export-task-panel")).not.toHaveClass("hidden")
     expect(screen.getByTestId("flashcards-create-task-panel")).toHaveClass("hidden")
     expect(screen.getByTestId("flashcards-import-task-panel")).toHaveClass("hidden")
+  })
+
+  it("opens the import task when an import handoff is present", () => {
+    mocks.useImportLimitsQuery.mockReturnValue({
+      data: null
+    })
+
+    render(<ImportExportTab initialTask="import" initialTaskHandoffKey="first-run-import" />)
+
+    expect(screen.getByTestId("flashcards-import-task-panel")).toBeVisible()
+    expect(screen.getByTestId("flashcards-import-task-panel")).not.toHaveClass("hidden")
+    expect(screen.getByTestId("flashcards-create-task-panel")).toHaveClass("hidden")
+    expect(screen.getByTestId("flashcards-export-task-panel")).toHaveClass("hidden")
+  })
+
+  it("switches to the create task when a later create handoff arrives", async () => {
+    mocks.useImportLimitsQuery.mockReturnValue({
+      data: null
+    })
+
+    const { rerender } = render(
+      <ImportExportTab initialTask="import" initialTaskHandoffKey="first-run-import" />
+    )
+
+    expect(screen.getByTestId("flashcards-import-task-panel")).not.toHaveClass("hidden")
+
+    rerender(
+      <ImportExportTab initialTask="create" initialTaskHandoffKey="first-run-generate" />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId("flashcards-create-task-panel")).not.toHaveClass(
+        "hidden"
+      )
+      expect(screen.getByTestId("flashcards-import-task-panel")).toHaveClass("hidden")
+      expect(screen.getByTestId("flashcards-export-task-panel")).toHaveClass("hidden")
+    })
   })
 
   it("opens the export task when a deck export handoff is present", () => {

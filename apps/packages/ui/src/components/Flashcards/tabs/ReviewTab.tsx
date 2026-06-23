@@ -81,6 +81,7 @@ const CRAM_AVAILABILITY_LIMIT = 1
 interface ReviewTabProps {
   onNavigateToCreate: () => void
   onNavigateToImport: () => void
+  onNavigateToGenerate?: () => void
   reviewDeckId: number | null | undefined
   onReviewDeckChange: (deckId: number | null | undefined) => void
   reviewOverrideCard?: Flashcard | null
@@ -109,6 +110,7 @@ interface ReviewFailureState {
 export const ReviewTab: React.FC<ReviewTabProps> = ({
   onNavigateToCreate,
   onNavigateToImport,
+  onNavigateToGenerate,
   reviewDeckId,
   onReviewDeckChange,
   reviewOverrideCard,
@@ -1715,12 +1717,6 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                                 "Rate recall with Again/Hard/Good/Easy so the next review is scheduled automatically."
                             })}
                           </li>
-                          <li className="text-text-muted">
-                            {t("option:flashcards.onboardingStepLlmNote", {
-                              defaultValue:
-                                "Card generation and the study assistant require an LLM provider (configure in Settings)."
-                            })}
-                          </li>
                         </ol>
                         <Text
                           type="secondary"
@@ -1794,7 +1790,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                       })}
                     </Button>
                     <Button
-                      onClick={onNavigateToImport}
+                      onClick={onNavigateToGenerate ?? onNavigateToImport}
                       data-testid="flashcards-review-empty-generate-cta"
                     >
                       {t("option:flashcards.generateFromTextCta", {

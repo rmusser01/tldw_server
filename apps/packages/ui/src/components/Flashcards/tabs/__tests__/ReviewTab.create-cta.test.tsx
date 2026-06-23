@@ -318,11 +318,13 @@ describe("ReviewTab create CTA visibility", () => {
   it("shows first-run onboarding guidance with create/import/generate actions", () => {
     const onNavigateToCreate = vi.fn()
     const onNavigateToImport = vi.fn()
+    const onNavigateToGenerate = vi.fn()
 
     render(
       <ReviewTab
         onNavigateToCreate={onNavigateToCreate}
         onNavigateToImport={onNavigateToImport}
+        onNavigateToGenerate={onNavigateToGenerate}
         reviewDeckId={undefined}
         onReviewDeckChange={() => {}}
         isActive
@@ -335,6 +337,10 @@ describe("ReviewTab create CTA visibility", () => {
       "Alert"
     )
     expect(onboardingGuide).toHaveAttribute("aria-live", "off")
+    expect(within(onboardingGuide).queryByText(/LLM provider/i)).not.toBeInTheDocument()
+    expect(
+      within(onboardingGuide).queryByText(/require.*provider/i)
+    ).not.toBeInTheDocument()
     expect(screen.getByTestId("flashcards-review-scheduler-preview")).toHaveTextContent(
       "Scheduler"
     )
@@ -348,7 +354,8 @@ describe("ReviewTab create CTA visibility", () => {
     fireEvent.click(screen.getByTestId("flashcards-review-empty-generate-cta"))
 
     expect(onNavigateToCreate).toHaveBeenCalledTimes(1)
-    expect(onNavigateToImport).toHaveBeenCalledTimes(2)
+    expect(onNavigateToImport).toHaveBeenCalledTimes(1)
+    expect(onNavigateToGenerate).toHaveBeenCalledTimes(1)
   })
 
   it("persists onboarding dismissal across remounts", async () => {

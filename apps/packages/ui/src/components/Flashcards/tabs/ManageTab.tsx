@@ -103,6 +103,7 @@ type MoveUndoSnapshot = {
 
 interface ManageTabProps {
   onNavigateToImport: () => void
+  onNavigateToGenerate?: () => void
   onReviewCard: (card: Flashcard) => void
   openCreateSignal?: number
   isActive: boolean
@@ -130,6 +131,7 @@ export const buildFlashcardsWorkspaceVisibilityOptions = (
  */
 export const ManageTab: React.FC<ManageTabProps> = ({
   onNavigateToImport,
+  onNavigateToGenerate,
   onReviewCard,
   openCreateSignal,
   isActive,
@@ -284,8 +286,15 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     [mSort]
   )
 
-  // Check if any filters are active
-  const hasActiveFilters = !!(mQuery || mTags.length > 0 || mDeckId != null || mDue !== "all")
+  // Check if any manage filters are active
+  const hasActiveFilters = !!(
+    mQuery.trim() ||
+    mTags.length > 0 ||
+    mDue !== "all" ||
+    mDeckId != null ||
+    selectedWorkspaceId != null ||
+    showWorkspaceDecks
+  )
 
   // Clear all filters
   const clearAllFilters = () => {
@@ -294,6 +303,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     setMTags([])
     setMTagInput("")
     setMDeckId(undefined)
+    setShowWorkspaceDecks(false)
+    setSelectedWorkspaceId(null)
     setMDue("all")
     setMSort("due")
     setPage(1)
@@ -2066,7 +2077,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                 <Empty
                   description={t("option:flashcards.noCardsTitle", {
                     defaultValue:
-                      mQuery || mTags.length > 0 || mDeckId != null || mDue !== "all"
+                      hasActiveFilters
                         ? "No cards match your filters"
                         : "No flashcards yet"
                   })}
@@ -2075,13 +2086,13 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                     <Text type="secondary">
                       {t("option:flashcards.noCardsDescription", {
                         defaultValue:
-                          mQuery || mTags.length > 0 || mDeckId != null || mDue !== "all"
+                          hasActiveFilters
                             ? "Try adjusting your search, deck, tag, or due filters."
                             : "Create cards from your notes and media, or import an existing deck."
                       })}
                     </Text>
                     <Space>
-                      {mQuery || mTags.length > 0 || mDeckId != null || mDue !== "all" ? (
+                      {hasActiveFilters ? (
                         <Button onClick={clearAllFilters}>
                           {t("option:flashcards.clearFilters", {
                             defaultValue: "Clear filters"
@@ -2107,7 +2118,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                             })}
                           </Button>
                           <Button
-                            onClick={onNavigateToImport}
+                            onClick={onNavigateToGenerate ?? onNavigateToImport}
                             data-testid="flashcards-manage-empty-generate-cta"
                           >
                             {t("option:flashcards.noCardsGenerateCta", {
