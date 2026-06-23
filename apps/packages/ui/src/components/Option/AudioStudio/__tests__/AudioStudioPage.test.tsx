@@ -215,6 +215,40 @@ describe("AudioStudioPage", () => {
     ).toBe(false)
   })
 
+  it("selects an existing project from the project sidebar", () => {
+    useAudioStudioStore.getState().setProjects([
+      {
+        project_id: "project-1",
+        title: "First project",
+        workflow: "narration",
+        status: "draft",
+        current_revision_id: "revision-1",
+        sections: [],
+        tracks: [],
+        clips: [],
+        settings: {}
+      },
+      {
+        project_id: "project-2",
+        title: "Second project",
+        workflow: "narration",
+        status: "draft",
+        current_revision_id: "revision-2",
+        sections: [],
+        tracks: [],
+        clips: [],
+        settings: {}
+      }
+    ] as any)
+    useAudioStudioStore.getState().setActiveProjectId("project-1")
+
+    render(<AudioStudioPage />)
+
+    fireEvent.click(screen.getByRole("button", { name: /Second project/ }))
+
+    expect(useAudioStudioStore.getState().activeProjectId).toBe("project-2")
+  })
+
   it("saves active project edits through the update hook", async () => {
     setActiveProject({
       workflow: "briefing",

@@ -13,6 +13,9 @@ export const ProjectSidebar: React.FC = () => {
   const projects = useAudioStudioStore((state) => state.projects)
   const activeProjectId = useAudioStudioStore((state) => state.activeProjectId)
   const activeWorkflow = useAudioStudioStore((state) => state.activeWorkflow)
+  const setActiveProjectId = useAudioStudioStore(
+    (state) => state.setActiveProjectId
+  )
   const createProjectMutation = useCreateAudioStudioProject()
   const visibleProjects = projects.filter(
     (project) => project.workflow === activeWorkflow

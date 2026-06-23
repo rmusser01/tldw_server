@@ -104,6 +104,13 @@ Code-quality follow-up verification:
 - `git diff --check` on TASK-2350 code-quality follow-up paths passed.
 - Bandit remains not applicable; frontend-only TypeScript/React changes, no Python/backend code touched.
 
+Small bug follow-up: restored `setActiveProjectId` selection in ProjectSidebar so existing server-loaded projects can be selected from the rail. Added an AudioStudioPage regression test that clicks an existing project and verifies the active project changes.
+
+Small bug follow-up verification:
+- `bunx vitest run ../packages/ui/src/components/Option/AudioStudio/__tests__/AudioStudioPage.test.tsx` - 14 passed.
+- `bunx vitest run ../packages/ui/src/services/__tests__/audio-studio.test.ts ../packages/ui/src/store/__tests__/audio-studio.test.tsx ../packages/ui/src/hooks/__tests__/useAudioStudioProjects.test.tsx ../packages/ui/src/routes/__tests__/route-metadata.coverage.test.ts __tests__/pages/audio-studio-route.test.tsx` - 21 passed.
+- `git diff --check` on TASK-2350 small bug follow-up paths passed.
+
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
