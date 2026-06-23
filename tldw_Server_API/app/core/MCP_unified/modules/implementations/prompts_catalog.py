@@ -13,6 +13,7 @@ from typing import Any
 from loguru import logger
 
 from ....DB_Management.Prompts_DB import DatabaseError, PromptsDatabase
+from ....exceptions import PromptCatalogError
 from ....Prompt_Management.structured_prompts import (
     PromptBlock,
     PromptDefinition,
@@ -38,16 +39,6 @@ _ALLOWED_CONFIG_ROLES = {"system", "developer", "user", "assistant"}
 _CATALOG_DB_EXCEPTIONS = (DatabaseError, OSError, RuntimeError, TypeError, ValueError)
 
 
-class PromptCatalogError(Exception):
-    """Sanitized prompt catalog error suitable for MCP protocol mapping."""
-
-    def __init__(self, code: str, message: str, internal: bool = False) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.internal = internal
-
-
 @dataclass(frozen=True)
 class PromptCatalogCursor:
     """Opaque pagination cursor state for prompt catalog sources."""
@@ -68,7 +59,16 @@ class PromptCatalogListResult:
 
 
 def encode_prompt_cursor(cursor: PromptCatalogCursor | None) -> str | None:
-    """Encode cursor state as unpadded URL-safe base64 JSON."""
+    """Encode prompt catalog pagination state for MCP clients.
+
+    Args:
+        cursor: Cursor state returned by a catalog source, or ``None`` when
+            there is no next page.
+
+    Returns:
+        An unpadded URL-safe base64 JSON cursor string, or ``None`` when no
+        cursor was provided.
+    """
 
     if cursor is None:
         return None
@@ -87,7 +87,19 @@ def encode_prompt_cursor(cursor: PromptCatalogCursor | None) -> str | None:
 
 
 def decode_prompt_cursor(raw_cursor: str | None) -> PromptCatalogCursor:
-    """Decode and validate an opaque prompt catalog cursor."""
+    """Decode and validate an MCP prompt catalog cursor.
+
+    Args:
+        raw_cursor: Opaque cursor string supplied by the MCP client. ``None``
+            and the empty string both represent the first page.
+
+    Returns:
+        Parsed prompt catalog cursor state.
+
+    Raises:
+        PromptCatalogError: If the cursor is malformed, unsupported, or
+            contains inconsistent pagination state.
+    """
 
     if raw_cursor is None or raw_cursor == "":
         return PromptCatalogCursor()

@@ -5,7 +5,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.asyncio
-async def test_ensure_baseline_rbac_seed_sqlite_idempotent():
+async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
     import aiosqlite
 
     from tldw_Server_API.app.core.AuthNZ.rbac_seed import ensure_baseline_rbac_seed
@@ -110,7 +110,7 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent():
             assert perm_id[name] in admin_perm_ids
 
 
-def test_migration_089_seeds_prompts_read_for_existing_admin_and_user_roles():
+def test_migration_089_seeds_prompts_read_for_existing_admin_and_user_roles() -> None:
     import sqlite3
 
     from tldw_Server_API.app.core.AuthNZ.migrations import (
@@ -174,7 +174,7 @@ def test_migration_089_seeds_prompts_read_for_existing_admin_and_user_roles():
 
 
 @pytest.mark.asyncio
-async def test_ensure_sqlite_rbac_tables_creates_minimal_schema():
+async def test_ensure_sqlite_rbac_tables_creates_minimal_schema() -> None:
     import aiosqlite
 
     from tldw_Server_API.app.core.AuthNZ.rbac_seed import ensure_sqlite_rbac_tables
@@ -194,7 +194,7 @@ async def test_ensure_sqlite_rbac_tables_creates_minimal_schema():
 @pytest.mark.asyncio
 async def test_ensure_baseline_rbac_seed_explicit_backend_hint_skips_detection(
     monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     import aiosqlite
 
     from tldw_Server_API.app.core.AuthNZ import rbac_seed

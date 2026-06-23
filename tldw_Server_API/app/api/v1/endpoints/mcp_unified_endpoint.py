@@ -1507,7 +1507,7 @@ async def list_prompts(
     cursor: str | None = Query(None, description="Opaque MCP prompt list cursor"),
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     _guard: None = Depends(enforce_http_security),
-):
+) -> dict[str, Any]:
     """
     List available MCP prompts.
 

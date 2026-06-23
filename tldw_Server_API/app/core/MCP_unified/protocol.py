@@ -55,6 +55,7 @@ from mcp_unified.tool_use_reporting.recorder import record_tool_use_safely
 from .auth.authnz_rbac import Action, Resource
 from .auth.rate_limiter import RateLimitExceeded
 from .config import get_config
+from ..exceptions import PromptCatalogError
 from .interfaces.runtime import (
     MCPRuntimeDependencies,
     NoopToolCallHookManager,
@@ -67,7 +68,6 @@ from .interfaces.runtime import (
 from .modules.implementations.prompts_catalog import (
     CONFIG_PROMPT_PREFIX,
     LIBRARY_PROMPT_PREFIX,
-    PromptCatalogError,
     decode_prompt_cursor,
 )
 from .modules.base import BaseModule
@@ -2719,7 +2719,7 @@ class MCPProtocol:
         capabilities = {
             "tools": {"available": bool(modules)},
             "resources": {"available": bool(modules)},
-            "prompts": {"listChanged": False}
+            "prompts": {"available": bool(modules), "listChanged": False}
         }
 
         return {

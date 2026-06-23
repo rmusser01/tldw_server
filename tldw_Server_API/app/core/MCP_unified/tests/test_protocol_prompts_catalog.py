@@ -24,6 +24,8 @@ from tldw_Server_API.app.core.MCP_unified.protocol import (
     RequestContext,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class PromptOnlyRegistry:
     def __init__(self, modules: dict[str, BaseModule] | None = None) -> None:
@@ -300,11 +302,14 @@ async def test_initialize_declares_mcp_prompt_capability() -> None:
 
     result = await handler._handle_initialize({"clientInfo": {"name": "unit"}}, _context())
 
-    assert result["capabilities"]["prompts"] == {"listChanged": False}  # nosec B101
+    assert result["capabilities"]["prompts"] == {  # nosec B101
+        "available": True,
+        "listChanged": False,
+    }
 
 
 @pytest.mark.asyncio
-async def test_prompts_list_uses_context_hook_and_preserves_cursor_and_warnings(monkeypatch) -> None:
+async def test_prompts_list_uses_context_hook_and_preserves_cursor_and_warnings(monkeypatch: pytest.MonkeyPatch) -> None:
     handler = _handler_with_registry(PromptOnlyRegistry({"prompts": _prompt_module()}))
 
     async def _allow_namespaced(context: RequestContext, prompt_name: str) -> bool:
@@ -441,7 +446,7 @@ async def test_prompts_list_maps_internal_catalog_error_to_runtime_error() -> No
 
 
 @pytest.mark.asyncio
-async def test_prompts_get_dispatches_namespaced_prompt_before_global_registry(monkeypatch) -> None:
+async def test_prompts_get_dispatches_namespaced_prompt_before_global_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     registry = PromptOnlyRegistry({"prompts": _prompt_module()})
     handler = _handler_with_registry(registry)
 
@@ -464,7 +469,7 @@ async def test_prompts_get_dispatches_namespaced_prompt_before_global_registry(m
 
 
 @pytest.mark.asyncio
-async def test_prompts_get_rejects_non_object_arguments(monkeypatch) -> None:
+async def test_prompts_get_rejects_non_object_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
     handler = _handler_with_registry(PromptOnlyRegistry({"prompts": _prompt_module()}))
 
     async def _allow_namespaced(context: RequestContext, prompt_name: str) -> bool:
@@ -483,7 +488,7 @@ async def test_prompts_get_rejects_non_object_arguments(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_protocol_maps_catalog_invalid_params_without_body_leak(monkeypatch) -> None:
+async def test_protocol_maps_catalog_invalid_params_without_body_leak(monkeypatch: pytest.MonkeyPatch) -> None:
     handler = _handler_with_registry(
         PromptOnlyRegistry(
             {
@@ -516,7 +521,7 @@ async def test_protocol_maps_catalog_invalid_params_without_body_leak(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_protocol_maps_internal_catalog_error_to_internal_message(monkeypatch) -> None:
+async def test_protocol_maps_internal_catalog_error_to_internal_message(monkeypatch: pytest.MonkeyPatch) -> None:
     handler = _handler_with_registry(
         PromptOnlyRegistry(
             {
@@ -554,7 +559,7 @@ async def test_protocol_maps_internal_catalog_error_to_internal_message(monkeypa
 
 @pytest.mark.asyncio
 async def test_process_request_internal_catalog_error_does_not_leak_to_response_or_logs(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     handler = _handler_with_registry(
         PromptOnlyRegistry(

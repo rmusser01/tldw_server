@@ -11,6 +11,7 @@ from typing import Any
 from loguru import logger
 
 from ....DB_Management.Prompts_DB import PromptsDatabase
+from ....exceptions import PromptCatalogError
 from ...persona_scope import assert_identifier_in_scope
 from ..base import BaseModule, create_tool_definition
 from ..disk_space import get_free_disk_space_gb
@@ -20,7 +21,6 @@ from .prompts_catalog import (
     ConfigPromptCatalogSource,
     MCPPromptFormatter,
     PromptCatalogCursor,
-    PromptCatalogError,
     UserPromptCatalogSource,
     clamp_prompt_page_size,
     decode_prompt_cursor,
@@ -39,6 +39,7 @@ _PROMPTS_CLOSE_EXCEPTIONS = (OSError, RuntimeError, SQLiteError, TypeError, Valu
 
 class PromptsModule(BaseModule):
     async def on_initialize(self) -> None:
+        """Initialize prompt catalog sources from module settings."""
         logger.info(f"Initializing Prompts module: {self.name}")
         settings = self.config.settings or {}
         self._prompt_list_page_size = clamp_prompt_page_size(settings.get("prompt_list_page_size", 50))

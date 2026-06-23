@@ -1,23 +1,35 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint
+
+pytestmark = pytest.mark.unit
 
 
 class _CaptureServer:
     initialized = True
 
     def __init__(self) -> None:
-        self.request = None
+        self.request: mcp_unified_endpoint.MCPRequest | None = None
 
-    async def handle_http_request(self, request, user_id=None, metadata=None):  # noqa: ANN001, ARG002
+    async def handle_http_request(
+        self,
+        request: mcp_unified_endpoint.MCPRequest,
+        user_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> SimpleNamespace:
+        _ = (user_id, metadata)
         self.request = request
-        return type("Response", (), {"error": None, "result": {"prompts": [], "nextCursor": "next"}})()
+        return SimpleNamespace(error=None, result={"prompts": [], "nextCursor": "next"})
 
 
-def test_get_mcp_prompts_maps_cursor_to_protocol_request(monkeypatch) -> None:
+def test_get_mcp_prompts_maps_cursor_to_protocol_request(monkeypatch: pytest.MonkeyPatch) -> None:
     server = _CaptureServer()
     monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
     app = FastAPI()
@@ -41,7 +53,7 @@ def test_get_mcp_prompts_maps_cursor_to_protocol_request(monkeypatch) -> None:
     assert server.request.params == {"cursor": "abc"}  # nosec B101
 
 
-def test_get_mcp_prompts_preserves_empty_cursor_query(monkeypatch) -> None:
+def test_get_mcp_prompts_preserves_empty_cursor_query(monkeypatch: pytest.MonkeyPatch) -> None:
     server = _CaptureServer()
     monkeypatch.setattr(mcp_unified_endpoint, "get_mcp_server", lambda: server)
     app = FastAPI()
