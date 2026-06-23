@@ -1885,6 +1885,26 @@ def test_iter_content_router_specs_uses_canonical_rag_key_and_single_web_scrapin
     assert web_scraping_specs[0].prefix == "/api/v1"
 
 
+def test_iter_content_router_specs_registers_audio_studio_as_stable_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.audio.audio_studio",
+        path="/audio-studio/workflows",
+    )
+
+    specs = list(iter_content_router_specs())
+    audio_studio_specs = [spec for spec in specs if spec.route_key == "audio-studio"]
+
+    assert len(audio_studio_specs) == 1
+    spec = audio_studio_specs[0]
+    assert spec.prefix == "/api/v1"
+    assert spec.tags == ("audio-studio",)
+    assert spec.default_stable is True
+    assert _first_router_path(spec.router) == "/audio-studio/workflows"
+
+
 def test_iter_content_router_specs_defers_rag_unified_router_attr_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -196,6 +196,78 @@ def test_generation_payload_allows_harmless_tokenizer_key() -> None:
     assert payload.provider == {"tokenizer": "cl100k_base"}
 
 
+@pytest.mark.parametrize(
+    ("model", "payload"),
+    [
+        (
+            AudioStudioGenerationCreate,
+            {
+                "kind": "speech",
+                "provider": {"base_url": "https://attacker.example"},
+                "target_resource_kind": "section",
+                "target_resource_id": "sec_001",
+                "target_revision_id": "rev_001",
+                "idempotency_key": "client-key-123456",
+            },
+        ),
+        (
+            AudioStudioGenerationCreate,
+            {
+                "kind": "speech",
+                "provider": "tts",
+                "options": {"nested": {"endpoint_url": "https://attacker.example"}},
+                "target_resource_kind": "section",
+                "target_resource_id": "sec_001",
+                "target_revision_id": "rev_001",
+                "idempotency_key": "client-key-123456",
+            },
+        ),
+        (
+            AudioStudioRenderCreate,
+            {
+                "render_type": "preview_mix",
+                "settings": {"provider_base_url": "https://attacker.example"},
+                "target_resource_kind": "render",
+                "target_resource_id": "rnd_001",
+                "target_revision_id": "rev_001",
+                "idempotency_key": "client-key-123456",
+            },
+        ),
+        (
+            AudioStudioProjectCreate,
+            {
+                "title": "Narration",
+                "workflow": "narration",
+                "metadata": {"links": ["https://attacker.example"]},
+            },
+        ),
+        (
+            AudioStudioSectionUpsert,
+            {
+                "base_revision_id": "rev_001",
+                "metadata": {"nested": {"callback": "http://attacker.example"}},
+            },
+        ),
+    ],
+)
+def test_client_payload_rejects_nested_url_keys_and_values(model, payload: dict[str, object]) -> None:
+    with pytest.raises(ValidationError, match="external URL|url"):
+        model(**payload)
+
+
+def test_client_payload_allows_harmless_non_url_strings() -> None:
+    payload = AudioStudioRenderCreate(
+        render_type="preview_mix",
+        settings={"voice": "af_heart", "note": "https-ish but not a url"},
+        target_resource_kind="render",
+        target_resource_id="rnd_001",
+        target_revision_id="rev_001",
+        idempotency_key="client-key-123456",
+    )
+
+    assert payload.settings["note"] == "https-ish but not a url"
+
+
 def test_project_archive_request_requires_base_revision_id() -> None:
     with pytest.raises(ValidationError, match="base_revision_id"):
         AudioStudioProjectArchiveRequest()

@@ -63,6 +63,13 @@ _FORBIDDEN_CLIENT_KEYS = {
 }
 
 
+_FORBIDDEN_URL_KEYS = {
+    "base_url",
+    "endpoint",
+    "endpoint_url",
+    "provider_base_url",
+    "url",
+}
 _FORBIDDEN_EXACT_KEYS = _FORBIDDEN_CLIENT_KEYS | {
     "access_token",
     "credentials",
@@ -75,6 +82,7 @@ _FORBIDDEN_EXACT_KEYS = _FORBIDDEN_CLIENT_KEYS | {
 _FORBIDDEN_COMPONENTS = {"authorization", "credential", "credentials", "password", "secret"}
 _TOKEN_QUALIFIERS = {"access", "auth", "bearer", "client", "id", "refresh", "session"}
 _KEY_QUALIFIERS = {"api", "auth", "client", "private", "secret"}
+_HTTP_URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 
 
 def _normalize_client_key(key: object) -> str:
@@ -85,7 +93,7 @@ def _normalize_client_key(key: object) -> str:
 
 def _is_forbidden_client_key(key: object) -> bool:
     normalized = _normalize_client_key(key)
-    if normalized in _FORBIDDEN_EXACT_KEYS or normalized.endswith("_secret"):
+    if normalized in _FORBIDDEN_EXACT_KEYS or normalized in _FORBIDDEN_URL_KEYS or normalized.endswith("_secret"):
         return True
     parts = [part for part in normalized.split("_") if part]
     if any(part in _FORBIDDEN_COMPONENTS for part in parts):
@@ -101,11 +109,13 @@ def _reject_secret_payload(value: Any, *, path: str = "payload") -> None:
     if isinstance(value, dict):
         for key, nested in value.items():
             if _is_forbidden_client_key(key):
-                raise ValueError(f"{path} must not include secret, credential, or external_url fields")
+                raise ValueError(f"{path} must not include secret, credential, external_url, or external URL fields")
             _reject_secret_payload(nested, path=f"{path}.{key}")
     elif isinstance(value, list):
         for index, nested in enumerate(value):
             _reject_secret_payload(nested, path=f"{path}[{index}]")
+    elif isinstance(value, str) and _HTTP_URL_RE.match(value.strip()):
+        raise ValueError(f"{path} must not include external URL values")
 
 
 class _BaseAudioStudioModel(BaseModel):

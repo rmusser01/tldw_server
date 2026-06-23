@@ -5219,7 +5219,7 @@ class CollectionsDatabase:
     # ------------------------
     # Audio Studio projects API
     # ------------------------
-    def create_audio_studio_project(
+    def _insert_audio_studio_project_row(
         self,
         *,
         project_id: str,
@@ -5250,7 +5250,7 @@ class CollectionsDatabase:
             raise DatabaseError("audio_studio_project_insert_failed")
         return self.get_audio_studio_project(row_id, include_archived=True)
 
-    def create_audio_studio_project_with_revision(
+    def create_audio_studio_project(
         self,
         *,
         project_id: str,
@@ -5312,6 +5312,9 @@ class CollectionsDatabase:
             if res.rowcount <= 0:
                 raise DatabaseError("audio_studio_project_revision_advance_failed")
             return self._get_audio_studio_project(project_row_id=row_id, include_archived=True, connection=conn)
+
+    def create_audio_studio_project_with_revision(self, **kwargs: Any) -> AudioStudioProjectRow:
+        return self.create_audio_studio_project(**kwargs)
 
     def _get_audio_studio_project(
         self,
@@ -5393,7 +5396,7 @@ class CollectionsDatabase:
         rows = self.backend.execute(q, tuple(params)).rows
         return [AudioStudioProjectRow(**row) for row in rows]
 
-    def update_audio_studio_project(
+    def _update_audio_studio_project_row(
         self,
         project_row_id: int,
         *,
@@ -5424,7 +5427,7 @@ class CollectionsDatabase:
             raise KeyError("audio_studio_project_not_found")
         return self.get_audio_studio_project(project_row_id, include_archived=True)
 
-    def archive_audio_studio_project(self, project_row_id: int) -> AudioStudioProjectRow:
+    def _archive_audio_studio_project_row(self, project_row_id: int) -> AudioStudioProjectRow:
         now = _utcnow_iso()
         res = self.backend.execute(
             "UPDATE audio_studio_projects SET status = ?, archived_at = ?, updated_at = ? "
@@ -5622,7 +5625,7 @@ class CollectionsDatabase:
             )
             return self._get_audio_studio_project(project_row_id=project_row_id, include_archived=True, connection=conn)
 
-    def archive_audio_studio_project_with_revision(
+    def archive_audio_studio_project(
         self,
         *,
         project_row_id: int,
@@ -5653,6 +5656,9 @@ class CollectionsDatabase:
             )
             return self._get_audio_studio_project(project_row_id=project_row_id, include_archived=True, connection=conn)
 
+    def archive_audio_studio_project_with_revision(self, **kwargs: Any) -> AudioStudioProjectRow:
+        return self.archive_audio_studio_project(**kwargs)
+
     def _require_audio_studio_resource(
         self,
         *,
@@ -5678,7 +5684,7 @@ class CollectionsDatabase:
             raise ValueError("stale_base_revision")
         return project
 
-    def upsert_audio_studio_section(
+    def _upsert_audio_studio_section_row(
         self,
         *,
         project_row_id: int,
@@ -5700,7 +5706,7 @@ class CollectionsDatabase:
             "ON CONFLICT(project_row_id, section_id) DO UPDATE SET "
             "workflow = excluded.workflow, title = excluded.title, body_text = excluded.body_text, "
             "speaker_id = excluded.speaker_id, order_index = excluded.order_index, settings_json = excluded.settings_json, "
-            "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?",
+            "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?, deleted_at = NULL",
             (
                 project_row_id,
                 section_id,
@@ -5714,7 +5720,7 @@ class CollectionsDatabase:
                 self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
             ),
         )
-        self.update_audio_studio_project(project_row_id, current_revision_id=current_revision_id)
+        self._update_audio_studio_project_row(project_row_id, current_revision_id=current_revision_id)
         row = self.backend.execute(
             "SELECT id, project_row_id, section_id, workflow, title, body_text, speaker_id, order_index, "
             "settings_json, current_revision_id, archived_at, deleted, deleted_at "
@@ -5725,7 +5731,7 @@ class CollectionsDatabase:
             raise DatabaseError("audio_studio_section_upsert_failed")
         return AudioStudioSectionRow(**row)
 
-    def upsert_audio_studio_track(
+    def _upsert_audio_studio_track_row(
         self,
         *,
         project_row_id: int,
@@ -5749,7 +5755,7 @@ class CollectionsDatabase:
             "ON CONFLICT(project_row_id, track_id) DO UPDATE SET "
             "name = excluded.name, kind = excluded.kind, order_index = excluded.order_index, muted = excluded.muted, "
             "solo = excluded.solo, volume = excluded.volume, settings_json = excluded.settings_json, "
-            "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?",
+            "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?, deleted_at = NULL",
             (
                 project_row_id,
                 track_id,
@@ -5764,7 +5770,7 @@ class CollectionsDatabase:
                 self._coerce_bool_flag(False, postgres=postgres),
             ),
         )
-        self.update_audio_studio_project(project_row_id, current_revision_id=current_revision_id)
+        self._update_audio_studio_project_row(project_row_id, current_revision_id=current_revision_id)
         row = self.backend.execute(
             "SELECT id, project_row_id, track_id, name, kind, order_index, muted, solo, volume, "
             "settings_json, current_revision_id, archived_at, deleted, deleted_at "
@@ -5775,7 +5781,7 @@ class CollectionsDatabase:
             raise DatabaseError("audio_studio_track_upsert_failed")
         return AudioStudioTrackRow(**row)
 
-    def upsert_audio_studio_clip(
+    def _upsert_audio_studio_clip_row(
         self,
         *,
         project_row_id: int,
@@ -5807,7 +5813,7 @@ class CollectionsDatabase:
             "clip_type = excluded.clip_type, start_ms = excluded.start_ms, duration_ms = excluded.duration_ms, "
             "volume = excluded.volume, fade_in_ms = excluded.fade_in_ms, fade_out_ms = excluded.fade_out_ms, "
             "muted = excluded.muted, artifact_id = excluded.artifact_id, settings_json = excluded.settings_json, "
-            "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?",
+            "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?, deleted_at = NULL",
             (
                 project_row_id,
                 clip_id,
@@ -5827,7 +5833,7 @@ class CollectionsDatabase:
                 self._coerce_bool_flag(False, postgres=postgres),
             ),
         )
-        self.update_audio_studio_project(project_row_id, current_revision_id=current_revision_id)
+        self._update_audio_studio_project_row(project_row_id, current_revision_id=current_revision_id)
         row = self.backend.execute(
             "SELECT id, project_row_id, clip_id, section_id, track_id, title, clip_type, start_ms, duration_ms, "
             "volume, fade_in_ms, fade_out_ms, muted, artifact_id, settings_json, current_revision_id, "
@@ -5838,7 +5844,7 @@ class CollectionsDatabase:
             raise DatabaseError("audio_studio_clip_upsert_failed")
         return AudioStudioClipRow(**row)
 
-    def upsert_audio_studio_section_with_revision(
+    def upsert_audio_studio_section(
         self,
         *,
         project_row_id: int,
@@ -5870,7 +5876,7 @@ class CollectionsDatabase:
                 "ON CONFLICT(project_row_id, section_id) DO UPDATE SET "
                 "workflow = excluded.workflow, title = excluded.title, body_text = excluded.body_text, "
                 "speaker_id = excluded.speaker_id, order_index = excluded.order_index, settings_json = excluded.settings_json, "
-                "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?",
+                "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?, deleted_at = NULL",
                 (
                     project_row_id,
                     section_id,
@@ -5907,7 +5913,10 @@ class CollectionsDatabase:
                 raise DatabaseError("audio_studio_section_upsert_failed")
             return AudioStudioSectionRow(**row)
 
-    def upsert_audio_studio_track_with_revision(
+    def upsert_audio_studio_section_with_revision(self, **kwargs: Any) -> AudioStudioSectionRow:
+        return self.upsert_audio_studio_section(**kwargs)
+
+    def upsert_audio_studio_track(
         self,
         *,
         project_row_id: int,
@@ -5941,7 +5950,7 @@ class CollectionsDatabase:
                 "ON CONFLICT(project_row_id, track_id) DO UPDATE SET "
                 "name = excluded.name, kind = excluded.kind, order_index = excluded.order_index, muted = excluded.muted, "
                 "solo = excluded.solo, volume = excluded.volume, settings_json = excluded.settings_json, "
-                "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?",
+                "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?, deleted_at = NULL",
                 (
                     project_row_id,
                     track_id,
@@ -5979,7 +5988,10 @@ class CollectionsDatabase:
                 raise DatabaseError("audio_studio_track_upsert_failed")
             return AudioStudioTrackRow(**row)
 
-    def upsert_audio_studio_clip_with_revision(
+    def upsert_audio_studio_track_with_revision(self, **kwargs: Any) -> AudioStudioTrackRow:
+        return self.upsert_audio_studio_track(**kwargs)
+
+    def upsert_audio_studio_clip(
         self,
         *,
         project_row_id: int,
@@ -6047,7 +6059,7 @@ class CollectionsDatabase:
                 "clip_type = excluded.clip_type, start_ms = excluded.start_ms, duration_ms = excluded.duration_ms, "
                 "volume = excluded.volume, fade_in_ms = excluded.fade_in_ms, fade_out_ms = excluded.fade_out_ms, "
                 "muted = excluded.muted, artifact_id = excluded.artifact_id, settings_json = excluded.settings_json, "
-                "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?",
+                "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?, deleted_at = NULL",
                 (
                     project_row_id,
                     clip_id,
@@ -6089,6 +6101,9 @@ class CollectionsDatabase:
             if not row:
                 raise DatabaseError("audio_studio_clip_upsert_failed")
             return AudioStudioClipRow(**row)
+
+    def upsert_audio_studio_clip_with_revision(self, **kwargs: Any) -> AudioStudioClipRow:
+        return self.upsert_audio_studio_clip(**kwargs)
 
     def create_audio_studio_artifact(
         self,
@@ -6233,16 +6248,18 @@ class CollectionsDatabase:
         request_hash: str,
         response_json: str,
     ) -> AudioStudioIdempotencyRecordRow:
+        existing = self.get_audio_studio_idempotency_record(namespace, key)
+        if existing is not None:
+            if existing.request_hash != request_hash:
+                raise ValueError("audio_studio_idempotency_conflict")
+            return existing
         if project_row_id is not None:
             self.get_audio_studio_project(project_row_id, include_archived=True)
         now = _utcnow_iso()
         self.backend.execute(
             "INSERT INTO audio_studio_idempotency_keys "
             "(namespace, key, user_id, project_row_id, request_hash, response_json, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(namespace, key, user_id) DO UPDATE SET "
-            "project_row_id = excluded.project_row_id, request_hash = excluded.request_hash, "
-            "response_json = excluded.response_json, updated_at = excluded.updated_at",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (namespace, key, self.user_id, project_row_id, request_hash, response_json, now, now),
         )
         record = self.get_audio_studio_idempotency_record(namespace, key)

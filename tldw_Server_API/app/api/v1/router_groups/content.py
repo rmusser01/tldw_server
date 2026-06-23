@@ -187,7 +187,6 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}",
             tags=("audio-studio",),
             route_key="audio-studio",
-            default_stable=False,
         ),
     )
 

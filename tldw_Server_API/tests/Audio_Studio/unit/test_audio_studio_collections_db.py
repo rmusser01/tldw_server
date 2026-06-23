@@ -42,14 +42,39 @@ def db_user_1(isolated_collections_base: Path) -> CollectionsDatabase:
     return CollectionsDatabase.for_user(user_id=101)
 
 
+def _create_audio_studio_project(
+    db: CollectionsDatabase,
+    *,
+    project_id: str,
+    title: str,
+    workflow: str = "narration",
+    revision_id: str = "rev_001",
+    settings_json: str | None = None,
+) -> object:
+    return db.create_audio_studio_project(
+        project_id=project_id,
+        title=title,
+        workflow=workflow,
+        revision_id=revision_id,
+        mutation_kind="project.create",
+        resource_kind="project",
+        resource_id=project_id,
+        content_hash=f"hash_{revision_id}",
+        payload_json=json.dumps({"title": title, "workflow": workflow}),
+        settings_json=settings_json,
+    )
+
+
 def test_audio_studio_project_crud_and_owner_isolation(
     db_user_1: CollectionsDatabase,
     isolated_collections_base: Path,
 ) -> None:
-    created = db_user_1.create_audio_studio_project(
+    created = _create_audio_studio_project(
+        db_user_1,
         project_id="ast_shared",
         title="Narration Project",
         workflow="narration",
+        revision_id="rev_001",
         settings_json=json.dumps({"format": "mp3"}),
     )
 
@@ -64,16 +89,25 @@ def test_audio_studio_project_crud_and_owner_isolation(
         db_user_2.get_audio_studio_project_by_project_id("ast_shared")
     assert db_user_2.list_audio_studio_projects() == []
 
-    other = db_user_2.create_audio_studio_project(
+    other = _create_audio_studio_project(
+        db_user_2,
         project_id="ast_shared",
         title="Other User Project",
         workflow="podcast",
+        revision_id="rev_001",
     )
     assert other.project_id == created.project_id
     assert other.user_id == "202"
 
-    updated = db_user_1.update_audio_studio_project(
-        created.id,
+    updated = db_user_1.mutate_audio_studio_project(
+        project_row_id=created.id,
+        base_revision_id="rev_001",
+        revision_id="rev_002",
+        mutation_kind="project.update",
+        resource_kind="project",
+        resource_id=created.project_id,
+        content_hash="hash_002",
+        payload_json=json.dumps({"title": "Renamed"}),
         title="Renamed",
         status="active",
         settings_json=json.dumps({"format": "wav"}),
@@ -82,7 +116,13 @@ def test_audio_studio_project_crud_and_owner_isolation(
     assert updated.status == "active"
     assert json.loads(updated.settings_json)["format"] == "wav"
 
-    archived = db_user_1.archive_audio_studio_project(created.id)
+    archived = db_user_1.archive_audio_studio_project(
+        project_row_id=created.id,
+        base_revision_id="rev_002",
+        revision_id="rev_archive",
+        content_hash="hash_archive",
+        payload_json=json.dumps({"archived": True}),
+    )
     assert archived.status == "archived"
     assert archived.archived_at is not None
     assert archived.deleted == 0
@@ -91,22 +131,15 @@ def test_audio_studio_project_crud_and_owner_isolation(
 
 
 def test_audio_studio_revisions_and_resource_upserts(db_user_1: CollectionsDatabase) -> None:
-    project = db_user_1.create_audio_studio_project(
+    project = _create_audio_studio_project(
+        db_user_1,
         project_id="ast_revisions",
         title="Revision Project",
         workflow="briefing",
+        revision_id="rev_001",
     )
 
-    revision = db_user_1.create_audio_studio_revision(
-        project_row_id=project.id,
-        revision_id="rev_001",
-        parent_revision_id=None,
-        mutation_kind="project.create",
-        resource_kind="section",
-        resource_id="sec_001",
-        content_hash="hash_001",
-        payload_json=json.dumps({"title": "Intro"}),
-    )
+    revision = db_user_1.get_audio_studio_revision("rev_001")
     assert revision.revision_id == "rev_001"
     assert db_user_1.get_audio_studio_project(project.id).current_revision_id == "rev_001"
 
@@ -121,7 +154,9 @@ def test_audio_studio_revisions_and_resource_upserts(db_user_1: CollectionsDatab
             speaker_id=None,
             order_index=0,
             settings_json=json.dumps({}),
-            current_revision_id="rev_002",
+            revision_id="rev_002",
+            content_hash="hash_002",
+            payload_json=json.dumps({"section_id": "sec_001"}),
         )
 
     section = db_user_1.upsert_audio_studio_section(
@@ -134,7 +169,9 @@ def test_audio_studio_revisions_and_resource_upserts(db_user_1: CollectionsDatab
         speaker_id=None,
         order_index=0,
         settings_json=json.dumps({}),
-        current_revision_id="rev_002",
+        revision_id="rev_002",
+        content_hash="hash_002",
+        payload_json=json.dumps({"section_id": "sec_001"}),
     )
     assert section.section_id == "sec_001"
     assert section.current_revision_id == "rev_002"
@@ -150,7 +187,9 @@ def test_audio_studio_revisions_and_resource_upserts(db_user_1: CollectionsDatab
         solo=False,
         volume=1.0,
         settings_json=json.dumps({}),
-        current_revision_id="rev_003",
+        revision_id="rev_003",
+        content_hash="hash_003",
+        payload_json=json.dumps({"track_id": "trk_001"}),
     )
     assert track.track_id == "trk_001"
     assert track.muted == 0
@@ -171,7 +210,9 @@ def test_audio_studio_revisions_and_resource_upserts(db_user_1: CollectionsDatab
         muted=False,
         artifact_id=None,
         settings_json=json.dumps({}),
-        current_revision_id="rev_004",
+        revision_id="rev_004",
+        content_hash="hash_004",
+        payload_json=json.dumps({"clip_id": "clip_001"}),
     )
     assert clip.clip_id == "clip_001"
     assert db_user_1.get_audio_studio_project(project.id).current_revision_id == "rev_004"
@@ -187,37 +228,23 @@ def test_audio_studio_revision_ids_are_owner_scoped_on_shared_database(tmp_path:
     db_user_1 = CollectionsDatabase.from_backend(user_id=101, backend=backend)
     db_user_2 = CollectionsDatabase.from_backend(user_id=202, backend=backend)
 
-    project_1 = db_user_1.create_audio_studio_project(
+    project_1 = _create_audio_studio_project(
+        db_user_1,
         project_id="ast_user_1",
         title="User 1 Project",
         workflow="narration",
+        revision_id="rev_shared",
     )
-    project_2 = db_user_2.create_audio_studio_project(
+    project_2 = _create_audio_studio_project(
+        db_user_2,
         project_id="ast_user_2",
         title="User 2 Project",
         workflow="podcast",
+        revision_id="rev_shared",
     )
 
-    revision_1 = db_user_1.create_audio_studio_revision(
-        project_row_id=project_1.id,
-        revision_id="rev_shared",
-        parent_revision_id=None,
-        mutation_kind="project.create",
-        resource_kind="project",
-        resource_id=project_1.project_id,
-        content_hash="hash_user_1",
-        payload_json=json.dumps({"title": project_1.title}),
-    )
-    revision_2 = db_user_2.create_audio_studio_revision(
-        project_row_id=project_2.id,
-        revision_id="rev_shared",
-        parent_revision_id=None,
-        mutation_kind="project.create",
-        resource_kind="project",
-        resource_id=project_2.project_id,
-        content_hash="hash_user_2",
-        payload_json=json.dumps({"title": project_2.title}),
-    )
+    revision_1 = db_user_1.get_audio_studio_revision("rev_shared")
+    revision_2 = db_user_2.get_audio_studio_revision("rev_shared")
 
     assert revision_1.revision_id == revision_2.revision_id == "rev_shared"
     assert db_user_1.get_audio_studio_revision("rev_shared").resource_id == "ast_user_1"
@@ -229,21 +256,13 @@ def test_audio_studio_revision_ids_are_owner_scoped_on_shared_database(tmp_path:
 def test_audio_studio_project_mutation_rolls_back_when_revision_insert_fails(
     db_user_1: CollectionsDatabase,
 ) -> None:
-    project = db_user_1.create_audio_studio_project(
+    project = _create_audio_studio_project(
+        db_user_1,
         project_id="ast_rollback",
         title="Rollback Project",
         workflow="narration",
-        settings_json=json.dumps({"description": "Original"}),
-    )
-    db_user_1.create_audio_studio_revision(
-        project_row_id=project.id,
         revision_id="rev_001",
-        parent_revision_id=None,
-        mutation_kind="project.create",
-        resource_kind="project",
-        resource_id=project.project_id,
-        content_hash="hash_001",
-        payload_json=json.dumps({"title": "Rollback Project"}),
+        settings_json=json.dumps({"description": "Original"}),
     )
 
     with pytest.raises(DatabaseError):
@@ -268,23 +287,15 @@ def test_audio_studio_project_mutation_rolls_back_when_revision_insert_fails(
 def test_audio_studio_archive_creates_revision_and_advances_project(
     db_user_1: CollectionsDatabase,
 ) -> None:
-    project = db_user_1.create_audio_studio_project(
+    project = _create_audio_studio_project(
+        db_user_1,
         project_id="ast_archive_revision",
         title="Archive Revision Project",
         workflow="briefing",
-    )
-    db_user_1.create_audio_studio_revision(
-        project_row_id=project.id,
         revision_id="rev_001",
-        parent_revision_id=None,
-        mutation_kind="project.create",
-        resource_kind="project",
-        resource_id=project.project_id,
-        content_hash="hash_001",
-        payload_json=json.dumps({"title": project.title}),
     )
 
-    archived = db_user_1.archive_audio_studio_project_with_revision(
+    archived = db_user_1.archive_audio_studio_project(
         project_row_id=project.id,
         base_revision_id="rev_001",
         revision_id="rev_archive",
@@ -305,24 +316,16 @@ def test_audio_studio_archive_creates_revision_and_advances_project(
 def test_audio_studio_resource_mutation_rolls_back_when_revision_insert_fails(
     db_user_1: CollectionsDatabase,
 ) -> None:
-    project = db_user_1.create_audio_studio_project(
+    project = _create_audio_studio_project(
+        db_user_1,
         project_id="ast_resource_rollback",
         title="Resource Rollback Project",
         workflow="briefing",
-    )
-    db_user_1.create_audio_studio_revision(
-        project_row_id=project.id,
         revision_id="rev_001",
-        parent_revision_id=None,
-        mutation_kind="project.create",
-        resource_kind="project",
-        resource_id=project.project_id,
-        content_hash="hash_001",
-        payload_json=json.dumps({"title": project.title}),
     )
 
     with pytest.raises(DatabaseError):
-        db_user_1.upsert_audio_studio_section_with_revision(
+        db_user_1.upsert_audio_studio_section(
             project_row_id=project.id,
             section_id="sec_rollback",
             base_revision_id="rev_001",
@@ -349,24 +352,16 @@ def test_audio_studio_resource_mutation_rolls_back_when_revision_insert_fails(
 def test_audio_studio_clip_upsert_rejects_dangling_references(
     db_user_1: CollectionsDatabase,
 ) -> None:
-    project = db_user_1.create_audio_studio_project(
+    project = _create_audio_studio_project(
+        db_user_1,
         project_id="ast_clip_refs",
         title="Clip References",
         workflow="narration",
-    )
-    db_user_1.create_audio_studio_revision(
-        project_row_id=project.id,
         revision_id="rev_001",
-        parent_revision_id=None,
-        mutation_kind="project.create",
-        resource_kind="project",
-        resource_id=project.project_id,
-        content_hash="hash_001",
-        payload_json=json.dumps({"title": project.title}),
     )
 
     with pytest.raises(ValueError, match="audio_studio_track_not_found"):
-        db_user_1.upsert_audio_studio_clip_with_revision(
+        db_user_1.upsert_audio_studio_clip(
             project_row_id=project.id,
             clip_id="clip_bad_track",
             base_revision_id="rev_001",
@@ -399,21 +394,13 @@ def test_audio_studio_clip_upsert_rejects_dangling_references(
         solo=False,
         volume=1.0,
         settings_json=json.dumps({}),
-        current_revision_id="rev_002",
-    )
-    db_user_1.create_audio_studio_revision(
-        project_row_id=project.id,
         revision_id="rev_002",
-        parent_revision_id="rev_001",
-        mutation_kind="track.upsert",
-        resource_kind="track",
-        resource_id="trk_001",
         content_hash="hash_002",
         payload_json=json.dumps({"track_id": "trk_001"}),
     )
 
     with pytest.raises(ValueError, match="audio_studio_section_not_found"):
-        db_user_1.upsert_audio_studio_clip_with_revision(
+        db_user_1.upsert_audio_studio_clip(
             project_row_id=project.id,
             clip_id="clip_bad_section",
             base_revision_id="rev_002",
@@ -445,21 +432,13 @@ def test_audio_studio_clip_upsert_rejects_dangling_references(
         speaker_id=None,
         order_index=0,
         settings_json=json.dumps({}),
-        current_revision_id="rev_003",
-    )
-    db_user_1.create_audio_studio_revision(
-        project_row_id=project.id,
         revision_id="rev_003",
-        parent_revision_id="rev_002",
-        mutation_kind="section.upsert",
-        resource_kind="section",
-        resource_id="sec_001",
         content_hash="hash_003",
         payload_json=json.dumps({"section_id": "sec_001"}),
     )
 
     with pytest.raises(ValueError, match="audio_studio_artifact_not_found"):
-        db_user_1.upsert_audio_studio_clip_with_revision(
+        db_user_1.upsert_audio_studio_clip(
             project_row_id=project.id,
             clip_id="clip_bad_artifact",
             base_revision_id="rev_003",
@@ -483,10 +462,12 @@ def test_audio_studio_clip_upsert_rejects_dangling_references(
 
 
 def test_audio_studio_artifacts_generation_jobs_and_idempotency(db_user_1: CollectionsDatabase) -> None:
-    project = db_user_1.create_audio_studio_project(
+    project = _create_audio_studio_project(
+        db_user_1,
         project_id="ast_jobs",
         title="Jobs Project",
         workflow="music",
+        revision_id="rev_001",
     )
 
     artifact = db_user_1.create_audio_studio_artifact(
@@ -523,14 +504,165 @@ def test_audio_studio_artifacts_generation_jobs_and_idempotency(db_user_1: Colle
     assert job.job_id == "job_001"
 
     assert db_user_1.get_audio_studio_idempotency_record("audio_studio", "missing") is None
-    db_user_1.put_audio_studio_idempotency_record(
+    inserted = db_user_1.put_audio_studio_idempotency_record(
         namespace="audio_studio",
         key="client-key-123456",
         project_row_id=project.id,
         request_hash="hash_001",
         response_json=json.dumps({"job_id": "job_001"}),
     )
+    assert json.loads(inserted.response_json)["job_id"] == "job_001"
     record = db_user_1.get_audio_studio_idempotency_record("audio_studio", "client-key-123456")
     assert record is not None
     assert record.project_row_id == project.id
     assert json.loads(record.response_json)["job_id"] == "job_001"
+
+    duplicate = db_user_1.put_audio_studio_idempotency_record(
+        namespace="audio_studio",
+        key="client-key-123456",
+        project_row_id=project.id,
+        request_hash="hash_001",
+        response_json=json.dumps({"job_id": "job_overwrite"}),
+    )
+    assert duplicate.updated_at == inserted.updated_at
+    assert json.loads(duplicate.response_json)["job_id"] == "job_001"
+
+    with pytest.raises(ValueError, match="audio_studio_idempotency_conflict"):
+        db_user_1.put_audio_studio_idempotency_record(
+            namespace="audio_studio",
+            key="client-key-123456",
+            project_row_id=project.id,
+            request_hash="hash_002",
+            response_json=json.dumps({"job_id": "job_conflict"}),
+        )
+
+
+def test_audio_studio_resource_resurrection_clears_deleted_at(db_user_1: CollectionsDatabase) -> None:
+    project = _create_audio_studio_project(
+        db_user_1,
+        project_id="ast_resurrection",
+        title="Resurrection Project",
+        workflow="narration",
+        revision_id="rev_001",
+    )
+    section = db_user_1.upsert_audio_studio_section(
+        project_row_id=project.id,
+        section_id="sec_001",
+        base_revision_id="rev_001",
+        revision_id="rev_002",
+        workflow="narration",
+        title="Intro",
+        body_text="Hello",
+        speaker_id=None,
+        order_index=0,
+        settings_json=json.dumps({}),
+        content_hash="hash_002",
+        payload_json=json.dumps({"section_id": "sec_001"}),
+    )
+    track = db_user_1.upsert_audio_studio_track(
+        project_row_id=project.id,
+        track_id="trk_001",
+        base_revision_id="rev_002",
+        revision_id="rev_003",
+        name="Narration",
+        kind="speech",
+        order_index=0,
+        muted=False,
+        solo=False,
+        volume=1.0,
+        settings_json=json.dumps({}),
+        content_hash="hash_003",
+        payload_json=json.dumps({"track_id": "trk_001"}),
+    )
+    clip = db_user_1.upsert_audio_studio_clip(
+        project_row_id=project.id,
+        clip_id="clip_001",
+        base_revision_id="rev_003",
+        revision_id="rev_004",
+        section_id=section.section_id,
+        track_id=track.track_id,
+        title="Clip",
+        clip_type="speech",
+        start_ms=0,
+        duration_ms=None,
+        volume=1.0,
+        fade_in_ms=0,
+        fade_out_ms=0,
+        muted=False,
+        artifact_id=None,
+        settings_json=json.dumps({}),
+        content_hash="hash_004",
+        payload_json=json.dumps({"clip_id": "clip_001"}),
+    )
+
+    deleted_at = "2026-01-01T00:00:00Z"
+    db_user_1.backend.execute(
+        "UPDATE audio_studio_sections SET deleted = ?, deleted_at = ? WHERE id = ?",
+        (1, deleted_at, section.id),
+    )
+    restored_section = db_user_1.upsert_audio_studio_section(
+        project_row_id=project.id,
+        section_id=section.section_id,
+        base_revision_id="rev_004",
+        revision_id="rev_005",
+        workflow="narration",
+        title="Restored Intro",
+        body_text="Hello again",
+        speaker_id=None,
+        order_index=0,
+        settings_json=json.dumps({}),
+        content_hash="hash_005",
+        payload_json=json.dumps({"section_id": section.section_id}),
+    )
+
+    db_user_1.backend.execute(
+        "UPDATE audio_studio_tracks SET deleted = ?, deleted_at = ? WHERE id = ?",
+        (1, deleted_at, track.id),
+    )
+    restored_track = db_user_1.upsert_audio_studio_track(
+        project_row_id=project.id,
+        track_id=track.track_id,
+        base_revision_id="rev_005",
+        revision_id="rev_006",
+        name="Restored Narration",
+        kind="speech",
+        order_index=0,
+        muted=False,
+        solo=False,
+        volume=1.0,
+        settings_json=json.dumps({}),
+        content_hash="hash_006",
+        payload_json=json.dumps({"track_id": track.track_id}),
+    )
+
+    db_user_1.backend.execute(
+        "UPDATE audio_studio_clips SET deleted = ?, deleted_at = ? WHERE id = ?",
+        (1, deleted_at, clip.id),
+    )
+    restored_clip = db_user_1.upsert_audio_studio_clip(
+        project_row_id=project.id,
+        clip_id=clip.clip_id,
+        base_revision_id="rev_006",
+        revision_id="rev_007",
+        section_id=section.section_id,
+        track_id=track.track_id,
+        title="Restored Clip",
+        clip_type="speech",
+        start_ms=0,
+        duration_ms=None,
+        volume=1.0,
+        fade_in_ms=0,
+        fade_out_ms=0,
+        muted=False,
+        artifact_id=None,
+        settings_json=json.dumps({}),
+        content_hash="hash_007",
+        payload_json=json.dumps({"clip_id": clip.clip_id}),
+    )
+
+    assert restored_section.deleted == 0
+    assert restored_section.deleted_at is None
+    assert restored_track.deleted == 0
+    assert restored_track.deleted_at is None
+    assert restored_clip.deleted == 0
+    assert restored_clip.deleted_at is None

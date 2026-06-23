@@ -2,13 +2,17 @@
 id: TASK-2348
 title: Implement Audio Studio backend foundation
 status: Done
+assignee: []
+created_date: ''
+updated_date: 2026-06-23 15:28
 labels:
 - audio
 - backend
-priority: high
+dependencies: []
 documentation:
 - Docs/superpowers/plans/2026-06-23-audio-studio-mvp-implementation-plan.md
 - Docs/superpowers/specs/2026-06-23-audio-studio-design.md
+priority: high
 modified_files:
 - tldw_Server_API/app/api/v1/schemas/audio_studio_schemas.py
 - tldw_Server_API/app/api/v1/endpoints/audio/audio_studio.py
@@ -17,6 +21,7 @@ modified_files:
 - tldw_Server_API/tests/Audio_Studio/unit/test_audio_studio_schemas.py
 - tldw_Server_API/tests/Audio_Studio/unit/test_audio_studio_collections_db.py
 - tldw_Server_API/tests/Audio_Studio/integration/test_audio_studio_projects_api.py
+- tldw_Server_API/tests/Services/test_router_groups_contract.py
 ---
 
 ## Description
@@ -40,6 +45,7 @@ Follow Stage 1 tasks 1.1 through 1.3 in Docs/superpowers/plans/2026-06-23-audio-
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Follow-up spec compliance fixes:
 - Strengthened Audio Studio client payload validation to reject common credential key variants including access_token, refresh-token, private_key, credentials/clientCredential, while allowing harmless keys such as tokenizer.
@@ -66,10 +72,29 @@ Follow-up verification:
 - git diff --check scoped to Audio Studio touched files: pass; global dirty worktree still contains unrelated changes outside this task scope.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
+Follow-up code-quality review fixes:
+- Rejected nested URL-bearing keys and http/https URL string values in Audio Studio client-controlled provider/options/settings/metadata payloads.
+- Made audio-studio router registration stable/default-enabled and added router group contract coverage.
+- Made canonical public project/resource mutation repository methods revision-aware transactional operations while keeping private row helpers for low-level setup.
+- Changed idempotency records to first-insert-wins with audio_studio_idempotency_conflict on mismatched request hashes.
+- Cleared deleted_at when section/track/clip upserts resurrect resources.
+
+Follow-up verification:
+- .venv/bin/python -m pytest tldw_Server_API/tests/Audio_Studio/unit/test_audio_studio_schemas.py -v: 32 passed
+- .venv/bin/python -m pytest tldw_Server_API/tests/Audio_Studio/unit/test_audio_studio_collections_db.py -v: 9 passed
+- .venv/bin/python -m pytest tldw_Server_API/tests/Audio_Studio/integration/test_audio_studio_projects_api.py -v: 8 passed
+- .venv/bin/python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py::test_iter_content_router_specs_registers_audio_studio_as_stable_route -v: 1 passed
+- .venv/bin/python -m pytest tldw_Server_API/tests/Audiobooks/integration/test_audiobook_jobs_endpoints.py -v: 4 passed
+- .venv/bin/python -m bandit -r touched backend files -f json -o /tmp/bandit_audio_studio_backend_foundation.json: exit 0, zero findings
+- Scoped git diff --check for Audio Studio touched files: pass
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Audio Studio backend foundation added for Stage 1.1-1.3. Created schema contracts with string enums, revision/idempotency validation, strict secret/external URL payload guards, and top-level extra-field rejection; extended Collections DB with Audio Studio project/revision/resource/artifact/job/idempotency tables and repository methods with owner isolation; changed revision table DDL to owner-scoped revision_id uniqueness; added transactional repository mutation methods that atomically validate base revisions, mutate project/resources, insert revision rows, advance current_revision_id, and roll back on failures; added clip reference validation and path ID validation; fixed explicit project description clearing; added /api/v1/audio-studio workflow, project CRUD, and section/track/clip upsert endpoints; registered the route key audio-studio; required base_revision_id for project archive; and added unit/integration coverage plus Bandit verification.
+
+Follow-up hardening completed: Audio Studio client payloads now reject nested external URLs, /audio-studio is registered as a stable/default-enabled content route with contract coverage, canonical public repository mutation methods are revision-aware transactional paths, idempotency records are first-insert-wins, and resource resurrection clears deleted_at.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

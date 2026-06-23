@@ -210,7 +210,7 @@ async def create_audio_studio_project(
     )
     payload = request.model_dump(mode="json")
     try:
-        project = collections_db.create_audio_studio_project_with_revision(
+        project = collections_db.create_audio_studio_project(
             project_id=project_id,
             title=request.title,
             workflow=request.workflow.value,
@@ -305,7 +305,7 @@ async def archive_audio_studio_project(
     revision_id = _new_revision_id()
     payload = request.model_dump(mode="json")
     try:
-        archived = collections_db.archive_audio_studio_project_with_revision(
+        archived = collections_db.archive_audio_studio_project(
             project_row_id=project.id,
             base_revision_id=request.base_revision_id,
             revision_id=revision_id,
@@ -333,7 +333,7 @@ async def upsert_audio_studio_section(
     revision_id = _new_revision_id()
     payload = request.model_dump(mode="json")
     try:
-        row = collections_db.upsert_audio_studio_section_with_revision(
+        row = collections_db.upsert_audio_studio_section(
             project_row_id=project.id,
             section_id=section_id,
             base_revision_id=request.base_revision_id,
@@ -368,7 +368,7 @@ async def upsert_audio_studio_track(
     revision_id = _new_revision_id()
     payload = request.model_dump(mode="json")
     try:
-        row = collections_db.upsert_audio_studio_track_with_revision(
+        row = collections_db.upsert_audio_studio_track(
             project_row_id=project.id,
             track_id=track_id,
             base_revision_id=request.base_revision_id,
@@ -404,7 +404,7 @@ async def upsert_audio_studio_clip(
     revision_id = _new_revision_id()
     payload = request.model_dump(mode="json")
     try:
-        row = collections_db.upsert_audio_studio_clip_with_revision(
+        row = collections_db.upsert_audio_studio_clip(
             project_row_id=project.id,
             clip_id=clip_id,
             base_revision_id=request.base_revision_id,
