@@ -121,6 +121,7 @@ _UPDATABLE_ANNOTATION_COLS = frozenset({
     "followup_note",
     "metadata",
 })
+_ANCHOR_STATUS_FILTER_CANDIDATE_CAP = 500
 
 
 def _word_count(text: str | None) -> int:
@@ -1432,15 +1433,17 @@ class ManuscriptDBHelper:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
-        """List annotations for a project with optional filters."""
+        """List annotations for a project with optional filters.
+
+        Unbounded derived anchor-status filtering is capped at 500 candidate
+        rows because status is derived from current scene text in Python.
+        """
         self._validate_annotation_enums(
             target_type=target_type,
             status=status,
             category=category,
             source=source,
         )
-        if anchor_status is not None and (target_type != "scene" or not target_id) and limit > 500:
-            raise ValueError("Unbounded anchor_status annotation filters are capped at 500 candidates.")  # noqa: TRY003
 
         clauses = ["project_id = ?", "deleted = 0"]
         params: list[Any] = [project_id]
@@ -1476,17 +1479,25 @@ class ManuscriptDBHelper:
                 ).fetchall()
                 return [self._annotation_row_to_dict(row, conn) for row in rows], int(total_row["cnt"] or 0)
 
-            candidate_limit = 500 if target_type != "scene" or not target_id else max(limit + offset, 1)
+            total_row = conn.execute(
+                f"SELECT COUNT(*) AS cnt FROM manuscript_annotations WHERE {where_sql}",  # nosec B608
+                params,
+            ).fetchone()
+            candidate_count = int(total_row["cnt"] or 0)
+            is_bounded_scene_target = target_type == "scene" and target_id is not None
+            if not is_bounded_scene_target and candidate_count > _ANCHOR_STATUS_FILTER_CANDIDATE_CAP:
+                raise ValueError(
+                    "Unbounded anchor_status annotation filter candidate set exceeds "
+                    f"{_ANCHOR_STATUS_FILTER_CANDIDATE_CAP} rows; add target_type='scene' and target_id."
+                )  # noqa: TRY003
+
             rows = conn.execute(
                 f"SELECT * FROM manuscript_annotations WHERE {where_sql} "  # nosec B608
-                "ORDER BY last_modified DESC LIMIT ?",
-                (*params, candidate_limit),
+                "ORDER BY last_modified DESC",
+                params,
             ).fetchall()
-            filtered = [
-                self._annotation_row_to_dict(row, conn)
-                for row in rows
-                if self._annotation_row_to_dict(row, conn)["anchor_status"] == anchor_status
-            ]
+            candidates = [self._annotation_row_to_dict(row, conn) for row in rows]
+            filtered = [row for row in candidates if row["anchor_status"] == anchor_status]
         return filtered[offset:offset + limit], len(filtered)
 
     def update_annotation(

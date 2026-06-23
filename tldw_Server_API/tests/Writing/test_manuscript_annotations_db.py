@@ -350,6 +350,79 @@ def test_derived_anchor_status_changes_after_scene_edit_without_mutating_row(mdb
     assert stored["anchor_status"] == "attached"
 
 
+def test_bounded_scene_anchor_status_filter_derives_before_pagination(mdb, manuscript):
+    scene = mdb.get_scene(manuscript["scene_id"])
+    gamma_start = scene["content_plain"].index("gamma")
+    delta_start = scene["content_plain"].index("delta")
+    attached_ids = [
+        mdb.create_annotation(
+            project_id=manuscript["project_id"],
+            target_type="scene",
+            target_id=manuscript["scene_id"],
+            category="pacing",
+            source="ai_selected_text",
+            body="Attached gamma.",
+            scene_version=scene["version"],
+            anchor_start=gamma_start,
+            anchor_end=gamma_start + len("gamma"),
+            selected_text="gamma",
+        ),
+        mdb.create_annotation(
+            project_id=manuscript["project_id"],
+            target_type="scene",
+            target_id=manuscript["scene_id"],
+            category="clarity",
+            source="ai_selected_text",
+            body="Attached delta.",
+            scene_version=scene["version"],
+            anchor_start=delta_start,
+            anchor_end=delta_start + len("delta"),
+            selected_text="delta",
+        ),
+    ]
+    scene_level_id = mdb.create_annotation(
+        project_id=manuscript["project_id"],
+        target_type="scene",
+        target_id=manuscript["scene_id"],
+        category="other",
+        source="user",
+        body="Newest scene-level note.",
+    )
+    mdb.update_annotation(scene_level_id, {"body": "Newest scene-level note updated."}, expected_version=1)
+
+    rows, total = mdb.list_annotations(
+        manuscript["project_id"],
+        target_type="scene",
+        target_id=manuscript["scene_id"],
+        anchor_status="attached",
+        limit=1,
+    )
+
+    assert total == 2
+    assert len(rows) == 1
+    assert rows[0]["id"] in attached_ids
+    assert rows[0]["anchor_status"] == "attached"
+
+
+def test_unbounded_anchor_status_filter_rejects_when_candidate_set_exceeds_cap(mdb, manuscript):
+    for i in range(501):
+        mdb.create_annotation(
+            project_id=manuscript["project_id"],
+            target_type="project",
+            target_id=manuscript["project_id"],
+            category="other",
+            source="user",
+            body=f"Project note {i}.",
+        )
+
+    with pytest.raises(ValueError, match="candidate set"):
+        mdb.list_annotations(
+            manuscript["project_id"],
+            anchor_status="scene_level",
+            limit=1,
+        )
+
+
 def test_sync_log_records_create_update_and_delete_for_annotations(mdb, manuscript):
     annotation_id = mdb.create_annotation(
         project_id=manuscript["project_id"],
