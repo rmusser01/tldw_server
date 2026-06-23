@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from enum import Enum
 from typing import Any
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -16,6 +17,15 @@ class AudioStudioWorkflow(str, Enum):
     PODCAST = "podcast"
     BRIEFING = "briefing"
     MUSIC = "music"
+
+
+class AudioStudioProjectStatus(str, Enum):
+    """Allowed lifecycle states for Audio Studio projects."""
+
+    DRAFT = "draft"
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+    ERROR = "error"
 
 
 class AudioStudioResourceKind(str, Enum):
@@ -82,7 +92,24 @@ _FORBIDDEN_EXACT_KEYS = _FORBIDDEN_CLIENT_KEYS | {
 _FORBIDDEN_COMPONENTS = {"authorization", "credential", "credentials", "password", "secret"}
 _TOKEN_QUALIFIERS = {"access", "auth", "bearer", "client", "id", "refresh", "session"}
 _KEY_QUALIFIERS = {"api", "auth", "client", "private", "secret"}
-_HTTP_URL_RE = re.compile(r"^https?://", re.IGNORECASE)
+_FORBIDDEN_URL_SCHEMES = {
+    "data",
+    "file",
+    "ftp",
+    "ftps",
+    "gopher",
+    "http",
+    "https",
+    "ldap",
+    "ldaps",
+    "mailto",
+    "nfs",
+    "sftp",
+    "smb",
+    "ssh",
+    "ws",
+    "wss",
+}
 
 
 def _normalize_client_key(key: object) -> str:
@@ -105,6 +132,16 @@ def _is_forbidden_client_key(key: object) -> bool:
     return False
 
 
+def _is_forbidden_url_value(value: str) -> bool:
+    stripped = value.strip()
+    if not stripped:
+        return False
+    parsed = urlparse(stripped)
+    if parsed.netloc:
+        return True
+    return parsed.scheme.lower() in _FORBIDDEN_URL_SCHEMES
+
+
 def _reject_secret_payload(value: Any, *, path: str = "payload") -> None:
     if isinstance(value, dict):
         for key, nested in value.items():
@@ -114,7 +151,7 @@ def _reject_secret_payload(value: Any, *, path: str = "payload") -> None:
     elif isinstance(value, list):
         for index, nested in enumerate(value):
             _reject_secret_payload(nested, path=f"{path}[{index}]")
-    elif isinstance(value, str) and _HTTP_URL_RE.match(value.strip()):
+    elif isinstance(value, str) and _is_forbidden_url_value(value):
         raise ValueError(f"{path} must not include external URL values")
 
 
@@ -151,7 +188,7 @@ class AudioStudioProjectUpdate(_SecretFreePayloadMixin):
     base_revision_id: str = Field(..., min_length=1, max_length=120)
     title: str | None = Field(None, min_length=1, max_length=200)
     description: str | None = Field(None, max_length=2000)
-    status: str | None = Field(None, max_length=40)
+    status: AudioStudioProjectStatus | None = None
     settings: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
 
@@ -169,7 +206,7 @@ class AudioStudioProjectResponse(_BaseAudioStudioModel):
     title: str
     description: str | None = None
     workflow: AudioStudioWorkflow
-    status: str
+    status: AudioStudioProjectStatus
     settings: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
     current_revision_id: str | None = None

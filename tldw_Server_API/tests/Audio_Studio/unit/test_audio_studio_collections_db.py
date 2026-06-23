@@ -130,6 +130,30 @@ def test_audio_studio_project_crud_and_owner_isolation(
     assert db_user_1.get_audio_studio_project(created.id, include_archived=True).project_id == "ast_shared"
 
 
+def test_audio_studio_project_mutation_rejects_unknown_status(db_user_1: CollectionsDatabase) -> None:
+    created = _create_audio_studio_project(
+        db_user_1,
+        project_id="ast_status",
+        title="Status Project",
+        revision_id="rev_001",
+    )
+
+    with pytest.raises(ValueError, match="audio_studio_invalid_project_status"):
+        db_user_1.mutate_audio_studio_project(
+            project_row_id=created.id,
+            base_revision_id="rev_001",
+            revision_id="rev_002",
+            mutation_kind="project.update",
+            resource_kind="project",
+            resource_id=created.project_id,
+            content_hash="hash_002",
+            payload_json=json.dumps({"status": "pending-review"}),
+            status="pending-review",
+        )
+
+    assert db_user_1.get_audio_studio_project(created.id).current_revision_id == "rev_001"
+
+
 def test_audio_studio_revisions_and_resource_upserts(db_user_1: CollectionsDatabase) -> None:
     project = _create_audio_studio_project(
         db_user_1,
@@ -311,6 +335,45 @@ def test_audio_studio_archive_creates_revision_and_advances_project(
     assert revision.mutation_kind == "project.archive"
     assert revision.resource_kind == "project"
     assert revision.resource_id == project.project_id
+
+
+def test_audio_studio_standalone_revision_requires_current_parent(
+    db_user_1: CollectionsDatabase,
+) -> None:
+    project = _create_audio_studio_project(
+        db_user_1,
+        project_id="ast_revision_guard",
+        title="Revision Guard Project",
+        workflow="briefing",
+        revision_id="rev_001",
+    )
+
+    revision = db_user_1.create_audio_studio_revision(
+        project_row_id=project.id,
+        revision_id="rev_002",
+        parent_revision_id="rev_001",
+        mutation_kind="test.revision",
+        resource_kind="project",
+        resource_id=project.project_id,
+        content_hash="hash_002",
+        payload_json=json.dumps({"revision_id": "rev_002"}),
+    )
+    assert revision.parent_revision_id == "rev_001"
+    assert db_user_1.get_audio_studio_project(project.id).current_revision_id == "rev_002"
+
+    with pytest.raises(ValueError, match="stale_base_revision"):
+        db_user_1.create_audio_studio_revision(
+            project_row_id=project.id,
+            revision_id="rev_stale",
+            parent_revision_id="rev_001",
+            mutation_kind="test.revision",
+            resource_kind="project",
+            resource_id=project.project_id,
+            content_hash="hash_stale",
+            payload_json=json.dumps({"revision_id": "rev_stale"}),
+        )
+
+    assert db_user_1.get_audio_studio_project(project.id).current_revision_id == "rev_002"
 
 
 def test_audio_studio_resource_mutation_rolls_back_when_revision_insert_fails(
@@ -535,6 +598,54 @@ def test_audio_studio_artifacts_generation_jobs_and_idempotency(db_user_1: Colle
             request_hash="hash_002",
             response_json=json.dumps({"job_id": "job_conflict"}),
         )
+
+
+def test_audio_studio_idempotency_insert_ignores_backend_conflict_and_returns_first_record(
+    db_user_1: CollectionsDatabase,
+) -> None:
+    project = _create_audio_studio_project(
+        db_user_1,
+        project_id="ast_idempotency_conflict",
+        title="Idempotency Conflict Project",
+        workflow="music",
+        revision_id="rev_001",
+    )
+    original_execute = db_user_1.backend.execute
+    inserted_by_hook = False
+
+    def insert_conflict_execute(query, params=(), **kwargs):
+        nonlocal inserted_by_hook
+        if (
+            isinstance(query, str)
+            and "INSERT INTO audio_studio_idempotency_keys" in query
+            and not inserted_by_hook
+        ):
+            inserted_by_hook = True
+            hook_params = list(params)
+            hook_params[5] = json.dumps({"job_id": "first"})
+            original_execute(
+                "INSERT INTO audio_studio_idempotency_keys "
+                "(namespace, key, user_id, project_row_id, request_hash, response_json, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                tuple(hook_params),
+                **kwargs,
+            )
+        return original_execute(query, params, **kwargs)
+
+    db_user_1.backend.execute = insert_conflict_execute  # type: ignore[method-assign]
+
+    try:
+        duplicate = db_user_1.put_audio_studio_idempotency_record(
+            namespace="audio_studio",
+            key="client-key-conflict",
+            project_row_id=project.id,
+            request_hash="hash_001",
+            response_json=json.dumps({"job_id": "second"}),
+        )
+    finally:
+        db_user_1.backend.execute = original_execute  # type: ignore[method-assign]
+
+    assert json.loads(duplicate.response_json)["job_id"] == "first"
 
 
 def test_audio_studio_resource_resurrection_clears_deleted_at(db_user_1: CollectionsDatabase) -> None:

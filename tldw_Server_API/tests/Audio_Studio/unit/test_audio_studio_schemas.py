@@ -11,6 +11,7 @@ from tldw_Server_API.app.api.v1.schemas.audio_studio_schemas import (
     AudioStudioGenerationCreate,
     AudioStudioProjectArchiveRequest,
     AudioStudioProjectCreate,
+    AudioStudioProjectStatus,
     AudioStudioProjectUpdate,
     AudioStudioRenderCreate,
     AudioStudioResourceKind,
@@ -39,6 +40,10 @@ def test_workflow_and_resource_enums_are_stable_strings() -> None:
         "export",
     ]
     assert isinstance(AudioStudioWorkflow.NARRATION.value, str)
+
+
+def test_project_status_enum_values_are_stable_strings() -> None:
+    assert [status.value for status in AudioStudioProjectStatus] == ["draft", "active", "archived", "error"]
 
 
 @pytest.mark.parametrize("workflow", ["narration", "podcast", "briefing", "music"])
@@ -92,6 +97,14 @@ def test_project_update_requires_base_revision_id() -> None:
 
     payload = AudioStudioProjectUpdate(title="Renamed", base_revision_id="rev_001")
     assert payload.base_revision_id == "rev_001"
+
+
+def test_project_update_rejects_unknown_status() -> None:
+    with pytest.raises(ValidationError, match="status"):
+        AudioStudioProjectUpdate(base_revision_id="rev_001", status="pending-review")
+
+    payload = AudioStudioProjectUpdate(base_revision_id="rev_001", status="active")
+    assert payload.status == AudioStudioProjectStatus.ACTIVE
 
 
 @pytest.mark.parametrize(
@@ -253,6 +266,28 @@ def test_generation_payload_allows_harmless_tokenizer_key() -> None:
 def test_client_payload_rejects_nested_url_keys_and_values(model, payload: dict[str, object]) -> None:
     with pytest.raises(ValidationError, match="external URL|url"):
         model(**payload)
+
+
+@pytest.mark.parametrize(
+    "url_value",
+    [
+        "ftp://attacker.example/file.wav",
+        "ws://attacker.example/socket",
+        "wss://attacker.example/socket",
+        "//attacker.example/path",
+        "data:text/plain;base64,SGVsbG8=",
+    ],
+)
+def test_client_payload_rejects_network_capable_url_values(url_value: str) -> None:
+    with pytest.raises(ValidationError, match="external URL|url"):
+        AudioStudioRenderCreate(
+            render_type="preview_mix",
+            settings={"nested": {"callback": url_value}},
+            target_resource_kind="render",
+            target_resource_id="rnd_001",
+            target_revision_id="rev_001",
+            idempotency_key="client-key-123456",
+        )
 
 
 def test_client_payload_allows_harmless_non_url_strings() -> None:

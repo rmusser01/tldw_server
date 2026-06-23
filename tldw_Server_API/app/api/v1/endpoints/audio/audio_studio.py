@@ -282,7 +282,7 @@ async def update_audio_studio_project(
             content_hash=_content_hash(revision_payload),
             payload_json=_json_dumps(revision_payload),
             title=request.title,
-            status=request.status,
+            status=request.status.value if request.status is not None else None,
             settings_json=_settings_json(settings=settings, metadata=metadata, description=description),
         )
         return _project_response(updated)

@@ -111,6 +111,14 @@ def _is_audiobook_output_type(type_value: str | None) -> bool:
     return str(type_value).startswith("audiobook_")
 
 
+AUDIO_STUDIO_PROJECT_STATUSES = frozenset({"draft", "active", "archived", "error"})
+
+
+def _validate_audio_studio_project_status(status: str | None) -> None:
+    if status is not None and status not in AUDIO_STUDIO_PROJECT_STATUSES:
+        raise ValueError("audio_studio_invalid_project_status")
+
+
 def _resolve_output_size_bytes(user_id: str, storage_path: str | None) -> int | None:
     if not storage_path:
         return None
@@ -5228,6 +5236,7 @@ class CollectionsDatabase:
         status: str = "draft",
         settings_json: str | None = None,
     ) -> AudioStudioProjectRow:
+        _validate_audio_studio_project_status(status)
         now = _utcnow_iso()
         q = (
             "INSERT INTO audio_studio_projects "
@@ -5265,6 +5274,7 @@ class CollectionsDatabase:
         status: str = "draft",
         settings_json: str | None = None,
     ) -> AudioStudioProjectRow:
+        _validate_audio_studio_project_status(status)
         now = _utcnow_iso()
         with self.transaction() as conn:
             res = self._execute_insert(
@@ -5405,6 +5415,7 @@ class CollectionsDatabase:
         settings_json: str | None = None,
         current_revision_id: str | None = None,
     ) -> AudioStudioProjectRow:
+        _validate_audio_studio_project_status(status)
         self.get_audio_studio_project(project_row_id, include_archived=True)
         fields = ["updated_at = ?"]
         params: list[Any] = [_utcnow_iso()]
@@ -5501,8 +5512,17 @@ class CollectionsDatabase:
         content_hash: str,
         payload_json: str,
     ) -> AudioStudioRevisionRow:
+        """Create a standalone revision only when its parent is the current project revision."""
+        if parent_revision_id is None:
+            raise ValueError("stale_base_revision")
         with self.transaction() as conn:
-            self._get_audio_studio_project(project_row_id=project_row_id, include_archived=True, connection=conn)
+            self._conditionally_mutate_audio_studio_project(
+                project_row_id=project_row_id,
+                base_revision_id=parent_revision_id,
+                revision_id=revision_id,
+                fields=[],
+                connection=conn,
+            )
             self._insert_audio_studio_revision(
                 project_row_id=project_row_id,
                 revision_id=revision_id,
@@ -5514,20 +5534,6 @@ class CollectionsDatabase:
                 payload_json=payload_json,
                 connection=conn,
             )
-            res = self.backend.execute(
-                "UPDATE audio_studio_projects SET current_revision_id = ?, updated_at = ? "
-                "WHERE id = ? AND user_id = ? AND deleted = ?",
-                (
-                    revision_id,
-                    _utcnow_iso(),
-                    project_row_id,
-                    self.user_id,
-                    self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
-                ),
-                connection=conn,
-            )
-            if res.rowcount <= 0:
-                raise KeyError("audio_studio_project_not_found")
             row = self.backend.execute(
                 "SELECT revision_id, project_row_id, user_id, parent_revision_id, mutation_kind, resource_kind, "
                 "resource_id, content_hash, payload_json, created_at "
@@ -5597,6 +5603,7 @@ class CollectionsDatabase:
         status: str | None = None,
         settings_json: str | None = None,
     ) -> AudioStudioProjectRow:
+        _validate_audio_studio_project_status(status)
         fields: list[tuple[str, Any]] = []
         if title is not None:
             fields.append(("title", title))
@@ -6227,17 +6234,27 @@ class CollectionsDatabase:
             raise DatabaseError("audio_studio_generation_job_insert_failed")
         return AudioStudioGenerationJobRow(**row)
 
-    def get_audio_studio_idempotency_record(
+    def _get_audio_studio_idempotency_record(
         self,
         namespace: str,
         key: str,
+        *,
+        connection: Any | None = None,
     ) -> AudioStudioIdempotencyRecordRow | None:
         row = self.backend.execute(
             "SELECT namespace, key, user_id, project_row_id, request_hash, response_json, created_at, updated_at "
             "FROM audio_studio_idempotency_keys WHERE namespace = ? AND key = ? AND user_id = ?",
             (namespace, key, self.user_id),
+            connection=connection,
         ).first
         return AudioStudioIdempotencyRecordRow(**row) if row else None
+
+    def get_audio_studio_idempotency_record(
+        self,
+        namespace: str,
+        key: str,
+    ) -> AudioStudioIdempotencyRecordRow | None:
+        return self._get_audio_studio_idempotency_record(namespace, key)
 
     def put_audio_studio_idempotency_record(
         self,
@@ -6248,23 +6265,23 @@ class CollectionsDatabase:
         request_hash: str,
         response_json: str,
     ) -> AudioStudioIdempotencyRecordRow:
-        existing = self.get_audio_studio_idempotency_record(namespace, key)
-        if existing is not None:
-            if existing.request_hash != request_hash:
-                raise ValueError("audio_studio_idempotency_conflict")
-            return existing
-        if project_row_id is not None:
-            self.get_audio_studio_project(project_row_id, include_archived=True)
         now = _utcnow_iso()
-        self.backend.execute(
-            "INSERT INTO audio_studio_idempotency_keys "
-            "(namespace, key, user_id, project_row_id, request_hash, response_json, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (namespace, key, self.user_id, project_row_id, request_hash, response_json, now, now),
-        )
-        record = self.get_audio_studio_idempotency_record(namespace, key)
+        with self.transaction() as conn:
+            if project_row_id is not None:
+                self._get_audio_studio_project(project_row_id=project_row_id, include_archived=True, connection=conn)
+            self.backend.execute(
+                "INSERT INTO audio_studio_idempotency_keys "
+                "(namespace, key, user_id, project_row_id, request_hash, response_json, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(namespace, key, user_id) DO NOTHING",
+                (namespace, key, self.user_id, project_row_id, request_hash, response_json, now, now),
+                connection=conn,
+            )
+            record = self._get_audio_studio_idempotency_record(namespace, key, connection=conn)
         if record is None:
             raise DatabaseError("audio_studio_idempotency_record_upsert_failed")
+        if record.request_hash != request_hash:
+            raise ValueError("audio_studio_idempotency_conflict")
         return record
 
     def create_voice_profile(
