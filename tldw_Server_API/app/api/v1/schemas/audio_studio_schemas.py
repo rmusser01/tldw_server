@@ -90,6 +90,7 @@ _FORBIDDEN_EXACT_KEYS = _FORBIDDEN_CLIENT_KEYS | {
     "session_token",
 }
 _FORBIDDEN_COMPONENTS = {"authorization", "credential", "credentials", "password", "secret"}
+_FORBIDDEN_URL_COMPONENTS = {"callback", "endpoint", "uri", "url", "webhook"}
 _TOKEN_QUALIFIERS = {"access", "auth", "bearer", "client", "id", "refresh", "session"}
 _KEY_QUALIFIERS = {"api", "auth", "client", "private", "secret"}
 _FORBIDDEN_URL_SCHEMES = {
@@ -124,6 +125,8 @@ def _is_forbidden_client_key(key: object) -> bool:
         return True
     parts = [part for part in normalized.split("_") if part]
     if any(part in _FORBIDDEN_COMPONENTS for part in parts):
+        return True
+    if any(part in _FORBIDDEN_URL_COMPONENTS for part in parts):
         return True
     if "token" in parts and (normalized == "token" or any(part in _TOKEN_QUALIFIERS for part in parts)):
         return True

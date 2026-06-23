@@ -290,6 +290,46 @@ def test_client_payload_rejects_network_capable_url_values(url_value: str) -> No
         )
 
 
+@pytest.mark.parametrize(
+    ("model", "payload"),
+    [
+        (
+            AudioStudioProjectCreate,
+            {
+                "title": "Narration",
+                "workflow": "narration",
+                "metadata": {"callback_url": "not set"},
+            },
+        ),
+        (
+            AudioStudioRenderCreate,
+            {
+                "render_type": "preview_mix",
+                "settings": {"callback_url": "not set"},
+                "target_resource_kind": "render",
+                "target_resource_id": "rnd_001",
+                "target_revision_id": "rev_001",
+                "idempotency_key": "client-key-123456",
+            },
+        ),
+        (
+            AudioStudioGenerationCreate,
+            {
+                "kind": "speech",
+                "provider": {"webhookUrl": "not set"},
+                "target_resource_kind": "section",
+                "target_resource_id": "sec_001",
+                "target_revision_id": "rev_001",
+                "idempotency_key": "client-key-123456",
+            },
+        ),
+    ],
+)
+def test_client_payload_rejects_url_bearing_keys_with_non_url_values(model, payload: dict[str, object]) -> None:
+    with pytest.raises(ValidationError, match="external URL|url"):
+        model(**payload)
+
+
 def test_client_payload_allows_harmless_non_url_strings() -> None:
     payload = AudioStudioRenderCreate(
         render_type="preview_mix",

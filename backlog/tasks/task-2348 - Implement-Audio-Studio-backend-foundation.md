@@ -96,7 +96,9 @@ Audio Studio backend foundation added for Stage 1.1-1.3. Created schema contract
 
 Follow-up hardening completed: Audio Studio client payloads now reject nested external URLs, non-http network URL schemes, protocol-relative URLs, and data URI values; project status is constrained to draft/active/archived/error in schemas and repository write paths; standalone revision creation now requires the parent revision to match the current project revision; idempotency records use an insert-first, first-writer-wins transaction with conflict detection by request hash; /audio-studio remains registered as a stable/default-enabled content route with contract coverage; canonical public repository mutation methods are revision-aware transactional paths; and resource resurrection clears deleted_at.
 
-Follow-up verification on 2026-06-23:
+Latest spec-compliance follow-up on 2026-06-23: schema payload key validation now rejects URL-bearing key components such as callback_url and webhookUrl even when their values are non-URL placeholders, while retaining component-based matching to avoid arbitrary substring bans. Verification: .venv/bin/python -m pytest tldw_Server_API/tests/Audio_Studio/unit/test_audio_studio_schemas.py -v: 42 passed.
+
+Prior follow-up verification on 2026-06-23:
 - .venv/bin/python -m pytest tldw_Server_API/tests/Audio_Studio/unit/test_audio_studio_schemas.py -v: 39 passed
 - .venv/bin/python -m pytest tldw_Server_API/tests/Audio_Studio/unit/test_audio_studio_collections_db.py -v: 12 passed
 - .venv/bin/python -m pytest tldw_Server_API/tests/Audio_Studio/integration/test_audio_studio_projects_api.py -v: 8 passed
