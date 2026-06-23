@@ -120,6 +120,13 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
 
       await launchWithBuiltExtension()
 
+      expect(resolveExtensionId).toHaveBeenCalledWith(
+        context,
+        expect.objectContaining({
+          extensionPath: extensionDir,
+          userDataDir: expect.stringContaining("tmp-playwright-profile/user-data-"),
+        }),
+      )
       expect(launchPersistentContext).toHaveBeenCalledWith(
         expect.stringContaining("tmp-playwright-profile/user-data-"),
         expect.objectContaining({

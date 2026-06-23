@@ -9,6 +9,9 @@ import {
   prioritizeExtensionBuildCandidates
 } from "./extension-paths"
 
+const EXPECTED_E2E_MANIFEST_KEY =
+  "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjI1q+ZCGeQEsFkXz8Jcx9BHxpWcxr4egilGW2LKpyDcxbd+2id2k0WtauiWSS+eBfvJWRnonnIjZQ/6jkNbN41z+G6Wp5HzHJaGHB609GO4LWW5kVkPo0h+KkSSEVjoXTyRQZO3ViwDbne3gqHVJmnKGWV+Tz6X2se3GwCah3I0AG2290/E4aweSV6OG/SRD15MCiDTImSCNa7WXhMQtqN61o+b8MGr3t5eN3E2UCKMFYAFH017EuRQ46vn8q29O7ATaEwHnB0U/7g9zyi3OKhCU5bI9XhZNoRH/iZqOajz5vVu4Pbq6Wq0Vu2Y1nHIjOQi4XADuUrd4ZFyQWkDFcwIDAQAB"
+
 let tempRoots: string[] = []
 
 afterEach(() => {
@@ -40,7 +43,7 @@ describe("prioritizeExtensionBuildCandidates", () => {
     ).toEqual([customPath, outputPath, buildPath])
   })
 
-  it("can stage a Chrome smoke copy with only a minimal default locale", () => {
+  it("can stage a Chrome smoke copy with only the real default locale catalog", () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tldw-extension-paths-"))
     tempRoots.push(tempRoot)
     const extensionDir = path.join(tempRoot, "chrome-mv3")
@@ -71,7 +74,10 @@ describe("prioritizeExtensionBuildCandidates", () => {
     })
 
     expect(stagedPath).not.toBe(extensionDir)
-    expect(fs.existsSync(path.join(stagedPath, "manifest.json"))).toBe(true)
+    const stagedManifest = JSON.parse(
+      fs.readFileSync(path.join(stagedPath, "manifest.json"), "utf8")
+    )
+    expect(stagedManifest.key).toBe(EXPECTED_E2E_MANIFEST_KEY)
     expect(fs.existsSync(path.join(stagedPath, "options.html"))).toBe(true)
     expect(fs.existsSync(path.join(stagedPath, "chunks", "page.js"))).toBe(true)
     expect(
@@ -84,10 +90,10 @@ describe("prioritizeExtensionBuildCandidates", () => {
           "utf8"
         )
       )
-    ).toEqual({})
+    ).toEqual({ appName: { message: "tldw Assistant" } })
   })
 
-  it("uses the manifest default locale when staging minimal locales", () => {
+  it("uses the manifest default locale catalog when staging minimal locales", () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tldw-extension-paths-"))
     tempRoots.push(tempRoot)
     const extensionDir = path.join(tempRoot, "chrome-mv3")
@@ -95,6 +101,11 @@ describe("prioritizeExtensionBuildCandidates", () => {
     fs.writeFileSync(
       path.join(extensionDir, "manifest.json"),
       JSON.stringify({ manifest_version: 3, default_locale: "ja" }),
+      "utf8"
+    )
+    fs.writeFileSync(
+      path.join(extensionDir, "_locales", "ja", "messages.json"),
+      JSON.stringify({ appName: { message: "tldw Assistant JA" } }),
       "utf8"
     )
 
@@ -116,6 +127,6 @@ describe("prioritizeExtensionBuildCandidates", () => {
           "utf8"
         )
       )
-    ).toEqual({})
+    ).toEqual({ appName: { message: "tldw Assistant JA" } })
   })
 })

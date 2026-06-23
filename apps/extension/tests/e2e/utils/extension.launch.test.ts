@@ -68,6 +68,7 @@ describe("launchWithExtension", () => {
       expect(resolveExtensionId).toHaveBeenCalledWith(
         context,
         expect.objectContaining({
+          extensionPath: extensionDir,
           userDataDir: expect.stringContaining("tmp-playwright-profile/user-data-"),
         }),
       )

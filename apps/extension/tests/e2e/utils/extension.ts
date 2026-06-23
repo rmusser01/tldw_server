@@ -263,7 +263,10 @@ export async function launchWithExtension(
     console.log('[E2E_DEBUG] No service worker found after waiting')
   }
 
-  const extensionId = await resolveExtensionId(context, { userDataDir })
+  const extensionId = await resolveExtensionId(context, {
+    extensionPath: launchExtPath,
+    userDataDir
+  })
   const optionsUrl = `chrome-extension://${extensionId}/options.html`
   const sidepanelUrl = `chrome-extension://${extensionId}/sidepanel.html`
 

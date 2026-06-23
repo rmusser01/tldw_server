@@ -5,6 +5,8 @@ const OUTPUT_SUFFIX = `${path.sep}.output${path.sep}chrome-mv3`
 const BUILD_SUFFIX = `${path.sep}build${path.sep}chrome-mv3`
 const DEFAULT_EXTENSION_LOCALE = "en"
 const LOCALE_NAME_PATTERN = /^[A-Za-z0-9_@-]+$/
+const E2E_EXTENSION_MANIFEST_KEY =
+  "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjI1q+ZCGeQEsFkXz8Jcx9BHxpWcxr4egilGW2LKpyDcxbd+2id2k0WtauiWSS+eBfvJWRnonnIjZQ/6jkNbN41z+G6Wp5HzHJaGHB609GO4LWW5kVkPo0h+KkSSEVjoXTyRQZO3ViwDbne3gqHVJmnKGWV+Tz6X2se3GwCah3I0AG2290/E4aweSV6OG/SRD15MCiDTImSCNa7WXhMQtqN61o+b8MGr3t5eN3E2UCKMFYAFH017EuRQ46vn8q29O7ATaEwHnB0U/7g9zyi3OKhCU5bI9XhZNoRH/iZqOajz5vVu4Pbq6Wq0Vu2Y1nHIjOQi4XADuUrd4ZFyQWkDFcwIDAQAB"
 
 const classifyExtensionCandidate = (candidate: string): "custom" | "output" | "build" => {
   const normalized = String(candidate || "").trim()
@@ -69,6 +71,51 @@ const resolveManifestDefaultLocale = (extensionPath: string): string => {
   return DEFAULT_EXTENSION_LOCALE
 }
 
+const copyDefaultLocaleCatalog = (
+  extensionPath: string,
+  stagedPath: string,
+  defaultLocale: string
+) => {
+  const sourceDefaultLocaleDir = path.join(
+    extensionPath,
+    "_locales",
+    defaultLocale
+  )
+  const stagedDefaultLocaleDir = path.join(stagedPath, "_locales", defaultLocale)
+
+  if (fs.existsSync(sourceDefaultLocaleDir)) {
+    fs.cpSync(sourceDefaultLocaleDir, stagedDefaultLocaleDir, {
+      recursive: true
+    })
+    return
+  }
+
+  fs.mkdirSync(stagedDefaultLocaleDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(stagedDefaultLocaleDir, "messages.json"),
+    "{}\n",
+    "utf8"
+  )
+}
+
+const ensureDeterministicManifestKey = (stagedPath: string) => {
+  const manifestPath = path.join(stagedPath, "manifest.json")
+
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
+      key?: unknown
+    }
+
+    if (typeof manifest.key !== "string" || !manifest.key.trim()) {
+      manifest.key = E2E_EXTENSION_MANIFEST_KEY
+      fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8")
+    }
+  } catch {
+    // The caller already validated the build enough to launch. Leave malformed
+    // manifests to Chrome/Playwright so the E2E failure reports the real cause.
+  }
+}
+
 export const prepareExtensionLaunchPath = (
   extensionPath: string,
   {
@@ -94,14 +141,13 @@ export const prepareExtensionLaunchPath = (
   const stagedPath = fs.mkdtempSync(path.join(rootDir, "chrome-mv3-"))
 
   copyExtensionTreeWithoutLocales(extensionPath, stagedPath)
+  ensureDeterministicManifestKey(stagedPath)
 
-  const defaultLocaleDir = path.join(
+  copyDefaultLocaleCatalog(
+    extensionPath,
     stagedPath,
-    "_locales",
     resolveManifestDefaultLocale(extensionPath)
   )
-  fs.mkdirSync(defaultLocaleDir, { recursive: true })
-  fs.writeFileSync(path.join(defaultLocaleDir, "messages.json"), "{}\n", "utf8")
 
   return stagedPath
 }

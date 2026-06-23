@@ -485,7 +485,10 @@ export async function launchWithBuiltExtension(
     }, seedLocalStorage)
   }
 
-  const extensionId = await resolveExtensionId(context, { userDataDir })
+  const extensionId = await resolveExtensionId(context, {
+    extensionPath: launchExtensionPath,
+    userDataDir
+  })
   const optionsUrl = `chrome-extension://${extensionId}/options.html`
   const sidepanelUrl = `chrome-extension://${extensionId}/sidepanel.html`
 

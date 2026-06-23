@@ -1,9 +1,11 @@
 import fs from 'node:fs'
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 import type { BrowserContext } from '@playwright/test'
 
 type ResolveExtensionIdOptions = {
   userDataDir?: string
+  extensionPath?: string
 }
 
 function resolveExtensionIdFromUserDataDir(userDataDir?: string): string | null {
@@ -23,6 +25,35 @@ function resolveExtensionIdFromUserDataDir(userDataDir?: string): string | null 
       .map((entry) => entry.name)
 
     return candidates[0] || null
+  } catch {
+    return null
+  }
+}
+
+function resolveExtensionIdFromManifestKey(extensionPath?: string): string | null {
+  if (!extensionPath) {
+    return null
+  }
+
+  try {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(extensionPath, 'manifest.json'), 'utf8')
+    ) as { key?: unknown }
+    const manifestKey = typeof manifest.key === 'string' ? manifest.key.trim() : ''
+    if (!manifestKey) {
+      return null
+    }
+
+    const keyBytes = Buffer.from(manifestKey, 'base64')
+    if (!keyBytes.length) {
+      return null
+    }
+
+    const hash = createHash('sha256').update(keyBytes).digest()
+    return Array.from(hash.subarray(0, 16))
+      .flatMap((byte) => [byte >> 4, byte & 15])
+      .map((nibble) => String.fromCharCode(97 + nibble))
+      .join('')
   } catch {
     return null
   }
@@ -77,6 +108,13 @@ export async function resolveExtensionId(
   )
   if (extensionIdFromProfile) {
     return extensionIdFromProfile
+  }
+
+  const extensionIdFromManifestKey = resolveExtensionIdFromManifestKey(
+    options.extensionPath
+  )
+  if (extensionIdFromManifestKey) {
+    return extensionIdFromManifestKey
   }
 
   const activeTargets = context

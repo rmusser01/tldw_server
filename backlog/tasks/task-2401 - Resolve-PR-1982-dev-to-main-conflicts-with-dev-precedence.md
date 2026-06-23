@@ -23,6 +23,14 @@ modified_files:
 - tldw_Server_API/tests/RAG_NEW/unit/test_analytics_db_dev_reconciliation.py
 - tldw_Server_API/app/core/DB_Management/media_db/runtime/fts_ops.py
 - tldw_Server_API/tests/DB_Management/test_media_postgres_support.py
+- apps/extension/tests/e2e/utils/extension-build.test.ts
+- apps/extension/tests/e2e/utils/extension-build.ts
+- apps/extension/tests/e2e/utils/extension-id.test.ts
+- apps/extension/tests/e2e/utils/extension-id.ts
+- apps/extension/tests/e2e/utils/extension-paths.test.ts
+- apps/extension/tests/e2e/utils/extension-paths.ts
+- apps/extension/tests/e2e/utils/extension.launch.test.ts
+- apps/extension/tests/e2e/utils/extension.ts
 ---
 
 ## Description
@@ -64,6 +72,7 @@ Docs/Plans/2026-06-23-pr1982-dev-main-conflict-resolution.md
 
 Old-head CI later exposed Full Suite shard integrations failing test_reconcile_content_update_updates_media_fts_versions_and_binding because SQLite external-content FTS deleted using the already-updated media_fts row. Changed _update_fts_media to delete with the supplied old title/content payload, preserving synonym expansion for old and new content, and updated the unit expectation. Local verification: focused failing integration plus FTS unit passed, full test_media_postgres_support.py passed, and test_sync_coordinator.py passed.
 - New-head Watchlists Extension E2E was canceled after `bunx playwright install --with-deps chromium` spent about 43 minutes downloading browsers and exhausted the 45-minute job window before the backend could start. Reverted that job to the runner's system Chrome channel while keeping `TLDW_E2E_EXTENSION_MINIMAL_LOCALES=1`; local verification: targeted workflow contract passed, full workflow-contract test file passed (36 tests), focused prior-failure Python regression set passed (16 tests), `git diff --check` passed, and Bandit on the touched CI contract test found no issues.
+- Latest Watchlists Extension E2E reached the Playwright spec but skipped all 14 tests after repeatedly logging `[E2E_DEBUG] No service worker found after waiting`; the strict no-skip gate then failed with `passed=0 skipped=14`. Added deterministic staged extension IDs via a test manifest key, resolved extension IDs from that manifest key when no MV3 service worker/background target is active, and preserved the real default locale catalog while pruning non-default locales. Local verification: the extension utility Vitest set passed (12 tests) and `bun run compile` passed; local headed/headless browser probes could not complete in this macOS sandbox before browser startup timeout, so CI remains the end-to-end confirmation for the full Watchlists workflow.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
