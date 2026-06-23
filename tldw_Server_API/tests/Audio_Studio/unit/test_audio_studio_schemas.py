@@ -49,6 +49,43 @@ def test_project_create_accepts_first_class_workflows(workflow: str) -> None:
     assert payload.title == f"{workflow} project"
 
 
+@pytest.mark.parametrize(
+    ("model", "payload", "extra"),
+    [
+        (
+            AudioStudioProjectCreate,
+            {"title": "Narration", "workflow": "narration"},
+            {"external_url": "https://provider.example.invalid"},
+        ),
+        (
+            AudioStudioProjectCreate,
+            {"title": "Narration", "workflow": "narration"},
+            {"api_key": "secret"},
+        ),
+        (
+            AudioStudioSectionUpsert,
+            {"base_revision_id": "rev_001", "title": "Intro"},
+            {"unexpected_field": "ignored would be unsafe"},
+        ),
+        (
+            AudioStudioGenerationCreate,
+            {
+                "kind": "speech",
+                "provider": "tts",
+                "target_resource_kind": "section",
+                "target_resource_id": "sec_001",
+                "target_revision_id": "rev_001",
+                "idempotency_key": "client-key-123456",
+            },
+            {"client_secret": "secret"},
+        ),
+    ],
+)
+def test_client_request_schemas_reject_top_level_extra_fields(model, payload: dict[str, object], extra: dict[str, object]) -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        model(**payload, **extra)
+
+
 def test_project_update_requires_base_revision_id() -> None:
     with pytest.raises(ValidationError, match="base_revision_id"):
         AudioStudioProjectUpdate(title="Renamed")

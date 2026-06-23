@@ -109,7 +109,7 @@ def _reject_secret_payload(value: Any, *, path: str = "payload") -> None:
 
 
 class _BaseAudioStudioModel(BaseModel):
-    model_config = {"use_enum_values": False}
+    model_config = {"use_enum_values": False, "extra": "forbid"}
 
 
 class _SecretFreePayloadMixin(_BaseAudioStudioModel):

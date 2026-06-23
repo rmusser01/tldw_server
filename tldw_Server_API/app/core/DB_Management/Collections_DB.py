@@ -1216,7 +1216,8 @@ class CollectionsDatabase:
                 ON audio_studio_projects(user_id, updated_at DESC);
 
             CREATE TABLE IF NOT EXISTS audio_studio_project_revisions (
-                revision_id TEXT PRIMARY KEY,
+                id BIGSERIAL PRIMARY KEY,
+                revision_id TEXT NOT NULL,
                 project_row_id BIGINT NOT NULL,
                 user_id TEXT NOT NULL,
                 parent_revision_id TEXT,
@@ -1227,6 +1228,8 @@ class CollectionsDatabase:
                 payload_json TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_studio_revisions_user_revision_id
+                ON audio_studio_project_revisions(user_id, revision_id);
             CREATE INDEX IF NOT EXISTS idx_audio_studio_revisions_project
                 ON audio_studio_project_revisions(project_row_id, created_at DESC);
 
@@ -1622,7 +1625,8 @@ class CollectionsDatabase:
                 ON audio_studio_projects(user_id, updated_at DESC);
 
             CREATE TABLE IF NOT EXISTS audio_studio_project_revisions (
-                revision_id TEXT PRIMARY KEY,
+                id INTEGER PRIMARY KEY,
+                revision_id TEXT NOT NULL,
                 project_row_id INTEGER NOT NULL,
                 user_id TEXT NOT NULL,
                 parent_revision_id TEXT,
@@ -1633,6 +1637,8 @@ class CollectionsDatabase:
                 payload_json TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_studio_revisions_user_revision_id
+                ON audio_studio_project_revisions(user_id, revision_id);
             CREATE INDEX IF NOT EXISTS idx_audio_studio_revisions_project
                 ON audio_studio_project_revisions(project_row_id, created_at DESC);
 

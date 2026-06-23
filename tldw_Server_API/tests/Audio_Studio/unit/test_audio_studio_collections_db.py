@@ -10,7 +10,8 @@ import pytest
 
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig, DatabaseError
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 
 
 pytestmark = pytest.mark.unit
@@ -174,6 +175,55 @@ def test_audio_studio_revisions_and_resource_upserts(db_user_1: CollectionsDatab
     )
     assert clip.clip_id == "clip_001"
     assert db_user_1.get_audio_studio_project(project.id).current_revision_id == "rev_004"
+
+
+def test_audio_studio_revision_ids_are_owner_scoped_on_shared_database(tmp_path: Path) -> None:
+    backend = DatabaseBackendFactory.create_backend(
+        DatabaseConfig(
+            backend_type=BackendType.SQLITE,
+            sqlite_path=str(tmp_path / "shared_collections.db"),
+        )
+    )
+    db_user_1 = CollectionsDatabase.from_backend(user_id=101, backend=backend)
+    db_user_2 = CollectionsDatabase.from_backend(user_id=202, backend=backend)
+
+    project_1 = db_user_1.create_audio_studio_project(
+        project_id="ast_user_1",
+        title="User 1 Project",
+        workflow="narration",
+    )
+    project_2 = db_user_2.create_audio_studio_project(
+        project_id="ast_user_2",
+        title="User 2 Project",
+        workflow="podcast",
+    )
+
+    revision_1 = db_user_1.create_audio_studio_revision(
+        project_row_id=project_1.id,
+        revision_id="rev_shared",
+        parent_revision_id=None,
+        mutation_kind="project.create",
+        resource_kind="project",
+        resource_id=project_1.project_id,
+        content_hash="hash_user_1",
+        payload_json=json.dumps({"title": project_1.title}),
+    )
+    revision_2 = db_user_2.create_audio_studio_revision(
+        project_row_id=project_2.id,
+        revision_id="rev_shared",
+        parent_revision_id=None,
+        mutation_kind="project.create",
+        resource_kind="project",
+        resource_id=project_2.project_id,
+        content_hash="hash_user_2",
+        payload_json=json.dumps({"title": project_2.title}),
+    )
+
+    assert revision_1.revision_id == revision_2.revision_id == "rev_shared"
+    assert db_user_1.get_audio_studio_revision("rev_shared").resource_id == "ast_user_1"
+    assert db_user_2.get_audio_studio_revision("rev_shared").resource_id == "ast_user_2"
+    assert db_user_1.get_audio_studio_project(project_1.id).current_revision_id == "rev_shared"
+    assert db_user_2.get_audio_studio_project(project_2.id).current_revision_id == "rev_shared"
 
 
 def test_audio_studio_project_mutation_rolls_back_when_revision_insert_fails(
