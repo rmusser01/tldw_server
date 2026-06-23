@@ -17,13 +17,20 @@ from tldw_Server_API.app.core.Notes.studio_markdown import (
     stable_content_hash,
     studio_payload_from_markdown,
 )
-from tldw_Server_API.app.core.Workflows.adapters.content import (
-    run_diagram_generate_adapter,
-    run_notes_studio_generate_adapter,
-)
-
 
 NoteStudioAdapter = Callable[[dict[str, Any], dict[str, Any]], Awaitable[dict[str, Any]]]
+
+
+async def _run_notes_studio_generate_adapter(request: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    from tldw_Server_API.app.core.Workflows.adapters.content import run_notes_studio_generate_adapter
+
+    return await run_notes_studio_generate_adapter(request, context)
+
+
+async def _run_diagram_generate_adapter(request: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    from tldw_Server_API.app.core.Workflows.adapters.content import run_diagram_generate_adapter
+
+    return await run_diagram_generate_adapter(request, context)
 
 
 @dataclass(slots=True)
@@ -31,8 +38,8 @@ class NotesStudioService:
     """Focused orchestration for Notes Studio state and sidecar persistence."""
 
     db: CharactersRAGDB
-    generation_adapter: NoteStudioAdapter = run_notes_studio_generate_adapter
-    diagram_adapter: NoteStudioAdapter = run_diagram_generate_adapter
+    generation_adapter: NoteStudioAdapter = _run_notes_studio_generate_adapter
+    diagram_adapter: NoteStudioAdapter = _run_diagram_generate_adapter
 
     async def derive_from_excerpt(
         self,
@@ -104,9 +111,18 @@ class NotesStudioService:
         self,
         *,
         note_id: str,
+        expected_version: int,
         current_markdown: str | None = None,
     ) -> dict[str, Any]:
         note = self._require_note(note_id)
+        current_version = int(note.get("version") or 0)
+        if current_version != expected_version:
+            raise ConflictError(
+                f"Note ID {note_id} regenerate failed: version mismatch "
+                f"(db has {current_version}, client expected {expected_version}).",
+                entity="notes",
+                entity_id=note_id,
+            )  # noqa: TRY003
         studio_document = self._require_studio_document(note_id)
         has_current_markdown_override = isinstance(current_markdown, str)
         markdown_source = current_markdown if has_current_markdown_override else str(note.get("content") or "")
@@ -135,7 +151,7 @@ class NotesStudioService:
             self.db.update_note(
                 note_id=note_id,
                 update_data={"title": rebuilt_title, "content": markdown},
-                expected_version=int(note.get("version", 1)),
+                expected_version=expected_version,
                 conn=conn,
             )
             updated_studio_document = self.db.upsert_note_studio_document(
@@ -170,6 +186,9 @@ class NotesStudioService:
         requested_section_ids = [str(section_id).strip() for section_id in (source_section_ids or []) if str(section_id).strip()]
         selected_sections = self._select_sections(payload=payload, requested_section_ids=requested_section_ids)
         diagram_context = self._build_diagram_context(selected_sections)
+        expected_companion_content_hash = studio_document.get("companion_content_hash")
+        expected_render_version = int(studio_document.get("render_version") or NOTE_STUDIO_RENDER_VERSION)
+        expected_last_modified = studio_document.get("last_modified")
 
         diagram_result = await self.diagram_adapter(
             {
@@ -197,17 +216,12 @@ class NotesStudioService:
             "format": str(diagram_result.get("format") or "mermaid"),
         }
 
-        updated_studio_document = self.db.upsert_note_studio_document(
+        updated_studio_document = self.db.update_note_studio_diagram_manifest(
             note_id=note_id,
-            payload_json=payload,
-            template_type=studio_document["template_type"],
-            handwriting_mode=studio_document["handwriting_mode"],
-            source_note_id=studio_document.get("source_note_id"),
-            excerpt_snapshot=studio_document.get("excerpt_snapshot"),
-            excerpt_hash=studio_document.get("excerpt_hash"),
             diagram_manifest_json=manifest,
-            companion_content_hash=studio_document.get("companion_content_hash"),
-            render_version=int(studio_document.get("render_version") or NOTE_STUDIO_RENDER_VERSION),
+            expected_companion_content_hash=expected_companion_content_hash,
+            expected_render_version=expected_render_version,
+            expected_last_modified=expected_last_modified,
         )
         return self._build_state(note_id=note_id, studio_document=updated_studio_document)
 
@@ -273,8 +287,12 @@ class NotesStudioService:
             return normalized_sections
 
         requested = set(requested_section_ids)
+        available = {str(section.get("id") or "") for section in normalized_sections}
+        missing = [section_id for section_id in requested_section_ids if section_id not in available]
+        if missing:
+            raise InputError(f"Unknown Studio section ID(s): {', '.join(missing)}")  # noqa: TRY003
         selected = [section for section in normalized_sections if str(section.get("id") or "") in requested]
-        return selected or normalized_sections
+        return selected
 
     @staticmethod
     def _build_diagram_context(selected_sections: list[dict[str, Any]]) -> dict[str, Any]:

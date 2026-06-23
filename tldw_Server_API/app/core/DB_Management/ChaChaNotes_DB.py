@@ -30113,6 +30113,7 @@ for _note_store_method in (
     "get_note_studio_document",
     "create_note_studio_document",
     "upsert_note_studio_document",
+    "update_note_studio_diagram_manifest",
     "list_notes",
     "list_deleted_notes",
     "get_notes_batch",

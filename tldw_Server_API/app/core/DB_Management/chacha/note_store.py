@@ -485,6 +485,83 @@ class NoteStore:
             upsert=True,
         )
 
+    def update_note_studio_diagram_manifest(
+        self,
+        *,
+        note_id: str,
+        diagram_manifest_json: dict[str, Any] | None,
+        expected_companion_content_hash: str | None,
+        expected_render_version: int | None = None,
+        expected_last_modified: Any | None = None,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+    ) -> dict[str, Any]:
+        normalized_note_id = str(note_id).strip()
+        if not normalized_note_id:
+            raise InputError("note_id cannot be empty.")  # noqa: TRY003
+
+        diagram_manifest_json_str = self._serialize_note_studio_json_field(
+            diagram_manifest_json,
+            "diagram_manifest_json",
+            required=False,
+        )
+        now = self._db._get_current_utc_timestamp_iso()
+        where_clauses = ["note_id = ?"]
+        params: list[Any] = [diagram_manifest_json_str, now, normalized_note_id]
+
+        if expected_companion_content_hash is None:
+            where_clauses.append("companion_content_hash IS NULL")
+        else:
+            where_clauses.append("companion_content_hash = ?")
+            params.append(expected_companion_content_hash)
+
+        if expected_render_version is not None:
+            where_clauses.append("render_version = ?")
+            params.append(expected_render_version)
+
+        if expected_last_modified is not None:
+            where_clauses.append("last_modified = ?")
+            params.append(expected_last_modified)
+
+        query = (
+            "UPDATE note_studio_documents "
+            "SET diagram_manifest_json = ?, last_modified = ? "
+            f"WHERE {' AND '.join(where_clauses)}"  # nosec B608
+        )
+
+        def _execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> dict[str, Any]:
+            prepared_query, prepared_params = self._db._prepare_backend_statement(query, tuple(params))
+            cursor = inner_conn.execute(prepared_query, prepared_params or ())
+            if cursor.rowcount == 0:
+                current_document = self._fetch_note_studio_document_row(normalized_note_id, conn=inner_conn)
+                if not current_document:
+                    raise ConflictError(
+                        "Note studio document not found.",
+                        entity="note_studio_documents",
+                        entity_id=normalized_note_id,
+                    )  # noqa: TRY003
+                raise ConflictError(
+                    f"Note studio document for note ID '{normalized_note_id}' changed concurrently.",
+                    entity="note_studio_documents",
+                    entity_id=normalized_note_id,
+                )  # noqa: TRY003
+
+            updated_document = self._fetch_note_studio_document_row(normalized_note_id, conn=inner_conn)
+            if not updated_document:
+                raise CharactersRAGDBError(
+                    f"Failed to read note studio document for note ID '{normalized_note_id}'."
+                )  # noqa: TRY003
+            return updated_document
+
+        try:
+            if conn is None:
+                with self._db.transaction() as transaction_conn:
+                    return _execute(transaction_conn)
+            return _execute(conn)
+        except sqlite3.Error as e:
+            raise CharactersRAGDBError(f"SQLite error updating note studio diagram manifest: {e}") from e  # noqa: TRY003
+        except BackendDatabaseError as e:
+            raise CharactersRAGDBError(f"Backend error updating note studio diagram manifest: {e}") from e  # noqa: TRY003
+
     def list_notes(
         self,
         limit: int = 100,
