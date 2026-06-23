@@ -20,7 +20,7 @@ def _make_manager_with_mock(mock_client, tmp_path):
     return mgr
 
 
-def test_dimension_metadata_mismatch_recreates_collection(tmp_path):
+def test_dimension_metadata_mismatch_rejects_without_deleting_collection(tmp_path):
 
 
     mock_client = MagicMock()
@@ -39,20 +39,22 @@ def test_dimension_metadata_mismatch_recreates_collection(tmp_path):
     ids = ["1", "2"]
     metas = [{"source": "t1"}, {"source": "t2"}]
 
-    mgr.store_in_chroma("dim_meta", texts, embeddings, ids, metas, embedding_model_id_for_dim_check="text-embedding-3-large")
+    with pytest.raises(ValueError, match="Embedding dimension mismatch"):
+        mgr.store_in_chroma(
+            "dim_meta",
+            texts,
+            embeddings,
+            ids,
+            metas,
+            embedding_model_id_for_dim_check="text-embedding-3-large",
+        )
 
-    # Expect deletion and recreation with new dimension metadata
-    mock_client.delete_collection.assert_called_with(name="dim_meta")
-    mock_client.create_collection.assert_called()
-    args, kwargs = mock_client.create_collection.call_args
-    assert kwargs.get("name") == "dim_meta"
-    assert kwargs.get("metadata")["embedding_dimension"] == 512
-    assert kwargs.get("metadata")["source_model_id"] == "text-embedding-3-large"
-    # Upsert invoked on the (current) collection
-    assert mock_coll.upsert.called
+    mock_client.delete_collection.assert_not_called()
+    mock_client.create_collection.assert_not_called()
+    mock_coll.upsert.assert_not_called()
 
 
-def test_dimension_sample_mismatch_recreates_collection(tmp_path):
+def test_dimension_sample_mismatch_rejects_without_deleting_collection(tmp_path):
 
 
     mock_client = MagicMock()
@@ -73,16 +75,36 @@ def test_dimension_sample_mismatch_recreates_collection(tmp_path):
     ids = ["id-x"]
     metas = [{"source": "unit"}]
 
-    mgr.store_in_chroma("dim_sample", texts, embeddings, ids, metas, embedding_model_id_for_dim_check="text-embedding-3-large")
+    with pytest.raises(ValueError, match="Embedding dimension mismatch"):
+        mgr.store_in_chroma(
+            "dim_sample",
+            texts,
+            embeddings,
+            ids,
+            metas,
+            embedding_model_id_for_dim_check="text-embedding-3-large",
+        )
 
-    # Expect recreation due to sampled dim mismatch
-    mock_client.delete_collection.assert_called_with(name="dim_sample")
-    mock_client.create_collection.assert_called()
-    args, kwargs = mock_client.create_collection.call_args
-    assert kwargs.get("name") == "dim_sample"
-    assert kwargs.get("metadata")["embedding_dimension"] == 256
-    assert kwargs.get("metadata")["source_model_id"] == "text-embedding-3-large"
-    assert mock_coll.upsert.called
+    mock_client.delete_collection.assert_not_called()
+    mock_client.create_collection.assert_not_called()
+    mock_coll.upsert.assert_not_called()
+
+
+def test_persistent_client_init_failure_fails_closed_by_default(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.Embeddings import ChromaDB_Library as cdl
+
+    def _raise_persistent_client(**_kwargs):
+        raise ValueError("persistent init failed")
+
+    monkeypatch.setattr(cdl.chromadb, "PersistentClient", _raise_persistent_client)
+    user_cfg = {
+        "USER_DB_BASE_DIR": str(tmp_path),
+        "embedding_config": {"default_model_id": "unused", "models": {}},
+        "chroma_client_settings": {"backend": "persistent"},
+    }
+
+    with pytest.raises(RuntimeError, match="ChromaDB client initialization failed"):
+        ChromaDBManager(user_id="fail_closed", user_embedding_config=user_cfg)
 
 
 def test_list_collections_propagates(mock_chroma_client, tmp_path):
@@ -343,6 +365,50 @@ def test_vector_search_passes_user_app_config(temp_chroma_path, monkeypatch):
     assert captured["kwargs"]["user_app_config"] == user_cfg
     assert "user_embedding_config" not in captured["kwargs"]
     mgr.close()
+
+
+@pytest.mark.unit
+def test_vector_search_log_omits_query_text(mock_chroma_client, tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Embeddings import ChromaDB_Library as cdl
+
+    logged_info: list[str] = []
+
+    class _Logger:
+        def info(self, message):
+            logged_info.append(str(message))
+
+        def debug(self, *_args, **_kwargs):
+            return None
+
+        def warning(self, *_args, **_kwargs):
+            return None
+
+        def error(self, *_args, **_kwargs):
+            return None
+
+    mock_coll = MagicMock()
+    mock_coll.name = "secret_collection"
+    mock_coll.query.return_value = {
+        "ids": [["doc-1"]],
+        "documents": [["stored doc"]],
+        "metadatas": [[{"source": "unit"}]],
+        "distances": [[0.1]],
+    }
+    mock_chroma_client.get_or_create_collection.return_value = mock_coll
+
+    monkeypatch.setattr(cdl, "logger", _Logger())
+    monkeypatch.setattr(cdl, "create_embedding", lambda text, user_app_config, model_id_override: [0.1, 0.2, 0.3])
+
+    mgr = _make_manager_with_mock(mock_chroma_client, tmp_path)
+    mgr.vector_search(
+        query="secret customer query text",
+        collection_name="secret_collection",
+        k=1,
+        embedding_model_id_override="manual",
+    )
+
+    assert logged_info
+    assert all("secret customer query text" not in message for message in logged_info)
 
 
 @pytest.mark.unit

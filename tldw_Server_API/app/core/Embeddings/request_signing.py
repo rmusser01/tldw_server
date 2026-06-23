@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import threading
 import time
@@ -309,15 +310,8 @@ class APIKeyManager:
             except Exception as e:
                 logger.error(f"Failed to load API keys: {e}")
 
-        # Generate default key if none exist
         if not self.api_keys:
-            default_key = self.generate_api_key("default")
-            self.api_keys[default_key] = {
-                "name": "default",
-                "created_at": datetime.utcnow().isoformat(),
-                "permissions": ["read", "write"],
-                "rate_limit": "1000/hour"
-            }
+            raise RuntimeError("Embeddings request signing API key file loaded no keys")
 
     def generate_api_key(self, name: str) -> str:
         """
@@ -416,7 +410,10 @@ def get_request_signer() -> RequestSigner:
     """Get or create the global request signer."""
     global _request_signer
     if _request_signer is None:
-        _request_signer = RequestSigner()
+        secret_key = (os.getenv("EMBEDDINGS_REQUEST_SIGNING_SECRET") or "").strip()
+        if not secret_key:
+            raise RuntimeError("Embeddings request signing secret is not configured")
+        _request_signer = RequestSigner(secret_key=secret_key)
     return _request_signer
 
 
@@ -432,7 +429,10 @@ def get_api_key_manager() -> APIKeyManager:
     """Get or create the global API key manager."""
     global _api_key_manager
     if _api_key_manager is None:
-        _api_key_manager = APIKeyManager()
+        keys_file = (os.getenv("EMBEDDINGS_REQUEST_SIGNING_KEYS_FILE") or "").strip()
+        if not keys_file:
+            raise RuntimeError("Embeddings request signing API key file is not configured")
+        _api_key_manager = APIKeyManager(keys_file=keys_file)
     return _api_key_manager
 
 

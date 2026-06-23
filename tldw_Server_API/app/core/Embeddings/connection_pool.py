@@ -176,13 +176,9 @@ class ConnectionPool:
 
                 status = int(getattr(resp, "status_code", 0))
                 if status >= 400:
-                    try:
-                        error_text = (resp.text or "")[:500]
-                    except Exception:
-                        error_text = ""
                     logger.error(
                         f"{self.provider} API error: "
-                        f"status={status}, body={error_text}"
+                        f"status={status}"
                     )
                     raise NetworkError(f"HTTP {status}")
 

@@ -317,10 +317,48 @@ def _artifact_dir(
 ) -> Path:
     base_dir = DatabasePaths.get_user_vector_store_dir(user_id) / "embeddings_jobs"
     base_dir.mkdir(parents=True, exist_ok=True)
-    name = root_uuid or job_uuid or f"media_{media_id}"
-    path = base_dir / str(name)
+    name = _validate_artifact_identifier(root_uuid or job_uuid or f"media_{media_id}")
+    base_resolved = base_dir.resolve()
+    path = (base_dir / name).resolve()
+    try:
+        path.relative_to(base_resolved)
+    except ValueError as exc:
+        raise EmbeddingsJobError("Invalid embeddings artifact identifier", retryable=False) from exc
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _validate_artifact_identifier(value: Any) -> str:
+    raw = str(value or "").strip()
+    if (
+        not raw
+        or raw in {".", ".."}
+        or ".." in raw
+        or "/" in raw
+        or "\\" in raw
+        or "\x00" in raw
+    ):
+        raise EmbeddingsJobError("Invalid embeddings artifact identifier", retryable=False)
+    return raw
+
+
+def _resolve_artifact_path(
+    artifact_dir: Path,
+    payload: dict[str, Any],
+    key: str,
+    default_path: Path,
+) -> Path:
+    raw_value = payload.get(key)
+    candidate = Path(raw_value) if raw_value else default_path
+    if not candidate.is_absolute():
+        candidate = artifact_dir / candidate
+    artifact_root = artifact_dir.resolve()
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(artifact_root)
+    except ValueError as exc:
+        raise EmbeddingsJobError(f"Invalid embeddings artifact path for {key}", retryable=False) from exc
+    return resolved
 
 
 def _chunk_artifact_path(base_dir: Path) -> Path:
@@ -492,7 +530,7 @@ async def _handle_chunking_job(
 ) -> tuple[dict[str, Any], bool]:
     force_regenerate = _coerce_bool(payload.get("force_regenerate"))
     artifact_dir = _artifact_dir(user_id, root_uuid, media_id, str(job.get("uuid") or job.get("id")))
-    chunks_path = Path(payload.get("chunks_path") or _chunk_artifact_path(artifact_dir))
+    chunks_path = _resolve_artifact_path(artifact_dir, payload, "chunks_path", _chunk_artifact_path(artifact_dir))
 
     if chunks_path.exists() and not force_regenerate:
         chunks = _read_json(chunks_path)
@@ -562,11 +600,16 @@ async def _handle_embedding_job(
 ) -> dict[str, Any]:
     force_regenerate = _coerce_bool(payload.get("force_regenerate"))
     artifact_dir = _artifact_dir(user_id, root_uuid, media_id, str(job.get("uuid") or job.get("id")))
-    chunks_path = Path(payload.get("chunks_path") or _chunk_artifact_path(artifact_dir))
+    chunks_path = _resolve_artifact_path(artifact_dir, payload, "chunks_path", _chunk_artifact_path(artifact_dir))
     if not chunks_path.exists():
         raise EmbeddingsJobError("Chunk artifacts missing for embedding stage", retryable=False)
 
-    embeddings_path = Path(payload.get("embeddings_path") or _embedding_artifact_path(artifact_dir))
+    embeddings_path = _resolve_artifact_path(
+        artifact_dir,
+        payload,
+        "embeddings_path",
+        _embedding_artifact_path(artifact_dir),
+    )
     if embeddings_path.exists() and not force_regenerate:
         stored = _read_json(embeddings_path)
         if isinstance(stored, dict):
@@ -670,9 +713,14 @@ async def _handle_storage_job(
 ) -> dict[str, Any]:
     force_regenerate = _coerce_bool(payload.get("force_regenerate"))
     artifact_dir = _artifact_dir(user_id, root_uuid, media_id, str(job.get("uuid") or job.get("id")))
-    chunks_path = Path(payload.get("chunks_path") or _chunk_artifact_path(artifact_dir))
-    embeddings_path = Path(payload.get("embeddings_path") or _embedding_artifact_path(artifact_dir))
-    storage_path = Path(payload.get("storage_path") or _storage_artifact_path(artifact_dir))
+    chunks_path = _resolve_artifact_path(artifact_dir, payload, "chunks_path", _chunk_artifact_path(artifact_dir))
+    embeddings_path = _resolve_artifact_path(
+        artifact_dir,
+        payload,
+        "embeddings_path",
+        _embedding_artifact_path(artifact_dir),
+    )
+    storage_path = _resolve_artifact_path(artifact_dir, payload, "storage_path", _storage_artifact_path(artifact_dir))
 
     if storage_path.exists() and not force_regenerate:
         stored = _read_json(storage_path)

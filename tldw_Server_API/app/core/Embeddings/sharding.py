@@ -2,6 +2,7 @@
 # Sharding implementation for distributed embedding storage and retrieval
 
 import hashlib
+import os
 import threading
 from collections import defaultdict
 from dataclasses import dataclass
@@ -483,6 +484,9 @@ _shard_manager: Optional[EmbeddingShardManager] = None
 def get_shard_manager() -> EmbeddingShardManager:
     """Get or create the global shard manager."""
     global _shard_manager
+    enabled = str(os.getenv("EMBEDDINGS_ENABLE_EXPERIMENTAL_SHARDING") or "").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        raise RuntimeError("Embeddings experimental sharding is disabled")
     if _shard_manager is None:
         _shard_manager = EmbeddingShardManager()
     return _shard_manager

@@ -2,7 +2,7 @@
 DLQ payload optional encryption helpers.
 
 Uses AES-GCM if `cryptography` is available and EMBEDDINGS_DLQ_ENCRYPTION_KEY is set.
-Falls back to base64 encoding when crypto is unavailable (marked alg=none).
+Configured encryption fails closed when AES-GCM is unavailable.
 """
 
 from __future__ import annotations
@@ -35,6 +35,10 @@ _SCRYPT_PARAMS = {
     "p": 1,
     "dklen": 32,
 }
+
+
+class DLQEncryptionError(RuntimeError):
+    """Raised when configured DLQ encryption cannot produce an encrypted payload."""
 
 
 def _derive_key_from_passphrase_legacy(passphrase: str) -> bytes:
@@ -70,8 +74,7 @@ def _aesgcm_encrypt(plaintext: bytes, key: bytes) -> dict[str, str]:
     try:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # type: ignore
     except ImportError:
-        # Fallback to base64-only marker
-        return {"alg": "none", "b64": base64.b64encode(plaintext).decode("utf-8")}
+        raise DLQEncryptionError("DLQ encryption unavailable: AES-GCM support is not installed")
     aesgcm = AESGCM(key)
     nonce = os.urandom(12)
     ct = aesgcm.encrypt(nonce, plaintext, associated_data=None)
@@ -109,7 +112,7 @@ def _aesgcm_decrypt(obj: dict[str, str], key: bytes) -> bytes | None:
 def encrypt_payload_if_configured(payload_obj: dict[str, Any]) -> str | None:
     """Return JSON string of encrypted blob when configured; else None.
 
-    When EMBEDDINGS_DLQ_ENCRYPTION_KEY is set, encrypts with AES-GCM (or base64 fallback).
+    When EMBEDDINGS_DLQ_ENCRYPTION_KEY is set, encrypts with AES-GCM.
     """
     key_str = os.getenv("EMBEDDINGS_DLQ_ENCRYPTION_KEY")
     if not key_str:
@@ -119,14 +122,16 @@ def encrypt_payload_if_configured(payload_obj: dict[str, Any]) -> str | None:
         key, kdf_used = _derive_key_from_passphrase(key_str, salt)
         raw = json.dumps(payload_obj, default=str).encode("utf-8")
         obj = _aesgcm_encrypt(raw, key)
+        if obj.get("alg") != "AESGCM":
+            raise DLQEncryptionError("DLQ encryption unavailable: AES-GCM support is required")
         if obj.get("alg") == "AESGCM":
             obj["kdf"] = kdf_used
             if kdf_used == "scrypt":
                 obj["salt"] = base64.b64encode(salt).decode("utf-8")
                 obj["kdf_params"] = _SCRYPT_PARAMS
         return json.dumps(obj)
-    except (MemoryError, OSError, TypeError, ValueError):
-        return None
+    except (MemoryError, OSError, TypeError, ValueError) as exc:
+        raise DLQEncryptionError("DLQ encryption failed") from exc
 
 
 def decrypt_payload_if_present(enc_json: str | None) -> dict[str, Any] | None:
