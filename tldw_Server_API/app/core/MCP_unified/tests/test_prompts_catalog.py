@@ -6,6 +6,7 @@ import importlib
 import json
 import sys
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -29,6 +30,16 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.prompts_catalo
     decode_prompt_cursor,
     encode_prompt_cursor,
 )
+
+pytestmark = pytest.mark.unit
+
+
+def test_prompt_catalog_error_uses_core_exception_type() -> None:
+    from tldw_Server_API.app.core.exception_types import PromptCatalogError as CorePromptCatalogError
+    from tldw_Server_API.app.core.exceptions import PromptCatalogError as ReexportedPromptCatalogError
+
+    assert PromptCatalogError is CorePromptCatalogError
+    assert ReexportedPromptCatalogError is CorePromptCatalogError
 
 
 def test_prompt_cursor_encodes_none_as_none() -> None:
@@ -359,7 +370,7 @@ def _add_legacy_prompt(db_path: str, *, name: str, deleted: bool = False) -> dic
         db.close_connection()
 
 
-def test_user_source_lists_non_deleted_library_prompts_with_uuid_names(tmp_path) -> None:
+def test_user_source_lists_non_deleted_library_prompts_with_uuid_names(tmp_path: Path) -> None:
     db_path = str(tmp_path / "prompts.db")
     alpha = _add_legacy_prompt(db_path, name="Alpha")
     _add_legacy_prompt(db_path, name="Deleted", deleted=True)
@@ -376,7 +387,7 @@ def test_user_source_lists_non_deleted_library_prompts_with_uuid_names(tmp_path)
     assert result.warnings == []
 
 
-def test_user_source_filters_by_prompt_id_scope(tmp_path) -> None:
+def test_user_source_filters_by_prompt_id_scope(tmp_path: Path) -> None:
     db_path = str(tmp_path / "prompts.db")
     allowed = _add_legacy_prompt(db_path, name="Allowed")
     _add_legacy_prompt(db_path, name="Blocked")
@@ -405,7 +416,7 @@ def test_user_source_list_missing_prompts_db_warns_without_leaking() -> None:
     assert result.warnings == [{"source": "library", "code": "prompt_db_unavailable"}]
 
 
-def test_user_source_list_internal_formatting_failure_warns(tmp_path) -> None:
+def test_user_source_list_internal_formatting_failure_warns(tmp_path: Path) -> None:
     db_path = str(tmp_path / "prompts.db")
     bad = _add_legacy_prompt(db_path, name="Bad Structured Prompt")
 
@@ -428,7 +439,7 @@ def test_user_source_list_internal_formatting_failure_warns(tmp_path) -> None:
     ]
 
 
-def test_user_source_list_skips_bad_row_and_keeps_cursor_moving(tmp_path) -> None:
+def test_user_source_list_skips_bad_row_and_keeps_cursor_moving(tmp_path: Path) -> None:
     db_path = str(tmp_path / "prompts.db")
     bad = _add_legacy_prompt(db_path, name="Alpha Bad")
     good = _add_legacy_prompt(db_path, name="Beta Good")
@@ -463,7 +474,7 @@ def test_user_source_list_skips_bad_row_and_keeps_cursor_moving(tmp_path) -> Non
     assert second_page.warnings == []
 
 
-def test_user_source_get_validates_uuid_and_scope(tmp_path) -> None:
+def test_user_source_get_validates_uuid_and_scope(tmp_path: Path) -> None:
     db_path = str(tmp_path / "prompts.db")
     allowed = _add_legacy_prompt(db_path, name="Allowed")
     source = UserPromptCatalogSource(MCPPromptFormatter(max_rendered_chars=10_000))
@@ -477,7 +488,7 @@ def test_user_source_get_validates_uuid_and_scope(tmp_path) -> None:
     assert result["messages"][0]["content"]["text"].endswith("Summarize scoped prompts")
 
 
-def test_user_source_get_rejects_malformed_library_prompt_name(tmp_path) -> None:
+def test_user_source_get_rejects_malformed_library_prompt_name(tmp_path: Path) -> None:
     db_path = str(tmp_path / "prompts.db")
     source = UserPromptCatalogSource(MCPPromptFormatter(max_rendered_chars=10_000))
 
@@ -491,7 +502,7 @@ def test_user_source_get_rejects_malformed_library_prompt_name(tmp_path) -> None
     assert excinfo.value.code == "invalid_prompt_name"
 
 
-def test_user_source_get_rejects_prompt_outside_scope(tmp_path) -> None:
+def test_user_source_get_rejects_prompt_outside_scope(tmp_path: Path) -> None:
     db_path = str(tmp_path / "prompts.db")
     allowed = _add_legacy_prompt(db_path, name="Allowed")
     blocked = _add_legacy_prompt(db_path, name="Blocked")
@@ -533,7 +544,7 @@ def test_user_source_get_sanitizes_db_failure() -> None:
     assert "raw db failure" not in excinfo.value.message
 
 
-def test_user_source_get_sanitizes_internal_formatting_failure(tmp_path) -> None:
+def test_user_source_get_sanitizes_internal_formatting_failure(tmp_path: Path) -> None:
     db_path = str(tmp_path / "prompts.db")
     prompt = _add_legacy_prompt(db_path, name="Bad Render")
 
@@ -555,7 +566,7 @@ def test_user_source_get_sanitizes_internal_formatting_failure(tmp_path) -> None
     assert "Invalid row" not in excinfo.value.message
 
 
-def test_config_source_lists_only_explicit_entries(monkeypatch, tmp_path) -> None:
+def test_config_source_lists_only_explicit_entries(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     override_path = tmp_path / "rag_retrieval.txt"
     override_path.write_text("Retrieve context for {query}", encoding="utf-8")
     monkeypatch.setenv("TLDW_PROMPT_FILE_RAG__RETRIEVAL_GUIDANCE", str(override_path))
@@ -582,7 +593,7 @@ def test_config_source_lists_only_explicit_entries(monkeypatch, tmp_path) -> Non
     assert result.prompts[0]["arguments"][0]["name"] == "query"
 
 
-def test_config_source_grouped_render_folds_system_user_and_preserves_assistant(monkeypatch, tmp_path) -> None:
+def test_config_source_grouped_render_folds_system_user_and_preserves_assistant(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     system_path = tmp_path / "system.txt"
     user_path = tmp_path / "user.txt"
     assistant_path = tmp_path / "assistant.txt"
@@ -657,7 +668,7 @@ def test_config_source_omits_missing_allowlist_entry() -> None:
     ]
 
 
-def test_missing_config_entry_error_does_not_include_override_path(monkeypatch, tmp_path) -> None:
+def test_missing_config_entry_error_does_not_include_override_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     missing_path = tmp_path / "missing-prompt.txt"
     monkeypatch.setenv("TLDW_PROMPT_FILE_MISSING__ENTRY", str(missing_path))
     source = ConfigPromptCatalogSource(
@@ -683,7 +694,7 @@ def test_missing_config_entry_error_does_not_include_override_path(monkeypatch, 
     assert str(missing_path) not in str(excinfo.value)  # nosec B101
 
 
-def test_config_source_get_respects_disabled_flag(monkeypatch, tmp_path) -> None:
+def test_config_source_get_respects_disabled_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     override_path = tmp_path / "prompt.txt"
     override_path.write_text("Search {query}", encoding="utf-8")
     monkeypatch.setenv("TLDW_PROMPT_FILE_MCP__SEARCH_KNOWLEDGE", str(override_path))
@@ -708,7 +719,7 @@ def test_config_source_get_respects_disabled_flag(monkeypatch, tmp_path) -> None
     assert excinfo.value.code == "prompt_not_found"
 
 
-def test_config_source_reports_entries_after_index(monkeypatch, tmp_path) -> None:
+def test_config_source_reports_entries_after_index(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     override_path = tmp_path / "prompt.txt"
     override_path.write_text("Search {query}", encoding="utf-8")
     monkeypatch.setenv("TLDW_PROMPT_FILE_MCP__SEARCH_KNOWLEDGE", str(override_path))
@@ -731,7 +742,7 @@ def test_config_source_reports_entries_after_index(monkeypatch, tmp_path) -> Non
     assert source.has_entries_after(1) is False
 
 
-def test_user_source_skips_library_when_cursor_is_inside_config_page(tmp_path) -> None:
+def test_user_source_skips_library_when_cursor_is_inside_config_page(tmp_path: Path) -> None:
     db_path = str(tmp_path / "prompts.db")
     _add_legacy_prompt(db_path, name="Alpha")
     source = UserPromptCatalogSource(MCPPromptFormatter(max_rendered_chars=10_000))
@@ -747,7 +758,7 @@ def test_user_source_skips_library_when_cursor_is_inside_config_page(tmp_path) -
     assert result.warnings == []
 
 
-def test_user_source_uses_collate_nocase_keyset_with_raw_name_cursor(tmp_path) -> None:
+def test_user_source_uses_collate_nocase_keyset_with_raw_name_cursor(tmp_path: Path) -> None:
     db_path = str(tmp_path / "prompts.db")
     alpha = _add_legacy_prompt(db_path, name="Alpha")
     beta = _add_legacy_prompt(db_path, name="beta")
@@ -769,7 +780,7 @@ def test_user_source_uses_collate_nocase_keyset_with_raw_name_cursor(tmp_path) -
     assert second_page.prompts[0]["name"] == f"{LIBRARY_PROMPT_PREFIX}{beta['uuid']}"
 
 
-def test_user_source_keyset_page_is_stable_when_prompt_inserted_before_cursor(tmp_path) -> None:
+def test_user_source_keyset_page_is_stable_when_prompt_inserted_before_cursor(tmp_path: Path) -> None:
     db_path = str(tmp_path / "prompts.db")
     alpha = _add_legacy_prompt(db_path, name="Alpha")
     charlie = _add_legacy_prompt(db_path, name="Charlie")
@@ -817,7 +828,7 @@ def _prompts_module_config(page_size: int) -> ModuleConfig:
 
 
 @pytest.mark.asyncio
-async def test_prompts_module_context_list_combines_library_and_config(monkeypatch, tmp_path) -> None:
+async def test_prompts_module_context_list_combines_library_and_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     db_path = str(tmp_path / "prompts.db")
     library_prompt = _add_legacy_prompt(db_path, name="Library Prompt")
     override_path = tmp_path / "search_knowledge.txt"
@@ -837,8 +848,8 @@ async def test_prompts_module_context_list_combines_library_and_config(monkeypat
 
 @pytest.mark.asyncio
 async def test_prompts_module_returns_config_cursor_when_library_exactly_fills_page(
-    monkeypatch,
-    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     db_path = str(tmp_path / "prompts.db")
     library_prompt = _add_legacy_prompt(db_path, name="Library Prompt")
@@ -865,7 +876,7 @@ async def test_prompts_module_returns_config_cursor_when_library_exactly_fills_p
 
 
 @pytest.mark.asyncio
-async def test_prompts_module_context_get_routes_by_namespace(tmp_path) -> None:
+async def test_prompts_module_context_get_routes_by_namespace(tmp_path: Path) -> None:
     db_path = str(tmp_path / "prompts.db")
     library_prompt = _add_legacy_prompt(db_path, name="Library Prompt")
     module = PromptsModule(_prompts_module_config(page_size=50))
@@ -881,7 +892,7 @@ async def test_prompts_module_context_get_routes_by_namespace(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_prompts_module_bad_cursor_raises_catalog_error(tmp_path) -> None:
+async def test_prompts_module_bad_cursor_raises_catalog_error(tmp_path: Path) -> None:
     module = PromptsModule(_prompts_module_config(page_size=50))
     await module.on_initialize()
 
@@ -894,7 +905,7 @@ async def test_prompts_module_bad_cursor_raises_catalog_error(tmp_path) -> None:
     assert excinfo.value.code == "invalid_cursor"
 
 
-def test_catalog_adapter_does_not_import_prompt_studio(monkeypatch) -> None:
+def test_catalog_adapter_does_not_import_prompt_studio(monkeypatch: pytest.MonkeyPatch) -> None:
     module_name = "tldw_Server_API.app.core.MCP_unified.modules.implementations.prompts_catalog"
     blocked_segments = (
         "Prompt_Management.PromptStudio",
@@ -904,7 +915,13 @@ def test_catalog_adapter_does_not_import_prompt_studio(monkeypatch) -> None:
     )
     real_import = builtins.__import__
 
-    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+    def guarded_import(
+        name: str,
+        globals: dict[str, Any] | None = None,
+        locals: dict[str, Any] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> Any:
         if any(segment in name for segment in blocked_segments):
             raise AssertionError(f"prompts_catalog imported Prompt Studio module: {name}")
         return real_import(name, globals, locals, fromlist, level)

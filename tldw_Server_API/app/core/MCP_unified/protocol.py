@@ -55,6 +55,7 @@ from mcp_unified.tool_use_reporting.recorder import record_tool_use_safely
 from .auth.authnz_rbac import Action, Resource
 from .auth.rate_limiter import RateLimitExceeded
 from .config import get_config
+from ..exception_types import PromptCatalogError
 from .interfaces.runtime import (
     MCPRuntimeDependencies,
     NoopToolCallHookManager,
@@ -67,7 +68,6 @@ from .interfaces.runtime import (
 from .modules.implementations.prompts_catalog import (
     CONFIG_PROMPT_PREFIX,
     LIBRARY_PROMPT_PREFIX,
-    PromptCatalogError,
     decode_prompt_cursor,
 )
 from .modules.base import BaseModule
@@ -776,6 +776,24 @@ class MCPProtocol:
         }
 
         logger.info("MCP Protocol handler initialized")
+
+    @staticmethod
+    def _module_declares_prompts(module: BaseModule) -> bool:
+        """Return whether a module can expose MCP prompts without querying catalogs.
+
+        Args:
+            module: Registered MCP module instance to inspect.
+
+        Returns:
+            True when the module overrides prompt listing hooks and can back
+            MCP ``prompts/list`` calls, otherwise False.
+        """
+
+        module_type = type(module)
+        return any(
+            getattr(module_type, method_name, None) is not getattr(BaseModule, method_name, None)
+            for method_name in ("get_prompts", "get_prompts_for_context")
+        )
 
     @property
     def telemetry(self) -> TelemetryProvider:
@@ -2715,11 +2733,12 @@ class MCPProtocol:
 
         # Get server capabilities
         modules = await self.module_registry.get_all_modules()
+        has_prompt_module = any(self._module_declares_prompts(module) for module in modules.values())
 
         capabilities = {
             "tools": {"available": bool(modules)},
             "resources": {"available": bool(modules)},
-            "prompts": {"listChanged": False}
+            "prompts": {"available": has_prompt_module, "listChanged": False}
         }
 
         return {
