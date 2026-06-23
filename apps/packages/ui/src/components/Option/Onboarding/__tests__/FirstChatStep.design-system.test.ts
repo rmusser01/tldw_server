@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 const guard = await import(
@@ -8,7 +9,9 @@ const guard = await import(
 
 const firstChatStepRelativePath =
   "src/components/Option/Onboarding/steps/FirstChatStep.tsx"
-const firstChatStepPath = path.resolve(process.cwd(), firstChatStepRelativePath)
+const here = path.dirname(fileURLToPath(import.meta.url))
+const packageRoot = path.resolve(here, "../../../../..")
+const firstChatStepPath = path.resolve(packageRoot, firstChatStepRelativePath)
 
 describe("FirstChatStep design-system state labels", () => {
   it("routes the retrying label through the design-system state registry", async () => {

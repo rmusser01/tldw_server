@@ -48,6 +48,8 @@ Continue the tldw_server WebUI design-system migration by routing the remaining 
 - 2026-06-23 verification after rebasing onto `origin/dev`: direct analyzer scan of `src/components/Option/Onboarding/steps/FirstChatStep.tsx` returned `[]`.
 - 2026-06-23 note: package-wide `node scripts/verify-design-system-product-state.mjs` still reports unrelated current-base blocked findings in `src/components/Option/Skills/SkillPreview.tsx`, `src/components/Option/ScheduledTasks/ScheduledTaskDetailDrawer.tsx`, `src/components/Option/Skills/Manager.tsx`, and `src/services/acp/readiness.ts`.
 - 2026-06-23 note: Bandit is not applicable for this task because the touched implementation/test files are TypeScript and the remaining touched file is a Backlog task record.
+- 2026-06-23 review fix: Updated the focused design-system test to resolve `FirstChatStep.tsx` from `import.meta.url` instead of `process.cwd()` so the test is stable across Vitest launch directories.
+- 2026-06-23 verification: `apps/packages/ui/node_modules/.bin/vitest run --root apps/packages/ui --config vitest.config.ts src/components/Option/Onboarding/__tests__/FirstChatStep.design-system.test.ts` passed from the repository root.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
