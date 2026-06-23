@@ -27,7 +27,7 @@ export type CoreMode =
   | "dictionaries"
   | "characters"
   | "watchlists"
-  | "audiobookStudio"
+  | "audioStudio"
   // Note: "promptStudio" mode has been unified with "prompts"
 
 interface ModeSelectorProps {
@@ -138,8 +138,8 @@ export function ModeSelector({ currentMode, onModeChange }: ModeSelectorProps) {
         shortcut: undefined,
       },
       {
-        key: "audiobookStudio",
-        label: t("option:header.audiobookStudio", "Audiobook Studio"),
+        key: "audioStudio",
+        label: t("option:header.audioStudio", "Audio Studio"),
         shortcut: undefined,
       },
     ],

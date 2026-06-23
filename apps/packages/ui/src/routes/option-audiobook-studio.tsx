@@ -1,12 +1,12 @@
 import OptionLayout from "~/components/Layouts/Layout"
-import { AudiobookStudioPage } from "~/components/Option/AudiobookStudio/AudiobookStudioPage"
 import { RouteErrorBoundary } from "@/components/Common/RouteErrorBoundary"
+import { CompatibilityRedirect } from "@/components/Option/AudioStudio/CompatibilityRedirect"
 
 const OptionAudiobookStudio = () => {
   return (
     <RouteErrorBoundary routeId="audiobook-studio" routeLabel="Audiobook Studio">
       <OptionLayout>
-        <AudiobookStudioPage />
+        <CompatibilityRedirect />
       </OptionLayout>
     </RouteErrorBoundary>
   )

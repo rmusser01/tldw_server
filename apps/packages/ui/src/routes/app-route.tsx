@@ -108,7 +108,7 @@ const getRouteBootstrapNamespaces = (
     if (pathname === "/evaluations") {
       addNamespaces(namespaces, ["evaluations"])
     }
-    if (pathname === "/audiobook-studio") {
+    if (pathname === "/audio-studio" || pathname === "/audiobook-studio") {
       addNamespaces(namespaces, ["audiobook"])
     }
     if (pathname === "/companion/conversation") {

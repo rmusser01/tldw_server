@@ -140,6 +140,7 @@ export const AUDITED_ROOT_ROUTE_PATHS = [
   "/model-playground",
   "/writing-playground",
   "/presentation-studio",
+  "/audio-studio",
   "/audiobook-studio",
   "/media",
   "/media-multi",
@@ -469,13 +470,31 @@ export const ROUTE_METADATA = [
     rationale: "Presentation creation and editing route."
   }),
   defineRoute({
-    path: "/audiobook-studio",
-    label: "Audiobook Studio",
+    path: "/audio-studio",
+    label: "Audio Studio",
     group: "audio",
     surface: "advanced_self_hosted",
     availability: webAndExtension,
+    commandPalette: "show",
+    nav: "secondary",
     requiresBackend: true,
-    rationale: "Long-form audio production route tied to TTS readiness."
+    aliases: ["/audiobook-studio"],
+    rationale:
+      "Workflow-first audio production route for narration, podcast, briefing, and music."
+  }),
+  defineRoute({
+    path: "/audiobook-studio",
+    label: "Audiobook Studio",
+    canonicalPath: "/audio-studio",
+    group: "audio",
+    surface: "legacy_alias",
+    availability: webAndExtension,
+    redirectsTo: "/audio-studio?workflow=narration",
+    commandPalette: "alias_only",
+    nav: "hidden",
+    requiresBackend: true,
+    rationale:
+      "Compatibility route that sends legacy audiobook users into Audio Studio Narration."
   }),
   defineRoute({
     path: "/media",

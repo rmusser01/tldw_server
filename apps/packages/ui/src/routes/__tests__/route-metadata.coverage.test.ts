@@ -34,11 +34,13 @@ const AUDITED_ROOT_ROUTES = [
   "/research",
   "/workspaces",
   "/research-workspace",
+  "/explainer",
   "/document-workspace",
   "/repo2txt",
   "/model-playground",
   "/writing-playground",
   "/presentation-studio",
+  "/audio-studio",
   "/audiobook-studio",
   "/media",
   "/media-multi",
@@ -88,9 +90,9 @@ const AUDITED_ROOT_ROUTES = [
 ] as const
 
 describe("route metadata coverage", () => {
-  it("tracks the audited 75-route bootstrap set explicitly", () => {
+  it("tracks the audited 76-route bootstrap set explicitly", () => {
     expect(AUDITED_ROOT_ROUTE_PATHS).toEqual(AUDITED_ROOT_ROUTES)
-    expect(AUDITED_ROOT_ROUTE_PATHS).toHaveLength(75)
+    expect(AUDITED_ROOT_ROUTE_PATHS).toHaveLength(76)
   })
 
   it("defines metadata for every audited root route", () => {
@@ -113,9 +115,28 @@ describe("route metadata coverage", () => {
 
   it("resolves compatibility aliases to canonical routes", () => {
     expect(getCanonicalRoutePath("/audio")).toBe("/speech")
+    expect(getCanonicalRoutePath("/audiobook-studio")).toBe("/audio-studio")
     expect(getCanonicalRoutePath("/search")).toBe("/knowledge")
     expect(getCanonicalRoutePath("/prompt-studio")).toBe("/prompts")
     expect(getCanonicalRoutePath("/workspace-playground")).toBeUndefined()
+  })
+
+  it("marks Audio Studio as canonical and Audiobook Studio as the legacy alias", () => {
+    expect(getRouteMetadata("/audio-studio")).toMatchObject({
+      path: "/audio-studio",
+      canonicalPath: "/audio-studio",
+      label: "Audio Studio",
+      group: "audio",
+      surface: "advanced_self_hosted"
+    })
+    expect(getRouteMetadata("/audiobook-studio")).toMatchObject({
+      path: "/audiobook-studio",
+      canonicalPath: "/audio-studio",
+      label: "Audiobook Studio",
+      group: "audio",
+      surface: "legacy_alias",
+      redirectsTo: "/audio-studio?workflow=narration"
+    })
   })
 
   it("defines research workspace as the canonical workspace research route without legacy aliases", () => {
