@@ -58,6 +58,7 @@ from tldw_Server_API.app.api.v1.schemas.writing_manuscript_schemas import (
     ManuscriptSceneUpdate,
     ManuscriptSearchResponse,
     ManuscriptSearchResult,
+    ManuscriptSelectedTextAnnotationReviewRequest,
     ManuscriptStructureResponse,
     ManuscriptTrashListResponse,
     ManuscriptVersionCreateRequest,
@@ -231,6 +232,21 @@ def _resolve_annotation_project_id(
 def _annotation_response(annotation: dict[str, Any]) -> ManuscriptAnnotationResponse:
     """Build the public annotation response model."""
     return ManuscriptAnnotationResponse(**annotation)
+
+
+def _validate_selected_text_review_range(
+    scene: dict[str, Any],
+    payload: ManuscriptSelectedTextAnnotationReviewRequest,
+) -> str:
+    """Validate a selected-text review anchor against the current saved scene."""
+    if int(payload.scene_version) != int(scene["version"]):
+        raise ConflictError("Annotation scene version does not match the saved scene version.")
+    scene_text = scene.get("content_plain") or ""
+    if payload.start < 0 or payload.end > len(scene_text) or payload.start >= payload.end:
+        raise ConflictError("Selected text range must select non-empty text within the scene.")
+    if scene_text[payload.start:payload.end] != payload.selected_text:
+        raise ConflictError("Annotation selected text does not match the saved scene range.")
+    return scene_text
 
 
 # ===================================================================
@@ -2145,6 +2161,92 @@ async def create_annotation(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
         _handle_db_errors(exc, "manuscript annotation")
+
+
+@router.post(
+    "/scenes/{scene_id}/annotations/review-selection",
+    response_model=ManuscriptAnnotationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Review selected manuscript text and create one annotation",
+    tags=["manuscripts"],
+)
+async def review_selected_text_annotation(
+    scene_id: str,
+    payload: ManuscriptSelectedTextAnnotationReviewRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
+    current_user: User = Depends(get_request_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.annotations.review")),
+) -> ManuscriptAnnotationResponse:
+    """Run an LLM review for a selected scene range and persist one annotation."""
+    try:
+        await _enforce_rate_limit(
+            rate_limiter,
+            int(current_user.id),
+            "writing.manuscripts.annotations.review",
+        )
+        provider_override, model_override = _validate_analysis_overrides(
+            provider=payload.provider,
+            model=payload.model,
+        )
+        helper = _get_helper(db)
+        scene = helper.get_scene(scene_id)
+        if not scene:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
+        scene_text = _validate_selected_text_review_range(scene, payload)
+
+        from tldw_Server_API.app.core.Chat import chat_service as _chat_service
+        from tldw_Server_API.app.core.Writing.manuscript_analysis import _extract_content
+        from tldw_Server_API.app.core.Writing.manuscript_annotations import (
+            build_selected_text_review_prompt,
+            parse_annotation_review_response,
+        )
+
+        messages = build_selected_text_review_prompt(
+            scene_text=scene_text,
+            selected_text=payload.selected_text,
+            category_hints=list(payload.category_hints),
+            instruction=payload.instruction,
+        )
+        chat_kwargs: dict[str, Any] = {"messages": messages, "temp": 0.2}
+        if provider_override:
+            chat_kwargs["api_endpoint"] = provider_override
+        if model_override:
+            chat_kwargs["model"] = model_override
+
+        llm_response = await _chat_service.perform_chat_api_call_async(**chat_kwargs)
+        raw_text = _extract_content(llm_response)
+        try:
+            review_annotations = parse_annotation_review_response(raw_text)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "message": "Selected-text review output could not be parsed.",
+                    "diagnostics": [str(exc)],
+                },
+            ) from exc
+
+        review_annotation = review_annotations[0]
+        annotation_id = helper.create_annotation(
+            project_id=scene["project_id"],
+            target_type="scene",
+            target_id=scene_id,
+            category=review_annotation["category"],
+            source="ai_selected_text",
+            body=review_annotation["body"],
+            suggested_fix=review_annotation.get("suggested_fix"),
+            scene_version=payload.scene_version,
+            anchor_start=payload.start,
+            anchor_end=payload.end,
+            selected_text=payload.selected_text,
+        )
+        annotation = helper.get_annotation(annotation_id)
+        if not annotation:
+            raise CharactersRAGDBError("Annotation created but could not be retrieved")
+        return _annotation_response(annotation)
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "selected-text annotation review")
 
 
 @router.get(

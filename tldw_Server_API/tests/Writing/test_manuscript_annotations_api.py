@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import importlib
+import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.ManuscriptDB import ManuscriptDBHelper
@@ -15,6 +19,11 @@ from tldw_Server_API.app.core.DB_Management.ManuscriptDB import ManuscriptDBHelp
 pytestmark = pytest.mark.integration
 
 PREFIX = "/api/v1/writing/manuscripts"
+_LLM_MODULE = "tldw_Server_API.app.core.Chat.chat_service"
+
+
+def _mock_llm_response(content: str) -> dict:
+    return {"choices": [{"message": {"content": content}}]}
 
 
 @pytest.fixture()
@@ -24,6 +33,10 @@ def api_context(tmp_path, monkeypatch):
 
     async def override_user():
         return User(id=1, username="tester", email="t@e.com", is_active=True, is_admin=True)
+
+    class _NoopRateLimiter:
+        async def check_user_rate_limit(self, *_args, **_kwargs):
+            return True, {}
 
     from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 
@@ -42,6 +55,7 @@ def api_context(tmp_path, monkeypatch):
 
     fastapi_app.dependency_overrides[get_request_user] = override_user
     fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_db
+    fastapi_app.dependency_overrides[get_rate_limiter_dep] = lambda: _NoopRateLimiter()
 
     with TestClient(fastapi_app) as client:
         yield client, db
@@ -81,6 +95,34 @@ def _create_scene_manuscript(
     chapter = _create_chapter(client, project["id"])
     scene = _create_scene(client, chapter["id"], content_plain)
     return project, chapter, scene
+
+
+def _range_for(text: str, selected_text: str) -> tuple[int, int]:
+    start = text.index(selected_text)
+    return start, start + len(selected_text)
+
+
+def _review_payload(scene: dict, selection_text: str, **overrides) -> dict:
+    start, end = _range_for(scene["content_plain"], selection_text)
+    payload = {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "scene_version": scene["version"],
+        "start": start,
+        "end": end,
+        "selected_text": selection_text,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _list_scene_annotations(client: TestClient, project_id: str, scene_id: str) -> list[dict]:
+    response = client.get(
+        f"{PREFIX}/projects/{project_id}/annotations",
+        params={"target_type": "scene", "target_id": scene_id},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["annotations"]
 
 
 def test_post_annotations_creates_manual_scene_range_annotation(api_context):
@@ -414,3 +456,176 @@ def test_bounded_anchor_status_filter_is_allowed(api_context):
     payload = response.json()
     assert payload["total"] == 1
     assert payload["annotations"][0]["id"] == annotation_id
+
+
+def test_review_selection_requires_provider_and_model_fields(api_context):
+    client, _db = api_context
+    _project, _chapter, scene = _create_scene_manuscript(client)
+
+    response = client.post(
+        f"{PREFIX}/scenes/{scene['id']}/annotations/review-selection",
+        json={
+            "api_provider": "openai",
+            "api_model": "gpt-4o-mini",
+            "scene_version": scene["version"],
+            "start": 0,
+            "end": 5,
+            "selected_text": "Alpha",
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    body = response.json()
+    missing_fields = {error["loc"][-1] for error in body["detail"] if error["type"] == "missing"}
+    assert {"provider", "model"}.issubset(missing_fields)
+
+
+def test_review_selection_rejects_unknown_provider_like_analysis_endpoint(
+    api_context,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client, _db = api_context
+    _project, _chapter, scene = _create_scene_manuscript(client)
+    import tldw_Server_API.app.api.v1.endpoints.writing_manuscripts as writing_endpoint
+
+    monkeypatch.setattr(
+        writing_endpoint,
+        "get_provider_manager",
+        lambda: SimpleNamespace(providers=["openai"], primary_provider="openai"),
+    )
+    monkeypatch.setattr(writing_endpoint, "is_model_known_for_provider", lambda *_args, **_kwargs: True)
+
+    response = client.post(
+        f"{PREFIX}/scenes/{scene['id']}/annotations/review-selection",
+        json=_review_payload(scene, "beta", provider="totally-invalid"),
+    )
+
+    assert response.status_code == 400, response.text
+    assert "provider" in response.json()["detail"].lower()
+
+
+def test_review_selection_rejects_unknown_model_like_analysis_endpoint(
+    api_context,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client, _db = api_context
+    _project, _chapter, scene = _create_scene_manuscript(client)
+    import tldw_Server_API.app.api.v1.endpoints.writing_manuscripts as writing_endpoint
+
+    monkeypatch.setattr(
+        writing_endpoint,
+        "get_provider_manager",
+        lambda: SimpleNamespace(providers=["openai"], primary_provider="openai"),
+    )
+    monkeypatch.setattr(
+        writing_endpoint,
+        "is_model_known_for_provider",
+        lambda provider, model: False if provider == "openai" and model == "bad-model" else True,
+    )
+
+    response = client.post(
+        f"{PREFIX}/scenes/{scene['id']}/annotations/review-selection",
+        json=_review_payload(scene, "beta", model="bad-model"),
+    )
+
+    assert response.status_code == 400, response.text
+    assert "model" in response.json()["detail"].lower()
+
+
+def test_review_selection_scene_version_mismatch_conflicts_before_llm(api_context):
+    client, _db = api_context
+    project, _chapter, scene = _create_scene_manuscript(client)
+
+    with patch(
+        f"{_LLM_MODULE}.perform_chat_api_call_async",
+        new_callable=AsyncMock,
+        return_value=_mock_llm_response(json.dumps({"category": "clarity", "body": "Tighten this."})),
+    ) as mock_llm:
+        response = client.post(
+            f"{PREFIX}/scenes/{scene['id']}/annotations/review-selection",
+            json=_review_payload(scene, "beta", scene_version=scene["version"] + 1),
+        )
+
+    assert response.status_code == 409, response.text
+    assert "version" in response.json()["detail"].lower()
+    mock_llm.assert_not_awaited()
+    assert _list_scene_annotations(client, project["id"], scene["id"]) == []
+
+
+def test_review_selection_range_text_mismatch_conflicts_before_llm(api_context):
+    client, _db = api_context
+    project, _chapter, scene = _create_scene_manuscript(client)
+
+    with patch(
+        f"{_LLM_MODULE}.perform_chat_api_call_async",
+        new_callable=AsyncMock,
+        return_value=_mock_llm_response(json.dumps({"category": "clarity", "body": "Tighten this."})),
+    ) as mock_llm:
+        response = client.post(
+            f"{PREFIX}/scenes/{scene['id']}/annotations/review-selection",
+            json=_review_payload(scene, "beta", selected_text="wrong text"),
+        )
+
+    assert response.status_code == 409, response.text
+    assert "selected text" in response.json()["detail"].lower()
+    mock_llm.assert_not_awaited()
+    assert _list_scene_annotations(client, project["id"], scene["id"]) == []
+
+
+def test_review_selection_persists_one_ai_selected_text_annotation(api_context):
+    client, _db = api_context
+    project, _chapter, scene = _create_scene_manuscript(client)
+
+    with patch(
+        f"{_LLM_MODULE}.perform_chat_api_call_async",
+        new_callable=AsyncMock,
+        return_value=_mock_llm_response(
+            json.dumps(
+                {
+                    "category": "clarity",
+                    "body": "The selected phrase could be more specific.",
+                    "suggested_fix": "Use a precise physical detail.",
+                }
+            )
+        ),
+    ) as mock_llm:
+        response = client.post(
+            f"{PREFIX}/scenes/{scene['id']}/annotations/review-selection",
+            json=_review_payload(scene, "beta", category_hints=["clarity"], instruction="Focus on specificity."),
+        )
+
+    assert response.status_code == 201, response.text
+    annotation = response.json()
+    assert annotation["project_id"] == project["id"]
+    assert annotation["target_type"] == "scene"
+    assert annotation["target_id"] == scene["id"]
+    assert annotation["source"] == "ai_selected_text"
+    assert annotation["category"] == "clarity"
+    assert annotation["body"] == "The selected phrase could be more specific."
+    assert annotation["suggested_fix"] == "Use a precise physical detail."
+    assert annotation["selected_text"] == "beta"
+    assert annotation["anchor_status"] == "attached"
+    mock_llm.assert_awaited_once()
+    stored = _list_scene_annotations(client, project["id"], scene["id"])
+    assert [item["id"] for item in stored] == [annotation["id"]]
+
+
+def test_review_selection_unparseable_output_returns_diagnostics_without_persisting(api_context):
+    client, _db = api_context
+    project, _chapter, scene = _create_scene_manuscript(client)
+
+    with patch(
+        f"{_LLM_MODULE}.perform_chat_api_call_async",
+        new_callable=AsyncMock,
+        return_value=_mock_llm_response("not json at all"),
+    ):
+        response = client.post(
+            f"{PREFIX}/scenes/{scene['id']}/annotations/review-selection",
+            json=_review_payload(scene, "beta"),
+        )
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert "diagnostics" in detail
+    assert "valid JSON" in " ".join(detail["diagnostics"])
+    assert _list_scene_annotations(client, project["id"], scene["id"]) == []

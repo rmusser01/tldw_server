@@ -671,6 +671,45 @@ class ManuscriptAnnotationCreate(BaseModel):
         return self
 
 
+class ManuscriptSelectedTextAnnotationReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(..., min_length=1, description="LLM provider override")
+    model: str = Field(..., min_length=1, description="Model override")
+    scene_version: int = Field(..., ge=0, description="Scene version being reviewed")
+    start: int = Field(..., ge=0, description="Selected text start offset")
+    end: int = Field(..., ge=0, description="Selected text end offset")
+    selected_text: str = Field(..., min_length=1, max_length=12000, description="Selected scene text")
+    category_hints: list[AnnotationCategory] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Optional preferred annotation categories",
+    )
+    instruction: str | None = Field(None, max_length=4000, description="Optional review instruction")
+
+    @field_validator("provider", "model")
+    @classmethod
+    def validate_required_override(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("provider and model must be non-empty")
+        return normalized
+
+    @field_validator("instruction")
+    @classmethod
+    def normalize_instruction(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def validate_range(self):
+        if self.end <= self.start:
+            raise ValueError("Selected text end must be greater than start.")
+        return self
+
+
 class ManuscriptAnnotationUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
