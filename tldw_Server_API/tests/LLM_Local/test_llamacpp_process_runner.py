@@ -83,6 +83,13 @@ def make_model(config: LlamaCppConfig, name: str = "model.gguf") -> Path:
     return model_path
 
 
+def test_runner_uses_shared_server_arg_formatter_map() -> None:
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as runner_module
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_server_args import server_arg_formatters
+
+    assert runner_module._server_arg_formatters is server_arg_formatters
+
+
 def profile(
     profile_id: str,
     *,

@@ -107,6 +107,36 @@ class HuggingFaceHandler(BaseLLMHandler):
     def _cache_key(self, model_name_or_path: str, quantization_config: Optional[dict]) -> tuple:
         return (model_name_or_path, self._freeze_config(quantization_config))
 
+    def _resolve_model_dir(self, model_name_or_path: str) -> Path | None:
+        candidate = Path(model_name_or_path).expanduser()
+        if candidate.is_dir():
+            try:
+                resolved = candidate.resolve()
+            except (OSError, RuntimeError, ValueError):
+                return None
+            if self._is_path_allowed(resolved) and (resolved / "config.json").exists():
+                return resolved
+            return None
+
+        local_model_path = (self.models_dir / model_name_or_path).expanduser()
+        try:
+            resolved_local = local_model_path.resolve()
+        except (OSError, RuntimeError, ValueError):
+            return None
+        if self._is_path_allowed(resolved_local) and (resolved_local / "config.json").exists():
+            return resolved_local
+        return None
+
+    def _enforce_cache_limit(self) -> None:
+        try:
+            max_loaded = int(getattr(self.config, "max_loaded_models", 1) or 1)
+        except (TypeError, ValueError):
+            max_loaded = 1
+        max_loaded = max(1, max_loaded)
+        while len(self.loaded_models) > max_loaded:
+            oldest_key = next(iter(self.loaded_models))
+            del self.loaded_models[oldest_key]
+
     async def list_models(self) -> list[str]:
         """Lists locally available Hugging Face models (directories in models_dir)."""
         if not self.models_dir.exists():
@@ -117,12 +147,7 @@ class HuggingFaceHandler(BaseLLMHandler):
 
     async def is_model_available(self, model_name: str) -> bool:
         """Checks if a model is available locally (either as a full path or in models_dir)."""
-        # Check if model_name is an absolute path to a model directory
-        if Path(model_name).is_dir() and (Path(model_name)/"config.json").exists():
-            return True
-        # Check if it's a name in our local models_dir
-        local_model_path = self.models_dir / model_name
-        return local_model_path.is_dir() and (local_model_path / "config.json").exists()
+        return self._resolve_model_dir(model_name) is not None
 
 
     async def download_model(self, model_identifier: str, save_directory: Optional[str] = None) -> str:
@@ -194,11 +219,9 @@ class HuggingFaceHandler(BaseLLMHandler):
         if cache_key in self.loaded_models:
             return self.loaded_models[cache_key]
 
-        actual_path = model_name_or_path
-        if not Path(actual_path).is_dir(): # If not a full path, assume it's in models_dir
-            actual_path = str(self.models_dir / model_name_or_path)
-            if not Path(actual_path).is_dir():
-                raise ModelNotFoundError(f"Model directory not found at {actual_path} or {model_name_or_path}")
+        actual_path = self._resolve_model_dir(model_name_or_path)
+        if actual_path is None:
+            raise ModelNotFoundError("Model directory was not found under allowed HuggingFace model paths.")
 
         self.logger.info(f"Loading model and tokenizer from: {actual_path}")
 
@@ -239,6 +262,7 @@ class HuggingFaceHandler(BaseLLMHandler):
         try:
             model, tokenizer = await asyncio.to_thread(_load)
             self.loaded_models[cache_key] = (model, tokenizer)
+            self._enforce_cache_limit()
             self.logger.info(f"Model and tokenizer for '{model_name_or_path}' loaded successfully.")
             return model, tokenizer
         except Exception as e:

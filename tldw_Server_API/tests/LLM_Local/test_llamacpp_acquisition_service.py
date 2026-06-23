@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import httpx
 import pytest
 
 
@@ -109,6 +110,80 @@ def test_validate_download_request_fails_closed_when_dns_cannot_be_verified(monk
 
     with pytest.raises(ServerError, match="resolve|verify"):
         llamacpp_acquisition_service.validate_download_request(payload, _saved_config(models_dir))
+
+
+@pytest.mark.unit
+def test_validate_download_payload_rechecks_dns_before_worker_download(monkeypatch, tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_acquisition_service
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    destination = models_dir / "model.gguf"
+    payload = {
+        "source_url": "https://example.com/model.gguf",
+        "destination_path": str(destination),
+        "register_asset": True,
+    }
+    monkeypatch.setattr(
+        llamacpp_acquisition_service.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("127.0.0.1", 0))],
+    )
+
+    with pytest.raises(ServerError, match="private|local|loopback"):
+        llamacpp_acquisition_service.validate_download_payload(payload, _saved_config(models_dir))
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_download_to_partial_rejects_redirect_to_private_target(monkeypatch, tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_acquisition_service
+    from tldw_Server_API.app.core import http_client
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    partial_path = models_dir / "model.gguf.partial"
+    validated = llamacpp_acquisition_service.LlamaCppValidatedDownload(
+        source_url="https://example.com/model.gguf",
+        source_label="example.com/model.gguf",
+        destination_path=models_dir / "model.gguf",
+    )
+
+    def fake_getaddrinfo(host: str, *_args, **_kwargs):
+        if host == "example.com":
+            return [(None, None, None, None, ("93.184.216.34", 0))]
+        if host == "127.0.0.1":
+            return [(None, None, None, None, ("127.0.0.1", 0))]
+        raise AssertionError(f"unexpected host lookup: {host}")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "example.com":
+            return httpx.Response(
+                302,
+                headers={"location": "http://127.0.0.1/internal-model.gguf"},
+                request=request,
+            )
+        return httpx.Response(200, content=b"internal", request=request)
+
+    transport = httpx.MockTransport(handler)
+
+    def fake_async_client(**kwargs):
+        return httpx.AsyncClient(
+            transport=transport,
+            timeout=kwargs.get("timeout"),
+            follow_redirects=False,
+        )
+
+    monkeypatch.setattr(llamacpp_acquisition_service.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(llamacpp_acquisition_service, "_read_saved_config", lambda: _saved_config(models_dir))
+    monkeypatch.setattr(http_client, "create_async_client", fake_async_client)
+
+    with pytest.raises(ServerError, match="private|local|loopback"):
+        await llamacpp_acquisition_service.download_to_partial(validated, partial_path)
+
+    assert not partial_path.exists()
 
 
 @pytest.mark.unit

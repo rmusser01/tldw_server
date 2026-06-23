@@ -25,6 +25,8 @@ class HuggingFaceConfig(BaseHandlerConfig):
     models_dir: Path = Path("models/huggingface_models") # Default path
     default_device_map: str = "auto"
     default_torch_dtype: str = "torch.bfloat16" # Store as string, convert later
+    allowed_paths: Optional[list[Path]] = None
+    max_loaded_models: int = 1
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -39,6 +41,8 @@ class LlamafileConfig(BaseHandlerConfig):
     port_autoselect: bool = True
     port_probe_max: int = 10
     allowed_paths: Optional[list[Path]] = None
+    allow_executable_auto_download: bool = False
+    executable_sha256: Optional[str] = None
     http_timeout: float = 120.0  # HTTP request timeout in seconds
     readiness_timeout: float = 30.0  # Server readiness poll timeout in seconds
     stderr_read_timeout: float = 5.0  # Timeout for reading stderr during startup failures

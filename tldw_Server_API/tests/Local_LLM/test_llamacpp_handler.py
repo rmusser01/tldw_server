@@ -493,6 +493,20 @@ async def test_llamacpp_stop_server_by_pid(monkeypatch, tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_llamacpp_stop_server_rejects_unmanaged_pid(monkeypatch, tmp_path: Path):
+    exe = tmp_path / "llama_server"
+    exe.write_text("#!/bin/sh\n")
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    cfg = LlamaCppConfig(executable_path=exe, models_dir=model_dir)
+    handler = LlamaCppHandler(cfg, global_app_config={})
+
+    msg = await handler.stop_server(pid=424242)
+
+    assert "no managed" in msg.lower()
+
+
+@pytest.mark.asyncio
 async def test_llamacpp_start_server_not_ready(monkeypatch, tmp_path: Path):
     exe = tmp_path / "llama_server"
     exe.write_text("#!/bin/sh\n")
