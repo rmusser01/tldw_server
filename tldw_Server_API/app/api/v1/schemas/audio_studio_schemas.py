@@ -406,6 +406,43 @@ class AudioStudioExportCreate(_AudioStudioJobCreate):
     settings: dict[str, Any] = Field(default_factory=dict)
 
 
+class AudioStudioRenderJobResponse(_BaseAudioStudioModel):
+    """Audio Studio render Jobs state plus revision-pinned manifest."""
+
+    job_id: str
+    project_id: str
+    job_type: str
+    render_id: str
+    render_type: str
+    status: str
+    target_resource_kind: AudioStudioResourceKind
+    target_resource_id: str
+    target_revision_id: str
+    manifest: dict[str, Any] = Field(default_factory=dict)
+    result: dict[str, Any] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class AudioStudioExportJobResponse(_BaseAudioStudioModel):
+    """Audio Studio export Jobs state plus revision-pinned manifest."""
+
+    job_id: str
+    project_id: str
+    job_type: str
+    export_id: str
+    export_type: str
+    status: str
+    target_resource_kind: AudioStudioResourceKind
+    target_resource_id: str
+    target_revision_id: str
+    source_render_id: str | None = None
+    manifest: dict[str, Any] = Field(default_factory=dict)
+    result: dict[str, Any] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
 class AudioStudioMigrationPreview(_SecretFreePayloadMixin):
     """Schema-only contract for legacy Audiobook Studio migration preview."""
 
@@ -417,6 +454,7 @@ class AudioStudioMigrationPreview(_SecretFreePayloadMixin):
 class AudioStudioMigrationCommit(_SecretFreePayloadMixin):
     """Schema-only contract for legacy Audiobook Studio migration commit."""
 
+    idempotency_key: str | None = Field(None, min_length=16, max_length=200)
     preview_id: str | None = Field(None, max_length=200)
     base_revision_id: str | None = Field(None, max_length=120)
     project_payload: dict[str, Any] = Field(default_factory=dict)
@@ -427,3 +465,27 @@ class AudioStudioMigrationCommit(_SecretFreePayloadMixin):
         if not self.preview_id and not self.project_payload:
             raise ValueError("migration commit requires preview_id or project_payload")
         return self
+
+
+class AudioStudioMigrationPreviewResponse(_BaseAudioStudioModel):
+    """Preview response for legacy Audiobook Studio migration."""
+
+    preview_id: str
+    fingerprint: str
+    workflow: AudioStudioWorkflow
+    project_count: int
+    section_count: int
+    audio_reference_count: int
+    needs_regeneration_count: int
+    warnings: list[str] = Field(default_factory=list)
+
+
+class AudioStudioMigrationCommitResponse(_BaseAudioStudioModel):
+    """Commit response for legacy Audiobook Studio migration."""
+
+    project: AudioStudioProjectResponse
+    imported_section_count: int
+    audio_reference_count: int
+    needs_regeneration_count: int
+    fingerprint: str
+    replayed: bool

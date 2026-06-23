@@ -1,7 +1,7 @@
-"""Audio Studio API endpoint skeleton.
+"""Audio Studio API endpoints.
 
 This module exposes server-backed project and timeline resource contracts for
-Audio Studio without provider execution, rendering, exporting, or migration.
+Audio Studio provider execution, rendering, exporting, and migration.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import json
 from typing import Annotated, Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
 from starlette import status
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
@@ -28,8 +28,16 @@ from tldw_Server_API.app.api.v1.schemas.audio_studio_schemas import (
     AudioStudioProjectUpdate,
     AudioStudioGenerationCreate,
     AudioStudioGenerationJobResponse,
+    AudioStudioExportCreate,
+    AudioStudioExportJobResponse,
+    AudioStudioMigrationCommit,
+    AudioStudioMigrationCommitResponse,
+    AudioStudioMigrationPreview,
+    AudioStudioMigrationPreviewResponse,
     AudioStudioProviderListResponse,
     AudioStudioProviderResponse,
+    AudioStudioRenderCreate,
+    AudioStudioRenderJobResponse,
     AudioStudioSectionResponse,
     AudioStudioSectionUpsert,
     AudioStudioTrackResponse,
@@ -46,8 +54,21 @@ from tldw_Server_API.app.core.DB_Management.Collections_DB import (
     CollectionsDatabase,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseError
-from tldw_Server_API.app.core.Audio_Studio.jobs import enqueue_audio_studio_generation_job
+from tldw_Server_API.app.core.Audio_Studio.export import create_audio_studio_export_manifest
+from tldw_Server_API.app.core.Audio_Studio.jobs import (
+    AUDIO_STUDIO_DOMAIN,
+    JOB_TYPE_EXPORT,
+    JOB_TYPE_RENDER,
+    enqueue_audio_studio_export_job,
+    enqueue_audio_studio_generation_job,
+    enqueue_audio_studio_render_job,
+)
+from tldw_Server_API.app.core.Audio_Studio.migration import (
+    commit_audio_studio_audiobook_migration,
+    preview_audio_studio_audiobook_migration,
+)
 from tldw_Server_API.app.core.Audio_Studio.providers.registry import build_audio_studio_provider_registry
+from tldw_Server_API.app.core.Audio_Studio.render import build_render_plan
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 
@@ -208,6 +229,133 @@ def _artifact_response(row: AudioStudioArtifactRow) -> AudioStudioArtifactRespon
     )
 
 
+def _render_job_response(
+    *,
+    accepted_or_job: Any,
+    project_id: str,
+    render_id: str,
+    render_type: str,
+    target_resource_kind: str,
+    target_resource_id: str,
+    target_revision_id: str,
+    manifest: dict[str, Any],
+) -> AudioStudioRenderJobResponse:
+    if isinstance(accepted_or_job, dict):
+        status_value = str(accepted_or_job.get("status") or "queued")
+        result = accepted_or_job.get("result") if isinstance(accepted_or_job.get("result"), dict) else None
+        created_at = _string_or_none(accepted_or_job.get("created_at"))
+        updated_at = _string_or_none(accepted_or_job.get("updated_at"))
+        job_id = str(accepted_or_job.get("uuid") or accepted_or_job.get("id") or "")
+    else:
+        status_value = str(getattr(accepted_or_job, "status", "queued"))
+        result = None
+        created_at = None
+        updated_at = None
+        job_id = str(getattr(accepted_or_job, "job_id", ""))
+    return AudioStudioRenderJobResponse(
+        job_id=job_id,
+        project_id=project_id,
+        job_type=JOB_TYPE_RENDER,
+        render_id=render_id,
+        render_type=render_type,
+        status=status_value,
+        target_resource_kind=target_resource_kind,
+        target_resource_id=target_resource_id,
+        target_revision_id=target_revision_id,
+        manifest=manifest,
+        result=result,
+        created_at=created_at,
+        updated_at=updated_at,
+    )
+
+
+def _export_job_response(
+    *,
+    accepted_or_job: Any,
+    project_id: str,
+    export_id: str,
+    export_type: str,
+    target_resource_kind: str,
+    target_resource_id: str,
+    target_revision_id: str,
+    source_render_id: str | None,
+    manifest: dict[str, Any],
+) -> AudioStudioExportJobResponse:
+    if isinstance(accepted_or_job, dict):
+        status_value = str(accepted_or_job.get("status") or "queued")
+        result = accepted_or_job.get("result") if isinstance(accepted_or_job.get("result"), dict) else None
+        created_at = _string_or_none(accepted_or_job.get("created_at"))
+        updated_at = _string_or_none(accepted_or_job.get("updated_at"))
+        job_id = str(accepted_or_job.get("uuid") or accepted_or_job.get("id") or "")
+    else:
+        status_value = str(getattr(accepted_or_job, "status", "queued"))
+        result = None
+        created_at = None
+        updated_at = None
+        job_id = str(getattr(accepted_or_job, "job_id", ""))
+    return AudioStudioExportJobResponse(
+        job_id=job_id,
+        project_id=project_id,
+        job_type=JOB_TYPE_EXPORT,
+        export_id=export_id,
+        export_type=export_type,
+        status=status_value,
+        target_resource_kind=target_resource_kind,
+        target_resource_id=target_resource_id,
+        target_revision_id=target_revision_id,
+        source_render_id=source_render_id,
+        manifest=manifest,
+        result=result,
+        created_at=created_at,
+        updated_at=updated_at,
+    )
+
+
+def _job_payload(job: dict[str, Any]) -> dict[str, Any]:
+    payload = job.get("payload")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _provider_options(payload: dict[str, Any]) -> dict[str, Any]:
+    options = payload.get("provider_options")
+    return options if isinstance(options, dict) else {}
+
+
+def _load_audio_studio_job_or_404(
+    *,
+    job_id: str,
+    project: AudioStudioProjectRow,
+    current_user: User,
+    job_type: str,
+) -> dict[str, Any]:
+    job = JobManager().get_job_by_uuid(job_id)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="audio_studio_job_not_found")
+    payload = _job_payload(job)
+    if (
+        job.get("domain") != AUDIO_STUDIO_DOMAIN
+        or job.get("job_type") != job_type
+        or str(job.get("owner_user_id") or "") != str(current_user.id)
+        or str(payload.get("project_id") or "") != project.project_id
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="audio_studio_job_not_found")
+    return job
+
+
+def _artifact_refs_from_request(request: AudioStudioRenderCreate | AudioStudioExportCreate) -> list[dict[str, Any] | str]:
+    if isinstance(request.options.get("artifact_refs"), list):
+        return request.options["artifact_refs"]
+    if isinstance(request.settings.get("artifact_refs"), list):
+        return request.settings["artifact_refs"]
+    return []
+
+
+def _string_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
 def _parse_json_object(raw: str | None) -> dict[str, Any]:
     if not raw:
         return {}
@@ -286,6 +434,70 @@ async def list_audio_studio_providers(
     registry = build_audio_studio_provider_registry()
     return AudioStudioProviderListResponse(
         providers=[AudioStudioProviderResponse(**row) for row in registry.list_providers()]
+    )
+
+
+@router.post("/migrations/audiobook/preview", response_model=AudioStudioMigrationPreviewResponse)
+async def preview_audiobook_studio_migration(
+    request: AudioStudioMigrationPreview,
+    current_user: User = Depends(get_request_user),
+) -> AudioStudioMigrationPreviewResponse:
+    """Preview a legacy local Audiobook Studio project without writing server records."""
+
+    try:
+        preview = preview_audio_studio_audiobook_migration(
+            project_payload=request.project_payload,
+            legacy_project_id=request.legacy_project_id,
+            user_id=str(current_user.id),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return AudioStudioMigrationPreviewResponse(
+        preview_id=preview.preview_id,
+        fingerprint=preview.fingerprint,
+        workflow=AudioStudioWorkflow.NARRATION,
+        project_count=preview.project_count,
+        section_count=preview.section_count,
+        audio_reference_count=preview.audio_reference_count,
+        needs_regeneration_count=preview.needs_regeneration_count,
+        warnings=preview.warnings,
+    )
+
+
+@router.post(
+    "/migrations/audiobook/commit",
+    response_model=AudioStudioMigrationCommitResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def commit_audiobook_studio_migration(
+    request: AudioStudioMigrationCommit,
+    response: Response,
+    current_user: User = Depends(get_request_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
+) -> AudioStudioMigrationCommitResponse:
+    """Commit a sanitized legacy Audiobook Studio project into Narration."""
+
+    try:
+        committed = commit_audio_studio_audiobook_migration(
+            collections_db=collections_db,
+            project_payload=request.project_payload,
+            legacy_project_id=None,
+            idempotency_key=request.idempotency_key,
+            user_id=str(current_user.id),
+        )
+    except ValueError as exc:
+        if str(exc) == "audio_studio_idempotency_conflict":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    if committed.replayed:
+        response.status_code = status.HTTP_200_OK
+    return AudioStudioMigrationCommitResponse(
+        project=_project_response(committed.project),
+        imported_section_count=committed.imported_section_count,
+        audio_reference_count=committed.audio_reference_count,
+        needs_regeneration_count=committed.needs_regeneration_count,
+        fingerprint=committed.fingerprint,
+        replayed=committed.replayed,
     )
 
 
@@ -600,6 +812,200 @@ async def get_audio_studio_generation(
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="audio_studio_generation_job_not_found") from exc
     return _generation_job_response(row, project_id=project.project_id)
+
+
+@router.post(
+    "/projects/{project_id}/renders",
+    response_model=AudioStudioRenderJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_audio_studio_render(
+    request: AudioStudioRenderCreate,
+    project_id: AudioStudioIdPath,
+    current_user: User = Depends(get_request_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
+) -> AudioStudioRenderJobResponse:
+    """Create an idempotent Audio Studio render job with validated source pins."""
+
+    project = _load_project_or_404(collections_db, project_id)
+    output_format = str(request.options.get("output_format") or request.settings.get("output_format") or "wav")
+    loudness_normalize = bool(request.options.get("loudness_normalize") or request.settings.get("loudness_normalize"))
+    try:
+        plan = build_render_plan(
+            collections_db=collections_db,
+            project=project,
+            render_id=request.target_resource_id,
+            target_revision_id=request.target_revision_id,
+            artifact_refs=_artifact_refs_from_request(request),
+            output_format=output_format,
+            loudness_normalize=loudness_normalize,
+            render_type=request.render_type,
+        )
+        job_options = {
+            **request.options,
+            "render_type": request.render_type,
+            "output_format": plan.output_format,
+            "loudness_normalize": plan.loudness_normalize,
+            "artifact_refs": request.options.get("artifact_refs") or request.settings.get("artifact_refs") or [],
+            "manifest": plan.manifest,
+        }
+        accepted = enqueue_audio_studio_render_job(
+            jm=JobManager(),
+            collections_db=collections_db,
+            user_id=str(current_user.id),
+            project_id=project.project_id,
+            target_resource_kind=request.target_resource_kind.value,
+            target_resource_id=request.target_resource_id,
+            target_revision_id=request.target_revision_id,
+            idempotency_key=request.idempotency_key,
+            options=job_options,
+        )
+        return _render_job_response(
+            accepted_or_job=accepted,
+            project_id=project.project_id,
+            render_id=request.target_resource_id,
+            render_type=request.render_type,
+            target_resource_kind=request.target_resource_kind.value,
+            target_resource_id=request.target_resource_id,
+            target_revision_id=request.target_revision_id,
+            manifest=plan.manifest,
+        )
+    except ValueError as exc:
+        if str(exc) in {"stale_target_revision", "stale_artifact_revision"}:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except DatabaseError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="audio_studio_render_create_failed") from exc
+
+
+@router.get(
+    "/projects/{project_id}/renders/{job_id}",
+    response_model=AudioStudioRenderJobResponse,
+)
+async def get_audio_studio_render(
+    project_id: AudioStudioIdPath,
+    job_id: AudioStudioIdPath,
+    current_user: User = Depends(get_request_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
+) -> AudioStudioRenderJobResponse:
+    """Fetch an Audio Studio render job owned by the current user."""
+
+    project = _load_project_or_404(collections_db, project_id)
+    job = _load_audio_studio_job_or_404(
+        job_id=job_id,
+        project=project,
+        current_user=current_user,
+        job_type=JOB_TYPE_RENDER,
+    )
+    payload = _job_payload(job)
+    options = _provider_options(payload)
+    return _render_job_response(
+        accepted_or_job=job,
+        project_id=project.project_id,
+        render_id=str(payload.get("target_resource_id") or ""),
+        render_type=str(options.get("render_type") or "preview_mix"),
+        target_resource_kind=str(payload.get("target_resource_kind") or "render"),
+        target_resource_id=str(payload.get("target_resource_id") or ""),
+        target_revision_id=str(payload.get("target_revision_id") or ""),
+        manifest=options.get("manifest") if isinstance(options.get("manifest"), dict) else {},
+    )
+
+
+@router.post(
+    "/projects/{project_id}/exports",
+    response_model=AudioStudioExportJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_audio_studio_export(
+    request: AudioStudioExportCreate,
+    project_id: AudioStudioIdPath,
+    current_user: User = Depends(get_request_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
+) -> AudioStudioExportJobResponse:
+    """Create an idempotent Audio Studio export job with source provenance."""
+
+    project = _load_project_or_404(collections_db, project_id)
+    settings = {**request.settings, **({"source_render_id": request.source_render_id} if request.source_render_id else {})}
+    try:
+        manifest = create_audio_studio_export_manifest(
+            collections_db=collections_db,
+            project=project,
+            export_id=request.target_resource_id,
+            export_type=request.export_type,
+            target_revision_id=request.target_revision_id,
+            artifact_refs=_artifact_refs_from_request(request),
+            source_render_id=request.source_render_id,
+            settings=settings,
+        )
+        job_options = {
+            **request.options,
+            "export_type": request.export_type,
+            "source_render_id": request.source_render_id,
+            "artifact_refs": request.options.get("artifact_refs") or request.settings.get("artifact_refs") or [],
+            "manifest": manifest,
+        }
+        accepted = enqueue_audio_studio_export_job(
+            jm=JobManager(),
+            collections_db=collections_db,
+            user_id=str(current_user.id),
+            project_id=project.project_id,
+            target_resource_kind=request.target_resource_kind.value,
+            target_resource_id=request.target_resource_id,
+            target_revision_id=request.target_revision_id,
+            idempotency_key=request.idempotency_key,
+            options=job_options,
+        )
+        return _export_job_response(
+            accepted_or_job=accepted,
+            project_id=project.project_id,
+            export_id=request.target_resource_id,
+            export_type=request.export_type,
+            target_resource_kind=request.target_resource_kind.value,
+            target_resource_id=request.target_resource_id,
+            target_revision_id=request.target_revision_id,
+            source_render_id=request.source_render_id,
+            manifest=manifest,
+        )
+    except ValueError as exc:
+        if str(exc) in {"stale_target_revision", "stale_artifact_revision"}:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except DatabaseError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="audio_studio_export_create_failed") from exc
+
+
+@router.get(
+    "/projects/{project_id}/exports/{job_id}",
+    response_model=AudioStudioExportJobResponse,
+)
+async def get_audio_studio_export(
+    project_id: AudioStudioIdPath,
+    job_id: AudioStudioIdPath,
+    current_user: User = Depends(get_request_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
+) -> AudioStudioExportJobResponse:
+    """Fetch an Audio Studio export job owned by the current user."""
+
+    project = _load_project_or_404(collections_db, project_id)
+    job = _load_audio_studio_job_or_404(
+        job_id=job_id,
+        project=project,
+        current_user=current_user,
+        job_type=JOB_TYPE_EXPORT,
+    )
+    payload = _job_payload(job)
+    options = _provider_options(payload)
+    return _export_job_response(
+        accepted_or_job=job,
+        project_id=project.project_id,
+        export_id=str(payload.get("target_resource_id") or ""),
+        export_type=str(options.get("export_type") or "zip_package"),
+        target_resource_kind=str(payload.get("target_resource_kind") or "export"),
+        target_resource_id=str(payload.get("target_resource_id") or ""),
+        target_revision_id=str(payload.get("target_revision_id") or ""),
+        source_render_id=options.get("source_render_id") if isinstance(options.get("source_render_id"), str) else None,
+        manifest=options.get("manifest") if isinstance(options.get("manifest"), dict) else {},
+    )
 
 
 @router.get("/projects/{project_id}/artifacts", response_model=AudioStudioArtifactListResponse)
