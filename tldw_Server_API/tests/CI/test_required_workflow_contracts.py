@@ -215,6 +215,21 @@ def test_e2e_required_explicitly_loads_pytest_asyncio_plugin() -> None:
     assert "-p pytest_asyncio.plugin" in retry["run"]
 
 
+def test_watchlists_extension_e2e_uses_playwright_chromium() -> None:
+    workflow = _load(".github/workflows/ui-watchlists-extension-e2e.yml")
+    job = workflow["jobs"]["watchlists-extension-e2e"]
+    env = job["env"]
+    steps = job["steps"]
+
+    assert "TLDW_E2E_PLAYWRIGHT_CHANNEL" not in env
+    assert env["TLDW_E2E_EXTENSION_MINIMAL_LOCALES"] == "1"
+    assert not any(step.get("name") == "Verify system Chrome" for step in steps)
+
+    install_step = _get_step(steps, "Install Playwright Chromium")
+    assert install_step["working-directory"] == "apps/extension"
+    assert install_step["run"] == "bunx playwright install --with-deps chromium"
+
+
 def test_frontend_e2e_tiers_install_portaudio_before_backend_dependency_setup() -> None:
     workflow = _load(".github/workflows/frontend-e2e-tiers.yml")
     for job_name in ("critical", "features", "admin"):

@@ -32,6 +32,9 @@ class FakePostgresBackend:
     def fetch_one(self, *args, **kwargs):
         return None
 
+    def table_exists(self, table_name: str, connection=None):  # noqa: ANN001
+        return True
+
     def transaction(self):
         class Transaction:
             def __enter__(self):

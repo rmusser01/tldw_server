@@ -57,7 +57,7 @@ jobs:
       TLDW_E2E_EXTENSION_LAUNCH_TIMEOUT_MS: "90000"
       TLDW_E2E_EXTENSION_TARGET_WAIT_MS: "90000"
       TLDW_E2E_EXTENSION_HEADLESS: "0"
-      TLDW_E2E_PLAYWRIGHT_CHANNEL: chrome
+      TLDW_E2E_EXTENSION_MINIMAL_LOCALES: "1"
 
     steps:
       - name: Checkout
@@ -83,8 +83,9 @@ jobs:
         working-directory: apps/extension
         run: bun run build:chrome:prod
 
-      - name: Verify system Chrome
-        run: google-chrome --version
+      - name: Install Playwright Chromium
+        working-directory: apps/extension
+        run: bunx playwright install --with-deps chromium
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg

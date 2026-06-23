@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   parseChecklistItems,
+  stripChecklistMetadataForLabel,
   toggleChecklistItemMarker
 } from "@/components/Notes/task-markdown"
 
@@ -50,5 +51,21 @@ describe("task markdown helpers", () => {
 
     expect(items[0]).toEqual(expect.objectContaining({ hasChildContent: true }))
     expect(items[1]).toEqual(expect.objectContaining({ hasChildContent: false }))
+  })
+
+  it("strips multiline checklist metadata comments from task labels", () => {
+    const label = stripChecklistMetadataForLabel(
+      "Draft PRD <!-- task:abc\nowner:docs --> {#task-abc}"
+    )
+
+    expect(label).toBe("Draft PRD")
+    expect(label).not.toContain("<!--")
+  })
+
+  it("drops dangling checklist metadata comments from task labels", () => {
+    const label = stripChecklistMetadataForLabel("Draft PRD <!-- task:abc")
+
+    expect(label).toBe("Draft PRD")
+    expect(label).not.toContain("<!--")
   })
 })

@@ -94,9 +94,31 @@ export const toggleChecklistItemMarker = (
 export const getNextTaskStatus = (checked: boolean): NoteTaskStatus =>
   checked ? "open" : "done"
 
+const stripHtmlCommentMetadata = (text: string): string => {
+  let sanitized = ""
+  let cursor = 0
+
+  while (cursor < text.length) {
+    const commentStart = text.indexOf("<!--", cursor)
+    if (commentStart === -1) {
+      sanitized += text.slice(cursor)
+      break
+    }
+
+    sanitized += text.slice(cursor, commentStart)
+    const commentEnd = text.indexOf("-->", commentStart + 4)
+    if (commentEnd === -1) {
+      break
+    }
+
+    cursor = commentEnd + 3
+  }
+
+  return sanitized
+}
+
 export const stripChecklistMetadataForLabel = (text: string): string =>
-  text
-    .replace(/<!--.*?-->/g, "")
+  stripHtmlCommentMetadata(text)
     .replace(/\s+\{#[^}]+\}/g, "")
     .replace(/\s+/g, " ")
     .trim()

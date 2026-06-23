@@ -9,7 +9,8 @@ import pytest
 import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-MCP_PACKAGE_PYPROJECT = REPO_ROOT / "mcp_unified" / "pyproject.toml"
+MCP_PACKAGE_PROJECT = REPO_ROOT / "apps" / "mcp-unified"
+MCP_PACKAGE_PYPROJECT = MCP_PACKAGE_PROJECT / "pyproject.toml"
 HARNESS_PATH = (
     REPO_ROOT
     / "Helper_Scripts"
@@ -45,8 +46,9 @@ def test_standalone_package_exposes_documented_gateway_and_smoke_clis() -> None:
 
     assert scripts["mcp-unified-gateway"] == "mcp_unified.gateway.cli:main"
     assert scripts["mcp-unified-smoke"] == "mcp_unified.smoke.cli:main"
+    assert "mcp_unified.gateway" in packages
     assert "mcp_unified.smoke" in packages
-    assert package_dirs["mcp_unified.smoke"] == "smoke"
+    assert package_dirs[""] == "src"
 
 
 @pytest.mark.unit
@@ -66,10 +68,11 @@ def test_user_guide_uat_plan_covers_documented_local_flows(tmp_path: Path) -> No
     plan = module.build_uat_plan(
         repo_root=REPO_ROOT,
         workspace=tmp_path,
-        python_executable="/tmp/uat-python",
-        gateway_executable="/tmp/mcp-unified-gateway",
-        smoke_executable="/tmp/mcp-unified-smoke",
+        python_executable=str(tmp_path / "uat-python"),
+        gateway_executable=str(tmp_path / "mcp-unified-gateway"),
+        smoke_executable=str(tmp_path / "mcp-unified-smoke"),
         gateway_url=None,
+        package_install_args=["-e", f"{MCP_PACKAGE_PROJECT}[gateway]"],
     )
 
     step_ids = [step.step_id for step in plan]
@@ -99,6 +102,8 @@ def test_user_guide_uat_plan_covers_documented_local_flows(tmp_path: Path) -> No
         "import_config_snapshot_apply",
         "write_reporting_config",
         "tool_events_report",
+        "tool_events_export",
+        "tool_events_cleanup",
         "smoke_inprocess",
         "write_stdio_fixture",
         "smoke_stdio_subprocess",
