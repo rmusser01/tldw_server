@@ -8,8 +8,17 @@ from starlette.requests import Request
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import admin as admin_mod
 from tldw_Server_API.app.api.v1.endpoints import monitoring as monitoring_mod
-from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
+from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE, SYSTEM_LOGS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+
+@pytest.fixture(autouse=True)
+def _single_user_test_key(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("SINGLE_USER_TEST_API_KEY", "monitoring-test-key")
+    reset_settings()
+    yield
+    reset_settings()
 
 
 def _build_app_with_overrides(
@@ -42,6 +51,34 @@ def _build_app_with_overrides(
         return _FakeMonitoringService()
 
     monitoring_mod.get_topic_monitoring_service = _fake_get_topic_monitoring_service  # type: ignore[assignment]
+
+    class _FakeNotificationService:
+        def get_settings(self) -> dict:
+            return {
+                "enabled": False,
+                "min_severity": "critical",
+                "file": "Databases/monitoring_notifications.log",
+                "webhook_url": "",
+                "email_to": "",
+                "smtp_host": "",
+                "smtp_port": 587,
+                "smtp_starttls": True,
+                "smtp_user": "",
+                "email_from": "",
+            }
+
+        def update_settings(self, **kwargs) -> dict:
+            settings = self.get_settings()
+            settings.update(kwargs)
+            return settings
+
+        def is_file_path_allowed(self, _path: str) -> bool:
+            return True
+
+        def notify(self, _alert) -> str:
+            return "logged"
+
+    monitoring_mod.get_notification_service = lambda: _FakeNotificationService()  # type: ignore[assignment]
 
     return app
 
@@ -156,6 +193,65 @@ async def test_monitoring_notification_settings_403_when_missing_system_logs_per
     assert resp.status_code == 403
     detail = resp.json().get("detail", "")
     assert SYSTEM_LOGS in detail
+
+
+@pytest.mark.asyncio
+async def test_monitoring_notification_settings_update_403_for_system_logs_only():
+    principal = _make_principal(
+        is_admin=False,
+        roles=["user"],
+        permissions=[SYSTEM_LOGS],
+    )
+    app = _build_app_with_overrides(principal=principal)
+
+    with TestClient(app) as client:
+        resp = client.put(
+            "/api/v1/monitoring/notifications/settings",
+            json={"enabled": True},
+        )
+
+    assert resp.status_code == 403
+    detail = resp.json().get("detail", "")
+    assert SYSTEM_CONFIGURE in detail
+
+
+@pytest.mark.asyncio
+async def test_monitoring_notification_settings_update_200_with_system_configure():
+    principal = _make_principal(
+        is_admin=False,
+        roles=["user"],
+        permissions=[SYSTEM_LOGS, SYSTEM_CONFIGURE],
+    )
+    app = _build_app_with_overrides(principal=principal)
+
+    with TestClient(app) as client:
+        resp = client.put(
+            "/api/v1/monitoring/notifications/settings",
+            json={"enabled": True},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json().get("enabled") is True
+
+
+@pytest.mark.asyncio
+async def test_monitoring_notification_test_403_for_system_logs_only():
+    principal = _make_principal(
+        is_admin=False,
+        roles=["user"],
+        permissions=[SYSTEM_LOGS],
+    )
+    app = _build_app_with_overrides(principal=principal)
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/monitoring/notifications/test",
+            json={"message": "probe", "severity": "critical"},
+        )
+
+    assert resp.status_code == 403
+    detail = resp.json().get("detail", "")
+    assert SYSTEM_CONFIGURE in detail
 
 
 @pytest.mark.asyncio

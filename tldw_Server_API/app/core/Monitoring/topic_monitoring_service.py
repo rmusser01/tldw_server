@@ -28,6 +28,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Character_Chat.regex_safety import validate_regex_safety
 from tldw_Server_API.app.api.v1.schemas.monitoring_schemas import Watchlist, WatchlistRule
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.DB_Management.TopicMonitoring_DB import (
@@ -409,7 +410,11 @@ class TopicMonitoringService:
     def _is_regex_dangerous(expr: str) -> bool:
         if not expr:
             return True
-        if len(expr) > 2000:
+        try:
+            is_safe, _reason = validate_regex_safety(expr)
+            if not is_safe:
+                return True
+        except (OSError, RuntimeError, TypeError, ValueError, re.error):
             return True
         # Nested quantifiers heuristic
         try:
@@ -776,15 +781,6 @@ class TopicMonitoringService:
                         )
                         continue
                 else:
-                    if self._db.recent_duplicate_exists(
-                        user_id=alert_user_id,
-                        watchlist_id=str(wid),
-                        source=str(source),
-                        rule_id=str(cr.rule_id),
-                        pattern=str(cr.pattern_text),
-                        window_seconds=self._dedup_window_seconds,
-                    ):
-                        continue
                     dedupe_meta = {}
                 snippet = self._snippet_around(text, match_span[0], match_span[1], max_len=200)
                 # Scope reflects the matched watchlist's scope
@@ -818,7 +814,15 @@ class TopicMonitoringService:
                     text_snippet=snippet,
                     metadata=combined_meta or None,
                 )
-                self._db.insert_alert(alert)
+                if streaming_mode:
+                    self._db.insert_alert(alert)
+                else:
+                    alert_id = self._db.insert_alert_if_not_duplicate(
+                        alert,
+                        window_seconds=self._dedup_window_seconds,
+                    )
+                    if alert_id is None:
+                        continue
                 # Notify if configured and severity threshold met
                 try:
                     notifier = get_notification_service()

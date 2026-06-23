@@ -300,7 +300,7 @@ class TestEscalation:
         def fail_escalation_state(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
             raise RuntimeError("escalation backend failed at /private/escalation.db")
 
-        monkeypatch.setattr(db, "get_escalation_state", fail_escalation_state)
+        monkeypatch.setattr(db, "update_escalation_for_trigger", fail_escalation_state)
 
         messages: list[str] = []
         sink_id = selfmon_module.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
@@ -313,6 +313,56 @@ class TestEscalation:
         joined = "\n".join(messages)
         assert "Escalation check failed" in joined
         assert "escalation.db" not in joined
+
+    def test_escalation_uses_atomic_db_helper(self, monkeypatch, db, svc):
+        rule = _create_rule(
+            db,
+            patterns=["trigger"],
+            action="notify",
+            escalation_session_threshold=1,
+            escalation_session_action="block",
+        )
+        calls: list[tuple[str, str, str | None]] = []
+
+        def _fake_update(rule_arg, user_id, session_id):
+            calls.append((rule_arg.id, user_id, session_id))
+            return {
+                "escalated": True,
+                "effective_action": "block",
+                "session_trigger_count": 1,
+                "window_trigger_count": 1,
+                "escalated_action": "block",
+            }
+
+        monkeypatch.setattr(db, "update_escalation_for_trigger", _fake_update, raising=False)
+
+        result = svc._check_escalation(rule, "user1", "session1")
+
+        assert calls == [(rule.id, "user1", "session1")]
+        assert result["escalated"] is True
+        assert result["effective_action"] == "block"
+
+    def test_update_escalation_for_trigger_updates_state_atomically(self, db):
+        rule = _create_rule(
+            db,
+            patterns=["trigger"],
+            action="notify",
+            escalation_session_threshold=2,
+            escalation_session_action="block",
+            cooldown_minutes=0,
+        )
+
+        first = db.update_escalation_for_trigger(rule, "user1", "session1")
+        second = db.update_escalation_for_trigger(rule, "user1", "session1")
+
+        assert first == {"escalated": False, "effective_action": "notify"}
+        assert second["escalated"] is True
+        assert second["effective_action"] == "block"
+        assert second["session_trigger_count"] == 2
+        state = db.get_escalation_state(rule.id, "user1")
+        assert state is not None
+        assert state.session_trigger_count == 2
+        assert state.current_escalated_action == "block"
 
     def test_window_escalation(self, db, svc):
         _create_rule(

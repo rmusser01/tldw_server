@@ -531,6 +531,28 @@ class DatabasePaths:
         return user_dir
 
     @staticmethod
+    def resolve_user_base_directory(
+        user_id: Optional[UserId],
+        *,
+        base_dir_override: Optional[Union[str, Path]] = None,
+        allow_legacy_alias: bool = False,
+    ) -> Path:
+        """Resolve a user's database directory without creating it."""
+        if base_dir_override is not None:
+            base_path = _normalize_user_db_base_dir(Path(base_dir_override))
+        else:
+            base_path = DatabasePaths.resolve_user_db_base_dir(
+                allow_legacy_alias=allow_legacy_alias
+            )
+        safe_user_id = _resolve_user_id_for_storage(user_id)
+        user_dir = (base_path / safe_user_id).resolve()
+        try:
+            user_dir.relative_to(base_path)
+        except ValueError as exc:
+            raise ValueError(f"Computed user directory escapes base path: {user_dir!r}") from exc
+        return user_dir
+
+    @staticmethod
     def get_media_db_path(user_id: Optional[UserId]) -> Path:
         """Get the path to the user's media database."""
         user_dir = DatabasePaths.get_user_base_directory(user_id)
@@ -641,6 +663,12 @@ class DatabasePaths:
     def get_guardian_db_path(user_id: Optional[UserId]) -> Path:
         """Get the path to the user's Guardian/self-monitoring database."""
         user_dir = DatabasePaths.get_user_base_directory(user_id)
+        return user_dir / DatabasePaths.GUARDIAN_DB_NAME
+
+    @staticmethod
+    def resolve_guardian_db_path(user_id: Optional[UserId]) -> Path:
+        """Resolve the user's Guardian DB path without creating directories."""
+        user_dir = DatabasePaths.resolve_user_base_directory(user_id)
         return user_dir / DatabasePaths.GUARDIAN_DB_NAME
 
     @staticmethod

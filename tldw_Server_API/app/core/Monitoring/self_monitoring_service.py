@@ -35,6 +35,9 @@ from tldw_Server_API.app.core.DB_Management.Guardian_DB import (
     GuardianDB,
     SelfMonitoringRule,
 )
+from tldw_Server_API.app.core.DB_Management.guardian_db_resolver import (
+    resolve_existing_guardian_db_for_user_id,
+)
 from tldw_Server_API.app.core.Moderation.governance_utils import (
     chat_type_matches,
     is_schedule_active,
@@ -49,6 +52,23 @@ _SELFMON_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
     re.error,
 )
+
+
+class SelfMonitoringOwnerDbResolutionError(ValueError):
+    """Raised when a partner approval owner DB cannot be resolved safely."""
+
+
+def resolve_partner_approval_guardian_db(
+    current_db: GuardianDB,
+    owner_user_id: object | None,
+) -> GuardianDB:
+    """Select the Guardian DB for partner approval without creating owner storage."""
+    if owner_user_id is None or str(owner_user_id).strip() == "":
+        return current_db
+    try:
+        return resolve_existing_guardian_db_for_user_id(owner_user_id)
+    except (FileNotFoundError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise SelfMonitoringOwnerDbResolutionError("Owner Guardian DB not found") from exc
 
 
 # ── Crisis Resources ──────────────────────────────────────────
@@ -385,97 +405,7 @@ class SelfMonitoringService:
             return info
 
         try:
-            state = self._db.get_escalation_state(rule.id, user_id)
-            now = datetime.now(timezone.utc)
-            now_iso = now.isoformat()
-            session_count = 0
-
-            if state:
-                # Reset session counter if session changed
-                if session_id and state.session_id != session_id:
-                    session_count = 1
-                else:
-                    session_count = (state.session_trigger_count or 0) + 1
-            else:
-                session_count = 1
-
-            # Rolling-window count: query actual alerts within the window
-            # instead of monotonically incrementing a counter.
-            # +1 because the current trigger's alert hasn't been recorded yet.
-            if rule.escalation_window_days > 0 and rule.escalation_window_threshold > 0:
-                window_count = self._db.count_alerts_in_window(
-                    user_id, rule.id, rule.escalation_window_days,
-                ) + 1  # include the current (not-yet-persisted) trigger
-            elif state:
-                window_count = (state.window_trigger_count or 0) + 1
-            else:
-                window_count = 1
-
-            # Check cooldown-based auto de-escalation: if a previous
-            # escalation has a cooldown_until in the past, clear it.
-            if state and state.cooldown_until:
-                try:
-                    cooldown_dt = datetime.fromisoformat(state.cooldown_until)
-                    if now >= cooldown_dt:
-                        # Cooldown expired — reset escalation state
-                        self._db.upsert_escalation_state(
-                            rule_id=rule.id,
-                            user_id=user_id,
-                            session_id=session_id,
-                            session_trigger_count=session_count,
-                            window_trigger_count=window_count,
-                            current_escalated_action=None,
-                            escalated_at=None,
-                            cooldown_until=None,
-                        )
-                        return info
-                except (ValueError, TypeError):
-                    pass  # malformed cooldown_until — ignore
-
-            escalated = False
-            escalated_action = None
-
-            # Session-level escalation
-            if (
-                rule.escalation_session_threshold > 0
-                and session_count >= rule.escalation_session_threshold
-                and rule.escalation_session_action
-            ):
-                escalated = True
-                escalated_action = rule.escalation_session_action
-
-            # Window-level escalation (cross-session)
-            if (
-                rule.escalation_window_threshold > 0
-                and window_count >= rule.escalation_window_threshold
-                and rule.escalation_window_action
-            ):
-                escalated = True
-                escalated_action = rule.escalation_window_action
-
-            # Compute cooldown_until when escalation triggers
-            cooldown_until_iso = None
-            if escalated and rule.cooldown_minutes > 0:
-                cooldown_until_iso = (now + timedelta(minutes=rule.cooldown_minutes)).isoformat()
-
-            self._db.upsert_escalation_state(
-                rule_id=rule.id,
-                user_id=user_id,
-                session_id=session_id,
-                session_trigger_count=session_count,
-                window_trigger_count=window_count,
-                current_escalated_action=escalated_action if escalated else None,
-                escalated_at=now_iso if escalated else None,
-                cooldown_until=cooldown_until_iso,
-            )
-
-            if escalated and escalated_action:
-                info["escalated"] = True
-                info["effective_action"] = escalated_action
-                info["session_trigger_count"] = session_count
-                info["window_trigger_count"] = window_count
-                info["escalated_action"] = escalated_action
-
+            return self._db.update_escalation_for_trigger(rule, user_id, session_id)
         except _SELFMON_NONCRITICAL_EXCEPTIONS:
             logger.debug("Escalation check failed")
 

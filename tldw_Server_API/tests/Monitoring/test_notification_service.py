@@ -3,6 +3,7 @@ import json
 import builtins
 from pathlib import Path
 
+import pytest
 from tenacity import Future, RetryError
 
 import tldw_Server_API.app.core.Monitoring.notification_service as notification_service
@@ -137,6 +138,58 @@ def test_notification_splits_email_recipients(monkeypatch):
     assert sent["from"] == "sender@example.com"
 
 
+def test_notification_send_email_fails_closed_when_starttls_fails(monkeypatch):
+    monkeypatch.setenv("MONITORING_NOTIFY_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("MONITORING_NOTIFY_EMAIL_TO", "a@example.com")
+    monkeypatch.setenv("MONITORING_NOTIFY_EMAIL_FROM", "sender@example.com")
+    monkeypatch.setenv("MONITORING_NOTIFY_SMTP_STARTTLS", "true")
+
+    sent: dict[str, object] = {}
+
+    class _FakeSMTP:
+        def __init__(self, host, port, timeout=None):
+            sent["host"] = host
+            sent["port"] = port
+            sent["timeout"] = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def starttls(self):
+            sent["starttls"] = True
+            raise notification_service.smtplib.SMTPException("tls unavailable")
+
+        def login(self, user, password):
+            sent["login"] = (user, password)
+
+        def sendmail(self, from_addr, to_addrs, msg):
+            sent["sendmail"] = True
+
+    monkeypatch.setattr(notification_service.smtplib, "SMTP", _FakeSMTP)
+
+    svc = NotificationService()
+    alert = TopicAlert(
+        user_id="u",
+        scope_type="user",
+        scope_id="u",
+        source="chat.input",
+        watchlist_id="w",
+        rule_category="adult",
+        rule_severity="critical",
+        pattern="nsfw",
+        text_snippet="...nsfw...",
+    )
+
+    with pytest.raises(RuntimeError, match="SMTP STARTTLS failed"):
+        svc._send_email(alert)
+
+    assert sent["starttls"] is True
+    assert "sendmail" not in sent
+
+
 def test_notification_update_settings_normalizes_relative_file(tmp_path, monkeypatch):
 
 
@@ -152,6 +205,62 @@ def test_notification_update_settings_normalizes_relative_file(tmp_path, monkeyp
     assert svc.file_path == str(expected)
     assert updated["file"] == str(expected)
     assert expected.parent.exists()
+
+
+def test_notify_generic_uses_single_delivery_worker(monkeypatch, tmp_path):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.file_path = str(tmp_path / "notifications.jsonl")
+    svc.webhook_url = "https://example.com/hook"
+
+    created_threads: list[object] = []
+
+    class _FakeThread:
+        def __init__(self, *, target=None, args=(), daemon=None):  # noqa: ANN001, ANN002
+            _ = (args, daemon)
+            created_threads.append(target)
+
+        def start(self) -> None:
+            return None
+
+    monkeypatch.setattr(notification_service.threading, "Thread", _FakeThread)
+
+    for _ in range(5):
+        assert svc.notify_generic(
+            {"type": "guardian_alert", "severity": "warning", "user_id": "u1"}
+        ) == "logged"
+
+    assert len(created_threads) == 1
+
+
+def test_digest_buffer_is_capped_per_recipient(monkeypatch):
+    monkeypatch.setenv("MONITORING_NOTIFY_MAX_DIGEST_ITEMS_PER_RECIPIENT", "2")
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.digest_mode = "hourly"
+    delivered: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        svc,
+        "notify_generic",
+        lambda payload: delivered.append(payload) or "logged",
+    )
+
+    for idx in range(3):
+        assert svc.notify_or_batch(
+            {
+                "type": "guardian_alert",
+                "severity": "info",
+                "user_id": "u1",
+                "idx": idx,
+            }
+        ) == "batched"
+
+    assert svc.get_pending_digest_count("u1") == 2
+    assert svc.flush_digest("u1") == 2
+    assert [item["idx"] for item in delivered[0]["items"]] == [1, 2]
 
 
 def test_notification_update_settings_file_failure_log_is_sanitized(tmp_path, monkeypatch):
@@ -386,10 +495,13 @@ def test_notify_generic_only_schedules_webhook_path(monkeypatch, tmp_path):
     result = svc.notify_generic({"type": "guardian_alert", "severity": "warning", "user_id": "u1"})
 
     assert result == "logged"
-    assert svc._send_webhook_safe in targets
-    assert svc._send_email_safe not in targets
+    assert targets == [svc._delivery_worker]
+    queued = list(svc._delivery_queue.queue)
+    assert len(queued) == 1
+    assert queued[0][0] == "webhook"
 
-def test_notify_generic_webhook_thread_failure_log_is_sanitized(monkeypatch, tmp_path):
+
+def test_notify_generic_webhook_enqueue_failure_log_is_sanitized(monkeypatch, tmp_path):
     svc = NotificationService()
     svc.enabled = True
     svc.min_severity = "info"
@@ -411,12 +523,12 @@ def test_notify_generic_webhook_thread_failure_log_is_sanitized(monkeypatch, tmp
         notification_service.logger.remove(sink_id)
 
     assert result == "logged"
-    assert any("Webhook thread start failed" in message for message in messages)
+    assert any("Webhook delivery enqueue failed" in message for message in messages)
     assert secret_thread_detail not in "\n".join(messages)
     assert "private-webhook-dispatch" not in "\n".join(messages)
 
 
-def test_notify_webhook_thread_failure_log_is_sanitized(monkeypatch, tmp_path):
+def test_notify_webhook_enqueue_failure_log_is_sanitized(monkeypatch, tmp_path):
     svc = NotificationService()
     svc.enabled = True
     svc.min_severity = "info"
@@ -450,13 +562,13 @@ def test_notify_webhook_thread_failure_log_is_sanitized(monkeypatch, tmp_path):
         notification_service.logger.remove(sink_id)
 
     assert result == "logged"
-    assert any("Webhook thread start failed" in message for message in messages)
+    assert any("Webhook delivery enqueue failed" in message for message in messages)
     joined = "\n".join(messages)
     assert secret_thread_detail not in joined
     assert "private-topic-webhook-dispatch" not in joined
 
 
-def test_notify_email_thread_failure_log_is_sanitized(monkeypatch, tmp_path):
+def test_notify_email_enqueue_failure_log_is_sanitized(monkeypatch, tmp_path):
     svc = NotificationService()
     svc.enabled = True
     svc.min_severity = "info"
@@ -492,7 +604,7 @@ def test_notify_email_thread_failure_log_is_sanitized(monkeypatch, tmp_path):
         notification_service.logger.remove(sink_id)
 
     assert result == "logged"
-    assert any("Email thread start failed" in message for message in messages)
+    assert any("Email delivery enqueue failed" in message for message in messages)
     joined = "\n".join(messages)
     assert secret_thread_detail not in joined
     assert "private-topic-email-dispatch" not in joined

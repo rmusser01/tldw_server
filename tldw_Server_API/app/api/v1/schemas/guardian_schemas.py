@@ -378,6 +378,10 @@ class DeactivationConfirmRequest(BaseModel):
 
 class DeactivationApproveRequest(BaseModel):
     token: str = Field(..., description="Confirmation token from deactivation request")
+    owner_user_id: str | None = Field(
+        default=None,
+        description="Owner user ID for resolving the rule's Guardian DB in per-user DB mode",
+    )
 
 
 class DetailResponse(BaseModel):

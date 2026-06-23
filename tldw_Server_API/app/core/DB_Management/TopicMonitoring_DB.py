@@ -552,43 +552,143 @@ class TopicMonitoringDB:
         with self._lock:
             conn = self._connect()
             try:
-                created_at = alert.created_at or _utcnow_iso()
-                metadata_json = None
-                if alert.metadata is not None:
-                    try:
-                        metadata_json = json.dumps(alert.metadata, ensure_ascii=False)
-                    except Exception:
-                        metadata_json = None
-                cur = conn.execute(
-                    """
-                    INSERT INTO topic_alerts (
-                        created_at, user_id, scope_type, scope_id, source, watchlist_id,
-                        rule_id, rule_category, rule_severity, pattern, source_id, chunk_id, chunk_seq,
-                        text_snippet, metadata, is_read, read_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        created_at,
-                        alert.user_id,
-                        alert.scope_type,
-                        alert.scope_id,
-                        alert.source,
-                        alert.watchlist_id,
-                        alert.rule_id,
-                        alert.rule_category,
-                        alert.rule_severity,
-                        alert.pattern,
-                        alert.source_id,
-                        alert.chunk_id,
-                        alert.chunk_seq,
-                        alert.text_snippet,
-                        metadata_json,
-                        int(alert.is_read or 0),
-                        alert.read_at,
-                    ),
-                )
+                cur = self._insert_alert_with_connection(conn, alert)
                 conn.commit()
                 return int(cur.lastrowid)
+            finally:
+                conn.close()
+
+    @staticmethod
+    def _alert_metadata_json(alert: TopicAlert) -> str | None:
+        if alert.metadata is None:
+            return None
+        try:
+            return json.dumps(alert.metadata, ensure_ascii=False)
+        except Exception:
+            return None
+
+    def _insert_alert_with_connection(
+        self,
+        conn: sqlite3.Connection,
+        alert: TopicAlert,
+    ) -> sqlite3.Cursor:
+        created_at = alert.created_at or _utcnow_iso()
+        return conn.execute(
+            """
+            INSERT INTO topic_alerts (
+                created_at, user_id, scope_type, scope_id, source, watchlist_id,
+                rule_id, rule_category, rule_severity, pattern, source_id, chunk_id, chunk_seq,
+                text_snippet, metadata, is_read, read_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                created_at,
+                alert.user_id,
+                alert.scope_type,
+                alert.scope_id,
+                alert.source,
+                alert.watchlist_id,
+                alert.rule_id,
+                alert.rule_category,
+                alert.rule_severity,
+                alert.pattern,
+                alert.source_id,
+                alert.chunk_id,
+                alert.chunk_seq,
+                alert.text_snippet,
+                self._alert_metadata_json(alert),
+                int(alert.is_read or 0),
+                alert.read_at,
+            ),
+        )
+
+    @staticmethod
+    def _duplicate_where_clause(
+        user_id: str | None,
+        watchlist_id: str,
+        source: str,
+        threshold: str,
+        *,
+        pattern: str | None = None,
+        rule_id: str | None = None,
+        source_id: str | None = None,
+    ) -> tuple[str, list[Any]]:
+        clauses = ["watchlist_id = ?", "source = ?", "created_at >= ?"]
+        params: list[Any] = [str(watchlist_id), str(source), threshold]
+        if user_id is None:
+            clauses.append("user_id IS NULL")
+        else:
+            clauses.append("user_id = ?")
+            params.append(str(user_id))
+        if rule_id:
+            clauses.append("rule_id = ?")
+            params.append(str(rule_id))
+        elif pattern:
+            clauses.append("pattern = ?")
+            params.append(str(pattern))
+        if source_id:
+            clauses.append("source_id = ?")
+            params.append(str(source_id))
+        return " AND ".join(clauses), params
+
+    def _recent_duplicate_exists_with_connection(
+        self,
+        conn: sqlite3.Connection,
+        user_id: str | None,
+        watchlist_id: str,
+        source: str,
+        threshold: str,
+        *,
+        pattern: str | None = None,
+        rule_id: str | None = None,
+        source_id: str | None = None,
+    ) -> bool:
+        where, params = self._duplicate_where_clause(
+            user_id,
+            watchlist_id,
+            source,
+            threshold,
+            pattern=pattern,
+            rule_id=rule_id,
+            source_id=source_id,
+        )
+        # TASK-2417: WHERE is built from fixed fragments only; values stay parameterized.
+        cur = conn.execute(
+            f"SELECT 1 FROM topic_alerts WHERE {where} LIMIT 1",  # nosec B608
+            params,
+        )
+        return cur.fetchone() is not None
+
+    def insert_alert_if_not_duplicate(
+        self,
+        alert: TopicAlert,
+        *,
+        window_seconds: int = 300,
+    ) -> int | None:
+        """Insert alert only when no duplicate exists in the dedupe window."""
+        threshold = (datetime.now(timezone.utc) - timedelta(seconds=window_seconds)).isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                begin_immediate_if_needed(conn)
+                if self._recent_duplicate_exists_with_connection(
+                    conn,
+                    user_id=alert.user_id,
+                    watchlist_id=alert.watchlist_id,
+                    source=alert.source,
+                    threshold=threshold,
+                    rule_id=alert.rule_id,
+                    pattern=alert.pattern,
+                    source_id=alert.source_id,
+                ):
+                    conn.commit()
+                    return None
+                cur = self._insert_alert_with_connection(conn, alert)
+                conn.commit()
+                return int(cur.lastrowid)
+            except Exception:
+                conn.rollback()
+                raise
             finally:
                 conn.close()
 
@@ -609,29 +709,16 @@ class TopicMonitoringDB:
         with self._lock:
             conn = self._connect()
             try:
-                clauses = ["watchlist_id = ?", "source = ?", "created_at >= ?"]
-                params: list[Any] = [str(watchlist_id), str(source), threshold]
-                if user_id is None:
-                    clauses.append("user_id IS NULL")
-                else:
-                    clauses.append("user_id = ?")
-                    params.append(str(user_id))
-                if rule_id:
-                    clauses.append("rule_id = ?")
-                    params.append(str(rule_id))
-                elif pattern:
-                    clauses.append("pattern = ?")
-                    params.append(str(pattern))
-                if source_id:
-                    clauses.append("source_id = ?")
-                    params.append(str(source_id))
-                where = " AND ".join(clauses)
-                cur = conn.execute(
-                    f"SELECT 1 FROM topic_alerts WHERE {where} LIMIT 1",  # nosec B608
-                    params,
+                return self._recent_duplicate_exists_with_connection(
+                    conn,
+                    user_id,
+                    watchlist_id,
+                    source,
+                    threshold,
+                    pattern=pattern,
+                    rule_id=rule_id,
+                    source_id=source_id,
                 )
-                row = cur.fetchone()
-                return bool(row)
             finally:
                 conn.close()
 
