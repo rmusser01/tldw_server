@@ -17,6 +17,8 @@ from starlette import status
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.schemas.audio_studio_schemas import (
+    AudioStudioArtifactListResponse,
+    AudioStudioArtifactResponse,
     AudioStudioClipResponse,
     AudioStudioClipUpsert,
     AudioStudioProjectArchiveRequest,
@@ -24,6 +26,10 @@ from tldw_Server_API.app.api.v1.schemas.audio_studio_schemas import (
     AudioStudioProjectListResponse,
     AudioStudioProjectResponse,
     AudioStudioProjectUpdate,
+    AudioStudioGenerationCreate,
+    AudioStudioGenerationJobResponse,
+    AudioStudioProviderListResponse,
+    AudioStudioProviderResponse,
     AudioStudioSectionResponse,
     AudioStudioSectionUpsert,
     AudioStudioTrackResponse,
@@ -32,12 +38,17 @@ from tldw_Server_API.app.api.v1.schemas.audio_studio_schemas import (
 )
 from tldw_Server_API.app.core.DB_Management.Collections_DB import (
     AudioStudioClipRow,
+    AudioStudioArtifactRow,
+    AudioStudioGenerationJobRow,
     AudioStudioProjectRow,
     AudioStudioSectionRow,
     AudioStudioTrackRow,
     CollectionsDatabase,
 )
-from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseError
+from tldw_Server_API.app.core.Audio_Studio.jobs import enqueue_audio_studio_generation_job
+from tldw_Server_API.app.core.Audio_Studio.providers.registry import build_audio_studio_provider_registry
+from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 
 router = APIRouter(prefix="/audio-studio", tags=["audio-studio"])
@@ -160,6 +171,53 @@ def _clip_response(row: AudioStudioClipRow) -> AudioStudioClipResponse:
     )
 
 
+def _generation_job_response(
+    row: AudioStudioGenerationJobRow,
+    *,
+    project_id: str,
+) -> AudioStudioGenerationJobResponse:
+    request_payload = _parse_json_object(row.request_json)
+    result_payload = _parse_json_object(row.result_json)
+    return AudioStudioGenerationJobResponse(
+        job_id=row.job_id,
+        project_id=project_id,
+        provider=row.provider,
+        kind=str(request_payload.get("kind") or row.operation.split(".", 1)[0]),
+        status=row.status,
+        target_resource_kind=row.target_resource_kind,
+        target_resource_id=row.target_resource_id,
+        target_revision_id=row.target_revision_id,
+        result=result_payload or None,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _artifact_response(row: AudioStudioArtifactRow) -> AudioStudioArtifactResponse:
+    return AudioStudioArtifactResponse(
+        artifact_id=row.artifact_id,
+        artifact_type=row.artifact_type,
+        provider=row.provider,
+        mime_type=row.mime_type,
+        size_bytes=row.size_bytes,
+        source_resource_kind=row.source_resource_kind,
+        source_resource_id=row.source_resource_id,
+        source_revision_id=row.source_revision_id,
+        metadata=_parse_json_object(row.metadata_json),
+        created_at=row.created_at,
+    )
+
+
+def _parse_json_object(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def _load_project_or_404(collections_db: CollectionsDatabase, project_id: str) -> AudioStudioProjectRow:
     try:
         return collections_db.get_audio_studio_project_by_project_id(project_id)
@@ -179,6 +237,32 @@ def _raise_conflict_for_stale_base(exc: ValueError) -> None:
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_audio_studio_request") from exc
 
 
+def _section_text_for_generation(
+    collections_db: CollectionsDatabase,
+    *,
+    project_row_id: int,
+    target_resource_kind: str,
+    target_resource_id: str,
+) -> str | None:
+    if target_resource_kind != "section":
+        return None
+    row = collections_db.backend.execute(
+        "SELECT body_text FROM audio_studio_sections "
+        "WHERE project_row_id = ? AND section_id = ? AND deleted = ?",
+        (
+            project_row_id,
+            target_resource_id,
+            collections_db._coerce_bool_flag(  # noqa: SLF001
+                False,
+                postgres=collections_db.backend.backend_type == BackendType.POSTGRESQL,
+            ),
+        ),
+    ).first
+    if not row:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="audio_studio_section_not_found")
+    return row.get("body_text")
+
+
 @router.get("/workflows")
 async def list_audio_studio_workflows(current_user: User = Depends(get_request_user)) -> dict[str, list[dict[str, str]]]:
     """Return first-class Audio Studio workflows."""
@@ -191,6 +275,18 @@ async def list_audio_studio_workflows(current_user: User = Depends(get_request_u
             {"id": AudioStudioWorkflow.MUSIC.value, "label": "Music"},
         ]
     }
+
+
+@router.get("/providers", response_model=AudioStudioProviderListResponse)
+async def list_audio_studio_providers(
+    current_user: User = Depends(get_request_user),
+) -> AudioStudioProviderListResponse:
+    """Return configured, secret-free Audio Studio generation providers."""
+    _ = current_user
+    registry = build_audio_studio_provider_registry()
+    return AudioStudioProviderListResponse(
+        providers=[AudioStudioProviderResponse(**row) for row in registry.list_providers()]
+    )
 
 
 @router.post("/projects", response_model=AudioStudioProjectResponse)
@@ -429,3 +525,98 @@ async def upsert_audio_studio_clip(
         _raise_conflict_for_stale_base(exc)
     except DatabaseError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="audio_studio_clip_upsert_failed") from exc
+
+
+@router.post(
+    "/projects/{project_id}/generations",
+    response_model=AudioStudioGenerationJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_audio_studio_generation(
+    request: AudioStudioGenerationCreate,
+    project_id: AudioStudioIdPath,
+    current_user: User = Depends(get_request_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
+) -> AudioStudioGenerationJobResponse:
+    """Create an idempotent Audio Studio generation job."""
+
+    project = _load_project_or_404(collections_db, project_id)
+    provider = request.provider
+    if not isinstance(provider, str):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="provider must be a string")
+    text = _section_text_for_generation(
+        collections_db,
+        project_row_id=project.id,
+        target_resource_kind=request.target_resource_kind.value,
+        target_resource_id=request.target_resource_id,
+    )
+    prompt = request.options.get("prompt") if isinstance(request.options.get("prompt"), str) else None
+    try:
+        accepted = enqueue_audio_studio_generation_job(
+            jm=JobManager(),
+            collections_db=collections_db,
+            user_id=str(current_user.id),
+            project_id=project.project_id,
+            workflow=project.workflow,
+            kind=request.kind,
+            provider=provider,
+            target_resource_kind=request.target_resource_kind.value,
+            target_resource_id=request.target_resource_id,
+            target_revision_id=request.target_revision_id,
+            idempotency_key=request.idempotency_key,
+            options=request.options,
+            text=text,
+            prompt=prompt,
+        )
+        row = collections_db.get_audio_studio_generation_job(
+            project_row_id=project.id,
+            job_id=accepted.job_id,
+        )
+        return _generation_job_response(row, project_id=project.project_id)
+    except ValueError as exc:
+        if str(exc) == "stale_target_revision":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="stale_target_revision") from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except DatabaseError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="audio_studio_generation_create_failed") from exc
+
+
+@router.get(
+    "/projects/{project_id}/generations/{job_id}",
+    response_model=AudioStudioGenerationJobResponse,
+)
+async def get_audio_studio_generation(
+    project_id: AudioStudioIdPath,
+    job_id: AudioStudioIdPath,
+    current_user: User = Depends(get_request_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
+) -> AudioStudioGenerationJobResponse:
+    """Fetch an Audio Studio generation job owned by the current user."""
+
+    _ = current_user
+    project = _load_project_or_404(collections_db, project_id)
+    try:
+        row = collections_db.get_audio_studio_generation_job(project_row_id=project.id, job_id=job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="audio_studio_generation_job_not_found") from exc
+    return _generation_job_response(row, project_id=project.project_id)
+
+
+@router.get("/projects/{project_id}/artifacts", response_model=AudioStudioArtifactListResponse)
+async def list_audio_studio_artifacts(
+    project_id: AudioStudioIdPath,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    current_user: User = Depends(get_request_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
+) -> AudioStudioArtifactListResponse:
+    """List Audio Studio artifacts for a project owned by the current user."""
+
+    _ = current_user
+    project = _load_project_or_404(collections_db, project_id)
+    rows = collections_db.list_audio_studio_artifacts(project_row_id=project.id, limit=limit, offset=offset)
+    return AudioStudioArtifactListResponse(
+        artifacts=[_artifact_response(row) for row in rows],
+        limit=limit,
+        offset=offset,
+    )

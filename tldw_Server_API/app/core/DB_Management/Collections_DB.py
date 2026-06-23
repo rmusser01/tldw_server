@@ -6234,6 +6234,57 @@ class CollectionsDatabase:
             raise DatabaseError("audio_studio_generation_job_insert_failed")
         return AudioStudioGenerationJobRow(**row)
 
+    def get_audio_studio_generation_job(
+        self,
+        *,
+        project_row_id: int,
+        job_id: str,
+    ) -> AudioStudioGenerationJobRow:
+        self.get_audio_studio_project(project_row_id, include_archived=True)
+        row = self.backend.execute(
+            "SELECT id, project_row_id, job_id, provider, operation, target_resource_kind, target_resource_id, "
+            "target_revision_id, idempotency_key, status, request_json, result_json, created_at, updated_at "
+            "FROM audio_studio_generation_jobs WHERE project_row_id = ? AND job_id = ?",
+            (project_row_id, job_id),
+        ).first
+        if not row:
+            raise KeyError("audio_studio_generation_job_not_found")
+        return AudioStudioGenerationJobRow(**row)
+
+    def list_audio_studio_generation_jobs(
+        self,
+        *,
+        project_row_id: int,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[AudioStudioGenerationJobRow]:
+        self.get_audio_studio_project(project_row_id, include_archived=True)
+        rows = self.backend.execute(
+            "SELECT id, project_row_id, job_id, provider, operation, target_resource_kind, target_resource_id, "
+            "target_revision_id, idempotency_key, status, request_json, result_json, created_at, updated_at "
+            "FROM audio_studio_generation_jobs WHERE project_row_id = ? "
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (project_row_id, limit, offset),
+        ).rows
+        return [AudioStudioGenerationJobRow(**row) for row in rows]
+
+    def update_audio_studio_generation_job(
+        self,
+        *,
+        project_row_id: int,
+        job_id: str,
+        status: str,
+        result_json: str | None,
+    ) -> AudioStudioGenerationJobRow:
+        self.get_audio_studio_project(project_row_id, include_archived=True)
+        now = _utcnow_iso()
+        self.backend.execute(
+            "UPDATE audio_studio_generation_jobs SET status = ?, result_json = ?, updated_at = ? "
+            "WHERE project_row_id = ? AND job_id = ?",
+            (status, result_json, now, project_row_id, job_id),
+        )
+        return self.get_audio_studio_generation_job(project_row_id=project_row_id, job_id=job_id)
+
     def _get_audio_studio_idempotency_record(
         self,
         namespace: str,

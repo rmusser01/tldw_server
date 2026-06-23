@@ -339,6 +339,58 @@ class AudioStudioGenerationCreate(_AudioStudioJobCreate):
     provider: str | dict[str, Any] = Field(..., min_length=1)
 
 
+class AudioStudioProviderResponse(_BaseAudioStudioModel):
+    """Secret-free provider catalog entry."""
+
+    provider_id: str
+    supported_kinds: list[str]
+
+
+class AudioStudioProviderListResponse(_BaseAudioStudioModel):
+    """Configured Audio Studio provider catalog."""
+
+    providers: list[AudioStudioProviderResponse]
+
+
+class AudioStudioGenerationJobResponse(_BaseAudioStudioModel):
+    """Audio Studio generation Jobs state."""
+
+    job_id: str
+    project_id: str
+    provider: str
+    kind: str
+    status: str
+    target_resource_kind: AudioStudioResourceKind
+    target_resource_id: str
+    target_revision_id: str
+    result: dict[str, Any] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class AudioStudioArtifactResponse(_BaseAudioStudioModel):
+    """Audio Studio artifact index response."""
+
+    artifact_id: str
+    artifact_type: str
+    provider: str | None = None
+    mime_type: str | None = None
+    size_bytes: int | None = None
+    source_resource_kind: AudioStudioResourceKind | None = None
+    source_resource_id: str | None = None
+    source_revision_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class AudioStudioArtifactListResponse(_BaseAudioStudioModel):
+    """Audio Studio artifact list response."""
+
+    artifacts: list[AudioStudioArtifactResponse]
+    limit: int
+    offset: int
+
+
 class AudioStudioRenderCreate(_AudioStudioJobCreate):
     """Schema-only contract for future render job creation."""
 

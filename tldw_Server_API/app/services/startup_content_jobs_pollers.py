@@ -36,6 +36,8 @@ class ContentJobsPollerHandles:
     audio_jobs_task: Any | None = None
     audiobook_jobs_stop_event: Any | None = None
     audiobook_jobs_task: Any | None = None
+    audio_studio_jobs_stop_event: Any | None = None
+    audio_studio_jobs_task: Any | None = None
     presentation_render_jobs_stop_event: Any | None = None
     presentation_render_jobs_task: Any | None = None
     media_ingest_jobs_stop_event: Any | None = None
@@ -187,6 +189,13 @@ async def start_content_jobs_pollers(
         should_start_worker=should_start_worker,
         worker_inventory=worker_inventory,
     )
+    audio_studio_jobs_stop_event, audio_studio_jobs_task = await _start_audio_studio_jobs_worker(
+        app=app,
+        owned_job_pollers=owned_job_pollers,
+        register_owned_job_poller=register_owned_job_poller,
+        should_start_worker=should_start_worker,
+        worker_inventory=worker_inventory,
+    )
     presentation_render_jobs_stop_event, presentation_render_jobs_task = (
         await _start_presentation_render_jobs_worker(
             app=app,
@@ -250,6 +259,8 @@ async def start_content_jobs_pollers(
         audio_jobs_task=audio_jobs_task,
         audiobook_jobs_stop_event=audiobook_jobs_stop_event,
         audiobook_jobs_task=audiobook_jobs_task,
+        audio_studio_jobs_stop_event=audio_studio_jobs_stop_event,
+        audio_studio_jobs_task=audio_studio_jobs_task,
         presentation_render_jobs_stop_event=presentation_render_jobs_stop_event,
         presentation_render_jobs_task=presentation_render_jobs_task,
         media_ingest_jobs_stop_event=media_ingest_jobs_stop_event,
@@ -375,6 +386,47 @@ async def _start_audiobook_jobs_worker(
         return stop_event, task
     except _STARTUP_GUARD_EXCEPTIONS as exc:
         logger.warning(f"Failed to start Audiobook Jobs worker: {exc}")
+        return None, None
+
+
+async def _start_audio_studio_jobs_worker(
+    *,
+    app: Any,
+    owned_job_pollers: list[Any],
+    register_owned_job_poller: Callable[..., None],
+    should_start_worker: Callable[..., bool],
+    worker_inventory: WorkerRegistry | None = None,
+) -> tuple[Any | None, Any | None]:
+    """Start the Audio Studio jobs poller and return its shutdown handles."""
+
+    try:
+        enabled = should_start_worker("AUDIO_STUDIO_JOBS_WORKER_ENABLED", "audio-studio")
+        if not enabled:
+            logger.info("Audio Studio Jobs worker disabled by flag (AUDIO_STUDIO_JOBS_WORKER_ENABLED)")
+            return None, None
+
+        if worker_inventory is not None:
+            stop_event, task = await _register_jobs_worker_with_inventory(
+                worker_inventory,
+                name="audio_studio_jobs_task",
+                coroutine_factory=_run_audio_studio_jobs_worker_service,
+            )
+            logger.info("Audio Studio Jobs worker started with explicit stop_event signal")
+            return stop_event, task
+
+        stop_event = _make_event()
+        task = _create_task(_run_audio_studio_jobs_worker_service(stop_event))
+        logger.info("Audio Studio Jobs worker started with explicit stop_event signal")
+        register_owned_job_poller(
+            app,
+            owned_job_pollers,
+            name="audio_studio_jobs_task",
+            task=task,
+            stop_event=stop_event,
+        )
+        return stop_event, task
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.warning(f"Failed to start Audio Studio Jobs worker: {exc}")
         return None, None
 
 
@@ -768,6 +820,14 @@ def _run_audiobook_jobs_worker_service(stop_event: Any) -> Any:
     )
 
     return _run_audiobook_jobs_worker(stop_event)
+
+
+def _run_audio_studio_jobs_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.core.Audio_Studio.jobs_worker import (
+        run_audio_studio_jobs_worker as _run_audio_studio_jobs_worker,
+    )
+
+    return _run_audio_studio_jobs_worker(stop_event)
 
 
 def _run_presentation_render_jobs_worker_service(stop_event: Any) -> Any:

@@ -214,6 +214,11 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
         calls.append("audiobook")
         return ("audiobook-stop", "audiobook-task")
 
+    async def _record_audio_studio(**kwargs):
+        del kwargs
+        calls.append("audio-studio")
+        return ("audio-studio-stop", "audio-studio-task")
+
     async def _record_presentation(**kwargs):
         del kwargs
         calls.append("presentation")
@@ -248,6 +253,7 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
 
     monkeypatch.setattr(startup_pollers, "_start_audio_jobs_worker", _record_audio)
     monkeypatch.setattr(startup_pollers, "_start_audiobook_jobs_worker", _record_audiobook)
+    monkeypatch.setattr(startup_pollers, "_start_audio_studio_jobs_worker", _record_audio_studio)
     monkeypatch.setattr(startup_pollers, "_start_presentation_render_jobs_worker", _record_presentation)
     monkeypatch.setattr(startup_pollers, "_start_media_ingest_jobs_workers", _record_media_ingest)
     monkeypatch.setattr(startup_pollers, "_start_reading_digest_jobs_worker", _record_reading_digest)
@@ -269,6 +275,7 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
     assert calls == [
         "audio",
         "audiobook",
+        "audio-studio",
         "presentation",
         "media-ingest",
         "reading-digest",
@@ -280,6 +287,8 @@ async def test_start_content_jobs_pollers_combines_handles_in_order(
     assert handles.audio_jobs_task == "audio-task"
     assert handles.audiobook_jobs_stop_event == "audiobook-stop"
     assert handles.audiobook_jobs_task == "audiobook-task"
+    assert handles.audio_studio_jobs_stop_event == "audio-studio-stop"
+    assert handles.audio_studio_jobs_task == "audio-studio-task"
     assert handles.presentation_render_jobs_stop_event == "presentation-stop"
     assert handles.presentation_render_jobs_task == "presentation-task"
     assert handles.media_ingest_jobs_stop_event == "media-stop"
@@ -329,6 +338,11 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
     )
     monkeypatch.setattr(
         startup_pollers,
+        "_start_audio_studio_jobs_worker",
+        _record_worker("audio-studio", ("audio-studio-stop", "audio-studio-task")),
+    )
+    monkeypatch.setattr(
+        startup_pollers,
         "_start_presentation_render_jobs_worker",
         _record_worker("presentation", ("presentation-stop", "presentation-task")),
     )
@@ -372,6 +386,7 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
     } == {
         "audio": worker_inventory,
         "audiobook": worker_inventory,
+        "audio-studio": worker_inventory,
         "presentation": worker_inventory,
         "media-ingest": worker_inventory,
         "reading-digest": worker_inventory,
@@ -403,6 +418,13 @@ async def test_start_content_jobs_pollers_passes_inventory_to_workers(
             "audiobooks",
             "audiobook_jobs_task",
             "_run_audiobook_jobs_worker_service",
+        ),
+        (
+            "_start_audio_studio_jobs_worker",
+            "AUDIO_STUDIO_JOBS_WORKER_ENABLED",
+            "audio-studio",
+            "audio_studio_jobs_task",
+            "_run_audio_studio_jobs_worker_service",
         ),
         (
             "_start_presentation_render_jobs_worker",
