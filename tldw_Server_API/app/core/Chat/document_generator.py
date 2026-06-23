@@ -153,6 +153,7 @@ class DocumentGeneratorService:
 
         # Request-scoped cache for prompts
         self._prompt_cache: dict[DocumentType, dict[str, Any]] = {}
+        self.llm_config: dict[str, Any] = {}
 
         # No longer need provider mapping - using adapter registry
     @staticmethod
@@ -1217,7 +1218,7 @@ class DocumentGeneratorService:
 
     def save_prompt_config(self, config: dict[DocumentType, str]) -> bool:
         """
-        Save custom prompt configuration.
+        Save legacy custom prompt configuration.
 
         Args:
             config: Dictionary mapping document types to custom prompts
@@ -1226,18 +1227,22 @@ class DocumentGeneratorService:
             True if saved successfully
         """
         try:
-            with self.db.get_connection() as conn:
-                for doc_type, prompt in config.items():
-                    conn.execute(
-                        """
-                        INSERT OR REPLACE INTO user_prompt_configs
-                        (user_id, document_type, custom_prompt, updated_at)
-                        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                        """,
-                        (self.user_id, doc_type.value, prompt)
-                    )
-                conn.commit()
-                return True
+            for doc_type, prompt in config.items():
+                normalized_doc_type = doc_type if isinstance(doc_type, DocumentType) else DocumentType(str(doc_type))
+                default_prompt = self.DEFAULT_PROMPTS.get(
+                    normalized_doc_type,
+                    self.DEFAULT_PROMPTS[DocumentType.SUMMARY],
+                )
+                saved = self.save_user_prompt_config(
+                    document_type=normalized_doc_type,
+                    system_prompt=str(default_prompt["system"]),
+                    user_prompt=str(prompt),
+                    temperature=float(default_prompt.get("temperature", 0.7)),
+                    max_tokens=int(default_prompt.get("max_tokens", 2000)),
+                )
+                if not saved:
+                    return False
+            return True
 
         except _DOCGEN_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error saving prompt config: {e}")
@@ -1257,14 +1262,14 @@ class DocumentGeneratorService:
             with self.db.get_connection() as conn:
                 cursor = conn.execute(
                     """
-                    SELECT custom_prompt FROM user_prompt_configs
-                    WHERE user_id = ? AND document_type = ?
+                    SELECT user_prompt FROM user_prompts
+                    WHERE document_type = ? AND is_active = 1
                     """,
-                    (self.user_id, document_type.value)
+                    (document_type.value,)
                 )
                 row = cursor.fetchone()
                 if row:
-                    return row['custom_prompt']
+                    return row["user_prompt"] if "user_prompt" in row.keys() else row[0]
                 return None
 
         except _DOCGEN_NONCRITICAL_EXCEPTIONS as e:
@@ -1274,8 +1279,12 @@ class DocumentGeneratorService:
     async def bulk_generate(
         self,
         conversation_id: str,
-        document_types: list[DocumentType]
-    ) -> list[dict[str, Any]]:
+        document_types: list[DocumentType],
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        app_config: Optional[dict[str, Any]] = None,
+    ) -> list[Any]:
         """
         Generate multiple document types at once.
 
@@ -1286,13 +1295,25 @@ class DocumentGeneratorService:
         Returns:
             List of generation results
         """
+        config = getattr(self, "llm_config", {}) or {}
+        effective_provider = provider or config.get("provider") or config.get("api_provider")
+        effective_model = model or config.get("model")
+        effective_api_key = api_key if api_key is not None else config.get("api_key", "")
+        effective_app_config = app_config if app_config is not None else config.get("app_config")
+
+        if not effective_provider or not effective_model:
+            raise ValueError("provider and model are required for bulk document generation")
+
         results = []
         for doc_type in document_types:
+            normalized_doc_type = doc_type if isinstance(doc_type, DocumentType) else DocumentType(str(doc_type))
             result = self.generate_document(
                 conversation_id,
-                doc_type,
-                self.llm_config['provider'],
-                self.llm_config['model']
+                normalized_doc_type,
+                str(effective_provider),
+                str(effective_model),
+                str(effective_api_key or ""),
+                app_config=effective_app_config,
             )
             results.append(result)
         return results

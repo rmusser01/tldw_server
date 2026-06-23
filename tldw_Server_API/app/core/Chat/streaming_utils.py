@@ -688,7 +688,17 @@ class StreamingResponseHandler:
                                     except StopIteration:
                                         return outputs, True
                                     except _STREAMING_NONCRITICAL_EXCEPTIONS as transform_err:
-                                        logger.debug(f"text_transform error ignored: {transform_err}")
+                                        logger.error(f"text_transform failed for {self.conversation_id}: {transform_err}")
+                                        err_payload = {
+                                            "error": {
+                                                "message": "Stream transform failed",
+                                                "type": "stream_transform_error",
+                                            }
+                                        }
+                                        self._attach_stream_metadata(err_payload)
+                                        outputs.append(f"data: {json.dumps(err_payload)}\n\n")
+                                        self.error_occurred = True
+                                        return outputs, True
                                     if text_piece and not append_content(text_piece):
                                         err_payload = {"error": {"message": "Response size limit exceeded"}}
                                         self._attach_stream_metadata(err_payload)
@@ -726,7 +736,17 @@ class StreamingResponseHandler:
                 except StopIteration:
                     return outputs, True
                 except _STREAMING_NONCRITICAL_EXCEPTIONS as transform_err:
-                    logger.debug(f"text_transform error ignored: {transform_err}")
+                    logger.error(f"text_transform failed for {self.conversation_id}: {transform_err}")
+                    err_payload = {
+                        "error": {
+                            "message": "Stream transform failed",
+                            "type": "stream_transform_error",
+                        }
+                    }
+                    self._attach_stream_metadata(err_payload)
+                    outputs.append(f"data: {json.dumps(err_payload)}\n\n")
+                    self.error_occurred = True
+                    return outputs, True
                 if text_piece and not append_content(text_piece):
                     err_payload = {"error": {"message": "Response size limit exceeded"}}
                     self._attach_stream_metadata(err_payload)
@@ -895,10 +915,9 @@ class StreamingResponseHandler:
                                 await maybe_result
                         except _STREAMING_NONCRITICAL_EXCEPTIONS as finalize_err:
                             logger.debug(f"Finalize callback error after cancel: {finalize_err}")
-                    return  # noqa: B012
 
                 # Flush any pending tail from text_transform (e.g., moderation holdback)
-                if not self.error_occurred and self.text_transform:
+                if not self.is_cancelled and not self.error_occurred and self.text_transform:
                     flush_fn = getattr(self.text_transform, "flush", None)
                     if callable(flush_fn):
                         try:
@@ -1021,7 +1040,7 @@ class StreamingResponseHandler:
                             )
 
                 # Send completion marker(s) after save so metadata includes IDs.
-                if not self.error_occurred:
+                if not self.is_cancelled and not self.error_occurred:
                     done_payload = {
                         "id": f"chatcmpl-{datetime.now(timezone.utc).timestamp()}",
                         "object": "chat.completion.chunk",
@@ -1032,7 +1051,7 @@ class StreamingResponseHandler:
                     self._attach_stream_metadata(done_payload)
                     yield f"data: {json.dumps(done_payload)}\n\n"
 
-                if finalize_callback and self.error_occurred:
+                if not self.is_cancelled and finalize_callback and self.error_occurred:
                     try:
                         maybe_result = finalize_callback(
                             success=False,
@@ -1055,10 +1074,11 @@ class StreamingResponseHandler:
                     yield f"event: stream_end\ndata: {json.dumps(end_payload)}\n\n"
                 # Ensure final [DONE] sentinel for client compatibility (unless already sent).
                 # If upstream already sent [DONE], defer emission until after stream_end.
-                if self.upstream_done_received and not self.done_sent or not self.done_sent:
-                    yield "data: [DONE]\n\n"
-                    self.done_sent = True
-                self.upstream_done_received = False
+                if not self.is_cancelled:
+                    if (self.upstream_done_received and not self.done_sent) or not self.done_sent:
+                        yield "data: [DONE]\n\n"
+                        self.done_sent = True
+                    self.upstream_done_received = False
 
             except _STREAMING_NONCRITICAL_EXCEPTIONS as e:
                 logger.error(f"Error in stream cleanup for {self.conversation_id}: {e}")

@@ -255,6 +255,30 @@ class TestSafeStreamGenerator:
         assert len(error_messages) > 0
         assert handler.error_occurred is True
 
+    async def test_text_transform_error_stops_without_emitting_original_content(self):
+        """Text-transform failures should fail closed instead of leaking raw chunks."""
+        def failing_transform(_text):
+            raise RuntimeError("moderation unavailable")
+
+        handler = StreamingResponseHandler(
+            "conv_transform_fail",
+            "gpt-4",
+            text_transform=failing_transform,
+        )
+
+        async def mock_stream():
+            yield "secret output"
+
+        messages = []
+        async for message in handler.safe_stream_generator(mock_stream()):
+            messages.append(message)
+
+        combined_messages = "".join(messages)
+        assert "secret output" not in combined_messages
+        assert handler.full_response == []
+        assert any('"error"' in message for message in messages)
+        assert handler.error_occurred is True
+
     async def test_save_callback_execution(self):
         """Test save callback is executed."""
         handler = StreamingResponseHandler("conv_123", "gpt-4")

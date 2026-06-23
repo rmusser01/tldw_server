@@ -357,23 +357,77 @@ class TestDocumentGeneratorService:
     def test_save_custom_prompt_config(self, service, real_db):
 
         """Test saving custom prompt configuration."""
-        # Skip if method doesn't exist
-        if not hasattr(service, 'save_prompt_config'):
-            pytest.skip("save_prompt_config not implemented")
+        assert service.save_prompt_config({DocumentType.SUMMARY: "Custom summary prompt"}) is True
+
+        with real_db.get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT user_prompt
+                FROM user_prompts
+                WHERE document_type = ? AND is_active = 1
+                """,
+                (DocumentType.SUMMARY.value,),
+            ).fetchone()
+
+        assert row is not None
+        assert row["user_prompt"] == "Custom summary prompt"
 
     def test_get_prompt_config(self, service, real_db):
 
         """Test retrieving custom prompt configuration."""
-        # Skip if method doesn't exist
-        if not hasattr(service, 'get_prompt_config'):
-            pytest.skip("get_prompt_config not implemented")
+        assert service.save_prompt_config({DocumentType.SUMMARY: "Saved prompt"}) is True
+
+        assert service.get_prompt_config(DocumentType.SUMMARY) == "Saved prompt"
 
     @pytest.mark.asyncio
-    async def test_bulk_generation(self, service, real_db):
+    async def test_bulk_generation(self, service, real_db, monkeypatch):
         """Test generating multiple document types at once."""
-        # Skip if method doesn't exist
-        if not hasattr(service, 'bulk_generate'):
-            pytest.skip("bulk_generate not implemented")
+        calls = []
+
+        def fake_generate_document(
+            conversation_id,
+            document_type,
+            provider,
+            model,
+            api_key,
+            app_config=None,
+            **_kwargs,
+        ):
+            calls.append((conversation_id, document_type, provider, model, api_key, app_config))
+            return f"{document_type.value} result"
+
+        monkeypatch.setattr(service, "generate_document", fake_generate_document)
+        service.llm_config = {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": "test-key",
+            "app_config": {"timeout": 30},
+        }
+
+        results = await service.bulk_generate(
+            str(real_db.test_conversation_id),
+            [DocumentType.SUMMARY, DocumentType.QA],
+        )
+
+        assert results == ["summary result", "q_and_a result"]
+        assert calls == [
+            (
+                str(real_db.test_conversation_id),
+                DocumentType.SUMMARY,
+                "openai",
+                "gpt-4o-mini",
+                "test-key",
+                {"timeout": 30},
+            ),
+            (
+                str(real_db.test_conversation_id),
+                DocumentType.QA,
+                "openai",
+                "gpt-4o-mini",
+                "test-key",
+                {"timeout": 30},
+            ),
+        ]
 
     def test_get_statistics(self, service, real_db):
 
