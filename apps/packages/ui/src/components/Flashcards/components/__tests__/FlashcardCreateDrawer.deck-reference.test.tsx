@@ -301,6 +301,32 @@ describe("FlashcardCreateDrawer deck reference section", () => {
       expect(screen.getByText("Existing cards in this deck")).toBeInTheDocument()
     })
     expect(screen.getByText("Biology deck")).toBeInTheDocument()
+    expect(vi.mocked(useFlashcardDeckRecentCardsQuery)).toHaveBeenLastCalledWith(
+      12,
+      expect.objectContaining({
+        enabled: false,
+        limit: 6
+      })
+    )
+
+    await expandReferenceSection()
+
+    expect(vi.mocked(useFlashcardDeckRecentCardsQuery)).toHaveBeenLastCalledWith(
+      12,
+      expect.objectContaining({
+        enabled: true,
+        limit: 6
+      })
+    )
+    expect(vi.mocked(useFlashcardDeckSearchQuery)).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        deckId: 12,
+        query: ""
+      }),
+      expect.objectContaining({
+        enabled: false
+      })
+    )
   })
 
   it("forwards workspace visibility options to the drawer deck reference hooks", async () => {

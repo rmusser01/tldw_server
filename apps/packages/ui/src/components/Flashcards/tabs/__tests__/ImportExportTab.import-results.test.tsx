@@ -395,6 +395,53 @@ describe("ImportExportTab import result details", () => {
     ).toBeInTheDocument()
   })
 
+  it("documents current invalid import failure preserving input and exiting loading", async () => {
+    const invalidPayload = "invalid import payload"
+    vi.mocked(useImportFlashcardsMutation).mockReturnValue({
+      mutateAsync: vi.fn().mockRejectedValue(new Error("Invalid import payload")),
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+    await openImportTask()
+
+    fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
+      target: { value: invalidPayload }
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^import$/i }))
+
+    await waitFor(() => {
+      expect(messageSpies.error).toHaveBeenCalledWith("Invalid import payload")
+    })
+    expect(screen.getByRole("button", { name: /^import$/i })).toBeEnabled()
+    expect(screen.getByDisplayValue(invalidPayload)).toBeInTheDocument()
+  })
+
+  it.skip(
+    "fixme: Implement flashcards UX PR 2 create import generate reliability should show inline invalid import alert",
+    async () => {
+      const invalidPayload = "invalid import payload"
+      vi.mocked(useImportFlashcardsMutation).mockReturnValue({
+        mutateAsync: vi.fn().mockRejectedValue(new Error("Invalid import payload")),
+        isPending: false
+      } as any)
+
+      render(<ImportExportTab />)
+      await openImportTask()
+
+      fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
+        target: { value: invalidPayload }
+      })
+      fireEvent.click(screen.getByRole("button", { name: /^import$/i }))
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        /invalid|failed|could not import/i
+      )
+      expect(screen.getByRole("button", { name: /^import$/i })).toBeEnabled()
+      expect(screen.getByDisplayValue(invalidPayload)).toBeInTheDocument()
+    }
+  )
+
   it("requires confirmation before importing very large batches", async () => {
     const mutateAsync = vi.fn().mockResolvedValue({
       imported: 0,

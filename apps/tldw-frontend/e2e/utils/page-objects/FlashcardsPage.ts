@@ -9,9 +9,181 @@
  *   /api/v1/flashcards        (cards CRUD, review, generate, import, export)
  *   /api/v1/flashcards/decks  (deck CRUD)
  */
-import { type Page, type Locator, expect } from '@playwright/test';
+import { type APIRequestContext, type Page, type Locator, expect } from '@playwright/test';
 import { BasePage, type InteractiveElement } from './BasePage';
-import { waitForAppShell, waitForConnection, dismissConnectionModals } from '../helpers';
+import {
+  waitForAppShell,
+  waitForConnection,
+  dismissConnectionModals,
+  TEST_CONFIG,
+} from '../helpers';
+
+export const FLASHCARDS_E2E_PREFIX = 'codex-flashcards-ux';
+
+export function makeFlashcardsRunId(): string {
+  return `${FLASHCARDS_E2E_PREFIX}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export type FlashcardsSeedRecord = {
+  runId: string;
+  deckName: string;
+  cardFront: string;
+  cardBack: string;
+};
+
+export function buildFlashcardsSeedRecord(
+  runId = makeFlashcardsRunId()
+): FlashcardsSeedRecord {
+  return {
+    runId,
+    deckName: `${runId}-deck`,
+    cardFront: `${runId} front`,
+    cardBack: `${runId} back`,
+  };
+}
+
+type FlashcardsCleanupDeck = {
+  id?: number;
+  name?: string;
+  version?: number;
+};
+
+type FlashcardsCleanupCard = {
+  uuid?: string;
+  front?: string | null;
+  back?: string | null;
+  tags?: string[] | null;
+  version?: number;
+};
+
+function flashcardsApiUrl(path: string): string {
+  return `${TEST_CONFIG.serverUrl.replace(/\/$/, '')}${path}`;
+}
+
+function flashcardsApiHeaders(): Record<string, string> {
+  return {
+    'X-API-Key': TEST_CONFIG.apiKey,
+  };
+}
+
+export async function assertFlashcardsBackendReady(
+  request: APIRequestContext
+): Promise<void> {
+  const response = await request.get(flashcardsApiUrl('/api/v1/health'), {
+    headers: flashcardsApiHeaders(),
+  });
+
+  if (!response.ok()) {
+    throw new Error(
+      `Flashcards backend preflight failed: ${response.status()} ${await response.text()}`
+    );
+  }
+
+  const flashcardsResponse = await request.get(
+    flashcardsApiUrl('/api/v1/flashcards/decks?limit=1&include_deleted=false'),
+    { headers: flashcardsApiHeaders() }
+  );
+
+  if (!flashcardsResponse.ok()) {
+    throw new Error(
+      `Flashcards API preflight failed: ${flashcardsResponse.status()} ${await flashcardsResponse.text()}`
+    );
+  }
+}
+
+const startsWithFlashcardsRunPrefix = (value: unknown): boolean =>
+  typeof value === 'string' && value.startsWith(`${FLASHCARDS_E2E_PREFIX}-`);
+
+async function cleanupFlashcardCard(
+  request: APIRequestContext,
+  card: FlashcardsCleanupCard
+): Promise<void> {
+  if (!card.uuid || typeof card.version !== 'number') return;
+
+  const response = await request.delete(
+    flashcardsApiUrl(
+      `/api/v1/flashcards/${encodeURIComponent(card.uuid)}?expected_version=${card.version}`
+    ),
+    { headers: flashcardsApiHeaders() }
+  );
+
+  if (!response.ok() && response.status() !== 404 && response.status() !== 409) {
+    throw new Error(
+      `Failed to cleanup flashcard card ${card.uuid}: ${response.status()} ${await response.text()}`
+    );
+  }
+}
+
+async function cleanupFlashcardDeck(
+  request: APIRequestContext,
+  deck: FlashcardsCleanupDeck
+): Promise<void> {
+  if (typeof deck.id !== 'number' || typeof deck.version !== 'number') return;
+
+  const response = await request.delete(
+    flashcardsApiUrl(
+      `/api/v1/flashcards/decks/${deck.id}?expected_version=${deck.version}`
+    ),
+    { headers: flashcardsApiHeaders() }
+  );
+
+  if (!response.ok() && response.status() !== 404 && response.status() !== 409) {
+    throw new Error(
+      `Failed to cleanup flashcard deck ${deck.id}: ${response.status()} ${await response.text()}`
+    );
+  }
+}
+
+export async function cleanupFlashcardsRunRecords(
+  request: APIRequestContext,
+  _testTitle?: string
+): Promise<void> {
+  try {
+    await assertFlashcardsBackendReady(request);
+  } catch {
+    return;
+  }
+
+  const cardResponse = await request.get(
+    flashcardsApiUrl(
+      `/api/v1/flashcards?q=${encodeURIComponent(FLASHCARDS_E2E_PREFIX)}&limit=1000&due_status=all`
+    ),
+    { headers: flashcardsApiHeaders() }
+  );
+
+  if (cardResponse.ok()) {
+    const payload = (await cardResponse.json().catch(() => ({}))) as {
+      items?: FlashcardsCleanupCard[];
+    };
+    const cards = Array.isArray(payload.items) ? payload.items : [];
+
+    for (const card of cards) {
+      if (
+        startsWithFlashcardsRunPrefix(card.front) ||
+        startsWithFlashcardsRunPrefix(card.back) ||
+        card.tags?.some(startsWithFlashcardsRunPrefix)
+      ) {
+        await cleanupFlashcardCard(request, card);
+      }
+    }
+  }
+
+  const deckResponse = await request.get(
+    flashcardsApiUrl('/api/v1/flashcards/decks?limit=1000&include_deleted=false'),
+    { headers: flashcardsApiHeaders() }
+  );
+
+  if (!deckResponse.ok()) return;
+
+  const decks = (await deckResponse.json().catch(() => [])) as FlashcardsCleanupDeck[];
+  if (!Array.isArray(decks)) return;
+
+  for (const deck of decks) {
+    if (startsWithFlashcardsRunPrefix(deck.name)) {
+      await cleanupFlashcardDeck(request, deck);
+    }
+  }
+}
 
 export class FlashcardsPage extends BasePage {
   constructor(page: Page) {

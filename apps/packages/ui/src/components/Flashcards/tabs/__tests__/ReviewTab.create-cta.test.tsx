@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { ReviewTab } from "../ReviewTab"
 import { clearSetting } from "@/services/settings/registry"
@@ -436,6 +437,74 @@ describe("ReviewTab create CTA visibility", () => {
     expect(topbarPrimaryButtons).toHaveLength(
       FLASHCARDS_LAYOUT_GUARDRAILS.review.maxTopbarPrimaryCtas.active
     )
+  })
+
+  it("keeps a visible re-rate action after rating an active review card", async () => {
+    const user = userEvent.setup()
+    let currentCard = createReviewCard({
+      uuid: "active-card-1",
+      deck_id: 11,
+      front: "Question",
+      back: "Answer"
+    })
+    const nextCard = createReviewCard({
+      uuid: "active-card-2",
+      deck_id: 11,
+      front: "Next question",
+      back: "Next answer",
+      version: 3
+    })
+
+    vi.mocked(useDecksQuery).mockReturnValue({
+      data: [{ id: 11, name: "Biology" }],
+      isLoading: false
+    } as any)
+    vi.mocked(useReviewQuery).mockImplementation(
+      () =>
+        ({
+          data: currentCard,
+          isLoading: false,
+          isFetching: false,
+          refetch: vi.fn().mockResolvedValue(undefined)
+        }) as any
+    )
+    vi.mocked(useReviewFlashcardMutation).mockReturnValue({
+      mutateAsync: vi.fn().mockImplementation(async () => {
+        currentCard = nextCard
+        return {
+          uuid: "active-card-1",
+          ef: 2.6,
+          interval_days: 2,
+          repetitions: 2,
+          lapses: 0,
+          due_at: "2026-02-20T09:30:00.000Z",
+          version: 2
+        }
+      }),
+      isPending: false
+    } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 2, new: 0, learning: 0, total: 2 },
+      refetch: vi.fn().mockResolvedValue(undefined)
+    } as any)
+    vi.mocked(useHasCardsQuery).mockReturnValue({
+      data: true
+    } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    expect(await screen.findByRole("button", { name: /show answer/i })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /show answer/i }))
+    await user.click(screen.getByRole("button", { name: /good/i }))
+    expect(await screen.findByRole("button", { name: /re-rate last card/i })).toBeInTheDocument()
   })
 
   it("shows due counts in deck selector labels when available", () => {

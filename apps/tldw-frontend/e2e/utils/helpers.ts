@@ -4,11 +4,20 @@
 import { expect, type Locator, type Page, type Route } from '@playwright/test';
 import { resolveE2eApiKey } from './e2e-auth';
 
-const E2E_SERVER_URL =
+const RAW_E2E_SERVER_URL =
   process.env.TLDW_SERVER_URL ||
   process.env.TLDW_E2E_SERVER_URL ||
   process.env.E2E_TEST_BASE_URL ||
   'http://127.0.0.1:8000';
+
+const normalizeOrigin = (value: string): string => value.replace(/\/$/, '');
+
+const normalizeHttpOrigin = (value: string): string => {
+  const origin = normalizeOrigin(value.trim());
+  return /^https?:\/\//i.test(origin) ? origin : `http://${origin}`;
+};
+
+const E2E_SERVER_URL = normalizeHttpOrigin(RAW_E2E_SERVER_URL);
 
 /**
  * Environment configuration for tests
@@ -20,11 +29,9 @@ export const TEST_CONFIG = {
   allowOffline: process.env.TLDW_E2E_ALLOW_OFFLINE !== '0',
 };
 
-const normalizeOrigin = (value: string): string => value.replace(/\/$/, '');
-
 const resolveSeedServerUrl = (cfg: Partial<typeof TEST_CONFIG>): string => {
   if (typeof cfg.serverUrl === 'string' && cfg.serverUrl.trim().length > 0) {
-    return normalizeOrigin(cfg.serverUrl.trim());
+    return normalizeHttpOrigin(cfg.serverUrl);
   }
   if (typeof cfg.webUrl === 'string' && cfg.webUrl.trim().length > 0) {
     return normalizeOrigin(cfg.webUrl.trim());
