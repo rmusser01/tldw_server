@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.Character_Chat.world_book_manager import (
     WorldBookEntry,
     BoundedDict,
 )
+from tldw_Server_API.app.core.Character_Chat.constants import MAX_REGEX_MATCH_TIME_MS
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 
 
@@ -54,6 +55,58 @@ def service(mock_db):
 
 class TestWorldBookService:
     """Test suite for WorldBookService."""
+
+    def test_regex_entry_matches_with_runtime_timeout(self, monkeypatch):
+        import tldw_Server_API.app.core.Character_Chat.world_book_manager as world_book_manager
+
+        observed_timeouts: list[float | None] = []
+
+        class FakePattern:
+            def search(self, _text: str, *, timeout: float | None = None):
+                observed_timeouts.append(timeout)
+                return True
+
+        def fake_safe_compile_regex(_pattern: str, flags: int = 0):
+            assert flags == 0
+            return FakePattern()
+
+        monkeypatch.setattr(world_book_manager, "_safe_compile_regex", fake_safe_compile_regex)
+
+        entry = WorldBookEntry(
+            entry_id=1,
+            world_book_id=1,
+            keywords=["hero"],
+            content="Hero lore",
+            regex_match=True,
+            case_sensitive=True,
+        )
+
+        assert entry.matches("the hero arrives")
+        assert observed_timeouts == [MAX_REGEX_MATCH_TIME_MS / 1000.0]
+
+    def test_regex_entry_timeout_variant_fails_closed(self, monkeypatch):
+        import tldw_Server_API.app.core.Character_Chat.world_book_manager as world_book_manager
+
+        class FakeRegexTimeout(Exception):
+            pass
+
+        class FakePattern:
+            def search(self, _text: str, *, timeout: float | None = None):
+                raise FakeRegexTimeout("timed out")
+
+        monkeypatch.setattr(world_book_manager, "_safe_compile_regex", lambda *_args, **_kwargs: FakePattern())
+        monkeypatch.setattr(world_book_manager, "_REGEX_TIMEOUT_ERROR", FakeRegexTimeout)
+
+        entry = WorldBookEntry(
+            entry_id=1,
+            world_book_id=1,
+            keywords=["hero"],
+            content="Hero lore",
+            regex_match=True,
+            case_sensitive=True,
+        )
+
+        assert entry.matches("the hero arrives") is False
 
     def test_init_creates_tables(self, mock_db):
         """Test that initialization creates necessary tables."""

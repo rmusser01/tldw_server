@@ -2155,6 +2155,65 @@ def test_post_message_rejects_oversized_content(db, monkeypatch):
         )
 
 
+def test_post_message_enforces_message_limit(db, monkeypatch):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.core.Character_Chat import character_limits as limits
+
+    monkeypatch.setenv("MAX_MESSAGES_PER_CHAT", "1")
+    monkeypatch.setattr(limits, "_limits", None)
+
+    char_id = db.add_character_card({"name": "LimitChar"})
+    conv_id = db.add_conversation({"character_id": char_id, "title": "Limit Chat"})
+
+    assert post_message_to_conversation(
+        db,
+        conv_id,
+        "LimitChar",
+        "first",
+        is_user_message=True,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        post_message_to_conversation(
+            db,
+            conv_id,
+            "LimitChar",
+            "second",
+            is_user_message=True,
+        )
+
+    assert exc_info.value.status_code == 403
+
+
+def test_post_message_does_not_limit_assistant_response(db, monkeypatch):
+    from tldw_Server_API.app.core.Character_Chat import character_limits as limits
+
+    monkeypatch.setenv("MAX_MESSAGES_PER_CHAT", "1")
+    monkeypatch.setattr(limits, "_limits", None)
+
+    char_id = db.add_character_card({"name": "LimitChar"})
+    conv_id = db.add_conversation({"character_id": char_id, "title": "Limit Chat"})
+
+    user_message_id = post_message_to_conversation(
+        db,
+        conv_id,
+        "LimitChar",
+        "first",
+        is_user_message=True,
+    )
+    assistant_message_id = post_message_to_conversation(
+        db,
+        conv_id,
+        "LimitChar",
+        "assistant reply",
+        is_user_message=False,
+        parent_message_id=user_message_id,
+    )
+
+    assert assistant_message_id
+
+
 def test_load_chat_history_respects_message_limit(db, monkeypatch):
     from tldw_Server_API.app.core.Character_Chat import character_limits as limits
 

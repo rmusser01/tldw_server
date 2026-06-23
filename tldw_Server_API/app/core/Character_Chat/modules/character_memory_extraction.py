@@ -31,9 +31,9 @@ _EXTRACTION_SYSTEM_PROMPT = (
     "- content: concise statement (1-2 sentences max)\n"
     "- salience: float 0.0-1.0 indicating importance (0.8+ = very important)\n\n"
     "Already known memories (do not duplicate):\n{existing_memories}\n\n"
-    "Respond ONLY with a JSON array:\n"
-    "[{{\"category\": \"...\", \"content\": \"...\", \"salience\": 0.8}}]\n"
-    "If nothing new, respond: []"
+    "Respond ONLY with a JSON object:\n"
+    "{{\"memories\": [{{\"category\": \"...\", \"content\": \"...\", \"salience\": 0.8}}]}}\n"
+    "If nothing new, respond: {{\"memories\": []}}"
 )
 
 
@@ -104,26 +104,36 @@ def parse_extraction_response(raw_text: str) -> list[dict[str, Any]]:
     if fence_match:
         text = fence_match.group(1).strip()
 
+    def _coerce_memory_payload(parsed: Any) -> tuple[bool, list[dict[str, Any]]]:
+        if isinstance(parsed, list):
+            return True, _validate_memory_list(parsed)
+        if isinstance(parsed, dict):
+            memories = parsed.get("memories")
+            if isinstance(memories, list):
+                return True, _validate_memory_list(memories)
+        return False, []
+
     # Try direct parse
     try:
         parsed = json.loads(text)
-        if isinstance(parsed, list):
-            return _validate_memory_list(parsed)
+        is_memory_payload, memories = _coerce_memory_payload(parsed)
+        if is_memory_payload:
+            return memories
     except json.JSONDecodeError:
         pass
 
-    # Try to find a JSON array in the text
-    bracket_start = text.find("[")
-    bracket_end = text.rfind("]")
-    if bracket_start != -1 and bracket_end > bracket_start:
+    # Try to recover a JSON object/array embedded in surrounding LLM text.
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"[\[{]", text):
         try:
-            parsed = json.loads(text[bracket_start : bracket_end + 1])
-            if isinstance(parsed, list):
-                return _validate_memory_list(parsed)
+            parsed, _ = decoder.raw_decode(text[match.start():])
         except json.JSONDecodeError:
-            pass
+            continue
+        is_memory_payload, memories = _coerce_memory_payload(parsed)
+        if is_memory_payload:
+            return memories
 
-    logger.warning("Failed to parse extraction response as JSON array")
+    logger.warning("Failed to parse extraction response as JSON memory payload")
     return []
 
 
