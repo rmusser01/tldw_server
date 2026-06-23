@@ -1,7 +1,7 @@
 ---
 id: TASK-2350
 title: Implement Audio Studio frontend route
-status: In Progress
+status: Done
 labels:
 - audio
 - webui
