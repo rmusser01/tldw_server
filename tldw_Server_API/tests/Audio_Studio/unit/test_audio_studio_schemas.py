@@ -9,6 +9,7 @@ from tldw_Server_API.app.api.v1.schemas.audio_studio_schemas import (
     AudioStudioClipUpsert,
     AudioStudioExportCreate,
     AudioStudioGenerationCreate,
+    AudioStudioProjectArchiveRequest,
     AudioStudioProjectCreate,
     AudioStudioProjectUpdate,
     AudioStudioRenderCreate,
@@ -121,3 +122,45 @@ def test_nested_payload_rejects_secret_like_keys() -> None:
             idempotency_key="client-key-123456",
             settings={"safe": {"token": "abc"}},
         )
+
+
+@pytest.mark.parametrize(
+    "provider_payload",
+    [
+        {"access_token": "secret"},
+        {"oauth": {"refresh-token": "secret"}},
+        {"nested": [{"private_key": "secret"}]},
+        {"credentials": "secret"},
+        {"clientCredential": "secret"},
+    ],
+)
+def test_generation_payload_rejects_common_credential_key_variants(provider_payload: dict[str, object]) -> None:
+    with pytest.raises(ValidationError, match="secret|credential|external_url"):
+        AudioStudioGenerationCreate(
+            kind="speech",
+            provider=provider_payload,
+            target_resource_kind="section",
+            target_resource_id="sec_001",
+            target_revision_id="rev_001",
+            idempotency_key="client-key-123456",
+        )
+
+
+def test_generation_payload_allows_harmless_tokenizer_key() -> None:
+    payload = AudioStudioGenerationCreate(
+        kind="speech",
+        provider={"tokenizer": "cl100k_base"},
+        target_resource_kind="section",
+        target_resource_id="sec_001",
+        target_revision_id="rev_001",
+        idempotency_key="client-key-123456",
+    )
+
+    assert payload.provider == {"tokenizer": "cl100k_base"}
+
+
+def test_project_archive_request_requires_base_revision_id() -> None:
+    with pytest.raises(ValidationError, match="base_revision_id"):
+        AudioStudioProjectArchiveRequest()
+
+    assert AudioStudioProjectArchiveRequest(base_revision_id="rev_001").base_revision_id == "rev_001"

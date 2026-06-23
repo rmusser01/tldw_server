@@ -19,6 +19,7 @@ from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collecti
 from tldw_Server_API.app.api.v1.schemas.audio_studio_schemas import (
     AudioStudioClipResponse,
     AudioStudioClipUpsert,
+    AudioStudioProjectArchiveRequest,
     AudioStudioProjectCreate,
     AudioStudioProjectListResponse,
     AudioStudioProjectResponse,
@@ -292,6 +293,7 @@ async def update_audio_studio_project(
 
 @router.delete("/projects/{project_id}")
 async def archive_audio_studio_project(
+    request: AudioStudioProjectArchiveRequest,
     project_id: str = Path(..., min_length=1),
     current_user: User = Depends(get_request_user),
     collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
@@ -299,6 +301,8 @@ async def archive_audio_studio_project(
     """Archive a project owned by the current user."""
     _ = current_user
     project = _load_project_or_404(collections_db, project_id)
+    if project.current_revision_id != request.base_revision_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="stale_base_revision")
     collections_db.archive_audio_studio_project(project.id)
     return {"project_id": project.project_id, "archived": True}
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from enum import Enum
 from typing import Any
 
@@ -62,12 +63,45 @@ _FORBIDDEN_CLIENT_KEYS = {
 }
 
 
+_FORBIDDEN_EXACT_KEYS = _FORBIDDEN_CLIENT_KEYS | {
+    "access_token",
+    "credentials",
+    "credential",
+    "id_token",
+    "private_key",
+    "refresh_token",
+    "session_token",
+}
+_FORBIDDEN_COMPONENTS = {"authorization", "credential", "credentials", "password", "secret"}
+_TOKEN_QUALIFIERS = {"access", "auth", "bearer", "client", "id", "refresh", "session"}
+_KEY_QUALIFIERS = {"api", "auth", "client", "private", "secret"}
+
+
+def _normalize_client_key(key: object) -> str:
+    raw = str(key)
+    with_separators = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", raw)
+    return re.sub(r"[^a-zA-Z0-9]+", "_", with_separators).strip("_").lower()
+
+
+def _is_forbidden_client_key(key: object) -> bool:
+    normalized = _normalize_client_key(key)
+    if normalized in _FORBIDDEN_EXACT_KEYS or normalized.endswith("_secret"):
+        return True
+    parts = [part for part in normalized.split("_") if part]
+    if any(part in _FORBIDDEN_COMPONENTS for part in parts):
+        return True
+    if "token" in parts and (normalized == "token" or any(part in _TOKEN_QUALIFIERS for part in parts)):
+        return True
+    if "key" in parts and any(part in _KEY_QUALIFIERS for part in parts):
+        return True
+    return False
+
+
 def _reject_secret_payload(value: Any, *, path: str = "payload") -> None:
     if isinstance(value, dict):
         for key, nested in value.items():
-            normalized = str(key).lower().replace("-", "_")
-            if normalized in _FORBIDDEN_CLIENT_KEYS or normalized.endswith("_secret"):
-                raise ValueError(f"{path} must not include secret or external_url fields")
+            if _is_forbidden_client_key(key):
+                raise ValueError(f"{path} must not include secret, credential, or external_url fields")
             _reject_secret_payload(nested, path=f"{path}.{key}")
     elif isinstance(value, list):
         for index, nested in enumerate(value):
@@ -110,6 +144,12 @@ class AudioStudioProjectUpdate(_SecretFreePayloadMixin):
     status: str | None = Field(None, max_length=40)
     settings: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
+
+
+class AudioStudioProjectArchiveRequest(_BaseAudioStudioModel):
+    """Archive a project with optimistic concurrency."""
+
+    base_revision_id: str = Field(..., min_length=1, max_length=120)
 
 
 class AudioStudioProjectResponse(_BaseAudioStudioModel):

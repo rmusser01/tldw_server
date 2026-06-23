@@ -120,7 +120,31 @@ def test_project_crud_and_resource_upserts(client_audio_studio: TestClient) -> N
     clip = clip_response.json()
     assert clip["clip_id"] == "clip_001"
 
-    delete_response = client_audio_studio.delete(f"/api/v1/audio-studio/projects/{created['project_id']}")
+    missing_body_response = client_audio_studio.request(
+        "DELETE",
+        f"/api/v1/audio-studio/projects/{created['project_id']}",
+    )
+    assert missing_body_response.status_code == 422
+
+    missing_revision_response = client_audio_studio.request(
+        "DELETE",
+        f"/api/v1/audio-studio/projects/{created['project_id']}",
+        json={},
+    )
+    assert missing_revision_response.status_code == 422
+
+    stale_delete_response = client_audio_studio.request(
+        "DELETE",
+        f"/api/v1/audio-studio/projects/{created['project_id']}",
+        json={"base_revision_id": created["current_revision_id"]},
+    )
+    assert stale_delete_response.status_code == 409
+
+    delete_response = client_audio_studio.request(
+        "DELETE",
+        f"/api/v1/audio-studio/projects/{created['project_id']}",
+        json={"base_revision_id": clip["current_revision_id"]},
+    )
     assert delete_response.status_code == 200
     assert delete_response.json()["archived"] is True
 
@@ -145,4 +169,8 @@ def test_project_lookup_does_not_leak_across_users(client_audio_studio: TestClie
         f"/api/v1/audio-studio/projects/{project_id}",
         json={"title": "Nope", "base_revision_id": "rev_missing"},
     ).status_code == 404
-    assert client_audio_studio.delete(f"/api/v1/audio-studio/projects/{project_id}").status_code == 404
+    assert client_audio_studio.request(
+        "DELETE",
+        f"/api/v1/audio-studio/projects/{project_id}",
+        json={"base_revision_id": "rev_missing"},
+    ).status_code == 404
