@@ -209,6 +209,6 @@ make PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python mc
 make PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python mcp-unified-publish-dry-run
 ```
 
-- [ ] **Step 4: Finalize task and commit**
+- [x] **Step 4: Finalize task and commit**
 
 Update `TASK-2400` with validation evidence, then commit the branch.

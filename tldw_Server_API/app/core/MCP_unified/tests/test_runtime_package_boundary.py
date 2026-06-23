@@ -1097,6 +1097,7 @@ def test_mcp_unified_publish_workflow_is_manual_and_gated() -> None:
         ("publish-pypi", "pypi", "MCP_UNIFIED_PYPI_API_TOKEN"),
     ):
         job = jobs[job_name]
+        assert job["needs"] == "publish-plan"  # nosec B101
         assert "inputs.confirm_publish == 'MCP_UNIFIED_PUBLISH'" in job["if"]  # nosec B101
         assert job["permissions"] == {"contents": "read"}  # nosec B101
         assert job["environment"]["name"] == environment_name  # nosec B101

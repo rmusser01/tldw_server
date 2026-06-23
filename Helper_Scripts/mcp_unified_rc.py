@@ -488,6 +488,12 @@ def build_publish_plan(
         raise FileNotFoundError(
             "expected built wheel and sdist in .artifacts/mcp-unified-rc/dist; run build first"
         )
+    if len(wheels) != 1 or len(sdists) != 1:
+        raise ValueError(
+            "expected exactly one wheel and one sdist in .artifacts/mcp-unified-rc/dist; "
+            f"found wheels={[path.name for path in wheels]}, "
+            f"sdists={[path.name for path in sdists]}"
+        )
 
     artifact_paths = [*wheels, *sdists]
     return PublishPlan(
@@ -549,14 +555,26 @@ def run_publish_plan(
         )
         return _write_and_report(recorder)
 
-    result = run_command(plan.command, cwd=paths.repo_root, timeout=300)
-    _record_command_result(
-        recorder,
-        phase="publish_plan",
-        name="twine_upload",
-        result=result,
-        details={"plan": plan.as_dict()},
-    )
+    try:
+        result = run_command(plan.command, cwd=paths.repo_root, timeout=300)
+    except (RuntimeError, subprocess.SubprocessError, OSError) as exc:
+        logger.exception("MCP Unified publish upload command failed unexpectedly")
+        recorder.record(
+            phase="publish_plan",
+            name="twine_upload",
+            status="failed",
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            reason=f"unexpected upload execution error: {exc}",
+            details={"plan": plan.as_dict()},
+        )
+    else:
+        _record_command_result(
+            recorder,
+            phase="publish_plan",
+            name="twine_upload",
+            result=result,
+            details={"plan": plan.as_dict()},
+        )
     return _write_and_report(recorder)
 
 
@@ -610,9 +628,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     publish_parser.add_argument(
         "--dry-run",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=True,
-        help="Record the publish command without uploading artifacts.",
+        help="Record the publish command without uploading artifacts. Use --no-dry-run to request guarded upload.",
     )
     publish_parser.add_argument(
         "--execute",
@@ -646,7 +664,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_publish_plan(
             paths,
             target=args.target,
-            execute=args.execute,
+            execute=args.execute or not args.dry_run,
             dry_run=args.dry_run,
         )
     return run_all(paths)
@@ -1454,7 +1472,7 @@ def _read_package_constants(metadata_path: Path) -> dict[str, Any]:
         if target_name in wanted and value_node is not None:
             try:
                 constants[target_name] = ast.literal_eval(value_node)
-            except (SyntaxError, ValueError):
+            except (SyntaxError, ValueError, TypeError):
                 if isinstance(value_node, ast.Constant):
                     constants[target_name] = value_node.value
     return constants

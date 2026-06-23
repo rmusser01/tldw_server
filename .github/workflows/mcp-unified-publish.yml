@@ -64,6 +64,7 @@ jobs:
 
   publish-testpypi:
     name: Upload MCP Unified to TestPyPI
+    needs: publish-plan
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi' && inputs.confirm_publish == 'MCP_UNIFIED_PUBLISH' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -98,6 +99,7 @@ jobs:
 
   publish-pypi:
     name: Upload MCP Unified to PyPI
+    needs: publish-plan
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'pypi' && inputs.confirm_publish == 'MCP_UNIFIED_PUBLISH' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
