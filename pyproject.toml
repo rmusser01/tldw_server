@@ -511,8 +511,6 @@ tldw-server = "tldw_Server_API.app.main:run_server"
 # Point tldw-evals to the richer, unified CLI
 tldw-evals = "tldw_Server_API.cli.evals_cli:main"
 tldw-setup = "tldw_Server_API.cli.wizard.cli:main"
-mcp-unified-gateway = "mcp_unified.gateway.cli:main"
-mcp-unified-smoke = "mcp_unified.smoke.cli:main"
 
 ###########################
 # Tools - Package Discovery
@@ -521,8 +519,13 @@ mcp-unified-smoke = "mcp_unified.smoke.cli:main"
 include-package-data = false
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["tldw_Server_API", "tldw_Server_API.*", "mcp_unified", "mcp_unified.*"]
+where = [".", "apps/mcp-unified/src"]
+include = [
+  "tldw_Server_API",
+  "tldw_Server_API.*",
+  "mcp_unified",
+  "mcp_unified.*",
+]
 namespaces = false
 exclude = [
   "tests*",
@@ -567,6 +570,7 @@ tldw_Server_API = [
 # Tools - Tests
 ###########################
 [tool.pytest.ini_options]
+pythonpath = ["apps/mcp-unified/src"]
 filterwarnings = [
     "ignore::DeprecationWarning:pkg_resources:",
     "ignore::DeprecationWarning:speechbrain.pretrained:",
@@ -698,7 +702,7 @@ extend-exclude = '''
 [tool.ruff]
 line-length = 120
 target-version = "py39"
-src = ["tldw_Server_API", "mcp_unified"]
+src = ["tldw_Server_API", "apps/mcp-unified/src/mcp_unified"]
 extend-include = ["*.ipynb"]
 exclude = [
   "migrations",
@@ -1831,7 +1835,7 @@ warn_no_return = true
 follow_imports = "silent"
 show_error_codes = true
 strict_equality = true
-files = ["tldw_Server_API", "mcp_unified"]
+files = ["tldw_Server_API", "apps/mcp-unified/src/mcp_unified"]
 exclude = [
     "tests",
     "migrations",

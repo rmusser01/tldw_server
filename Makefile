@@ -34,6 +34,10 @@ help:
 	@echo "Testing:"
 	@echo "  make tooling-install         Install test/smoke extras"
 	@echo "  make tooling-smoke           Run unified smoke checks"
+	@echo "  make mcp-unified-build       Build MCP Unified standalone RC artifacts"
+	@echo "  make mcp-unified-check       Run MCP Unified RC artifact gates"
+	@echo "  make mcp-unified-uat         Run MCP Unified RC UAT checks"
+	@echo "  make mcp-unified-rc          Run the full MCP Unified internal RC"
 	@echo "  make lint-changed            Lint only changed files"
 	@echo "  make ci-local                Run gating CI checks locally (fast tier)"
 	@echo "  make ci-local-full           Run the full suite locally (-n auto)"
@@ -54,7 +58,7 @@ help:
 # -----------------------------------------------------------------------------
 # Quickstart targets (first-time setup)
 # -----------------------------------------------------------------------------
-.PHONY: setup-wizard-tools setup-docker-single start-docker-single verify-docker-single setup-docker-multi start-docker-multi verify-docker-multi install-local setup-local-single start-local-single verify-local-single quickstart quickstart-install quickstart-prereqs quickstart-local quickstart-docker quickstart-docker-bootstrap quickstart-docker-webui model-cycle verify pypi-build pypi-check tooling-install tooling-smoke show-api-key release release-patch release-minor
+.PHONY: setup-wizard-tools setup-docker-single start-docker-single verify-docker-single setup-docker-multi start-docker-multi verify-docker-multi install-local setup-local-single start-local-single verify-local-single quickstart quickstart-install quickstart-prereqs quickstart-local quickstart-docker quickstart-docker-bootstrap quickstart-docker-webui model-cycle verify pypi-build pypi-check tooling-install tooling-smoke show-api-key release release-patch release-minor mcp-unified-build mcp-unified-check mcp-unified-uat mcp-unified-rc
 
 PYTHON ?= python3
 VENV_DIR ?= .venv
@@ -77,6 +81,7 @@ DOCKER_BUILD ?= false
 DOCKER_BUILD_FLAG = $(if $(filter true TRUE 1 yes YES,$(DOCKER_BUILD)),--build,)
 DOCKER_WAIT_FLAG ?= --wait
 PYPI_BUILD_ARGS ?= --no-isolation
+MCP_UNIFIED_RC ?= $(PYTHON) Helper_Scripts/mcp_unified_rc.py
 MODEL_CYCLE_FIRST ?=
 MODEL_CYCLE_SECOND ?=
 MODEL_CYCLE_EXCLUDED ?=postgres,redis
@@ -259,6 +264,26 @@ pypi-check: pypi-build
 	@$(PYTHON) -m pip show twine >/dev/null 2>&1 || (echo "[pypi-check] Missing 'twine'. Install with: $(PYTHON) -m pip install twine" && exit 1)
 	@echo "[pypi-check] Validating distributions..."
 	@$(PYTHON) -m twine check dist/*
+
+# -----------------------------------------------------------------------------
+# MCP Unified standalone RC
+# -----------------------------------------------------------------------------
+
+mcp-unified-build:
+	$(MCP_UNIFIED_RC) build
+
+mcp-unified-check:
+	$(MCP_UNIFIED_RC) build
+	$(MCP_UNIFIED_RC) artifact-gate
+	$(MCP_UNIFIED_RC) install-smoke
+
+mcp-unified-uat:
+	$(MCP_UNIFIED_RC) cli-uat
+	$(MCP_UNIFIED_RC) smoke-uat
+	$(MCP_UNIFIED_RC) extras-matrix
+
+mcp-unified-rc:
+	$(MCP_UNIFIED_RC) all
 
 # -----------------------------------------------------------------------------
 # PostgreSQL backup/restore

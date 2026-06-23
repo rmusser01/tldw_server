@@ -1,4 +1,4 @@
-name: Publish PyPI Package
+name: Publish tldw-server PyPI Package
 
 on:
   workflow_dispatch:
@@ -40,7 +40,7 @@ jobs:
       - name: Upload dist artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: pypi-dist
+          name: tldw-server-pypi-dist
           path: dist/*
           if-no-files-found: error
 
@@ -58,7 +58,7 @@ jobs:
       - name: Download dist artifacts
         uses: actions/download-artifact@v8
         with:
-          name: pypi-dist
+          name: tldw-server-pypi-dist
           path: dist
 
       - name: Publish to TestPyPI
@@ -80,7 +80,7 @@ jobs:
       - name: Download dist artifacts
         uses: actions/download-artifact@v8
         with:
-          name: pypi-dist
+          name: tldw-server-pypi-dist
           path: dist
 
       - name: Publish to PyPI

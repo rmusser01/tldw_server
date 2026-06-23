@@ -27,6 +27,30 @@ _MAX_CAPTURE_CHARS = 6000
 _DEFAULT_TIMEOUT_SECONDS = 120.0
 _FIXTURE_HOST = "127.0.0.1"
 _SERVER_STOP_TIMEOUT_SECONDS = 5.0
+_LOCAL_ABSOLUTE_PATH_PATTERN = re.compile(
+    r"(^|[\s\"'(\[{=,:])"
+    r"(/(?:Users|private|var|tmp|Volumes|home|opt|usr|workspace|runner)/"
+    r"[^\s\"',}\]]+)"
+)
+_WINDOWS_ABSOLUTE_PATH_PATTERN = re.compile(
+    r"(?i)(^|[\s\"'(\[{=,:])([A-Z]:\\[^\s\"',}\]]+)"
+)
+_SMOKE_STEP_IDS = {
+    "smoke_cli_help",
+    "smoke_inprocess",
+    "write_stdio_fixture",
+    "smoke_stdio_subprocess",
+    "write_asgi_fixture",
+    "start_fixture_gateway",
+    "smoke_http",
+    "smoke_websocket",
+    "stop_fixture_gateway",
+}
+_SMOKE_MODE_SETUP_STEP_IDS = {
+    "create_venv",
+    "install_package_boundary",
+    *_SMOKE_STEP_IDS,
+}
 
 _STDIO_FIXTURE_SOURCE = '''\
 from __future__ import annotations
@@ -110,8 +134,35 @@ class UatRunContext:
     gateway_url: str | None
     admin_key: str | None
     timeout_seconds: float
+    package_install_args: list[str]
+    mode: str = "all"
     secrets: list[str] = field(default_factory=list)
     processes: dict[str, subprocess.Popen[str]] = field(default_factory=dict)
+
+
+def default_package_project(repo_root: Path) -> Path:
+    """Return the standalone MCP package project path."""
+
+    return repo_root / "apps" / "mcp-unified"
+
+
+def package_install_spec(
+    *,
+    repo_root: Path,
+    wheel_path: Path | None,
+    editable: bool,
+) -> list[str]:
+    """Return pip install arguments for the standalone package under test.
+
+    Wheel installs take precedence over editable source installs.
+    """
+
+    if wheel_path is not None:
+        return [f"{wheel_path.resolve()}[gateway]"]
+    project = default_package_project(repo_root)
+    if editable:
+        return ["-e", f"{project}[gateway]"]
+    return [f"{project}[gateway]"]
 
 
 def build_uat_plan(
@@ -122,7 +173,9 @@ def build_uat_plan(
     gateway_executable: str,
     smoke_executable: str,
     gateway_url: str | None,
+    package_install_args: list[str],
     fixture_port: int | None = None,
+    mode: str = "all",
 ) -> list[UatStep]:
     """Build the ordered standalone user-guide UAT command plan."""
 
@@ -140,6 +193,7 @@ def build_uat_plan(
     asgi_fixture = workspace / "smoke_asgi_fixture.py"
     http_smoke_report = workspace / "mcp-smoke-http.json"
     websocket_smoke_report = workspace / "mcp-smoke-websocket.json"
+    tool_events_export = workspace / "mcp-tool-events.jsonl"
     fixture_port = fixture_port or _fixture_port_for_workspace(workspace)
 
     steps = [
@@ -150,6 +204,7 @@ def build_uat_plan(
                 python_executable,
                 "-m",
                 "venv",
+                *(["--symlinks"] if os.name != "nt" else []),
                 str(venv_dir),
             ],
             cwd=workspace,
@@ -162,8 +217,7 @@ def build_uat_plan(
                 "-m",
                 "pip",
                 "install",
-                "-e",
-                f"{repo_root / 'mcp_unified'}[gateway]",
+                *package_install_args,
             ],
             cwd=workspace,
         ),
@@ -431,6 +485,40 @@ def build_uat_plan(
             cwd=workspace,
         ),
         UatStep(
+            "tool_events_export",
+            "Export metadata-only tool-use events from the configured store.",
+            command=[
+                gateway_executable,
+                "tool-events",
+                "export",
+                "--format",
+                "jsonl",
+                "--since",
+                "7d",
+                "--output",
+                str(tool_events_export),
+                "--config",
+                str(reporting_config),
+            ],
+            cwd=workspace,
+        ),
+        UatStep(
+            "tool_events_cleanup",
+            "Apply tool-use reporting retention cleanup to the configured store.",
+            command=[
+                gateway_executable,
+                "tool-events",
+                "cleanup",
+                "--max-age-days",
+                "30",
+                "--max-events",
+                "100000",
+                "--config",
+                str(reporting_config),
+            ],
+            cwd=workspace,
+        ),
+        UatStep(
             "smoke_inprocess",
             "Run the documented in-process MCP smoke scenario.",
             command=[
@@ -545,7 +633,7 @@ def build_uat_plan(
             )
         )
 
-    return steps
+    return _filter_uat_plan(steps, mode=mode)
 
 
 def redact_text(
@@ -560,6 +648,8 @@ def redact_text(
     for path in sorted({str(path) for path in sensitive_paths if path}, key=len, reverse=True):
         if path:
             redacted = redacted.replace(path, "<redacted-path>")
+    redacted = _LOCAL_ABSOLUTE_PATH_PATTERN.sub(r"\1<redacted-path>", redacted)
+    redacted = _WINDOWS_ABSOLUTE_PATH_PATTERN.sub(r"\1<redacted-path>", redacted)
     for secret in sorted({secret for secret in secrets if secret}, key=len, reverse=True):
         redacted = redacted.replace(secret, "<redacted-secret>")
     redacted = re.sub(
@@ -593,6 +683,8 @@ def run_uat(context: UatRunContext) -> dict[str, Any]:
         gateway_executable=gateway_executable,
         smoke_executable=smoke_executable,
         gateway_url=context.gateway_url,
+        package_install_args=context.package_install_args,
+        mode=context.mode,
     )
     try:
         results = [_run_step(step, context) for step in plan]
@@ -605,7 +697,7 @@ def run_uat(context: UatRunContext) -> dict[str, Any]:
         "duration_ms": _elapsed_ms(started),
         "workspace": "<redacted-path>",
         "repo_root": "<redacted-path>",
-        "guide": "mcp_unified/USER_GUIDE.md",
+        "guide": "apps/mcp-unified/USER_GUIDE.md",
         "steps": [_step_result_payload(result, context) for result in results],
         "summary": {
             "passed": sum(1 for result in results if result.status == "passed"),
@@ -623,6 +715,11 @@ def main(argv: list[str] | None = None) -> int:
     gateway_url = args.gateway_url or os.getenv("MCP_UNIFIED_GATEWAY_URL")
     admin_key = os.getenv("MCP_UNIFIED_GATEWAY_ADMIN_KEY")
     secrets = [admin_key] if admin_key else []
+    package_install_args = package_install_spec(
+        repo_root=repo_root,
+        wheel_path=args.wheel,
+        editable=args.editable,
+    )
 
     if args.workspace:
         workspace = args.workspace.resolve()
@@ -634,6 +731,8 @@ def main(argv: list[str] | None = None) -> int:
                 gateway_url=gateway_url,
                 admin_key=admin_key,
                 timeout_seconds=args.timeout_seconds,
+                package_install_args=package_install_args,
+                mode=args.mode,
                 secrets=secrets,
             )
         )
@@ -647,6 +746,8 @@ def main(argv: list[str] | None = None) -> int:
                     gateway_url=gateway_url,
                     admin_key=admin_key,
                     timeout_seconds=args.timeout_seconds,
+                    package_install_args=package_install_args,
+                    mode=args.mode,
                     secrets=secrets,
                 )
             )
@@ -761,6 +862,18 @@ def _run_step(step: UatStep, context: UatRunContext) -> UatStepResult:
         stderr=_truncate(completed.stderr),
         reason=None if status == "passed" else "unexpected exit code",
     )
+
+
+def _filter_uat_plan(steps: list[UatStep], *, mode: str) -> list[UatStep]:
+    """Return the selected UAT plan slice."""
+
+    if mode == "all":
+        return steps
+    if mode == "cli":
+        return [step for step in steps if step.step_id not in _SMOKE_STEP_IDS]
+    if mode == "smoke":
+        return [step for step in steps if step.step_id in _SMOKE_MODE_SETUP_STEP_IDS]
+    raise ValueError(f"unsupported UAT mode: {mode}")
 
 
 def _start_background_process(
@@ -948,7 +1061,15 @@ def _step_result_payload(result: UatStepResult, context: UatRunContext) -> dict[
             secrets=context.secrets,
             sensitive_paths=[context.workspace, context.repo_root],
         ),
-        "reason": result.reason,
+        "reason": (
+            redact_text(
+                result.reason,
+                secrets=context.secrets,
+                sensitive_paths=[context.workspace, context.repo_root],
+            )
+            if result.reason
+            else None
+        ),
     }
 
 
@@ -980,7 +1101,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--repo-root",
         type=Path,
         default=Path(__file__).resolve().parents[2],
-        help="Repository root containing the mcp_unified package directory.",
+        help="Repository root containing the apps/mcp-unified standalone project.",
     )
     parser.add_argument(
         "--workspace",
@@ -991,6 +1112,25 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--json-report",
         type=Path,
         help="Path to write the redacted JSON report. Defaults to stdout.",
+    )
+    parser.add_argument(
+        "--wheel",
+        type=Path,
+        help="Built wheel to install for installed-artifact UAT.",
+    )
+    parser.add_argument(
+        "--editable",
+        action="store_true",
+        help=(
+            "Install the app package project in editable mode for local guide iteration. "
+            "Ignored when --wheel is supplied."
+        ),
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("all", "cli", "smoke"),
+        default="all",
+        help="Select the UAT plan slice to run.",
     )
     parser.add_argument(
         "--gateway-url",

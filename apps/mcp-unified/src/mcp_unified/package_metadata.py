@@ -18,13 +18,13 @@ CORE_DEPENDENCIES: Final = (
     "loguru",
     "pyyaml",
 )
-SMOKE_TRANSPORT_DEPENDENCIES: Final = (
+NETWORK_DEPENDENCIES: Final = (
     "httpx",
     "websockets",
 )
-BASE_DEPENDENCIES: Final = (
+PROJECT_DEPENDENCIES: Final = (
     *CORE_DEPENDENCIES,
-    *SMOKE_TRANSPORT_DEPENDENCIES,
+    *NETWORK_DEPENDENCIES,
 )
 FASTAPI_DEPENDENCIES: Final = (
     "fastapi",
@@ -34,12 +34,15 @@ SQLITE_DEPENDENCIES: Final = ("sqlalchemy",)
 FEDERATION_DEPENDENCIES: Final = CORE_DEPENDENCIES
 GATEWAY_DEPENDENCIES: Final = (
     *CORE_DEPENDENCIES,
+    *NETWORK_DEPENDENCIES,
     *FASTAPI_DEPENDENCIES,
     *SQLITE_DEPENDENCIES,
-    *SMOKE_TRANSPORT_DEPENDENCIES,
     "uvicorn",
 )
 DEV_DEPENDENCIES: Final = (
+    "build",
+    "setuptools",
+    "tomli",
     "pytest",
     "pytest-asyncio",
     "bandit",
@@ -69,7 +72,7 @@ def package_metadata_summary() -> dict[str, object]:
         "license_expression": LICENSE_EXPRESSION,
         "source_distribution": SOURCE_DISTRIBUTION,
         "dependency_version_policy": DEPENDENCY_VERSION_POLICY,
-        "base_dependencies": list(BASE_DEPENDENCIES),
+        "base_dependencies": list(PROJECT_DEPENDENCIES),
         "optional_extras": {
             extra: list(dependencies)
             for extra, dependencies in OPTIONAL_EXTRAS.items()

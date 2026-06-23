@@ -1,4 +1,4 @@
-"""Standalone MCP Unified artifact gate without host pytest package imports.
+"""Validate apps/mcp-unified artifacts through the host boundary-test module.
 
 The real artifact assertions live beside the host MCP Unified tests. This shim
 loads them by file path so the CI package gate can run with only standalone
@@ -26,7 +26,7 @@ BOUNDARY_TESTS_PATH = (
 
 
 def _load_boundary_tests() -> ModuleType:
-    """Load boundary tests by file path so pytest does not import host packages."""
+    """Load host boundary tests by file path without host package imports."""
 
     spec = importlib.util.spec_from_file_location(
         BOUNDARY_TESTS_MODULE,

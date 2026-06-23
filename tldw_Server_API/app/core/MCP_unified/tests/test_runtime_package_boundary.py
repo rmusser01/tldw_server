@@ -1,3 +1,5 @@
+"""Runtime and package-boundary checks for the standalone MCP Unified package."""
+
 from __future__ import annotations
 
 import ast
@@ -18,23 +20,45 @@ from email.parser import Parser
 from importlib import metadata as importlib_metadata
 from pathlib import Path
 
-import mcp_unified
 import pytest
 import yaml
 from pydantic import ValidationError
+
+pytestmark = pytest.mark.unit
 
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility.
     import tomli as tomllib
 
-PACKAGE_ROOT = Path(mcp_unified.__file__).resolve().parent
-STANDALONE_PYPROJECT = PACKAGE_ROOT / "pyproject.toml"
+REPO_ROOT = Path(__file__).resolve().parents[5]
+ROOT_PYPROJECT = REPO_ROOT / "pyproject.toml"
+STANDALONE_PROJECT_ROOT = REPO_ROOT / "apps" / "mcp-unified"
+STANDALONE_SRC_ROOT = STANDALONE_PROJECT_ROOT / "src"
+PACKAGE_ROOT = STANDALONE_SRC_ROOT / "mcp_unified"
+STANDALONE_PYPROJECT = STANDALONE_PROJECT_ROOT / "pyproject.toml"
 PY_TYPED_MARKER = PACKAGE_ROOT / "py.typed"
-PACKAGE_README = PACKAGE_ROOT / "README.md"
-PACKAGE_USER_GUIDE = PACKAGE_ROOT / "USER_GUIDE.md"
+PACKAGE_README = STANDALONE_PROJECT_ROOT / "README.md"
+PACKAGE_USER_GUIDE = STANDALONE_PROJECT_ROOT / "USER_GUIDE.md"
+PACKAGE_RESOURCE_README = PACKAGE_ROOT / "README.md"
+PACKAGE_RESOURCE_USER_GUIDE = PACKAGE_ROOT / "USER_GUIDE.md"
+
+if str(STANDALONE_SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(STANDALONE_SRC_ROOT))
+
+import mcp_unified
+
 REQUIRES_DIST_NAME_PATTERN = re.compile(r"^\s*([A-Za-z0-9_.-]+)")
 REQUIRES_DIST_EXTRA_PATTERN = re.compile(r"extra\s*==\s*['\"]([^'\"]+)['\"]")
+
+
+def test_mcp_unified_package_project_lives_under_apps() -> None:
+    """The standalone project must live under apps/mcp-unified."""
+
+    assert STANDALONE_PROJECT_ROOT.is_dir()  # nosec B101
+    assert STANDALONE_PYPROJECT.is_file()  # nosec B101
+    assert PACKAGE_ROOT.is_dir()  # nosec B101
+    assert not (REPO_ROOT / "mcp_unified").exists()  # nosec B101
 
 
 def _dependency_package_name(dependency: str) -> str:
@@ -51,6 +75,14 @@ def _load_standalone_pyproject() -> dict[str, object]:
 
     assert STANDALONE_PYPROJECT.is_file()
     with STANDALONE_PYPROJECT.open("rb") as pyproject_file:
+        return tomllib.load(pyproject_file)
+
+
+def _load_root_pyproject() -> dict[str, object]:
+    """Load the root tldw-server pyproject document."""
+
+    assert ROOT_PYPROJECT.is_file()
+    with ROOT_PYPROJECT.open("rb") as pyproject_file:
         return tomllib.load(pyproject_file)
 
 
@@ -166,6 +198,31 @@ def _assert_subprocess_succeeded(
         )
 
 
+def _subprocess_env(
+    extra_env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Return a subprocess environment without injecting checkout source paths."""
+
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
+    return env
+
+
+def _subprocess_env_with_standalone_src(
+    extra_env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Return subprocess env with relocated standalone src on PYTHONPATH."""
+
+    env = _subprocess_env(extra_env)
+    pythonpath_entries = [str(STANDALONE_SRC_ROOT)]
+    existing_pythonpath = env.get("PYTHONPATH")
+    if existing_pythonpath:
+        pythonpath_entries.append(existing_pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_entries)
+    return env
+
+
 def _build_standalone_distributions(tmp_path: Path) -> tuple[Path, Path]:
     """Build standalone MCP Unified wheel and sdist into a temporary directory."""
 
@@ -173,7 +230,7 @@ def _build_standalone_distributions(tmp_path: Path) -> tuple[Path, Path]:
 
     package_source = tmp_path / "mcp_unified_source"
     shutil.copytree(
-        PACKAGE_ROOT,
+        STANDALONE_PROJECT_ROOT,
         package_source,
         ignore=shutil.ignore_patterns(
             "__pycache__",
@@ -200,11 +257,12 @@ def _build_standalone_distributions(tmp_path: Path) -> tuple[Path, Path]:
         check=False,
         capture_output=True,
         text=True,
-        env={
-            **os.environ,
-            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-            "PIP_NO_INDEX": "1",
-        },
+        env=_subprocess_env(
+            {
+                "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+                "PIP_NO_INDEX": "1",
+            }
+        ),
     )
     _assert_subprocess_succeeded(result, "python -m build")
 
@@ -294,10 +352,34 @@ def _wheel_extra_dependency_names(
 
 
 def _read_sdist_members(sdist: Path) -> set[str]:
-    """Return normalized member names from a standalone source distribution."""
+    """Return archive member names from a standalone source distribution."""
 
     with tarfile.open(sdist, "r:gz") as archive:
         return {member.name for member in archive.getmembers()}
+
+
+def _sdist_project_members(sdist_members: set[str]) -> set[str]:
+    """Return sdist members relative to the distribution project root."""
+
+    members = {
+        member.removeprefix("./").strip("/")
+        for member in sdist_members
+        if member.removeprefix("./").strip("/")
+    }
+    if "pyproject.toml" in members:
+        return members
+
+    distribution_roots = {
+        member.split("/", 1)[0]
+        for member in members
+    }
+    assert len(distribution_roots) == 1, sorted(distribution_roots)  # nosec B101
+    distribution_root = next(iter(distribution_roots))
+    return {
+        member.removeprefix(f"{distribution_root}/")
+        for member in members
+        if member != distribution_root
+    }
 
 
 @pytest.fixture(scope="module")
@@ -330,7 +412,36 @@ def test_subprocess_failure_assertion_includes_captured_output() -> None:
     assert "STDERR:\nbuild stderr" in message
 
 
+def test_build_subprocess_env_does_not_inject_checkout_src(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Build subprocesses should not see checkout src via PYTHONPATH."""
+
+    monkeypatch.setenv("PYTHONPATH", "existing-pythonpath")
+
+    env = _subprocess_env({"PIP_NO_INDEX": "1"})
+
+    assert env["PYTHONPATH"] == "existing-pythonpath"  # nosec B101
+    assert str(STANDALONE_SRC_ROOT) not in env["PYTHONPATH"]  # nosec B101
+    assert env["PIP_NO_INDEX"] == "1"  # nosec B101
+
+
+def test_runtime_subprocess_env_injects_standalone_src(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime subprocesses should get the relocated standalone src path."""
+
+    monkeypatch.setenv("PYTHONPATH", "existing-pythonpath")
+
+    env = _subprocess_env_with_standalone_src()
+
+    pythonpath_entries = env["PYTHONPATH"].split(os.pathsep)
+    assert pythonpath_entries == [str(STANDALONE_SRC_ROOT), "existing-pythonpath"]  # nosec B101
+
+
 def _tldw_imports_for(path: Path) -> list[str]:
+    """Return host-package imports found in a Python source file."""
+
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     imports: list[str] = []
     for node in ast.walk(tree):
@@ -348,6 +459,8 @@ def _tldw_imports_for(path: Path) -> list[str]:
 
 
 def test_runtime_package_boundary_has_no_tldw_server_imports() -> None:
+    """Standalone package modules must not import the host tldw server package."""
+
     assert PACKAGE_ROOT.exists()
     offenders: dict[str, list[str]] = {}
     for path in PACKAGE_ROOT.rglob("*.py"):
@@ -358,6 +471,8 @@ def test_runtime_package_boundary_has_no_tldw_server_imports() -> None:
 
 
 def test_mcp_unified_package_metadata_declares_release_gate() -> None:
+    """Release-gate package metadata should advertise the internal status."""
+
     metadata = importlib.import_module("mcp_unified.package_metadata")
 
     assert metadata.PACKAGE_NAME == "mcp-unified"
@@ -381,17 +496,17 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
     )
     assert all(
         isinstance(dependency, str)
-        for dependency in metadata.BASE_DEPENDENCIES
+        for dependency in metadata.PROJECT_DEPENDENCIES
     )
     assert all(
         dependency == _dependency_package_name(dependency)
-        for dependency in metadata.BASE_DEPENDENCIES
+        for dependency in metadata.PROJECT_DEPENDENCIES
     )
-    assert set(metadata.CORE_DEPENDENCIES).issubset(metadata.BASE_DEPENDENCIES)
-    assert set(metadata.SMOKE_TRANSPORT_DEPENDENCIES).issubset(
-        metadata.BASE_DEPENDENCIES
+    assert set(metadata.CORE_DEPENDENCIES).issubset(metadata.PROJECT_DEPENDENCIES)
+    assert set(metadata.NETWORK_DEPENDENCIES).issubset(
+        metadata.PROJECT_DEPENDENCIES
     )
-    assert set(metadata.SMOKE_TRANSPORT_DEPENDENCIES).issubset(
+    assert set(metadata.NETWORK_DEPENDENCIES).issubset(
         metadata.GATEWAY_DEPENDENCIES
     )
     assert all(
@@ -421,7 +536,7 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
     assert summary["ok"] is True
     assert summary["package_name"] == metadata.PACKAGE_NAME
     assert summary["dependency_version_policy"] == metadata.DEPENDENCY_VERSION_POLICY
-    assert summary["base_dependencies"] == list(metadata.BASE_DEPENDENCIES)
+    assert summary["base_dependencies"] == list(metadata.PROJECT_DEPENDENCIES)
     assert summary["optional_extras"] == {
         key: list(value)
         for key, value in extras.items()
@@ -440,9 +555,16 @@ def test_mcp_unified_package_docs_are_local_to_package_boundary() -> None:
 
     assert PACKAGE_README.is_file()  # nosec B101
     assert PACKAGE_USER_GUIDE.is_file()  # nosec B101
+    assert PACKAGE_RESOURCE_README.is_file()  # nosec B101
+    assert PACKAGE_RESOURCE_USER_GUIDE.is_file()  # nosec B101
 
     readme = PACKAGE_README.read_text(encoding="utf-8")
     user_guide = PACKAGE_USER_GUIDE.read_text(encoding="utf-8")
+    resource_readme = PACKAGE_RESOURCE_README.read_text(encoding="utf-8")
+    resource_user_guide = PACKAGE_RESOURCE_USER_GUIDE.read_text(encoding="utf-8")
+
+    assert resource_readme == readme  # nosec B101
+    assert resource_user_guide == user_guide  # nosec B101
 
     assert "# MCP Unified" in readme  # nosec B101
     assert "USER_GUIDE.md" in readme  # nosec B101
@@ -500,6 +622,7 @@ def test_mcp_unified_reporting_imports_do_not_eagerly_load_db_adapters() -> None
         check=False,
         capture_output=True,
         text=True,
+        env=_subprocess_env_with_standalone_src(),
     )
 
     assert result.returncode == 0, result.stdout + result.stderr  # nosec B101
@@ -527,6 +650,7 @@ def test_filesystem_lock_star_import_does_not_eagerly_load_sqlite_backend() -> N
         check=True,
         capture_output=True,
         text=True,
+        env=_subprocess_env_with_standalone_src(),
     )
 
     assert json.loads(result.stdout) == []  # nosec B101
@@ -546,15 +670,24 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
     assert project["license"]["text"] == metadata.LICENSE_EXPRESSION
     assert project["scripts"]["mcp-unified-gateway"] == "mcp_unified.gateway.cli:main"
     setuptools_config = pyproject["tool"]["setuptools"]
-    assert "mcp_unified.filesystem_locks" in setuptools_config["packages"]  # nosec B101
-    assert setuptools_config["package-dir"]["mcp_unified.filesystem_locks"] == (  # nosec B101
-        "filesystem_locks"
-    )
+    assert setuptools_config["packages"] == [  # nosec B101
+        "mcp_unified",
+        "mcp_unified.federation",
+        "mcp_unified.filesystem_locks",
+        "mcp_unified.gateway",
+        "mcp_unified.interfaces",
+        "mcp_unified.profiles",
+        "mcp_unified.smoke",
+        "mcp_unified.storage",
+        "mcp_unified.tool_hooks",
+        "mcp_unified.tool_use_reporting",
+    ]
+    assert setuptools_config["package-dir"] == {"": "src"}  # nosec B101
     assert pyproject["tool"]["setuptools"]["package-data"] == {  # nosec B101
         "mcp_unified": ["py.typed", "README.md", "USER_GUIDE.md"],
     }
 
-    assert _dependency_names(project["dependencies"]) == set(metadata.BASE_DEPENDENCIES)
+    assert _dependency_names(project["dependencies"]) == set(metadata.PROJECT_DEPENDENCIES)
 
     optional_dependencies = project["optional-dependencies"]
     assert set(optional_dependencies) == set(metadata.OPTIONAL_EXTRAS)
@@ -586,6 +719,64 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
     assert forbidden_dependency_names.isdisjoint(standalone_dependency_names)
 
 
+def test_mcp_unified_console_scripts_are_standalone_package_owned() -> None:
+    """Root package must not advertise standalone MCP Unified console scripts."""
+
+    standalone_project = _load_standalone_pyproject()["project"]
+    root_project = _load_root_pyproject()["project"]
+
+    standalone_scripts = standalone_project["scripts"]
+    root_scripts = root_project["scripts"]
+
+    assert standalone_scripts["mcp-unified-gateway"] == "mcp_unified.gateway.cli:main"  # nosec B101
+    assert standalone_scripts["mcp-unified-smoke"] == "mcp_unified.smoke.cli:main"  # nosec B101
+    assert "mcp-unified-gateway" not in root_scripts  # nosec B101
+    assert "mcp-unified-smoke" not in root_scripts  # nosec B101
+
+
+def test_root_tldw_package_discovers_mcp_unified_runtime_imports() -> None:
+    """Root installs must include package-owned modules used by host MCP shims."""
+
+    root_pyproject = _load_root_pyproject()
+    find_config = root_pyproject["tool"]["setuptools"]["packages"]["find"]
+
+    assert "apps/mcp-unified/src" in find_config["where"]  # nosec B101
+    assert "mcp_unified" in find_config["include"]  # nosec B101
+    assert "mcp_unified.*" in find_config["include"]  # nosec B101
+    assert "tldw_Server_API" in find_config["include"]  # nosec B101
+    assert "tldw_Server_API.*" in find_config["include"]  # nosec B101
+
+
+def test_host_mcp_import_bootstraps_standalone_src_for_source_checkout() -> None:
+    """Source checkout imports must find relocated MCP Unified package modules."""
+
+    script = (
+        "import json, sys; "
+        "sys.path = [p for p in sys.path if 'apps/mcp-unified/src' not in p]; "
+        "import tldw_Server_API.app.core.MCP_unified.modules.base; "
+        "import mcp_unified; "
+        "print(json.dumps({'file': mcp_unified.__file__, 'paths': ["
+        "p for p in sys.path if 'apps/mcp-unified/src' in p"
+        "]}))"
+    )
+    result = subprocess.run(  # nosec B603
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        env={
+            **os.environ,
+            "PYTHONPATH": str(REPO_ROOT),
+        },
+    )
+    _assert_subprocess_succeeded(result, "host MCP source import")
+
+    payload = json.loads(result.stdout)
+    assert Path(payload["file"]).is_relative_to(STANDALONE_SRC_ROOT)  # nosec B101
+    assert payload["paths"] == [str(STANDALONE_SRC_ROOT)]  # nosec B101
+
+
 def test_mcp_unified_standalone_distribution_metadata_matches_extras(
     standalone_distributions: tuple[Path, Path],
 ) -> None:
@@ -607,6 +798,10 @@ def test_mcp_unified_standalone_distribution_metadata_matches_extras(
     assert (
         entry_points["console_scripts"]["mcp-unified-gateway"]
         == "mcp_unified.gateway.cli:main"
+    )  # nosec B101
+    assert (
+        entry_points["console_scripts"]["mcp-unified-smoke"]
+        == "mcp_unified.smoke.cli:main"
     )  # nosec B101
 
     forbidden_dependency_names = {
@@ -633,17 +828,44 @@ def test_mcp_unified_standalone_sdist_contains_only_package_boundary(
     """Built standalone sdist must not include the host server package tree."""
 
     _wheel, sdist = standalone_distributions
-    members = _read_sdist_members(sdist)
+    members = _sdist_project_members(_read_sdist_members(sdist))
 
-    assert any(member.endswith("/pyproject.toml") for member in members)  # nosec B101
-    assert any(member.endswith("/__init__.py") for member in members)  # nosec B101
-    assert any(  # nosec B101
-        member.endswith("/filesystem_locks/__init__.py")
+    allowed_project_root_members = {
+        "PKG-INFO",
+        "README.md",
+        "USER_GUIDE.md",
+        "pyproject.toml",
+        "setup.cfg",
+        "src",
+    }
+    project_root_members = {
+        member.split("/", 1)[0]
         for member in members
+    }
+    assert project_root_members <= allowed_project_root_members  # nosec B101
+
+    forbidden_host_root_members = {
+        ".github",
+        "Databases",
+        "Dockerfiles",
+        "Docs",
+        "Helper_Scripts",
+        "apps",
+        "mock_openai_server",
+        "models",
+        "tldw_Server_API",
+    }
+    forbidden_members = sorted(
+        member
+        for member in members
+        if member.split("/", 1)[0] in forbidden_host_root_members
     )
-    assert any(member.endswith("/gateway/cli.py") for member in members)  # nosec B101
-    assert not any("/tldw_Server_API/" in member for member in members)  # nosec B101
-    assert not any("/apps/tldw-frontend/" in member for member in members)  # nosec B101
+    assert forbidden_members == []  # nosec B101
+
+    assert "pyproject.toml" in members  # nosec B101
+    assert "src/mcp_unified/__init__.py" in members  # nosec B101
+    assert "src/mcp_unified/filesystem_locks/__init__.py" in members  # nosec B101
+    assert "src/mcp_unified/gateway/cli.py" in members  # nosec B101
 
 
 def test_mcp_unified_standalone_artifacts_include_typed_marker(
@@ -653,10 +875,10 @@ def test_mcp_unified_standalone_artifacts_include_typed_marker(
 
     wheel, sdist = standalone_distributions
     wheel_members = _read_wheel_members(wheel)
-    sdist_members = _read_sdist_members(sdist)
+    sdist_members = _sdist_project_members(_read_sdist_members(sdist))
 
     assert "mcp_unified/py.typed" in wheel_members  # nosec B101
-    assert any(member.endswith("/py.typed") for member in sdist_members)  # nosec B101
+    assert "src/mcp_unified/py.typed" in sdist_members  # nosec B101
 
 
 def test_mcp_unified_standalone_artifacts_include_package_docs(
@@ -666,62 +888,175 @@ def test_mcp_unified_standalone_artifacts_include_package_docs(
 
     wheel, sdist = standalone_distributions
     wheel_members = _read_wheel_members(wheel)
-    sdist_members = _read_sdist_members(sdist)
+    sdist_members = _sdist_project_members(_read_sdist_members(sdist))
 
     assert "mcp_unified/README.md" in wheel_members  # nosec B101
     assert "mcp_unified/USER_GUIDE.md" in wheel_members  # nosec B101
     assert "mcp_unified/filesystem_locks/__init__.py" in wheel_members  # nosec B101
-    assert any(member.endswith("/README.md") for member in sdist_members)  # nosec B101
-    assert any(member.endswith("/USER_GUIDE.md") for member in sdist_members)  # nosec B101
-    assert any(  # nosec B101
-        member.endswith("/filesystem_locks/__init__.py")
-        for member in sdist_members
-    )
+    assert "src/mcp_unified/README.md" in sdist_members  # nosec B101
+    assert "src/mcp_unified/USER_GUIDE.md" in sdist_members  # nosec B101
+    assert "src/mcp_unified/filesystem_locks/__init__.py" in sdist_members  # nosec B101
 
 
-def test_pypi_workflow_runs_mcp_unified_standalone_artifact_gate() -> None:
-    """PyPI validation workflow must also gate package-local mcp_unified changes."""
+def _load_workflow(path: Path) -> dict[str, object]:
+    """Load a GitHub Actions workflow document."""
 
-    artifact_gate_config = "mcp_unified/pytest-artifact-gate.ini"
-    config_path = PACKAGE_ROOT.parent / artifact_gate_config
-    assert config_path.is_file()  # nosec B101
-    pytest_config = configparser.ConfigParser()
-    pytest_config.read(config_path, encoding="utf-8")
-    assert "--noconftest" in pytest_config["pytest"]["addopts"]  # nosec B101
+    assert path.is_file()  # nosec B101
+    workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(workflow, dict)  # nosec B101
+    return workflow
 
-    workflow_path = (
-        PACKAGE_ROOT.parent / ".github" / "workflows" / "pypi-package.yml"
-    )
-    assert workflow_path.is_file()  # nosec B101
-    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+
+def _workflow_run_blocks(workflow: dict[str, object]) -> list[str]:
+    """Return shell run blocks from every workflow job step."""
+
+    return [
+        str(step.get("run", ""))
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+    ]
+
+
+def _workflow_trigger_paths(workflow: dict[str, object]) -> dict[str, list[str]]:
+    """Return GitHub workflow trigger paths with YAML boolean-key fallback."""
+
     triggers = workflow.get("on") or workflow.get(True)
+    assert isinstance(triggers, dict)  # nosec B101
+    return {
+        trigger_name: trigger_config.get("paths", [])
+        for trigger_name, trigger_config in triggers.items()
+        if isinstance(trigger_config, dict)
+    }
 
-    assert "mcp_unified/**" in triggers["pull_request"]["paths"]  # nosec B101
-    assert "mcp_unified/**" in triggers["push"]["paths"]  # nosec B101
 
-    steps = workflow["jobs"]["build-and-check"]["steps"]
-    run_blocks = [step.get("run", "") for step in steps]
-    artifact_gate_test_path = ".github/tests/test_mcp_unified_artifact_gate.py"
-    artifact_gate_nodeids = (
-        "test_mcp_unified_standalone_distribution_metadata_matches_extras",
-        "test_mcp_unified_standalone_sdist_contains_only_package_boundary",
-        "test_mcp_unified_standalone_artifacts_include_typed_marker",
-        "test_mcp_unified_standalone_artifacts_include_package_docs",
+def _contains_editable_install(run_block: str, package_path: str) -> bool:
+    """Return whether a shell run block editable-installs a package path."""
+
+    editable_pattern = re.compile(
+        rf"(?:^|\s)(?:-e|--editable)(?:\s+|=)[\"']?{re.escape(package_path)}"
     )
-    assert any(
-        all(f"{artifact_gate_test_path}::{nodeid}" in run_block for nodeid in artifact_gate_nodeids)
-        and f"-c {artifact_gate_config}" in run_block
+    return bool(editable_pattern.search(run_block))
+
+
+def _make_target_commands(makefile: str, target_name: str) -> list[str]:
+    """Return tab-indented command lines for one Makefile target."""
+
+    match = re.search(
+        rf"(?ms)^{re.escape(target_name)}:\n"
+        r"(?P<body>(?:\t[^\n]*\n)+)",
+        makefile,
+    )
+    assert match is not None, f"missing Makefile target: {target_name}"  # nosec B101
+    return [
+        line.removeprefix("\t").strip()
+        for line in match.group("body").splitlines()
+        if line.startswith("\t") and line.strip()
+    ]
+
+
+def test_mcp_unified_rc_workflow_uses_private_permissions() -> None:
+    """Internal RC workflow must stay private and source-scoped."""
+
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "mcp-unified-rc.yml"
+    workflow = _load_workflow(workflow_path)
+    serialized_workflow = yaml.safe_dump(workflow, sort_keys=True)
+    run_blocks = _workflow_run_blocks(workflow)
+    install_runs = "\n".join(run_blocks)
+    trigger_paths = _workflow_trigger_paths(workflow)
+    steps = workflow["jobs"]["internal-rc"]["steps"]
+    checkout_step = next(step for step in steps if step.get("name") == "Checkout")
+    setup_python_step = next(step for step in steps if step.get("name") == "Setup Python")
+    upload_step = next(
+        step for step in steps if step.get("name") == "Upload MCP Unified RC artifacts"
+    )
+
+    assert workflow["permissions"] == {"contents": "read"}  # nosec B101
+    assert "id-token" not in workflow["permissions"]  # nosec B101
+    assert checkout_step["uses"] == "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"  # nosec B101
+    assert checkout_step["with"]["persist-credentials"] is False  # nosec B101
+    assert setup_python_step["uses"] == "actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405"  # nosec B101
+    assert upload_step["if"] == "always()"  # nosec B101
+    assert upload_step["uses"] == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"  # nosec B101
+    assert "apps/mcp-unified" in serialized_workflow  # nosec B101
+    assert "Makefile" in trigger_paths["pull_request"]  # nosec B101
+    assert "make mcp-unified-rc" in serialized_workflow  # nosec B101
+    assert '"pydantic>=2.0.0"' in install_runs  # nosec B101
+    assert '"PyYAML>=6.0.0"' in install_runs  # nosec B101
+    assert not any(  # nosec B101
+        _contains_editable_install(run_block, "apps/mcp-unified")
         for run_block in run_blocks
-    )  # nosec B101
-    assert any(
-        run_block.strip() == "make pypi-check"
-        for run_block in run_blocks
-    )  # nosec B101
-    assert any(
-        str(step.get("uses", "")).startswith("actions/upload-artifact@")
-        and step.get("with", {}).get("path") == "dist/*"
-        for step in steps
-    )  # nosec B101
+    )
+    assert "pip install -e" not in install_runs  # nosec B101
+    assert "pip install --editable" not in install_runs  # nosec B101
+
+
+def test_mcp_unified_make_targets_do_not_call_root_pypi_check() -> None:
+    """Standalone RC targets must not delegate to the root PyPI package check."""
+
+    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    for target_name in (
+        "mcp-unified-build",
+        "mcp-unified-check",
+        "mcp-unified-uat",
+        "mcp-unified-rc",
+    ):
+        assert re.search(rf"^{target_name}:", makefile, flags=re.MULTILINE)  # nosec B101
+
+    assert _make_target_commands(makefile, "mcp-unified-build") == [  # nosec B101
+        "$(MCP_UNIFIED_RC) build",
+    ]
+    assert _make_target_commands(makefile, "mcp-unified-check") == [  # nosec B101
+        "$(MCP_UNIFIED_RC) build",
+        "$(MCP_UNIFIED_RC) artifact-gate",
+        "$(MCP_UNIFIED_RC) install-smoke",
+    ]
+    assert _make_target_commands(makefile, "mcp-unified-uat") == [  # nosec B101
+        "$(MCP_UNIFIED_RC) cli-uat",
+        "$(MCP_UNIFIED_RC) smoke-uat",
+        "$(MCP_UNIFIED_RC) extras-matrix",
+    ]
+    assert _make_target_commands(makefile, "mcp-unified-rc") == [  # nosec B101
+        "$(MCP_UNIFIED_RC) all",
+    ]
+
+
+def test_root_pypi_package_workflow_is_tldw_server_only() -> None:
+    """Root package-check workflow must not carry MCP Unified artifact gates."""
+
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "pypi-package.yml"
+    workflow = _load_workflow(workflow_path)
+    serialized_workflow = yaml.safe_dump(workflow, sort_keys=True)
+    trigger_paths = _workflow_trigger_paths(workflow)
+    run_blocks = _workflow_run_blocks(workflow)
+    upload_names = [
+        step.get("with", {}).get("name")
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+        if "upload-artifact" in str(step.get("uses", ""))
+    ]
+
+    assert workflow["name"] == "tldw-server PyPI Package Check"  # nosec B101
+    assert "apps/mcp-unified/**" not in trigger_paths["pull_request"]  # nosec B101
+    assert "apps/mcp-unified/**" not in trigger_paths["push"]  # nosec B101
+    assert "mcp_unified/**" not in trigger_paths["pull_request"]  # nosec B101
+    assert "mcp_unified/**" not in trigger_paths["push"]  # nosec B101
+    assert "test_mcp_unified_artifact_gate.py" not in serialized_workflow  # nosec B101
+    assert not any("apps/mcp-unified" in run_block for run_block in run_blocks)  # nosec B101
+    assert not any("mcp_unified[dev]" in run_block for run_block in run_blocks)  # nosec B101
+    assert not any("mcp_unified/" in run_block for run_block in run_blocks)  # nosec B101
+    assert "tldw-server-pypi-dist" in upload_names  # nosec B101
+
+
+def test_root_pypi_publish_workflow_is_labeled_for_tldw_server() -> None:
+    """Root publish workflow must stay unambiguous about tldw-server artifacts."""
+
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "publish-pypi.yml"
+    workflow = _load_workflow(workflow_path)
+    serialized_workflow = yaml.safe_dump(workflow, sort_keys=True)
+
+    assert workflow["name"] == "Publish tldw-server PyPI Package"  # nosec B101
+    assert "mcp-unified" not in serialized_workflow  # nosec B101
+    assert "tldw-server-pypi-dist" in serialized_workflow  # nosec B101
 
 
 @pytest.mark.smoke
@@ -734,7 +1069,7 @@ def test_mcp_unified_standalone_package_installs_without_root_dependencies(
     _require_offline_build_tools()
     package_source = tmp_path / "mcp_unified_source"
     shutil.copytree(
-        PACKAGE_ROOT,
+        STANDALONE_PROJECT_ROOT,
         package_source,
         ignore=shutil.ignore_patterns(
             "__pycache__",
@@ -744,11 +1079,12 @@ def test_mcp_unified_standalone_package_installs_without_root_dependencies(
     )
     wheel_dir = tmp_path / "dist"
     wheel_dir.mkdir()
-    build_env = {
-        **os.environ,
-        "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-        "PIP_NO_INDEX": "1",
-    }
+    build_env = _subprocess_env(
+        {
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+            "PIP_NO_INDEX": "1",
+        }
+    )
     build_result = subprocess.run(
         [
             sys.executable,
@@ -856,6 +1192,7 @@ def test_mcp_unified_core_import_smoke_stays_minimal() -> None:
         check=True,
         capture_output=True,
         text=True,
+        env=_subprocess_env_with_standalone_src(),
     )
 
     assert json.loads(result.stdout) == []
@@ -893,12 +1230,15 @@ def test_package_imports_do_not_eagerly_load_sqlite_backend(
         check=True,
         capture_output=True,
         text=True,
+        env=_subprocess_env_with_standalone_src(),
     )
 
     assert json.loads(result.stdout) == []
 
 
 def test_host_interface_shims_reexport_package_contracts() -> None:
+    """Host interface shims should re-export package-owned contracts."""
+
     package_policy = importlib.import_module("mcp_unified.interfaces.policy")
     package_runtime = importlib.import_module("mcp_unified.interfaces.runtime")
     package_storage = importlib.import_module("mcp_unified.interfaces.storage")
@@ -918,6 +1258,8 @@ def test_host_interface_shims_reexport_package_contracts() -> None:
 
 
 def test_host_external_config_schema_shim_reexports_package_contracts() -> None:
+    """Host external config-schema shim should re-export package contracts."""
+
     package_schema = importlib.import_module("mcp_unified.federation.config_schema")
     host_schema = importlib.import_module(
         "tldw_Server_API.app.core.MCP_unified.external_servers.config_schema"
@@ -1019,6 +1361,7 @@ def test_gateway_external_runtime_adapter_import_does_not_import_fastapi_transpo
         check=True,
         capture_output=True,
         text=True,
+        env=_subprocess_env_with_standalone_src(),
     )
 
     assert result.stdout.strip() == "False"
@@ -1070,6 +1413,8 @@ def test_virtual_external_tool_copy_returns_caller_owned_data() -> None:
 
 
 def test_profile_defaults_are_safe_and_preserve_extension_metadata() -> None:
+    """Profile defaults should stay safe while preserving extension metadata."""
+
     from mcp_unified.profiles.models import MCPProfile
 
     profile = MCPProfile(
@@ -1102,6 +1447,8 @@ def test_profile_defaults_are_safe_and_preserve_extension_metadata() -> None:
 
 
 def test_profile_rejects_naive_timestamps() -> None:
+    """Profile models should reject naive timestamp values."""
+
     from mcp_unified.profiles.models import MCPProfile
 
     with pytest.raises(ValidationError):
