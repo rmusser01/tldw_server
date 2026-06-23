@@ -59,6 +59,10 @@ export class AudioStudioPage extends BasePage {
     return this.page.getByText("Render & Export")
   }
 
+  get timelinePanel(): Locator {
+    return this.page.getByRole("heading", { name: "Timeline" })
+  }
+
   workflowTab(workflow: AudioStudioWorkflow): Locator {
     return this.page.getByRole("tab", { name: new RegExp(`^${WORKFLOW_LABELS[workflow]}\\b`, "i") })
   }

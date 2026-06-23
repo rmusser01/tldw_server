@@ -3,7 +3,8 @@ import { Button, Divider, Typography } from "antd"
 import { Download, SlidersHorizontal } from "lucide-react"
 
 const { Text } = Typography
-const DEFERRED_RENDER_EXPORT_TITLE = "Render/export controls land in TASK-2351."
+const DEFERRED_RENDER_EXPORT_TITLE =
+  "Render/export controls need a ready timeline render controls slice."
 
 export const RenderExportPanel: React.FC = () => {
   return (
@@ -13,7 +14,7 @@ export const RenderExportPanel: React.FC = () => {
       </Text>
       <Text type="secondary" className="mt-1 block text-xs">
         Preview render and export job wiring is server-backed; full render/export UI
-        lands in TASK-2351.
+        remains a follow-up controls slice.
       </Text>
       <Divider className="my-3" />
       <div className="space-y-2">

@@ -11,9 +11,11 @@ const projectHookMocks = vi.hoisted(() => ({
   createProject: vi.fn(),
   updateProject: vi.fn(),
   upsertSection: vi.fn(),
+  upsertClip: vi.fn(),
   createPending: false,
   updatePending: false,
-  upsertSectionPending: false
+  upsertSectionPending: false,
+  upsertClipPending: false
 }))
 
 vi.mock("react-i18next", () => ({
@@ -70,6 +72,10 @@ vi.mock("@/hooks/useAudioStudioProjects", () => ({
   useUpsertAudioStudioSection: () => ({
     mutateAsync: projectHookMocks.upsertSection,
     isPending: projectHookMocks.upsertSectionPending
+  }),
+  useUpsertAudioStudioClip: () => ({
+    mutateAsync: projectHookMocks.upsertClip,
+    isPending: projectHookMocks.upsertClipPending
   })
 }))
 
@@ -117,6 +123,7 @@ describe("AudioStudioPage", () => {
     projectHookMocks.createPending = false
     projectHookMocks.updatePending = false
     projectHookMocks.upsertSectionPending = false
+    projectHookMocks.upsertClipPending = false
     projectHookMocks.upsertSection.mockResolvedValue({
       section_id: "section_draft",
       workflow: "podcast",
@@ -124,6 +131,19 @@ describe("AudioStudioPage", () => {
       body_text: "Saved script",
       order_index: 0,
       current_revision_id: "revision-section-saved"
+    })
+    projectHookMocks.upsertClip.mockResolvedValue({
+      clip_id: "clip-host",
+      track_id: "speech-track-1",
+      title: "Host intro",
+      clip_type: "speech",
+      start_ms: 2500,
+      duration_ms: 42000,
+      volume: 0.6,
+      fade_in_ms: 750,
+      fade_out_ms: 1000,
+      muted: true,
+      current_revision_id: "revision-clip-saved"
     })
     projectHookMocks.useProjects.mockReturnValue({
       isLoading: false,
@@ -349,7 +369,7 @@ describe("AudioStudioPage", () => {
     expect(generationMocks.mutateAsync).not.toHaveBeenCalled()
   })
 
-  it("keeps render and export controls disabled while TASK-2351 owns implementation", () => {
+  it("keeps render and export controls disabled until the render controls slice", () => {
     setActiveProject({ workflow: "narration" })
     useAudioStudioStore.getState().setActiveWorkflow("narration")
 
@@ -361,10 +381,219 @@ describe("AudioStudioPage", () => {
     expect(screen.getByRole("button", { name: "Create export" })).toBeDisabled()
     expect(
       screen.getByRole("button", { name: "Create preview render" })
-    ).toHaveAttribute("title", "Render/export controls land in TASK-2351.")
+    ).toHaveAttribute(
+      "title",
+      "Render/export controls need a ready timeline render controls slice."
+    )
     expect(
       screen.getByRole("button", { name: "Create export" })
-    ).toHaveAttribute("title", "Render/export controls land in TASK-2351.")
+    ).toHaveAttribute(
+      "title",
+      "Render/export controls need a ready timeline render controls slice."
+    )
+  })
+
+  it("renders active project tracks and clips in the timeline editor", () => {
+    setActiveProject({
+      workflow: "podcast",
+      tracks: [
+        {
+          track_id: "speech-track-1",
+          name: "Dialogue",
+          kind: "speech",
+          order: 0
+        },
+        {
+          track_id: "music-track-1",
+          name: "Music bed",
+          kind: "music",
+          order: 1
+        }
+      ],
+      clips: [
+        {
+          clip_id: "clip-host",
+          track_id: "speech-track-1",
+          section_id: "section-1",
+          artifact_id: "artifact-host",
+          title: "Host intro",
+          clip_type: "speech",
+          start_ms: 1000,
+          duration_ms: 30000,
+          volume: 0.8,
+          fade_in_ms: 250,
+          fade_out_ms: 500
+        }
+      ]
+    })
+    useAudioStudioStore.getState().setActiveWorkflow("podcast")
+
+    render(<AudioStudioPage />)
+
+    expect(screen.getByRole("heading", { name: "Timeline" })).toBeInTheDocument()
+    expect(screen.getByText("Dialogue")).toBeInTheDocument()
+    expect(screen.getByText("Music bed")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Host intro/ })).toBeInTheDocument()
+    expect(screen.getByText("Starts 1.0s")).toBeInTheDocument()
+  })
+
+  it("persists selected clip trim fade and volume edits through the clip hook", async () => {
+    setActiveProject({
+      workflow: "podcast",
+      tracks: [
+        {
+          track_id: "speech-track-1",
+          name: "Dialogue",
+          kind: "speech",
+          order: 0
+        }
+      ],
+      clips: [
+        {
+          clip_id: "clip-host",
+          track_id: "speech-track-1",
+          section_id: "section-1",
+          artifact_id: "artifact-host",
+          title: "Host intro",
+          clip_type: "speech",
+          start_ms: 1000,
+          duration_ms: 30000,
+          volume: 0.8,
+          fade_in_ms: 250,
+          fade_out_ms: 500
+        }
+      ]
+    })
+    useAudioStudioStore.getState().setActiveWorkflow("podcast")
+
+    render(<AudioStudioPage />)
+
+    fireEvent.click(screen.getByRole("button", { name: /Host intro/ }))
+    fireEvent.change(screen.getByLabelText("Start seconds"), {
+      target: { value: "2.5" }
+    })
+    fireEvent.change(screen.getByLabelText("Duration seconds"), {
+      target: { value: "42" }
+    })
+    fireEvent.change(screen.getByLabelText("Volume percent"), {
+      target: { value: "60" }
+    })
+    fireEvent.change(screen.getByLabelText("Fade in seconds"), {
+      target: { value: "0.75" }
+    })
+    fireEvent.change(screen.getByLabelText("Fade out seconds"), {
+      target: { value: "1" }
+    })
+    fireEvent.click(screen.getByLabelText("Mute clip"))
+    fireEvent.click(screen.getByRole("button", { name: "Save clip edits" }))
+
+    await waitFor(() => expect(projectHookMocks.upsertClip).toHaveBeenCalled())
+    expect(projectHookMocks.upsertClip).toHaveBeenCalledWith({
+      clipId: "clip-host",
+      payload: {
+        base_revision_id: "revision-current",
+        track_id: "speech-track-1",
+        section_id: "section-1",
+        title: "Host intro",
+        clip_type: "speech",
+        artifact_id: "artifact-host",
+        start_ms: 2500,
+        duration_ms: 42000,
+        volume: 0.6,
+        fade_in_ms: 750,
+        fade_out_ms: 1000,
+        muted: true,
+        settings: {}
+      }
+    })
+  })
+
+  it("updates the selected clip start time when dragged on its timeline lane", () => {
+    setActiveProject({
+      workflow: "podcast",
+      tracks: [
+        {
+          track_id: "speech-track-1",
+          name: "Dialogue",
+          kind: "speech",
+          order: 0
+        }
+      ],
+      clips: [
+        {
+          clip_id: "clip-host",
+          track_id: "speech-track-1",
+          title: "Host intro",
+          clip_type: "speech",
+          start_ms: 0,
+          duration_ms: 45000,
+          volume: 0.8
+        }
+      ]
+    })
+    useAudioStudioStore.getState().setActiveWorkflow("podcast")
+
+    render(<AudioStudioPage />)
+
+    const clipButton = screen.getByRole("button", { name: /Host intro/ })
+    const lane = clipButton.parentElement
+    expect(lane).not.toBeNull()
+    vi.spyOn(lane as HTMLElement, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      right: 100,
+      top: 0,
+      bottom: 56,
+      width: 100,
+      height: 56,
+      toJSON: () => ({})
+    })
+
+    fireEvent.pointerDown(clipButton, { clientX: 0, pointerId: 1 })
+    fireEvent.pointerMove(clipButton, { clientX: 20, pointerId: 1 })
+    fireEvent.pointerUp(clipButton, { clientX: 20, pointerId: 1 })
+
+    expect(screen.getByLabelText("Start seconds")).toHaveValue("9.0")
+  })
+
+  it("supports timeline preview play pause and manual scrub state", () => {
+    setActiveProject({
+      workflow: "music",
+      tracks: [
+        {
+          track_id: "music-track-1",
+          name: "Music",
+          kind: "music",
+          order: 0
+        }
+      ],
+      clips: [
+        {
+          clip_id: "clip-bed",
+          track_id: "music-track-1",
+          title: "Music bed",
+          clip_type: "music",
+          start_ms: 0,
+          duration_ms: 45000,
+          volume: 0.7
+        }
+      ]
+    })
+    useAudioStudioStore.getState().setActiveWorkflow("music")
+
+    render(<AudioStudioPage />)
+
+    fireEvent.change(screen.getByLabelText("Timeline playhead seconds"), {
+      target: { value: "12" }
+    })
+
+    expect(screen.getByText("12.0s / 45.0s")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Play timeline preview" }))
+    expect(
+      screen.getByRole("button", { name: "Pause timeline preview" })
+    ).toBeInTheDocument()
   })
 
   it("queues music generation with controlled Music workflow inputs", async () => {

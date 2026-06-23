@@ -1,13 +1,20 @@
 import { createWithEqualityFn } from "zustand/traditional"
 import type {
   AudioStudioClip,
+  AudioStudioClipType,
   AudioStudioProject as ServiceAudioStudioProject,
   AudioStudioSection,
   AudioStudioTrack,
   AudioStudioWorkflow
 } from "@/services/audio-studio"
 
-export type { AudioStudioWorkflow, AudioStudioSection, AudioStudioTrack, AudioStudioClip }
+export type {
+  AudioStudioWorkflow,
+  AudioStudioSection,
+  AudioStudioTrack,
+  AudioStudioClip,
+  AudioStudioClipType
+}
 
 export type AudioStudioWorkflowDefinition = {
   id: AudioStudioWorkflow
@@ -224,6 +231,11 @@ export const useAudioStudioStore = createWithEqualityFn<AudioStudioStore>(
   })
 )
 
+type AudioStudioDevWindow = Window & {
+  __tldw_useAudioStudioStore?: typeof useAudioStudioStore
+}
+
 if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
-  ;(window as any).__tldw_useAudioStudioStore = useAudioStudioStore
+  ;(window as AudioStudioDevWindow).__tldw_useAudioStudioStore =
+    useAudioStudioStore
 }

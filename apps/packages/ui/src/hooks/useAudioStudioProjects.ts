@@ -4,7 +4,9 @@ import {
   createAudioStudioProject,
   listAudioStudioProjects,
   updateAudioStudioProject,
+  upsertAudioStudioClip,
   upsertAudioStudioSection,
+  type AudioStudioClipUpsertRequest,
   type AudioStudioSectionUpsertRequest,
   type CreateAudioStudioProjectRequest,
   type ListAudioStudioProjectsParams,
@@ -92,6 +94,28 @@ export const useUpsertAudioStudioSection = (projectId: string | null) => {
     }) => {
       if (!projectId) throw new Error("Audio Studio project is required")
       return upsertAudioStudioSection(projectId, sectionId, payload)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: audioStudioProjectQueryKeys.projects()
+      })
+    }
+  })
+}
+
+export const useUpsertAudioStudioClip = (projectId: string | null) => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      clipId,
+      payload
+    }: {
+      clipId: string
+      payload: AudioStudioClipUpsertRequest
+    }) => {
+      if (!projectId) throw new Error("Audio Studio project is required")
+      return upsertAudioStudioClip(projectId, clipId, payload)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({

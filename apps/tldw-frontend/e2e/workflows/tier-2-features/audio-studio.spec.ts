@@ -32,6 +32,7 @@ test.describe("Audio Studio", () => {
     await expect(studio.newProjectButton).toBeVisible()
     await expect(studio.generationPanel).toBeVisible()
     await expect(studio.renderExportPanel).toBeVisible()
+    await expect(studio.timelinePanel).toBeVisible()
 
     for (const workflow of ["narration", "podcast", "briefing", "music"] as AudioStudioWorkflow[]) {
       await expect(studio.workflowTab(workflow)).toBeVisible()

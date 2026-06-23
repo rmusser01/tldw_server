@@ -58,10 +58,15 @@ export type AudioStudioClip = {
   clip_id: string
   track_id: string
   section_id?: string
+  title?: string
+  clip_type?: AudioStudioClipType
   artifact_id?: string
   start_ms: number
   duration_ms?: number
   volume?: number
+  fade_in_ms?: number
+  fade_out_ms?: number
+  muted?: boolean
   revision_id?: string
   settings?: Record<string, unknown>
 }

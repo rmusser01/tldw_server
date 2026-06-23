@@ -17,6 +17,7 @@ import { PodcastWorkflow } from "./PodcastWorkflow"
 import { ProjectHeader } from "./ProjectHeader"
 import { ProjectSidebar } from "./ProjectSidebar"
 import { RenderExportPanel } from "./RenderExportPanel"
+import { TimelineEditor } from "./TimelineEditor"
 import { WorkflowSwitcher } from "./WorkflowSwitcher"
 
 const { Text } = Typography
@@ -90,6 +91,7 @@ export const AudioStudioPage: React.FC = () => {
             <RenderExportPanel />
           </div>
         </div>
+        <TimelineEditor />
       </div>
     </PageShell>
   )
