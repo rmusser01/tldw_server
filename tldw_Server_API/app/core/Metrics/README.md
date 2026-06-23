@@ -298,9 +298,9 @@ Count function invocations:
 ```python
 @count_calls(
     metric_name="function_calls_total",
-    label_extractor=lambda *args, **kwargs: {"user_id": kwargs.get("user_id")}
+    label_extractor=lambda *args, **kwargs: {"operation": kwargs.get("operation", "default")}
 )
-def process_user_request(user_id: str):
+def process_request(operation: str):
     pass
 ```
 
@@ -650,7 +650,6 @@ observe_histogram("evaluation_duration_seconds", duration)
 - `tldw_Server_API/app/core/Metrics/traces.py`: tracer provider, context propagation, span helpers
 - `tldw_Server_API/app/core/Metrics/decorators.py`: `@track_metrics`, `@measure_latency`, `@count_calls`, `@track_llm_usage`, `@cache_metrics`
 - `tldw_Server_API/app/core/Metrics/http_middleware.py`: `HTTPMetricsMiddleware` for per-route request count/latency
-- `tldw_Server_API/app/core/Metrics/logger_config.py`: logging integration and metrics-safe logger setup
 - `tldw_Server_API/app/core/Metrics/metrics_logger.py`: legacy compatibility helpers (migrate to registry helpers)
 
 ### Adding New Metrics

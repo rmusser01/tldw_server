@@ -38,6 +38,34 @@ def test_cumulative_counter_series_cap_drops_new_label_sets(monkeypatch):
         metrics_manager._metrics_registry = None
 
 
+def test_gauge_latest_series_survives_ring_buffer_eviction(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Export every latest gauge series even after sample buffer eviction."""
+    monkeypatch.setenv("METRICS_RING_BUFFER_MAXLEN_OR_UNBOUNDED", "2")
+    metrics_manager._metrics_registry = None
+    registry = metrics_manager.get_metrics_registry()
+
+    try:
+        registry.register_metric(
+            MetricDefinition(
+                name="ring_buffer_gauge",
+                type=MetricType.GAUGE,
+                description="gauge ring buffer test",
+                labels=["series"],
+            )
+        )
+
+        registry.set_gauge("ring_buffer_gauge", 1.0, labels={"series": "a"})
+        registry.set_gauge("ring_buffer_gauge", 2.0, labels={"series": "b"})
+        registry.set_gauge("ring_buffer_gauge", 3.0, labels={"series": "c"})
+
+        text = registry.export_prometheus_format()
+        assert 'ring_buffer_gauge{series="a"} 1.0' in text
+        assert 'ring_buffer_gauge{series="b"} 2.0' in text
+        assert 'ring_buffer_gauge{series="c"} 3.0' in text
+    finally:
+        metrics_manager._metrics_registry = None
+
+
 def test_cumulative_histogram_series_cap_drops_new_label_sets(monkeypatch):
     monkeypatch.setenv("METRICS_CUMULATIVE_SERIES_MAX_PER_METRIC", "1")
     metrics_manager._metrics_registry = None
