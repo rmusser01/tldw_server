@@ -557,6 +557,112 @@ class NoteStore:
         cur = self._db.execute_query(query, tuple(params))
         return [row[0] for row in cur.fetchall()]
 
+    @staticmethod
+    def _normalize_graph_tag_filter(tag: str) -> str:
+        text = str(tag or "").strip()
+        if text.lower().startswith("tag:"):
+            return text[4:].strip()
+        return text
+
+    @staticmethod
+    def _parse_graph_source_filter(source: str) -> tuple[str, str | None]:
+        text = str(source or "").strip()
+        if text.lower().startswith("source:"):
+            text = text[len("source:"):]
+        if ":" in text:
+            src, external_ref = text.split(":", 1)
+            return src.strip(), external_ref.strip() or None
+        return text.strip(), None
+
+    def get_note_ids_by_tag_for_graph(
+        self,
+        tag: str,
+        include_deleted: bool = True,
+        limit: int = 500,
+    ) -> list[str]:
+        """Return graph seed note IDs for a tag, ordered by last_modified DESC, id ASC."""
+        normalized_tag = self._normalize_graph_tag_filter(tag)
+        if not normalized_tag or limit <= 0:
+            return []
+
+        if include_deleted:
+            query = (
+                "SELECT DISTINCT n.id, n.last_modified "
+                "FROM notes n "
+                "JOIN note_keywords nk ON nk.note_id = n.id "
+                "JOIN keywords k ON k.id = nk.keyword_id "
+                "WHERE LOWER(k.keyword) = LOWER(?) AND k.deleted = ? "
+                "ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
+            )
+            params: list[Any] = [normalized_tag, self._deleted_value(False), limit]
+        else:
+            query = (
+                "SELECT DISTINCT n.id, n.last_modified "
+                "FROM notes n "
+                "JOIN note_keywords nk ON nk.note_id = n.id "
+                "JOIN keywords k ON k.id = nk.keyword_id "
+                "WHERE LOWER(k.keyword) = LOWER(?) AND k.deleted = ? AND n.deleted = ? "
+                "ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
+            )
+            params = [
+                normalized_tag,
+                self._deleted_value(False),
+                self._deleted_value(False),
+                limit,
+            ]
+        cur = self._db.execute_query(query, tuple(params))
+        return [row[0] for row in cur.fetchall()]
+
+    def get_note_ids_by_source_for_graph(
+        self,
+        source: str,
+        include_deleted: bool = True,
+        limit: int = 500,
+    ) -> list[str]:
+        """Return graph seed note IDs for a source, ordered by last_modified DESC, id ASC."""
+        src, external_ref = self._parse_graph_source_filter(source)
+        if not src or limit <= 0:
+            return []
+
+        if external_ref is not None and not include_deleted:
+            query = (
+                "SELECT DISTINCT n.id, n.last_modified "
+                "FROM notes n "
+                "JOIN conversations c ON c.id = n.conversation_id "
+                "WHERE c.source = ? AND c.external_ref = ? AND n.deleted = ? "
+                "ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
+            )
+            params: list[Any] = [src, external_ref, self._deleted_value(False), limit]
+        elif external_ref is not None:
+            query = (
+                "SELECT DISTINCT n.id, n.last_modified "
+                "FROM notes n "
+                "JOIN conversations c ON c.id = n.conversation_id "
+                "WHERE c.source = ? AND c.external_ref = ? "
+                "ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
+            )
+            params = [src, external_ref, limit]
+        elif not include_deleted:
+            query = (
+                "SELECT DISTINCT n.id, n.last_modified "
+                "FROM notes n "
+                "JOIN conversations c ON c.id = n.conversation_id "
+                "WHERE c.source = ? AND n.deleted = ? "
+                "ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
+            )
+            params = [src, self._deleted_value(False), limit]
+        else:
+            query = (
+                "SELECT DISTINCT n.id, n.last_modified "
+                "FROM notes n "
+                "JOIN conversations c ON c.id = n.conversation_id "
+                "WHERE c.source = ? "
+                "ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
+            )
+            params = [src, limit]
+        cur = self._db.execute_query(query, tuple(params))
+        return [row[0] for row in cur.fetchall()]
+
     def get_note_tag_edges(self, note_ids: list[str]) -> list[dict[str, Any]]:
         """Return (note_id, keyword_id, keyword) for notes with active keywords."""
         if not note_ids:
@@ -568,7 +674,8 @@ class NoteStore:
                 f"SELECT nk.note_id, k.id AS keyword_id, k.keyword "  # nosec B608
                 f"FROM note_keywords nk "
                 f"JOIN keywords k ON k.id = nk.keyword_id "
-                f"WHERE nk.note_id IN ({ph}) AND k.deleted = ?"
+                f"WHERE nk.note_id IN ({ph}) AND k.deleted = ? "
+                f"ORDER BY nk.note_id ASC, k.id ASC"
             )
             cur = self._db.execute_query(query, tuple([*batch, self._deleted_value(False)]))
             for row in cur.fetchall():
@@ -643,7 +750,8 @@ class NoteStore:
                 f"SELECT n.id AS note_id, c.id AS conversation_id, c.source, c.external_ref "  # nosec B608
                 f"FROM notes n "
                 f"JOIN conversations c ON c.id = n.conversation_id "
-                f"WHERE n.id IN ({ph}) AND c.source IS NOT NULL"
+                f"WHERE n.id IN ({ph}) AND c.source IS NOT NULL "
+                f"ORDER BY n.id ASC, c.source ASC, c.external_ref ASC"
             )
             cur = self._db.execute_query(query, tuple(batch))
             for row in cur.fetchall():

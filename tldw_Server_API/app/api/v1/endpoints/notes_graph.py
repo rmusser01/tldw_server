@@ -13,7 +13,12 @@ from tldw_Server_API.app.api.v1.schemas.notes_graph import (
     NoteGraphRequest,
     NoteLinkCreate,
 )
-from tldw_Server_API.app.core.AuthNZ.permissions import NOTES_GRAPH_READ, NOTES_GRAPH_WRITE
+from tldw_Server_API.app.core.AuthNZ.permissions import (
+    NOTES_GRAPH_ADMIN,
+    NOTES_GRAPH_READ,
+    NOTES_GRAPH_WRITE,
+    SYSTEM_CONFIGURE,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -63,6 +68,32 @@ def _normalize_edge_id(raw_id: Optional[str]) -> str:
             raise HTTPException(status_code=400, detail=f"Invalid UUID format: {value}") from None
         return value
     return text
+
+
+def _can_use_heavy_graph_limits(user: User) -> bool:
+    roles = {str(role).strip().lower() for role in (getattr(user, "roles", []) or [])}
+    legacy_role = str(getattr(user, "role", "") or "").strip().lower()
+    if legacy_role:
+        roles.add(legacy_role)
+    permissions = {str(perm).strip().lower() for perm in (getattr(user, "permissions", []) or [])}
+    admin_permissions = {"*", SYSTEM_CONFIGURE.lower(), NOTES_GRAPH_ADMIN.lower()}
+    return bool(
+        getattr(user, "is_admin", False)
+        or getattr(user, "is_superuser", False)
+        or "admin" in roles
+        or bool(permissions & admin_permissions)
+    )
+
+
+def _enforce_heavy_graph_permission(req: NoteGraphRequest, current_user: User) -> bool:
+    if not req.allow_heavy:
+        return False
+    if _can_use_heavy_graph_limits(current_user):
+        return True
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"{NOTES_GRAPH_ADMIN} permission is required for allow_heavy graph requests",
+    )
 
 
 @router.get(
@@ -122,7 +153,12 @@ async def get_notes_graph(
             req.edge_types = parsed or None
         if getattr(req, "center_note_id", None):
             req.center_note_id = _normalize_note_id(req.center_note_id)
-        service = NoteGraphService(user_id=str(current_user.id_str), db=db)
+        heavy_limits_allowed = _enforce_heavy_graph_permission(req, current_user)
+        service = NoteGraphService(
+            user_id=str(current_user.id_str),
+            db=db,
+            allow_heavy_limits=heavy_limits_allowed,
+        )
         graph = service.generate_graph(req)
         if req.format == GraphFormat.cytoscape:
             return to_cytoscape(graph)
@@ -187,7 +223,12 @@ async def get_note_neighbors(
         normalized_note_id = _normalize_note_id(note_id)
         req.center_note_id = normalized_note_id
         req.radius = 1
-        service = NoteGraphService(user_id=str(current_user.id_str), db=db)
+        heavy_limits_allowed = _enforce_heavy_graph_permission(req, current_user)
+        service = NoteGraphService(
+            user_id=str(current_user.id_str),
+            db=db,
+            allow_heavy_limits=heavy_limits_allowed,
+        )
         graph = service.generate_graph(req)
         if req.format == GraphFormat.cytoscape:
             return to_cytoscape(graph)

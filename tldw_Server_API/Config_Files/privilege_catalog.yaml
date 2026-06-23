@@ -1250,6 +1250,20 @@ scopes:
     ownership_predicates:
       - same_org
     doc_url: https://docs.example.com/privileges/notes-graph-write
+  - id: notes.graph.admin
+    description: Use elevated Notes Graph query limits.
+    resource_tags:
+      - notes
+      - graph
+      - admin
+    sensitivity_tier: moderate
+    rate_limit_class: standard
+    default_roles:
+      - admin
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/notes-graph-admin
   - id: notes.graph.suggest
     description: Suggest candidate graph links (LLM/heuristic).
     resource_tags:

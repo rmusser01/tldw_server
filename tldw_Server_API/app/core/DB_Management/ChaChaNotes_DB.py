@@ -30117,6 +30117,8 @@ for _note_store_method in (
     "list_deleted_notes",
     "get_notes_batch",
     "get_all_note_ids_for_graph",
+    "get_note_ids_by_tag_for_graph",
+    "get_note_ids_by_source_for_graph",
     "get_note_tag_edges",
     "count_notes",
     "count_deleted_notes",

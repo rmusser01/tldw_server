@@ -314,6 +314,7 @@ CHAT_WORKFLOWS_RUN = "chat_workflows.run"
 # Notes / graph permissions
 NOTES_GRAPH_READ = "notes.graph.read"
 NOTES_GRAPH_WRITE = "notes.graph.write"
+NOTES_GRAPH_ADMIN = "notes.graph.admin"
 
 # Evaluations permissions
 EVALS_MANAGE = "evals.manage"

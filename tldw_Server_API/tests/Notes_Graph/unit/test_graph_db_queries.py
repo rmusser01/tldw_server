@@ -131,6 +131,39 @@ class TestGetNoteTagEdges:
         assert rows == []
 
 
+class TestGraphSeedLookups:
+    def test_get_note_ids_by_tag_for_graph_finds_older_match_with_limit(self, db):
+        for index in range(5):
+            _make_note(db, title=f"Recent {index}")
+        matching = _make_note(db, title="Older tagged")
+        kw_id = db.add_keyword("deep-tag")
+        db.link_note_to_keyword(matching, kw_id)
+
+        rows = db.get_note_ids_by_tag_for_graph("deep-tag", limit=1)
+
+        assert rows == [matching]
+
+    def test_get_note_ids_by_source_for_graph_accepts_canonical_source_id(self, db):
+        character_id = db.add_character_card({"name": "Graph Source Character"})
+        conversation_id = db.add_conversation(
+            {
+                "character_id": character_id,
+                "title": "Source Conversation",
+                "source": "youtube",
+                "external_ref": "video-123",
+            }
+        )
+        matching = db.add_note(
+            title="Sourced note",
+            content="body",
+            conversation_id=conversation_id,
+        )
+
+        rows = db.get_note_ids_by_source_for_graph("source:youtube:video-123", limit=5)
+
+        assert rows == [matching]
+
+
 # ---------- count_notes_per_tag ----------
 
 class TestCountNotesPerTag:
