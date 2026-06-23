@@ -143,6 +143,7 @@ class ProviderRegistryBase(Generic[AdapterT]):
         self._aliases: dict[str, str] = {}
         self._adapter_cache: dict[str, AdapterT] = {}
         self._failed_providers: dict[str, float] = {}
+        self._sync_init_locks: dict[str, threading.Lock] = {}
         self._async_init_locks: dict[str, asyncio.Lock] = {}
         self._lock = threading.RLock()
 
@@ -372,22 +373,54 @@ class ProviderRegistryBase(Generic[AdapterT]):
             cached = self._adapter_cache.get(provider_key)
             if cached is not None:
                 return cached
-            spec = record.spec
 
-        try:
-            adapter = self._materialize_adapter(provider_key, spec)
-            if self._adapter_validator and not self._adapter_validator(adapter):
-                raise TypeError(f"Adapter for provider '{provider_key}' failed validation")
-        except Exception as exc:
+        init_lock = self._get_or_create_sync_lock(provider_key)
+        with init_lock:
             with self._lock:
-                self._mark_failure_locked(provider_key)
-            logger.error("Failed to initialize adapter for provider '{}': {}", provider_key, exc)
-            return None
+                record = self._providers.get(provider_key)
+                if record is None:
+                    return None
+                if not self._is_effectively_enabled_locked(provider_key, record):
+                    self._invalidate_provider_state_locked(provider_key)
+                    return None
+                if self._has_active_failure_locked(provider_key):
+                    return None
+                cached = self._adapter_cache.get(provider_key)
+                if cached is not None:
+                    return cached
+                spec = record.spec
 
+            try:
+                adapter = self._materialize_adapter(provider_key, spec)
+                if self._adapter_validator and not self._adapter_validator(adapter):
+                    raise TypeError(f"Adapter for provider '{provider_key}' failed validation")
+            except Exception as exc:
+                with self._lock:
+                    self._mark_failure_locked(provider_key)
+                logger.error("Failed to initialize adapter for provider '{}': {}", provider_key, exc)
+                return None
+
+            with self._lock:
+                record = self._providers.get(provider_key)
+                if record is None:
+                    return None
+                if not self._is_effectively_enabled_locked(provider_key, record):
+                    self._invalidate_provider_state_locked(provider_key)
+                    return None
+                cached = self._adapter_cache.get(provider_key)
+                if cached is not None:
+                    return cached
+                self._adapter_cache[provider_key] = adapter
+                self._failed_providers.pop(provider_key, None)
+                return adapter
+
+    def _get_or_create_sync_lock(self, provider_key: str) -> threading.Lock:
         with self._lock:
-            self._adapter_cache[provider_key] = adapter
-            self._failed_providers.pop(provider_key, None)
-        return adapter
+            lock = self._sync_init_locks.get(provider_key)
+            if lock is None:
+                lock = threading.Lock()
+                self._sync_init_locks[provider_key] = lock
+            return lock
 
     def _get_or_create_async_lock(self, provider_key: str) -> asyncio.Lock:
         with self._lock:

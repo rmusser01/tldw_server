@@ -120,6 +120,20 @@ class TestFileLockStaleLock:
         assert lock.acquire() is True
         lock.release()
 
+    def test_does_not_break_old_lock_when_owner_pid_is_alive(self, tmp_path: Path) -> None:
+        lock_path = tmp_path / "live-old.lock"
+        holder = FileLock(lock_path, timeout=2, stale_timeout=9999)
+        assert holder.acquire() is True
+        old_time = time.time() - 1000
+        os.utime(str(lock_path), (old_time, old_time))
+
+        try:
+            contender = FileLock(lock_path, timeout=0.2, stale_timeout=0.01)
+            assert contender.acquire() is False
+            assert lock_path.exists()
+        finally:
+            holder.release()
+
 
 class _FakeMsvcrt:
     LK_NBLCK = 1
@@ -170,6 +184,8 @@ class _MockRedis:
 
     def __init__(self) -> None:
         self._store: dict[str, str] = {}
+        self.expire_calls: list[tuple[str, int]] = []
+        self.close_calls = 0
 
     def set(self, key: str, value: str, ex: int = 0, nx: bool = False):
         if nx and key in self._store:
@@ -177,9 +193,21 @@ class _MockRedis:
         self._store[key] = value
         return True
 
+    def get(self, key: str):
+        return self._store.get(key)
+
+    def expire(self, key: str, ttl: int):
+        self.expire_calls.append((key, ttl))
+        return key in self._store
+
     def eval(self, script: str, num_keys: int, *args):
         key = args[0]
         token = args[1]
+        if "expire" in script:
+            if self._store.get(key) == token:
+                self.expire(key, int(args[2]))
+                return 1
+            return 0
         if self._store.get(key) == token:
             del self._store[key]
             return 1
@@ -187,6 +215,9 @@ class _MockRedis:
 
     def ping(self):
         return True
+
+    def close(self):
+        self.close_calls += 1
 
 
 class TestRedisLock:
@@ -237,6 +268,18 @@ class TestRedisLock:
             with RedisLock(client, key="test:fail", timeout=0.2):
                 pass
 
+    def test_renew_extends_ttl_only_for_current_owner(self) -> None:
+        client = _MockRedis()
+        lock = RedisLock(client, key="test:renew", timeout=5, ttl=10)
+        assert lock.acquire() is True
+
+        assert lock.renew() is True
+        assert client.expire_calls == [("test:renew", 10)]
+
+        client._store["test:renew"] = "someone_else"
+        assert lock.renew() is False
+        assert client.expire_calls == [("test:renew", 10)]
+
 
 # ======================================================================
 # acquire_migration_lock factory tests
@@ -267,14 +310,35 @@ class TestAcquireMigrationLock:
         except OSError:
             pass
 
-    def test_falls_back_to_file_when_redis_unavailable(self, tmp_path: Path) -> None:
-        with acquire_migration_lock(
-            lock_dir=str(tmp_path),
-            lock_name="fallback",
-            redis_url="redis://127.0.0.1:1",  # Non-routable port.
-            timeout=5,
-        ) as lock:
-            assert isinstance(lock, FileLock)
+    def test_fails_closed_when_configured_redis_is_unavailable(self, tmp_path: Path) -> None:
+        with patch(
+            "tldw_Server_API.app.core.Infrastructure.distributed_lock._redis_mod"
+        ) as mock_redis:
+            mock_redis.from_url.side_effect = RuntimeError("redis down")
+
+            with pytest.raises(LockAcquisitionError, match="Redis unavailable"):
+                with acquire_migration_lock(
+                    lock_dir=str(tmp_path),
+                    lock_name="fallback",
+                    redis_url="redis://127.0.0.1:1",
+                    timeout=5,
+                ):
+                    pass
+
+    def test_can_opt_in_to_file_fallback_when_redis_unavailable(self, tmp_path: Path) -> None:
+        with patch(
+            "tldw_Server_API.app.core.Infrastructure.distributed_lock._redis_mod"
+        ) as mock_redis:
+            mock_redis.from_url.side_effect = RuntimeError("redis down")
+
+            with acquire_migration_lock(
+                lock_dir=str(tmp_path),
+                lock_name="fallback",
+                redis_url="redis://127.0.0.1:1",
+                timeout=5,
+                allow_file_fallback_on_redis_error=True,
+            ) as lock:
+                assert isinstance(lock, FileLock)
 
     def test_uses_redis_when_available(self, tmp_path: Path) -> None:
         mock_client = _MockRedis()
@@ -292,3 +356,54 @@ class TestAcquireMigrationLock:
                 timeout=5,
             ) as lock:
                 assert isinstance(lock, RedisLock)
+
+        assert mock_client.close_calls == 1
+
+    def test_redis_lock_propagates_caller_exception(self, tmp_path: Path) -> None:
+        mock_client = _MockRedis()
+        sentinel = RuntimeError("migration failed")
+
+        with patch(
+            "tldw_Server_API.app.core.Infrastructure.distributed_lock._redis_mod"
+        ) as mock_redis:
+            mock_redis.from_url.return_value = mock_client
+
+            with pytest.raises(RuntimeError, match="migration failed") as exc_info:
+                with acquire_migration_lock(
+                    lock_dir=str(tmp_path),
+                    lock_name="redis_exception",
+                    redis_url="redis://localhost:6379",
+                    timeout=5,
+                    allow_file_fallback_on_redis_error=True,
+                ):
+                    raise sentinel
+
+        assert exc_info.value is sentinel
+        assert mock_client.close_calls == 1
+        assert not (tmp_path / "redis_exception.lock").exists()
+
+    def test_redis_lock_does_not_rerun_caller_block_on_exception(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        mock_client = _MockRedis()
+        calls = 0
+
+        with patch(
+            "tldw_Server_API.app.core.Infrastructure.distributed_lock._redis_mod"
+        ) as mock_redis:
+            mock_redis.from_url.return_value = mock_client
+
+            with pytest.raises(ValueError, match="stop"):
+                with acquire_migration_lock(
+                    lock_dir=str(tmp_path),
+                    lock_name="redis_no_rerun",
+                    redis_url="redis://localhost:6379",
+                    timeout=5,
+                    allow_file_fallback_on_redis_error=True,
+                ):
+                    calls += 1
+                    raise ValueError("stop")
+
+        assert calls == 1
+        assert not (tmp_path / "redis_no_rerun.lock").exists()
