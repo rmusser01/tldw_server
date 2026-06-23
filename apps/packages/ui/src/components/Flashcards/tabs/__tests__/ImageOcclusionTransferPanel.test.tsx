@@ -241,6 +241,53 @@ describe("ImageOcclusionTransferPanel", () => {
     })
   })
 
+  it("keeps drafts and reports warning when bulk create returns zero saved cards without details", async () => {
+    createBulkMutateAsync.mockResolvedValueOnce({
+      items: [],
+      count: 0,
+      total: 0
+    })
+    const onTransferAction = vi.fn()
+
+    render(<ImageOcclusionTransferPanel onTransferAction={onTransferAction} />)
+
+    fireEvent.click(screen.getByTestId("mock-occlusion-panel-load"))
+    fireEvent.click(screen.getByTestId("flashcards-occlusion-generate-button"))
+
+    await waitFor(() => {
+      expect(uploadFlashcardAssetMock).toHaveBeenCalledTimes(3)
+    })
+
+    fireEvent.click(screen.getByTestId("flashcards-occlusion-save-button"))
+
+    await waitFor(() => {
+      expect(createBulkMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(
+      screen.getByTestId("flashcards-occlusion-draft-front-occlusion-region-1")
+    ).toHaveValue("Identify the occluded region.\n\n![Prompt](flashcard-asset://prompt-asset)")
+    expect(
+      screen.getByTestId("flashcards-occlusion-draft-back-occlusion-region-1")
+    ).toHaveValue("Mitochondria\n\n![Answer](flashcard-asset://answer-asset)")
+    const warningText = await screen.findByText(
+      "No image occlusion cards were saved. Details are unavailable; review the drafts and retry."
+    )
+    expect(warningText.closest('[data-ds-component="Alert"]')).not.toBeNull()
+    expect(messageSpies.warning).toHaveBeenCalledWith(
+      "No image occlusion cards were saved. Details are unavailable; review the drafts and retry."
+    )
+    expect(messageSpies.success).not.toHaveBeenCalledWith(
+      "Saved 0 image occlusion cards."
+    )
+    expect(showUndoNotificationMock).not.toHaveBeenCalled()
+    expect(onTransferAction).toHaveBeenLastCalledWith({
+      area: "occlusion",
+      status: "warning",
+      message:
+        "No image occlusion cards were saved. Details are unavailable; review the drafts and retry."
+    })
+  })
+
   it("renders generation errors through the design-system alert", async () => {
     generateImageOcclusionAssetsMock.mockRejectedValueOnce(
       new Error("Unable to prepare image occlusion assets.")

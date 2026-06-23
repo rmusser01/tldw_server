@@ -40,6 +40,7 @@ import {
   usePreviewStructuredQaImportMutation
 } from "../../hooks"
 import { useDeckSchedulerDraft } from "../../hooks/useDeckSchedulerDraft"
+import { extractFlashcardsErrorStatus } from "../../utils/error-taxonomy"
 import { getUtf8ByteLength } from "../../utils/field-byte-limit"
 import { formatSchedulerSummary } from "../../utils/scheduler-settings"
 import {
@@ -58,6 +59,7 @@ import {
   countDelimiterOccurrences,
   detectJsonImportFormat,
   estimateJsonItemCount,
+  guardInterpolatedText,
   getImportErrorGuidance,
   normalizeHeaderToken,
   normalizeImportLimits,
@@ -70,6 +72,34 @@ import {
 } from "./shared"
 
 const { Text } = Typography
+
+const isValidationImportErrorMessage = (message: string): boolean => {
+  const normalized = message.toLowerCase()
+  return [
+    "missing required",
+    "invalid",
+    "validation",
+    "field too long",
+    "line too long",
+    "maximum import",
+    "parse",
+    "json"
+  ].some((token) => normalized.includes(token))
+}
+
+const getImportFailureMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message.trim()) return error.message
+  if (typeof error === "string" && error.trim()) return error
+  return fallback
+}
+
+const isValidationImportError = (error: unknown, message: string): boolean => {
+  const status = extractFlashcardsErrorStatus(error)
+  if (status !== undefined) {
+    return status === 400 || status === 422
+  }
+  return isValidationImportErrorMessage(message)
+}
 
 /**
  * Import panel for CSV/TSV flashcard import.
@@ -302,6 +332,114 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
     return null
   }, [content, delimiter, hasHeader, importMode, selectedDelimiterLabel, t])
 
+  const buildCompletedImportResult = React.useCallback(
+    (imported: number, errors: FlashcardsImportError[]): ImportResultSummary => {
+      const skipped = errors.length
+      if (errors.length > 0 && imported > 0) {
+        return {
+          status: "partial",
+          imported,
+          skipped,
+          errors,
+          detailsAvailable: true,
+          title: t("option:flashcards.lastImportPartial", {
+            defaultValue: "Last import: {{imported}} imported, {{skipped}} skipped",
+            imported,
+            skipped
+          }),
+          detail: t("option:flashcards.lastImportPartialDetail", {
+            defaultValue:
+              "Some rows were skipped. Review the details below, fix those rows, then import them again."
+          })
+        }
+      }
+
+      if (errors.length > 0) {
+        return {
+          status: "validation-error",
+          imported,
+          skipped,
+          errors,
+          detailsAvailable: true,
+          title: t("option:flashcards.importValidationFailedTitle", {
+            defaultValue: "Import validation failed"
+          }),
+          detail: t("option:flashcards.importValidationFailedDetail", {
+            defaultValue:
+              "No cards were created. Review the details below, fix the payload, then import again."
+          })
+        }
+      }
+
+      if (imported > 0) {
+        return {
+          status: "success",
+          imported,
+          skipped,
+          errors,
+          detailsAvailable: true,
+          title: t("option:flashcards.lastImportSuccess", {
+            defaultValue: "Last import: {{imported}} cards imported",
+            imported
+          }),
+          detail: t("option:flashcards.lastImportSuccessDetail", {
+            defaultValue:
+              "Review imported cards in Manage, or use the undo notification if this import was accidental."
+          })
+        }
+      }
+
+      return {
+        status: "validation-error",
+        imported,
+        skipped,
+        errors,
+        detailsAvailable: false,
+        title: t("option:flashcards.importNoCardsTitle", {
+          defaultValue: "No cards imported"
+        }),
+        detail: t("option:flashcards.importNoCardsDetail", {
+          defaultValue:
+            "No cards were created and the API did not return row details. Your pasted content is still below so you can adjust it and retry."
+        })
+      }
+    },
+    [t]
+  )
+
+  const buildFailedImportResult = React.useCallback(
+    (error: unknown, fallbackMessage: string): ImportResultSummary => {
+      const errorMessage = getImportFailureMessage(error, fallbackMessage)
+      const isValidationError = isValidationImportError(error, errorMessage)
+      return {
+        status: isValidationError ? "validation-error" : "error",
+        imported: 0,
+        skipped: 0,
+        errors: [],
+        detailsAvailable: false,
+        title: isValidationError
+          ? t("option:flashcards.importValidationFailedTitle", {
+              defaultValue: "Import validation failed"
+            })
+          : t("option:flashcards.importFailedTitle", {
+              defaultValue: "Import failed"
+            }),
+        detail: isValidationError
+          ? t("option:flashcards.importValidationFailedRetryDetail", {
+              defaultValue:
+                "{{message}}. No cards were created. Your pasted content is still below. Fix the highlighted issue and import again.",
+              message: errorMessage
+            })
+          : t("option:flashcards.importFailedRetryDetail", {
+              defaultValue:
+                "{{message}}. No cards were created. Your pasted content is still below. Details are unavailable; check connection/API status and retry.",
+              message: errorMessage
+            })
+      }
+    },
+    [t]
+  )
+
   const detectedJsonImportFormat = React.useMemo(
     () => detectJsonImportFormat(content),
     [content]
@@ -336,6 +474,13 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
       : importMode === "structured"
         ? false
         : estimatedImportItems >= LARGE_IMPORT_CONFIRM_THRESHOLD_ROWS
+  const importLimitsFallback = importLimits
+    ? [
+        `Limits: max ${importLimits.maxLines.toLocaleString()} lines`,
+        `${importLimits.maxLineLengthBytes.toLocaleString()} bytes per line`,
+        `${importLimits.maxFieldLengthBytes.toLocaleString()} bytes per field`
+      ].join(", ")
+    : ""
 
   const invalidateFlashcardQueries = React.useCallback(async () => {
     await qc.invalidateQueries({
@@ -381,7 +526,8 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
         message: successCopy
       })
     } catch (e: unknown) {
-      const errorMessage = e instanceof Error ? e.message : "Structured preview failed"
+      const errorMessage = getImportFailureMessage(e, "Structured preview failed")
+      setLastResult(buildFailedImportResult(e, "Structured preview failed"))
       message.error(errorMessage)
       onTransferAction?.({
         area: "import",
@@ -389,7 +535,7 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
         message: errorMessage
       })
     }
-  }, [content, message, onTransferAction, previewStructuredMutation, t])
+  }, [buildFailedImportResult, content, message, onTransferAction, previewStructuredMutation, t])
 
   const handleSaveStructuredDrafts = React.useCallback(async () => {
     const selectedDrafts = structuredDrafts.filter((draft) => draft.selected)
@@ -432,14 +578,31 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
       const submittedDraftIds = new Set(savableDrafts.map((draft) => draft.id))
       const resultErrors = [...structuredPreviewErrors, ...skippedSaveErrors]
 
+      setLastResult(buildCompletedImportResult(createdItems.length, resultErrors))
+
+      if (createdItems.length === 0) {
+        const warningCopy =
+          resultErrors.length > 0
+            ? t("option:flashcards.structuredSaveZeroCreatedWithErrors", {
+                defaultValue:
+                  "No structured cards were saved. Review {{count}} errors below and retry.",
+                count: resultErrors.length
+              })
+            : t("option:flashcards.structuredSaveZeroCreated", {
+                defaultValue: "No structured cards were saved. Details are unavailable."
+              })
+        message.warning(warningCopy)
+        onTransferAction?.({
+          area: "import",
+          status: "warning",
+          message: warningCopy
+        })
+        return
+      }
+
       setStructuredDrafts((prev) =>
         prev.filter((draft) => !submittedDraftIds.has(draft.id))
       )
-      setLastResult({
-        imported: createdItems.length,
-        skipped: resultErrors.length,
-        errors: resultErrors
-      })
 
       const saveFeedbackCopy =
         resultErrors.length > 0
@@ -499,7 +662,8 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
         })
       }
     } catch (e: unknown) {
-      const errorMessage = e instanceof Error ? e.message : "Structured save failed"
+      const errorMessage = getImportFailureMessage(e, "Structured save failed")
+      setLastResult(buildFailedImportResult(e, "Structured save failed"))
       message.error(errorMessage)
       onTransferAction?.({
         area: "import",
@@ -508,6 +672,8 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
       })
     }
   }, [
+    buildCompletedImportResult,
+    buildFailedImportResult,
     createBulkMutation,
     invalidateFlashcardQueries,
     message,
@@ -559,11 +725,7 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
       const errors = normalizeImportErrors(result.errors)
       const skipped = errors.length
 
-      setLastResult({
-        imported,
-        skipped,
-        errors
-      })
+      setLastResult(buildCompletedImportResult(imported, errors))
 
       if (errors.length > 0) {
         const warningCopy = t("option:flashcards.importResultWithErrors", {
@@ -578,7 +740,7 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
           status: "warning",
           message: warningCopy
         })
-      } else {
+      } else if (imported > 0) {
         const successCopy = t("option:flashcards.importResultSuccess", {
           defaultValue: "Imported {{count}} cards.",
           count: imported
@@ -593,6 +755,16 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
         if (importMode === "apkg") {
           setApkgFile(null)
         }
+      } else {
+        const warningCopy = t("option:flashcards.importNoCardsWarning", {
+          defaultValue: "No cards were imported. Details are unavailable."
+        })
+        message.warning(warningCopy)
+        onTransferAction?.({
+          area: "import",
+          status: "warning",
+          message: warningCopy
+        })
       }
 
       if (importedItems.length > 0) {
@@ -635,7 +807,8 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
         })
       }
     } catch (e: unknown) {
-      const errorMessage = e instanceof Error ? e.message : "Import failed"
+      const errorMessage = getImportFailureMessage(e, "Import failed")
+      setLastResult(buildFailedImportResult(e, "Import failed"))
       message.error(errorMessage)
       onTransferAction?.({
         area: "import",
@@ -644,6 +817,8 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
       })
     }
   }, [
+    buildCompletedImportResult,
+    buildFailedImportResult,
     content,
     delimiter,
     hasHeader,
@@ -1086,13 +1261,16 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
       )}
       {importLimits && (
         <Text type="secondary" className="text-xs">
-          {t("option:flashcards.importLimitsValue", {
-            defaultValue:
-              "Limits: max {{maxLines}} lines, {{maxLineBytes}} bytes per line, {{maxFieldBytes}} bytes per field",
-            maxLines: importLimits.maxLines.toLocaleString(),
-            maxLineBytes: importLimits.maxLineLengthBytes.toLocaleString(),
-            maxFieldBytes: importLimits.maxFieldLengthBytes.toLocaleString()
-          })}
+          {guardInterpolatedText(
+            t("option:flashcards.importLimitsValue", {
+              defaultValue:
+                "Limits: max {{maxLines}} lines, {{maxLineBytes}} bytes per line, {{maxFieldBytes}} bytes per field",
+              maxLines: importLimits.maxLines.toLocaleString(),
+              maxLineBytes: importLimits.maxLineLengthBytes.toLocaleString(),
+              maxFieldBytes: importLimits.maxFieldLengthBytes.toLocaleString()
+            }),
+            importLimitsFallback
+          )}
         </Text>
       )}
       {importPreflightWarning && (
@@ -1314,20 +1492,23 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
       {lastResult && (
         <Alert
           data-testid="flashcards-import-last-result"
-          variant={lastResult.errors.length > 0 ? "warning" : "success"}
-          title={
-            lastResult.errors.length > 0
-              ? t("option:flashcards.lastImportPartial", {
-                  defaultValue: "Last import: {{imported}} imported, {{skipped}} skipped",
-                  imported: lastResult.imported,
-                  skipped: lastResult.skipped
-                })
-              : t("option:flashcards.lastImportSuccess", {
-                  defaultValue: "Last import: {{imported}} cards imported",
-                  imported: lastResult.imported
-                })
+          variant={
+            lastResult.status === "success"
+              ? "success"
+              : lastResult.status === "error"
+                ? "error"
+                : "warning"
           }
+          title={lastResult.title}
         >
+          <Text className="block text-xs">{lastResult.detail}</Text>
+          {!lastResult.detailsAvailable && (
+            <Text type="secondary" className="mt-1 block text-xs">
+              {t("option:flashcards.importDetailsUnavailable", {
+                defaultValue: "Row-level details are unavailable for this result."
+              })}
+            </Text>
+          )}
           {lastResult.errors.length > 0 && (
             <div className="mt-1 space-y-1 text-xs">
               {lastResult.errors.slice(0, 6).map((err, idx) => {

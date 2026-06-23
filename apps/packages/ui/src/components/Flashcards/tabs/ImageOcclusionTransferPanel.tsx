@@ -367,6 +367,22 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
 
       const created = await createBulkMutation.mutateAsync(payload)
       const createdItems = normalizeCreatedItems(created.items)
+
+      if (createdItems.length === 0) {
+        const warningCopy = t("option:flashcards.occlusionSaveZeroCreated", {
+          defaultValue:
+            "No image occlusion cards were saved. Details are unavailable; review the drafts and retry."
+        })
+        setInlineAlert({ message: warningCopy, variant: "warning" })
+        message.warning(warningCopy)
+        onTransferAction?.({
+          area: "occlusion",
+          status: "warning",
+          message: warningCopy
+        })
+        return
+      }
+
       setDrafts([])
 
       const successCopy = t("option:flashcards.occlusionSaveSuccess", {

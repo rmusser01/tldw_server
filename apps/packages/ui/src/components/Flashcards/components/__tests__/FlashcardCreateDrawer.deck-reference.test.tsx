@@ -489,6 +489,10 @@ describe("FlashcardCreateDrawer deck reference section", () => {
     })
     rerender(<FlashcardCreateDrawer open onClose={onClose} onSuccess={onSuccess} />)
 
+    const createErrorAlert = screen.getByTestId("flashcards-create-error")
+    expect(createErrorAlert).toHaveAttribute("data-ds-component", "Alert")
+    expect(createErrorAlert).toHaveTextContent("Could not create flashcard")
+    expect(createErrorAlert).toHaveTextContent("Create service unavailable")
     expect(onClose).not.toHaveBeenCalled()
     expect(onSuccess).not.toHaveBeenCalled()
     expect((screen.getByPlaceholderText("Question or prompt...") as HTMLTextAreaElement).value).toBe(

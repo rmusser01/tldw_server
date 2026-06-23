@@ -13,6 +13,7 @@ import { GeneratePanel } from "./ImportExport/GeneratePanel"
 import { ImportPanel } from "./ImportExport/ImportPanel"
 import { StudyPackPanel } from "./ImportExport/StudyPackPanel"
 import {
+  guardInterpolatedText,
   normalizeImportLimits,
   type TransferActionSummary,
   type TransferActionSummaryInput
@@ -94,13 +95,21 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
   const importLimitsText = React.useMemo(() => {
     const importLimits = normalizeImportLimits(limitsQuery.data)
     if (!importLimits) return null
-    return t("option:flashcards.transferSummaryLimitsValue", {
-      defaultValue:
-        "{{lines}} lines / {{lineBytes}} bytes per line / {{fieldBytes}} bytes per field",
-      lines: importLimits.maxLines.toLocaleString(),
-      lineBytes: importLimits.maxLineLengthBytes.toLocaleString(),
-      fieldBytes: importLimits.maxFieldLengthBytes.toLocaleString()
-    })
+    const fallback = [
+      `${importLimits.maxLines.toLocaleString()} lines`,
+      `${importLimits.maxLineLengthBytes.toLocaleString()} bytes per line`,
+      `${importLimits.maxFieldLengthBytes.toLocaleString()} bytes per field`
+    ].join(" / ")
+    return guardInterpolatedText(
+      t("option:flashcards.transferSummaryLimitsValue", {
+        defaultValue:
+          "{{lines}} lines / {{lineBytes}} bytes per line / {{fieldBytes}} bytes per field",
+        lines: importLimits.maxLines.toLocaleString(),
+        lineBytes: importLimits.maxLineLengthBytes.toLocaleString(),
+        fieldBytes: importLimits.maxFieldLengthBytes.toLocaleString()
+      }),
+      fallback
+    )
   }, [limitsQuery.data, t])
 
   React.useEffect(() => {
@@ -201,12 +210,17 @@ export const ImportExportTab: React.FC<ImportExportTabProps> = ({
             : t("option:flashcards.generateTitle", {
                 defaultValue: "Generate Flashcards"
               })
-    return t("option:flashcards.transferSummaryLastAction", {
-      defaultValue: "{{area}} · {{message}} · {{time}}",
-      area: areaLabel,
-      message: lastTransferAction.message,
-      time: new Date(lastTransferAction.at).toLocaleTimeString()
-    })
+    const actionTime = new Date(lastTransferAction.at).toLocaleTimeString()
+    const fallback = `${areaLabel} · ${lastTransferAction.message} · ${actionTime}`
+    return guardInterpolatedText(
+      t("option:flashcards.transferSummaryLastAction", {
+        defaultValue: "{{area}} · {{message}} · {{time}}",
+        area: areaLabel,
+        message: lastTransferAction.message,
+        time: actionTime
+      }),
+      fallback
+    )
   }, [lastTransferAction, t])
 
   return (
