@@ -299,6 +299,43 @@ def test_soft_deleted_targets_return_not_found(api_context):
     assert response.status_code == 404, response.text
 
 
+def test_soft_deleted_scene_target_hides_existing_annotation(api_context):
+    client, _db = api_context
+    project, _chapter, scene = _create_scene_manuscript(client)
+    selected_text = "beta"
+    start = scene["content_plain"].index(selected_text)
+    create_response = client.post(
+        f"{PREFIX}/annotations",
+        json={
+            "target_type": "scene",
+            "target_id": scene["id"],
+            "category": "clarity",
+            "body": "Clarify this word.",
+            "scene_version": scene["version"],
+            "start": start,
+            "end": start + len(selected_text),
+            "selected_text": selected_text,
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    annotation_id = create_response.json()["id"]
+
+    delete_response = client.delete(
+        f"{PREFIX}/scenes/{scene['id']}",
+        headers={"expected-version": str(scene["version"])},
+    )
+    assert delete_response.status_code == 204, delete_response.text
+
+    get_response = client.get(f"{PREFIX}/annotations/{annotation_id}")
+    assert get_response.status_code == 404, get_response.text
+
+    list_response = client.get(f"{PREFIX}/projects/{project['id']}/annotations")
+    assert list_response.status_code == 200, list_response.text
+    payload = list_response.json()
+    assert payload["annotations"] == []
+    assert payload["total"] == 0
+
+
 def test_manual_range_offsets_are_unicode_code_point_offsets(api_context):
     client, _db = api_context
     scene_text = "Alpha 😀 beta 🌌 omega"

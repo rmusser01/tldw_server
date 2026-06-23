@@ -123,6 +123,50 @@ _UPDATABLE_ANNOTATION_COLS = frozenset({
 })
 _ANCHOR_STATUS_FILTER_CANDIDATE_CAP = 500
 _VALID_ANCHOR_STATUSES = frozenset({"scene_level", "attached", "reattached", "needs_review"})
+_ACTIVE_ANNOTATION_TARGET_SQL = """
+(
+    (
+        ma.target_type = 'project'
+        AND ma.target_id = ma.project_id
+        AND EXISTS (
+            SELECT 1
+              FROM manuscript_projects p
+             WHERE p.id = ma.project_id
+               AND p.deleted = 0
+        )
+    )
+    OR (
+        ma.target_type = 'chapter'
+        AND EXISTS (
+            SELECT 1
+              FROM manuscript_chapters c
+              JOIN manuscript_projects p
+                ON p.id = c.project_id
+               AND p.deleted = 0
+             WHERE c.id = ma.target_id
+               AND c.project_id = ma.project_id
+               AND c.deleted = 0
+        )
+    )
+    OR (
+        ma.target_type = 'scene'
+        AND EXISTS (
+            SELECT 1
+              FROM manuscript_scenes s
+              JOIN manuscript_chapters c
+                ON c.id = s.chapter_id
+               AND c.project_id = s.project_id
+               AND c.deleted = 0
+              JOIN manuscript_projects p
+                ON p.id = s.project_id
+               AND p.deleted = 0
+             WHERE s.id = ma.target_id
+               AND s.project_id = ma.project_id
+               AND s.deleted = 0
+        )
+    )
+)
+"""
 _ANNOTATION_DUPLICATE_KEY_FIELDS = (
     "target_type",
     "target_id",
@@ -1448,7 +1492,9 @@ class ManuscriptDBHelper:
         """Fetch a non-deleted annotation by ID."""
         with self.db.transaction() as conn:
             row = conn.execute(
-                "SELECT * FROM manuscript_annotations WHERE id = ? AND deleted = 0",
+                "SELECT ma.* FROM manuscript_annotations ma "
+                "WHERE ma.id = ? AND ma.deleted = 0 AND "
+                f"{_ACTIVE_ANNOTATION_TARGET_SQL}",  # nosec B608
                 (annotation_id,),
             ).fetchone()
             if row is None:
@@ -1481,22 +1527,22 @@ class ManuscriptDBHelper:
         )
         self._validate_annotation_anchor_status(anchor_status)
 
-        clauses = ["project_id = ?", "deleted = 0"]
+        clauses = ["ma.project_id = ?", "ma.deleted = 0", _ACTIVE_ANNOTATION_TARGET_SQL]
         params: list[Any] = [project_id]
         if target_type is not None:
-            clauses.append("target_type = ?")
+            clauses.append("ma.target_type = ?")
             params.append(target_type)
         if target_id is not None:
-            clauses.append("target_id = ?")
+            clauses.append("ma.target_id = ?")
             params.append(target_id)
         if status is not None:
-            clauses.append("status = ?")
+            clauses.append("ma.status = ?")
             params.append(status)
         if category is not None:
-            clauses.append("category = ?")
+            clauses.append("ma.category = ?")
             params.append(category)
         if source is not None:
-            clauses.append("source = ?")
+            clauses.append("ma.source = ?")
             params.append(source)
         where_sql = " AND ".join(clauses)
 
@@ -1505,18 +1551,18 @@ class ManuscriptDBHelper:
                 return [], 0
             if anchor_status is None:
                 total_row = conn.execute(
-                    f"SELECT COUNT(*) AS cnt FROM manuscript_annotations WHERE {where_sql}",  # nosec B608
+                    f"SELECT COUNT(*) AS cnt FROM manuscript_annotations ma WHERE {where_sql}",  # nosec B608
                     params,
                 ).fetchone()
                 rows = conn.execute(
-                    f"SELECT * FROM manuscript_annotations WHERE {where_sql} "  # nosec B608
-                    "ORDER BY last_modified DESC LIMIT ? OFFSET ?",
+                    f"SELECT ma.* FROM manuscript_annotations ma WHERE {where_sql} "  # nosec B608
+                    "ORDER BY ma.last_modified DESC LIMIT ? OFFSET ?",
                     (*params, limit, offset),
                 ).fetchall()
                 return [self._annotation_row_to_dict(row, conn) for row in rows], int(total_row["cnt"] or 0)
 
             total_row = conn.execute(
-                f"SELECT COUNT(*) AS cnt FROM manuscript_annotations WHERE {where_sql}",  # nosec B608
+                f"SELECT COUNT(*) AS cnt FROM manuscript_annotations ma WHERE {where_sql}",  # nosec B608
                 params,
             ).fetchone()
             candidate_count = int(total_row["cnt"] or 0)
@@ -1528,8 +1574,8 @@ class ManuscriptDBHelper:
                 )  # noqa: TRY003
 
             rows = conn.execute(
-                f"SELECT * FROM manuscript_annotations WHERE {where_sql} "  # nosec B608
-                "ORDER BY last_modified DESC",
+                f"SELECT ma.* FROM manuscript_annotations ma WHERE {where_sql} "  # nosec B608
+                "ORDER BY ma.last_modified DESC",
                 params,
             ).fetchall()
             candidates = [self._annotation_row_to_dict(row, conn) for row in rows]

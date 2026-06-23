@@ -311,6 +311,70 @@ def test_update_and_delete_use_optimistic_locking(mdb, manuscript):
     assert mdb.get_annotation(annotation_id) is None
 
 
+def test_deleted_scene_target_hides_annotation_from_get_and_project_list(mdb, manuscript):
+    scene = mdb.get_scene(manuscript["scene_id"])
+    start = scene["content_plain"].index("beta")
+    annotation_id = mdb.create_annotation(
+        project_id=manuscript["project_id"],
+        target_type="scene",
+        target_id=manuscript["scene_id"],
+        category="clarity",
+        source="ai_selected_text",
+        body="Clarify this word.",
+        scene_version=scene["version"],
+        anchor_start=start,
+        anchor_end=start + len("beta"),
+        selected_text="beta",
+    )
+
+    mdb.soft_delete_scene(manuscript["scene_id"], expected_version=scene["version"])
+
+    assert mdb.get_annotation(annotation_id) is None
+    rows, total = mdb.list_annotations(manuscript["project_id"])
+    assert rows == []
+    assert total == 0
+    with mdb.db.transaction() as conn:
+        stored = conn.execute(
+            "SELECT deleted FROM manuscript_annotations WHERE id = ?",
+            (annotation_id,),
+        ).fetchone()
+    assert stored["deleted"] == 0
+
+
+def test_deleted_chapter_target_hides_annotation_but_preserves_project_annotation(mdb, manuscript):
+    chapter_annotation_id = mdb.create_annotation(
+        project_id=manuscript["project_id"],
+        target_type="chapter",
+        target_id=manuscript["chapter_id"],
+        category="structure",
+        source="user",
+        body="Chapter-level note.",
+    )
+    project_annotation_id = mdb.create_annotation(
+        project_id=manuscript["project_id"],
+        target_type="project",
+        target_id=manuscript["project_id"],
+        category="other",
+        source="user",
+        body="Project-level note.",
+    )
+
+    chapter = mdb.get_chapter(manuscript["chapter_id"])
+    mdb.soft_delete_chapter(manuscript["chapter_id"], expected_version=chapter["version"])
+
+    assert mdb.get_annotation(chapter_annotation_id) is None
+    assert mdb.get_annotation(project_annotation_id) is not None
+    rows, total = mdb.list_annotations(manuscript["project_id"])
+    assert [row["id"] for row in rows] == [project_annotation_id]
+    assert total == 1
+    with mdb.db.transaction() as conn:
+        stored = conn.execute(
+            "SELECT deleted FROM manuscript_annotations WHERE id = ?",
+            (chapter_annotation_id,),
+        ).fetchone()
+    assert stored["deleted"] == 0
+
+
 def test_list_annotations_filters_by_target_status_category_and_source(mdb, manuscript):
     mdb.create_annotation(
         project_id=manuscript["project_id"],
