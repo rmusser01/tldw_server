@@ -58,6 +58,7 @@ class _FakeCollectionsDb:
     def __init__(self) -> None:
         self.project = _Project()
         self.recorded_jobs: list[dict[str, Any]] = []
+        self.generation_jobs: dict[str, dict[str, Any]] = {}
 
     def get_audio_studio_project_by_project_id(self, project_id: str) -> _Project:
         assert project_id == self.project.project_id
@@ -68,9 +69,17 @@ class _FakeCollectionsDb:
             raise KeyError("audio_studio_revision_not_found")
         return object()
 
+    def get_audio_studio_generation_job(self, *, project_row_id: int, job_id: str) -> dict[str, Any]:
+        assert project_row_id == self.project.id
+        try:
+            return self.generation_jobs[job_id]
+        except KeyError as exc:
+            raise KeyError("audio_studio_generation_job_not_found") from exc
+
     def record_audio_studio_generation_job(self, **kwargs: Any) -> object:
         self.recorded_jobs.append(kwargs)
-        return object()
+        self.generation_jobs[kwargs["job_id"]] = kwargs
+        return kwargs
 
 
 def test_generation_enqueue_builds_secret_free_idempotent_job() -> None:
@@ -126,6 +135,48 @@ def test_generation_enqueue_builds_secret_free_idempotent_job() -> None:
     assert "must-not-store" not in json.dumps(call["payload"])
     assert db.recorded_jobs[0]["job_id"] == "job-1"
     assert db.recorded_jobs[0]["request_json"]
+
+
+def test_generation_enqueue_replays_existing_completed_idempotent_job() -> None:
+    jm = _FakeJobsManager()
+    db = _FakeCollectionsDb()
+
+    accepted = enqueue_audio_studio_generation_job(
+        jm=jm,
+        collections_db=db,
+        user_id="42",
+        project_id="ast_jobs",
+        workflow="narration",
+        kind="speech",
+        provider="tts",
+        target_resource_kind="section",
+        target_resource_id="sec_001",
+        target_revision_id="rev_001",
+        idempotency_key="client-key-123456",
+        options={"voice": "af_heart"},
+    )
+    jm.rows[jm.calls[0]["idempotency_key"]]["status"] = "completed"
+    db.generation_jobs[accepted.job_id]["status"] = "completed"
+
+    replay = enqueue_audio_studio_generation_job(
+        jm=jm,
+        collections_db=db,
+        user_id="42",
+        project_id="ast_jobs",
+        workflow="narration",
+        kind="speech",
+        provider="tts",
+        target_resource_kind="section",
+        target_resource_id="sec_001",
+        target_revision_id="rev_001",
+        idempotency_key="client-key-123456",
+        options={"voice": "af_heart"},
+    )
+
+    assert replay.job_id == accepted.job_id
+    assert replay.status == "completed"
+    assert len(jm.rows) == 1
+    assert len(db.recorded_jobs) == 1
 
 
 def test_generation_enqueue_rejects_stale_revision_before_job_create() -> None:

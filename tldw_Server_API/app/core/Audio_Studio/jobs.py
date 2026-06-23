@@ -16,7 +16,16 @@ JOB_TYPE_RENDER = "audio_studio_render"
 JOB_TYPE_EXPORT = "audio_studio_export"
 JOB_TYPE_MIGRATE = "audio_studio_migrate"
 
-_ENQUEUEABLE_JOB_STATUSES = {"queued", "pending", "scheduled", "processing"}
+_REPLAYABLE_JOB_STATUSES = {
+    "queued",
+    "pending",
+    "scheduled",
+    "processing",
+    "completed",
+    "failed",
+    "cancelled",
+    "quarantined",
+}
 
 
 @dataclass(frozen=True)
@@ -250,9 +259,9 @@ def _enqueue_audio_studio_job(
         idempotency_key=job_idempotency_key,
     )
     status = str(job.get("status") or "queued").strip().lower()
-    if status not in _ENQUEUEABLE_JOB_STATUSES:
+    if status not in _REPLAYABLE_JOB_STATUSES:
         raise AudioStudioTerminalJobError(
-            f"Audio Studio job was not queued; current job status is {status or 'unknown'}"
+            f"Audio Studio job returned unknown status {status or 'unknown'}"
         )
     job_id = str(job.get("uuid") or job.get("id"))
     if job_type == JOB_TYPE_GENERATE:

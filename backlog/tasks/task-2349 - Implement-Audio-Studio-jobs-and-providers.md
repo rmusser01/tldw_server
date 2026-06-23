@@ -34,6 +34,7 @@ Follow Stage 2 tasks 2.1 through 2.5 in Docs/superpowers/plans/2026-06-23-audio-
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-06-23 recovery: inspected the partial TASK-2349 implementation against the Stage 2 requirements. No additional code fixes were needed after focused verification. Removed generated __pycache__ directories from the Audio Studio app/test scope before staging.
+2026-06-23 follow-up: fixed idempotent generation replays so existing Jobs rows with known terminal statuses, including completed, return the existing generation job row instead of raising a client error. Added focused unit coverage for completed replay preserving a single Jobs row and generation index record. Verification: focused jobs/API pytest 7 passed, broader TASK-2349 suite 33 passed, Bandit on jobs.py 0 findings, scoped git diff check clean.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
