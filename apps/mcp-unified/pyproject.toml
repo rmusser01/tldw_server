@@ -95,6 +95,7 @@ packages = [
   "mcp_unified.filesystem_locks",
   "mcp_unified.gateway",
   "mcp_unified.interfaces",
+  "mcp_unified.policy_grants",
   "mcp_unified.profiles",
   "mcp_unified.smoke",
   "mcp_unified.storage",

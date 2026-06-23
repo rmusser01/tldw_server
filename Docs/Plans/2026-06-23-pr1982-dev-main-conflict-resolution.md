@@ -14,4 +14,10 @@
 **Goal**: Confirm the merge commit is clean enough to update PR #1982.
 **Success Criteria**: Conflict markers are absent, whitespace checks pass, and GitHub reports PR #1982 no longer dirty after pushing to `dev`.
 **Tests**: `rg '<<<<<<<|=======|>>>>>>>' README.md`; `git diff --check`; `gh pr view 1982 --json mergeStateStatus,statusCheckRollup`.
-**Status**: In Progress
+**Status**: Complete
+
+## Stage 4: Repair Current PR Check Failure
+**Goal**: Address the MCP Unified Internal RC failure observed after conflict resolution.
+**Success Criteria**: The standalone `mcp-unified` wheel includes all source packages required by gateway imports, including policy grants.
+**Tests**: targeted MCP package-boundary pytest; `PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python make mcp-unified-rc`.
+**Status**: Complete
