@@ -40,12 +40,14 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError as AuthNZStorageError
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import (
+    FILE_CATEGORY_EXPORT,
     FILE_CATEGORY_IMAGE,
     FILE_CATEGORY_MINDMAP,
     FILE_CATEGORY_SPREADSHEET,
     FILE_CATEGORY_TTS_AUDIO,
     FILE_CATEGORY_VOICE_CLONE,
     SOURCE_FEATURE_DATA_TABLES,
+    SOURCE_FEATURE_EXPORT,
     SOURCE_FEATURE_IMAGE_GEN,
     SOURCE_FEATURE_MINDMAP,
     SOURCE_FEATURE_TTS,
@@ -82,6 +84,14 @@ SPREADSHEET_MIME_TYPES = {
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "csv": "text/csv",
     "xls": "application/vnd.ms-excel",
+}
+
+EXPORT_MIME_TYPES = {
+    "ics": "text/calendar",
+    "md": "text/markdown",
+    "html": "text/html",
+    "json": "application/json",
+    "txt": "text/plain",
 }
 
 
@@ -614,6 +624,59 @@ async def save_and_register_spreadsheet(
         logger.info(f"Registered spreadsheet: {filename} ({len(spreadsheet_bytes)} bytes) for user {user_id}")
         return file_record
 
+    except Exception:
+        with contextlib.suppress(Exception):
+            file_path.unlink()
+        raise
+
+
+async def save_and_register_file_export(
+    *,
+    user_id: int,
+    file_bytes: bytes,
+    file_format: str,
+    original_filename: str | None = None,
+    source_ref: str | None = None,
+    content_type: str | None = None,
+    org_id: int | None = None,
+    team_id: int | None = None,
+    folder_tag: str | None = None,
+    tags: list[str] | None = None,
+    is_transient: bool = False,
+    expires_at: datetime | None = None,
+    check_quota: bool = True,
+) -> dict[str, Any]:
+    """Save a generated file export and register it for quota tracking."""
+    filename = _generate_filename("file_export", file_format)
+    category_folder = "file_exports"
+    file_path = await _save_file(user_id, file_bytes, category_folder, filename)
+    outputs_dir = DatabasePaths.get_user_outputs_dir(user_id)
+    relative_path = str(file_path.relative_to(outputs_dir))
+    mime_type = content_type or EXPORT_MIME_TYPES.get(file_format.lower(), "application/octet-stream")
+
+    service = await get_storage_service()
+    try:
+        file_record = await service.register_generated_file(
+            user_id=user_id,
+            filename=filename,
+            storage_path=relative_path,
+            file_category=FILE_CATEGORY_EXPORT,
+            source_feature=SOURCE_FEATURE_EXPORT,
+            file_size_bytes=len(file_bytes),
+            org_id=org_id,
+            team_id=team_id,
+            original_filename=original_filename or f"export.{file_format}",
+            mime_type=mime_type,
+            checksum=_compute_checksum(file_bytes),
+            source_ref=source_ref,
+            folder_tag=folder_tag,
+            tags=tags,
+            is_transient=is_transient,
+            expires_at=expires_at,
+            check_quota=check_quota,
+        )
+        logger.info(f"Registered file export: {filename} ({len(file_bytes)} bytes) for user {user_id}")
+        return file_record
     except Exception:
         with contextlib.suppress(Exception):
             file_path.unlink()

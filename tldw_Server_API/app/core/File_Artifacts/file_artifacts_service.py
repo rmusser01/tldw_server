@@ -37,6 +37,7 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.Storage.generated_file_helpers import (
+    save_and_register_file_export,
     save_and_register_image,
     save_and_register_spreadsheet,
 )
@@ -49,6 +50,7 @@ DEFAULT_ASYNC_CELLS = 100000
 INLINE_MAX_BYTES = 256 * 1024
 INLINE_MAX_BYTES_UPPER_BOUND = 10 * 1024 * 1024
 DEFAULT_EXPORT_TTL_SECONDS = 900
+DEFAULT_MAX_EXPORT_TTL_SECONDS = DEFAULT_EXPORT_TTL_SECONDS
 
 EXPORT_MIME_TYPES = {
     "ics": "text/calendar",
@@ -254,7 +256,7 @@ class FileArtifactsService:
                 "file_type": adapter.file_type,
                 "export_format": export_req.format,
                 "user_id": self._user_id,
-                "max_bytes": options.max_bytes or DEFAULT_MAX_BYTES,
+                "max_bytes": self._resolve_max_bytes(options),
                 "export_ttl_seconds": export_ttl,
             }
             queue = (os.getenv("FILES_JOBS_QUEUE") or "default").strip() or "default"
@@ -346,7 +348,7 @@ class FileArtifactsService:
             raise FileArtifactsError("export_failed")
 
         byte_count = len(export_result.content)
-        max_bytes = options.max_bytes or DEFAULT_MAX_BYTES
+        max_bytes = self._resolve_max_bytes(options)
         if byte_count > max_bytes:
             raise FileArtifactsValidationError("export_size_exceeded")
 
@@ -393,12 +395,14 @@ class FileArtifactsService:
                 )
                 export_updated = True
             if export_req.mode == "url" or not inline_ready:
-                # Register generated files for storage/quota tracking (image + spreadsheet exports).
+                # Register generated files for storage/quota tracking.
                 await self._register_generated_file_export(
                     file_id=file_id,
                     file_type=file_type,
                     export_format=export_req.format,
                     content=export_result.content,
+                    content_type=content_type,
+                    expires_at=expires_at,
                 )
         except Exception:
             if storage_path:
@@ -440,6 +444,8 @@ class FileArtifactsService:
         file_type: str,
         export_format: str,
         content: bytes,
+        content_type: str | None = None,
+        expires_at: datetime | None = None,
     ) -> None:
         """Persist export outputs into generated files storage for quota tracking."""
         try:
@@ -450,6 +456,8 @@ class FileArtifactsService:
                     image_format=export_format,
                     source_prompt=None,
                     model_name=None,
+                    is_transient=True,
+                    expires_at=expires_at,
                     check_quota=True,
                 )
             elif file_type == "data_table" and export_format in {"xlsx", "csv", "xls"}:
@@ -459,6 +467,20 @@ class FileArtifactsService:
                     spreadsheet_format=export_format,
                     original_filename=f"file_{file_id}.{export_format}",
                     source_ref=f"file_artifact:{file_id}",
+                    is_transient=True,
+                    expires_at=expires_at,
+                    check_quota=True,
+                )
+            else:
+                await save_and_register_file_export(
+                    user_id=self._user_id_int,
+                    file_bytes=content,
+                    file_format=export_format,
+                    original_filename=f"file_{file_id}.{export_format}",
+                    source_ref=f"file_artifact:{file_id}",
+                    content_type=content_type or EXPORT_MIME_TYPES.get(export_format),
+                    is_transient=True,
+                    expires_at=expires_at,
                     check_quota=True,
                 )
         except QuotaExceededError as exc:
@@ -585,14 +607,67 @@ class FileArtifactsService:
 
     @staticmethod
     def _resolve_export_ttl_seconds(options: FileCreateOptions) -> int:
+        """Resolve the requested export TTL while enforcing the server cap."""
+        max_ttl = FileArtifactsService._resolve_limit_setting(
+            "FILES_EXPORT_TTL_MAX_SECONDS",
+            "export_ttl_max_seconds",
+            DEFAULT_MAX_EXPORT_TTL_SECONDS,
+        )
         raw = options.export_ttl_seconds
         if raw is None:
-            return DEFAULT_EXPORT_TTL_SECONDS
+            return min(DEFAULT_EXPORT_TTL_SECONDS, max_ttl)
         try:
             value = int(raw)
         except (TypeError, ValueError):
-            return DEFAULT_EXPORT_TTL_SECONDS
-        return max(1, value)
+            return min(DEFAULT_EXPORT_TTL_SECONDS, max_ttl)
+        return min(max(1, value), max_ttl)
+
+    @staticmethod
+    def _resolve_limit_setting(env_name: str, config_key: str, default: int) -> int:
+        """Read a positive integer limit from environment or file config."""
+        raw = os.getenv(env_name)
+        if raw is None:
+            raw = get_config_value("Files", config_key)
+        if raw is None:
+            return default
+        try:
+            value = int(str(raw).strip())
+        except (TypeError, ValueError):
+            logger.warning("Invalid Files.{} limit; using default {}.", config_key, default)
+            return default
+        if value <= 0:
+            logger.warning("Non-positive Files.{} limit; using default {}.", config_key, default)
+            return default
+        return value
+
+    @staticmethod
+    def _cap_requested_limit(requested: int | None, server_max: int) -> int:
+        """Clamp a caller-provided limit to the configured server maximum."""
+        if requested is None:
+            return server_max
+        try:
+            value = int(requested)
+        except (TypeError, ValueError):
+            return server_max
+        return min(max(1, value), server_max)
+
+    @staticmethod
+    def _resolve_max_bytes(options: FileCreateOptions) -> int:
+        """Resolve the byte limit for a create request."""
+        server_max = FileArtifactsService._resolve_limit_setting("FILES_MAX_BYTES", "max_bytes", DEFAULT_MAX_BYTES)
+        return FileArtifactsService._cap_requested_limit(options.max_bytes, server_max)
+
+    @staticmethod
+    def _resolve_max_rows(options: FileCreateOptions) -> int:
+        """Resolve the row limit for a create request."""
+        server_max = FileArtifactsService._resolve_limit_setting("FILES_MAX_ROWS", "max_rows", DEFAULT_MAX_ROWS)
+        return FileArtifactsService._cap_requested_limit(options.max_rows, server_max)
+
+    @staticmethod
+    def _resolve_max_cells(options: FileCreateOptions) -> int:
+        """Resolve the cell limit for a create request."""
+        server_max = FileArtifactsService._resolve_limit_setting("FILES_MAX_CELLS", "max_cells", DEFAULT_MAX_CELLS)
+        return FileArtifactsService._cap_requested_limit(options.max_cells, server_max)
 
     @staticmethod
     def _resolve_inline_max_bytes() -> int:
@@ -712,8 +787,8 @@ class FileArtifactsService:
         return FileExportInfo(status="none")
 
     def _enforce_limits(self, file_type: str, structured: dict[str, Any], options: FileCreateOptions) -> None:
-        max_rows = options.max_rows or DEFAULT_MAX_ROWS
-        max_cells = options.max_cells or DEFAULT_MAX_CELLS
+        max_rows = self._resolve_max_rows(options)
+        max_cells = self._resolve_max_cells(options)
         rows, cells = self._extract_table_shape(file_type, structured)
         if rows > max_rows:
             raise FileArtifactsValidationError("row_limit_exceeded")
@@ -727,8 +802,8 @@ class FileArtifactsService:
         options: FileCreateOptions,
         export_format: str,
     ) -> bool:
-        hard_rows = options.max_rows or DEFAULT_MAX_ROWS
-        hard_cells = options.max_cells or DEFAULT_MAX_CELLS
+        hard_rows = self._resolve_max_rows(options)
+        hard_cells = self._resolve_max_cells(options)
         max_rows = min(hard_rows, DEFAULT_ASYNC_ROWS)
         max_cells = min(hard_cells, DEFAULT_ASYNC_CELLS)
         rows, cells = self._extract_table_shape(file_type, structured)
@@ -737,7 +812,7 @@ class FileArtifactsService:
         estimated = self._estimate_export_size(file_type, structured, export_format)
         if estimated is None:
             return False
-        max_bytes = options.max_bytes or DEFAULT_MAX_BYTES
+        max_bytes = self._resolve_max_bytes(options)
         return estimated > max_bytes
 
     def _estimate_export_size(
