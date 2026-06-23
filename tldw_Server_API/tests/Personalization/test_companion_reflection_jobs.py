@@ -282,6 +282,73 @@ def test_companion_reflection_job_reuses_existing_reflection_outside_recent_wind
     assert len(reflections) == 1
 
 
+def test_companion_reflection_job_normalizes_cadence_before_deduping(
+    companion_reflection_env,
+) -> None:
+    personalization_db, collections_db = _seed_companion_context("1")
+    now = datetime(2026, 3, 10, 16, 0, tzinfo=timezone.utc)
+
+    first = run_companion_reflection_job(
+        user_id="1",
+        cadence=" Weekly ",
+        now=now,
+        personalization_db=personalization_db,
+        collections_db=collections_db,
+    )
+    second = run_companion_reflection_job(
+        user_id="1",
+        cadence="weekly",
+        now=now,
+        personalization_db=personalization_db,
+        collections_db=collections_db,
+    )
+
+    assert first["status"] == "completed"
+    assert second["status"] == "completed"
+    assert second["reflection_id"] == first["reflection_id"]
+    rows, _total = personalization_db.list_companion_activity_events("1", limit=20, offset=0)
+    reflections = [row for row in rows if row["event_type"] == "companion_reflection_generated"]
+    assert len(reflections) == 1
+    assert reflections[0]["metadata"]["cadence"] == "weekly"
+    assert reflections[0]["source_id"] == "2026-W11"
+
+
+def test_companion_reflection_job_rejects_unknown_cadence(
+    companion_reflection_env,
+) -> None:
+    personalization_db, collections_db = _seed_companion_context("1")
+
+    result = run_companion_reflection_job(
+        user_id="1",
+        cadence="monthly",
+        now=datetime(2026, 3, 10, 16, 0, tzinfo=timezone.utc),
+        personalization_db=personalization_db,
+        collections_db=collections_db,
+    )
+
+    assert result == {"status": "skipped", "reason": "invalid_cadence"}
+    rows, _total = personalization_db.list_companion_activity_events("1", limit=20, offset=0)
+    assert not any(row["event_type"] == "companion_reflection_generated" for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_handle_companion_reflection_job_rejects_unknown_job_type(
+    companion_reflection_env,
+) -> None:
+    result = await handle_companion_reflection_job(
+        {
+            "job_type": "companion_archive",
+            "payload": {"user_id": "1", "cadence": "daily"},
+        }
+    )
+
+    assert result == {
+        "status": "skipped",
+        "reason": "unsupported_job_type",
+        "job_type": "companion_archive",
+    }
+
+
 @pytest.mark.asyncio
 async def test_handle_companion_job_dispatches_rebuild_scope(companion_reflection_env) -> None:
     personalization_db = PersonalizationDB(str(DatabasePaths.get_personalization_db_path("1")))

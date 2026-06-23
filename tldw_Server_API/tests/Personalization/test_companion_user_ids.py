@@ -13,3 +13,4 @@ def test_resolve_companion_storage_user_id_derives_stable_numeric_key_for_text_i
 
     assert left == right
     assert left.isdigit()
+    assert int(left) > 2**32

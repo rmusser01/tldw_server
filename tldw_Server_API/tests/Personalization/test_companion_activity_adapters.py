@@ -1,5 +1,6 @@
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -19,6 +20,8 @@ from tldw_Server_API.app.core.Personalization.companion_activity import (
     record_persona_session_started,
     record_persona_session_summarized,
     record_persona_tool_executed,
+    record_reading_highlight_created,
+    record_reading_item_updated,
     record_reminder_task_deleted,
     record_reminder_task_updated,
     record_watchlist_item_added,
@@ -27,6 +30,7 @@ from tldw_Server_API.app.core.Personalization.companion_activity import (
     record_watchlist_source_restored,
     record_watchlist_source_updated,
 )
+from tldw_Server_API.app.core.Personalization.companion_user_ids import resolve_companion_storage_user_id
 from tldw_Server_API.app.core.config import settings
 
 
@@ -116,6 +120,41 @@ def test_record_companion_activity_requires_opt_in_and_dedupes(companion_db_env)
     assert total_after_duplicate == 1
 
 
+def test_record_companion_activity_uses_resolved_storage_user_id_for_text_users(monkeypatch):
+    class _FakeDB:
+        def get_or_create_profile(self, user_id: str) -> dict[str, int]:
+            return {"enabled": 1}
+
+        def insert_companion_activity_event(self, **kwargs: Any) -> str:
+            assert kwargs["user_id"] == "user-alpha"
+            return "evt-1"
+
+    opened_user_ids: list[str] = []
+
+    def _fake_for_user(cls, user_id: str | int) -> _FakeDB:
+        opened_user_ids.append(str(user_id))
+        return _FakeDB()
+
+    monkeypatch.setattr(companion_activity_module, "is_personalization_enabled", lambda: True)
+    monkeypatch.setattr(
+        companion_activity_module.PersonalizationDB,
+        "for_user",
+        classmethod(_fake_for_user),
+    )
+
+    result = record_companion_activity(
+        user_id="user-alpha",
+        event_type="reading_item_saved",
+        source_type="reading_item",
+        source_id="123",
+        surface="api.reading",
+        dedupe_key="reading.save:123",
+    )
+
+    assert result == "evt-1"
+    assert opened_user_ids == [resolve_companion_storage_user_id("user-alpha")]
+
+
 def test_insert_companion_activity_events_bulk_skips_duplicate_dedupe_keys(companion_db_env):
     user_id = "77-bulk"
     db = PersonalizationDB(str(DatabasePaths.get_personalization_db_path(user_id)))
@@ -149,6 +188,81 @@ def test_insert_companion_activity_events_bulk_skips_duplicate_dedupe_keys(compa
     rows, total = db.list_companion_activity_events(user_id, limit=10)
     assert total == 1
     assert rows[0]["source_id"] == "n1"
+
+
+def test_record_reading_item_updated_retains_notes_preview_not_full_text(monkeypatch):
+    captured: dict[str, Any] = {}
+    long_notes = "sensitive " * 80
+
+    def _capture_activity(**kwargs: Any) -> str:
+        captured.update(kwargs)
+        return "evt-note"
+
+    monkeypatch.setattr(companion_activity_module, "record_companion_activity", _capture_activity)
+
+    result = record_reading_item_updated(
+        user_id="1",
+        item=SimpleNamespace(
+            id=123,
+            updated_at="2026-06-23T12:00:00Z",
+            created_at=None,
+            tags=[],
+            title="Reading item",
+            status="active",
+            favorite=False,
+            notes=long_notes,
+        ),
+    )
+
+    metadata = captured["metadata"]
+    assert result == "evt-note"
+    assert "notes" not in metadata
+    assert metadata["notes_preview"].endswith("... [truncated]")
+    assert len(metadata["notes_preview"]) <= 240
+    assert metadata["notes_char_count"] == len(long_notes.strip())
+    assert metadata["notes_digest"]
+
+
+def test_record_reading_highlight_created_retains_quote_and_note_previews(monkeypatch):
+    captured: dict[str, Any] = {}
+    quote = "important quote " * 40
+    note = "private annotation " * 40
+
+    def _capture_activity(**kwargs: Any) -> str:
+        captured.update(kwargs)
+        return "evt-highlight"
+
+    monkeypatch.setattr(companion_activity_module, "record_companion_activity", _capture_activity)
+
+    result = record_reading_highlight_created(
+        user_id="1",
+        highlight=SimpleNamespace(
+            id=99,
+            item_id=123,
+            created_at="2026-06-23T12:00:00Z",
+            quote=quote,
+            note=note,
+            color="yellow",
+            state="active",
+            anchor_strategy="offset",
+            start_offset=0,
+            end_offset=10,
+        ),
+        item_title="Reading item",
+    )
+
+    metadata = captured["metadata"]
+    assert result == "evt-highlight"
+    assert "quote" not in metadata
+    assert "note" not in metadata
+    assert metadata["quote_preview"].endswith("... [truncated]")
+    assert metadata["note_preview"].endswith("... [truncated]")
+    assert len(metadata["quote_preview"]) <= 240
+    assert len(metadata["note_preview"]) <= 240
+    assert metadata["quote_char_count"] == len(quote.strip())
+    assert metadata["note_char_count"] == len(note.strip())
+    assert metadata["quote_digest"]
+    assert metadata["note_digest"]
 
 
 def test_insert_companion_activity_events_bulk_keeps_unique_rows_when_one_conflicts(companion_db_env):
@@ -299,6 +413,7 @@ def test_record_companion_activity_capture_skip_log_omits_exception_text(monkeyp
     assert result is None
     log_text = "\n".join(messages)
     assert "companion activity capture skipped" in log_text
+    assert "RuntimeError" in log_text
     assert "companion backend exploded" not in log_text
     assert "/private/companion.db" not in log_text
 
@@ -334,6 +449,7 @@ def test_record_companion_activity_insert_skip_log_omits_exception_text(monkeypa
     assert result is None
     log_text = "\n".join(messages)
     assert "companion activity insert skipped" in log_text
+    assert "IntegrityError" in log_text
     assert "database disk image is malformed" not in log_text
     assert "/private/companion.db" not in log_text
 
@@ -368,6 +484,7 @@ def test_record_companion_activity_bulk_capture_skip_log_omits_exception_text(mo
     assert result == []
     log_text = "\n".join(messages)
     assert "companion activity bulk capture skipped" in log_text
+    assert "RuntimeError" in log_text
     assert "companion backend exploded" not in log_text
     assert "/private/companion.db" not in log_text
 
@@ -701,7 +818,9 @@ def test_persona_activity_adapters_accept_surface_overrides_and_normalize_invali
     companion_db_env,
 ):
     user_id = "81b"
-    db = PersonalizationDB(str(DatabasePaths.get_personalization_db_path(user_id)))
+    db = PersonalizationDB(
+        str(DatabasePaths.get_personalization_db_path(resolve_companion_storage_user_id(user_id)))
+    )
     db.update_profile(user_id, enabled=1)
 
     started = record_persona_session_started(

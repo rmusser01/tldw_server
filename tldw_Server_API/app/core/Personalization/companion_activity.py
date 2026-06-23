@@ -11,6 +11,9 @@ from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.feature_flags import is_personalization_enabled
+from tldw_Server_API.app.core.Personalization.companion_user_ids import (
+    resolve_companion_storage_user_id,
+)
 
 
 def _open_db_for_user(user_id: str | int) -> tuple[PersonalizationDB, str]:
@@ -18,7 +21,8 @@ def _open_db_for_user(user_id: str | int) -> tuple[PersonalizationDB, str]:
     normalized_user_id = str(user_id or "").strip()
     if not normalized_user_id:
         raise ValueError("user_id is required")
-    return PersonalizationDB.for_user(user_id), normalized_user_id
+    storage_user_id = resolve_companion_storage_user_id(normalized_user_id)
+    return PersonalizationDB.for_user(storage_user_id), normalized_user_id
 
 
 def _profile_opted_in(db: PersonalizationDB, user_id: str) -> bool:
@@ -52,6 +56,10 @@ def _payload_fingerprint(payload: dict[str, Any] | None) -> str:
     except Exception:
         serialized = json.dumps({"unserializable": True}, sort_keys=True, ensure_ascii=True)
     return hashlib.sha1(serialized.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+
+
+def _exception_reason(exc: BaseException) -> str:
+    return type(exc).__name__
 
 
 def record_companion_activity(
@@ -91,10 +99,10 @@ def record_companion_activity(
         if _unique_conflict(exc):
             logger.debug("companion activity duplicate skipped: {}", dedupe_key)
             return None
-        logger.debug("companion activity insert skipped")
+        logger.debug("companion activity insert skipped: reason={}", _exception_reason(exc))
         return None
-    except Exception:
-        logger.debug("companion activity capture skipped")
+    except Exception as exc:
+        logger.debug("companion activity capture skipped: reason={}", _exception_reason(exc))
         return None
 
 
@@ -127,8 +135,8 @@ def record_companion_activity_events_bulk(
             user_id=normalized_user_id,
             events=safe_events,
         )
-    except Exception:
-        logger.warning("companion activity bulk capture skipped")
+    except Exception as exc:
+        logger.warning("companion activity bulk capture skipped: reason={}", _exception_reason(exc))
         return []
 
 
@@ -141,6 +149,32 @@ def _truncate_text(value: str | None, *, max_length: int) -> str | None:
     if len(normalized) <= max_length:
         return normalized
     return normalized[: max_length - 3].rstrip() + "..."
+
+
+def _retained_text_metadata(field_name: str, value: Any, *, max_chars: int = 240) -> dict[str, Any]:
+    text = " ".join(str(value or "").strip().split())
+    if not text:
+        return {
+            f"{field_name}_preview": None,
+            f"{field_name}_char_count": 0,
+            f"{field_name}_digest": "na",
+            f"{field_name}_truncated": False,
+        }
+    digest = hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
+    safe_limit = max(8, int(max_chars))
+    suffix = "... [truncated]"
+    if len(text) <= safe_limit:
+        preview = text
+    elif safe_limit <= len(suffix):
+        preview = text[:safe_limit]
+    else:
+        preview = f"{text[: safe_limit - len(suffix)]}{suffix}"
+    return {
+        f"{field_name}_preview": preview,
+        f"{field_name}_char_count": len(text),
+        f"{field_name}_digest": digest,
+        f"{field_name}_truncated": len(text) > safe_limit,
+    }
 
 
 def _normalize_companion_tags(tags: list[str] | None) -> list[str]:
@@ -256,7 +290,7 @@ def record_reading_item_updated(*, user_id: str | int | None, item: Any) -> str 
             "title": getattr(item, "title", None),
             "status": getattr(item, "status", None),
             "favorite": bool(getattr(item, "favorite", False)),
-            "notes": getattr(item, "notes", None),
+            **_retained_text_metadata("notes", getattr(item, "notes", None)),
         },
     )
 
@@ -366,8 +400,8 @@ def _reading_highlight_metadata(highlight: Any, *, item_title: str | None = None
         "item_id": getattr(highlight, "item_id", None),
         "title": item_title,
         "item_title": item_title,
-        "quote": getattr(highlight, "quote", None),
-        "note": getattr(highlight, "note", None),
+        **_retained_text_metadata("quote", getattr(highlight, "quote", None)),
+        **_retained_text_metadata("note", getattr(highlight, "note", None)),
         "color": getattr(highlight, "color", None),
         "state": getattr(highlight, "state", None),
         "anchor_strategy": getattr(highlight, "anchor_strategy", None),

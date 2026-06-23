@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.Personalization.companion_user_ids import (
 COMPANION_REFLECTION_DOMAIN = "companion"
 COMPANION_REFLECTION_JOB_TYPE = "companion_reflection"
 COMPANION_REBUILD_JOB_TYPE = "companion_rebuild"
+_COMPANION_REFLECTION_CADENCES = frozenset({"daily", "weekly"})
 
 
 def companion_reflection_queue() -> str:
@@ -84,6 +85,13 @@ def _parse_hhmm(raw: Any) -> tuple[int, int] | None:
     return hour, minute
 
 
+def _normalize_reflection_cadence(cadence: str | None) -> str | None:
+    normalized = str(cadence or "").strip().lower() or "daily"
+    if normalized not in _COMPANION_REFLECTION_CADENCES:
+        return None
+    return normalized
+
+
 def _quiet_hours_active(profile: dict[str, Any], now: datetime) -> bool:
     start = _parse_hhmm(profile.get("quiet_hours_start"))
     end = _parse_hhmm(profile.get("quiet_hours_end"))
@@ -110,7 +118,9 @@ def companion_reflection_enabled_for_profile(
         return False, "proactive_disabled"
     if not bool(profile.get("companion_reflections_enabled", 1)):
         return False, "companion_reflections_disabled"
-    normalized_cadence = str(cadence or "").strip().lower()
+    normalized_cadence = _normalize_reflection_cadence(cadence)
+    if normalized_cadence is None:
+        return False, "invalid_cadence"
     if normalized_cadence == "daily" and not bool(profile.get("companion_daily_reflections_enabled", 1)):
         return False, "daily_reflections_disabled"
     if normalized_cadence == "weekly" and not bool(profile.get("companion_weekly_reflections_enabled", 1)):
@@ -388,20 +398,23 @@ def run_companion_reflection_job(
 ) -> dict[str, Any]:
     """Generate one companion reflection for the given cadence slot."""
     normalized_user_id = str(user_id)
+    normalized_cadence = _normalize_reflection_cadence(cadence)
+    if normalized_cadence is None:
+        return {"status": "skipped", "reason": "invalid_cadence"}
     current_time = _coerce_now(_parse_iso_datetime(scheduled_for) or now)
     storage_user_id = resolve_companion_storage_user_id(normalized_user_id)
     db = personalization_db or PersonalizationDB.for_user(storage_user_id)
     cdb = collections_db or CollectionsDatabase.for_user(user_id=normalized_user_id)
     profile = db.get_or_create_profile(normalized_user_id)
 
-    enabled, reason = companion_reflection_enabled_for_profile(profile, cadence)
+    enabled, reason = companion_reflection_enabled_for_profile(profile, normalized_cadence)
     if not enabled:
         return {"status": "skipped", "reason": reason}
     if _quiet_hours_active(profile, current_time):
         return {"status": "skipped", "reason": "quiet_hours"}
 
-    slot_key = _reflection_slot_key(cadence, current_time)
-    dedupe_key = f"companion.reflection:{cadence}:{slot_key}"
+    slot_key = _reflection_slot_key(normalized_cadence, current_time)
+    dedupe_key = f"companion.reflection:{normalized_cadence}:{slot_key}"
     recent_rows, _total = db.list_companion_activity_events(normalized_user_id, limit=100, offset=0)
     recent_reflections = _recent_reflection_summaries(rows=recent_rows, current_slot_key=slot_key)
     activity_rows = [row for row in recent_rows if row["source_type"] != "companion_reflection"]
@@ -415,14 +428,14 @@ def run_companion_reflection_job(
         if str(goal.get("status") or "").lower() in {"active", "paused"}
     ]
     title, metadata, provenance, tags = _build_reflection_payload(
-        cadence=cadence,
+        cadence=normalized_cadence,
         cards=cards,
         goals=goals,
         activity_rows=activity_rows,
         now=current_time,
     )
     delivery = classify_companion_reflection_delivery(
-        cadence=cadence,
+        cadence=normalized_cadence,
         activity_count=len(activity_rows),
         theme_key=str(metadata.get("theme_key") or ""),
         signal_strength=float(metadata.get("signal_strength") or 0.0),
@@ -464,7 +477,7 @@ def run_companion_reflection_job(
             source_job_type=COMPANION_REFLECTION_JOB_TYPE,
             link_type="companion_reflection",
             link_id=reflection_id,
-            dedupe_key=f"companion_reflection:{cadence}:{slot_key}",
+            dedupe_key=f"companion_reflection:{normalized_cadence}:{slot_key}",
         )
     return {
         "status": "completed",
@@ -485,6 +498,12 @@ async def handle_companion_reflection_job(job: dict[str, Any]) -> dict[str, Any]
             user_id=user_id,
             scope=scope,
         )
+    if job_type and job_type != COMPANION_REFLECTION_JOB_TYPE:
+        return {
+            "status": "skipped",
+            "reason": "unsupported_job_type",
+            "job_type": job_type,
+        }
     cadence = str(payload.get("cadence") or "daily").strip().lower() or "daily"
     scheduled_for = payload.get("scheduled_for")
     return await asyncio.to_thread(

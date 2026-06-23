@@ -20,7 +20,10 @@ def resolve_companion_storage_user_id(user_id: str | int) -> str:
             raw.encode("utf-8"),
             "sha256",
         )
-        return str(int.from_bytes(digest[:4], byteorder="big", signed=False))
+        storage_id = int.from_bytes(digest[:16], byteorder="big", signed=False)
+        if storage_id <= 0:
+            storage_id = int.from_bytes(digest, byteorder="big", signed=False)
+        return str(storage_id)
 
 
 __all__ = ["resolve_companion_storage_user_id"]

@@ -10,31 +10,18 @@ from fastapi import Depends, Request
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import (
     PersonalizationDB,
     UsageEvent,
+)
+from tldw_Server_API.app.core.Personalization.companion_user_ids import (
+    resolve_companion_storage_user_id,
 )
 
 
 def get_personalization_db_for_user(user: User = Depends(get_request_user)) -> PersonalizationDB:
     """Return a PersonalizationDB instance bound to the current user's DB path."""
-    # Accept both numeric and string IDs in tests/single-user flows
-    try:
-        uid = int(user.id)
-    except Exception:
-        # Derive a stable numeric from string id (e.g., "test_user")
-        try:
-            import hashlib
-            # Deterministic non-crypto ID derivation for non-integer test/single-user IDs.
-            # `usedforsecurity=False` keeps behavior while making intent explicit.
-            try:
-                digest = hashlib.sha1(str(user.id).encode("utf-8"), usedforsecurity=False).digest()
-            except TypeError:  # pragma: no cover - compatibility fallback
-                digest = hashlib.sha1(str(user.id).encode("utf-8")).digest()  # nosec B324
-            uid = int.from_bytes(digest[:4], byteorder="big", signed=False)
-        except Exception:
-            uid = 0
+    uid = resolve_companion_storage_user_id(user.id)
     return PersonalizationDB.for_user(uid)
 
 

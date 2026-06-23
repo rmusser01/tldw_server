@@ -7,7 +7,6 @@ Stage 1 scaffold: topic scoring from event tags, no embedding integration yet.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,6 +18,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.Personalization.companion_derivations import derive_companion_knowledge_cards
+from tldw_Server_API.app.core.Personalization.companion_user_ids import resolve_companion_storage_user_id
 
 _PERSONALIZATION_CONSOLIDATION_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -33,13 +33,9 @@ _PERSONALIZATION_CONSOLIDATION_NONCRITICAL_EXCEPTIONS = (
 )
 
 
-def _resolve_user_id_to_int(user_id: str) -> int:
-    """Convert a user_id string to a numeric value, mirroring personalization_deps logic."""
-    try:
-        return int(user_id)
-    except (ValueError, TypeError):
-        digest = hashlib.sha1(str(user_id).encode("utf-8"), usedforsecurity=False).digest()
-        return int.from_bytes(digest[:4], byteorder="big", signed=False)
+def _resolve_user_storage_id(user_id: str) -> str:
+    """Return the shared personalization storage id for logical user ids."""
+    return resolve_companion_storage_user_id(user_id)
 
 
 @dataclass
@@ -212,8 +208,8 @@ class PersonalizationConsolidationService:
 
     @staticmethod
     def _get_user_db(user_id: str) -> PersonalizationDB:
-        uid_int = _resolve_user_id_to_int(user_id)
-        return PersonalizationDB.for_user(uid_int)
+        storage_user_id = _resolve_user_storage_id(user_id)
+        return PersonalizationDB.for_user(storage_user_id)
 
     @staticmethod
     def _score_topics_from_events(events: list[dict]) -> dict[str, float]:
