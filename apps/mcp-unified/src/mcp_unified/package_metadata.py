@@ -72,7 +72,7 @@ def package_metadata_summary() -> dict[str, object]:
         "license_expression": LICENSE_EXPRESSION,
         "source_distribution": SOURCE_DISTRIBUTION,
         "dependency_version_policy": DEPENDENCY_VERSION_POLICY,
-        "base_dependencies": list(BASE_DEPENDENCIES),
+        "base_dependencies": list(PROJECT_DEPENDENCIES),
         "optional_extras": {
             extra: list(dependencies)
             for extra, dependencies in OPTIONAL_EXTRAS.items()

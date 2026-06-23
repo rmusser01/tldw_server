@@ -4,7 +4,7 @@ title: Implement MCP Unified internal RC artifact pipeline
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-23 06:27'
+updated_date: '2026-06-23 06:37'
 labels:
   - mcp
   - packaging
@@ -70,12 +70,14 @@ PR #2430 review follow-up started after CI/review inspection. Still-valid issues
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 PR #2430 review follow-up completed. Fixed still-valid live review items: root tldw-server package discovery now includes apps/mcp-unified/src and mcp_unified*; source checkouts bootstrap apps/mcp-unified/src before host MCP imports; RC harness uses tomli fallback, Loguru status output, errors="replace", and graceful OSError command-start evidence; new/changed RC tests have module/function docstrings and module-level unit markers; MCP RC workflow pins checkout/setup-python/upload-artifact actions, disables checkout credential persistence, and uploads RC artifacts with if: always(); boundary tests now keep checkout source out of build subprocess environments while retaining it for runtime import subprocesses. Validation: focused pytest passed (68 passed, 5 warnings); Ruff passed; compileall passed; workflow YAML parse confirmed pinned actions/persist-credentials false/always upload; source-checkout host MCP import smoke passed; setuptools package discovery check found mcp_unified, mcp_unified.interfaces, and tldw_Server_API; make PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python mcp-unified-rc passed with evidence ok=True, 13 passed, 0 failed, 9 optional local dependency skips; Bandit non-test touched scope reported zero findings, full touched scope reported only existing low-severity test-file baseline; git diff --check passed. Generated .artifacts/ remains untracked.
+
+Post-rebase follow-up: rebased PR #2430 onto latest origin/dev after GitHub reported mergeStateStatus=DIRTY. Resolved the package metadata/test conflict by preserving the PR's PROJECT_DEPENDENCIES/NETWORK_DEPENDENCIES contract and updating the release metadata summary/assertions away from the stale BASE_DEPENDENCIES/SMOKE_TRANSPORT_DEPENDENCIES names. Fresh validation after rebase: focused MCP RC/package-boundary pytest passed (68 passed, 5 warnings); Ruff passed; compileall passed; non-test Bandit scope reported zero findings; full touched Bandit scope reported 89 low-severity test-file baseline findings, 0 medium/high, 0 errors; git diff --check passed; full make PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python mcp-unified-rc passed with evidence ok=True, 13 passed, 0 failed, 9 optional local dependency skips.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed PR #2430 review feedback for the MCP Unified internal RC package pipeline. The root tldw-server package and source-checkout host imports now provide mcp_unified, the RC harness is more robust and uses Loguru, test metadata/docstrings comply with review requirements, workflow actions are pinned with safer checkout/upload behavior, and build-boundary tests no longer inject checkout src into build subprocesses. Validation: focused pytest 68 passed, Ruff/compileall/diff checks passed, workflow YAML parse passed, non-test Bandit zero findings, full touched Bandit only existing low-severity test baseline, and make mcp-unified-rc passed with 13 required passes and 9 optional local network skips.
+Addressed PR #2430 review feedback and rebased the branch onto latest dev. Review threads were fixed and resolved: root tldw-server package discovery/source checkout imports now provide mcp_unified, the RC harness is more robust and uses Loguru, tests have docstrings/markers, workflow actions are pinned with safer checkout/upload behavior, build subprocesses no longer inject checkout src, and the post-rebase metadata conflict now consistently uses PROJECT_DEPENDENCIES/NETWORK_DEPENDENCIES. Validation after rebase: focused pytest 68 passed, Ruff/compileall/diff checks passed, non-test Bandit zero findings, full touched Bandit only low-severity test baseline, and make mcp-unified-rc passed with 13 required passes and 9 optional local network skips.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

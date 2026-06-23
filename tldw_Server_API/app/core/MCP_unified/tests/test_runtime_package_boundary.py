@@ -496,17 +496,17 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
     )
     assert all(
         isinstance(dependency, str)
-        for dependency in metadata.BASE_DEPENDENCIES
+        for dependency in metadata.PROJECT_DEPENDENCIES
     )
     assert all(
         dependency == _dependency_package_name(dependency)
-        for dependency in metadata.BASE_DEPENDENCIES
+        for dependency in metadata.PROJECT_DEPENDENCIES
     )
-    assert set(metadata.CORE_DEPENDENCIES).issubset(metadata.BASE_DEPENDENCIES)
-    assert set(metadata.SMOKE_TRANSPORT_DEPENDENCIES).issubset(
-        metadata.BASE_DEPENDENCIES
+    assert set(metadata.CORE_DEPENDENCIES).issubset(metadata.PROJECT_DEPENDENCIES)
+    assert set(metadata.NETWORK_DEPENDENCIES).issubset(
+        metadata.PROJECT_DEPENDENCIES
     )
-    assert set(metadata.SMOKE_TRANSPORT_DEPENDENCIES).issubset(
+    assert set(metadata.NETWORK_DEPENDENCIES).issubset(
         metadata.GATEWAY_DEPENDENCIES
     )
     assert all(
@@ -536,7 +536,7 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
     assert summary["ok"] is True
     assert summary["package_name"] == metadata.PACKAGE_NAME
     assert summary["dependency_version_policy"] == metadata.DEPENDENCY_VERSION_POLICY
-    assert summary["base_dependencies"] == list(metadata.BASE_DEPENDENCIES)
+    assert summary["base_dependencies"] == list(metadata.PROJECT_DEPENDENCIES)
     assert summary["optional_extras"] == {
         key: list(value)
         for key, value in extras.items()
