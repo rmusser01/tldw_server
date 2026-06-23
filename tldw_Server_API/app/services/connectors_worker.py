@@ -8,6 +8,7 @@ import html
 import json
 import os
 import re
+from dataclasses import replace
 from datetime import datetime, timezone
 from fnmatch import fnmatch
 from typing import Any
@@ -41,6 +42,7 @@ _CONNECTOR_NONCRITICAL_EXCEPTIONS = (
 
 DOMAIN = "connectors"
 _EMAIL_SYNC_METRICS_REGISTERED = False
+_FILE_SYNC_RESTORABLE_STATUSES = frozenset({"archived_upstream_removed", "orphaned"})
 
 
 def _email_sync_metric_labels(
@@ -473,6 +475,17 @@ def _file_sync_cursor_kind(provider: str) -> str | None:
     if normalized == "onedrive":
         return "graph_delta_link"
     return None
+
+
+def _normalize_file_sync_delta_event(change, binding: dict[str, Any] | None):
+    if change.event_type != "content_updated":
+        return change
+    if not binding:
+        return replace(change, event_type="created")
+    sync_status = str(binding.get("sync_status") or "active").strip().lower()
+    if sync_status in _FILE_SYNC_RESTORABLE_STATUSES:
+        return replace(change, event_type="restored")
+    return change
 
 
 def _determine_drive_export_mime(
@@ -1214,6 +1227,7 @@ async def _process_import_job(
                         external_id=change.remote_id,
                     )
 
+                change = _normalize_file_sync_delta_event(change, binding)
                 if not binding and change.event_type != "created":
                     logger.warning(
                         "Skipping file sync change without binding for provider={} source_id={} remote_id={}",

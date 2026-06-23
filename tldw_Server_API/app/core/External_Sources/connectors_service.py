@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -84,6 +85,8 @@ _EXTERNAL_ITEM_BINDING_FIELDS = (
     "access_revoked_at",
     "provider_metadata",
 )
+_TRUTHY_ENV_VALUES = frozenset({"1", "true", "t", "yes", "y", "on"})
+
 
 def _utc_now_text() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -126,6 +129,42 @@ def _json_loads(value: Any, default: Any) -> Any:
         return json.loads(value)
     except _CONNECTORS_NONCRITICAL_EXCEPTIONS:
         return default
+
+
+def _env_truthy(name: str) -> bool:
+    return str(os.getenv(name, "")).strip().lower() in _TRUTHY_ENV_VALUES
+
+
+def _connector_secret_encryption_required() -> bool:
+    auth_mode = str(os.getenv("AUTH_MODE", "")).strip().lower()
+    return (
+        _env_truthy("CONNECTORS_REQUIRE_TOKEN_ENCRYPTION")
+        or auth_mode == "multi_user"
+        or _env_truthy("tldw_production")
+        or _env_truthy("TLDW_PRODUCTION")
+    )
+
+
+def _raise_required_connector_secret_encryption() -> None:
+    logger.warning("Connector secret encryption is required but unavailable")
+    raise RuntimeError("Connector secret encryption is required but unavailable")
+
+
+def _encrypt_connector_secret_payload(payload: dict[str, Any], *, failure_log: str) -> dict[str, Any] | None:
+    try:
+        from tldw_Server_API.app.core.Security.crypto import encrypt_json_blob
+
+        envelope = encrypt_json_blob(dict(payload or {}))
+        if envelope:
+            return envelope
+    except _CONNECTORS_NONCRITICAL_EXCEPTIONS:
+        if _connector_secret_encryption_required():
+            _raise_required_connector_secret_encryption()
+        logger.debug(failure_log)
+        return None
+    if _connector_secret_encryption_required():
+        _raise_required_connector_secret_encryption()
+    return None
 
 
 def _provider_metadata_from_tokens(tokens: dict[str, Any] | None) -> dict[str, Any]:
@@ -181,14 +220,12 @@ def _normalize_reference_item_row(row: Any) -> dict[str, Any] | None:
 def _protect_oauth_state_metadata(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
     if not metadata:
         return None
-    try:
-        from tldw_Server_API.app.core.Security.crypto import encrypt_json_blob
-
-        envelope = encrypt_json_blob(dict(metadata))
-        if envelope:
-            return envelope
-    except _CONNECTORS_NONCRITICAL_EXCEPTIONS:
-        logger.debug("Failed to encrypt oauth state metadata")
+    envelope = _encrypt_connector_secret_payload(
+        dict(metadata),
+        failure_log="Failed to encrypt oauth state metadata",
+    )
+    if envelope:
+        return envelope
     return dict(metadata)
 
 
@@ -539,7 +576,7 @@ async def consume_oauth_state(
     await _ensure_tables(db)
     is_pg = _is_postgres_connection(db)
     cutoff_dt, cutoff_str = _oauth_state_cutoff(max_age_minutes)
-    row = await _fetch_oauth_state_row(
+    row = await _consume_oauth_state_row(
         db,
         is_pg=is_pg,
         state=state,
@@ -550,16 +587,10 @@ async def consume_oauth_state(
     )
     if not row:
         return False
-    await _delete_oauth_state_row(
-        db,
-        is_pg=is_pg,
-        state=state,
-        user_id=user_id,
-    )
     return _normalize_oauth_state_row(row) or True
 
 
-async def _fetch_oauth_state_row(
+async def _consume_oauth_state_row(
     db,
     *,
     is_pg: bool,
@@ -572,39 +603,23 @@ async def _fetch_oauth_state_row(
     if is_pg:
         return await db.fetchrow(
             """
-            SELECT state, provider, metadata, created_at FROM external_oauth_state
+            DELETE FROM external_oauth_state
             WHERE state = $1 AND user_id = $2 AND provider = $3 AND created_at >= $4
+            RETURNING state, provider, metadata, created_at
             """,
             state, user_id, provider, cutoff_dt,
         )
     cur = await db.execute(
         """
-        SELECT state, provider, metadata, created_at FROM external_oauth_state
+        DELETE FROM external_oauth_state
         WHERE state = ? AND user_id = ? AND provider = ? AND created_at >= ?
+        RETURNING state, provider, metadata, created_at
         """,
         (state, user_id, provider, cutoff_str),
     )
-    return await cur.fetchone()
-
-
-async def _delete_oauth_state_row(
-    db,
-    *,
-    is_pg: bool,
-    state: str,
-    user_id: int,
-) -> None:
-    if is_pg:
-        await db.execute(
-            "DELETE FROM external_oauth_state WHERE state = $1 AND user_id = $2",
-            state, user_id,
-        )
-        return
-    await db.execute(
-        "DELETE FROM external_oauth_state WHERE state = ? AND user_id = ?",
-        (state, user_id),
-    )
+    row = await cur.fetchone()
     await getattr(db, "commit", lambda: None)()
+    return row
 
 
 async def create_account(db, user_id: int, provider: str, display_name: str, email: str | None, tokens: dict[str, Any]) -> dict[str, Any]:
@@ -613,16 +628,13 @@ async def create_account(db, user_id: int, provider: str, display_name: str, ema
     provider_metadata = _provider_metadata_from_tokens(tokens)
     # Securely envelope tokens if crypto is configured; fallback to storing access token raw
     import json as _json
-    try:
-        from tldw_Server_API.app.core.Security.crypto import encrypt_json_blob
-        env = encrypt_json_blob(dict(tokens or {}))
-        access_token_store = _json.dumps(env) if env else str(tokens.get("access_token") or "")
-        refresh_token_store = None  # envelope contains refresh
-        tokens.get("scope") or None
-    except _CONNECTORS_NONCRITICAL_EXCEPTIONS:
-        access_token_store = str(tokens.get("access_token") or "")
-        refresh_token_store = tokens.get("refresh_token")
-        tokens.get("scope") or None
+    env = _encrypt_connector_secret_payload(
+        dict(tokens or {}),
+        failure_log="Failed to encrypt connector account tokens",
+    )
+    access_token_store = _json.dumps(env) if env else str(tokens.get("access_token") or "")
+    refresh_token_store = None if env else tokens.get("refresh_token")
+    tokens.get("scope") or None
 
     if is_pg:
         row = await db.fetchrow(
@@ -765,19 +777,16 @@ async def update_account_tokens(db, user_id: int, account_id: int, new_tokens: d
     provider_metadata_value = existing_provider_metadata | _provider_metadata_from_tokens(new_tokens)
     refresh_token_value = new_tokens.get("refresh_token") or existing_refresh
     # Build storage values similar to create_account
-    try:
-        from tldw_Server_API.app.core.Security.crypto import encrypt_json_blob
-        envelope_payload = dict(existing.get("tokens") or {})
-        envelope_payload.update(dict(new_tokens or {}))
-        envelope_payload["refresh_token"] = refresh_token_value
-        env = encrypt_json_blob(envelope_payload)
-        access_token_store = _json.dumps(env) if env else str(new_tokens.get("access_token") or "")
-        refresh_token_store = None
-        scopes_store = new_tokens.get("scope") or None
-    except _CONNECTORS_NONCRITICAL_EXCEPTIONS:
-        access_token_store = str(new_tokens.get("access_token") or "")
-        refresh_token_store = refresh_token_value
-        scopes_store = new_tokens.get("scope") or None
+    envelope_payload = dict(existing.get("tokens") or {})
+    envelope_payload.update(dict(new_tokens or {}))
+    envelope_payload["refresh_token"] = refresh_token_value
+    env = _encrypt_connector_secret_payload(
+        envelope_payload,
+        failure_log="Failed to encrypt connector account tokens",
+    )
+    access_token_store = _json.dumps(env) if env else str(new_tokens.get("access_token") or "")
+    refresh_token_store = None if env else refresh_token_value
+    scopes_store = new_tokens.get("scope") or None
 
     if is_pg:
         # Ensure ownership
@@ -2587,16 +2596,6 @@ async def create_import_job(
                 if _job_is_active(active_job):
                     return _format_connectors_job(active_job or {}, source_id=source_id, default_type=job_type)
         return _format_connectors_job(job, source_id=source_id, default_type=job_type)
-    except _CONNECTORS_NONCRITICAL_EXCEPTIONS:
+    except _CONNECTORS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning("Failed to create connectors job via JobManager")
-        # Fallback to synthetic ID
-        import uuid
-        jid = uuid.uuid4().hex
-        return {
-            "id": jid,
-            "source_id": source_id,
-            "type": job_type,
-            "status": "queued",
-            "progress_pct": 0,
-            "counts": {"processed": 0, "skipped": 0, "failed": 0},
-        }
+        raise RuntimeError("Failed to create connectors job") from exc

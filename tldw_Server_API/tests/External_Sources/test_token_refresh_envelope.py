@@ -10,6 +10,7 @@ async def test_update_account_tokens_encrypted_env(monkeypatch, tmp_path):
 
     # Enable encryption
     # Valid base64-encoded 32-byte key (AES-256)
+    monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("WORKFLOWS_ARTIFACT_ENC_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 
     import aiosqlite
@@ -53,6 +54,9 @@ async def test_update_account_tokens_encrypted_env(monkeypatch, tmp_path):
 async def test_update_account_tokens_plaintext_without_env(monkeypatch, tmp_path):
     from tldw_Server_API.app.core.External_Sources import connectors_service as svc
     # Ensure encryption disabled
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.delenv("CONNECTORS_REQUIRE_TOKEN_ENCRYPTION", raising=False)
+    monkeypatch.delenv("tldw_production", raising=False)
     monkeypatch.delenv("WORKFLOWS_ARTIFACT_ENC_KEY", raising=False)
 
     import aiosqlite
@@ -74,3 +78,33 @@ async def test_update_account_tokens_plaintext_without_env(monkeypatch, tmp_path
         # get_account_tokens reflects new value
         toks = await svc.get_account_tokens(db, 1, account_id)
         assert toks.get("access_token") == "n2"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_create_account_requires_encryption_in_multi_user(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.External_Sources import connectors_service as svc
+    from tldw_Server_API.app.core.Security import crypto
+
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.delenv("CONNECTORS_REQUIRE_TOKEN_ENCRYPTION", raising=False)
+    monkeypatch.delenv("tldw_production", raising=False)
+    monkeypatch.delenv("WORKFLOWS_ARTIFACT_ENC_KEY", raising=False)
+    monkeypatch.setattr(crypto, "encrypt_json_blob", lambda _tokens: None)
+
+    import aiosqlite
+    db_path = tmp_path / "required-encryption.db"
+    async with aiosqlite.connect(str(db_path)) as db:
+        with pytest.raises(RuntimeError, match="Connector secret encryption is required"):
+            await svc.create_account(
+                db,
+                user_id=1,
+                provider="drive",
+                display_name="Drive",
+                email="user@example.com",
+                tokens={"access_token": "at1", "refresh_token": "rt1"},
+            )
+
+        cur = await db.execute("SELECT COUNT(*) FROM external_accounts")
+        row = await cur.fetchone()
+        assert row[0] == 0

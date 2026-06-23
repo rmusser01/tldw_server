@@ -1,14 +1,58 @@
 from __future__ import annotations
 
+import html
 import os
+import re
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from loguru import logger
 
 from tldw_Server_API.app.core.http_client import afetch
 
 from .connector_base import BaseConnector
+
+_MARKDOWN_SPECIAL_CHARS = re.compile(r"([\\`*_{}\[\]()#+\-.!|])")
+_JAVASCRIPT_SCHEME = re.compile(r"(?i)\bjavascript\s*:")
+_SAFE_CODE_LANGUAGE = re.compile(r"[^A-Za-z0-9_+.#-]")
+_BACKTICK_RUN = re.compile(r"`+")
+
+
+def _neutralize_unsafe_text_schemes(value: str) -> str:
+    return _JAVASCRIPT_SCHEME.sub("javascript&#58;", value)
+
+
+def _escape_markdown_text(value: Any) -> str:
+    text = html.escape(str(value or ""), quote=False)
+    text = _neutralize_unsafe_text_schemes(text)
+    return _MARKDOWN_SPECIAL_CHARS.sub(r"\\\1", text)
+
+
+def _escape_html_text(value: Any) -> str:
+    return _neutralize_unsafe_text_schemes(html.escape(str(value or ""), quote=True))
+
+
+def _rich_text_plain_text(rich: list[dict[str, Any]]) -> str:
+    return "".join(str(part.get("plain_text") or "") for part in rich or [])
+
+
+def _safe_markdown_url(value: Any) -> str | None:
+    url = str(value or "").strip()
+    if not url or any(char.isspace() for char in url) or any(char in url for char in "<>"):
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in {"http", "https"}:
+        return None
+    return url.replace(")", "%29")
+
+
+def _sanitize_code_language(value: Any) -> str:
+    return _SAFE_CODE_LANGUAGE.sub("", str(value or "").strip())
+
+
+def _code_fence_for(text: str) -> str:
+    max_run = max((len(match.group(0)) for match in _BACKTICK_RUN.finditer(text)), default=0)
+    return "`" * max(3, max_run + 1)
 
 
 class NotionConnector(BaseConnector):
@@ -186,16 +230,19 @@ class NotionConnector(BaseConnector):
         def _rich_text_to_md(rich: list[dict[str, Any]]) -> str:
             out = []
             for p in rich or []:
-                txt = p.get("plain_text") or ""
+                raw_txt = p.get("plain_text") or ""
                 ann = (p.get("annotations") or {})
                 if ann.get("code"):
-                    txt = f"`{txt}`"
-                if ann.get("bold"):
-                    txt = f"**{txt}**"
-                if ann.get("italic"):
-                    txt = f"*{txt}*"
-                if ann.get("strikethrough"):
-                    txt = f"~~{txt}~~"
+                    inline_code = _escape_html_text(raw_txt).replace("`", "\\`")
+                    txt = f"`{inline_code}`"
+                else:
+                    txt = _escape_markdown_text(raw_txt)
+                    if ann.get("bold"):
+                        txt = f"**{txt}**"
+                    if ann.get("italic"):
+                        txt = f"*{txt}*"
+                    if ann.get("strikethrough"):
+                        txt = f"~~{txt}~~"
                 out.append(txt)
             return "".join(out)
 
@@ -225,7 +272,7 @@ class NotionConnector(BaseConnector):
                         lines.extend(await _render_block(kb, depth + 1))
             # Toggle
             elif t == "toggle":
-                text = _rich_text_to_md(bt.get("rich_text") or [])
+                text = "".join(_escape_html_text(p.get("plain_text") or "") for p in bt.get("rich_text") or [])
                 lines.append(f"<details><summary>{text}</summary>")
                 if b.get("has_children"):
                     kids = await _fetch_children(b.get("id"))
@@ -234,9 +281,11 @@ class NotionConnector(BaseConnector):
                 lines.append("</details>")
             # Code block
             elif t == "code":
-                lang = (bt.get("language") or "").strip() or ""
-                text = _rich_text_to_md(bt.get("rich_text") or [])
-                lines.append(f"```{lang}\n{text}\n```")
+                lang = _sanitize_code_language(bt.get("language"))
+                text = html.escape(_rich_text_plain_text(bt.get("rich_text") or []), quote=False)
+                text = _neutralize_unsafe_text_schemes(text)
+                fence = _code_fence_for(text)
+                lines.append(f"{fence}{lang}\n{text}\n{fence}")
             # Quote
             elif t == "quote":
                 text = _rich_text_to_md(bt.get("rich_text") or [])
@@ -245,7 +294,7 @@ class NotionConnector(BaseConnector):
             elif t == "callout":
                 text = _rich_text_to_md(bt.get("rich_text") or [])
                 emoji = (bt.get("icon") or {}).get("emoji") if isinstance(bt.get("icon"), dict) else None
-                prefix = f"{emoji} " if emoji else ""
+                prefix = f"{_escape_markdown_text(emoji)} " if emoji else ""
                 lines.append(f"> {prefix}{text}")
             # Table (render table and its rows)
             elif t == "table":
@@ -278,13 +327,14 @@ class NotionConnector(BaseConnector):
                 elif bt.get("type") == "file":
                     src = (bt.get("file") or {}).get("url")
                 alt = cap or "image"
-                if src:
-                    lines.append(f"![{alt}]({src})")
+                safe_src = _safe_markdown_url(src)
+                if safe_src:
+                    lines.append(f"![{alt}]({safe_src})")
                 else:
                     lines.append(f"![{alt}]")
             # Unsupported types: render a placeholder and children if any
             else:
-                typename = t or "unknown"
+                typename = re.sub(r"[^A-Za-z0-9_:-]", "", str(t or "unknown")) or "unknown"
                 lines.append(f"<!-- unsupported block: {typename} -->")
                 if b.get("has_children"):
                     kids = await _fetch_children(b.get("id"))

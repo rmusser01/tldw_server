@@ -36,10 +36,10 @@ class BaseConnector(ABC):
         page_size: int = 50,
         cursor: str | None = None,
     ) -> tuple[list[dict[str, Any]], str | None]:
-        """List folders/pages/databases; scaffold returns empty list."""
+        """List folders/pages/databases when implemented by a provider."""
         _ = page_size
         _ = cursor
-        return [], None
+        raise NotImplementedError(f"{self.name} does not support source listing")
 
     async def list_files(
         self,
@@ -49,15 +49,15 @@ class BaseConnector(ABC):
         page_size: int = 50,
         cursor: str | None = None,
     ) -> tuple[list[dict[str, Any]], str | None]:
-        """List files under a folder/page; scaffold returns empty list."""
+        """List files under a folder/page when implemented by a provider."""
         _ = page_size
         _ = cursor
-        return [], None
+        raise NotImplementedError(f"{self.name} does not support file listing")
 
     async def download_file(self, account: dict[str, Any], file_id: str, **kwargs: Any) -> bytes:
-        """Download file contents; scaffold returns empty bytes."""
+        """Download file contents when implemented by a provider."""
         _ = kwargs
-        return b""
+        raise NotImplementedError(f"{self.name} does not support file download")
 
     async def list_children(
         self,
