@@ -29,6 +29,7 @@ def test_billing_package_lazy_subscription_exports() -> None:
         # router-group contract tests). Only the payment-processing modules are removed.
         "tldw_Server_API.app.api.v1.endpoints.billing_webhooks",
         "tldw_Server_API.app.core.Billing.stripe_client",
+        "tldw_Server_API.app.core.Billing.billing_audit",
         "tldw_Server_API.app.services.stripe_metering_service",
     ],
 )
