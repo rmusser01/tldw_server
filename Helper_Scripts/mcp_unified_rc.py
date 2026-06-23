@@ -708,6 +708,14 @@ def _run_extras_matrix(paths: RcPaths, recorder: RcEvidenceRecorder) -> None:
                 name=f"{extra}_import",
                 result=import_result,
             )
+            _run_extra_tier_checks(
+                recorder,
+                extra=extra,
+                repo_root=paths.repo_root,
+                python_path=python_path,
+                venv_dir=venv_dir,
+                temp_dir=temp_dir,
+            )
 
 
 def _run_cli_uat(paths: RcPaths, recorder: RcEvidenceRecorder) -> None:
@@ -749,6 +757,141 @@ def _run_smoke_uat(paths: RcPaths, recorder: RcEvidenceRecorder) -> None:
         phase="smoke_uat",
         name="user_guide_smoke_transports",
         mode="smoke",
+    )
+
+
+def _run_extra_tier_checks(
+    recorder: RcEvidenceRecorder,
+    *,
+    extra: str,
+    repo_root: Path,
+    python_path: Path,
+    venv_dir: Path,
+    temp_dir: Path,
+) -> None:
+    """Run extra-specific installed-package checks required by the RC spec."""
+
+    if extra == "core":
+        result = run_command(
+            [str(_venv_executable(venv_dir, "mcp-unified-gateway")), "package-info"],
+            cwd=temp_dir,
+            timeout=60,
+        )
+        _record_command_result(
+            recorder,
+            phase="extras_matrix",
+            name="core_package_info",
+            result=result,
+        )
+        return
+    if extra == "gateway":
+        _run_gateway_extra_checks(recorder, python_path=python_path, venv_dir=venv_dir, temp_dir=temp_dir)
+        return
+    if extra == "sqlite":
+        result = run_command(
+            [
+                str(python_path),
+                "-c",
+                (
+                    "import asyncio; "
+                    "from pathlib import Path; "
+                    "from mcp_unified.storage.sqlite import SQLiteMCPStore; "
+                    "from mcp_unified.tool_use_reporting.sqlite import SQLiteToolUseEventStore; "
+                    "profile_store = SQLiteMCPStore(Path('mcp-store.db')); "
+                    "profile_store.close(); "
+                    "event_store = SQLiteToolUseEventStore(Path('mcp-tool-events.db')); "
+                    "asyncio.run(event_store.aclose()); "
+                    "print('sqlite-ok')"
+                ),
+            ],
+            cwd=temp_dir,
+            timeout=60,
+        )
+        _record_command_result(
+            recorder,
+            phase="extras_matrix",
+            name="sqlite_storage_smoke",
+            result=result,
+        )
+        return
+    if extra == "dev":
+        result = run_command(
+            [
+                str(python_path),
+                "-m",
+                "pytest",
+                "-c",
+                str(Path("apps") / "mcp-unified" / "pytest-artifact-gate.ini"),
+                ".github/tests/test_mcp_unified_artifact_gate.py",
+                "-q",
+            ],
+            cwd=repo_root,
+            timeout=300,
+            env={"PYTHONPATH": str(repo_root / "apps" / "mcp-unified" / "src")},
+        )
+        _record_command_result(
+            recorder,
+            phase="extras_matrix",
+            name="dev_artifact_gate_selection",
+            result=result,
+        )
+
+
+def _run_gateway_extra_checks(
+    recorder: RcEvidenceRecorder,
+    *,
+    python_path: Path,
+    venv_dir: Path,
+    temp_dir: Path,
+) -> None:
+    """Run installed gateway-extra import and config-validation checks."""
+
+    import_result = run_command(
+        [
+            str(python_path),
+            "-c",
+            (
+                "import mcp_unified.gateway.cli; "
+                "import mcp_unified.gateway.config; "
+                "print('gateway-ok')"
+            ),
+        ],
+        cwd=temp_dir,
+        timeout=60,
+    )
+    _record_command_result(
+        recorder,
+        phase="extras_matrix",
+        name="gateway_module_imports",
+        result=import_result,
+    )
+    config_path = temp_dir / "gateway-extra-config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "default_preset_id": "project-researcher",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    validation_result = run_command(
+        [
+            str(_venv_executable(venv_dir, "mcp-unified-gateway")),
+            "validate-config",
+            str(config_path),
+        ],
+        cwd=temp_dir,
+        timeout=60,
+    )
+    _record_command_result(
+        recorder,
+        phase="extras_matrix",
+        name="gateway_config_validation",
+        result=validation_result,
     )
 
 

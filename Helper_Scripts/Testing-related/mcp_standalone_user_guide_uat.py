@@ -193,6 +193,7 @@ def build_uat_plan(
     asgi_fixture = workspace / "smoke_asgi_fixture.py"
     http_smoke_report = workspace / "mcp-smoke-http.json"
     websocket_smoke_report = workspace / "mcp-smoke-websocket.json"
+    tool_events_export = workspace / "mcp-tool-events.jsonl"
     fixture_port = fixture_port or _fixture_port_for_workspace(workspace)
 
     steps = [
@@ -478,6 +479,40 @@ def build_uat_plan(
                 "report",
                 "--group-by",
                 "profile",
+                "--config",
+                str(reporting_config),
+            ],
+            cwd=workspace,
+        ),
+        UatStep(
+            "tool_events_export",
+            "Export metadata-only tool-use events from the configured store.",
+            command=[
+                gateway_executable,
+                "tool-events",
+                "export",
+                "--format",
+                "jsonl",
+                "--since",
+                "7d",
+                "--output",
+                str(tool_events_export),
+                "--config",
+                str(reporting_config),
+            ],
+            cwd=workspace,
+        ),
+        UatStep(
+            "tool_events_cleanup",
+            "Apply tool-use reporting retention cleanup to the configured store.",
+            command=[
+                gateway_executable,
+                "tool-events",
+                "cleanup",
+                "--max-age-days",
+                "30",
+                "--max-events",
+                "100000",
                 "--config",
                 str(reporting_config),
             ],

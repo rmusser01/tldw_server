@@ -153,6 +153,40 @@ def test_user_guide_uat_plan_filters_cli_and_smoke_modes(tmp_path: Path) -> None
     assert "list_presets" not in smoke_ids  # nosec B101
 
 
+def test_user_guide_uat_cli_mode_includes_tool_event_export_and_cleanup(
+    tmp_path: Path,
+) -> None:
+    harness = _load_user_guide_harness()
+
+    cli_plan = harness.build_uat_plan(
+        repo_root=Path("/repo"),
+        workspace=tmp_path,
+        python_executable="python",
+        gateway_executable="mcp-unified-gateway",
+        smoke_executable="mcp-unified-smoke",
+        gateway_url=None,
+        package_install_args=["/repo/apps/mcp-unified[gateway]"],
+        mode="cli",
+    )
+
+    steps_by_id = {step.step_id: step for step in cli_plan}
+    export_step = steps_by_id["tool_events_export"]
+    cleanup_step = steps_by_id["tool_events_cleanup"]
+    assert export_step.command is not None  # nosec B101
+    assert export_step.command[:3] == ["mcp-unified-gateway", "tool-events", "export"]  # nosec B101
+    assert "--format" in export_step.command  # nosec B101
+    assert "jsonl" in export_step.command  # nosec B101
+    assert "--since" in export_step.command  # nosec B101
+    assert "7d" in export_step.command  # nosec B101
+    assert "--output" in export_step.command  # nosec B101
+    assert cleanup_step.command is not None  # nosec B101
+    assert cleanup_step.command[:3] == ["mcp-unified-gateway", "tool-events", "cleanup"]  # nosec B101
+    assert "--max-age-days" in cleanup_step.command  # nosec B101
+    assert "30" in cleanup_step.command  # nosec B101
+    assert "--max-events" in cleanup_step.command  # nosec B101
+    assert "100000" in cleanup_step.command  # nosec B101
+
+
 def test_user_guide_uat_result_payload_redacts_reason(tmp_path: Path) -> None:
     harness = _load_user_guide_harness()
     wheel_path = tmp_path / "dist" / "mcp_unified-0.1.0-py3-none-any.whl"
@@ -654,6 +688,62 @@ def test_rc_evidence_redacts_local_absolute_paths(tmp_path: Path) -> None:
     assert "/private/var/folders" not in rendered  # nosec B101
     assert "<repo>" in rendered  # nosec B101
     assert "<redacted-path>" in rendered  # nosec B101
+
+
+def test_rc_extras_matrix_records_tier_specific_checks(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    paths = mcp_unified_rc.RcPaths.from_repo_root(tmp_path)
+    paths.dist_dir.mkdir(parents=True)
+    wheel = paths.dist_dir / "mcp_unified-0.1.0-py3-none-any.whl"
+    wheel.write_text("placeholder", encoding="utf-8")
+    recorder = mcp_unified_rc.RcEvidenceRecorder(
+        evidence_dir=paths.evidence_dir,
+        package_name="mcp-unified",
+        package_version="0.1.0",
+        package_status="internal-experimental",
+        publishing_status="not-published",
+        commit="abc1234",
+        source_path="apps/mcp-unified",
+        layout="src",
+    )
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(mcp_unified_rc, "OPTIONAL_EXTRAS", ("core", "gateway", "sqlite", "dev"))
+    monkeypatch.setattr(mcp_unified_rc, "_create_venv", lambda *_args, **_kwargs: True)
+
+    def fake_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        timeout: int = 180,
+        env: dict[str, str] | None = None,
+    ) -> mcp_unified_rc.RcCommandResult:
+        commands.append(command)
+        return mcp_unified_rc.RcCommandResult(
+            command=command,
+            cwd=str(cwd),
+            returncode=0,
+            stdout="ok",
+            stderr="",
+            duration_ms=10,
+        )
+
+    monkeypatch.setattr(mcp_unified_rc, "run_command", fake_run_command)
+
+    mcp_unified_rc._run_extras_matrix(paths, recorder)
+
+    names = {result["name"] for result in recorder.results}
+    assert "core_package_info" in names  # nosec B101
+    assert "gateway_config_validation" in names  # nosec B101
+    assert "sqlite_storage_smoke" in names  # nosec B101
+    assert "dev_artifact_gate_selection" in names  # nosec B101
+    flattened_commands = [" ".join(command) for command in commands]
+    assert any("mcp-unified-gateway package-info" in command for command in flattened_commands)  # nosec B101
+    assert any("mcp-unified-gateway validate-config" in command for command in flattened_commands)  # nosec B101
+    assert any("SQLiteMCPStore" in command for command in flattened_commands)  # nosec B101
+    assert any(".github/tests/test_mcp_unified_artifact_gate.py" in command for command in flattened_commands)  # nosec B101
 
 
 def test_result_recorder_writes_json_and_markdown(tmp_path: Path) -> None:
