@@ -28,6 +28,7 @@ modified_files:
 - apps/packages/ui/src/components/Option/AudioStudio/BriefingWorkflow.tsx
 - apps/packages/ui/src/components/Option/AudioStudio/MusicWorkflow.tsx
 - apps/packages/ui/src/components/Option/AudioStudio/GenerationPanel.tsx
+- apps/packages/ui/src/components/Option/AudioStudio/generationPayload.ts
 - apps/packages/ui/src/components/Option/AudioStudio/RenderExportPanel.tsx
 - apps/packages/ui/src/components/Option/AudioStudio/MigrationBanner.tsx
 - apps/packages/ui/src/components/Option/AudioStudio/CompatibilityRedirect.tsx
@@ -85,6 +86,14 @@ Verification:
 Bandit: not applicable; frontend-only TypeScript/React route work, no Python/backend files touched.
 
 Known deferrals by scope: Dexie migration UI and render/export services remain for TASK-2351.
+
+Spec review follow-up: wired previously inert Audio Studio generation controls. MusicWorkflow now keeps prompt, lyrics, style, provider, and duration as controlled state and submits a backend-shaped music generation request through `useCreateAudioStudioGeneration(projectId)`. The shared GenerationPanel now queues music jobs against a track target and speech jobs against the first section target when the active project has a usable revision, with disabled states when the required target is unavailable. Updated generation service typing to match the backend `AudioStudioGenerationCreate` contract (`kind`, provider, target resource, target revision, idempotency key, and options).
+
+Follow-up verification:
+- `bunx vitest run ../packages/ui/src/components/Option/AudioStudio/__tests__/AudioStudioPage.test.tsx` - 8 passed.
+- `bunx vitest run ../packages/ui/src/services/__tests__/audio-studio.test.ts ../packages/ui/src/store/__tests__/audio-studio.test.tsx ../packages/ui/src/hooks/__tests__/useAudioStudioProjects.test.tsx ../packages/ui/src/routes/__tests__/route-metadata.coverage.test.ts __tests__/pages/audio-studio-route.test.tsx` - 20 passed.
+- `git diff --check` on TASK-2350 follow-up paths passed.
+- Bandit remains not applicable; frontend-only TypeScript/React changes, no Python/backend code touched.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 

@@ -118,13 +118,20 @@ export type AudioStudioClipUpsertRequest = {
 }
 
 export type AudioStudioGenerationCreateRequest = {
-  workflow: AudioStudioWorkflow
-  operation: "speech" | "music" | "script" | string
-  provider: string
+  kind: "speech" | "music" | "script" | string
+  provider: string | Record<string, unknown>
   idempotency_key: string
-  target_resource_id?: string
-  target_resource_kind?: "section" | "track" | "clip" | string
-  inputs?: Record<string, unknown>
+  target_resource_kind:
+    | "section"
+    | "track"
+    | "clip"
+    | "artifact"
+    | "render"
+    | "export"
+    | string
+  target_resource_id: string
+  target_revision_id: string
+  options?: Record<string, unknown>
 }
 
 export type AudioStudioRenderCreateRequest = {

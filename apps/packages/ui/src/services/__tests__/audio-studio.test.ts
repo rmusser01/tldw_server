@@ -140,11 +140,13 @@ describe("audio-studio service", () => {
 
   it("creates generation, render, export, and migration jobs", async () => {
     await createAudioStudioGeneration("p1", {
-      workflow: "music",
-      operation: "music",
+      kind: "music",
       provider: "ace_step",
       idempotency_key: "generation-key-1234",
-      inputs: { prompt: "warm intro" }
+      target_resource_kind: "track",
+      target_resource_id: "track-1",
+      target_revision_id: "rev-4",
+      options: { prompt: "warm intro" }
     })
     await createAudioStudioRender("p1", {
       idempotency_key: "render-key-1234",
@@ -165,11 +167,13 @@ describe("audio-studio service", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: {
-        workflow: "music",
-        operation: "music",
+        kind: "music",
         provider: "ace_step",
         idempotency_key: "generation-key-1234",
-        inputs: { prompt: "warm intro" }
+        target_resource_kind: "track",
+        target_resource_id: "track-1",
+        target_revision_id: "rev-4",
+        options: { prompt: "warm intro" }
       }
     })
     expect(mocks.bgRequest).toHaveBeenNthCalledWith(2, {

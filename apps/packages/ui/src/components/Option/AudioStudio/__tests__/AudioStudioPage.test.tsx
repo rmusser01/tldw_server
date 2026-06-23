@@ -1,6 +1,10 @@
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+
+const generationMocks = vi.hoisted(() => ({
+  mutateAsync: vi.fn()
+}))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -35,11 +39,51 @@ vi.mock("@/components/Option/AudiobookStudio/Output/OutputPanel", () => ({
   OutputPanel: () => <div>Audiobook Player</div>
 }))
 
+vi.mock("@/hooks/useAudioStudioGeneration", () => ({
+  useCreateAudioStudioGeneration: () => ({
+    mutateAsync: generationMocks.mutateAsync,
+    isPending: false
+  })
+}))
+
 import { AudioStudioPage } from "../AudioStudioPage"
 import { useAudioStudioStore } from "@/store/audio-studio"
 
+const setActiveProject = (overrides: Record<string, unknown> = {}) => {
+  useAudioStudioStore.getState().setProjects([
+    {
+      project_id: "project-1",
+      title: "Working project",
+      workflow: "music",
+      status: "draft",
+      current_revision_id: "revision-current",
+      sections: [
+        {
+          section_id: "section-1",
+          workflow: "narration",
+          title: "Intro",
+          order: 0
+        }
+      ],
+      tracks: [
+        {
+          track_id: "music-track-1",
+          name: "Music",
+          kind: "music",
+          order: 0
+        }
+      ],
+      clips: [],
+      settings: {},
+      ...overrides
+    } as any
+  ])
+  useAudioStudioStore.getState().setActiveProjectId("project-1")
+}
+
 describe("AudioStudioPage", () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     useAudioStudioStore.getState().resetAudioStudio()
   })
 
@@ -91,5 +135,94 @@ describe("AudioStudioPage", () => {
     expect(screen.getByLabelText("Lyrics")).toBeInTheDocument()
     expect(screen.getByLabelText("Style")).toBeInTheDocument()
     expect(screen.getByLabelText("Provider")).toBeInTheDocument()
+  })
+
+  it("queues music generation with controlled Music workflow inputs", async () => {
+    setActiveProject({ workflow: "music" })
+    useAudioStudioStore.getState().setActiveWorkflow("music")
+
+    render(<AudioStudioPage />)
+
+    fireEvent.change(screen.getByLabelText("Prompt"), {
+      target: { value: "Warm documentary intro" }
+    })
+    fireEvent.change(screen.getByLabelText("Lyrics"), {
+      target: { value: "Hold the first phrase" }
+    })
+    fireEvent.change(screen.getByLabelText("Style"), {
+      target: { value: "cinematic, ambient" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Generate music" }))
+
+    await waitFor(() => expect(generationMocks.mutateAsync).toHaveBeenCalled())
+    expect(generationMocks.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "music",
+        provider: "ace_step",
+        target_resource_kind: "track",
+        target_resource_id: "music-track-1",
+        target_revision_id: "revision-current",
+        options: {
+          prompt: "Warm documentary intro",
+          lyrics: "Hold the first phrase",
+          style: "cinematic, ambient",
+          duration: 45
+        }
+      })
+    )
+    expect(
+      generationMocks.mutateAsync.mock.calls[0][0].idempotency_key.length
+    ).toBeGreaterThanOrEqual(16)
+  })
+
+  it("queues shared music generation from the side panel", async () => {
+    setActiveProject({ workflow: "music" })
+    useAudioStudioStore.getState().setActiveWorkflow("music")
+
+    render(<AudioStudioPage />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Queue music generation" }))
+
+    await waitFor(() => expect(generationMocks.mutateAsync).toHaveBeenCalled())
+    expect(generationMocks.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "music",
+        provider: "ace_step",
+        target_resource_kind: "track",
+        target_resource_id: "music-track-1",
+        target_revision_id: "revision-current"
+      })
+    )
+  })
+
+  it("queues shared speech generation for the first available section", async () => {
+    setActiveProject({ workflow: "narration" })
+    useAudioStudioStore.getState().setActiveWorkflow("narration")
+
+    render(<AudioStudioPage />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Queue speech generation" }))
+
+    await waitFor(() => expect(generationMocks.mutateAsync).toHaveBeenCalled())
+    expect(generationMocks.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "speech",
+        provider: "tts",
+        target_resource_kind: "section",
+        target_resource_id: "section-1",
+        target_revision_id: "revision-current"
+      })
+    )
+  })
+
+  it("disables shared speech generation without a usable section target", () => {
+    setActiveProject({ workflow: "narration", sections: [] })
+    useAudioStudioStore.getState().setActiveWorkflow("narration")
+
+    render(<AudioStudioPage />)
+
+    expect(
+      screen.getByRole("button", { name: "Queue speech generation" })
+    ).toBeDisabled()
   })
 })
