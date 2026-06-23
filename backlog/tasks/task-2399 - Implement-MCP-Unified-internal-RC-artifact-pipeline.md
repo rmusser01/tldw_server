@@ -2,28 +2,21 @@
 id: TASK-2399
 title: Implement MCP Unified internal RC artifact pipeline
 status: Done
+assignee: []
+created_date: ''
+updated_date: '2026-06-23 06:27'
 labels:
-- mcp
-- packaging
-- uat
-- release
-- implementation
+  - mcp
+  - packaging
+  - uat
+  - release
+  - implementation
+dependencies: []
 documentation:
-- Docs/superpowers/specs/2026-06-22-mcp-unified-internal-rc-artifact-pipeline-design.md
-- Docs/superpowers/plans/2026-06-22-mcp-unified-internal-rc-artifact-pipeline-implementation-plan.md
-modified_files:
-- apps/mcp-unified
-- Helper_Scripts/mcp_unified_rc.py
-- Helper_Scripts/Testing-related/mcp_standalone_user_guide_uat.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_mcp_unified_rc_harness.py
-- .github/tests/test_mcp_unified_artifact_gate.py
-- Makefile
-- .github/workflows/pypi-package.yml
-- .github/workflows/publish-pypi.yml
-- .github/workflows/mcp-unified-rc.yml
-- pyproject.toml
-- Docs/MCP_UNIFIED_STANDALONE_GATEWAY_ADMIN.md
+  - >-
+    Docs/superpowers/specs/2026-06-22-mcp-unified-internal-rc-artifact-pipeline-design.md
+  - >-
+    Docs/superpowers/plans/2026-06-22-mcp-unified-internal-rc-artifact-pipeline-implementation-plan.md
 ---
 
 ## Description
@@ -38,6 +31,7 @@ Execute the approved implementation plan for moving the standalone MCP package u
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation started using subagent-driven development after the design/spec and implementation plan were approved and re-reviewed. Worktree: codex/mcp-unified-internal-rc-spec.
 
@@ -72,12 +66,16 @@ Quality-review follow-up completed: the standalone `dev` extra now includes `bui
 Quality re-review follow-up completed: the new dev-extra regression now uses the existing `tomllib`/`tomli` fallback pattern so the test remains compatible with the project-supported Python 3.10 floor. Verification after the fallback: focused regression passed (1 passed); RC harness pytest passed (24 passed, 4 warnings); runtime package-boundary pytest passed (39 passed, 5 warnings); artifact-gate pytest passed (4 passed); compileall passed; Bandit on touched helper/UAT/test scope reported zero findings; `git diff --check` passed.
 Spec re-review follow-up completed: the standalone `dev` extra now includes the Python 3.10 TOML fallback dependency `tomli` as a conditional pyproject dependency and names-only release metadata entry, because the isolated dev-extra artifact-gate path imports TOML-parsing boundary tests on Python 3.10. The dev-extra regression now asserts both `build` and `tomli` are present and that the `tomli` dependency is Python-version gated. Verification after this fix: focused dev-extra regression passed (1 passed); focused metadata/package-boundary checks passed (3 passed); RC harness pytest passed (24 passed, 4 warnings); runtime package-boundary pytest passed (39 passed, 5 warnings); artifact-gate pytest passed (4 passed); compileall passed; Bandit on touched helper/UAT/test scope reported zero findings; `git diff --check` passed.
 Quality re-review follow-up completed: the standalone `dev` extra now also includes the package build-system backend requirement `setuptools`, mirrored in names-only release metadata, so the isolated dev-extra artifact-gate path has the tools required by `python -m build --no-isolation` on fresh Python 3.12 venvs. The dev-extra regression now asserts the build-system requirement names are a subset of dev-extra names. Verification after this fix: focused dev-extra regression passed (1 passed); focused metadata/package-boundary checks passed (3 passed); RC harness pytest passed (24 passed, 4 warnings); runtime package-boundary pytest passed (39 passed, 5 warnings); artifact-gate pytest passed (4 passed); compileall passed; Bandit on touched helper/UAT/test scope reported zero findings; `git diff --check` passed.
+PR #2430 review follow-up started after CI/review inspection. Still-valid issues to address: root tldw-server packaging must provide `mcp_unified` for installed deployments; RC harness should use `tomli` fallback on Python 3.10, handle command start/decode failures gracefully, and use Loguru instead of print status output; new RC tests need module/function docstrings and approved pytest markers. CI logs confirm multiple failures are caused by `ModuleNotFoundError: No module named 'mcp_unified'` during root server/test imports. Generated `.artifacts/` remains untracked.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+PR #2430 review follow-up completed. Fixed still-valid live review items: root tldw-server package discovery now includes apps/mcp-unified/src and mcp_unified*; source checkouts bootstrap apps/mcp-unified/src before host MCP imports; RC harness uses tomli fallback, Loguru status output, errors="replace", and graceful OSError command-start evidence; new/changed RC tests have module/function docstrings and module-level unit markers; MCP RC workflow pins checkout/setup-python/upload-artifact actions, disables checkout credential persistence, and uploads RC artifacts with if: always(); boundary tests now keep checkout source out of build subprocess environments while retaining it for runtime import subprocesses. Validation: focused pytest passed (68 passed, 5 warnings); Ruff passed; compileall passed; workflow YAML parse confirmed pinned actions/persist-credentials false/always upload; source-checkout host MCP import smoke passed; setuptools package discovery check found mcp_unified, mcp_unified.interfaces, and tldw_Server_API; make PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python mcp-unified-rc passed with evidence ok=True, 13 passed, 0 failed, 9 optional local dependency skips; Bandit non-test touched scope reported zero findings, full touched scope reported only existing low-severity test-file baseline; git diff --check passed. Generated .artifacts/ remains untracked.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the MCP Unified internal RC artifact pipeline around the standalone package under `apps/mcp-unified`: package-boundary hardening, RC build/check/UAT harnesses, private RC workflow, Make targets, installed-wheel/user-guide UAT slices, artifact-gate selection, evidence redaction, and local-offline/CI-fail-closed behavior. Final review follow-ups made the isolated `dev` extra self-contained for artifact-gate execution by declaring `build`, build-system backend `setuptools`, and Python 3.10 `tomli` fallback dependencies, with names-only release metadata parity and regression coverage. Final validation recorded: RC harness pytest 24 passed; runtime package-boundary pytest 39 passed; artifact-gate pytest 4 passed; compileall passed; Bandit reported zero findings on touched helper/UAT/test scope; `git diff --check` passed; `make mcp-unified-rc` passed with evidence ok=True, 13 passed, 9 optional local dependency skips, 0 failed; evidence commit matched HEAD and redaction scans found no local path leaks or package-index URL damage.
+Addressed PR #2430 review feedback for the MCP Unified internal RC package pipeline. The root tldw-server package and source-checkout host imports now provide mcp_unified, the RC harness is more robust and uses Loguru, test metadata/docstrings comply with review requirements, workflow actions are pinned with safer checkout/upload behavior, and build-boundary tests no longer inject checkout src into build subprocesses. Validation: focused pytest 68 passed, Ruff/compileall/diff checks passed, workflow YAML parse passed, non-test Bandit zero findings, full touched Bandit only existing low-severity test baseline, and make mcp-unified-rc passed with 13 required passes and 9 optional local network skips.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -519,8 +519,13 @@ tldw-setup = "tldw_Server_API.cli.wizard.cli:main"
 include-package-data = false
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["tldw_Server_API", "tldw_Server_API.*"]
+where = [".", "apps/mcp-unified/src"]
+include = [
+  "tldw_Server_API",
+  "tldw_Server_API.*",
+  "mcp_unified",
+  "mcp_unified.*",
+]
 namespaces = false
 exclude = [
   "tests*",

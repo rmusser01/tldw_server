@@ -1,3 +1,5 @@
+"""Runtime and package-boundary checks for the standalone MCP Unified package."""
+
 from __future__ import annotations
 
 import ast
@@ -21,6 +23,8 @@ from pathlib import Path
 import pytest
 import yaml
 from pydantic import ValidationError
+
+pytestmark = pytest.mark.unit
 
 try:
     import tomllib
@@ -194,19 +198,28 @@ def _assert_subprocess_succeeded(
         )
 
 
+def _subprocess_env(
+    extra_env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Return a subprocess environment without injecting checkout source paths."""
+
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
+    return env
+
+
 def _subprocess_env_with_standalone_src(
     extra_env: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Return subprocess env with relocated standalone src on PYTHONPATH."""
 
-    env = os.environ.copy()
+    env = _subprocess_env(extra_env)
     pythonpath_entries = [str(STANDALONE_SRC_ROOT)]
     existing_pythonpath = env.get("PYTHONPATH")
     if existing_pythonpath:
         pythonpath_entries.append(existing_pythonpath)
     env["PYTHONPATH"] = os.pathsep.join(pythonpath_entries)
-    if extra_env:
-        env.update(extra_env)
     return env
 
 
@@ -244,7 +257,7 @@ def _build_standalone_distributions(tmp_path: Path) -> tuple[Path, Path]:
         check=False,
         capture_output=True,
         text=True,
-        env=_subprocess_env_with_standalone_src(
+        env=_subprocess_env(
             {
                 "PIP_DISABLE_PIP_VERSION_CHECK": "1",
                 "PIP_NO_INDEX": "1",
@@ -399,7 +412,36 @@ def test_subprocess_failure_assertion_includes_captured_output() -> None:
     assert "STDERR:\nbuild stderr" in message
 
 
+def test_build_subprocess_env_does_not_inject_checkout_src(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Build subprocesses should not see checkout src via PYTHONPATH."""
+
+    monkeypatch.setenv("PYTHONPATH", "existing-pythonpath")
+
+    env = _subprocess_env({"PIP_NO_INDEX": "1"})
+
+    assert env["PYTHONPATH"] == "existing-pythonpath"  # nosec B101
+    assert str(STANDALONE_SRC_ROOT) not in env["PYTHONPATH"]  # nosec B101
+    assert env["PIP_NO_INDEX"] == "1"  # nosec B101
+
+
+def test_runtime_subprocess_env_injects_standalone_src(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime subprocesses should get the relocated standalone src path."""
+
+    monkeypatch.setenv("PYTHONPATH", "existing-pythonpath")
+
+    env = _subprocess_env_with_standalone_src()
+
+    pythonpath_entries = env["PYTHONPATH"].split(os.pathsep)
+    assert pythonpath_entries == [str(STANDALONE_SRC_ROOT), "existing-pythonpath"]  # nosec B101
+
+
 def _tldw_imports_for(path: Path) -> list[str]:
+    """Return host-package imports found in a Python source file."""
+
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     imports: list[str] = []
     for node in ast.walk(tree):
@@ -417,6 +459,8 @@ def _tldw_imports_for(path: Path) -> list[str]:
 
 
 def test_runtime_package_boundary_has_no_tldw_server_imports() -> None:
+    """Standalone package modules must not import the host tldw server package."""
+
     assert PACKAGE_ROOT.exists()
     offenders: dict[str, list[str]] = {}
     for path in PACKAGE_ROOT.rglob("*.py"):
@@ -427,6 +471,8 @@ def test_runtime_package_boundary_has_no_tldw_server_imports() -> None:
 
 
 def test_mcp_unified_package_metadata_declares_release_gate() -> None:
+    """Release-gate package metadata should advertise the internal status."""
+
     metadata = importlib.import_module("mcp_unified.package_metadata")
 
     assert metadata.PACKAGE_NAME == "mcp-unified"
@@ -688,6 +734,49 @@ def test_mcp_unified_console_scripts_are_standalone_package_owned() -> None:
     assert "mcp-unified-smoke" not in root_scripts  # nosec B101
 
 
+def test_root_tldw_package_discovers_mcp_unified_runtime_imports() -> None:
+    """Root installs must include package-owned modules used by host MCP shims."""
+
+    root_pyproject = _load_root_pyproject()
+    find_config = root_pyproject["tool"]["setuptools"]["packages"]["find"]
+
+    assert "apps/mcp-unified/src" in find_config["where"]  # nosec B101
+    assert "mcp_unified" in find_config["include"]  # nosec B101
+    assert "mcp_unified.*" in find_config["include"]  # nosec B101
+    assert "tldw_Server_API" in find_config["include"]  # nosec B101
+    assert "tldw_Server_API.*" in find_config["include"]  # nosec B101
+
+
+def test_host_mcp_import_bootstraps_standalone_src_for_source_checkout() -> None:
+    """Source checkout imports must find relocated MCP Unified package modules."""
+
+    script = (
+        "import json, sys; "
+        "sys.path = [p for p in sys.path if 'apps/mcp-unified/src' not in p]; "
+        "import tldw_Server_API.app.core.MCP_unified.modules.base; "
+        "import mcp_unified; "
+        "print(json.dumps({'file': mcp_unified.__file__, 'paths': ["
+        "p for p in sys.path if 'apps/mcp-unified/src' in p"
+        "]}))"
+    )
+    result = subprocess.run(  # nosec B603
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        env={
+            **os.environ,
+            "PYTHONPATH": str(REPO_ROOT),
+        },
+    )
+    _assert_subprocess_succeeded(result, "host MCP source import")
+
+    payload = json.loads(result.stdout)
+    assert Path(payload["file"]).is_relative_to(STANDALONE_SRC_ROOT)  # nosec B101
+    assert payload["paths"] == [str(STANDALONE_SRC_ROOT)]  # nosec B101
+
+
 def test_mcp_unified_standalone_distribution_metadata_matches_extras(
     standalone_distributions: tuple[Path, Path],
 ) -> None:
@@ -874,9 +963,20 @@ def test_mcp_unified_rc_workflow_uses_private_permissions() -> None:
     run_blocks = _workflow_run_blocks(workflow)
     install_runs = "\n".join(run_blocks)
     trigger_paths = _workflow_trigger_paths(workflow)
+    steps = workflow["jobs"]["internal-rc"]["steps"]
+    checkout_step = next(step for step in steps if step.get("name") == "Checkout")
+    setup_python_step = next(step for step in steps if step.get("name") == "Setup Python")
+    upload_step = next(
+        step for step in steps if step.get("name") == "Upload MCP Unified RC artifacts"
+    )
 
     assert workflow["permissions"] == {"contents": "read"}  # nosec B101
     assert "id-token" not in workflow["permissions"]  # nosec B101
+    assert checkout_step["uses"] == "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"  # nosec B101
+    assert checkout_step["with"]["persist-credentials"] is False  # nosec B101
+    assert setup_python_step["uses"] == "actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405"  # nosec B101
+    assert upload_step["if"] == "always()"  # nosec B101
+    assert upload_step["uses"] == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"  # nosec B101
     assert "apps/mcp-unified" in serialized_workflow  # nosec B101
     assert "Makefile" in trigger_paths["pull_request"]  # nosec B101
     assert "make mcp-unified-rc" in serialized_workflow  # nosec B101
@@ -979,7 +1079,7 @@ def test_mcp_unified_standalone_package_installs_without_root_dependencies(
     )
     wheel_dir = tmp_path / "dist"
     wheel_dir.mkdir()
-    build_env = _subprocess_env_with_standalone_src(
+    build_env = _subprocess_env(
         {
             "PIP_DISABLE_PIP_VERSION_CHECK": "1",
             "PIP_NO_INDEX": "1",
@@ -1137,6 +1237,8 @@ def test_package_imports_do_not_eagerly_load_sqlite_backend(
 
 
 def test_host_interface_shims_reexport_package_contracts() -> None:
+    """Host interface shims should re-export package-owned contracts."""
+
     package_policy = importlib.import_module("mcp_unified.interfaces.policy")
     package_runtime = importlib.import_module("mcp_unified.interfaces.runtime")
     package_storage = importlib.import_module("mcp_unified.interfaces.storage")
@@ -1156,6 +1258,8 @@ def test_host_interface_shims_reexport_package_contracts() -> None:
 
 
 def test_host_external_config_schema_shim_reexports_package_contracts() -> None:
+    """Host external config-schema shim should re-export package contracts."""
+
     package_schema = importlib.import_module("mcp_unified.federation.config_schema")
     host_schema = importlib.import_module(
         "tldw_Server_API.app.core.MCP_unified.external_servers.config_schema"
@@ -1309,6 +1413,8 @@ def test_virtual_external_tool_copy_returns_caller_owned_data() -> None:
 
 
 def test_profile_defaults_are_safe_and_preserve_extension_metadata() -> None:
+    """Profile defaults should stay safe while preserving extension metadata."""
+
     from mcp_unified.profiles.models import MCPProfile
 
     profile = MCPProfile(
@@ -1341,6 +1447,8 @@ def test_profile_defaults_are_safe_and_preserve_extension_metadata() -> None:
 
 
 def test_profile_rejects_naive_timestamps() -> None:
+    """Profile models should reject naive timestamp values."""
+
     from mcp_unified.profiles.models import MCPProfile
 
     with pytest.raises(ValidationError):

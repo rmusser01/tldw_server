@@ -21,14 +21,20 @@ import sys
 import tempfile
 import time
 import venv
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
+
+from loguru import logger
 
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility.
-    tomllib = None  # type: ignore[assignment]
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:
+        tomllib = None  # type: ignore[assignment]
 
 RESULT_STATUSES = {"passed", "failed", "skipped"}
 SOURCE_PATH = "apps/mcp-unified"
@@ -85,7 +91,7 @@ class RcPaths:
     dist_dir: Path
 
     @classmethod
-    def from_repo_root(cls, repo_root: Path) -> "RcPaths":
+    def from_repo_root(cls, repo_root: Path) -> RcPaths:
         """Return canonical RC paths for a repository root."""
 
         return cls(
@@ -317,6 +323,7 @@ def run_command(
             check=False,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=timeout,
             env=run_env,
         )
@@ -337,6 +344,15 @@ def run_command(
             returncode=124,
             stdout=redact_text(stdout[-6000:]),
             stderr=redact_text((stderr[-6000:] + f"\nTimed out after {timeout}s").strip()),
+            duration_ms=int((time.perf_counter() - started) * 1000),
+        )
+    except OSError as exc:
+        return RcCommandResult(
+            command=redacted_command,
+            cwd=str(cwd),
+            returncode=127,
+            stdout="",
+            stderr=redact_text(f"Command failed to start: {exc}"),
             duration_ms=int((time.perf_counter() - started) * 1000),
         )
 
@@ -1180,7 +1196,7 @@ def _create_venv(
             clear=True,
             symlinks=os.name != "nt",
         ).create(venv_dir)
-    except Exception as exc:  # pragma: no cover - platform/environment-specific.
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:  # pragma: no cover - platform/environment-specific.
         recorder.record(
             phase=phase,
             name=name,
@@ -1340,12 +1356,12 @@ def _render_markdown(payload: dict[str, Any]) -> str:
 
 def _write_and_report(recorder: RcEvidenceRecorder) -> int:
     json_path, markdown_path = recorder.write()
-    print(f"Wrote RC evidence JSON: {json_path}")
-    print(f"Wrote RC evidence Markdown: {markdown_path}")
+    logger.info("Wrote RC evidence JSON: {}", json_path)
+    logger.info("Wrote RC evidence Markdown: {}", markdown_path)
     if recorder.has_required_failures():
-        print("RC status: failed")
+        logger.error("RC status: failed")
         return 1
-    print("RC status: ok")
+    logger.info("RC status: ok")
     return 0
 
 

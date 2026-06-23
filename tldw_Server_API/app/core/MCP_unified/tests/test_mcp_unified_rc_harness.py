@@ -1,3 +1,5 @@
+"""Unit coverage for the internal MCP Unified release-candidate harness."""
+
 from __future__ import annotations
 
 import importlib.util
@@ -8,7 +10,10 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+import pytest
 from Helper_Scripts import mcp_unified_rc
+
+pytestmark = pytest.mark.unit
 
 try:
     import tomllib
@@ -25,6 +30,8 @@ USER_GUIDE_UAT_PATH = (
 
 
 def _load_user_guide_harness() -> ModuleType:
+    """Load the standalone user-guide UAT harness from its script path."""
+
     spec = importlib.util.spec_from_file_location(
         "_mcp_standalone_user_guide_uat",
         USER_GUIDE_UAT_PATH,
@@ -38,6 +45,8 @@ def _load_user_guide_harness() -> ModuleType:
 
 
 def test_default_paths_point_to_apps_package() -> None:
+    """Default RC paths should target the apps/mcp-unified package project."""
+
     paths = mcp_unified_rc.RcPaths.from_repo_root(Path("/repo"))
 
     assert paths.package_project == Path("/repo/apps/mcp-unified")  # nosec B101
@@ -46,6 +55,8 @@ def test_default_paths_point_to_apps_package() -> None:
 
 
 def test_user_guide_uat_install_spec_uses_apps_project_by_default() -> None:
+    """User-guide UAT install specs should default to the app package project."""
+
     harness = _load_user_guide_harness()
     wheel = Path("/tmp/mcp_unified-0.1.0-py3-none-any.whl")  # nosec B108
     relative_wheel = Path("dist/mcp_unified-0.1.0-py3-none-any.whl")
@@ -79,6 +90,8 @@ def test_user_guide_uat_install_spec_uses_apps_project_by_default() -> None:
 
 
 def test_user_guide_uat_plan_uses_package_install_args(tmp_path: Path) -> None:
+    """Generated UAT plans should pass selected install args to pip."""
+
     harness = _load_user_guide_harness()
     install_args = [str(tmp_path / "mcp_unified-0.1.0-py3-none-any.whl")]
 
@@ -103,6 +116,8 @@ def test_user_guide_uat_plan_uses_package_install_args(tmp_path: Path) -> None:
 
 
 def test_user_guide_uat_plan_uses_symlinked_venv_on_posix(tmp_path: Path) -> None:
+    """Generated UAT plans should use symlinked virtualenvs on POSIX."""
+
     harness = _load_user_guide_harness()
 
     plan = harness.build_uat_plan(
@@ -124,6 +139,8 @@ def test_user_guide_uat_plan_uses_symlinked_venv_on_posix(tmp_path: Path) -> Non
 
 
 def test_user_guide_uat_plan_filters_cli_and_smoke_modes(tmp_path: Path) -> None:
+    """UAT mode filters should select CLI and smoke slices independently."""
+
     harness = _load_user_guide_harness()
 
     cli_plan = harness.build_uat_plan(
@@ -161,6 +178,8 @@ def test_user_guide_uat_plan_filters_cli_and_smoke_modes(tmp_path: Path) -> None
 def test_user_guide_uat_cli_mode_includes_tool_event_export_and_cleanup(
     tmp_path: Path,
 ) -> None:
+    """CLI-mode UAT should include tool-event export and cleanup workflows."""
+
     harness = _load_user_guide_harness()
 
     cli_plan = harness.build_uat_plan(
@@ -193,6 +212,8 @@ def test_user_guide_uat_cli_mode_includes_tool_event_export_and_cleanup(
 
 
 def test_user_guide_uat_result_payload_redacts_reason(tmp_path: Path) -> None:
+    """UAT result payloads should redact sensitive reason text."""
+
     harness = _load_user_guide_harness()
     wheel_path = tmp_path / "dist" / "mcp_unified-0.1.0-py3-none-any.whl"
     context = harness.UatRunContext(
@@ -223,6 +244,8 @@ def test_user_guide_uat_result_payload_redacts_reason(tmp_path: Path) -> None:
 
 
 def test_user_guide_uat_result_payload_redacts_absolute_paths(tmp_path: Path) -> None:
+    """UAT result payloads should redact local absolute paths."""
+
     harness = _load_user_guide_harness()
     context = harness.UatRunContext(
         repo_root=Path("/repo"),
@@ -262,6 +285,8 @@ def test_user_guide_uat_result_payload_redacts_absolute_paths(tmp_path: Path) ->
 
 
 def test_user_guide_uat_redaction_preserves_url_paths(tmp_path: Path) -> None:
+    """UAT redaction should preserve URL paths while hiding local paths."""
+
     harness = _load_user_guide_harness()
 
     redacted = harness.redact_text(
@@ -280,6 +305,8 @@ def test_user_guide_uat_redaction_preserves_url_paths(tmp_path: Path) -> None:
 
 
 def test_rc_evidence_redaction_preserves_url_paths(tmp_path: Path) -> None:
+    """RC evidence redaction should preserve URL paths while hiding local paths."""
+
     recorder = mcp_unified_rc.RcEvidenceRecorder(
         evidence_dir=tmp_path / "evidence",
         package_name="mcp-unified",
@@ -307,6 +334,8 @@ def test_rc_evidence_redaction_preserves_url_paths(tmp_path: Path) -> None:
 
 
 def test_redact_text_removes_secret_like_values() -> None:
+    """Secret-like token values should be removed from harness output."""
+
     raw = 'token=abc123\nAPI_KEY=secret-value\n{"secret": "json-value"}\nnormal=value'
 
     redacted = mcp_unified_rc.redact_text(raw)
@@ -321,6 +350,8 @@ def test_run_command_clears_inherited_pythonpath(
     monkeypatch: Any,
     tmp_path: Path,
 ) -> None:
+    """run_command should avoid inheriting checkout PYTHONPATH by default."""
+
     captured_env: dict[str, str] = {}
 
     def fake_run(*args: Any, **kwargs: Any) -> Any:
@@ -341,10 +372,25 @@ def test_run_command_clears_inherited_pythonpath(
     assert "PYTHONPATH" not in captured_env  # nosec B101
 
 
+def test_run_command_reports_command_start_failure(tmp_path: Path) -> None:
+    """run_command should return evidence instead of raising on OSError."""
+
+    result = mcp_unified_rc.run_command(
+        ["definitely-not-a-real-mcp-rc-command"],
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 127  # nosec B101
+    assert result.stdout == ""  # nosec B101
+    assert "Command failed to start:" in result.stderr  # nosec B101
+
+
 def test_rc_create_venv_uses_symlinks_on_posix(
     monkeypatch: Any,
     tmp_path: Path,
 ) -> None:
+    """RC venv creation should use symlinks on POSIX hosts."""
+
     captured: dict[str, Any] = {}
 
     class FakeEnvBuilder:
@@ -381,6 +427,8 @@ def test_rc_create_venv_uses_symlinks_on_posix(
 
 
 def test_rc_pip_dependency_outage_records_optional_skip(tmp_path: Path) -> None:
+    """Local dependency-index outages should be optional skips outside CI."""
+
     recorder = mcp_unified_rc.RcEvidenceRecorder(
         evidence_dir=tmp_path,
         package_name="mcp-unified",
@@ -429,6 +477,8 @@ def test_rc_pip_dependency_outage_is_required_failure_in_ci(
     monkeypatch: Any,
     tmp_path: Path,
 ) -> None:
+    """CI dependency-index outages should remain required failures."""
+
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     recorder = mcp_unified_rc.RcEvidenceRecorder(
         evidence_dir=tmp_path,
@@ -467,6 +517,8 @@ def test_rc_pip_dependency_outage_is_required_failure_in_ci(
 
 
 def test_rc_user_guide_uat_dependency_outage_records_optional_skip(tmp_path: Path) -> None:
+    """User-guide UAT dependency outages should be optional skips locally."""
+
     report_path = tmp_path / "user-guide-uat.json"
     report_path.write_text(
         json.dumps(
@@ -526,6 +578,8 @@ def test_rc_cli_uat_runs_user_guide_wheel_mode(
     monkeypatch: Any,
     tmp_path: Path,
 ) -> None:
+    """CLI UAT should delegate to the user-guide wheel-mode harness."""
+
     paths = mcp_unified_rc.RcPaths.from_repo_root(tmp_path)
     paths.dist_dir.mkdir(parents=True)
     wheel = paths.dist_dir / "mcp_unified-0.1.0-py3-none-any.whl"
@@ -590,6 +644,8 @@ def test_rc_smoke_uat_runs_user_guide_transport_checks(
     monkeypatch: Any,
     tmp_path: Path,
 ) -> None:
+    """Smoke UAT should delegate to user-guide transport checks."""
+
     paths = mcp_unified_rc.RcPaths.from_repo_root(tmp_path)
     paths.dist_dir.mkdir(parents=True)
     wheel = paths.dist_dir / "mcp_unified-0.1.0-py3-none-any.whl"
@@ -656,6 +712,8 @@ def test_rc_smoke_uat_runs_user_guide_transport_checks(
 
 
 def test_rc_evidence_redacts_local_absolute_paths(tmp_path: Path) -> None:
+    """Recorded RC evidence should not leak local absolute paths."""
+
     repo_root = tmp_path / "repo"
     evidence_dir = repo_root / ".artifacts" / "mcp-unified-rc"
     local_repo_path = repo_root / "apps" / "mcp-unified" / "pyproject.toml"
@@ -699,6 +757,8 @@ def test_rc_extras_matrix_records_tier_specific_checks(
     monkeypatch: Any,
     tmp_path: Path,
 ) -> None:
+    """Extras matrix should record checks specific to each optional tier."""
+
     paths = mcp_unified_rc.RcPaths.from_repo_root(tmp_path)
     paths.dist_dir.mkdir(parents=True)
     wheel = paths.dist_dir / "mcp_unified-0.1.0-py3-none-any.whl"
@@ -752,6 +812,8 @@ def test_rc_extras_matrix_records_tier_specific_checks(
 
 
 def test_mcp_unified_dev_extra_declares_artifact_gate_dependencies() -> None:
+    """The dev extra should include dependencies needed by artifact gates."""
+
     pyproject = tomllib.loads((REPO_ROOT / "apps" / "mcp-unified" / "pyproject.toml").read_text())
     dev_dependencies = pyproject["project"]["optional-dependencies"]["dev"]
     build_dependencies = pyproject["build-system"]["requires"]
@@ -787,6 +849,8 @@ def test_mcp_unified_dev_extra_declares_artifact_gate_dependencies() -> None:
 
 
 def test_result_recorder_writes_json_and_markdown(tmp_path: Path) -> None:
+    """The evidence recorder should write JSON and Markdown summaries."""
+
     recorder = mcp_unified_rc.RcEvidenceRecorder(
         evidence_dir=tmp_path,
         package_name="mcp-unified",
@@ -814,6 +878,8 @@ def test_result_recorder_writes_json_and_markdown(tmp_path: Path) -> None:
 
 
 def test_result_recorder_marks_required_failure(tmp_path: Path) -> None:
+    """Required failures should make the evidence payload not ok."""
+
     recorder = mcp_unified_rc.RcEvidenceRecorder(
         evidence_dir=tmp_path,
         package_name="mcp-unified",
@@ -840,6 +906,8 @@ def test_result_recorder_marks_required_failure(tmp_path: Path) -> None:
 
 
 def test_result_recorder_includes_artifact_hashes(tmp_path: Path) -> None:
+    """Artifact records should include filenames and SHA256 hashes."""
+
     artifact = tmp_path / "mcp_unified-0.1.0-py3-none-any.whl"
     artifact.write_text("wheel-content", encoding="utf-8")
     recorder = mcp_unified_rc.RcEvidenceRecorder(
