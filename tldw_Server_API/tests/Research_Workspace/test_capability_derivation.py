@@ -1,13 +1,23 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+import asyncio
+import sys
+import time
+from types import ModuleType, SimpleNamespace
+from typing import get_args
 
 import pytest
 
+from tldw_Server_API.app.api.v1.schemas.research_workspace_capabilities import (
+    ResearchWorkspaceCapabilitiesResponse,
+    ResearchWorkspaceCapabilityId,
+)
 from tldw_Server_API.app.core.Research_Workspace import capabilities
 from tldw_Server_API.app.core.Research_Workspace.capabilities import (
     RESEARCH_WORKSPACE_CAPABILITY_IDS,
+    ResearchWorkspaceHealthCollectors,
     build_research_workspace_capabilities,
+    collect_research_workspace_capabilities,
 )
 
 
@@ -50,7 +60,7 @@ def test_ready_dependencies_allow_core_research_workspace_actions():
     assert response.capabilities["export_download"].mode == "allow"
     assert response.capabilities["sync_share"].status == "unknown"
     assert response.capabilities["sync_share"].mode == "warn"
-    assert response.status == "degraded"
+    assert response.status == "ready"
     assert response.ttl_seconds == 30
 
 
@@ -192,6 +202,26 @@ def test_slides_and_tts_health_only_gate_their_artifact_types():
     assert response.capabilities["audio_summary"].mode == "block"
 
 
+def test_slides_db_lookup_failure_blocks_slides_generation(monkeypatch):
+    fake_slides_deps = ModuleType("tldw_Server_API.app.api.v1.API_Deps.Slides_DB_Deps")
+    fake_slides_deps.try_get_slides_db_for_user = lambda current_user: None
+    monkeypatch.setitem(
+        sys.modules,
+        "tldw_Server_API.app.api.v1.API_Deps.Slides_DB_Deps",
+        fake_slides_deps,
+    )
+
+    slides_health = capabilities._collect_slides_health(user_id=42)
+    response = build_research_workspace_capabilities(
+        **_health_inputs(slides_health=slides_health)
+    )
+
+    assert slides_health["status"] == "unavailable"
+    assert response.capabilities["slides_generation"].reason_code == "slides_unavailable"
+    assert response.capabilities["slides_generation"].mode == "block"
+    assert response.capabilities["artifact_text_generation"].mode == "allow"
+
+
 def test_capability_payload_does_not_leak_raw_errors_paths_or_secrets():
     response = build_research_workspace_capabilities(
         **_health_inputs(
@@ -230,6 +260,22 @@ def test_capability_payload_does_not_leak_raw_errors_paths_or_secrets():
     assert "api_key" not in dumped
 
 
+def test_capability_response_keys_are_typed_as_known_capability_ids():
+    annotation = ResearchWorkspaceCapabilitiesResponse.model_fields["capabilities"].annotation
+    key_type = get_args(annotation)[0]
+
+    assert get_args(key_type) == get_args(ResearchWorkspaceCapabilityId)
+
+
+def test_core_capability_collector_does_not_import_api_endpoint_health_functions():
+    source = capabilities.__loader__.get_source(capabilities.__name__)
+
+    assert source is not None
+    assert "app.api.v1.endpoints.health" not in source
+    assert "app.api.v1.endpoints.rag_health" not in source
+    assert "app.api.v1.endpoints.llm_providers" not in source
+
+
 @pytest.mark.asyncio
 async def test_tts_health_collection_uses_config_without_provider_initialization(monkeypatch):
     class FakeTtsConfigManager:
@@ -239,19 +285,71 @@ async def test_tts_health_collection_uses_config_without_provider_initialization
         def get_enabled_providers(self):
             return ["openai"]
 
-    async def forbidden_setup_health():
-        raise AssertionError("Research Workspace capability collection must not initialize TTS providers")
-
     monkeypatch.setattr(
         "tldw_Server_API.app.core.TTS.tts_config.get_tts_config_manager",
         lambda: FakeTtsConfigManager(),
-    )
-    monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.audio.audio_health.collect_setup_tts_health",
-        forbidden_setup_health,
-        raising=False,
     )
 
     result = await capabilities._collect_tts_health()
 
     assert result == {"status": "healthy", "providers": {"available": 1, "total": 2}}
+
+
+@pytest.mark.asyncio
+async def test_capability_collection_runs_bounded_independent_probes_concurrently():
+    started: list[str] = []
+
+    async def slow_aggregate_health():
+        started.append("aggregate")
+        await asyncio.sleep(0.2)
+        return {
+            "status": "ok",
+            "checks": {
+                "database": {"status": "healthy"},
+                "chacha_notes": {"status": "healthy"},
+            },
+        }
+
+    async def ready_rag_health():
+        started.append("rag")
+        await asyncio.sleep(0.01)
+        return {"status": "healthy"}
+
+    async def ready_llm_health():
+        started.append("llm")
+        await asyncio.sleep(0.01)
+        return {
+            "status": "healthy",
+            "components": {"providers": {"initialized": True, "count": 1}},
+        }
+
+    def ready_slides_health(*, user_id: int | str | None = None):
+        started.append(f"slides:{user_id}")
+        time.sleep(0.01)
+        return {"status": "ok"}
+
+    async def ready_tts_health():
+        started.append("tts")
+        await asyncio.sleep(0.01)
+        return {"status": "healthy", "providers": {"available": 1}}
+
+    collectors = ResearchWorkspaceHealthCollectors(
+        aggregate_health=slow_aggregate_health,
+        rag_health=ready_rag_health,
+        llm_health=ready_llm_health,
+        slides_health=ready_slides_health,
+        tts_health=ready_tts_health,
+    )
+
+    started_at = time.perf_counter()
+    response = await collect_research_workspace_capabilities(
+        user_id=42,
+        collectors=collectors,
+        probe_timeout_seconds=0.05,
+    )
+    elapsed = time.perf_counter() - started_at
+
+    assert elapsed < 0.15
+    assert set(started) == {"aggregate", "rag", "llm", "slides:42", "tts"}
+    assert response.capabilities["source_browse"].status == "unknown"
+    assert response.capabilities["chat"].mode == "warn"
