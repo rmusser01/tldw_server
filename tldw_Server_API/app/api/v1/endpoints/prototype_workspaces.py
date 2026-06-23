@@ -9,8 +9,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from ....core.AuthNZ.repos.prototype_workspaces_repo import InactivePrototypeSharedActorError
-from ....core.AuthNZ.User_DB_Handling import User, get_request_user
 from ..schemas.prototype_workspace_schemas import (
     PrototypeCollaboratorSessionCreateRequest,
     PrototypePreviewGrantResponse,

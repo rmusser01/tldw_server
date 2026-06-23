@@ -1612,18 +1612,21 @@ def get_unified_evaluation_service_for_user(user_id: str | int) -> UnifiedEvalua
             legacy_numeric_key = int(uid_key)
         except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
             legacy_numeric_key = None
-        # Return existing and mark as recently used
-        if uid_key in _service_instances_by_user:
-            svc = _service_instances_by_user.pop(uid_key)
-            # If tests override the DB via env, ensure the cached instance matches
+        def _ensure_test_db_override(svc: UnifiedEvaluationService) -> UnifiedEvaluationService:
             try:
                 import os as _os
                 override_path = _os.getenv("EVALUATIONS_TEST_DB_PATH")
                 if override_path and getattr(getattr(svc, "db", None), "db_path", None) != override_path:
-                    # Replace with a new instance bound to the override path
-                    svc = UnifiedEvaluationService(db_path=override_path)
+                    return UnifiedEvaluationService(db_path=override_path)
             except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
                 pass
+            return svc
+
+        # Return existing and mark as recently used
+        if uid_key in _service_instances_by_user:
+            svc = _service_instances_by_user.pop(uid_key)
+            # If tests override the DB via env, ensure the cached instance matches.
+            svc = _ensure_test_db_override(svc)
             _service_instances_by_user[uid_key] = svc
             return svc
         # Temporary migration path: older in-process callers cached services under numeric
@@ -1631,6 +1634,7 @@ def get_unified_evaluation_service_for_user(user_id: str | int) -> UnifiedEvalua
         # callers and long-lived workers have been restarted on the string-scope contract.
         if legacy_numeric_key is not None and legacy_numeric_key in _service_instances_by_user:  # type: ignore[operator]
             svc = _service_instances_by_user.pop(legacy_numeric_key)  # type: ignore[arg-type]
+            svc = _ensure_test_db_override(svc)
             _service_instances_by_user[uid_key] = svc
             return svc
 

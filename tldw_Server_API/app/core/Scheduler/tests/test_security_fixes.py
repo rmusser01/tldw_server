@@ -59,6 +59,16 @@ class TestPathTraversalFixes:
         with pytest.raises(ValueError, match="Directory traversal detected in database path"):
             config = SchedulerConfig(database_url='sqlite:///../../../etc/passwd.db')
 
+    def test_windows_short_sqlite_path_is_not_tilde_traversal(self, tmp_path):
+        """Windows 8.3 short paths contain ``~1`` without implying home expansion."""
+        with patch('platform.system', return_value='Windows'):
+            config = SchedulerConfig(
+                database_url=r"sqlite:///C:\Users\RUNNER~1\AppData\Local\Temp/scheduler_123.db",
+                base_path=tmp_path / "scheduler",
+            )
+
+        assert "RUNNER~1" in config.database_url
+
     def test_windows_path_fallback(self):
         """Test Windows path fallback when /var/lib doesn't exist."""
         with patch('platform.system', return_value='Windows'):

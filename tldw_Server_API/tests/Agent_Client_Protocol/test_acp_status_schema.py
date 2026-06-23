@@ -140,6 +140,7 @@ class _StubSessionStore:
         user_id: int | None = None,
         status: str | None = None,
         agent_type: str | None = None,
+        workspace_id: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ):

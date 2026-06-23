@@ -43,6 +43,17 @@ _READING_DIGEST_NONCRITICAL_EXCEPTIONS = (
     ConnectionError,
     TimeoutError,
 )
+_READING_DIGEST_RUN_LOCKS: dict[tuple[str, str], asyncio.Lock] = {}
+
+
+def _get_reading_digest_run_lock(schedule_id: str, user_id: int | str | None) -> asyncio.Lock:
+    """Return a process-local lock for one user/schedule run slot."""
+    key = (str(user_id or ""), str(schedule_id))
+    lock = _READING_DIGEST_RUN_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _READING_DIGEST_RUN_LOCKS[key] = lock
+    return lock
 
 
 class _ReadingDigestScheduler:
@@ -193,6 +204,11 @@ class _ReadingDigestScheduler:
             logger.warning("Reading digest scheduler failed to add job {}: {}", schedule.id, exc)
 
     async def _run_schedule(self, schedule_id: str, user_id: int | None = None) -> None:
+        lock = _get_reading_digest_run_lock(schedule_id, user_id)
+        async with lock:
+            await self._run_schedule_locked(schedule_id, user_id)
+
+    async def _run_schedule_locked(self, schedule_id: str, user_id: int | None = None) -> None:
         db = None
         schedule = None
         if user_id is not None:

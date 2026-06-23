@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.StudySuggestions import snapshot_service
 import pytest
@@ -709,7 +711,10 @@ def test_study_pack_postgres_schema_dedupes_before_unique_index_recreation() -> 
             return None
 
     db = CharactersRAGDB.__new__(CharactersRAGDB)
-    db.backend = RecordingBackend()
+    # backend is a read-only property; populate the minimal backing state it reads.
+    db._backend = RecordingBackend()
+    db._local = threading.local()
+    db._uses_shared_content_backend = False
     db._dedupe_suggestion_generation_links_postgres = lambda conn: executed_statements.append("__DEDUPE__")  # type: ignore[method-assign]
 
     db._ensure_study_pack_schema_postgres(conn=object())

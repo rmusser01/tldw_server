@@ -272,7 +272,7 @@ def test_workflow_step_attempt_round_trip(tmp_path):
     assert attempts[0]["metadata_json"]["failure_envelope"]["reason_code_core"] == "transient_network_error"
 
 
-def test_workflow_step_run_listing_round_trip(tmp_path):
+def test_workflow_step_run_listing_round_trip(tmp_path, monkeypatch):
     db_path = tmp_path / "workflows.db"
     db = WorkflowsDatabase(str(db_path))
 
@@ -285,6 +285,13 @@ def test_workflow_step_run_listing_round_trip(tmp_path):
         definition_version=1,
         definition_snapshot={"name": "step-runs", "steps": []},
     )
+    timestamps = iter(
+        [
+            "2026-01-01T00:00:01+00:00",
+            "2026-01-01T00:00:02+00:00",
+        ]
+    )
+    monkeypatch.setattr(workflows_db_mod, "_utcnow_iso", lambda: next(timestamps))
     db.create_step_run(
         step_run_id="wf-run-step-runs-1:s2:1",
         tenant_id="tenant",

@@ -486,13 +486,14 @@ class Qwen3TTSAdapter(TTSAdapter):
         except ImportError:
             return self.dtype
         mapping = {
-            "float16": torch.float16,
-            "fp16": torch.float16,
-            "bfloat16": torch.bfloat16,
-            "bf16": torch.bfloat16,
-            "float32": torch.float32,
-            "fp32": torch.float32,
+            "float16": getattr(torch, "float16", None),
+            "fp16": getattr(torch, "float16", None),
+            "bfloat16": getattr(torch, "bfloat16", None),
+            "bf16": getattr(torch, "bfloat16", None),
+            "float32": getattr(torch, "float32", None),
+            "fp32": getattr(torch, "float32", None),
         }
+        mapping = {key: value for key, value in mapping.items() if value is not None}
         return mapping.get(dtype, self.dtype)
 
     def _build_model_kwargs(self, model_id: str) -> dict[str, Any]:

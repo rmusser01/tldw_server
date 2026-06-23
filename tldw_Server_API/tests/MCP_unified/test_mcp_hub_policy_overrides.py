@@ -203,11 +203,17 @@ async def test_policy_resolver_applies_assignment_override_and_emits_provenance(
     assert policy["allowed_tools"] == ["notes.search", "Bash(git *)", "remote.fetch"]
     assert policy["capabilities"] == ["filesystem.read"]
     assert policy["approval_mode"] == "ask_outside_profile"
-    for key, value in policy["authored_policy_document"].items():
-        assert key in policy["resolved_policy_document"]
-        assert policy["resolved_policy_document"][key] == value
-    assert policy["resolved_policy_document"]["tool_tier_overrides"] == {}
-    assert policy["resolved_policy_document"]["conditions"] == {}
+    expected_authored_policy = {
+        "allowed_tools": ["notes.search", "Bash(git *)", "remote.fetch"],
+        "capabilities": ["filesystem.read"],
+        "approval_mode": "ask_outside_profile",
+    }
+    assert policy["authored_policy_document"] == expected_authored_policy
+    assert policy["resolved_policy_document"] == {
+        **expected_authored_policy,
+        "conditions": {},
+        "tool_tier_overrides": {},
+    }
     assert policy["sources"] == [
         {
             "assignment_id": 12,

@@ -12,6 +12,7 @@ const validateNetworkingConfigPath = path.join(
   "validate-networking-config.mjs"
 )
 const makefilePath = path.join(repoRoot, "Makefile")
+const composeWebuiPath = path.join(repoRoot, "Dockerfiles", "docker-compose.webui.yml")
 
 const ORIGINAL_ENV = {
   NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE,
@@ -244,14 +245,20 @@ describe("frontend quickstart networking", () => {
     expect(makefile).toContain("TLDW_INTERNAL_API_ORIGIN ?= http://app:8000")
   })
 
-  it("passes the generated single-user key into the WebUI quickstart compose command", () => {
+  it("passes the generated single-user key through WebUI quickstart compose interpolation", () => {
     const makefile = readFileSync(makefilePath, "utf8")
-
-    expect(makefile).toMatch(
-      /grep '\^SINGLE_USER_API_KEY=' "\$\(TLDW_ENV_FILE\)"/
+    const compose = readFileSync(composeWebuiPath, "utf8")
+    const startTarget = makefile.match(
+      /start-docker-single:\n(?<recipe>[\s\S]*?)\n\nverify-docker-single:/
     )
-    expect(makefile).toContain(
-      "NEXT_PUBLIC_X_API_KEY=\"$${NEXT_PUBLIC_X_API_KEY:-$$api_key}\""
+
+    expect(startTarget?.groups?.recipe).toBeTruthy()
+    expect(startTarget?.groups?.recipe).not.toMatch(/grep '\^SINGLE_USER_API_KEY='/)
+    expect(compose).toContain(
+      "NEXT_PUBLIC_X_API_KEY: ${NEXT_PUBLIC_X_API_KEY:-${SINGLE_USER_API_KEY:-}}"
+    )
+    expect(compose).toContain(
+      "NEXT_PUBLIC_X_API_KEY=${NEXT_PUBLIC_X_API_KEY:-${SINGLE_USER_API_KEY:-}}"
     )
     expect(makefile).toContain(
       "docker compose --env-file \"$(TLDW_ENV_FILE)\" -f \"$(DOCKER_SINGLE_COMPOSE)\" -f \"$(DOCKER_WEBUI_COMPOSE)\""
@@ -265,9 +272,8 @@ describe("frontend quickstart networking", () => {
     )
 
     expect(startTarget?.groups?.recipe).toBeTruthy()
-    expect(startTarget?.groups?.recipe).toContain(
-      "@api_key=\"$$("
-    )
+    expect(startTarget?.groups?.recipe).not.toContain("grep '^SINGLE_USER_API_KEY='")
+    expect(startTarget?.groups?.recipe).not.toContain("cut -d= -f2-")
     expect(startTarget?.groups?.recipe).not.toContain(
       "NEXT_PUBLIC_X_API_KEY=\"$$(grep"
     )

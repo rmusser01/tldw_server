@@ -337,6 +337,110 @@ def test_message_store_rag_context_helpers_latest_and_since(db):
     assert store.count_messages_since(conversation_id, first_message_id) == 2
 
 
+def test_message_store_orders_equal_timestamps_by_last_modified(db):
+    store = db["store"]
+    raw_db = db["db"]
+    conversation_id = db["conversation_id"]
+    same_timestamp = "2026-01-01T00:00:00Z"
+
+    assistant_id = store.add_message(
+        {
+            "id": "tie-assistant",
+            "conversation_id": conversation_id,
+            "sender": "assistant",
+            "content": "Assistant response",
+            "timestamp": same_timestamp,
+        }
+    )
+    user_id = store.add_message(
+        {
+            "id": "tie-user",
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "User request",
+            "timestamp": same_timestamp,
+        }
+    )
+    system_id = store.add_message(
+        {
+            "id": "tie-system",
+            "conversation_id": conversation_id,
+            "sender": "system",
+            "content": "System prompt",
+            "timestamp": same_timestamp,
+        }
+    )
+
+    for message_id, last_modified in [
+        (system_id, "2026-01-01T00:00:00.000Z"),
+        (user_id, "2026-01-01T00:00:00.100Z"),
+        (assistant_id, "2026-01-01T00:00:00.200Z"),
+    ]:
+        raw_db.execute_query(
+            "UPDATE messages SET last_modified = ? WHERE id = ?",
+            (last_modified, message_id),
+            commit=True,
+        )
+
+    ascending = store.get_messages_for_conversation(
+        conversation_id,
+        limit=10,
+        offset=0,
+        order_by_timestamp="ASC",
+    )
+    assert [row["id"] for row in ascending] == [system_id, user_id, assistant_id]
+
+    descending = store.get_messages_for_conversation(
+        conversation_id,
+        limit=10,
+        offset=0,
+        order_by_timestamp="DESC",
+    )
+    assert [row["id"] for row in descending] == [assistant_id, user_id, system_id]
+
+
+def test_message_store_preserves_append_order_when_insert_clock_ties(db, monkeypatch):
+    store = db["store"]
+    raw_db = db["db"]
+    conversation_id = db["conversation_id"]
+    same_timestamp = "2026-01-01T00:00:00.000Z"
+
+    monkeypatch.setattr(raw_db, "_get_current_utc_timestamp_iso", lambda: same_timestamp)
+
+    first_id = store.add_message(
+        {
+            "id": "order-b",
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "First",
+        }
+    )
+    second_id = store.add_message(
+        {
+            "id": "order-a",
+            "conversation_id": conversation_id,
+            "sender": "assistant",
+            "content": "Second",
+        }
+    )
+    third_id = store.add_message(
+        {
+            "id": "order-c",
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "Third",
+        }
+    )
+
+    messages = store.get_messages_for_conversation(conversation_id, limit=10, offset=0)
+    assert [row["id"] for row in messages] == [first_id, second_id, third_id]
+    assert [row["last_modified"] for row in messages] == [
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.001Z",
+        "2026-01-01T00:00:00.002Z",
+    ]
+
+
 def test_message_store_counts_and_soft_delete_roundtrip(db):
     store = db["store"]
     conversation_id = db["conversation_id"]

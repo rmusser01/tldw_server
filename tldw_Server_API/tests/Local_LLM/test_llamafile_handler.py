@@ -141,6 +141,9 @@ async def test_llamafile_stop_timeout(monkeypatch, tmp_path: Path):
         def terminate(self):
             self.returncode = None
 
+        def kill(self):
+            self.returncode = -9
+
     handler._active_servers[5555] = SlowProc()
 
     async def fake_wait_for(coro, timeout):
@@ -151,6 +154,7 @@ async def test_llamafile_stop_timeout(monkeypatch, tmp_path: Path):
     import os as _os
 
     monkeypatch.setattr(_os, "killpg", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
 
     msg = await handler.stop_server(port=5555)
     assert "stopped" in msg.lower() or "terminated" in msg.lower()
@@ -245,13 +249,21 @@ async def test_llamafile_start_server_not_ready_terminates_process(monkeypatch, 
     from tldw_Server_API.app.core.Local_LLM import http_utils
 
     monkeypatch.setattr(http_utils, "wait_for_http_ready", lambda *a, **k: asyncio.sleep(0, result=False))
-    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    import tldw_Server_API.app.core.Local_LLM.Llamafile_Handler as llamafile_mod
+
+    monkeypatch.setattr(llamafile_mod.os, "getpgid", lambda pid: pid, raising=False)
+
+    def fail_killpg(*_args):
+        raise AssertionError("fake subprocess cleanup must not signal a real process group")
+
+    monkeypatch.setattr(llamafile_mod.os, "killpg", fail_killpg, raising=False)
 
     with pytest.raises(ServerError):
         await handler.start_server("toy.gguf", server_args={"port": 8077})
 
     proc = proc_holder["proc"]
-    assert proc.terminated or proc.killed
+    assert proc.terminated is True
+    assert proc.killed is False
 
 
 @pytest.mark.unit

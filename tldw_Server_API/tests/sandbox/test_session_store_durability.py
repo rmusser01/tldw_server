@@ -10,6 +10,7 @@ import pytest
 from tldw_Server_API.app.core.config import clear_config_cache, settings as app_settings
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunStatus, RuntimeType, RunSpec, Session, SessionSpec, TrustLevel
 from tldw_Server_API.app.core.Sandbox.orchestrator import SandboxOrchestrator, SessionActiveRunsConflict
+from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
 from tldw_Server_API.app.core.Sandbox.store import get_store
 
@@ -31,6 +32,27 @@ def _configure_sqlite_store(monkeypatch, tmp_path: Path) -> None:
     if hasattr(app_settings, "SANDBOX_SNAPSHOT_PATH"):
         monkeypatch.setattr(app_settings, "SANDBOX_SNAPSHOT_PATH", snapshot_dir)
     clear_config_cache()
+    _force_docker_preflight_available(monkeypatch)
+
+
+def _force_docker_preflight_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _preflights(
+        self: SandboxService,
+        *,
+        network_policy: str | None,
+    ) -> dict[RuntimeType, RuntimePreflightResult]:
+        del self, network_policy
+        return {
+            RuntimeType.docker: RuntimePreflightResult(
+                runtime=RuntimeType.docker,
+                available=True,
+                reasons=[],
+                execution_mode="mocked",
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        }
+
+    monkeypatch.setattr(SandboxService, "_collect_runtime_preflights", _preflights)
 
 
 def test_session_metadata_rehydrates_across_orchestrator_instances(monkeypatch, tmp_path: Path) -> None:
@@ -69,6 +91,7 @@ def test_session_metadata_rehydrates_across_orchestrator_instances(monkeypatch, 
 
 def test_clone_session_works_after_service_restart(monkeypatch, tmp_path: Path) -> None:
     _configure_sqlite_store(monkeypatch, tmp_path)
+    _force_docker_preflight_available(monkeypatch)
 
     source_service = SandboxService()
     spec = SessionSpec(runtime=RuntimeType.docker, base_image="python:3.11-slim")
@@ -96,6 +119,7 @@ def test_clone_session_works_after_service_restart(monkeypatch, tmp_path: Path) 
 
 def test_session_execution_defaults_roundtrip_and_clone(monkeypatch, tmp_path: Path) -> None:
     _configure_sqlite_store(monkeypatch, tmp_path)
+    _force_docker_preflight_available(monkeypatch)
 
     source_service = SandboxService()
     spec = SessionSpec(
@@ -175,6 +199,7 @@ def test_cross_service_destroy_removes_store_backed_workspace_root(
     tmp_path: Path,
 ) -> None:
     _configure_sqlite_store(monkeypatch, tmp_path)
+    _force_docker_preflight_available(monkeypatch)
 
     creator = SandboxService()
     session = creator.create_session(
@@ -231,7 +256,6 @@ def test_destroy_session_cancels_and_drains_when_active_runs_exist(monkeypatch, 
 
 def test_destroy_session_cleans_snapshots_artifacts_and_usage(monkeypatch, tmp_path: Path) -> None:
     _configure_sqlite_store(monkeypatch, tmp_path)
-
     svc = SandboxService()
     session = svc.create_session(
         user_id="user-77",
@@ -504,6 +528,7 @@ def test_session_backed_start_run_waits_for_snapshot_workspace_operation_across_
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "0")
+    _force_docker_preflight_available(monkeypatch)
 
     session_id = "sess-cross-worker-run"
     workspace_root = tmp_path / session_id / "workspace"
@@ -665,9 +690,11 @@ def test_list_snapshots_waits_for_cross_service_snapshot_create(monkeypatch, tmp
     assert "snapshots" not in list_result, "cross-service snapshot listing should wait for in-progress create"
 
     release_snapshot.set()
-    create_thread.join(timeout=1.0)
-    list_thread.join(timeout=1.0)
+    create_thread.join(timeout=5.0)
+    list_thread.join(timeout=5.0)
 
+    assert not create_thread.is_alive(), "snapshot create did not finish after release"
+    assert not list_thread.is_alive(), "snapshot list did not finish after release"
     assert not create_errors
     assert not list_errors
     snapshots = list_result.get("snapshots")
@@ -747,9 +774,11 @@ def test_get_snapshot_info_waits_for_cross_service_snapshot_create(monkeypatch, 
     assert "snapshot" not in info_result, "cross-service snapshot info should wait for in-progress create"
 
     release_snapshot.set()
-    create_thread.join(timeout=1.0)
-    info_thread.join(timeout=1.0)
+    create_thread.join(timeout=5.0)
+    info_thread.join(timeout=5.0)
 
+    assert not create_thread.is_alive(), "snapshot create did not finish after release"
+    assert not info_thread.is_alive(), "snapshot info did not finish after release"
     assert not create_errors
     assert not info_errors
     snapshot_info = info_result.get("snapshot")
@@ -829,9 +858,11 @@ def test_delete_snapshot_waits_for_cross_service_snapshot_create(monkeypatch, tm
     assert "deleted" not in delete_result, "cross-service snapshot delete should wait for in-progress create"
 
     release_snapshot.set()
-    create_thread.join(timeout=1.0)
-    delete_thread.join(timeout=1.0)
+    create_thread.join(timeout=5.0)
+    delete_thread.join(timeout=5.0)
 
+    assert not create_thread.is_alive(), "snapshot create did not finish after release"
+    assert not delete_thread.is_alive(), "snapshot delete did not finish after release"
     assert not create_errors
     assert not delete_errors
     assert delete_result.get("deleted") is True

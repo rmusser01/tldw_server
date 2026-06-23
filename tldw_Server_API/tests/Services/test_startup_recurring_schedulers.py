@@ -502,10 +502,12 @@ async def test_register_recurring_scheduler_task_bounds_failed_registration_roll
             raise RuntimeError("inventory unavailable")
 
     allow_cancel = False
+    entered = asyncio.Event()
 
     async def _stubborn_task() -> None:
         nonlocal allow_cancel
         while True:
+            entered.set()
             try:
                 await asyncio.sleep(60)
             except asyncio.CancelledError:
@@ -525,6 +527,7 @@ async def test_register_recurring_scheduler_task_bounds_failed_registration_roll
 
     task = asyncio.create_task(_stubborn_task(), name="stubborn-rollback-scheduler")
     try:
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
         with pytest.raises(RuntimeError, match="inventory unavailable"):
             await asyncio.wait_for(
                 startup_recurring._register_recurring_scheduler_task(

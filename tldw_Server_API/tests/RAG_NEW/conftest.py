@@ -8,7 +8,6 @@ Focused on testing only the unified pipeline that's actually in use.
 # Keep this file free of pytest_plugins to avoid pytest deprecation warnings.
 
 import sys
-import tempfile
 from pathlib import Path
 from typing import Dict, Any, Generator
 from unittest.mock import MagicMock, AsyncMock
@@ -17,6 +16,7 @@ import pytest
 from loguru import logger
 
 # Import actual MediaDatabase for integration tests
+from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
 from tldw_Server_API.app.core.RAG.rag_service.metrics_collector import QueryMetrics
@@ -152,11 +152,9 @@ def admin_user():
 # =====================================================================
 
 @pytest.fixture
-def temp_db_path() -> Generator[Path, None, None]:
+def temp_db_path(tmp_path: Path) -> Path:
     """Create a temporary database path."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        db_path = Path(temp_dir) / "test_media.db"
-        yield db_path
+    return tmp_path / "test_media.db"
 
 @pytest.fixture
 def media_database(temp_db_path) -> Generator[MediaDatabase, None, None]:
@@ -173,6 +171,9 @@ def media_database(temp_db_path) -> Generator[MediaDatabase, None, None]:
             db.close_connection()
         except Exception:
             _ = None
+        reset_managed_sqlite_backends(
+            sqlite_targets=[str(temp_db_path), str(temp_db_path.resolve())]
+        )
 
 @pytest.fixture
 def populated_media_db(media_database) -> MediaDatabase:

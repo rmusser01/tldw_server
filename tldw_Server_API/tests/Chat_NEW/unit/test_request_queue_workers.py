@@ -1,4 +1,5 @@
 import asyncio
+import threading
 import time
 
 import pytest
@@ -11,9 +12,28 @@ async def test_concurrent_processing_non_streaming():
     q = RequestQueue(max_queue_size=10, max_concurrent=2, timeout=5)
     await q.start(num_workers=2)
 
+    both_started = threading.Event()
+    release_processors = threading.Event()
+    lock = threading.Lock()
+    active_processors = 0
+    peak_active_processors = 0
+    started_processors = 0
+
     async def submit_job(idx: int):
         def proc():
-            time.sleep(0.2)
+            nonlocal active_processors, peak_active_processors, started_processors
+
+            with lock:
+                active_processors += 1
+                peak_active_processors = max(peak_active_processors, active_processors)
+                started_processors += 1
+                if started_processors == 2:
+                    both_started.set()
+
+            release_processors.wait(timeout=2)
+
+            with lock:
+                active_processors -= 1
             return {"idx": idx}
 
         fut = await q.enqueue(
@@ -27,28 +47,20 @@ async def test_concurrent_processing_non_streaming():
         )
         return await fut
 
-    # Measure concurrent execution time with high-resolution clock
-    t0 = time.perf_counter()
-    res = await asyncio.gather(submit_job(1), submit_job(2))
-    elapsed = time.perf_counter() - t0
+    tasks = [asyncio.create_task(submit_job(1)), asyncio.create_task(submit_job(2))]
 
-    assert all("idx" in r for r in res)
-    # Absolute assertion (relaxed to tolerate normal jitter)
-    # With 2 workers and 0.2s per job, expect < 0.40s if concurrent
-    assert elapsed < 0.40, f"Jobs did not run concurrently (abs), elapsed={elapsed:.3f}s"
+    try:
+        started_in_time = await asyncio.to_thread(both_started.wait, 2)
+        release_processors.set()
+        res = await asyncio.gather(*tasks)
 
-    # Relative assertion against a sequential baseline (two 0.2s sleeps)
-    base_t0 = time.perf_counter()
-    time.sleep(0.2)
-    time.sleep(0.2)
-    baseline = time.perf_counter() - base_t0
-    # Require at least a 30% speedup vs sequential
-    assert elapsed < 0.7 * baseline, (
-        f"Jobs did not run concurrently enough (rel), elapsed={elapsed:.3f}s, "
-        f"baseline={baseline:.3f}s"
-    )
-
-    await q.stop()
+        assert started_in_time, "Queue workers did not start both processors concurrently"
+        assert peak_active_processors == 2
+        assert all("idx" in r for r in res)
+    finally:
+        release_processors.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await q.stop()
 
 
 @pytest.mark.asyncio

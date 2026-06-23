@@ -6,8 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 from fastapi.routing import APIRoute
 
-from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+from tldw_Server_API.tests.helpers.app_main_state import reload_app_main
 
 
 class FakeRedisBP:
@@ -103,6 +103,7 @@ async def test_backpressure_respects_settings_redis_disabled_when_env_url_exists
 
 @pytest.mark.unit
 def test_backpressure_by_age_returns_429(monkeypatch):
+    app = reload_app_main().app
     client = TestClient(app)
     app.dependency_overrides[get_request_user] = _override_user(admin=True)
     # Force age above threshold
@@ -151,6 +152,7 @@ async def test_tenant_quota_429(monkeypatch):
 
 @pytest.mark.unit
 def test_embeddings_batch_route_has_rbac_rate_limit_parity():
+    app = reload_app_main().app
     single_route = None
     batch_route = None
     for route in app.routes:

@@ -55,7 +55,7 @@ def rollback_to_version(
         with self.transaction() as conn:
             media_info = self._fetchone_with_connection(
                 conn,
-                "SELECT uuid, version, title FROM Media WHERE id = ? AND deleted = 0",
+                "SELECT uuid, version, title, content FROM Media WHERE id = ? AND deleted = 0",
                 (media_id,),
             )
             if not media_info:
@@ -64,6 +64,7 @@ def rollback_to_version(
             media_uuid = media_info["uuid"]
             current_media_version = media_info["version"]
             current_title = media_info["title"]
+            current_content = media_info["content"]
             new_media_version = current_media_version + 1
 
             target_version_data = get_document_version(
@@ -141,7 +142,14 @@ def rollback_to_version(
                 updated_media_data,
             )
 
-            self._update_fts_media(conn, media_id, current_title, target_content)
+            self._update_fts_media(
+                conn,
+                media_id,
+                current_title,
+                target_content,
+                old_title=current_title,
+                old_content=current_content,
+            )
 
         logger.info(
             "Rolled back media {} to state of doc ver {}. New DocVer: {}, New MediaVer: {}",

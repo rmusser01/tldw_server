@@ -31,6 +31,14 @@ from tldw_Server_API.app.core.TTS.tts_exceptions import (
 class TestElevenLabsAdapterMock:
     """Mock/Unit tests for ElevenLabs adapter"""
 
+    @pytest.fixture(autouse=True)
+    def _mock_user_voice_fetch(self, monkeypatch):
+        monkeypatch.setattr(
+            ElevenLabsAdapter,
+            "_fetch_user_voices",
+            AsyncMock(return_value=None),
+        )
+
     async def test_initialization_without_api_key(self):
         """Test initialization without API key"""
         adapter = ElevenLabsAdapter({})

@@ -16,7 +16,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 from starlette import status
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard, check_rate_limit
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    TokenScopeGuard,
+    User,
+    check_rate_limit,
+    get_request_user,
+)
 from tldw_Server_API.app.api.v1.endpoints.audio.audio_tts import get_tts_service
 from tldw_Server_API.app.api.v1.schemas.audio_health import SttCapabilitiesResponse
 from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
@@ -853,7 +858,10 @@ def _stt_provider_capability_metadata(registry: Any, provider: str | None) -> tu
         ),
     ],
 )
-def get_stt_capabilities(request: Request) -> dict[str, Any]:
+def get_stt_capabilities(
+    request: Request,
+    _current_user: User = Depends(get_request_user),
+) -> dict[str, Any]:
     """Return read-only STT capability metadata without warming models."""
     from datetime import datetime
 

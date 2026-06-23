@@ -275,10 +275,6 @@ class TestChatErrorHandling:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: isolated_db
         app.dependency_overrides[get_request_user] = mock_get_request_user
 
-        with TestClient(app) as client:
-            response = client.get("/api/v1/health")
-            csrf_token = response.cookies.get("csrf_token", "")
-
         request_data = {
             "model": "test-model",
             "api_provider": "openai",
@@ -286,29 +282,33 @@ class TestChatErrorHandling:
         }
 
         # Mock the LLM call to raise an exception and API keys
-        with (
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_perform,
-            patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
-        ):
-            mock_perform.side_effect = Exception("LLM API Error")
+        try:
+            with TestClient(app) as client:
+                response = client.get("/api/v1/health")
+                csrf_token = response.cookies.get("csrf_token", "")
 
-            from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+                with (
+                    patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_perform,
+                    patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+                ):
+                    mock_perform.side_effect = Exception("LLM API Error")
 
-            settings = get_settings()
-            api_key = settings.SINGLE_USER_API_KEY or os.getenv("SINGLE_USER_TEST_API_KEY", "test-api-key-12345")
+                    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
-            response = client.post(
-                "/api/v1/chat/completions",
-                json=request_data,
-                headers={"X-CSRF-Token": csrf_token, "X-API-KEY": api_key},
-            )
+                    settings = get_settings()
+                    api_key = settings.SINGLE_USER_API_KEY or os.getenv("SINGLE_USER_TEST_API_KEY", "test-api-key-12345")
 
-            assert response.status_code >= 500
-            data = response.json()
-            assert "detail" in data
+                    response = client.post(
+                        "/api/v1/chat/completions",
+                        json=request_data,
+                        headers={"X-CSRF-Token": csrf_token, "X-API-KEY": api_key},
+                    )
 
-        # Restore overrides
-        app.dependency_overrides = original_overrides
+                    assert response.status_code >= 500
+                    data = response.json()
+                    assert "detail" in data
+        finally:
+            app.dependency_overrides = original_overrides
 
     def test_database_error(self, unit_test_client, isolated_db):
         """Test handling of invalid conversation ID."""

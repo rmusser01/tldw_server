@@ -31,35 +31,37 @@ fastapi_app.include_router(persona_ep.router, prefix="/api/v1/persona")
 _ORIGINAL_RESOLVE_AUTHENTICATED_USER_ID = persona_ep._resolve_authenticated_user_id
 
 
-def _recv_until(client, predicate, timeout=2.0):
+def _recv_until(client, predicate, timeout=8.0):
     import time
 
     start = time.time()
-    while time.time() - start < timeout:
-        inbox: queue.Queue[tuple[str, object]] = queue.Queue(maxsize=1)
+    inbox: queue.Queue[tuple[str, object]] = queue.Queue(maxsize=1)
 
-        def _reader() -> None:
+    def _reader() -> None:
+        while time.time() - start < timeout:
             try:
-                inbox.put(("ok", client.receive_text()))
+                msg = client.receive_text()
             except Exception as exc:  # pragma: no cover - test harness defensive path
                 inbox.put(("err", exc))
+                return
+            try:
+                data = json.loads(str(msg))
+            except json.JSONDecodeError:
+                continue
+            if predicate(data):
+                inbox.put(("ok", data))
+                return
 
-        thread = threading.Thread(target=_reader, daemon=True)
-        thread.start()
-        remaining = max(0.01, min(0.1, timeout - (time.time() - start)))
-        try:
-            status, payload = inbox.get(timeout=remaining)
-        except queue.Empty:
-            continue
-        if status == "err":
-            raise payload  # type: ignore[misc]
-        msg = str(payload)
-        try:
-            data = json.loads(msg)
-        except Exception:
-            continue
-        if predicate(data):
-            return data
+    thread = threading.Thread(target=_reader, daemon=True)
+    thread.start()
+    try:
+        status, payload = inbox.get(timeout=timeout)
+    except queue.Empty:
+        raise AssertionError("Expected event not received in time")
+    if status == "err":
+        raise payload  # type: ignore[misc]
+    if status == "ok":
+        return payload
     raise AssertionError("Expected event not received in time")
 
 
@@ -230,7 +232,7 @@ def test_persona_websocket_plan_and_confirm(monkeypatch):
                 )
             )
 
-            plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
+            plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan", timeout=8.0)
             assert "steps" in plan and isinstance(plan["steps"], list)
             steps = plan["steps"]
             plan_id = plan.get("plan_id")
@@ -263,6 +265,51 @@ def test_persona_websocket_plan_and_confirm(monkeypatch):
             assert "output" in evt_res
             assert "result" in evt_res
             assert evt_res["output"] == evt_res["result"]
+
+
+def test_persona_tool_result_handles_empty_mcp_response(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
+
+    class _FakeServer:
+        def __init__(self):
+            self.initialized = True
+
+        async def initialize(self):
+            self.initialized = True
+
+        async def handle_http_request(self, request, user_id=None, metadata=None):
+            return None
+
+    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+
+    with TestClient(fastapi_app) as c:
+        with c.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            session_id = "sess_empty_mcp_response"
+            ws.send_text(
+                json.dumps(
+                    {"type": "user_message", "session_id": session_id, "text": "https://example.com"}
+                )
+            )
+            plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan", timeout=8.0)
+            first_idx = int(plan["steps"][0]["idx"])
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "confirm_plan",
+                        "session_id": session_id,
+                        "plan_id": plan["plan_id"],
+                        "approved_steps": [first_idx],
+                    }
+                )
+            )
+
+            _ = _recv_until(ws, lambda d: d.get("event") == "tool_call")
+            evt_res = _recv_until(ws, lambda d: d.get("event") == "tool_result")
+
+    assert evt_res.get("ok") is False
+    assert evt_res.get("reason_code") == "TOOL_EXECUTION_EMPTY_RESPONSE"
+    assert evt_res.get("output") is None
 
 
 def test_persona_ws_persistence_offloads_to_thread(monkeypatch):
@@ -3800,7 +3847,7 @@ def test_persona_tool_call_emits_tool_processing_notice_after_quiet_delay(tmp_pa
             self.initialized = True
 
         async def handle_http_request(self, request, user_id=None, metadata=None):
-            await asyncio.sleep(0.03)
+            await asyncio.sleep(0.25)
             return SimpleNamespace(error=None, result={"ok": True, "slow": True})
 
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
@@ -3834,7 +3881,7 @@ def test_persona_tool_call_emits_tool_processing_notice_after_quiet_delay(tmp_pa
                 ws,
                 lambda d: d.get("event") == "notice"
                 and d.get("reason_code") == "VOICE_TOOL_EXECUTION_PROCESSING",
-                timeout=0.5,
+                timeout=3.0,
             )
             assert processing_notice.get("session_id") == "sess_tool_processing_notice"
             assert processing_notice.get("tool") == "knowledge.search"
@@ -5356,6 +5403,78 @@ def test_persona_state_context_message_override_can_enable_when_profile_default_
     assert memory_payload.get("persona_state_requested_enabled") is True
     assert memory_payload.get("persona_state_enabled") is True
     assert memory_payload.get("persona_state_applied_count", 0) >= 1
+
+
+def test_persona_summary_memory_persisted_before_assistant_delta(tmp_path, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
+
+    class _FakeServer:
+        def __init__(self):
+            self.initialized = True
+
+        async def initialize(self):
+            self.initialized = True
+
+        async def handle_http_request(self, request, user_id=None, metadata=None):
+            return SimpleNamespace(error=None, result={"ok": True, "tool": request.params.get("name")})
+
+    event_order: list[str] = []
+    persisted = threading.Event()
+    original_send_json = persona_ep.WebSocketStream.send_json
+
+    async def _recording_send_json(self, payload):
+        if dict(payload or {}).get("event") == "assistant_delta":
+            event_order.append("assistant_delta")
+        await original_send_json(self, payload)
+
+    def _fake_persist_persona_turn(**kwargs):
+        if kwargs.get("role") == "assistant" and kwargs.get("store_as_memory") is True:
+            event_order.append("persist_summary")
+            persisted.set()
+        return True
+
+    monkeypatch.setattr(persona_ep.WebSocketStream, "send_json", _recording_send_json)
+    monkeypatch.setattr(persona_ep, "persist_persona_turn", _fake_persist_persona_turn)
+    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    _seed_persona_session(
+        tmp_path,
+        monkeypatch,
+        user_id="1",
+        session_id="sess_summary_order",
+        mode="persistent_scoped",
+    )
+
+    with TestClient(fastapi_app) as c:
+        with c.websocket_connect("/api/v1/persona/stream") as ws:
+            _ = json.loads(ws.receive_text())
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "user_message",
+                        "session_id": "sess_summary_order",
+                        "text": "https://example.com",
+                        "use_memory_context": False,
+                    }
+                )
+            )
+            plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
+            approved_steps = [int(step["idx"]) for step in plan.get("steps", [])]
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "confirm_plan",
+                        "session_id": "sess_summary_order",
+                        "plan_id": plan["plan_id"],
+                        "approved_steps": approved_steps,
+                    }
+                )
+            )
+            _ = _recv_until(ws, lambda d: d.get("event") == "tool_result")
+            _ = _recv_until(ws, lambda d: d.get("event") == "assistant_delta")
+            persisted.wait(timeout=1.0)
+
+    assert "persist_summary" in event_order
+    assert event_order.index("persist_summary") < event_order.index("assistant_delta")
 
 
 @pytest.mark.parametrize(

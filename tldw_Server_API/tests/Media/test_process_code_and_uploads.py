@@ -1,6 +1,7 @@
 import os
 import io
 import json
+import tarfile
 import pytest
 from dataclasses import dataclass, field
 from fastapi import UploadFile
@@ -153,7 +154,14 @@ async def test_save_uploaded_files_extension_candidates_tar_gz(tmp_path, monkeyp
     )
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import FileValidator
 
-    content = b"fake tar gz content"
+    tar_buffer = io.BytesIO()
+    payload = b"archive payload\n"
+    with tarfile.open(fileobj=tar_buffer, mode="w:gz") as tar:
+        member = tarfile.TarInfo("payload.txt")
+        member.size = len(payload)
+        tar.addfile(member, io.BytesIO(payload))
+    tar_buffer.seek(0)
+    content = tar_buffer.getvalue()
     up = UploadFile(filename="archive.tar.gz", file=io.BytesIO(content))
 
     saved, errors = await save_uploaded_files(

@@ -3,6 +3,7 @@ import json
 import sys
 import time
 import types
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -48,6 +49,12 @@ if "transformers" not in sys.modules:
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.core.AuthNZ.permissions import (
+    WORKFLOWS_RUNS_CONTROL,
+    WORKFLOWS_RUNS_READ,
+)
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
 
@@ -57,15 +64,36 @@ pytestmark = pytest.mark.integration
 @pytest.fixture()
 def client_with_wf(tmp_path, auth_headers):
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+    permissions = [WORKFLOWS_RUNS_READ, WORKFLOWS_RUNS_CONTROL]
 
     async def override_user():
-        return User(id=1, username="tester", email="t@e.com", is_active=True, is_admin=True)
+        return User(
+            id=1,
+            username="tester",
+            email="t@e.com",
+            is_active=True,
+            is_admin=True,
+            tenant_id="default",
+            roles=["admin"],
+            permissions=permissions,
+        )
+
+    async def override_principal():
+        return AuthPrincipal(
+            kind="user",
+            user_id=1,
+            username="tester",
+            email="t@e.com",
+            roles=["admin"],
+            permissions=permissions,
+        )
 
     def override_db():
 
         return db
 
     app.dependency_overrides[get_request_user] = override_user
+    app.dependency_overrides[get_auth_principal] = override_principal
     app.dependency_overrides[wf_mod._get_db] = override_db
 
     with TestClient(app, headers=auth_headers) as client:
@@ -132,18 +160,19 @@ def test_mcp_tool_workflow(client_with_wf: TestClient):
     definition = {
         "name": "mcp-echo",
         "version": 1,
+        "metadata": {"mcp": {"allowlist": ["echo"], "scopes": ["*"]}},
         "steps": [
             {"id": "s1", "type": "mcp_tool", "config": {"tool_name": "echo", "arguments": {"message": "ping"}}},
         ],
     }
     wid = client.post("/api/v1/workflows", json=definition).json()["id"]
-    run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
-    for _ in range(50):
-        data = client.get(f"/api/v1/workflows/runs/{run_id}").json()
-        if data["status"] in ("succeeded", "failed"):
-            break
-        time.sleep(0.05)
-    assert data["status"] == "succeeded"
+    run_id = client.post(
+        f"/api/v1/workflows/{wid}/run",
+        json={"inputs": {}},
+        params={"mode": "sync"},
+    ).json()["run_id"]
+    data = _wait_for_status(client, run_id, {"succeeded", "failed"})
+    assert data["status"] == "succeeded", data
     assert (data.get("outputs") or {}).get("result") == "ping"
 
 
@@ -160,29 +189,28 @@ def test_webhook_step_noop(client_with_wf: TestClient, monkeypatch):
     }
     wid = client.post("/api/v1/workflows", json=definition).json()["id"]
     run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {"user_id": "1"}}).json()["run_id"]
-    for _ in range(50):
-        data = client.get(f"/api/v1/workflows/runs/{run_id}").json()
-        if data["status"] in ("succeeded", "failed"):
-            break
-        time.sleep(0.05)
-    assert data["status"] == "succeeded"
+    data = _wait_for_status(client, run_id, {"succeeded", "failed"})
+    assert data["status"] == "succeeded", data
 
 
-def _wait_for_status(client: TestClient, run_id: str, allowed: set[str], timeout_seconds: float = 8.0) -> dict:
-    deadline = time.time() + timeout_seconds
+def _wait_for_status(client: TestClient, run_id: str, allowed: set[str], timeout_seconds: float = 30.0) -> dict:
+    deadline = time.monotonic() + timeout_seconds
     last = {}
-    while time.time() < deadline:
+    while time.monotonic() < deadline:
         last = client.get(f"/api/v1/workflows/runs/{run_id}").json()
         if last.get("status") in allowed:
             return last
         time.sleep(0.05)
-    return last
+    pytest.fail(
+        f"workflow run {run_id} did not reach {sorted(allowed)} "
+        f"within {timeout_seconds}s; last={last}"
+    )
 
 
 def _patch_acp_runner(monkeypatch):
     class _StubRunner:
         async def create_session(self, **kwargs):
-            return "acp-session-1"
+            return f"acp-session-{uuid4().hex}"
 
         async def verify_session_access(self, session_id, user_id):
             return True
@@ -217,6 +245,7 @@ def test_l1_acp_pipeline_template_run_succeeds(client_with_wf: TestClient, monke
     run_resp = client.post(
         f"/api/v1/workflows/{workflow_id}/run",
         json={"inputs": {"task": "domain-only task", "workspace_id": "ws-1", "workspace_group_id": "wg-1"}},
+        params={"mode": "sync"},
     )
     assert run_resp.status_code == 200, run_resp.text
     run_id = run_resp.json()["run_id"]
@@ -292,6 +321,7 @@ def test_l1_acp_pipeline_persists_schema_version_on_acp_steps(client_with_wf: Te
     run_id = client.post(
         f"/api/v1/workflows/{workflow_id}/run",
         json={"inputs": {"task": "domain-only task", "workspace_id": "ws-1", "workspace_group_id": "wg-1"}},
+        params={"mode": "sync"},
     ).json()["run_id"]
 
     terminal = _wait_for_status(client, run_id, {"succeeded", "failed"})

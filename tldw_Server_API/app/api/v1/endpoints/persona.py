@@ -8977,6 +8977,25 @@ async def persona_stream(
                     {"source": "mcp_tool", "result": "miss"},
                 )
             resp = await server.handle_http_request(req, user_id=authenticated_user_id, metadata=audit_metadata)
+            if resp is None:
+                logger.warning(
+                    "Persona MCP tool call returned no response: tool={} mapped_tool={} session_id={} plan_id={}",
+                    name,
+                    resolved_name,
+                    session_id,
+                    plan_id,
+                )
+                _increment_persona_metric(
+                    "persona_ws_tool_calls_total",
+                    {"kind": "mcp", "status": "empty_response"},
+                )
+                return _build_tool_result(
+                    ok=False,
+                    output=None,
+                    error="Tool execution returned no response",
+                    reason_code="TOOL_EXECUTION_EMPTY_RESPONSE",
+                    policy=policy,
+                )
             if resp.error:
                 error_data = getattr(resp.error, "data", None)
                 approval_payload = (
@@ -10560,11 +10579,6 @@ async def persona_stream(
                             summary_text=assistant_text,
                             surface=activity_surface,
                         )
-                        await _emit_assistant_delta(
-                            session_id=session_id,
-                            step_idx=step.idx,
-                            text_delta=assistant_text,
-                        )
                         await _record_turn(
                             session_id=session_id,
                             role="assistant",
@@ -10576,6 +10590,11 @@ async def persona_stream(
                             runtime_mode_override=runtime_mode,
                             scope_snapshot_id_override=runtime_scope_snapshot_id,
                             memory_kind="summary",
+                        )
+                        await _emit_assistant_delta(
+                            session_id=session_id,
+                            step_idx=step.idx,
+                            text_delta=assistant_text,
                         )
                         await _emit_persona_live_tts_for_assistant_text(
                             session_id=session_id,

@@ -6,6 +6,11 @@ from tldw_Server_API.app.core.Collections.embedding_queue import enqueue_embeddi
 from tldw_Server_API.app.core.Embeddings import redis_pipeline
 
 
+def _disable_test_mode(monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+
+
 @pytest.mark.asyncio
 async def test_enqueue_embeddings_job_uses_manager(monkeypatch):
     captured = {}
@@ -16,7 +21,7 @@ async def test_enqueue_embeddings_job_uses_manager(monkeypatch):
             captured["job_kwargs"] = kwargs
             return {"id": 123, "uuid": "root-123"}
 
-    monkeypatch.setenv("TEST_MODE", "0")
+    _disable_test_mode(monkeypatch)
     monkeypatch.setattr(embedding_queue, "_jobs_manager", lambda: FakeManager())
     monkeypatch.setattr(redis_pipeline, "enqueue_content_job", lambda **kwargs: enqueue.update(kwargs) or "stream-1")
 
@@ -48,7 +53,7 @@ async def test_enqueue_embeddings_skips_empty_content(monkeypatch):
         def create_job(self, **kwargs):
             called["job_kwargs"] = kwargs
 
-    monkeypatch.setenv("TEST_MODE", "0")
+    _disable_test_mode(monkeypatch)
     monkeypatch.setattr(embedding_queue, "_jobs_manager", lambda: FakeManager())
 
     await enqueue_embeddings_job_for_item(
@@ -67,7 +72,7 @@ async def test_enqueue_embeddings_best_effort_when_queue_unavailable(monkeypatch
         def create_job(self, **kwargs):
             raise RuntimeError("queue unavailable")
 
-    monkeypatch.setenv("TEST_MODE", "0")
+    _disable_test_mode(monkeypatch)
     monkeypatch.setattr(embedding_queue, "_jobs_manager", lambda: FakeManager())
 
     await enqueue_embeddings_job_for_item(

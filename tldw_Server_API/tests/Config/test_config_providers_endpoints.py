@@ -4,6 +4,7 @@ Tests for GET /config/providers and POST /config/validate-provider endpoints.
 """
 import asyncio
 import configparser
+import types
 from collections.abc import Iterator
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -229,7 +230,7 @@ class TestConfigInfoSanitizedLogs:
         def _failing_getenv(name: str, default=None):  # noqa: ARG001
             raise RuntimeError("quickstart env exploded at /private/env")
 
-        monkeypatch.setattr(config_info_mod.os, "getenv", _failing_getenv)
+        monkeypatch.setattr(config_info_mod, "os", types.SimpleNamespace(getenv=_failing_getenv))
 
         with _capture_config_info_logs() as messages:
             response = await get_quickstart_redirect()

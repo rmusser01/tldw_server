@@ -49,7 +49,7 @@ from collections.abc import Mapping
 from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
-from typing import Any, Callable, Protocol, TypeAlias  # noqa: E402
+from typing import Any, Callable, ClassVar, Protocol, TypeAlias  # noqa: E402
 
 from loguru import logger  # noqa: E402
 
@@ -605,6 +605,16 @@ class CharactersRAGDB:
     """
     _CURRENT_SCHEMA_VERSION = 50  # Schema v50 adds Workspace activity/index event storage
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
+    _SQLITE_SCHEMA_INIT_LOCKS_GUARD: ClassVar[threading.RLock] = threading.RLock()
+    _SQLITE_SCHEMA_INIT_LOCKS: ClassVar[dict[str, threading.RLock]] = {}
+    _SQLITE_CORE_SCHEMA_TABLES = frozenset(
+        {
+            "character_cards",
+            "conversations",
+            "messages",
+            "notes",
+        }
+    )
     _ALLOWED_CONVERSATION_STATES: tuple[str, ...] = ("in-progress", "resolved", "backlog", "non-viable")
     _ALLOWED_CONVERSATION_CHARACTER_SCOPES: tuple[str, ...] = ("all", "character", "non_character")
     _ALLOWED_CONVERSATION_SEARCH_ORDER: tuple[str, ...] = ("bm25", "recency", "hybrid", "topic")
@@ -702,6 +712,7 @@ class CharactersRAGDB:
     _SQLITE_SCHEMA_TABLE_INFO_STATEMENTS: dict[str, str] = {
         "persona_profiles": "PRAGMA table_info('persona_profiles')",
         "persona_memory_entries": "PRAGMA table_info('persona_memory_entries')",
+        "persona_visual_candidates": "PRAGMA table_info('persona_visual_candidates')",
     }
     _SQLITE_SCHEMA_INDEX_LIST_STATEMENTS: dict[str, str] = {
         "persona_profiles": "PRAGMA index_list('persona_profiles')",
@@ -5461,6 +5472,9 @@ UPDATE db_schema_version
   Migration to Version 47 — Research Workspace migration protocol state (2026-05-23) [Postgres]
 ───────────────────────────────────────────────────────────────*/
 
+ALTER TABLE persona_visual_candidates
+  ADD COLUMN IF NOT EXISTS generation_provenance_json TEXT NOT NULL DEFAULT '{}';
+
 CREATE TABLE IF NOT EXISTS workspace_migration_sessions (
   id                     TEXT PRIMARY KEY NOT NULL,
   target_workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -6596,6 +6610,70 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
             raise CharactersRAGDBError(f"Query execution failed: {exc}") from exc  # noqa: TRY003
 
+    def upsert_voice_command(
+        self,
+        *,
+        command_id: str,
+        user_id: int,
+        persona_id: str | None,
+        connection_id: str | None,
+        name: str,
+        phrases: list[str] | str,
+        action_type: str,
+        action_config: dict[str, Any] | str,
+        priority: int,
+        enabled: bool,
+        requires_confirmation: bool,
+        description: str | None,
+        created_at: str,
+        updated_at: str,
+    ) -> None:
+        """Persist a user-defined voice command for VoiceAssistant helpers."""
+        phrases_json = phrases if isinstance(phrases, str) else json.dumps(phrases)
+        action_config_json = (
+            action_config if isinstance(action_config, str) else json.dumps(action_config)
+        )
+        self.execute_query(
+            """
+            INSERT INTO voice_commands (
+                id, user_id, persona_id, connection_id, name, phrases,
+                action_type, action_config, priority, enabled,
+                requires_confirmation, description, created_at, updated_at, deleted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ON CONFLICT(id) DO UPDATE SET
+                user_id = excluded.user_id,
+                persona_id = excluded.persona_id,
+                connection_id = excluded.connection_id,
+                name = excluded.name,
+                phrases = excluded.phrases,
+                action_type = excluded.action_type,
+                action_config = excluded.action_config,
+                priority = excluded.priority,
+                enabled = excluded.enabled,
+                requires_confirmation = excluded.requires_confirmation,
+                description = excluded.description,
+                updated_at = excluded.updated_at,
+                deleted = 0
+            """,
+            (
+                command_id,
+                user_id,
+                persona_id,
+                connection_id,
+                name,
+                phrases_json,
+                action_type,
+                action_config_json,
+                priority,
+                1 if enabled else 0,
+                1 if requires_confirmation else 0,
+                description,
+                created_at,
+                updated_at,
+            ),
+            commit=True,
+        )
+
     def execute_many(
         self,
         query: str,
@@ -6704,6 +6782,88 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             for table_name in drop_tables:
                 conn.execute(cls._SQLITE_MIGRATION_FIXTURE_DROP_STATEMENTS[table_name])
             conn.commit()
+
+    def _sqlite_linear_migration_steps(self) -> dict[int, Callable[[sqlite3.Connection], None]]:
+        """Return SQLite schema migrations keyed by their source schema version."""
+        steps = {
+            4: self._migrate_from_v4_to_v5,
+            5: self._migrate_from_v5_to_v6,
+            6: self._migrate_from_v6_to_v7,
+            7: self._migrate_from_v7_to_v8,
+            8: self._migrate_from_v8_to_v9,
+            9: self._migrate_from_v9_to_v10,
+            10: self._migrate_from_v10_to_v11,
+            11: self._migrate_from_v11_to_v12,
+            12: self._migrate_from_v12_to_v13,
+            13: self._migrate_from_v13_to_v14,
+            14: self._migrate_from_v14_to_v15,
+            15: self._migrate_from_v15_to_v16,
+            16: self._migrate_from_v16_to_v17,
+            17: self._migrate_from_v17_to_v18,
+            18: self._migrate_from_v18_to_v19,
+            19: self._migrate_from_v19_to_v20,
+            20: self._migrate_from_v20_to_v21,
+            21: self._migrate_from_v21_to_v22,
+            22: self._migrate_from_v22_to_v23,
+            23: self._migrate_from_v23_to_v24,
+            24: self._migrate_from_v24_to_v25,
+            25: self._migrate_from_v25_to_v26,
+            26: self._migrate_from_v26_to_v27,
+            27: self._migrate_from_v27_to_v28,
+            28: self._migrate_from_v28_to_v29,
+            29: self._migrate_from_v29_to_v30,
+            30: self._migrate_from_v30_to_v31,
+            31: self._migrate_from_v31_to_v32,
+            32: self._migrate_from_v32_to_v33,
+            33: self._migrate_from_v33_to_v34,
+            34: self._migrate_from_v34_to_v35,
+            35: self._migrate_from_v35_to_v36,
+            36: self._migrate_from_v36_to_v37,
+            37: self._migrate_from_v37_to_v38,
+            38: self._migrate_from_v38_to_v39,
+            39: self._migrate_from_v39_to_v40,
+            40: self._migrate_from_v40_to_v41,
+            41: self._migrate_from_v41_to_v42,
+            42: self._migrate_from_v42_to_v43,
+            43: self._migrate_from_v43_to_v44,
+            44: self._migrate_from_v44_to_v45,
+            45: self._migrate_from_v45_to_v46,
+            46: self._migrate_from_v46_to_v47,
+        }
+        for version, method_name in (
+            (47, "_migrate_from_v47_to_v48"),
+            (48, "_migrate_from_v48_to_v49"),
+            (49, "_migrate_from_v49_to_v50"),
+        ):
+            method = getattr(self, method_name, None)
+            if method is not None:
+                steps[version] = method
+        return steps
+
+    def _run_sqlite_linear_migration_step(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        from_version: int,
+        target_version: int,
+        initial_version: int,
+    ) -> int:
+        steps = self._sqlite_linear_migration_steps()
+        step = steps.get(from_version)
+        if step is None:
+            raise SchemaError(  # noqa: TRY003
+                f"Migration path undefined for '{self._SCHEMA_NAME}' from version {from_version} to {target_version} "
+                f"while migrating from {initial_version} to {target_version}. Manual migration or a new database may be required."
+            )
+        step(conn)
+        next_version = self._get_db_version(conn)
+        expected_version = from_version + 1
+        if next_version != expected_version:
+            raise SchemaError(  # noqa: TRY003
+                f"SQLite migration for '{self._SCHEMA_NAME}' advanced from version {from_version} to {next_version}; "
+                f"expected {expected_version} while migrating from {initial_version} to {target_version}."
+            )
+        return next_version
 
     @staticmethod
     def _sqlite_table_names(conn: sqlite3.Connection) -> set[str]:
@@ -7967,6 +8127,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V46 to V47 for DB: {self.db_path_str}...")
         try:
             self._ensure_workspace_migration_schema_sqlite(conn)
+            candidate_columns = self._sqlite_column_names(conn, "persona_visual_candidates")
+            if "generation_provenance_json" not in candidate_columns:
+                conn.execute(
+                    "ALTER TABLE persona_visual_candidates "
+                    "ADD COLUMN generation_provenance_json TEXT NOT NULL DEFAULT '{}'"
+                )
             conn.executescript(self._MIGRATION_SQL_V46_TO_V47)
             final_version = self._get_db_version(conn)
             if final_version != 47:
@@ -9859,7 +10025,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _initialize_schema(self):
         if self.backend_type == BackendType.SQLITE:
-            self._initialize_schema_sqlite()
+            if self.is_memory_db:
+                self._initialize_schema_sqlite()
+            else:
+                with self._sqlite_schema_init_lock_for_path(self.db_path_str):
+                    self._initialize_schema_sqlite()
         elif self.backend_type == BackendType.POSTGRESQL:
             self._initialize_schema_postgres()
         else:
@@ -9869,6 +10039,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._ensure_message_metadata_table()
         self._ensure_persona_live_voice_session_summaries_table()
         self._ensure_conversation_settings_table()
+
+    @classmethod
+    def _sqlite_schema_init_lock_for_path(cls, db_path_str: str) -> threading.RLock:
+        """Return the process-local schema initialization lock for one SQLite DB path."""
+        with cls._SQLITE_SCHEMA_INIT_LOCKS_GUARD:
+            lock = cls._SQLITE_SCHEMA_INIT_LOCKS.get(db_path_str)
+            if lock is None:
+                lock = threading.RLock()
+                cls._SQLITE_SCHEMA_INIT_LOCKS[db_path_str] = lock
+            return lock
 
     def ensure_character_tables_ready(self) -> None:
         """
@@ -9934,6 +10114,63 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         return any(marker in message for marker in missing_markers)
 
+    def _missing_current_schema_core_tables_sqlite(self, conn: sqlite3.Connection) -> set[str]:
+        """Return required core tables missing from a current-version SQLite schema."""
+        required = set(self._SQLITE_CORE_SCHEMA_TABLES)
+        try:
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed checking current SQLite schema tables: {exc}") from exc  # noqa: TRY003
+        existing = {row[0] for row in rows} & required
+        return required - existing
+
+    def _reset_empty_partial_current_schema_marker_sqlite(
+        self,
+        conn: sqlite3.Connection,
+        missing_tables: set[str],
+    ) -> None:
+        """
+        Reset an empty partial bootstrap marker so normal schema creation can run.
+
+        A crash or competing initializer can leave only a current db_schema_version
+        row behind. That state is safe to rebuild because there are no user tables
+        to preserve. If any other table exists, fail closed rather than risk data
+        loss from an automatic rebuild.
+        """
+        try:
+            rows = conn.execute(
+                """
+                SELECT name
+                  FROM sqlite_master
+                 WHERE type = 'table'
+                   AND name NOT LIKE 'sqlite_%'
+                """
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed checking partial SQLite schema tables: {exc}") from exc  # noqa: TRY003
+
+        user_tables = {row[0] for row in rows}
+        if user_tables - {"db_schema_version"}:
+            raise SchemaError(  # noqa: TRY003
+                "Current SQLite schema marker is present but required tables are missing "
+                f"({', '.join(sorted(missing_tables))}); existing user tables: "
+                f"{', '.join(sorted(user_tables))}. Manual repair is required."
+            )
+
+        logger.warning(
+            "Detected empty partial current SQLite schema for '{}' at {}; missing tables: {}. "
+            "Resetting version marker so schema creation can rebuild it.",
+            self._SCHEMA_NAME,
+            self.db_path_str,
+            ", ".join(sorted(missing_tables)),
+        )
+        conn.execute(
+            "DELETE FROM db_schema_version WHERE schema_name = ?",
+            (self._SCHEMA_NAME,),
+        )
+
     def _initialize_schema_sqlite(self):
         """
         Initializes or migrates the database schema to `_CURRENT_SCHEMA_VERSION`.
@@ -9964,69 +10201,75 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     f"Checking DB schema '{self._SCHEMA_NAME}'. Current version: {current_db_version}. Code supports: {target_version}")
 
                 if current_db_version == target_version:
-                    logger.debug(f"Database schema '{self._SCHEMA_NAME}' is up to date (Version {target_version}).")
-                    # Ensure helpful indexes that may have been introduced post-creation
-                    try:
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_conversation ON flashcards(conversation_id)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_message ON flashcards(message_id)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_state ON conversations(state)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_cluster ON conversations(cluster_id)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_last_modified ON conversations(last_modified)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_topic_label ON conversations(topic_label)")
-                        conn.execute(
-                            "CREATE INDEX IF NOT EXISTS idx_conversations_source_external_ref ON conversations(source, external_ref)"
-                        )
-                        conn.execute(
-                            "CREATE INDEX IF NOT EXISTS idx_conversations_client_deleted_last_modified "
-                            "ON conversations(client_id, deleted, last_modified DESC)"
-                        )
-                        conn.execute(
-                            "CREATE INDEX IF NOT EXISTS idx_conversations_client_character_deleted_last_modified "
-                            "ON conversations(client_id, character_id, deleted, last_modified DESC)"
-                        )
-                        conn.execute(
-                            "CREATE INDEX IF NOT EXISTS idx_conversations_client_deleted_created_at "
-                            "ON conversations(client_id, deleted, created_at DESC)"
-                        )
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_conversation ON notes(conversation_id)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_message ON notes(message_id)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_sessions_last_modified ON writing_sessions(last_modified)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_sessions_deleted ON writing_sessions(deleted)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_templates_last_modified ON writing_templates(last_modified)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_templates_deleted ON writing_templates(deleted)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_themes_last_modified ON writing_themes(last_modified)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_themes_deleted ON writing_themes(deleted)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_themes_order ON writing_themes(order_index)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_wordclouds_status ON writing_wordclouds(status)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_wordclouds_last_modified ON writing_wordclouds(last_modified)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_character_exemplars_character ON character_exemplars(character_id)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_character_exemplars_scenario_emotion ON character_exemplars(scenario, emotion)")
-                        conn.execute("CREATE INDEX IF NOT EXISTS idx_character_exemplars_novelty ON character_exemplars(novelty_hint)")
-                    except sqlite3.Error:
-                        pass
-                    # Verify core FTS tables exist to avoid silent search failures
-                    self._verify_required_fts_tables_sqlite(conn)
-                    self._ensure_workspace_subresource_schema_sqlite(conn)
-                    self._ensure_workspace_migration_schema_sqlite(conn)
-                    self._ensure_flashcard_asset_schema_sqlite(conn)
-                    self._ensure_flashcard_template_schema_sqlite(conn)
-                    self._ensure_flashcard_scheduler_schema_sqlite(conn)
-                    self._ensure_study_pack_schema_sqlite(conn)
-                    self._ensure_study_assistant_schema_sqlite(conn)
-                    self._ensure_quiz_remediation_conversion_schema_sqlite(conn)
-                    self._ensure_flashcard_fts_triggers_sqlite(conn)
-                    self._ensure_character_cards_fts_triggers_sqlite(conn)
-                    self._ensure_notes_fts_triggers_sqlite(conn)
-                    self._ensure_recent_persona_schema_sqlite(conn)
-                    self._ensure_recent_voice_command_schema_sqlite(conn)
-                    self._ensure_note_folder_schema_sqlite(conn)
-                    self._ensure_note_studio_schema_sqlite(conn)
-                    self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
-                    # Seed/heal character_cards_fts before request traffic. Schema V4
-                    # inserts "Default Assistant" before FTS triggers are created.
-                    self._self_heal_character_cards_fts_sqlite(conn)
-                    return
+                    missing_core_tables = self._missing_current_schema_core_tables_sqlite(conn)
+                    if missing_core_tables:
+                        self._reset_empty_partial_current_schema_marker_sqlite(conn, missing_core_tables)
+                        current_db_version = 0
+                        current_initial_version = 0
+                    else:
+                        logger.debug(f"Database schema '{self._SCHEMA_NAME}' is up to date (Version {target_version}).")
+                        # Ensure helpful indexes that may have been introduced post-creation
+                        try:
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_conversation ON flashcards(conversation_id)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_message ON flashcards(message_id)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_state ON conversations(state)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_cluster ON conversations(cluster_id)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_last_modified ON conversations(last_modified)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_topic_label ON conversations(topic_label)")
+                            conn.execute(
+                                "CREATE INDEX IF NOT EXISTS idx_conversations_source_external_ref ON conversations(source, external_ref)"
+                            )
+                            conn.execute(
+                                "CREATE INDEX IF NOT EXISTS idx_conversations_client_deleted_last_modified "
+                                "ON conversations(client_id, deleted, last_modified DESC)"
+                            )
+                            conn.execute(
+                                "CREATE INDEX IF NOT EXISTS idx_conversations_client_character_deleted_last_modified "
+                                "ON conversations(client_id, character_id, deleted, last_modified DESC)"
+                            )
+                            conn.execute(
+                                "CREATE INDEX IF NOT EXISTS idx_conversations_client_deleted_created_at "
+                                "ON conversations(client_id, deleted, created_at DESC)"
+                            )
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_conversation ON notes(conversation_id)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_message ON notes(message_id)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_sessions_last_modified ON writing_sessions(last_modified)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_sessions_deleted ON writing_sessions(deleted)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_templates_last_modified ON writing_templates(last_modified)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_templates_deleted ON writing_templates(deleted)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_themes_last_modified ON writing_themes(last_modified)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_themes_deleted ON writing_themes(deleted)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_themes_order ON writing_themes(order_index)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_wordclouds_status ON writing_wordclouds(status)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_writing_wordclouds_last_modified ON writing_wordclouds(last_modified)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_character_exemplars_character ON character_exemplars(character_id)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_character_exemplars_scenario_emotion ON character_exemplars(scenario, emotion)")
+                            conn.execute("CREATE INDEX IF NOT EXISTS idx_character_exemplars_novelty ON character_exemplars(novelty_hint)")
+                        except sqlite3.Error:
+                            pass
+                        # Verify core FTS tables exist to avoid silent search failures
+                        self._verify_required_fts_tables_sqlite(conn)
+                        self._ensure_workspace_subresource_schema_sqlite(conn)
+                        self._ensure_workspace_migration_schema_sqlite(conn)
+                        self._ensure_flashcard_asset_schema_sqlite(conn)
+                        self._ensure_flashcard_template_schema_sqlite(conn)
+                        self._ensure_flashcard_scheduler_schema_sqlite(conn)
+                        self._ensure_study_pack_schema_sqlite(conn)
+                        self._ensure_study_assistant_schema_sqlite(conn)
+                        self._ensure_quiz_remediation_conversion_schema_sqlite(conn)
+                        self._ensure_flashcard_fts_triggers_sqlite(conn)
+                        self._ensure_character_cards_fts_triggers_sqlite(conn)
+                        self._ensure_notes_fts_triggers_sqlite(conn)
+                        self._ensure_recent_persona_schema_sqlite(conn)
+                        self._ensure_recent_voice_command_schema_sqlite(conn)
+                        self._ensure_note_folder_schema_sqlite(conn)
+                        self._ensure_note_studio_schema_sqlite(conn)
+                        self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
+                        # Seed/heal character_cards_fts before request traffic. Schema V4
+                        # inserts "Default Assistant" before FTS triggers are created.
+                        self._self_heal_character_cards_fts_sqlite(conn)
+                        return
                 if current_db_version > target_version:
                     raise SchemaError(  # noqa: TRY003, TRY301
                         f"Database schema '{self._SCHEMA_NAME}' version ({current_db_version}) is newer than supported by code ({target_version}). Aborting.")
@@ -10156,8 +10399,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         self._migrate_from_v43_to_v44(conn)
                         current_db_version = self._get_db_version(conn)
                     if target_version >= 45 and current_db_version == 44:
-                        self._migrate_from_v44_to_v45(conn)
-                        current_db_version = self._get_db_version(conn)
+                        current_db_version = self._run_sqlite_linear_migration_step(
+                            conn,
+                            from_version=44,
+                            target_version=target_version,
+                            initial_version=current_initial_version,
+                        )
                     if target_version >= 46 and current_db_version == 45:
                         self._migrate_from_v45_to_v46(conn)
                         current_db_version = self._get_db_version(conn)
@@ -10229,8 +10476,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         pass
                     # Handle known migration paths for pre-existing databases
                     elif current_initial_version == 4 and target_version >= 5:
-                        self._migrate_from_v4_to_v5(conn)
-                        current_db_version = self._get_db_version(conn)
+                        current_db_version = self._run_sqlite_linear_migration_step(
+                            conn,
+                            from_version=4,
+                            target_version=target_version,
+                            initial_version=current_initial_version,
+                        )
                         if target_version >= 6 and current_db_version == 5:
                             self._migrate_from_v5_to_v6(conn)
                             current_db_version = self._get_db_version(conn)
@@ -10433,104 +10684,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         self._migrate_from_v28_to_v29(conn)
                         current_db_version = self._get_db_version(conn)
                     else:
-                        # Fallback: attempt linear migrations for known versions.
+                        # Fallback through the shared registry so late migrations
+                        # stay available when branches add newer schema versions.
                         fallback_version = current_initial_version
                         while fallback_version < target_version:
-                            if fallback_version == 4:
-                                self._migrate_from_v4_to_v5(conn)
-                            elif fallback_version == 5:
-                                self._migrate_from_v5_to_v6(conn)
-                            elif fallback_version == 6:
-                                self._migrate_from_v6_to_v7(conn)
-                            elif fallback_version == 7:
-                                self._migrate_from_v7_to_v8(conn)
-                            elif fallback_version == 8:
-                                self._migrate_from_v8_to_v9(conn)
-                            elif fallback_version == 9:
-                                self._migrate_from_v9_to_v10(conn)
-                            elif fallback_version == 10:
-                                self._migrate_from_v10_to_v11(conn)
-                            elif fallback_version == 11:
-                                self._migrate_from_v11_to_v12(conn)
-                            elif fallback_version == 12:
-                                self._migrate_from_v12_to_v13(conn)
-                            elif fallback_version == 13:
-                                self._migrate_from_v13_to_v14(conn)
-                            elif fallback_version == 14:
-                                self._migrate_from_v14_to_v15(conn)
-                            elif fallback_version == 15:
-                                self._migrate_from_v15_to_v16(conn)
-                            elif fallback_version == 16:
-                                self._migrate_from_v16_to_v17(conn)
-                            elif fallback_version == 17:
-                                self._migrate_from_v17_to_v18(conn)
-                            elif fallback_version == 18:
-                                self._migrate_from_v18_to_v19(conn)
-                            elif fallback_version == 19:
-                                self._migrate_from_v19_to_v20(conn)
-                            elif fallback_version == 20:
-                                self._migrate_from_v20_to_v21(conn)
-                            elif fallback_version == 21:
-                                self._migrate_from_v21_to_v22(conn)
-                            elif fallback_version == 22:
-                                self._migrate_from_v22_to_v23(conn)
-                            elif fallback_version == 23:
-                                self._migrate_from_v23_to_v24(conn)
-                            elif fallback_version == 24:
-                                self._migrate_from_v24_to_v25(conn)
-                            elif fallback_version == 25:
-                                self._migrate_from_v25_to_v26(conn)
-                            elif fallback_version == 26:
-                                self._migrate_from_v26_to_v27(conn)
-                            elif fallback_version == 27:
-                                self._migrate_from_v27_to_v28(conn)
-                            elif fallback_version == 28:
-                                self._migrate_from_v28_to_v29(conn)
-                            elif fallback_version == 29:
-                                self._migrate_from_v29_to_v30(conn)
-                            elif fallback_version == 30:
-                                self._migrate_from_v30_to_v31(conn)
-                            elif fallback_version == 31:
-                                self._migrate_from_v31_to_v32(conn)
-                            elif fallback_version == 32:
-                                self._migrate_from_v32_to_v33(conn)
-                            elif fallback_version == 33:
-                                self._migrate_from_v33_to_v34(conn)
-                            elif fallback_version == 34:
-                                self._migrate_from_v34_to_v35(conn)
-                            elif fallback_version == 35:
-                                self._migrate_from_v35_to_v36(conn)
-                            elif fallback_version == 36:
-                                self._migrate_from_v36_to_v37(conn)
-                            elif fallback_version == 37:
-                                self._migrate_from_v37_to_v38(conn)
-                            elif fallback_version == 38:
-                                self._migrate_from_v38_to_v39(conn)
-                            elif fallback_version == 39:
-                                self._migrate_from_v39_to_v40(conn)
-                            elif fallback_version == 40:
-                                self._migrate_from_v40_to_v41(conn)
-                            elif fallback_version == 41:
-                                self._migrate_from_v41_to_v42(conn)
-                            elif fallback_version == 42:
-                                self._migrate_from_v42_to_v43(conn)
-                            elif fallback_version == 43:
-                                self._migrate_from_v43_to_v44(conn)
-                            elif fallback_version == 44:
-                                self._migrate_from_v44_to_v45(conn)
-                            elif fallback_version == 45:
-                                self._migrate_from_v45_to_v46(conn)
-                            elif fallback_version == 46:
-                                self._migrate_from_v46_to_v47(conn)
-                            elif fallback_version == 47:
-                                self._migrate_from_v47_to_v48(conn)
-                            elif fallback_version == 48:
-                                self._migrate_from_v48_to_v49(conn)
-                            else:
-                                raise SchemaError(  # noqa: TRY003, TRY301
-                                    f"Migration path undefined for '{self._SCHEMA_NAME}' from version {current_initial_version} to {target_version}. "
-                                    f"Manual migration or a new database may be required.")
-                            fallback_version = self._get_db_version(conn)
+                            fallback_version = self._run_sqlite_linear_migration_step(
+                                conn,
+                                from_version=fallback_version,
+                                target_version=target_version,
+                                initial_version=current_initial_version,
+                            )
                         current_db_version = fallback_version
                 else: # Should not be reached due to prior checks
                     raise SchemaError(f"Unexpected schema state: current {current_initial_version}, target {target_version}")  # noqa: TRY003, TRY301
@@ -10635,8 +10798,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._migrate_from_v43_to_v44(conn)
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 45 and current_db_version == 44:
-                    self._migrate_from_v44_to_v45(conn)
-                    current_db_version = self._get_db_version(conn)
+                    current_db_version = self._run_sqlite_linear_migration_step(
+                        conn,
+                        from_version=44,
+                        target_version=target_version,
+                        initial_version=current_initial_version,
+                    )
                 if target_version >= 46 and current_db_version == 45:
                     self._migrate_from_v45_to_v46(conn)
                     current_db_version = self._get_db_version(conn)
@@ -10658,6 +10825,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._ensure_note_folder_schema_sqlite(conn)
                 self._ensure_note_studio_schema_sqlite(conn)
                 self._ensure_web_clipper_schema_sqlite(conn)
+                self._ensure_prompt_presets_schema_sqlite(conn)
                 self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
                 self._ensure_workspace_activity_events_schema_sqlite(conn)
 
@@ -10719,6 +10887,56 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
         except sqlite3.Error as e:
             raise SchemaError(f"Failed verifying FTS tables for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+
+    def _ensure_prompt_presets_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure custom Character Chat prompt presets are available in SQLite."""
+        try:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS prompt_presets(
+                  preset_id              TEXT PRIMARY KEY NOT NULL,
+                  name                   TEXT NOT NULL,
+                  section_order_json     TEXT NOT NULL DEFAULT '[]',
+                  section_templates_json TEXT NOT NULL DEFAULT '{}',
+                  created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  deleted                BOOLEAN NOT NULL DEFAULT 0,
+                  client_id              TEXT NOT NULL DEFAULT 'unknown',
+                  version                INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE INDEX IF NOT EXISTS idx_prompt_presets_active_updated
+                  ON prompt_presets(deleted, last_modified DESC);
+                """
+            )
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring prompt_presets schema: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_prompt_presets_schema_postgres(self, conn: Any) -> None:
+        """Ensure custom Character Chat prompt presets are available in PostgreSQL."""
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS prompt_presets(
+                  preset_id              TEXT PRIMARY KEY NOT NULL,
+                  name                   TEXT NOT NULL,
+                  section_order_json     TEXT NOT NULL DEFAULT '[]',
+                  section_templates_json TEXT NOT NULL DEFAULT '{}',
+                  created_at             TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  deleted                BOOLEAN NOT NULL DEFAULT FALSE,
+                  client_id              TEXT NOT NULL DEFAULT 'unknown',
+                  version                INTEGER NOT NULL DEFAULT 1
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_prompt_presets_active_updated
+                  ON prompt_presets(deleted, last_modified DESC)
+                """
+            )
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            raise SchemaError(f"Failed ensuring PostgreSQL prompt_presets schema: {exc}") from exc  # noqa: TRY003
 
     def _ensure_character_cards_fts_columns_sqlite(self, conn: sqlite3.Connection) -> None:
         """Add legacy-missing character card columns required by FTS rebuild."""
@@ -14515,6 +14733,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_note_folder_schema_postgres(conn)
             self._ensure_note_studio_schema_postgres(conn)
             self._ensure_web_clipper_schema_postgres(conn)
+            self._ensure_prompt_presets_schema_postgres(conn)
             self._ensure_workspace_subresource_schema_postgres(conn)
             self._ensure_workspace_file_inventory_schema_postgres(conn)
             self._ensure_workspace_migration_schema_postgres(conn)
@@ -24367,7 +24586,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         upd["interval_days"] if upd["queue_state"] == "review" else None,
                         upd["ef"],
                         upd["repetitions"],
-                        1 if upd["was_lapse"] else 0,
+                        bool(upd["was_lapse"]),
                         self.client_id,
                         scheduler_type,
                         previous_queue_state,
@@ -29178,6 +29397,586 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except CharactersRAGDBError as e:
             logger.error(f"Error fetching latest sync log change_id: {e}")
             raise
+
+    # --- Chat Grammar Methods ---
+    def ensure_chat_grammars_table(self) -> None:
+        """Ensure the user-scoped chat grammar library table exists."""
+        if self.backend_type == BackendType.POSTGRESQL:
+            ddl_statements = (
+                """
+                CREATE TABLE IF NOT EXISTS chat_grammars(
+                  id                TEXT PRIMARY KEY NOT NULL,
+                  name              TEXT NOT NULL,
+                  description       TEXT,
+                  grammar_text      TEXT NOT NULL,
+                  validation_status TEXT NOT NULL DEFAULT 'unchecked',
+                  is_archived       BOOLEAN NOT NULL DEFAULT FALSE,
+                  created_at        TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  deleted           BOOLEAN NOT NULL DEFAULT FALSE,
+                  client_id         TEXT NOT NULL DEFAULT 'unknown',
+                  version           INTEGER NOT NULL DEFAULT 1
+                )
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_chat_grammars_client_active_updated
+                  ON chat_grammars(client_id, deleted, is_archived, last_modified DESC)
+                """,
+            )
+            with self.transaction() as conn:
+                for statement in ddl_statements:
+                    conn.execute(statement)
+            return
+
+        with self.transaction() as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS chat_grammars(
+                  id                TEXT PRIMARY KEY NOT NULL,
+                  name              TEXT NOT NULL,
+                  description       TEXT,
+                  grammar_text      TEXT NOT NULL,
+                  validation_status TEXT NOT NULL DEFAULT 'unchecked',
+                  is_archived       BOOLEAN NOT NULL DEFAULT 0,
+                  created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  last_modified     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  deleted           BOOLEAN NOT NULL DEFAULT 0,
+                  client_id         TEXT NOT NULL DEFAULT 'unknown',
+                  version           INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE INDEX IF NOT EXISTS idx_chat_grammars_client_active_updated
+                  ON chat_grammars(client_id, deleted, is_archived, last_modified DESC);
+                """
+            )
+
+    @staticmethod
+    def _normalize_chat_grammar_name(name: str) -> str:
+        value = str(name or "").strip()
+        if not value:
+            raise InputError("Chat grammar name is required.")  # noqa: TRY003
+        if len(value) > 255:
+            raise InputError("Chat grammar name must be 255 characters or fewer.")  # noqa: TRY003
+        return value
+
+    @staticmethod
+    def _normalize_chat_grammar_text(grammar_text: str) -> str:
+        value = str(grammar_text or "").strip()
+        if not value:
+            raise InputError("Chat grammar text is required.")  # noqa: TRY003
+        return value
+
+    @staticmethod
+    def _normalize_chat_grammar_validation_status(value: Any) -> str:
+        normalized = str(value or "unchecked").strip().lower()
+        if normalized not in _CHAT_GRAMMAR_VALIDATION_STATUSES:
+            raise InputError("Chat grammar validation_status is invalid.")  # noqa: TRY003
+        return normalized
+
+    def _chat_grammar_from_row(self, row: Any) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        record = dict(row)
+        return {
+            "id": record.get("id"),
+            "name": record.get("name"),
+            "description": record.get("description"),
+            "grammar_text": record.get("grammar_text"),
+            "validation_status": record.get("validation_status"),
+            "is_archived": bool(record.get("is_archived")),
+            "created_at": record.get("created_at"),
+            "updated_at": record.get("last_modified"),
+            "last_modified": record.get("last_modified"),
+            "deleted": bool(record.get("deleted")),
+            "client_id": record.get("client_id"),
+            "version": int(record.get("version") or 1),
+        }
+
+    def insert_chat_grammar(self, grammar_data: dict[str, Any]) -> str:
+        """Create a saved chat grammar for the current client and return its ID."""
+        self.ensure_chat_grammars_table()
+        name = self._normalize_chat_grammar_name(str(grammar_data.get("name") or ""))
+        grammar_text = self._normalize_chat_grammar_text(str(grammar_data.get("grammar_text") or ""))
+        description = grammar_data.get("description")
+        validation_status = self._normalize_chat_grammar_validation_status(
+            grammar_data.get("validation_status")
+        )
+        grammar_id = str(grammar_data.get("id") or uuid.uuid4())
+        now = self._get_current_utc_timestamp_iso()
+        active_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+
+        with self.transaction() as conn:
+            existing = conn.execute(
+                """
+                SELECT id FROM chat_grammars
+                 WHERE client_id = ? AND deleted = ? AND LOWER(name) = LOWER(?)
+                 LIMIT 1
+                """,
+                (self.client_id, active_value, name),
+            ).fetchone()
+            if existing is not None:
+                raise ConflictError("Chat grammar name already exists.", entity="chat_grammars", entity_id=name)  # noqa: TRY003
+
+            conn.execute(
+                """
+                INSERT INTO chat_grammars (
+                    id, name, description, grammar_text, validation_status,
+                    is_archived, created_at, last_modified, deleted, client_id, version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    grammar_id,
+                    name,
+                    str(description) if description is not None else None,
+                    grammar_text,
+                    validation_status,
+                    False if self.backend_type == BackendType.POSTGRESQL else 0,
+                    now,
+                    now,
+                    active_value,
+                    self.client_id,
+                    1,
+                ),
+            )
+        return grammar_id
+
+    def get_chat_grammar(
+        self,
+        grammar_id: str,
+        *,
+        include_archived: bool = False,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        """Return one saved chat grammar by ID for the current client."""
+        self.ensure_chat_grammars_table()
+        conditions = ["id = ?", "client_id = ?"]
+        params: list[Any] = [str(grammar_id), self.client_id]
+        if not include_deleted:
+            conditions.append("deleted = ?")
+            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
+        if not include_archived:
+            conditions.append("is_archived = ?")
+            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
+        cursor = self.execute_query(
+            f"""
+            SELECT id, name, description, grammar_text, validation_status,
+                   is_archived, created_at, last_modified, deleted, client_id, version
+              FROM chat_grammars
+             WHERE {' AND '.join(conditions)}
+             LIMIT 1
+            """,  # nosec B608
+            tuple(params),
+        )
+        return self._chat_grammar_from_row(cursor.fetchone())
+
+    def list_chat_grammars(
+        self,
+        *,
+        include_archived: bool = False,
+        include_deleted: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """List saved chat grammars for the current client."""
+        self.ensure_chat_grammars_table()
+        safe_limit = max(1, min(int(limit or 100), 500))
+        safe_offset = max(0, int(offset or 0))
+        conditions = ["client_id = ?"]
+        params: list[Any] = [self.client_id]
+        if not include_deleted:
+            conditions.append("deleted = ?")
+            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
+        if not include_archived:
+            conditions.append("is_archived = ?")
+            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
+        params.extend([safe_limit, safe_offset])
+        cursor = self.execute_query(
+            f"""
+            SELECT id, name, description, grammar_text, validation_status,
+                   is_archived, created_at, last_modified, deleted, client_id, version
+              FROM chat_grammars
+             WHERE {' AND '.join(conditions)}
+             ORDER BY last_modified DESC, name ASC
+             LIMIT ? OFFSET ?
+            """,  # nosec B608
+            tuple(params),
+        )
+        return [
+            grammar
+            for row in cursor.fetchall()
+            if (grammar := self._chat_grammar_from_row(row)) is not None
+        ]
+
+    def count_chat_grammars(
+        self,
+        *,
+        include_archived: bool = False,
+        include_deleted: bool = False,
+    ) -> int:
+        """Count saved chat grammars for the current client."""
+        self.ensure_chat_grammars_table()
+        conditions = ["client_id = ?"]
+        params: list[Any] = [self.client_id]
+        if not include_deleted:
+            conditions.append("deleted = ?")
+            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
+        if not include_archived:
+            conditions.append("is_archived = ?")
+            params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
+        cursor = self.execute_query(
+            f"SELECT COUNT(*) AS cnt FROM chat_grammars WHERE {' AND '.join(conditions)}",  # nosec B608
+            tuple(params),
+        )
+        row = cursor.fetchone()
+        return int(row["cnt"] if row else 0)
+
+    def update_chat_grammar(
+        self,
+        grammar_id: str,
+        updates: dict[str, Any],
+        *,
+        expected_version: int,
+    ) -> bool:
+        """Update a saved chat grammar using optimistic version checks."""
+        self.ensure_chat_grammars_table()
+        allowed_fields = {"name", "description", "grammar_text", "validation_status"}
+        update_data = {key: value for key, value in dict(updates or {}).items() if key in allowed_fields}
+        if not update_data:
+            raise InputError("No valid chat grammar fields were provided.")  # noqa: TRY003
+        if "name" in update_data:
+            update_data["name"] = self._normalize_chat_grammar_name(str(update_data["name"] or ""))
+        if "grammar_text" in update_data:
+            update_data["grammar_text"] = self._normalize_chat_grammar_text(str(update_data["grammar_text"] or ""))
+        if "validation_status" in update_data:
+            update_data["validation_status"] = self._normalize_chat_grammar_validation_status(
+                update_data["validation_status"]
+            )
+
+        now = self._get_current_utc_timestamp_iso()
+        active_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+        with self.transaction() as conn:
+            current = conn.execute(
+                "SELECT version FROM chat_grammars WHERE id = ? AND client_id = ? AND deleted = ?",
+                (str(grammar_id), self.client_id, active_value),
+            ).fetchone()
+            if current is None:
+                raise InputError(f"Chat grammar {grammar_id} not found.")  # noqa: TRY003
+            current_version = int(dict(current).get("version") or 1)
+            if current_version != int(expected_version):
+                raise ConflictError("Version mismatch", entity="chat_grammars", entity_id=grammar_id)  # noqa: TRY003
+            if "name" in update_data:
+                duplicate = conn.execute(
+                    """
+                    SELECT id FROM chat_grammars
+                     WHERE client_id = ? AND deleted = ? AND LOWER(name) = LOWER(?) AND id <> ?
+                     LIMIT 1
+                    """,
+                    (self.client_id, active_value, update_data["name"], str(grammar_id)),
+                ).fetchone()
+                if duplicate is not None:
+                    raise ConflictError(
+                        "Chat grammar name already exists.",
+                        entity="chat_grammars",
+                        entity_id=update_data["name"],
+                    )  # noqa: TRY003
+
+            assignments = [f"{field} = ?" for field in update_data]
+            params = list(update_data.values())
+            assignments.extend(["last_modified = ?", "client_id = ?", "version = ?"])
+            params.extend([now, self.client_id, current_version + 1, str(grammar_id), active_value])
+            cursor = conn.execute(
+                f"""
+                UPDATE chat_grammars
+                   SET {', '.join(assignments)}
+                 WHERE id = ? AND deleted = ?
+                """,  # nosec B608
+                tuple(params),
+            )
+            return bool(getattr(cursor, "rowcount", 0))
+
+    def archive_chat_grammar(self, grammar_id: str, *, expected_version: int) -> dict[str, Any]:
+        """Archive a saved chat grammar without deleting it."""
+        archived_value = True if self.backend_type == BackendType.POSTGRESQL else 1
+        now = self._get_current_utc_timestamp_iso()
+        with self.transaction() as conn:
+            current = conn.execute(
+                "SELECT version FROM chat_grammars WHERE id = ? AND client_id = ? AND deleted = ?",
+                (str(grammar_id), self.client_id, False if self.backend_type == BackendType.POSTGRESQL else 0),
+            ).fetchone()
+            if current is None:
+                raise InputError(f"Chat grammar {grammar_id} not found.")  # noqa: TRY003
+            current_version = int(dict(current).get("version") or 1)
+            if current_version != int(expected_version):
+                raise ConflictError("Version mismatch", entity="chat_grammars", entity_id=grammar_id)  # noqa: TRY003
+            conn.execute(
+                """
+                UPDATE chat_grammars
+                   SET is_archived = ?, last_modified = ?, client_id = ?, version = ?
+                 WHERE id = ?
+                """,
+                (archived_value, now, self.client_id, current_version + 1, str(grammar_id)),
+            )
+        archived = self.get_chat_grammar(grammar_id, include_archived=True, include_deleted=True)
+        if archived is None:
+            raise CharactersRAGDBError(f"Archived grammar {grammar_id} could not be reloaded")  # noqa: TRY003
+        return archived
+
+    def delete_chat_grammar(
+        self,
+        grammar_id: str,
+        *,
+        expected_version: int,
+        hard_delete: bool = False,
+    ) -> bool:
+        """Delete a saved chat grammar, soft-delete by default."""
+        self.ensure_chat_grammars_table()
+        with self.transaction() as conn:
+            current = conn.execute(
+                "SELECT version FROM chat_grammars WHERE id = ? AND client_id = ?",
+                (str(grammar_id), self.client_id),
+            ).fetchone()
+            if current is None:
+                return False
+            current_version = int(dict(current).get("version") or 1)
+            if current_version != int(expected_version):
+                raise ConflictError("Version mismatch", entity="chat_grammars", entity_id=grammar_id)  # noqa: TRY003
+            if hard_delete:
+                cursor = conn.execute(
+                    "DELETE FROM chat_grammars WHERE id = ? AND client_id = ?",
+                    (str(grammar_id), self.client_id),
+                )
+                return bool(getattr(cursor, "rowcount", 0))
+            cursor = conn.execute(
+                """
+                UPDATE chat_grammars
+                   SET deleted = ?, last_modified = ?, client_id = ?, version = ?
+                 WHERE id = ? AND client_id = ?
+                """,
+                (
+                    True if self.backend_type == BackendType.POSTGRESQL else 1,
+                    self._get_current_utc_timestamp_iso(),
+                    self.client_id,
+                    current_version + 1,
+                    str(grammar_id),
+                    self.client_id,
+                ),
+            )
+            return bool(getattr(cursor, "rowcount", 0))
+
+    # --- Prompt Preset Methods ---
+    @staticmethod
+    def _normalize_prompt_preset_id(preset_id: str) -> str:
+        value = str(preset_id or "").strip()
+        if not value:
+            raise InputError("Prompt preset ID is required.")  # noqa: TRY003
+        if len(value) > 128:
+            raise InputError("Prompt preset ID must be 128 characters or fewer.")  # noqa: TRY003
+        return value
+
+    @staticmethod
+    def _normalize_prompt_preset_name(name: str) -> str:
+        value = str(name or "").strip()
+        if not value:
+            raise InputError("Prompt preset name is required.")  # noqa: TRY003
+        if len(value) > 255:
+            raise InputError("Prompt preset name must be 255 characters or fewer.")  # noqa: TRY003
+        return value
+
+    @staticmethod
+    def _serialize_prompt_preset_order(section_order: list[str]) -> str:
+        if not isinstance(section_order, list):
+            raise InputError("Prompt preset section_order must be a list.")  # noqa: TRY003
+        normalized = [item for item in section_order if isinstance(item, str) and item.strip()]
+        return json.dumps(normalized, ensure_ascii=True)
+
+    @staticmethod
+    def _serialize_prompt_preset_templates(section_templates: dict[str, str]) -> str:
+        if not isinstance(section_templates, dict):
+            raise InputError("Prompt preset section_templates must be an object.")  # noqa: TRY003
+        normalized = {
+            str(key): value
+            for key, value in section_templates.items()
+            if isinstance(key, str) and isinstance(value, str)
+        }
+        return json.dumps(normalized, ensure_ascii=True)
+
+    @staticmethod
+    def _decode_prompt_preset_json(value: Any, default: Any) -> Any:
+        if isinstance(value, str) and value.strip():
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return default
+        return default
+
+    def _prompt_preset_from_row(self, row: Any) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        record = dict(row)
+        section_order = self._decode_prompt_preset_json(record.get("section_order_json"), [])
+        section_templates = self._decode_prompt_preset_json(record.get("section_templates_json"), {})
+        return {
+            "preset_id": record.get("preset_id"),
+            "name": record.get("name"),
+            "section_order": section_order if isinstance(section_order, list) else [],
+            "section_templates": section_templates if isinstance(section_templates, dict) else {},
+            "created_at": record.get("created_at"),
+            "updated_at": record.get("last_modified"),
+            "last_modified": record.get("last_modified"),
+            "client_id": record.get("client_id"),
+            "version": record.get("version"),
+        }
+
+    def upsert_prompt_preset(
+        self,
+        *,
+        preset_id: str,
+        name: str,
+        section_order: list[str],
+        section_templates: dict[str, str],
+    ) -> bool:
+        """Create or update a custom Character Chat prompt preset."""
+        preset_id_value = self._normalize_prompt_preset_id(preset_id)
+        name_value = self._normalize_prompt_preset_name(name)
+        section_order_json = self._serialize_prompt_preset_order(section_order)
+        section_templates_json = self._serialize_prompt_preset_templates(section_templates)
+        now = self._get_current_utc_timestamp_iso()
+        active_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+
+        try:
+            with self.transaction() as conn:
+                existing = conn.execute(
+                    "SELECT version FROM prompt_presets WHERE preset_id = ?",
+                    (preset_id_value,),
+                ).fetchone()
+                if existing is not None:
+                    version = int(dict(existing).get("version") or 1)
+                    conn.execute(
+                        """
+                        UPDATE prompt_presets
+                           SET name = ?,
+                               section_order_json = ?,
+                               section_templates_json = ?,
+                               deleted = ?,
+                               last_modified = ?,
+                               client_id = ?,
+                               version = ?
+                         WHERE preset_id = ?
+                        """,
+                        (
+                            name_value,
+                            section_order_json,
+                            section_templates_json,
+                            active_value,
+                            now,
+                            self.client_id,
+                            version + 1,
+                            preset_id_value,
+                        ),
+                    )
+                    return True
+
+                conn.execute(
+                    """
+                    INSERT INTO prompt_presets (
+                        preset_id,
+                        name,
+                        section_order_json,
+                        section_templates_json,
+                        created_at,
+                        last_modified,
+                        deleted,
+                        client_id,
+                        version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        preset_id_value,
+                        name_value,
+                        section_order_json,
+                        section_templates_json,
+                        now,
+                        now,
+                        active_value,
+                        self.client_id,
+                        1,
+                    ),
+                )
+                return True
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
+            logger.error("Failed to upsert prompt preset '{}': {}", preset_id_value, exc)
+            raise CharactersRAGDBError(f"Failed to upsert prompt preset '{preset_id_value}': {exc}") from exc  # noqa: TRY003
+
+    def get_prompt_preset(self, preset_id: str) -> dict[str, Any] | None:
+        """Return one active custom prompt preset by ID."""
+        preset_id_value = self._normalize_prompt_preset_id(preset_id)
+        active_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+        cursor = self.execute_query(
+            """
+            SELECT preset_id, name, section_order_json, section_templates_json,
+                   created_at, last_modified, client_id, version
+              FROM prompt_presets
+             WHERE preset_id = ? AND deleted = ?
+             LIMIT 1
+            """,
+            (preset_id_value, active_value),
+        )
+        return self._prompt_preset_from_row(cursor.fetchone())
+
+    def list_prompt_presets(self) -> list[dict[str, Any]]:
+        """List active custom prompt presets."""
+        active_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+        cursor = self.execute_query(
+            """
+            SELECT preset_id, name, section_order_json, section_templates_json,
+                   created_at, last_modified, client_id, version
+              FROM prompt_presets
+             WHERE deleted = ?
+             ORDER BY last_modified DESC, preset_id ASC
+            """,
+            (active_value,),
+        )
+        return [
+            preset
+            for row in cursor.fetchall()
+            if (preset := self._prompt_preset_from_row(row)) is not None
+        ]
+
+    def delete_prompt_preset(self, preset_id: str) -> bool:
+        """Soft-delete a custom prompt preset."""
+        preset_id_value = self._normalize_prompt_preset_id(preset_id)
+        now = self._get_current_utc_timestamp_iso()
+        active_value = False if self.backend_type == BackendType.POSTGRESQL else 0
+        deleted_value = True if self.backend_type == BackendType.POSTGRESQL else 1
+
+        with self.transaction() as conn:
+            existing = conn.execute(
+                "SELECT version, deleted FROM prompt_presets WHERE preset_id = ?",
+                (preset_id_value,),
+            ).fetchone()
+            if existing is None:
+                return False
+            record = dict(existing)
+            if bool(record.get("deleted")):
+                return True
+            cursor = conn.execute(
+                """
+                UPDATE prompt_presets
+                   SET deleted = ?,
+                       last_modified = ?,
+                       client_id = ?,
+                       version = ?
+                 WHERE preset_id = ? AND deleted = ?
+                """,
+                (
+                    deleted_value,
+                    now,
+                    self.client_id,
+                    int(record.get("version") or 1) + 1,
+                    preset_id_value,
+                    active_value,
+                ),
+            )
+            return bool(getattr(cursor, "rowcount", 0))
 
 
 def _delegate_store_method(store_attr: str, method_name: str) -> Callable[..., Any]:

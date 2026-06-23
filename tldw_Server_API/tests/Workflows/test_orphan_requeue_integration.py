@@ -44,6 +44,10 @@ async def test_orphan_requeue_resumes_run(tmp_path):
         step_type="prompt",
     )
     db.complete_step_run(step_run_id=step1_run_id, status="succeeded", outputs={"text": "Alpha"})
+    step1_ended_at = db._conn.execute(
+        "SELECT ended_at FROM workflow_step_runs WHERE step_run_id = ?",
+        (step1_run_id,),
+    ).fetchone()[0]
 
     step2_run_id = f"{run_id}:s2:2"
     db.create_step_run(
@@ -56,8 +60,8 @@ async def test_orphan_requeue_resumes_run(tmp_path):
     )
     old = (datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(seconds=120)).isoformat()
     db._conn.execute(
-        "UPDATE workflow_step_runs SET heartbeat_at = ?, status = 'running' WHERE step_run_id = ?",
-        (old, step2_run_id),
+        "UPDATE workflow_step_runs SET started_at = ?, heartbeat_at = ?, status = 'running' WHERE step_run_id = ?",
+        (step1_ended_at, old, step2_run_id),
     )
     db._conn.commit()
 

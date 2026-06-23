@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import sqlite3
 import stat
 from pathlib import Path
@@ -902,7 +903,10 @@ def test_openwebui_attachment_storage_root_is_private(tmp_path, monkeypatch):
     resolved = service._openwebui_attachment_storage_root()
 
     assert resolved == storage_root
-    assert stat.S_IMODE(resolved.stat().st_mode) == 0o700
+    if os.name == "nt":
+        assert resolved.exists()
+    else:
+        assert stat.S_IMODE(resolved.stat().st_mode) == 0o700
 
 
 def test_run_openwebui_attachment_hydration_hydrates_resolved_image(

@@ -151,6 +151,24 @@ class LlamaCppHandler(BaseLLMHandler):
         """Log defensively to avoid errors when sinks are closed during atexit."""
         handler_utils.safe_log(self.logger, level, msg, *args)
 
+    def _signal_managed_process_group(self, process: Any, sig: signal.Signals) -> int:
+        """Signal a process group only when it is owned by a real managed subprocess."""
+        if not isinstance(process, asyncio.subprocess.Process):
+            raise ProcessLookupError("Refusing to signal process group for non-asyncio process")
+
+        pid = getattr(process, "pid", None)
+        if not isinstance(pid, int) or pid <= 1:
+            raise ProcessLookupError(f"Refusing unsafe process group signal for PID {pid!r}")
+
+        pgid = os.getpgid(pid)
+        if pgid != pid:
+            raise PermissionError(f"Refusing to signal non-leader process group {pgid} for PID {pid}")
+        if pgid == os.getpgrp():
+            raise PermissionError("Refusing to signal current process group")
+
+        os.killpg(pgid, sig)
+        return pgid
+
     async def _terminate_process(self, process: asyncio.subprocess.Process) -> None:
         if process.returncode is not None:
             return
@@ -160,8 +178,7 @@ class LlamaCppHandler(BaseLLMHandler):
                 process.terminate()
         else:
             try:
-                pgid = await asyncio.to_thread(os.getpgid, process.pid)
-                await asyncio.to_thread(os.killpg, pgid, signal.SIGTERM)
+                await asyncio.to_thread(self._signal_managed_process_group, process, signal.SIGTERM)
             except ProcessLookupError:
                 if hasattr(process, "terminate"):
                     process.terminate()
@@ -177,8 +194,7 @@ class LlamaCppHandler(BaseLLMHandler):
                     process.kill()
             else:
                 try:
-                    pgid = await asyncio.to_thread(os.getpgid, process.pid)
-                    await asyncio.to_thread(os.killpg, pgid, signal.SIGKILL)
+                    await asyncio.to_thread(self._signal_managed_process_group, process, signal.SIGKILL)
                 except _LLAMACPP_NONCRITICAL_EXCEPTIONS:
                     if hasattr(process, "kill"):
                         process.kill()
@@ -703,8 +719,11 @@ class LlamaCppHandler(BaseLLMHandler):
                     process_to_stop.terminate()
                 else:
                     try:
-                        pgid = await asyncio.to_thread(os.getpgid, pid)
-                        await asyncio.to_thread(os.killpg, pgid, signal.SIGTERM)
+                        pgid = await asyncio.to_thread(
+                            self._signal_managed_process_group,
+                            process_to_stop,
+                            signal.SIGTERM,
+                        )
                         self.logger.info(f"Sent SIGTERM to process group {pgid} (leader PID: {pid}).")
                     except ProcessLookupError:
                         self.logger.warning(f"Process {pid} not found for SIGTERM, likely already terminated.")
@@ -730,8 +749,11 @@ class LlamaCppHandler(BaseLLMHandler):
                             process_to_stop.kill()
                     else:
                         try:
-                            pgid = await asyncio.to_thread(os.getpgid, pid)  # Re-fetch pgid in case
-                            await asyncio.to_thread(os.killpg, pgid, signal.SIGKILL)
+                            await asyncio.to_thread(
+                                self._signal_managed_process_group,
+                                process_to_stop,
+                                signal.SIGKILL,
+                            )
                         except (ProcessLookupError, PermissionError, OSError) as e:
                             # pgid may not be available if getpgid failed; log using pid
                             self.logger.warning(
@@ -972,8 +994,7 @@ class LlamaCppHandler(BaseLLMHandler):
                         proc.terminate()
                 else:
                     try:
-                        pgid = os.getpgid(pid)
-                        os.killpg(pgid, signal.SIGTERM)
+                        pgid = self._signal_managed_process_group(proc, signal.SIGTERM)
                         self._safe_log("debug", f"Sent SIGTERM to process group {pgid}")
                     except ProcessLookupError:
                         if hasattr(proc, "terminate"):
@@ -1000,7 +1021,7 @@ class LlamaCppHandler(BaseLLMHandler):
                                 proc.kill()
                     else:
                         try:
-                            os.killpg(os.getpgid(pid), signal.SIGKILL)
+                            self._signal_managed_process_group(proc, signal.SIGKILL)
                         except (ProcessLookupError, PermissionError, OSError):
                             if hasattr(proc, "kill"):
                                 with contextlib.suppress(_LLAMACPP_NONCRITICAL_EXCEPTIONS):

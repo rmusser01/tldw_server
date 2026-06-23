@@ -63,6 +63,16 @@ def client_and_db(tmp_path, monkeypatch):
         yield client, db
 
     fastapi_app.dependency_overrides.clear()
+    db.close_connection()
+
+    # This fixture reloads the shared app module in full-app mode so the
+    # notes graph routes are available. Restore the default lightweight test
+    # profile before later tests reuse app_main.app via client_user_only.
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("MINIMAL_TEST_APP", "1")
+    monkeypatch.setenv("ULTRA_MINIMAL_APP", "0")
+    reset_settings()
+    importlib.reload(app_main)
     reset_settings()
 
 

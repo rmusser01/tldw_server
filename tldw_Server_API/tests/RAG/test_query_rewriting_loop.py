@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.RAG.rag_service.query_features import (
     QueryIntent,
     QueryComplexity,
 )
+import tldw_Server_API.app.core.RAG.rag_service.query_features as query_features_module
 
 
 @dataclass
@@ -75,6 +76,25 @@ class TestQueryRewriterImproveForRetrieval:
         assert len(rewrites) > 0
         # All should be improve_for_retrieval type
         assert all(r.rewrite_type == "improve_for_retrieval" for r in rewrites)
+
+    def test_improve_for_retrieval_without_wordnet_still_rewrites(self, monkeypatch, rewriter):
+        """WordNet-free test environments still get a deterministic retrieval rewrite."""
+        class _MissingWordnet:
+            def synsets(self, _term):
+                raise LookupError("wordnet unavailable")
+
+        monkeypatch.setattr(query_features_module, "wordnet", _MissingWordnet())
+
+        rewrites = rewriter.rewrite_query(
+            "what is machine learning",
+            strategies=["improve_for_retrieval"],
+        )
+
+        assert any(
+            rewrite.rewritten_query == "machine learning"
+            and rewrite.explanation == "Generated keyword-focused fallback rewrite"
+            for rewrite in rewrites
+        )
 
     def test_improve_for_retrieval_with_failed_docs(self, rewriter, sample_failed_docs):
         """Test that improve_for_retrieval uses entities from failed docs."""

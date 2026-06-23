@@ -6,12 +6,17 @@ import os
 import importlib.util
 import subprocess  # nosec B404
 import sys
+import uuid
 from datetime import datetime
 import pytest
 pytestmark = pytest.mark.integration
 import numpy as np
 
 IN_CI = os.getenv("CI", "").lower() == "true"
+RUN_REAL_HF_EMBEDDING_TESTS = (
+    os.getenv("RUN_REAL_HF_EMBEDDING_TESTS", "").lower() in {"1", "true", "yes", "on"}
+    or not IN_CI
+)
 
 try:
     import redis
@@ -79,7 +84,7 @@ def _huggingface_deps_available() -> bool:
         return False
 
 
-HF_DEPS_AVAILABLE = _huggingface_deps_available()
+HF_DEPS_AVAILABLE = RUN_REAL_HF_EMBEDDING_TESTS and _huggingface_deps_available()
 
 
 def _skip_if_hf_service_unavailable(resp) -> None:
@@ -99,11 +104,17 @@ def _skip_if_hf_service_unavailable(resp) -> None:
 @pytest.fixture(autouse=True)
 def disable_rate_limiting():
     """Disable rate limiting for all tests in this module"""
+    previous_auto_download = os.environ.get("AUTO_DOWNLOAD_MODELS")
     os.environ["TESTING"] = "true"
+    os.environ["AUTO_DOWNLOAD_MODELS"] = "false"
     yield
     # Clean up after tests
     if "TESTING" in os.environ:
         del os.environ["TESTING"]
+    if previous_auto_download is None:
+        os.environ.pop("AUTO_DOWNLOAD_MODELS", None)
+    else:
+        os.environ["AUTO_DOWNLOAD_MODELS"] = previous_auto_download
 
 # Module-level setup fixture for integration tests
 @pytest.fixture
@@ -116,7 +127,7 @@ def setup():
         data = SetupData()
         data.client = client
         # Set CSRF token in both cookie and header
-        csrf_token = "test-csrf-token-12345"
+        csrf_token = f"test-csrf-{uuid.uuid4().hex}"
         client.cookies.set("csrf_token", csrf_token)
         data.auth_headers = {
             "Authorization": "Bearer test-api-key",

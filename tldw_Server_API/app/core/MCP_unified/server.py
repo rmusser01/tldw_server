@@ -19,7 +19,9 @@ from typing import Any, Optional
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.exceptions import AuthenticationError
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import is_single_user_ip_allowed
+from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, is_single_user_profile_mode
 
 from .auth.rate_limiter import RateLimitExceeded
@@ -60,6 +62,7 @@ _MCP_SERVER_NONCRITICAL_EXCEPTIONS = (
     WebSocketDisconnect,
     RateLimitExceeded,
 )
+_AUTHNZ_TOKEN_DETECTION_EXCEPTIONS = _MCP_SERVER_NONCRITICAL_EXCEPTIONS + (AuthenticationError,)
 
 _ENV_PLACEHOLDER_RE = re.compile(r"^\$\{(?P<name>[A-Z0-9_]+)(?::-(?P<default>.*))?\}$")
 _JSONRPC_EXPLICIT_NULL_ID_PREFIX = "__tldw_ws_jsonrpc_explicit_null_id_"
@@ -72,9 +75,16 @@ def _is_authnz_access_token(token: str) -> bool:
             TldwServerAuthProvider,
         )
 
-        return TldwServerAuthProvider().is_authnz_access_token(token)
-    except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+        if TldwServerAuthProvider().is_authnz_access_token(token):
+            return True
+    except _AUTHNZ_TOKEN_DETECTION_EXCEPTIONS:
+        pass
+
+    try:
+        payload = get_jwt_service().decode_access_token(token)
+    except _AUTHNZ_TOKEN_DETECTION_EXCEPTIONS:
         return False
+    return isinstance(payload, dict) and bool(payload.get("sub"))
 
 
 def _resolve_env_placeholders(value: Any) -> Any:

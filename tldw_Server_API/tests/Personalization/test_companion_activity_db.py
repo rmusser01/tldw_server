@@ -58,12 +58,18 @@ def test_personalization_dependency_uses_safe_for_user_factory(monkeypatch):
 
 
 def test_personalization_db_constructor_does_not_resolve_input_path(monkeypatch, tmp_path) -> None:
-    def fail_resolve(self, strict=False):  # pragma: no cover - exercised by failing pre-fix path
-        raise AssertionError("constructor should not call Path.resolve")
-
-    monkeypatch.setattr(personalization_db_module.Path, "resolve", fail_resolve)
-
     db_path = tmp_path / "personalization.db"
+
+    def fake_require_trusted_database_parent_exists(path, **kwargs):
+        assert path == db_path
+        return path
+
+    monkeypatch.setattr(
+        personalization_db_module,
+        "require_trusted_database_parent_exists",
+        fake_require_trusted_database_parent_exists,
+    )
+
     db = PersonalizationDB(db_path)
 
     assert db.db_path == str(db_path)

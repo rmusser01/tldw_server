@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.Logging.log_context import ensure_traceparent
+from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
 
 
 def _route_exists(path: str, method: str) -> bool:
@@ -16,6 +17,14 @@ def _route_exists(path: str, method: str) -> bool:
         if route_path == path and wanted_method in route_methods:
             return True
     return False
+
+
+def _fresh_test_client() -> TestClient:
+    """Return a TestClient after clearing any leaked shared-app drain state."""
+    reset_lifecycle_state(app)
+    client = TestClient(app)
+    reset_lifecycle_state(app)
+    return client
 
 
 def test_ensure_traceparent_sets_state_and_returns_value():
@@ -68,7 +77,7 @@ def test_audio_jobs_submit_propagates_request_id(monkeypatch):
 
     monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
 
-    client = TestClient(app)
+    client = _fresh_test_client()
     resp = client.post(
         "/api/v1/audio/jobs/submit",
         json={"url": "https://example.com/a.mp3"},
@@ -106,7 +115,7 @@ def test_media_ingest_jobs_submit_propagates_request_id(monkeypatch, tmp_path):
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
     monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
 
-    client = TestClient(app)
+    client = _fresh_test_client()
     resp = client.post(
         "/api/v1/media/ingest/jobs",
         data={"media_type": "audio", "urls": "https://example.com/a.mp3"},
@@ -154,7 +163,7 @@ def test_reembed_schedule_propagates_request_id(monkeypatch):
     monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
     monkeypatch.setattr(redis_pipeline, "enqueue_chunking_job", fake_enqueue_chunking_job, raising=True)
 
-    client = TestClient(app)
+    client = _fresh_test_client()
     resp = client.post(
         "/api/v1/embeddings/reembed/schedule",
         json={"media_id": 1},

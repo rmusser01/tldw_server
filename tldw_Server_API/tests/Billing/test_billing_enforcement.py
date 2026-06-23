@@ -539,11 +539,12 @@ class TestModuleFunctions:
         monkeypatch.delenv("BILLING_ENABLED", raising=False)
         assert billing_enabled() is False
 
-    def test_billing_enabled_true(self, monkeypatch):
+    def test_billing_enabled_stays_false_in_oss(self, monkeypatch):
 
-        """billing_enabled should be True when env var is set."""
+        """OSS builds hard-disable billing: billing_enabled() is False even when
+        BILLING_ENABLED is set (see Billing.runtime_flags.is_billing_enabled)."""
         monkeypatch.setenv("BILLING_ENABLED", "true")
-        assert billing_enabled() is True
+        assert billing_enabled() is False
 
     def test_enforcement_enabled_true_by_default(self, monkeypatch):
 
@@ -574,13 +575,16 @@ class TestModuleFunctions:
 
         monkeypatch.setenv("BILLING_ENFORCEMENT_FAILURE_MODE", "open")
         monkeypatch.setattr(
-            "tldw_Server_API.app.core.Billing.enforcement.importlib.import_module",
-            lambda _: object(),
-            raising=False,
-        )
-        monkeypatch.setattr(
             "tldw_Server_API.app.core.Billing.enforcement.get_billing_enforcer",
             lambda: _ExplodingEnforcer(),
+            raising=False,
+        )
+        # Patch import_module LAST: enforcement.importlib is the shared stdlib
+        # module, so replacing import_module mutates it globally and would break
+        # pytest's own monkeypatch.setattr resolution for any subsequent target.
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Billing.enforcement.importlib.import_module",
+            lambda _: object(),
             raising=False,
         )
 
@@ -608,11 +612,6 @@ class TestModuleFunctions:
 
         monkeypatch.setenv("BILLING_ENFORCEMENT_FAILURE_MODE", "open")
         monkeypatch.setattr(
-            "tldw_Server_API.app.core.Billing.enforcement.importlib.import_module",
-            lambda _: object(),
-            raising=False,
-        )
-        monkeypatch.setattr(
             "tldw_Server_API.app.core.Billing.enforcement.get_billing_enforcer",
             lambda: _ExplodingEnforcer(),
             raising=False,
@@ -620,6 +619,12 @@ class TestModuleFunctions:
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Billing.enforcement.logger.warning",
             _record_log_message,
+        )
+        # Patch import_module LAST (mutates shared stdlib importlib; see above).
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Billing.enforcement.importlib.import_module",
+            lambda _: object(),
+            raising=False,
         )
 
         allowed = await check_billing_with_rg(
@@ -645,13 +650,14 @@ class TestModuleFunctions:
 
         monkeypatch.setenv("BILLING_ENFORCEMENT_FAILURE_MODE", "closed")
         monkeypatch.setattr(
-            "tldw_Server_API.app.core.Billing.enforcement.importlib.import_module",
-            lambda _: object(),
-            raising=False,
-        )
-        monkeypatch.setattr(
             "tldw_Server_API.app.core.Billing.enforcement.get_billing_enforcer",
             lambda: _ExplodingEnforcer(),
+            raising=False,
+        )
+        # Patch import_module LAST (mutates shared stdlib importlib; see above).
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Billing.enforcement.importlib.import_module",
+            lambda _: object(),
             raising=False,
         )
 
@@ -679,11 +685,6 @@ class TestModuleFunctions:
 
         monkeypatch.setenv("BILLING_ENFORCEMENT_FAILURE_MODE", "closed")
         monkeypatch.setattr(
-            "tldw_Server_API.app.core.Billing.enforcement.importlib.import_module",
-            lambda _: object(),
-            raising=False,
-        )
-        monkeypatch.setattr(
             "tldw_Server_API.app.core.Billing.enforcement.get_billing_enforcer",
             lambda: _ExplodingEnforcer(),
             raising=False,
@@ -691,6 +692,12 @@ class TestModuleFunctions:
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Billing.enforcement.logger.error",
             _record_log_message,
+        )
+        # Patch import_module LAST (mutates shared stdlib importlib; see above).
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Billing.enforcement.importlib.import_module",
+            lambda _: object(),
+            raising=False,
         )
 
         allowed = await check_billing_with_rg(

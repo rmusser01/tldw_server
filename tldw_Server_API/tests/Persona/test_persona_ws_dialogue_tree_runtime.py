@@ -26,9 +26,10 @@ fastapi_app = FastAPI()
 fastapi_app.include_router(persona_ep.router, prefix="/api/v1/persona")
 
 
-def _recv_until(client, predicate, timeout=2.0):
+def _recv_until(client, predicate, timeout=5.0):
     deadline = time.monotonic() + timeout
     inbox: queue.Queue[tuple[str, object]] = queue.Queue()
+    seen_events: list[dict] = []
 
     def _reader() -> None:
         while time.monotonic() < deadline:
@@ -49,11 +50,12 @@ def _recv_until(client, predicate, timeout=2.0):
             raise payload  # type: ignore[misc]
         try:
             data = json.loads(str(payload))
-        except Exception:
+        except json.JSONDecodeError:
             continue
+        seen_events.append(data)
         if predicate(data):
             return data
-    raise AssertionError("Expected event not received in time")
+    raise AssertionError(f"Expected event not received in time; seen_events={seen_events!r}")
 
 
 @pytest.fixture(autouse=True)
@@ -104,7 +106,13 @@ def _events_for_text(text: str, *, session_id: str = "sess_runtime") -> list[dic
     return events
 
 
-def _notice_for_text(text: str, *, reason_code: str, session_id: str = "sess_runtime") -> dict:
+def _notice_for_text(
+    text: str,
+    *,
+    reason_code: str,
+    session_id: str = "sess_runtime",
+    timeout: float = 2.0,
+) -> dict:
     with TestClient(fastapi_app) as client:
         with client.websocket_connect("/api/v1/persona/stream") as ws:
             _ = json.loads(ws.receive_text())
@@ -124,6 +132,7 @@ def _notice_for_text(text: str, *, reason_code: str, session_id: str = "sess_run
                 ws,
                 lambda data: data.get("event") == "notice"
                 and data.get("reason_code") == reason_code,
+                timeout=timeout,
             )
 
 
@@ -477,6 +486,7 @@ def test_runtime_explorer_circuit_open_notice_has_distinct_reason(
         "find runtime notes while circuit is open",
         reason_code="RUNTIME_EXPLORER_CIRCUIT_OPEN",
         session_id="sess_runtime_circuit_open_notice",
+        timeout=5.0,
     )
 
     diagnostics = notice["runtime_explorer"]

@@ -11,6 +11,29 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunStatus, RuntimeType
 
 
+def _force_docker_preflight_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
+    from tldw_Server_API.app.core.Sandbox.service import SandboxService
+
+    def _preflights(
+        self: SandboxService,
+        *,
+        network_policy: str | None,
+    ) -> dict[RuntimeType, RuntimePreflightResult]:
+        del self, network_policy
+        return {
+            RuntimeType.docker: RuntimePreflightResult(
+                runtime=RuntimeType.docker,
+                available=True,
+                reasons=[],
+                execution_mode="mocked",
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        }
+
+    monkeypatch.setattr(SandboxService, "_collect_runtime_preflights", _preflights)
+
+
 def _user_dep(user_id: int = 1, *, is_admin: bool = False):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
@@ -47,6 +70,7 @@ def _sandbox_api_client(monkeypatch, *, user_id: int = 1, is_admin: bool = False
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "0")
     monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "0")
+    _force_docker_preflight_available(monkeypatch)
     with contextlib.suppress(Exception):
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 

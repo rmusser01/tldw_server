@@ -159,7 +159,7 @@ def _read_valid_restart_pid(
         pytest.fail(f"helper restart pid file is unavailable: {exc}")
     if not stat.S_ISREG(stat_result.st_mode):
         pytest.fail("helper restart pid file must be a regular non-symlink file")
-    if stat_result.st_mode & 0o077:
+    if os.name != "nt" and stat_result.st_mode & 0o077:
         pytest.fail("helper restart pid file must be owner-only")
     try:
         raw_pid = lease.pid_file.read_text(encoding="utf-8").strip()
@@ -392,6 +392,7 @@ def test_wait_for_helper_socket_unavailable_retries_socket_timeout(
                 raise socket.timeout("transient timeout")
             raise ConnectionRefusedError("helper socket unavailable")
 
+    monkeypatch.setattr(socket, "AF_UNIX", getattr(socket, "AF_UNIX", 1), raising=False)
     monkeypatch.setattr(socket, "socket", lambda *_args, **_kwargs: _FakeSocket())
 
     _wait_for_helper_socket_unavailable(socket_path, timeout_sec=1.0)
@@ -424,6 +425,7 @@ def test_restart_helper_for_drill_skips_when_pid_exits_before_signal(
         _restart_helper_for_drill(lease, process_lookup=lambda _pid: str(helper))
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="helper restart drill uses POSIX process semantics")
 def test_restart_helper_for_drill_replaces_pid_file_and_stops_old_helper(tmp_path: Path) -> None:
     helper = tmp_path / "macos-vz-helper"
     helper.write_text(

@@ -136,7 +136,14 @@ def apply_media_item_update(
             fts_title = fields.get("title", current_title)
             fts_content = new_content if content_actually_changed else current_content
             if "title" in fields or content_actually_changed:
-                self._update_fts_media(conn, media_id, fts_title, fts_content)
+                self._update_fts_media(
+                    conn,
+                    media_id,
+                    fts_title,
+                    fts_content,
+                    old_title=current_title,
+                    old_content=current_content,
+                )
 
             if content_provided:
                 new_doc_version_info = self.create_document_version(

@@ -401,7 +401,7 @@ def test_apply_recommendation_updates_only_embedding_defaults_and_audits(monkeyp
     }
     assert update_config_spy.call_args.kwargs == {"create_backup": True}
     assert result["applied"] is True
-    assert result["backup_path"] == "/tmp/config.txt.pre-setup-test.bak"
+    assert Path(result["backup_path"]) == update_config_spy.return_value
     assert result["audit_ref"] == "embedding_recipe_apply_audit"
     audit = service.db.metadata["embedding_recipe_apply_audit"]
     assert audit["slot"] == "best_overall"
@@ -415,7 +415,7 @@ def test_apply_recommendation_updates_only_embedding_defaults_and_audits(monkeyp
         "model": "text-embedding-3-small",
     }
     assert audit["new"] == audit["proposed"]
-    assert audit["backup_path"] == "/tmp/config.txt.pre-setup-test.bak"
+    assert Path(audit["backup_path"]) == update_config_spy.return_value
     assert audit["status"] == "applied"
     assert audit["timestamp"]
 

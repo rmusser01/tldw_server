@@ -2,7 +2,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
 
 @pytest.fixture
@@ -11,8 +13,13 @@ def client(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-1234567890")
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
+
+    async def _user() -> User:
+        return User(id=1, username="single_user", email=None, is_active=True)
+
     app = FastAPI()
     app.include_router(audio_router, prefix="/api/v1/audio")
+    app.dependency_overrides[get_request_user] = _user
     with TestClient(app) as c:
         c.headers.update({"X-API-KEY": "test-api-key-1234567890"})
         yield c

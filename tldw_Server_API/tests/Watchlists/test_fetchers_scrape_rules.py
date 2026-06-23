@@ -125,6 +125,7 @@ async def test_fetch_site_items_with_rules_test_mode_y(monkeypatch):
 @pytest.mark.asyncio
 async def test_fetch_site_items_with_rules_pagination(monkeypatch):
     monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
 
     page_one = """
     <html>
@@ -194,6 +195,7 @@ async def test_fetch_site_items_with_rules_pagination(monkeypatch):
 @pytest.mark.asyncio
 async def test_fetch_site_items_with_rules_reports_fetch_status(monkeypatch):
     monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
 
     class FakeResponse:
         status_code = 503

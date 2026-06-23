@@ -5,6 +5,7 @@
 import os
 import re
 import threading
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import islice
@@ -40,6 +41,13 @@ _CHROMA_NONCRITICAL_EXCEPTIONS = (
     TimeoutError,
     ChromaError,
 )
+_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS = (0.05, 0.1, 0.2, 0.5, 1.0)
+
+
+def _is_transient_chroma_segment_error(error: BaseException) -> bool:
+    """Return True for Chroma's transient HNSW segment-reader race."""
+    message = str(error).lower()
+    return "hnsw segment reader" in message and "nothing found on disk" in message
 
 #
 # Local Imports:
@@ -75,6 +83,14 @@ from tldw_Server_API.app.core.Utils.Utils import logger  # Assuming this is 'log
 #######################################################################################################################
 #
 # Security Functions:
+def _audit_invalid_user_id(user_id: str | None, action: str, metadata: dict[str, Any] | None = None) -> None:
+    """Best-effort audit for rejected user IDs without masking validation errors."""
+    try:
+        log_security_violation(user_id=user_id, action=action, metadata=metadata)
+    except Exception as exc:
+        logger.warning(f"Unable to audit invalid user_id for action {action}: {exc}")
+
+
 def validate_user_id(user_id: str) -> str:
     """
     Validates and sanitizes user_id to prevent path traversal attacks.
@@ -97,7 +113,11 @@ def validate_user_id(user_id: str) -> str:
     if any(pattern in raw_user_id for pattern in ['..', '/', '\\', '\x00', '\n', '\r']):
         logger.error(f"Potential path traversal attempt detected in user_id: {user_id[:50]}")
         # Best-effort unified audit (non-blocking)
-        log_security_violation(user_id=raw_user_id[:50], action="path_traversal_attempt", metadata={"attempted_value": raw_user_id[:100]})
+        _audit_invalid_user_id(
+            user_id=raw_user_id[:50],
+            action="path_traversal_attempt",
+            metadata={"attempted_value": raw_user_id[:100]},
+        )
         raise ValueError("Invalid user_id: contains forbidden characters")
 
     # Now trim safe leading/trailing whitespace
@@ -106,7 +126,11 @@ def validate_user_id(user_id: str) -> str:
     # Only allow alphanumeric, underscore, and hyphen
     if not re.match(r'^[a-zA-Z0-9_-]+$', user_id):
         logger.error(f"Invalid user_id format: {user_id[:50]}")
-        log_security_violation(user_id=user_id[:50], action="invalid_user_id", metadata={"reason": "invalid_characters"})
+        _audit_invalid_user_id(
+            user_id=user_id[:50],
+            action="invalid_user_id",
+            metadata={"reason": "invalid_characters"},
+        )
         raise ValueError("Invalid user_id: must contain only alphanumeric characters, underscores, and hyphens")
 
     # Limit length to prevent DoS
@@ -1321,6 +1345,40 @@ class ChromaDBManager:
                     f"User '{self.user_id}': Successfully upserted {len(embeddings_list)} items to '{target_collection.name}'.")
 
             except chromadb.errors.ChromaError as ce:  # Catch specific ChromaDB errors
+                if _is_transient_chroma_segment_error(ce):
+                    for retry_attempt, retry_delay in enumerate(_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS, start=1):
+                        logger.warning(
+                            f"User '{self.user_id}': Retrying ChromaDB upsert for collection "
+                            f"'{target_collection.name}' after transient segment-reader error "
+                            f"(attempt {retry_attempt}/{len(_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS)}): {ce}"
+                        )
+                        time.sleep(retry_delay)
+                        try:
+                            target_collection = self.client.get_or_create_collection(name=target_collection.name)
+                            target_collection.upsert(
+                                documents=texts,
+                                embeddings=embeddings_list,
+                                ids=ids,
+                                metadatas=cleaned_metadatas
+                            )
+                            logger.info(
+                                f"User '{self.user_id}': Successfully upserted {len(embeddings_list)} "
+                                f"items to '{target_collection.name}' after retry attempt {retry_attempt}.")
+                            return target_collection
+                        except chromadb.errors.ChromaError as retry_error:
+                            if (
+                                    retry_attempt < len(_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS)
+                                    and _is_transient_chroma_segment_error(retry_error)
+                            ):
+                                ce = retry_error
+                                continue
+                            logger.error(
+                                f"User '{self.user_id}': ChromaDB retry in store_in_chroma for collection "
+                                f"'{target_collection.name}' failed after {retry_attempt} attempt(s): {retry_error}",
+                                exc_info=True)
+                            raise RuntimeError(
+                                f"ChromaDB operation failed after retry: {retry_error}"
+                            ) from retry_error
                 logger.error(
                     f"User '{self.user_id}': ChromaDB error in store_in_chroma for collection '{target_collection.name}': {ce}",
                     exc_info=True)
@@ -1679,14 +1737,45 @@ class ChromaDBManager:
                         f"User '{self.user_id}': One or more embedding vectors in query_embeddings is empty.")
                     raise ValueError("All embedding vectors in query_embeddings must be non-empty.")
 
+                cleaned_where_clause = self._clean_metadata(where_clause) if where_clause else None
                 return target_collection.query(
                     query_embeddings=query_embeddings,
                     n_results=n_results,
-                    where=self._clean_metadata(where_clause) if where_clause else None,
+                    where=cleaned_where_clause,
                     include=effective_include_fields  # Pass the correctly typed list
                 )
             # Use the more specific ChromaError imports if they work for your version
             except ChromaError as ce:
+                if collection_name and _is_transient_chroma_segment_error(ce):
+                    for retry_attempt, retry_delay in enumerate(_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS, start=1):
+                        logger.warning(
+                            f"User '{self.user_id}': Retrying ChromaDB query for collection "
+                            f"'{target_collection.name}' after transient segment-reader error "
+                            f"(attempt {retry_attempt}/{len(_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS)}): {ce}"
+                        )
+                        time.sleep(retry_delay)
+                        try:
+                            target_collection = self.client.get_or_create_collection(name=collection_name)
+                            return target_collection.query(
+                                query_embeddings=query_embeddings,
+                                n_results=n_results,
+                                where=cleaned_where_clause,
+                                include=effective_include_fields
+                            )
+                        except ChromaError as retry_error:
+                            if (
+                                    retry_attempt < len(_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS)
+                                    and _is_transient_chroma_segment_error(retry_error)
+                            ):
+                                ce = retry_error
+                                continue
+                            logger.error(
+                                f"User '{self.user_id}': ChromaDB retry querying collection "
+                                f"'{target_collection.name}' failed after {retry_attempt} attempt(s): {retry_error}",
+                                exc_info=True)
+                            raise RuntimeError(
+                                f"ChromaDB query with precomputed embeddings failed: {retry_error}"
+                            ) from retry_error
                 logger.error(
                     f"User '{self.user_id}': ChromaDB error querying collection '{target_collection.name}': {ce}",
                     exc_info=True)

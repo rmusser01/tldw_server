@@ -41,6 +41,17 @@ prompt_name_strategy = st.builds(
 # Valid prompt content strategy
 prompt_content_strategy = st.text(min_size=1, max_size=10000)
 
+STRUCTURED_SEARCH_PREFIXES = {"author", "keyword"}
+
+
+def uses_structured_search_prefix(query: str) -> bool:
+    """Return true when a query uses field-filter syntax instead of free text."""
+    stripped = query.lstrip()
+    if ":" not in stripped:
+        return False
+    prefix, _rest = stripped.split(":", 1)
+    return prefix.strip().casefold() in STRUCTURED_SEARCH_PREFIXES
+
 # Template content with variables
 template_strategy = st.builds(
     lambda base, vars: base + ''.join(f' {{{{var{i}}}}}' for i in range(vars)),
@@ -253,6 +264,7 @@ class TestSearchProperties:
     @given(query=st.text(min_size=1, max_size=100))
     def test_search_is_case_insensitive(self, query, populated_prompts_db):
         """Search should be case insensitive."""
+        assume(not uses_structured_search_prefix(query))
         db = populated_prompts_db
 
         # Create prompt with known content

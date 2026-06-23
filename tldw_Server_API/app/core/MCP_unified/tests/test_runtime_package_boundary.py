@@ -380,6 +380,21 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
         for dependency in values
     )
     assert all(
+        isinstance(dependency, str)
+        for dependency in metadata.BASE_DEPENDENCIES
+    )
+    assert all(
+        dependency == _dependency_package_name(dependency)
+        for dependency in metadata.BASE_DEPENDENCIES
+    )
+    assert set(metadata.CORE_DEPENDENCIES).issubset(metadata.BASE_DEPENDENCIES)
+    assert set(metadata.SMOKE_TRANSPORT_DEPENDENCIES).issubset(
+        metadata.BASE_DEPENDENCIES
+    )
+    assert set(metadata.SMOKE_TRANSPORT_DEPENDENCIES).issubset(
+        metadata.GATEWAY_DEPENDENCIES
+    )
+    assert all(
         dependency == _dependency_package_name(dependency)
         for values in extras.values()
         for dependency in values
@@ -406,6 +421,7 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
     assert summary["ok"] is True
     assert summary["package_name"] == metadata.PACKAGE_NAME
     assert summary["dependency_version_policy"] == metadata.DEPENDENCY_VERSION_POLICY
+    assert summary["base_dependencies"] == list(metadata.BASE_DEPENDENCIES)
     assert summary["optional_extras"] == {
         key: list(value)
         for key, value in extras.items()
@@ -538,7 +554,7 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
         "mcp_unified": ["py.typed", "README.md", "USER_GUIDE.md"],
     }
 
-    assert _dependency_names(project["dependencies"]) == set(metadata.CORE_DEPENDENCIES)
+    assert _dependency_names(project["dependencies"]) == set(metadata.BASE_DEPENDENCIES)
 
     optional_dependencies = project["optional-dependencies"]
     assert set(optional_dependencies) == set(metadata.OPTIONAL_EXTRAS)

@@ -79,7 +79,11 @@ def test_update_config_preserves_line_breaks_for_adjacent_updates(monkeypatch, t
         "embedding_model = old-model",
         "onnx_model_path = ./models",
     ]
-    config_path.write_text(line_ending.join(original_lines) + line_ending, encoding="utf-8")
+    config_path.write_text(
+        line_ending.join(original_lines) + line_ending,
+        encoding="utf-8",
+        newline="",
+    )
     monkeypatch.setenv("TLDW_CONFIG_DIR", str(config_dir))
     _patch_project_root(monkeypatch, tmp_path / "project")
 

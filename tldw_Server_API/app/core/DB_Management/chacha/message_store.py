@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -23,6 +24,20 @@ class MessageStore:
 
     def __init__(self, db: CharactersRAGDB) -> None:
         self._db = db
+        self._last_message_order_timestamp: str | None = None
+
+    def _next_message_order_timestamp(self) -> str:
+        """Return a millisecond ISO timestamp that is monotonic for message inserts."""
+        now = self._db._get_current_utc_timestamp_iso()
+        last = self._last_message_order_timestamp
+        if last is not None and now <= last:
+            try:
+                bumped = datetime.fromisoformat(last.replace("Z", "+00:00")) + timedelta(milliseconds=1)
+                now = bumped.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+            except ValueError:
+                logger.warning("Could not parse last message timestamp {}; using current timestamp.", last)
+        self._last_message_order_timestamp = now
+        return now
 
     # ------------------------------------------------------------------
     # Message creation
@@ -121,7 +136,7 @@ class MessageStore:
         if not client_id:
             raise InputError("Client ID is required for message.")  # noqa: TRY003
 
-        now = self._db._get_current_utc_timestamp_iso()
+        now = self._next_message_order_timestamp()
         timestamp = msg_data.get('timestamp') or now
 
         query = """
@@ -570,7 +585,7 @@ class MessageStore:
             "LEFT JOIN message_metadata mm ON mm.message_id = m.id "
             "JOIN conversations c ON c.id = m.conversation_id "
             f"WHERE 1 = 1 {deleted_clause} "  # nosec B608
-            "ORDER BY m.timestamp ASC, m.id ASC"
+            "ORDER BY m.timestamp ASC, m.last_modified ASC, m.id ASC"
         )
         cursor = self._db.execute_query(query)
         rows = cursor.fetchall()
@@ -682,6 +697,7 @@ class MessageStore:
         """
         if order_by_timestamp.upper() not in ["ASC", "DESC"]:
             raise InputError("order_by_timestamp must be 'ASC' or 'DESC'.")  # noqa: TRY003
+        order_direction = order_by_timestamp.upper()
 
         # The new query joins with conversations to check its 'deleted' status.
         delete_clause = "" if include_deleted else "AND m.deleted = FALSE"
@@ -695,7 +711,7 @@ class MessageStore:
             WHERE m.conversation_id = ?
               {delete_clause}
               AND c.deleted = FALSE
-            ORDER BY m.timestamp {order_by_timestamp}
+            ORDER BY m.timestamp {order_direction}, m.last_modified {order_direction}, m.id {order_direction}
             LIMIT ? OFFSET ?
         """.format_map(locals())  # nosec B608
         try:
@@ -747,6 +763,7 @@ class MessageStore:
         """Fetch root (parentless) messages with minimal columns for tree building."""
         if order_by_timestamp.upper() not in ["ASC", "DESC"]:
             raise InputError("order_by_timestamp must be 'ASC' or 'DESC'.")  # noqa: TRY003
+        order_direction = order_by_timestamp.upper()
         query = """
             SELECT m.id, m.parent_message_id, m.sender, m.content, m.timestamp
             FROM messages m
@@ -755,7 +772,7 @@ class MessageStore:
               AND m.parent_message_id IS NULL
               AND m.deleted = FALSE
               AND c.deleted = FALSE
-            ORDER BY m.timestamp {order_by_timestamp}
+            ORDER BY m.timestamp {order_direction}, m.last_modified {order_direction}, m.id {order_direction}
             LIMIT ? OFFSET ?
         """.format_map(locals())  # nosec B608
         try:
@@ -783,6 +800,7 @@ class MessageStore:
             return []
         if order_by_timestamp.upper() not in ["ASC", "DESC"]:
             raise InputError("order_by_timestamp must be 'ASC' or 'DESC'.")  # noqa: TRY003
+        order_direction = order_by_timestamp.upper()
         placeholders = ",".join(["?"] * len(parent_ids))
         query = """
             SELECT m.id, m.parent_message_id, m.sender, m.content, m.timestamp
@@ -792,7 +810,7 @@ class MessageStore:
               AND m.parent_message_id IN ({placeholders})
               AND m.deleted = FALSE
               AND c.deleted = FALSE
-            ORDER BY m.timestamp {order_by_timestamp}
+            ORDER BY m.timestamp {order_direction}, m.last_modified {order_direction}, m.id {order_direction}
         """.format_map(locals())  # nosec B608
         params = [conversation_id, *parent_ids]
         try:
@@ -1500,7 +1518,7 @@ class MessageStore:
             "SELECT m.id, m.timestamp, m.content, m.sender "
             "FROM messages m JOIN conversations c ON m.conversation_id = c.id "
             "WHERE m.conversation_id = ? AND m.deleted = FALSE AND c.deleted = FALSE "
-            "ORDER BY m.timestamp DESC LIMIT 1"
+            "ORDER BY m.timestamp DESC, m.last_modified DESC, m.id DESC LIMIT 1"
         )
         try:
             cursor = self._db.execute_query(query, (conversation_id,))

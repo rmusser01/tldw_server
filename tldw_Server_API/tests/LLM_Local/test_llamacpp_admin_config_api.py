@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import stat
+import subprocess
+import sys
 from configparser import ConfigParser
 from pathlib import Path
 from typing import Any
@@ -612,8 +614,9 @@ def test_llamacpp_validate_default_is_stat_only_and_does_not_execute(tmp_path: P
 
 
 @pytest.mark.unit
-def test_llamacpp_validate_endpoint_offloads_probe_to_threadpool(monkeypatch):
+def test_llamacpp_validate_endpoint_offloads_probe_to_threadpool(monkeypatch, tmp_path: Path):
     calls: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
+    probe_path = str(tmp_path / "llama-server")
 
     def fake_validate(binary_path: str, timeout_seconds: float, **kwargs: Any) -> dict[str, Any]:
         return {
@@ -637,14 +640,14 @@ def test_llamacpp_validate_endpoint_offloads_probe_to_threadpool(monkeypatch):
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/llamacpp/validate",
-            json={"binary_path": "/tmp/llama-server", "timeout_seconds": 2.0, "run_probe": True},
+            json={"binary_path": probe_path, "timeout_seconds": 2.0, "run_probe": True},
         )
 
     assert response.status_code == 200, response.text
     assert len(calls) == 1
     func, args, kwargs = calls[0]
     assert func is fake_validate
-    assert args == ("/tmp/llama-server", 2.0)
+    assert args == (probe_path, 2.0)
     assert isinstance(kwargs["llm_manager"], _ManagerWithoutHandler)
     assert kwargs["run_probe"] is True
 
@@ -674,23 +677,20 @@ def test_llamacpp_validate_run_probe_requires_saved_or_active_binary_path(tmp_pa
 
 
 @pytest.mark.unit
-def test_llamacpp_validate_run_probe_executes_saved_binary(monkeypatch, tmp_path: Path):
+def test_llamacpp_validate_run_probe_executes_saved_binary(monkeypatch):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
 
-    script = tmp_path / "llama-server"
-    script.write_text("#!/bin/sh\nprintf 'llama-server version test\\n'\n", encoding="utf-8")
-    script.chmod(script.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setattr(
         llamacpp_config_service,
         "load_comprehensive_config",
-        lambda: _llamacpp_parser(executable_path=str(script)),
+        lambda: _llamacpp_parser(executable_path=sys.executable),
     )
     app = _make_app_with_manager(_ManagerWithoutHandler())
 
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/llamacpp/validate",
-            json={"binary_path": str(script), "run_probe": True},
+            json={"binary_path": sys.executable, "run_probe": True},
         )
 
     assert response.status_code == 200, response.text
@@ -698,23 +698,25 @@ def test_llamacpp_validate_run_probe_executes_saved_binary(monkeypatch, tmp_path
     assert body["valid"] is True
     assert body["exists"] is True
     assert body["executable"] is True
-    assert body["version_output"] == "llama-server version test"
+    assert "Python" in body["version_output"]
 
 
 @pytest.mark.unit
-def test_llamacpp_validate_probe_empty_success_output_is_valid(monkeypatch, tmp_path: Path):
+def test_llamacpp_validate_probe_empty_success_output_is_valid(monkeypatch):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_config_service
 
-    script = tmp_path / "llama-server"
-    script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    script.chmod(script.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setattr(
         llamacpp_config_service,
         "load_comprehensive_config",
-        lambda: _llamacpp_parser(executable_path=str(script)),
+        lambda: _llamacpp_parser(executable_path=sys.executable),
     )
 
-    result = llamacpp_config_service.validate_binary(str(script), run_probe=True)
+    def fake_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(llamacpp_config_service.subprocess, "run", fake_run)
+
+    result = llamacpp_config_service.validate_binary(sys.executable, run_probe=True)
 
     assert result["valid"] is True
     assert result["version_output"] == ""
@@ -722,16 +724,13 @@ def test_llamacpp_validate_probe_empty_success_output_is_valid(monkeypatch, tmp_
 
 
 @pytest.mark.unit
-def test_llamacpp_validate_run_probe_executes_active_handler_binary(tmp_path: Path):
-    script = tmp_path / "llama-server"
-    script.write_text("#!/bin/sh\nprintf 'active llama-server version test\\n'\n", encoding="utf-8")
-    script.chmod(script.stat().st_mode | stat.S_IXUSR)
-    app = _make_app_with_manager(_ManagerWithHandler(script))
+def test_llamacpp_validate_run_probe_executes_active_handler_binary():
+    app = _make_app_with_manager(_ManagerWithHandler(Path(sys.executable)))
 
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/llamacpp/validate",
-            json={"binary_path": str(script), "run_probe": True},
+            json={"binary_path": sys.executable, "run_probe": True},
         )
 
     assert response.status_code == 200, response.text
@@ -739,7 +738,7 @@ def test_llamacpp_validate_run_probe_executes_active_handler_binary(tmp_path: Pa
     assert body["valid"] is True
     assert body["exists"] is True
     assert body["executable"] is True
-    assert body["version_output"] == "active llama-server version test"
+    assert "Python" in body["version_output"]
 
 
 @pytest.mark.unit

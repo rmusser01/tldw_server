@@ -160,14 +160,14 @@ async def test_kokoro_generate_applies_overrides_in_generate_flow(monkeypatch: p
 def test_invalid_config_path_candidate_log_omits_raw_path_and_exception_text(
     captured_phoneme_override_logs,
 ):
-    secret_path = "SECRET_CONFIG_PATH_" + ("a" * 10_000)
+    secret_path = "SECRET_CONFIG_PATH_\0invalid"
 
     entries = load_override_entries(secret_path)
 
     log_text = "\n".join(captured_phoneme_override_logs)
     assert entries == []
     assert "Skipping invalid config path candidate" in log_text
-    assert "OSError" in log_text
+    assert "ValueError" in log_text
     assert "SECRET_CONFIG_PATH" not in log_text
     assert "File name too long" not in log_text
 

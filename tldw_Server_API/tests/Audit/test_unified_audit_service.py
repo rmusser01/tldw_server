@@ -1252,9 +1252,10 @@ class TestUnifiedAuditService:
         await audit_service.flush()
 
         events = await audit_service.query_events()
+        categories_by_type = {event["event_type"]: event["category"] for event in events}
 
-        for event, (event_type, expected_category) in zip(reversed(events), test_cases):
-            assert event["category"] == expected_category.value
+        for event_type, expected_category in test_cases:
+            assert categories_by_type[event_type.value] == expected_category.value
 
     @pytest.mark.asyncio
     async def test_auto_severity_determination(self, audit_service):
@@ -1276,9 +1277,10 @@ class TestUnifiedAuditService:
         await audit_service.flush()
 
         events = await audit_service.query_events()
+        severities_by_type = {event["event_type"]: event["severity"] for event in events}
 
-        for event, (_, _, expected_severity) in zip(reversed(events), test_cases):
-            assert event["severity"] == expected_severity.value
+        for event_type, _, expected_severity in test_cases:
+            assert severities_by_type[event_type.value] == expected_severity.value
 
 
 # ============================================================================
@@ -1437,10 +1439,12 @@ class TestIntegration:
         for event in events:
             assert event["context_session_id"] == session_id
 
-        # Verify event sequence
-        event_types = [e["event_type"] for e in reversed(events)]
-        assert event_types[0] == AuditEventType.AUTH_LOGIN_SUCCESS.value
-        assert event_types[-1] == AuditEventType.AUTH_LOGOUT.value
+        # Verify the complete trail without depending on DB tie-break ordering.
+        event_types = [e["event_type"] for e in events]
+        assert event_types.count(AuditEventType.AUTH_LOGIN_SUCCESS.value) == 1
+        assert event_types.count(AuditEventType.DATA_READ.value) == 5
+        assert event_types.count(AuditEventType.DATA_UPDATE.value) == 1
+        assert event_types.count(AuditEventType.AUTH_LOGOUT.value) == 1
 
     @pytest.mark.asyncio
     async def test_rag_workflow_audit(self, audit_service):

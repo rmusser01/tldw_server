@@ -75,6 +75,14 @@ def test_minimal_app_uses_router_registry(client_user_only) -> None:
 
 
 @pytest.mark.unit
+def test_minimal_required_routers_include_monitoring() -> None:
+    from tldw_Server_API.app.api.v1.router_groups.minimal import MINIMAL_REQUIRED_ROUTER_NAMES
+
+    if "monitoring" not in MINIMAL_REQUIRED_ROUTER_NAMES:
+        pytest.fail("monitoring router must be part of the required minimal test app surface")
+
+
+@pytest.mark.unit
 def test_minimal_app_import_does_not_probe_setup_router_directly(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("MINIMAL_TEST_APP", "1")

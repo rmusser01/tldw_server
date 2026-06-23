@@ -275,9 +275,14 @@ async def test_protocol_metadata_probe_log_omits_raw_exception_message() -> None
 
 @pytest.mark.asyncio
 async def test_protocol_tool_execution_failure_log_omits_raw_exception_and_traceback() -> None:
+    from tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime import (
+        build_default_runtime_dependencies,
+    )
+
     fake_telemetry = _FakeTelemetry()
-    protocol = MCPProtocol()
-    protocol.dependencies.telemetry_provider = fake_telemetry
+    deps = build_default_runtime_dependencies()
+    deps.telemetry_provider = fake_telemetry
+    protocol = MCPProtocol(dependencies=deps)
     protocol.rate_limiter = _NoopRateLimiter()
     context = RequestContext(request_id="req-tool", client_id="client-tool")
     prepared = _prepared_tool_call(protocol, context)

@@ -2005,16 +2005,22 @@ async def run_saved(
             definition_version=d.version,
             validation_mode=(body.validation_mode if body and getattr(body, "validation_mode", None) else None),
         )
+    inputs_json = getattr(run, "inputs_json", None)
+    outputs_json = getattr(run, "outputs_json", None)
     return WorkflowRunResponse(
-        run_id=run.run_id,
-        workflow_id=run.workflow_id,
-        user_id=str(run.user_id) if getattr(run, 'user_id', None) is not None else None,
-        status=run.status,
-        status_reason=run.status_reason,
-        inputs=json.loads(run.inputs_json or "{}"),
-        outputs=json.loads(run.outputs_json or "null") if run.outputs_json else None,
-        error=run.error,
-        definition_version=run.definition_version,
+        run_id=getattr(run, "run_id", None) or run_id,
+        workflow_id=getattr(run, "workflow_id", None) or d.id,
+        user_id=(
+            str(getattr(run, "user_id", None))
+            if getattr(run, "user_id", None) is not None
+            else (str(current_user.id) if getattr(current_user, "id", None) is not None else None)
+        ),
+        status=getattr(run, "status", None) or "queued",
+        status_reason=getattr(run, "status_reason", None),
+        inputs=json.loads(inputs_json or "{}"),
+        outputs=json.loads(outputs_json or "null") if outputs_json else None,
+        error=getattr(run, "error", None),
+        definition_version=getattr(run, "definition_version", None) or d.version,
         validation_mode=getattr(run, 'validation_mode', None),
     )
 
@@ -2397,7 +2403,7 @@ async def run_adhoc(
         run_id=run.run_id,
         workflow_id=run.workflow_id,
         user_id=str(run.user_id) if getattr(run, 'user_id', None) is not None else None,
-        status=run.status,
+        status=getattr(run, "status", None) or "queued",
         status_reason=run.status_reason,
         inputs=json.loads(run.inputs_json or "{}"),
         outputs=json.loads(run.outputs_json or "null") if run.outputs_json else None,
@@ -2476,7 +2482,7 @@ async def get_run(
         run_id=run.run_id,
         workflow_id=run.workflow_id,
         user_id=str(run.user_id) if getattr(run, 'user_id', None) is not None else None,
-        status=run.status,
+        status=getattr(run, "status", None) or "queued",
         status_reason=run.status_reason,
         inputs=json.loads(run.inputs_json or "{}"),
         outputs=json.loads(run.outputs_json or "null") if run.outputs_json else None,
@@ -3615,7 +3621,14 @@ async def control_run(
         # Delegate to retry behavior
         failed_step = db.get_last_failed_step_id(run_id)
         if failed_step:
-            asyncio.create_task(engine.continue_run(run_id, after_step_id=failed_step, last_outputs=None))
+            asyncio.create_task(
+                engine.continue_run(
+                    run_id,
+                    after_step_id=failed_step,
+                    last_outputs=None,
+                    retry_resume=True,
+                )
+            )
         else:
             engine.submit(run_id, RunMode.ASYNC)
     else:
@@ -4323,7 +4336,14 @@ async def retry_run(
     # Resume from last failed step if present
     failed_step = db.get_last_failed_step_id(run_id)
     if failed_step:
-        asyncio.create_task(engine.continue_run(run_id, after_step_id=failed_step, last_outputs=None))
+        asyncio.create_task(
+            engine.continue_run(
+                run_id,
+                after_step_id=failed_step,
+                last_outputs=None,
+                retry_resume=True,
+            )
+        )
     else:
         engine.submit(run_id, RunMode.ASYNC)
     return {"ok": True}

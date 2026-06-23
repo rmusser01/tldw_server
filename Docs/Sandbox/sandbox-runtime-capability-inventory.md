@@ -298,7 +298,7 @@ for `untrusted` workloads.
 | The portable session-contract gate proves discovery schema completeness, but host-gated recovery behavior still needs prepared-host evidence where real runtimes own live resources. | all | Phase 4 |
 | Host-gated and manual `vz_linux` recovery paths now cover diagnostics, dry-run repair planning, drill-owned stale VM termination, smoke-owned helper restart, explicit launchd validation, stale socket handling, host-independent stuck boot/readiness and guest-agent mismatch checks, and explicit host reboot pre/post evidence. Remaining gaps are reviewed mutating repair, default/scheduled coverage for disruptive drills, prepared-host evidence packets for manually skipped drills, and broader unclassified helper crash recovery. | `vz_linux` | Phase 4 |
 | Recovery/repair ownership exists only for `vz_linux`. | all except `vz_linux` | Phase 4 |
-| No single CI job proves real execution for every runtime; the portable capability gate covers capability contracts only. | all | Phase 5 |
+| No single CI job proves real execution for every runtime; the portable session-contract gate covers static `session_contract` capability coverage only. | all | Phase 5 |
 
 ## Maintenance Rules
 

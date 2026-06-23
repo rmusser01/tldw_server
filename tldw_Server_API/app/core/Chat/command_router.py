@@ -26,6 +26,7 @@ import asyncio
 import contextlib
 import os
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -287,6 +288,7 @@ class CommandSpec:
 _registry: dict[str, CommandSpec] = {}
 _buckets: dict[tuple[str, str], TokenBucket] = {}
 _global_buckets: dict[str, TokenBucket] = {}
+_bucket_registry_lock = threading.RLock()
 
 
 def register_command(
@@ -352,18 +354,26 @@ def parse_slash_command(message: str) -> tuple[str, str | None] | None:
 
 def _acquire_bucket(user_id: str, command: str) -> TokenBucket:
     key = (user_id or "anonymous", command)
-    if key not in _buckets:
+    with _bucket_registry_lock:
+        bucket = _buckets.get(key)
+        if bucket is not None:
+            return bucket
         rpm = _per_command_user_rpm()
-        _buckets[key] = TokenBucket(capacity=rpm, refill_rate=rpm / 60.0)
-    return _buckets[key]
+        bucket = TokenBucket(capacity=rpm, refill_rate=rpm / 60.0)
+        _buckets[key] = bucket
+        return bucket
 
 
 def _acquire_global_bucket(command: str) -> TokenBucket:
     key = command
-    if key not in _global_buckets:
+    with _bucket_registry_lock:
+        bucket = _global_buckets.get(key)
+        if bucket is not None:
+            return bucket
         rpm = _per_command_global_rpm()
-        _global_buckets[key] = TokenBucket(capacity=rpm, refill_rate=rpm / 60.0)
-    return _global_buckets[key]
+        bucket = TokenBucket(capacity=rpm, refill_rate=rpm / 60.0)
+        _global_buckets[key] = bucket
+        return bucket
 
 
 def _finalize_result(result: CommandResult) -> CommandResult:

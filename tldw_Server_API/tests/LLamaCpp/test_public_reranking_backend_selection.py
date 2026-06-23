@@ -2,16 +2,16 @@ import pytest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.RAG.rag_service.advanced_reranking import RerankingStrategy
+from tldw_Server_API.tests.LLamaCpp.llamacpp_test_app import llamacpp_test_client
 
 
 @pytest.fixture(scope="module")
 def client():
     settings = get_settings()
     headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
-    with TestClient(app, headers=headers) as c:
+    with llamacpp_test_client(headers=headers) as c:
         yield c
 
 

@@ -71,7 +71,12 @@ def test_starlette_dependency_floor_excludes_badhost_cve_versions():
 
 
 def test_fastapi_dependency_floor_supports_starlette_1_series():
-    _expect_project_dependency("fastapi", "fastapi>=0.136.3")
+    _expect_project_dependency("fastapi", "fastapi>=0.136.3,<0.137.0")
+
+
+def test_tzlocal_declared_for_apscheduler_session_import_path():
+    """APScheduler imports tzlocal during AuthNZ session-manager collection."""
+    _expect_project_dependency("tzlocal", "tzlocal>=3.0")
 
 
 def test_python_multipart_dependency_floor_excludes_header_dos_cve_versions():

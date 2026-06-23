@@ -9,6 +9,15 @@ def _make_client():
     return TestClient(app)
 
 
+class _CompletionReadyStore:
+    def validate_completion_ready(self):
+        return None
+
+    def mark_completed_with_legacy_flag(self, mark_legacy_complete):
+        mark_legacy_complete()
+        return None
+
+
 def test_setup_complete_does_not_imply_audio_ready(mocker, tmp_path):
     store = setup_endpoint.audio_readiness_store.AudioReadinessStore(
         tmp_path / "audio_readiness.json"
@@ -17,13 +26,18 @@ def test_setup_complete_does_not_imply_audio_ready(mocker, tmp_path):
     mocker.patch.object(
         setup_endpoint.setup_manager,
         "get_status_snapshot",
-        return_value={"enabled": True, "needs_setup": True},
+        return_value={"enabled": True, "needs_setup": True, "setup_completed": False, "completed": False},
     )
     mocker.patch.object(setup_endpoint.setup_manager, "mark_setup_completed")
     mocker.patch.object(
         setup_endpoint.audio_readiness_store,
         "get_audio_readiness_store",
         return_value=store,
+    )
+    mocker.patch.object(
+        setup_endpoint,
+        "_run_first_run_store_call",
+        side_effect=lambda callback: callback(_CompletionReadyStore()),
     )
 
     with _make_client() as client:
@@ -147,4 +161,5 @@ def test_audio_provision_endpoint_masks_bundle_lookup_details(mocker):
         )
 
     assert response.status_code == 404
-    assert response.json()["detail"] == "Audio bundle or resource profile not found."
+    assert response.json()["detail"] == "Audio bundle not found"
+    assert "catalog internals" not in response.text

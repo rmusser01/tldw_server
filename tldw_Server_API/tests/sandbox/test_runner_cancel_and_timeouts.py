@@ -345,7 +345,7 @@ def test_seatbelt_cancel_run_kills_active_process_group_and_removes_run_dir(monk
         SeatbeltRunner._active_run_dir[rid] = str(run_dir)  # type: ignore[attr-defined]
 
     killpg_calls: list[tuple[int, int]] = []
-    monkeypatch.setattr("os.killpg", lambda pid, sig: killpg_calls.append((pid, sig)))
+    monkeypatch.setattr("os.killpg", lambda pid, sig: killpg_calls.append((pid, sig)), raising=False)
     monkeypatch.setattr(SeatbeltRunner, "_cancel_grace_seconds", classmethod(lambda cls: 0))
 
     try:

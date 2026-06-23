@@ -370,6 +370,7 @@ class WebScrapingService:
                     chunking_mode=chunking_mode,
                     auto_chunking_goal=auto_chunking_goal,
                     auto_chunking_use_llm=auto_chunking_use_llm,
+                    api_name=api_name,
                 )
                 if isinstance(stored, dict):
                     stored["task_id"] = task_id
@@ -703,6 +704,7 @@ class WebScrapingService:
         chunking_mode: str | None,
         auto_chunking_goal: str,
         auto_chunking_use_llm: bool,
+        api_name: str | None = None,
     ) -> dict[str, Any]:
         """Store results in database"""
         media_ids = []

@@ -23,6 +23,22 @@ def _client(monkeypatch) -> TestClient:
     if "sandbox" not in parts:
         parts.append("sandbox")
     monkeypatch.setenv("ROUTES_ENABLE", ",".join(parts))
+    from tldw_Server_API.app.core.Sandbox.models import RuntimeType
+    from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
+    from tldw_Server_API.app.core.Sandbox.service import SandboxService
+
+    monkeypatch.setattr(
+        SandboxService,
+        "_collect_runtime_preflights",
+        lambda self, network_policy=None: {
+            RuntimeType.docker: RuntimePreflightResult(
+                runtime=RuntimeType.docker,
+                available=True,
+                reasons=[],
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        },
+    )
     # Build a minimal app with only the sandbox router
     from tldw_Server_API.app.api.v1.endpoints.sandbox import router as sandbox_router
     app = FastAPI()
@@ -61,11 +77,12 @@ def test_admin_idempotency_list_filters_and_pagination(monkeypatch) -> None:
         })
         assert lr.status_code == 200
         payload = lr.json()
-        assert set(payload.keys()) == {"total", "limit", "offset", "has_more", "items", "pagination"}
+        assert set(payload.keys()) == {"total", "limit", "offset", "has_more", "next_offset", "items", "pagination"}
         assert payload["pagination"]["total"] == payload["total"]
         assert payload["pagination"]["limit"] == 10
         assert payload["pagination"]["offset"] == 0
         assert payload["pagination"]["has_more"] == payload["has_more"]
+        assert payload["pagination"]["next_offset"] == payload["next_offset"]
         items = payload["items"]
         assert isinstance(items, list)
         assert len(items) >= 1
@@ -99,11 +116,12 @@ def test_admin_usage_aggregates_schema_and_filters(monkeypatch) -> None:
         ur = client.get("/api/v1/sandbox/admin/usage", params={"limit": 50, "offset": 0})
         assert ur.status_code == 200
         payload = ur.json()
-        assert set(payload.keys()) == {"total", "limit", "offset", "has_more", "items", "pagination"}
+        assert set(payload.keys()) == {"total", "limit", "offset", "has_more", "next_offset", "items", "pagination"}
         assert payload["pagination"]["total"] == payload["total"]
         assert payload["pagination"]["limit"] == 50
         assert payload["pagination"]["offset"] == 0
         assert payload["pagination"]["has_more"] == payload["has_more"]
+        assert payload["pagination"]["next_offset"] == payload["next_offset"]
         assert isinstance(payload["items"], list)
         # If the default user exists, ensure schema for first item
         if payload["items"]:
@@ -120,6 +138,7 @@ def test_admin_usage_aggregates_schema_and_filters(monkeypatch) -> None:
         assert p2["pagination"]["total"] == p2["total"]
         assert p2["pagination"]["limit"] == 1
         assert p2["pagination"]["offset"] == 0
+        assert p2["pagination"]["next_offset"] == p2["next_offset"]
 
         client.app.dependency_overrides.clear()
 

@@ -14,6 +14,33 @@ from tldw_Server_API.app.core.Sandbox.service import SandboxService
 pytestmark = pytest.mark.unit
 
 
+def _force_docker_preflight_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
+
+    def _preflights(
+        self: SandboxService,
+        *,
+        network_policy: str | None,
+    ) -> dict[RuntimeType, RuntimePreflightResult]:
+        del self, network_policy
+        return {
+            RuntimeType.docker: RuntimePreflightResult(
+                runtime=RuntimeType.docker,
+                available=True,
+                reasons=[],
+                execution_mode="mocked",
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        }
+
+    monkeypatch.setattr(SandboxService, "_collect_runtime_preflights", _preflights)
+
+
+@pytest.fixture(autouse=True)
+def _snapshot_quota_docker_preflight(monkeypatch: pytest.MonkeyPatch) -> None:
+    _force_docker_preflight_available(monkeypatch)
+
+
 def _configure_sqlite_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     db_path = str(tmp_path / "sandbox_store.db")
     root_dir = str(tmp_path / "sandbox_root")

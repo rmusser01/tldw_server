@@ -638,7 +638,7 @@ async def test_embeddings_recipe_apply_endpoint_updates_config_and_audits(
     assert update_config_spy.call_args.kwargs == {"create_backup": True}
     body = response.json()
     assert body["applied"] is True
-    assert body["backup_path"] == "/tmp/config.txt.pre-setup-test.bak"
+    assert Path(body["backup_path"]) == update_config_spy.return_value
     assert body["audit_ref"] == "embedding_recipe_apply_audit"
 
     updated_run = db.get_recipe_run(run_id)

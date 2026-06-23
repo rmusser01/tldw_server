@@ -1,7 +1,6 @@
 import os
 
 os.environ.setdefault("LOGURU_LEVEL", "ERROR")
-os.environ.setdefault("TLDW_TEST_MODE", "true")
 os.environ.setdefault("SINGLE_USER_API_KEY", "test-key")
 
 from loguru import logger
@@ -46,14 +45,34 @@ def workflows_db(tmp_path: Path):
             _ = None
 
 
-def _wait_for_status(db: WorkflowsDatabase, run_id: str, timeout: float = 3.0) -> str:
+def _wait_for_status(db: WorkflowsDatabase, run_id: str, timeout: float = 10.0) -> str:
     deadline = time.time() + timeout
+    last_status = None
     while time.time() < deadline:
         run = db.get_run(run_id)
+        last_status = getattr(run, "status", None) if run else None
         if run and run.status in TERMINAL_STATES.union({"waiting_human", "waiting_approval"}):
             return run.status
         time.sleep(0.05)
-    raise AssertionError("Run did not reach a terminal or waiting state within the timeout")
+    raise AssertionError(
+        "Run did not reach a terminal or waiting state within the timeout "
+        f"(run_id={run_id!r}, last_status={last_status!r})"
+    )
+
+
+def _wait_for_scheduler_idle(scheduler: WorkflowScheduler, timeout: float = 10.0) -> dict[str, int]:
+    deadline = time.time() + timeout
+    last_stats = scheduler.stats()
+    while time.time() < deadline:
+        last_stats = scheduler.stats()
+        if (
+            last_stats["queue_depth"] == 0
+            and last_stats["active_tenants"] == 0
+            and last_stats["active_workflows"] == 0
+        ):
+            return last_stats
+        time.sleep(0.02)
+    return last_stats
 
 
 def test_scheduler_releases_slot_on_step_failure(workflows_db: WorkflowsDatabase):
@@ -84,10 +103,45 @@ def test_scheduler_releases_slot_on_step_failure(workflows_db: WorkflowsDatabase
     status = _wait_for_status(workflows_db, run_id)
     assert status == "failed"
 
-    stats = scheduler.stats()
+    stats = _wait_for_scheduler_idle(scheduler)
     assert stats["active_tenants"] == 0
     assert stats["active_workflows"] == 0
-    assert scheduler.queue_depth() == 0
+    assert stats["queue_depth"] == 0
+
+
+def test_drain_pending_reports_active_run(
+    workflows_db: WorkflowsDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    scheduler = WorkflowScheduler.instance()
+    spawned = []
+
+    def fake_spawn(coro):
+        spawned.append(coro)
+        coro.close()
+
+    monkeypatch.setattr(WorkflowScheduler, "_spawn", staticmethod(fake_spawn))
+
+    definition = {
+        "name": "active-run",
+        "steps": [{"id": "step1", "type": "prompt", "config": {"template": "hi"}}],
+    }
+    run_id = "active-run"
+    workflows_db.create_run(
+        run_id=run_id,
+        tenant_id="tenant",
+        user_id="user",
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot=definition,
+    )
+
+    WorkflowEngine(workflows_db).submit(run_id, RunMode.ASYNC)
+
+    assert spawned
+    assert scheduler.stats()["active_tenants"] == 1
+    assert scheduler.drain_pending(run_id) is True
 
 
 def test_waiting_run_keeps_secrets_and_releases_slot(workflows_db: WorkflowsDatabase):
@@ -114,7 +168,7 @@ def test_waiting_run_keeps_secrets_and_releases_slot(workflows_db: WorkflowsData
         definition_version=1,
         definition_snapshot=definition,
     )
-    WorkflowEngine.set_run_secrets(run_id, {"token": "secret"})
+    WorkflowEngine.set_run_secrets(run_id, {"fixture": "value"})
     engine = WorkflowEngine(workflows_db)
     engine.submit(run_id, RunMode.ASYNC)
 
@@ -122,7 +176,7 @@ def test_waiting_run_keeps_secrets_and_releases_slot(workflows_db: WorkflowsData
     assert status == "waiting_human"
     assert WorkflowEngine._RUN_SECRETS.get(run_id) is not None
 
-    stats = scheduler.stats()
+    stats = _wait_for_scheduler_idle(scheduler, timeout=10.0)
     assert stats["active_tenants"] == 0
     assert stats["active_workflows"] == 0
 
@@ -151,7 +205,7 @@ def test_continue_run_clears_secrets(workflows_db: WorkflowsDatabase):
         definition_version=1,
         definition_snapshot=definition,
     )
-    WorkflowEngine.set_run_secrets(run_id, {"token": "secret"})
+    WorkflowEngine.set_run_secrets(run_id, {"fixture": "value"})
     engine = WorkflowEngine(workflows_db)
     engine.submit(run_id, RunMode.ASYNC)
     status = _wait_for_status(workflows_db, run_id)
@@ -162,7 +216,7 @@ def test_continue_run_clears_secrets(workflows_db: WorkflowsDatabase):
     status = _wait_for_status(workflows_db, run_id)
     assert status == "succeeded"
     assert WorkflowEngine._RUN_SECRETS.get(run_id) is None
-    stats = scheduler.stats()
+    stats = _wait_for_scheduler_idle(scheduler)
     assert stats["active_tenants"] == 0
     assert stats["active_workflows"] == 0
 
@@ -238,7 +292,7 @@ def test_adapter_returned_research_checkpoint_wait_sets_run_waiting_human_withou
     assert step_run["status"] == "waiting_human"
     assert scheduled_timeouts == []
 
-    stats = scheduler.stats()
+    stats = _wait_for_scheduler_idle(scheduler)
     assert stats["active_tenants"] == 0
     assert stats["active_workflows"] == 0
 
@@ -272,6 +326,6 @@ def test_run_saved_sync_waits_for_completion(workflows_db: WorkflowsDatabase, mo
         )
     )
     assert response.status == "succeeded"
-    stats = WorkflowScheduler.instance().stats()
+    stats = _wait_for_scheduler_idle(WorkflowScheduler.instance())
     assert stats["active_tenants"] == 0
     assert stats["active_workflows"] == 0

@@ -2200,6 +2200,16 @@ async def _execute_audio_bundle_verification(
             status.HTTP_404_NOT_FOUND,
             detail=AUDIO_BUNDLE_NOT_FOUND_DETAIL,
         ) from None
+    except Exception as exc:  # noqa: BLE001 - public response must stay sanitized
+        logger.warning(
+            "Audio bundle verification failed for {}: {}",
+            payload.bundle_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to verify audio bundle.",
+        ) from exc
 
 
 @router.get("/admin/install-status")

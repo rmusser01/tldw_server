@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 import subprocess
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import pytest
 
@@ -86,7 +87,15 @@ def _init_git_pack_repo(tmp_path: Path, *, subpath: str = "packs/researcher") ->
 
 def _repo_path_from_file_uri(repo_url: str) -> Path:
     parsed = urlparse(repo_url)
-    return Path(parsed.path)
+    if parsed.scheme != "file":
+        return Path(repo_url)
+
+    path = unquote(parsed.path)
+    if parsed.netloc:
+        path = f"//{parsed.netloc}{path}"
+    elif os.name == "nt" and len(path) >= 3 and path[0] == "/" and path[2] == ":":
+        path = path[1:]
+    return Path(path)
 
 
 def _git_head_branch(repo_url: str) -> str:

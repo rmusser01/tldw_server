@@ -24,6 +24,11 @@ TESTS_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_PATH = TESTS_ROOT / "fixtures/persona_chat_judge_contract_cases.json"
 
 
+def _load_cli_stdout_json(result: Any) -> Any:
+    """Parse the command's stdout JSON without mixing stderr diagnostics."""
+    return json.loads(result.stdout)
+
+
 def _load_fixture() -> dict[str, Any]:
     """Load the checked-in Persona Chat judge contract fixture."""
     with FIXTURE_PATH.open(encoding="utf-8") as fixture_file:
@@ -88,7 +93,7 @@ def test_persona_chat_judge_review_command_outputs_bounded_report(tmp_path: Path
     )
 
     assert result.exit_code == 0, result.output  # nosec B101
-    report = json.loads(result.output)
+    report = _load_cli_stdout_json(result)
     serialized_report = json.dumps(report, sort_keys=True)
     assert report["offline_only"] is True  # nosec B101
     assert report["total_cases"] == expected_total_cases  # nosec B101
@@ -123,7 +128,7 @@ def test_persona_chat_judge_review_command_writes_explicit_output_file(tmp_path:
 
     assert result.exit_code == 0, result.output  # nosec B101
     assert output_path.exists()  # nosec B101
-    assert json.loads(result.output) == json.loads(  # nosec B101
+    assert _load_cli_stdout_json(result) == json.loads(  # nosec B101
         output_path.read_text(encoding="utf-8")
     )
 
@@ -189,7 +194,7 @@ def test_persona_chat_judge_artifact_command_outputs_trace_safe_artifact(tmp_pat
     )
 
     assert result.exit_code == 0, result.output  # nosec B101
-    artifact = json.loads(result.output)
+    artifact = _load_cli_stdout_json(result)
     serialized_artifact = json.dumps(artifact, sort_keys=True)
     assert artifact["schema_version"] == "persona-chat-judge-execution-artifact.v1"  # nosec B101
     assert artifact["offline_only"] is True  # nosec B101
@@ -234,7 +239,7 @@ def test_persona_chat_judge_artifact_command_writes_explicit_output_file(tmp_pat
 
     assert result.exit_code == 0, result.output  # nosec B101
     assert output_path.exists()  # nosec B101
-    assert json.loads(result.output) == json.loads(  # nosec B101
+    assert _load_cli_stdout_json(result) == json.loads(  # nosec B101
         output_path.read_text(encoding="utf-8")
     )
 

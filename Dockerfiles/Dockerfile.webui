@@ -8,9 +8,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 WORKDIR /app/apps
 
-# Copy the root manifest plus the workspace sources Bun needs during install.
-# Only copy the extension manifest + prepare shim here so unrelated extension
-# source changes do not invalidate the WebUI dependency layer.
+# Copy the root manifest plus workspace manifests Bun needs for the frozen lockfile.
+# Only copy non-WebUI workspace manifests/shims so unrelated source changes do not
+# invalidate this layer.
 COPY apps/package.json /app/apps/package.json
 COPY apps/bun.lock /app/apps/bun.lock
 COPY apps/scripts /app/apps/scripts
@@ -20,7 +20,7 @@ COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-ass
 COPY apps/tldw-frontend /app/apps/tldw-frontend
 COPY apps/packages/ui /app/apps/packages/ui
 
-# Install the frontend monorepo with Bun so workspace:* dependencies resolve correctly.
+# Keep the root workspace graph aligned with bun.lock while skipping extension prepare.
 ENV SKIP_WXT_PREPARE=1
 RUN bun install --frozen-lockfile --cwd /app/apps
 

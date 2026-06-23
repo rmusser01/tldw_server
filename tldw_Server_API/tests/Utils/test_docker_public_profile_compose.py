@@ -28,6 +28,32 @@ def _literal(*parts: str) -> str:
     return "".join(parts)
 
 
+def _entrypoint_command(*args: str) -> list[str]:
+    shell = "/bin/sh"
+    if os.name == "nt":
+        shell = shutil.which("sh") or shutil.which("bash") or ""
+        if not shell:
+            pytest.skip("POSIX shell is required to execute the container entrypoint script")
+    return [shell, "Dockerfiles/entrypoints/tldw-app-first-run.sh", *args]
+
+
+def _windows_shell_path(path: os.PathLike[str] | str) -> str:
+    path_text = os.fspath(path).replace("\\", "/")
+    if len(path_text) >= 2 and path_text[1] == ":":
+        drive = path_text[0].lower()
+        tail = path_text[2:]
+        if not tail.startswith("/"):
+            tail = f"/{tail}"
+        return f"/{drive}{tail}"
+    return path_text
+
+
+def _shell_path(path: Path) -> str:
+    if os.name == "nt":
+        return _windows_shell_path(path)
+    return str(path)
+
+
 def test_single_user_compose_has_no_postgres_service_or_dependency() -> None:
     compose = _compose("Dockerfiles/docker-compose.single-user.yml")
     _require("postgres" not in compose["services"], "single-user compose should not define postgres")
@@ -386,10 +412,11 @@ def test_entrypoint_loads_env_file_with_literal_dollar_signs(tmp_path: Path) -> 
         )
         + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
     result = subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        _entrypoint_command("true"),
         check=False,
         capture_output=True,
         text=True,
@@ -422,10 +449,11 @@ def test_entrypoint_loads_raw_env_file_values_without_dotenv_rewriting(tmp_path:
         )
         + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
     result = subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "/usr/bin/env"],
+        _entrypoint_command("/usr/bin/env"),
         check=False,
         capture_output=True,
         text=True,
@@ -446,8 +474,8 @@ def _entrypoint_process_env(env_file: Path, marker_dir: Path) -> dict[str, str]:
         value = os.environ.get(key)
         if value:
             env[key] = value
-    env["TLDW_ENV_FILE"] = str(env_file)
-    env["TLDW_AUTH_MARKER_DIR"] = str(marker_dir)
+    env["TLDW_ENV_FILE"] = _shell_path(env_file)
+    env["TLDW_AUTH_MARKER_DIR"] = _shell_path(marker_dir)
     return env
 
 
@@ -460,8 +488,21 @@ def test_entrypoint_process_env_does_not_copy_host_environment(tmp_path: Path, m
     env = _entrypoint_process_env(env_file, marker_dir)
 
     assert "ENTRYPOINT_TEST_HOST_SECRET" not in env
-    assert env["TLDW_ENV_FILE"] == str(env_file)
-    assert env["TLDW_AUTH_MARKER_DIR"] == str(marker_dir)
+    assert env["TLDW_ENV_FILE"] == _shell_path(env_file)
+    assert env["TLDW_AUTH_MARKER_DIR"] == _shell_path(marker_dir)
+
+
+def test_windows_shell_path_converts_drive_paths_for_git_bash() -> None:
+    _require_equal(
+        _windows_shell_path(r"C:\Users\runneradmin\AppData\Local\Temp\tldw\.env"),
+        "/c/Users/runneradmin/AppData/Local/Temp/tldw/.env",
+        "Windows drive paths should be visible to Git Bash subprocesses",
+    )
+    _require_equal(
+        _windows_shell_path("D:/a/tldw_server/tldw_server"),
+        "/d/a/tldw_server/tldw_server",
+        "Windows forward-slash drive paths should be visible to Git Bash subprocesses",
+    )
 
 
 def _compose_process_env(env_file: Path, marker_dir: Path, extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -502,16 +543,17 @@ def _write_entrypoint_env(path: Path, extra_lines: tuple[str, ...] = ()) -> None
         )
         + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
 
 def _run_entrypoint_with_env(env_file: Path, marker_dir: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        _entrypoint_command("true"),
         check=False,
         capture_output=True,
         text=True,
-        env=_entrypoint_process_env(env_file, marker_dir),
+        env=_compose_process_env(env_file, marker_dir),
     )
 
 
@@ -521,7 +563,7 @@ def test_entrypoint_honors_compose_process_env_when_env_file_missing(tmp_path: P
     marker_dir.mkdir()
 
     result = subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        _entrypoint_command("true"),
         check=False,
         capture_output=True,
         text=True,
@@ -542,7 +584,7 @@ def test_entrypoint_rejects_process_env_stale_database_url_without_env_file(tmp_
     marker_dir.mkdir()
 
     result = subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        _entrypoint_command("true"),
         check=False,
         capture_output=True,
         text=True,
@@ -565,7 +607,7 @@ def test_entrypoint_rejects_process_env_stale_jobs_database_url_without_env_file
     marker_dir.mkdir()
 
     result = subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        _entrypoint_command("true"),
         check=False,
         capture_output=True,
         text=True,
@@ -597,7 +639,7 @@ def test_entrypoint_rejects_existing_env_file_stale_database_urls_with_compose_p
     )
 
     result = subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        _entrypoint_command("true"),
         check=False,
         capture_output=True,
         text=True,
@@ -617,7 +659,7 @@ def test_entrypoint_missing_compose_postgres_env_errors_without_single_user_file
     env.pop("POSTGRES_PASSWORD")
 
     result = subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "true"],
+        _entrypoint_command("true"),
         check=False,
         capture_output=True,
         text=True,
@@ -710,28 +752,40 @@ def test_multi_user_entrypoint_fails_when_admin_bootstrap_fails(tmp_path: Path) 
     marker_dir.mkdir()
     wrapper_dir.mkdir()
     _write_entrypoint_env(env_file)
-    (marker_dir / ".authnz_initialized_multi_user").write_text("", encoding="utf-8")
     python_wrapper = wrapper_dir / "python"
     python_wrapper.write_text(
         "\n".join(
             (
                 "#!/bin/sh",
+                'real_python="${TLDW_TEST_REAL_PYTHON:-}"',
+                'if [ -z "$real_python" ]; then',
+                '  echo "[test-wrapper] TLDW_TEST_REAL_PYTHON is required" >&2',
+                "  exit 127",
+                "fi",
+                'if [ "$1" = "-m" ] && [ "$2" = "tldw_Server_API.app.core.AuthNZ.initialize" ]; then',
+                '  echo "[test-wrapper] initialize succeeded"',
+                "  exit 0",
+                "fi",
                 'if [ "$1" = "-m" ] && [ "$2" = "tldw_Server_API.app.core.AuthNZ.create_admin" ]; then',
                 '  echo "[test-wrapper] create_admin failed" >&2',
                 "  exit 42",
                 "fi",
-                f'exec "{sys.executable}" "$@"',
+                'exec "$real_python" "$@"',
             )
         )
         + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     python_wrapper.chmod(0o700)
-    env = _entrypoint_process_env(env_file, marker_dir)
-    env["PATH"] = f"{wrapper_dir}{os.pathsep}{env['PATH']}"
+    # Keep this test focused on admin bootstrap failure; env-file parsing has
+    # dedicated coverage above and Git Bash path/env handling differs on Windows.
+    env = _compose_process_env(env_file, marker_dir)
+    env["PYTHON_BIN"] = _shell_path(python_wrapper)
+    env["TLDW_TEST_REAL_PYTHON"] = _shell_path(Path(sys.executable))
 
     result = subprocess.run(  # nosec B603
-        ["/bin/sh", "Dockerfiles/entrypoints/tldw-app-first-run.sh", "uvicorn"],
+        _entrypoint_command("uvicorn"),
         check=False,
         capture_output=True,
         text=True,

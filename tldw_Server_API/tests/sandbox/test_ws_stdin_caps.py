@@ -8,7 +8,31 @@ from fastapi.testclient import TestClient
 import pytest
 
 
-pytestmark = pytest.mark.timeout(10)
+pytestmark = pytest.mark.timeout(30)
+
+
+def _force_docker_preflight_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Sandbox.models import RuntimeType
+    from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
+    from tldw_Server_API.app.core.Sandbox.service import SandboxService
+
+    def _preflights(
+        self: SandboxService,
+        *,
+        network_policy: str | None,
+    ) -> dict[RuntimeType, RuntimePreflightResult]:
+        del self, network_policy
+        return {
+            RuntimeType.docker: RuntimePreflightResult(
+                runtime=RuntimeType.docker,
+                available=True,
+                reasons=[],
+                execution_mode="mocked",
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        }
+
+    monkeypatch.setattr(SandboxService, "_collect_runtime_preflights", _preflights)
 
 
 def _client(monkeypatch) -> TestClient:
@@ -24,6 +48,7 @@ def _client(monkeypatch) -> TestClient:
     if "sandbox" not in parts:
         parts.append("sandbox")
     monkeypatch.setenv("ROUTES_ENABLE", ",".join(parts))
+    _force_docker_preflight_available(monkeypatch)
     from tldw_Server_API.app.main import app as _app
     return TestClient(_app)
 

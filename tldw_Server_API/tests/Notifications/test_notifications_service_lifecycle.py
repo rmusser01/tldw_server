@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -21,6 +23,7 @@ def test_notifications_services_start_when_enabled(monkeypatch):
     monkeypatch.setenv("REMINDERS_SCHEDULER_ENABLED", "true")
     monkeypatch.setenv("REMINDER_JOBS_WORKER_ENABLED", "true")
     monkeypatch.setenv("JOBS_NOTIFICATIONS_BRIDGE_ENABLED", "true")
+    monkeypatch.setenv("TLDW_WORKERS_SIDECAR_MODE", "0")
 
     called = {
         "reminders_scheduler_start": 0,
@@ -31,7 +34,7 @@ def test_notifications_services_start_when_enabled(monkeypatch):
 
     async def _fake_start_reminders_scheduler(*_args, **_kwargs):
         called["reminders_scheduler_start"] += 1
-        return None
+        return asyncio.create_task(asyncio.sleep(0), name="fake_reminders_scheduler")
 
     async def _fake_stop_reminders_scheduler(*_args, **_kwargs):
         called["reminders_scheduler_stop"] += 1
@@ -40,9 +43,13 @@ def test_notifications_services_start_when_enabled(monkeypatch):
         called["reminder_jobs_worker_start"] += 1
         return None
 
+    async def _fake_run_reminder_jobs_worker(stop_event):
+        called["reminder_jobs_worker_start"] += 1
+        await stop_event.wait()
+
     async def _fake_start_jobs_notifications_service(*_args, **_kwargs):
         called["jobs_notifications_bridge_start"] += 1
-        return None
+        return asyncio.create_task(asyncio.sleep(0), name="fake_jobs_notifications_bridge")
 
     import tldw_Server_API.app.services.jobs_notifications_service as jobs_notifications_service
     import tldw_Server_API.app.services.reminder_jobs_worker as reminder_jobs_worker
@@ -57,6 +64,7 @@ def test_notifications_services_start_when_enabled(monkeypatch):
         monkeypatch.setattr(reminders_scheduler, "start_reminders_scheduler", _fake_start_reminders_scheduler)
         monkeypatch.setattr(reminders_scheduler, "stop_reminders_scheduler", _fake_stop_reminders_scheduler)
         monkeypatch.setattr(reminder_jobs_worker, "start_reminder_jobs_worker", _fake_start_reminder_jobs_worker)
+        monkeypatch.setattr(reminder_jobs_worker, "run_reminder_jobs_worker", _fake_run_reminder_jobs_worker)
         monkeypatch.setattr(
             jobs_notifications_service,
             "start_jobs_notifications_service",

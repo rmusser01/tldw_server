@@ -1,4 +1,5 @@
 import shutil
+import threading
 from pathlib import Path
 
 import pytest
@@ -71,8 +72,11 @@ def test_collections_close_releases_managed_backend_at_most_once(
     backend = _Backend()
     collections_db = CollectionsDatabase.__new__(CollectionsDatabase)
     collections_db.user_id = 778
-    collections_db.backend = backend
+    collections_db._backend = backend
     collections_db._owns_backend = True
+    collections_db._local = threading.local()
+    collections_db._uses_shared_content_backend = False
+    collections_db._backend_refresh_suspended = False
 
     monkeypatch.setattr(
         "tldw_Server_API.app.core.DB_Management.Collections_DB.is_factory_managed_backend",

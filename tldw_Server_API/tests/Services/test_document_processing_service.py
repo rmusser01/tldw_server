@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 
 import pytest
 
@@ -100,9 +101,14 @@ async def test_process_documents_store_in_db_uses_media_repository_api(
             "keywords": ["alpha", "beta"],
             "prompt": None,
             "analysis_content": "",
-            "safe_metadata": '{"title": "Stored doc", "source": "document", "url": "'
-            + str(document_path)
-            + '"}',
+            "safe_metadata": json.dumps(
+                {
+                    "title": "Stored doc",
+                    "source": "document",
+                    "url": str(document_path),
+                },
+                ensure_ascii=False,
+            ),
             "transcription_model": "document-import",
             "author": None,
             "ingestion_date": None,

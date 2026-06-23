@@ -53,8 +53,8 @@ async def test_unified_pipeline_reuses_resolved_request_and_plan(monkeypatch):
         seen["retrieval_resolved"] = kwargs["resolved_request"]
         seen["retrieval_plan"] = kwargs["retrieval_plan"]
         return SimpleNamespace(
-            documents=[],
-            sources=[],
+            documents=[{"id": "doc-1", "content": "retrieved context"}],
+            sources=[{"id": "doc-1"}],
             metadata={"retrieval": "ok"},
         )
 
@@ -104,7 +104,11 @@ async def test_unified_pipeline_builds_single_legacy_resolved_request(monkeypatc
     async def fake_retrieval_phase(**kwargs):
         seen["retrieval_resolved"] = kwargs["resolved_request"]
         seen["retrieval_plan"] = kwargs["retrieval_plan"]
-        return SimpleNamespace(documents=[], sources=[], metadata={})
+        return SimpleNamespace(
+            documents=[{"id": "legacy-doc", "content": "legacy context"}],
+            sources=[{"id": "legacy-doc"}],
+            metadata={},
+        )
 
     async def fake_generation_phase(**kwargs):
         seen["generation_resolved"] = kwargs["resolved_request"]

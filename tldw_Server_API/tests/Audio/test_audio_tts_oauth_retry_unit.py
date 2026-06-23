@@ -334,7 +334,11 @@ async def test_audio_speech_history_write_failure_log_is_sanitized(monkeypatch):
     )
 
     assert response.status_code == 200
-    fake_logger.debug.assert_called_once_with("TTS history: failed to write record")
+    fake_logger.debug.assert_called_once()
+    log_args = fake_logger.debug.call_args.args
+    assert log_args[0] == "TTS history: failed to write record request_id={}"
+    assert isinstance(log_args[1], str)
+    assert "/private/" not in repr(fake_logger.debug.call_args)
 
 
 @pytest.mark.unit

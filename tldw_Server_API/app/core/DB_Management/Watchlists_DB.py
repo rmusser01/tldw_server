@@ -413,8 +413,9 @@ class WatchlistsDatabase:
             backend, db_key, uses_shared_backend = self._resolve_backend()
             self._uses_shared_content_backend = uses_shared_backend
         else:
-            # Fallback key when external backend is supplied (best-effort de-dupe)
-            db_key = f"backend:{id(backend)}"
+            # Use the backend target, not object identity, so Python id reuse cannot
+            # skip schema setup for a fresh externally supplied database.
+            db_key = self._backend_target_key(backend) or f"backend:{id(backend)}"
         self._backend = backend
         # De-duplicate schema ensures across startup/requests
         if db_key:

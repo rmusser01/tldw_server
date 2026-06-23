@@ -2115,7 +2115,7 @@ async def import_sources_opml(
                     surface="api.watchlists.sources.import",
                 )
             )
-            items.append(SourcesImportItem(url=url_str, name=row.name, id=row.id, status="created"))
+            items.append(SourcesImportItem(url=url_str, name=e.name or row.name, id=row.id, status="created"))
             created += 1
         except (*_WATCHLISTS_NONCRITICAL_EXCEPTIONS, _DatabaseError) as exc:
             items.append(SourcesImportItem(url=url_str, name=e.name, status="skipped", error=str(exc)))

@@ -23,6 +23,8 @@ def _apply_test_env_defaults() -> None:
     Sets environment flags to mirror test configuration and route scoping:
     - MINIMAL_TEST_APP: enable minimal app configuration for tests
     - TEST_MODE: activate test mode behaviors
+    - SINGLE_USER_API_KEY/AUTH_MODE/DATABASE_URL: mirror pytest's deterministic
+      AuthNZ defaults before importing the app
     - OTEL_SDK_DISABLED: disable OpenTelemetry instrumentation
     - AUTH_MODE/SINGLE_USER_*: mirror the deterministic single-user auth
       defaults from tests/conftest.py
@@ -38,6 +40,8 @@ def _apply_test_env_defaults() -> None:
     os.environ.setdefault("SINGLE_USER_TEST_API_KEY", "test-api-key-12345")
     os.environ["SINGLE_USER_API_KEY"] = os.environ["SINGLE_USER_TEST_API_KEY"]
     os.environ["AUTH_MODE"] = "single_user"
+    os.environ.setdefault("DATABASE_URL", "sqlite:///./Databases/users.db")
+    os.environ.pop("PROFILE", None)
     # Route inclusion in app startup now keys off explicit pytest runtime, not
     # only TEST_MODE. Mirror pytest's runtime signal so this helper produces
     # the same snapshot shape as tests.

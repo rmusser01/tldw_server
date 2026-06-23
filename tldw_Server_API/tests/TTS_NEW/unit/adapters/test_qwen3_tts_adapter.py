@@ -116,6 +116,14 @@ async def test_auto_model_selects_customvoice_cpu(fake_qwen_module):
     assert fake_qwen_module["last_model_id"] == adapter.MODEL_CUSTOMVOICE_06B
 
 
+def test_resolve_torch_dtype_falls_back_for_partial_torch_module(monkeypatch):
+    module = types.ModuleType("torch")
+    monkeypatch.setitem(sys.modules, "torch", module)
+    adapter = Qwen3TTSAdapter({"device": "cpu", "model": "auto", "dtype": "float16"})
+
+    assert adapter._resolve_torch_dtype() == "float16"
+
+
 @pytest.mark.parametrize("model_alias", ["qwen3_tts", "qwen3-tts"])
 def test_provider_style_model_aliases_resolve_to_canonical_model(model_alias):
     adapter = Qwen3TTSAdapter({"device": "cpu", "model": "auto"})

@@ -121,6 +121,20 @@ class TestMockEmailSending:
         files = list(tmp_path.glob("*.json"))
         assert len(files) >= 1
 
+    @pytest.mark.asyncio
+    async def test_mock_email_file_names_are_platform_safe(self, email_service, tmp_path):
+        """Mock email file names should avoid characters invalid on Windows."""
+        await email_service.send_email(
+            to_email="recipient@test.com",
+            subject="Test Subject",
+            html_body="<p>Test body</p>",
+        )
+
+        file_names = [path.name for path in tmp_path.iterdir()]
+        assert file_names
+        invalid_chars = set('<>:"/\\|?*')
+        assert all(invalid_chars.isdisjoint(name) for name in file_names)
+
 
 class TestHeaderInjectionPrevention:
     """Tests for email header injection prevention."""

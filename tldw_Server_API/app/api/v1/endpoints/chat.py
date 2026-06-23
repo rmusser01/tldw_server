@@ -4663,7 +4663,7 @@ def _build_streaming_commit_cb(
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
                 logger.warning(
                     "Billing streaming cache update failed (fail-open): "
-                    "org_id=%s, category=LLM_TOKENS_MONTH, tokens=%s, error=%s",
+                    "org_id={}, category=LLM_TOKENS_MONTH, tokens={}, error={}",
                     billing_org_id, tokens, exc,
                 )
 
@@ -4698,7 +4698,7 @@ def _build_streaming_commit_cb(
                 except Exception as exc:
                     logger.warning(
                         "Billing streaming durable ledger write failed (fail-open): "
-                        "org_id=%s, category=LLM_TOKENS_MONTH, tokens=%s, error=%s",
+                        "org_id={}, category=LLM_TOKENS_MONTH, tokens={}, error={}",
                         billing_org_id, tokens, exc,
                     )
             if rg_coro is not None:

@@ -274,6 +274,7 @@ def test_rag_streaming_generation_uses_shared_resolved_payload(
         db_paths: dict[str, Any],
         media_db: Any,
         chacha_db: Any,
+        prompts_db: Any = None,  # noqa: ARG001
     ) -> ResolvedRequestBundle:
         resolved_request = _resolved_request_for_test(request.query)
         retrieval_plan = build_retrieval_plan(resolved_request)

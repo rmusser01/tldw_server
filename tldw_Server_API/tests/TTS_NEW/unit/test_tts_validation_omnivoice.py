@@ -189,6 +189,14 @@ def test_omnivoice_rejects_unknown_generation_param():
         ({"mode": "clone", "instruct": "calm", "reference_text": "reference transcript"}, "clone", _make_reference_wav(3.5), "clone"),
         ({"mode": "clone"}, "auto", None, "reference"),
     ],
+    ids=[
+        "auto-with-instruct",
+        "auto-with-clone-reference",
+        "design-without-instruct",
+        "design-with-clone-reference",
+        "clone-with-instruct",
+        "clone-without-reference",
+    ],
 )
 def test_omnivoice_rejects_mode_conflicts(extra_params, voice, voice_reference, expected_error):
     validator = TTSInputValidator()

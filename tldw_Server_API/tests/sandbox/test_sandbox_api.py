@@ -12,11 +12,33 @@ from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunStatus, Runtime
 from tldw_Server_API.app.core.Sandbox.orchestrator import SessionActiveRunsConflict
 
 
+def _force_docker_preflight_available(monkeypatch) -> None:
+    from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
+    from tldw_Server_API.app.core.Sandbox.service import SandboxService
+
+    def _preflights(
+        self: SandboxService,
+        *,
+        network_policy: str | None,
+    ) -> dict[RuntimeType, RuntimePreflightResult]:
+        del self, network_policy
+        return {
+            RuntimeType.docker: RuntimePreflightResult(
+                runtime=RuntimeType.docker,
+                available=True,
+                reasons=[],
+                execution_mode="mocked",
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        }
+
+    monkeypatch.setattr(SandboxService, "_collect_runtime_preflights", _preflights)
+
+
 def _client(monkeypatch) -> TestClient:
-
-
-     # Enable test-mode behaviors in auth to avoid API key requirements
+    # Enable test-mode behaviors in auth to avoid API key requirements
     monkeypatch.setenv("TEST_MODE", "1")
+    _force_docker_preflight_available(monkeypatch)
     return TestClient(app)
 
 

@@ -42,18 +42,26 @@ jobs:
           gen_from_requirements() {
             local req="$1"
             local req_dir req_file out_file
+            local pyproject_args=()
             req_dir="$(dirname "$req")"
             req_file="$(basename "$req")"
             out_file="$repo_root/sbom-python.cdx.json"
+            if [ -f "$repo_root/pyproject.toml" ]; then
+              pyproject_args=(--pyproject "$repo_root/pyproject.toml")
+            fi
             echo "Generating Python SBOM from ${req}"
 
             # Try modern CLI first: cyclonedx-py requirements <file>
             if command -v cyclonedx-py >/dev/null 2>&1; then
               echo "Using cyclonedx-py"
-              if (cd "$req_dir" && cyclonedx-py requirements "$req_file" -o "$out_file"); then
+              if (cd "$req_dir" && cyclonedx-py requirements "$req_file" "${pyproject_args[@]}" -o "$out_file"); then
                 return 0
               fi
-              echo "cyclonedx-py positional requirements failed; trying stdin form"
+              echo "cyclonedx-py positional requirements failed; trying input flag form"
+              if (cd "$req_dir" && cyclonedx-py requirements -i "$req_file" "${pyproject_args[@]}" -o "$out_file"); then
+                return 0
+              fi
+              echo "cyclonedx-py input flag requirements failed; trying stdin form"
               if (cd "$req_dir" && cyclonedx-py requirements - -o "$out_file" < "$req_file"); then
                 return 0
               fi

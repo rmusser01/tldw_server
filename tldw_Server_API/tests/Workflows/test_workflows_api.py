@@ -58,7 +58,8 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture()
-def client_with_workflows_db(tmp_path, auth_headers):
+def client_with_workflows_db(tmp_path, auth_headers, monkeypatch):
+    monkeypatch.setenv("WORKFLOWS_SQLITE_POOL_SIZE", "4")
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))
 
     async def override_user():
@@ -82,6 +83,88 @@ def client_with_workflows_db(tmp_path, auth_headers):
         yield client
 
     app.dependency_overrides.clear()
+    db.close()
+
+
+def _wait_for_run_row(db: WorkflowsDatabase, run_id: str, timeout: float = 5.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        run = db.get_run(run_id)
+        if run is not None:
+            return run
+        time.sleep(0.02)
+    pytest.fail(f"workflow run row was not created for {run_id}")
+
+
+def _wait_for_run_terminal_data(client: TestClient, run_id: str, timeout: float = 10.0) -> dict:
+    deadline = time.time() + timeout
+    last_status = None
+    last_response_text = None
+    while time.time() < deadline:
+        response = client.get(f"/api/v1/workflows/runs/{run_id}")
+        if response.status_code == 404:
+            last_response_text = response.text
+            time.sleep(0.02)
+            continue
+        assert response.status_code == 200, response.text
+        data = response.json()
+        last_status = data.get("status")
+        if last_status in ("succeeded", "failed", "cancelled"):
+            return data
+        time.sleep(0.02)
+    pytest.fail(
+        f"workflow run {run_id} did not reach terminal status; "
+        f"last_status={last_status}; last_response={last_response_text}"
+    )
+
+
+def _wait_for_run_terminal(client: TestClient, run_id: str, timeout: float = 10.0) -> str:
+    return str(_wait_for_run_terminal_data(client, run_id, timeout=timeout).get("status"))
+
+
+def _wait_for_run_id_in_list(
+    client: TestClient,
+    params,
+    run_id: str,
+    timeout: float = 5.0,
+) -> list[str]:
+    deadline = time.time() + timeout
+    last_payload = None
+    while time.time() < deadline:
+        response = client.get("/api/v1/workflows/runs", params=params)
+        assert response.status_code == 200, response.text
+        last_payload = response.json()
+        run_ids = [str(r["run_id"]) for r in last_payload.get("runs", [])]
+        if run_id in run_ids:
+            return run_ids
+        time.sleep(0.05)
+    pytest.fail(f"workflow run {run_id} was not returned by list filter; last_payload={last_payload}")
+
+
+def _wait_for_webhook_delivery_status(
+    client: TestClient,
+    run_id: str,
+    expected_status: str,
+    timeout: float = 5.0,
+) -> list[str]:
+    deadline = time.time() + timeout
+    statuses: list[str] = []
+    while time.time() < deadline:
+        response = client.get(f"/api/v1/workflows/runs/{run_id}/events")
+        assert response.status_code == 200, response.text
+        events = response.json()
+        statuses = [
+            (e.get("payload") or {}).get("status")
+            for e in events
+            if e.get("event_type") == "webhook_delivery"
+        ]
+        if expected_status in statuses:
+            return statuses
+        time.sleep(0.05)
+    pytest.fail(
+        f"workflow run {run_id} did not record webhook_delivery status "
+        f"{expected_status!r}; statuses={statuses}"
+    )
 
 
 def test_create_and_run_saved_workflow(client_with_workflows_db: TestClient):
@@ -105,15 +188,8 @@ def test_create_and_run_saved_workflow(client_with_workflows_db: TestClient):
     assert run_resp.status_code == 200, run_resp.text
     run_id = run_resp.json()["run_id"]
 
-    # Poll until complete
-    for _ in range(50):
-        r = client.get(f"/api/v1/workflows/runs/{run_id}")
-        assert r.status_code == 200
-        data = r.json()
-        if data["status"] in ("succeeded", "failed"):
-            break
-        time.sleep(0.05)
-    assert data["status"] == "succeeded"
+    data = _wait_for_run_terminal_data(client, run_id)
+    assert data["status"] == "succeeded", data
     assert (data.get("outputs") or {}).get("text") == "Hello Alice"
 
     # Events include run_completed
@@ -121,6 +197,37 @@ def test_create_and_run_saved_workflow(client_with_workflows_db: TestClient):
     assert ev.status_code == 200
     types = [e["event_type"] for e in ev.json()]
     assert "run_completed" in types
+
+
+def test_get_run_normalizes_falsey_status(
+    client_with_workflows_db: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A transient falsey DB status should not break response validation."""
+    client = client_with_workflows_db
+
+    definition = {
+        "name": "status-normalization",
+        "version": 1,
+        "steps": [{"id": "s1", "type": "log", "config": {"message": "status"}}],
+    }
+    wid = client.post("/api/v1/workflows", json=definition).json()["id"]
+    run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
+
+    db: WorkflowsDatabase = client.app.dependency_overrides[wf_mod._get_db]()
+    original_get_run = db.get_run
+
+    def patched_get_run(rid: str):
+        run = original_get_run(rid)
+        if run and run.run_id == run_id:
+            run.status = None  # type: ignore[assignment]
+        return run
+
+    monkeypatch.setattr(db, "get_run", patched_get_run, raising=False)
+
+    response = client.get(f"/api/v1/workflows/runs/{run_id}")
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "queued"
 
 
 def test_run_adhoc_requires_workflows_scope_like_saved_run(tmp_path):
@@ -361,16 +468,24 @@ def test_runs_list_created_after_before(client_with_workflows_db: TestClient):
     d = {"name": "time-filter", "version": 1, "steps": [{"id": "s1", "type": "prompt", "config": {"template": "ok"}}]}
     wid = client.post("/api/v1/workflows", json=d).json()["id"]
     r1 = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
+    assert _wait_for_run_terminal(client, r1, timeout=30.0) == "succeeded"
     import time
     time.sleep(0.05)
     r2 = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
+    assert _wait_for_run_terminal(client, r2, timeout=30.0) == "succeeded"
 
     # Extract created_at via DB
     from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
     from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
     db: WorkflowsDatabase = client.app.dependency_overrides[wf_mod._get_db]()
-    c1 = db.get_run(r1).created_at
-    c2 = db.get_run(r2).created_at
+    _wait_for_run_row(db, r1)
+    _wait_for_run_row(db, r2)
+
+    c1 = "2026-01-01T00:00:00+00:00"
+    c2 = "2026-01-01T00:00:01+00:00"
+    db._conn.execute("UPDATE workflow_runs SET created_at = ? WHERE run_id = ?", (c1, r1))
+    db._conn.execute("UPDATE workflow_runs SET created_at = ? WHERE run_id = ?", (c2, r2))
+    db._conn.commit()
 
     # created_after just after c1 should include r2 only
     from datetime import datetime, timedelta
@@ -379,18 +494,16 @@ def test_runs_list_created_after_before(client_with_workflows_db: TestClient):
     except Exception:
         dt1 = datetime.strptime(c1.split('.') [0], "%Y-%m-%dT%H:%M:%S")
     ca = (dt1 + timedelta(milliseconds=1)).isoformat()
-    lst_after = client.get("/api/v1/workflows/runs", params={"created_after": ca}).json()
-    after_ids = [r["run_id"] for r in lst_after.get("runs", [])]
-    assert r2 in after_ids
+    after_ids = _wait_for_run_id_in_list(client, {"created_after": ca}, r2)
+    assert r1 not in after_ids
     # created_before just before c2 should include r1 only (if ordering tight)
     try:
         dt2 = datetime.fromisoformat(c2)
     except Exception:
         dt2 = datetime.strptime(c2.split('.') [0], "%Y-%m-%dT%H:%M:%S")
     cb = (dt2 - timedelta(milliseconds=1)).isoformat()
-    lst_before = client.get("/api/v1/workflows/runs", params={"created_before": cb}).json()
-    before_ids = [r["run_id"] for r in lst_before.get("runs", [])]
-    assert r1 in before_ids
+    before_ids = _wait_for_run_id_in_list(client, {"created_before": cb}, r1)
+    assert r2 not in before_ids
 
 
 def test_runs_multi_status_and_ordering(client_with_workflows_db: TestClient):
@@ -433,6 +546,7 @@ def test_artifact_download_scope_non_strict(monkeypatch, client_with_workflows_d
     d = {"name": "artifacts", "version": 1, "steps": [{"id": "s1", "type": "prompt", "config": {"template": "ok"}}]}
     wid = client.post("/api/v1/workflows", json=d).json()["id"]
     run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
+    assert _wait_for_run_terminal(client, run_id) == "succeeded"
 
     # Prepare a temp file outside of the recorded workdir
     import os, tempfile, pathlib
@@ -475,6 +589,7 @@ def test_artifact_download_per_run_non_block(monkeypatch, client_with_workflows_
     d = {"name": "artifacts2", "version": 1, "steps": [{"id": "s1", "type": "prompt", "config": {"template": "ok"}}]}
     wid = client.post("/api/v1/workflows", json=d).json()["id"]
     run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
+    assert _wait_for_run_terminal(client, run_id) == "succeeded"
 
     # Prepare a temp file outside of the recorded workdir
     import os, tempfile, pathlib
@@ -861,13 +976,7 @@ def test_run_workflow_launches_deep_research_session(monkeypatch, client_with_wo
         json={"inputs": {"topic": "evidence-backed forecasting"}},
     ).json()["run_id"]
 
-    deadline = time.time() + 5
-    data = {}
-    while time.time() < deadline:
-        data = client.get(f"/api/v1/workflows/runs/{run_id}").json()
-        if data["status"] in ("succeeded", "failed", "cancelled"):
-            break
-        time.sleep(0.05)
+    data = _wait_for_run_terminal_data(client, run_id)
 
     assert data["status"] == "succeeded"
     assert (data.get("outputs") or {}) == {
@@ -962,13 +1071,7 @@ def test_run_workflow_waits_for_deep_research_completion(monkeypatch, client_wit
         json={"inputs": {"topic": "evidence-backed forecasting"}},
     ).json()["run_id"]
 
-    deadline = time.time() + 5
-    data = {}
-    while time.time() < deadline:
-        data = client.get(f"/api/v1/workflows/runs/{run_id}").json()
-        if data["status"] in ("succeeded", "failed", "cancelled"):
-            break
-        time.sleep(0.05)
+    data = _wait_for_run_terminal_data(client, run_id)
 
     assert data["status"] == "succeeded"
     assert (data.get("outputs") or {}) == {
@@ -1560,13 +1663,7 @@ def test_run_workflow_loads_bundle_refs_after_wait(monkeypatch, client_with_work
         json={"inputs": {"topic": "evidence-backed forecasting"}},
     ).json()["run_id"]
 
-    deadline = time.time() + 5
-    data = {}
-    while time.time() < deadline:
-        data = client.get(f"/api/v1/workflows/runs/{run_id}").json()
-        if data["status"] in ("succeeded", "failed", "cancelled"):
-            break
-        time.sleep(0.05)
+    data = _wait_for_run_terminal_data(client, run_id)
 
     assert data["status"] == "succeeded"
     assert (data.get("outputs") or {}) == {
@@ -1705,15 +1802,8 @@ def test_run_workflow_launches_waits_selects_research_bundle_fields_and_uses_the
         json={"inputs": {"topic": "evidence-backed forecasting"}},
     ).json()["run_id"]
 
-    deadline = time.time() + 5
-    data = {}
-    while time.time() < deadline:
-        data = client.get(f"/api/v1/workflows/runs/{run_id}").json()
-        if data["status"] in ("succeeded", "failed", "cancelled"):
-            break
-        time.sleep(0.05)
-
-    assert data["status"] == "succeeded"
+    data = _wait_for_run_terminal_data(client, run_id)
+    assert data["status"] == "succeeded", data
     assert (data.get("outputs") or {}) == {
         "text": "Investigate evidence-backed forecasting :: 2"
     }
@@ -1766,18 +1856,11 @@ def test_completion_webhook_tenant_denylist_blocked(monkeypatch, client_with_wor
     }
     wid = client.post("/api/v1/workflows", json=definition).json()["id"]
     run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
-    # Wait for completion
-    import time
-    deadline = time.time() + 3
-    while time.time() < deadline:
-        st = client.get(f"/api/v1/workflows/runs/{run_id}").json()["status"]
-        if st in ("succeeded", "failed", "cancelled"):
-            break
-        time.sleep(0.05)
-    ev = client.get(f"/api/v1/workflows/runs/{run_id}/events").json()
-    statuses = [e.get("payload", {}).get("status") for e in ev if e.get("event_type") == "webhook_delivery"]
+    data = _wait_for_run_terminal_data(client, run_id)
+    assert data["status"] == "succeeded", data
+
     # blocked event should be present
-    assert "blocked" in statuses
+    _wait_for_webhook_delivery_status(client, run_id, "blocked")
 
     # Admin can filter by specific owner (user 2) and should see that run
     # Ensure there is at least one run owned by user id=2

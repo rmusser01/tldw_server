@@ -272,9 +272,12 @@ class MacOSVirtualizationHelperClient:
             "protocol_version": self._protocol_version,
             "request": dict(request),
         }
+        socket_family = getattr(socket, "AF_UNIX", None)
+        if socket_family is None:
+            raise MacOSVirtualizationHelperUnavailable("macos_virtualization_helper_unavailable")
 
         try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            with socket.socket(socket_family, socket.SOCK_STREAM) as client:
                 client.settimeout(float(timeout_sec if timeout_sec is not None else self._timeout_sec))
                 client.connect(socket_path)
                 client.sendall(json.dumps(payload).encode("utf-8") + b"\n")

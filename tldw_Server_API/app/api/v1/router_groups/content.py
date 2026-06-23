@@ -63,7 +63,7 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             log_name="research_runs",
             prefix=f"{API_V1_PREFIX}",
             tags=("research-runs",),
-            route_key="research",
+            route_key="research-runs",
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.research_workspace",
@@ -130,6 +130,16 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             prefix=f"{API_V1_PREFIX}/media",
             tags=("media",),
             route_key="media",
+        ),
+    )
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.media.ingest_jobs",
+            log_name="media_ingest_jobs",
+            prefix=f"{API_V1_PREFIX}/media",
+            tags=("media",),
+            route_key="media-ingest-jobs",
         ),
     )
 
@@ -401,7 +411,7 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
             log_name="workspace_memberships",
             prefix=f"{API_V1_PREFIX}/workspace-memberships",
             tags=("workspaces",),
-            route_key="workspaces",
+            route_key="workspace-memberships",
         ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.workspace_eligibility",

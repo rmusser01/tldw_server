@@ -40,7 +40,7 @@ jobs:
     timeout-minutes: 40
     services:
       redis:
-        image: redis:8-alpine
+        image: mirror.gcr.io/library/redis:8-alpine
         ports:
           - 6379:6379
         options: >-
@@ -71,6 +71,7 @@ jobs:
         if: needs.changes.outputs.e2e_changed == 'true'
         uses: ./.github/actions/setup-ffmpeg
         with:
+          install-ffmpeg: 'false'
           install-portaudio: 'true'
 
       - name: Setup Python and dependencies

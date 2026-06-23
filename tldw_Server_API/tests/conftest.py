@@ -28,6 +28,9 @@ except Exception:
     _ = None
 # Force test-friendly env knobs
 os.environ["MPLBACKEND"] = "Agg"
+# Full-app TestClient fixtures should not trigger CI embedding model preloads.
+# Tests that exercise model downloads can opt in explicitly.
+os.environ.setdefault("AUTO_DOWNLOAD_MODELS", "false")
 # Provide an explicit, deterministic API key for tests that rely on single-user/test-mode shortcuts.
 # Production code no longer assumes a default for SINGLE_USER_TEST_API_KEY.
 os.environ.setdefault("SINGLE_USER_TEST_API_KEY", "test-api-key-12345")
@@ -71,6 +74,7 @@ import weakref
 import threading
 import atexit
 import asyncio
+from unittest import mock as unittest_mock
 try:
     import faulthandler
     import signal
@@ -81,6 +85,45 @@ except Exception:
     # Best-effort; tracing is optional
     _ = None
 import pytest
+
+
+class _LocalPatchProxy:
+    def __init__(self, request):
+        self._request = request
+
+    def __call__(self, target, *args, **kwargs):
+        patcher = unittest_mock.patch(target, *args, **kwargs)
+        replacement = patcher.start()
+        self._request.addfinalizer(patcher.stop)
+        return replacement
+
+    def object(self, target, attribute, *args, **kwargs):
+        patcher = unittest_mock.patch.object(target, attribute, *args, **kwargs)
+        replacement = patcher.start()
+        self._request.addfinalizer(patcher.stop)
+        return replacement
+
+    def dict(self, in_dict, values=(), clear=False, **kwargs):
+        patcher = unittest_mock.patch.dict(in_dict, values, clear=clear, **kwargs)
+        replacement = patcher.start()
+        self._request.addfinalizer(patcher.stop)
+        return replacement
+
+
+class _LocalMocker:
+    Mock = unittest_mock.Mock
+    MagicMock = unittest_mock.MagicMock
+    AsyncMock = unittest_mock.AsyncMock
+    call = unittest_mock.call
+
+    def __init__(self, request):
+        self.patch = _LocalPatchProxy(request)
+
+
+@pytest.fixture
+def mocker(request):
+    """Small pytest-mock compatible shim for CI runs with plugin autoload disabled."""
+    return _LocalMocker(request)
 
 
 _AIOSQLITE_CONNECTIONS: "weakref.WeakSet[object]" = weakref.WeakSet()
@@ -572,6 +615,24 @@ def pytest_collection_modifyitems(config, items):  # pragma: no cover - collecti
         except Exception:
             # Never break collection on marker inspection
             _ = None
+
+
+@pytest.fixture(autouse=True)
+def _reset_main_app_lifecycle_state_between_tests():
+    """Keep TestClient lifespan shutdown from leaking drain state across tests."""
+
+    def _reset() -> None:
+        try:
+            from tldw_Server_API.app.main import app as fastapi_app
+            from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
+
+            reset_lifecycle_state(fastapi_app)
+        except Exception:
+            _ = None
+
+    _reset()
+    yield
+    _reset()
 
 def pytest_configure(config):  # pragma: no cover - registration only
     try:

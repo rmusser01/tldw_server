@@ -108,7 +108,7 @@ def test_mcts_ws_schema_and_persistence_match_throttle_cadence(
     monkeypatch.setattr(eb_mod.EventBroadcaster, "broadcast_event", _capture_event, raising=True)
 
     engine = OptimizationEngine(db)
-    asyncio.get_event_loop().run_until_complete(engine.optimize(opt["id"]))
+    asyncio.run(engine.optimize(opt["id"]))
 
     assert lifecycle_events.count(EventType.OPTIMIZATION_STARTED.value) == 1
     assert lifecycle_events.count(EventType.OPTIMIZATION_COMPLETED.value) == 1
@@ -245,7 +245,7 @@ def test_mcts_final_trace_persisted(prompt_studio_dual_backend_db, monkeypatch):
     monkeypatch.setattr(TestRunner, "run_single_test", _fake_run_single_test, raising=True)
 
     engine = OptimizationEngine(db)
-    asyncio.get_event_loop().run_until_complete(engine.optimize(opt["id"]))
+    asyncio.run(engine.optimize(opt["id"]))
 
     row = db.get_optimization(opt["id"]) or {}
     fm = row.get("final_metrics") or {}

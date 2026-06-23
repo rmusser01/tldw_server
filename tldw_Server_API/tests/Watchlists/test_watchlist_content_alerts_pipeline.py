@@ -217,6 +217,7 @@ async def test_run_watchlist_job_triggers_content_alerts_for_recorded_items(monk
     base_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
     monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
 
     db = WatchlistsDatabase.for_user(user_id)
     watchlist = db.create_watchlist(
@@ -307,6 +308,7 @@ async def test_pipeline_content_alert_failure_is_noncritical(monkeypatch, tmp_pa
     base_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
     monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
 
     db = WatchlistsDatabase.for_user(user_id)
     watchlist = db.create_watchlist(

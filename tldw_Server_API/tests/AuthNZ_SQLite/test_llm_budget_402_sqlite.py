@@ -19,7 +19,7 @@ def _chat_stub_response():
     }
 
 
-def _override_chat_deps(app, monkeypatch):
+def _override_chat_deps(app, monkeypatch, chacha_db_path: Path):
     import tldw_Server_API.app.api.v1.endpoints.chat as chat_endpoint
     import tldw_Server_API.app.api.v1.schemas.chat_request_schemas as schema_chat
     from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
@@ -40,7 +40,7 @@ def _override_chat_deps(app, monkeypatch):
     )
 
     async def _override_chacha_db_for_user(current_user=None):
-        return CharactersRAGDB(db_path=":memory:", client_id="test-llm-budget")
+        return CharactersRAGDB(db_path=chacha_db_path, client_id="test-llm-budget")
 
     app.dependency_overrides[chacha_deps.get_chacha_db_for_user] = _override_chacha_db_for_user
 
@@ -161,7 +161,7 @@ async def test_llm_budget_allows_under_budget_chat_sqlite(tmp_path, monkeypatch)
     from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
 
     app_settings["CSRF_ENABLED"] = False
-    _override_chat_deps(app, monkeypatch)
+    _override_chat_deps(app, monkeypatch, tmp_path / "chacha_under_budget.db")
 
     try:
         with TestClient(app) as client:

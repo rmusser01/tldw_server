@@ -33,6 +33,10 @@ def _manifest_payload(*, runtime: str, template_name: str, disk_path: str = "/tm
     }
 
 
+def _path_has_tail(path: str, *tail: str) -> bool:
+    return Path(path).parts[-len(tail):] == tail
+
+
 def test_sandbox_image_store_registers_bundle_reloads_and_plans_gc(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
     bundle.mkdir()
@@ -66,7 +70,11 @@ def test_sandbox_image_store_registers_bundle_reloads_and_plans_gc(tmp_path: Pat
     assert record.labels == {"profile": "minimal"}
     assert record.provenance == {"suite": "bookworm", "architecture": "arm64"}
     assert [template.template_id for template in reloaded.list_templates(runtime="vz_linux")] == [template_id]
-    assert any(item.target_path.endswith("run-123/rootfs.img") for item in clone_manifest.clone_items)
+    assert any(
+        Path(item.target_path).parent.name == "run-123"
+        and Path(item.target_path).name == "rootfs.img"
+        for item in clone_manifest.clone_items
+    )
     assert (tmp_path / "store" / "runs" / "run-123" / "manifest.json").exists()
     persisted_manifest = reloaded.get_run_clone_manifest("run-123")
     assert persisted_manifest is not None
@@ -266,10 +274,20 @@ def test_sandbox_image_store_can_target_run_clone_subdirectory(tmp_path: Path) -
     reloaded = SandboxImageStore(root_path=tmp_path / "store").get_run_clone_manifest("run-with-bundle")
 
     assert manifest.target_subdir == "bundle"
-    assert manifest.clone_items[0].target_path.endswith("run-with-bundle/bundle/rootfs.img")
+    assert _path_has_tail(
+        manifest.clone_items[0].target_path,
+        "run-with-bundle",
+        "bundle",
+        "rootfs.img",
+    )
     assert reloaded is not None
     assert reloaded.target_subdir == "bundle"
-    assert reloaded.clone_items[0].target_path.endswith("run-with-bundle/bundle/rootfs.img")
+    assert _path_has_tail(
+        reloaded.clone_items[0].target_path,
+        "run-with-bundle",
+        "bundle",
+        "rootfs.img",
+    )
 
 
 def test_sandbox_image_store_rejects_non_string_run_manifest_target_subdir(tmp_path: Path) -> None:

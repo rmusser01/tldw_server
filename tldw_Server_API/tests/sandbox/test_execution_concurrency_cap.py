@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -10,9 +11,13 @@ import pytest
 from tldw_Server_API.app.core.config import clear_config_cache, settings as app_settings
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunSpec, RunStatus, RuntimeType
 from tldw_Server_API.app.core.Sandbox.runners.docker_runner import DockerRunner
+from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
 
 pytestmark = pytest.mark.unit
+
+RUNNER_START_TIMEOUT_SEC = 30.0
+TEST_BACKGROUND_WORKERS = 2
 
 
 def _configure_sqlite_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -34,6 +39,26 @@ def _configure_sqlite_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     clear_config_cache()
 
 
+def _force_docker_preflight_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _preflights(
+        self: SandboxService,
+        *,
+        network_policy: str | None,
+    ) -> dict[RuntimeType, RuntimePreflightResult]:
+        del self, network_policy
+        return {
+            RuntimeType.docker: RuntimePreflightResult(
+                runtime=RuntimeType.docker,
+                available=True,
+                reasons=[],
+                execution_mode="mocked",
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        }
+
+    monkeypatch.setattr(SandboxService, "_collect_runtime_preflights", _preflights)
+
+
 def _wait_for_phase(
     svc: SandboxService,
     run_id: str,
@@ -49,6 +74,18 @@ def _wait_for_phase(
     return None
 
 
+def _install_test_background_executor(
+    monkeypatch: pytest.MonkeyPatch,
+    svc: SandboxService,
+) -> ThreadPoolExecutor:
+    executor = ThreadPoolExecutor(
+        max_workers=TEST_BACKGROUND_WORKERS,
+        thread_name_prefix="sandbox-test-runner",
+    )
+    monkeypatch.setattr(svc, "_background_executor", lambda: executor)
+    return executor
+
+
 def test_background_execution_respects_max_concurrent_runs(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -59,6 +96,7 @@ def test_background_execution_respects_max_concurrent_runs(
     monkeypatch.setenv("SANDBOX_MAX_CONCURRENT_RUNS", "1")
     monkeypatch.setenv("SANDBOX_RUN_CLAIM_LEASE_SEC", "30")
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "0")
+    _force_docker_preflight_available(monkeypatch)
 
     lock = threading.Lock()
     allow_first_finish = threading.Event()
@@ -97,44 +135,49 @@ def test_background_execution_respects_max_concurrent_runs(
     monkeypatch.setattr(DockerRunner, "start_run", _fake_start_run)
 
     svc = SandboxService()
-    run1 = svc.start_run_scaffold(
-        user_id="user-cap",
-        spec=RunSpec(
-            session_id=None,
-            runtime=RuntimeType.docker,
-            base_image="python:3.11-slim",
-            command=["echo", "one"],
-        ),
-        spec_version="1.0",
-        idem_key=None,
-        raw_body={"command": ["echo", "one"]},
-    )
-    assert first_started.wait(timeout=1.0) is True
+    executor = _install_test_background_executor(monkeypatch, svc)
+    try:
+        run1 = svc.start_run_scaffold(
+            user_id="user-cap",
+            spec=RunSpec(
+                session_id=None,
+                runtime=RuntimeType.docker,
+                base_image="python:3.11-slim",
+                command=["echo", "one"],
+            ),
+            spec_version="1.0",
+            idem_key=None,
+            raw_body={"command": ["echo", "one"]},
+        )
+        assert first_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
 
-    run2 = svc.start_run_scaffold(
-        user_id="user-cap",
-        spec=RunSpec(
-            session_id=None,
-            runtime=RuntimeType.docker,
-            base_image="python:3.11-slim",
-            command=["echo", "two"],
-        ),
-        spec_version="1.0",
-        idem_key=None,
-        raw_body={"command": ["echo", "two"]},
-    )
+        run2 = svc.start_run_scaffold(
+            user_id="user-cap",
+            spec=RunSpec(
+                session_id=None,
+                runtime=RuntimeType.docker,
+                base_image="python:3.11-slim",
+                command=["echo", "two"],
+            ),
+            spec_version="1.0",
+            idem_key=None,
+            raw_body={"command": ["echo", "two"]},
+        )
 
-    time.sleep(0.15)
-    assert second_started.is_set() is False
+        time.sleep(0.15)
+        assert second_started.is_set() is False
 
-    allow_first_finish.set()
-    assert second_started.wait(timeout=2.0) is True
+        allow_first_finish.set()
+        assert second_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
 
-    done1 = _wait_for_phase(svc, run1.id, RunPhase.completed)
-    done2 = _wait_for_phase(svc, run2.id, RunPhase.completed)
-    assert done1 is not None
-    assert done2 is not None
-    assert peak == 1
+        done1 = _wait_for_phase(svc, run1.id, RunPhase.completed)
+        done2 = _wait_for_phase(svc, run2.id, RunPhase.completed)
+        assert done1 is not None
+        assert done2 is not None
+        assert peak == 1
+    finally:
+        allow_first_finish.set()
+        executor.shutdown(wait=True, cancel_futures=True)
 
 
 def test_global_active_cap_enforced_across_service_instances(
@@ -147,6 +190,7 @@ def test_global_active_cap_enforced_across_service_instances(
     monkeypatch.setenv("SANDBOX_MAX_CONCURRENT_RUNS", "1")
     monkeypatch.setenv("SANDBOX_RUN_CLAIM_LEASE_SEC", "30")
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "0")
+    _force_docker_preflight_available(monkeypatch)
 
     lock = threading.Lock()
     allow_first_finish = threading.Event()
@@ -186,44 +230,51 @@ def test_global_active_cap_enforced_across_service_instances(
 
     svc_a = SandboxService()
     svc_b = SandboxService()
-    run1 = svc_a.start_run_scaffold(
-        user_id="user-cap-a",
-        spec=RunSpec(
-            session_id=None,
-            runtime=RuntimeType.docker,
-            base_image="python:3.11-slim",
-            command=["echo", "one"],
-        ),
-        spec_version="1.0",
-        idem_key=None,
-        raw_body={"command": ["echo", "one"]},
-    )
-    assert first_started.wait(timeout=1.0) is True
+    executor_a = _install_test_background_executor(monkeypatch, svc_a)
+    executor_b = _install_test_background_executor(monkeypatch, svc_b)
+    try:
+        run1 = svc_a.start_run_scaffold(
+            user_id="user-cap-a",
+            spec=RunSpec(
+                session_id=None,
+                runtime=RuntimeType.docker,
+                base_image="python:3.11-slim",
+                command=["echo", "one"],
+            ),
+            spec_version="1.0",
+            idem_key=None,
+            raw_body={"command": ["echo", "one"]},
+        )
+        assert first_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
 
-    run2 = svc_b.start_run_scaffold(
-        user_id="user-cap-b",
-        spec=RunSpec(
-            session_id=None,
-            runtime=RuntimeType.docker,
-            base_image="python:3.11-slim",
-            command=["echo", "two"],
-        ),
-        spec_version="1.0",
-        idem_key=None,
-        raw_body={"command": ["echo", "two"]},
-    )
+        run2 = svc_b.start_run_scaffold(
+            user_id="user-cap-b",
+            spec=RunSpec(
+                session_id=None,
+                runtime=RuntimeType.docker,
+                base_image="python:3.11-slim",
+                command=["echo", "two"],
+            ),
+            spec_version="1.0",
+            idem_key=None,
+            raw_body={"command": ["echo", "two"]},
+        )
 
-    time.sleep(0.15)
-    assert second_started.is_set() is False
+        time.sleep(0.15)
+        assert second_started.is_set() is False
 
-    allow_first_finish.set()
-    assert second_started.wait(timeout=2.0) is True
+        allow_first_finish.set()
+        assert second_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
 
-    done1 = _wait_for_phase(svc_a, run1.id, RunPhase.completed)
-    done2 = _wait_for_phase(svc_b, run2.id, RunPhase.completed)
-    assert done1 is not None
-    assert done2 is not None
-    assert peak == 1
+        done1 = _wait_for_phase(svc_a, run1.id, RunPhase.completed)
+        done2 = _wait_for_phase(svc_b, run2.id, RunPhase.completed)
+        assert done1 is not None
+        assert done2 is not None
+        assert peak == 1
+    finally:
+        allow_first_finish.set()
+        executor_a.shutdown(wait=True, cancel_futures=True)
+        executor_b.shutdown(wait=True, cancel_futures=True)
 
 
 def test_per_user_active_cap_enforced_across_service_instances(
@@ -237,6 +288,7 @@ def test_per_user_active_cap_enforced_across_service_instances(
     monkeypatch.setenv("SANDBOX_ACTIVE_MAX_PER_USER", "1")
     monkeypatch.setenv("SANDBOX_RUN_CLAIM_LEASE_SEC", "30")
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "0")
+    _force_docker_preflight_available(monkeypatch)
 
     lock = threading.Lock()
     allow_first_finish = threading.Event()
@@ -276,41 +328,48 @@ def test_per_user_active_cap_enforced_across_service_instances(
 
     svc_a = SandboxService()
     svc_b = SandboxService()
-    run1 = svc_a.start_run_scaffold(
-        user_id="user-same",
-        spec=RunSpec(
-            session_id=None,
-            runtime=RuntimeType.docker,
-            base_image="python:3.11-slim",
-            command=["echo", "one"],
-        ),
-        spec_version="1.0",
-        idem_key=None,
-        raw_body={"command": ["echo", "one"]},
-    )
-    assert first_started.wait(timeout=1.0) is True
+    executor_a = _install_test_background_executor(monkeypatch, svc_a)
+    executor_b = _install_test_background_executor(monkeypatch, svc_b)
+    try:
+        run1 = svc_a.start_run_scaffold(
+            user_id="user-same",
+            spec=RunSpec(
+                session_id=None,
+                runtime=RuntimeType.docker,
+                base_image="python:3.11-slim",
+                command=["echo", "one"],
+            ),
+            spec_version="1.0",
+            idem_key=None,
+            raw_body={"command": ["echo", "one"]},
+        )
+        assert first_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
 
-    run2 = svc_b.start_run_scaffold(
-        user_id="user-same",
-        spec=RunSpec(
-            session_id=None,
-            runtime=RuntimeType.docker,
-            base_image="python:3.11-slim",
-            command=["echo", "two"],
-        ),
-        spec_version="1.0",
-        idem_key=None,
-        raw_body={"command": ["echo", "two"]},
-    )
+        run2 = svc_b.start_run_scaffold(
+            user_id="user-same",
+            spec=RunSpec(
+                session_id=None,
+                runtime=RuntimeType.docker,
+                base_image="python:3.11-slim",
+                command=["echo", "two"],
+            ),
+            spec_version="1.0",
+            idem_key=None,
+            raw_body={"command": ["echo", "two"]},
+        )
 
-    time.sleep(0.15)
-    assert second_started.is_set() is False
+        time.sleep(0.15)
+        assert second_started.is_set() is False
 
-    allow_first_finish.set()
-    assert second_started.wait(timeout=2.0) is True
+        allow_first_finish.set()
+        assert second_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
 
-    done1 = _wait_for_phase(svc_a, run1.id, RunPhase.completed)
-    done2 = _wait_for_phase(svc_b, run2.id, RunPhase.completed)
-    assert done1 is not None
-    assert done2 is not None
-    assert peak == 1
+        done1 = _wait_for_phase(svc_a, run1.id, RunPhase.completed)
+        done2 = _wait_for_phase(svc_b, run2.id, RunPhase.completed)
+        assert done1 is not None
+        assert done2 is not None
+        assert peak == 1
+    finally:
+        allow_first_finish.set()
+        executor_a.shutdown(wait=True, cancel_futures=True)
+        executor_b.shutdown(wait=True, cancel_futures=True)

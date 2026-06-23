@@ -43,6 +43,17 @@ class FakePostgresBackend:
         return Transaction()
 
 
+@pytest.fixture(autouse=True)
+def isolate_bootstrapped_backend_targets():
+    original_targets = set(analytics_db.AnalyticsDatabase._bootstrapped_backend_targets)
+    analytics_db.AnalyticsDatabase._bootstrapped_backend_targets.clear()
+    try:
+        yield
+    finally:
+        analytics_db.AnalyticsDatabase._bootstrapped_backend_targets.clear()
+        analytics_db.AnalyticsDatabase._bootstrapped_backend_targets.update(original_targets)
+
+
 def test_analytics_database_refreshes_shared_content_backend_after_error(monkeypatch, tmp_path):
     first_backend = FakePostgresBackend("first")
     second_backend = FakePostgresBackend("second")

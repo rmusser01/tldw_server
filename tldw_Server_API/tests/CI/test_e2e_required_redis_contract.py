@@ -22,7 +22,10 @@ def test_e2e_required_declares_redis_service_and_environment_contract() -> None:
     services = job.get("services") or {}
     redis_service = services.get("redis")
     _expect(isinstance(redis_service, dict), "e2e-required.redis service missing")
-    _expect(redis_service.get("image") == "redis:8-alpine", "e2e-required redis image must be redis:8-alpine")
+    _expect(
+        redis_service.get("image") == "mirror.gcr.io/library/redis:8-alpine",
+        "e2e-required redis image must be mirror.gcr.io/library/redis:8-alpine (mirror avoids Docker Hub rate limits; matches ci.yml)",
+    )
     _expect(
         "6379:6379" in (redis_service.get("ports") or []),
         "e2e-required redis service must map host/container port 6379:6379",

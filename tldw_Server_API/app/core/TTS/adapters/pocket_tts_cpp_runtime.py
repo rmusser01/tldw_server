@@ -526,15 +526,32 @@ def _write_runtime_file_sync(path: Path, payload: bytes) -> None:
             temp_file.flush()
             os.fsync(temp_file.fileno())
         os.replace(temp_path, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        _fsync_directory_best_effort(path.parent)
     except Exception:
         with contextlib.suppress(OSError):
             temp_path.unlink()
         raise
+
+
+def _fsync_directory_best_effort(directory: Path) -> None:
+    try:
+        directory_fd = os.open(directory, os.O_RDONLY)
+    except OSError as exc:
+        logger.debug(
+            "Skipping PocketTTS.cpp runtime directory fsync (exception_type={})",
+            type(exc).__name__,
+        )
+        return
+    try:
+        os.fsync(directory_fd)
+    except OSError as exc:
+        logger.debug(
+            "Skipping PocketTTS.cpp runtime directory fsync (exception_type={})",
+            type(exc).__name__,
+        )
+    finally:
+        with contextlib.suppress(OSError):
+            os.close(directory_fd)
 
 
 async def _write_runtime_file(path: Path, payload: bytes) -> None:

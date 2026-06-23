@@ -9,10 +9,32 @@ from tldw_Server_API.app.core.Sandbox.runners.lima_runner import LimaRunner
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
 
 
+def _stub_lima_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    allowlist_ready: bool = False,
+    deny_all_ready: bool = True,
+) -> None:
+    def _fake_preflight(self, network_policy: str | None = None):
+        return RuntimePreflightResult(
+            runtime=RuntimeType.lima,
+            available=True,
+            reasons=[],
+            host={"os": "linux", "variant": "native"},
+            enforcement_ready={
+                "deny_all": deny_all_ready,
+                "allowlist": allowlist_ready,
+            },
+        )
+
+    monkeypatch.setattr(LimaRunner, "preflight", _fake_preflight)
+
+
 def test_lima_allowlist_rejected_when_strict_not_ready(monkeypatch) -> None:
     monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "0")
     monkeypatch.setenv("TLDW_SANDBOX_LIMA_AVAILABLE", "1")
     monkeypatch.setenv("TLDW_SANDBOX_LIMA_ENFORCER_ALLOWLIST_READY", "0")
+    _stub_lima_preflight(monkeypatch, allowlist_ready=False)
 
     svc = SandboxService()
     spec = RunSpec(
@@ -38,6 +60,7 @@ def test_lima_allowlist_rejected_even_when_override_reports_ready(monkeypatch) -
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("TLDW_SANDBOX_LIMA_AVAILABLE", "1")
     monkeypatch.setenv("TLDW_SANDBOX_LIMA_ENFORCER_ALLOWLIST_READY", "1")
+    _stub_lima_preflight(monkeypatch, allowlist_ready=True)
 
     svc = SandboxService()
     spec = RunSpec(
@@ -64,6 +87,7 @@ def test_lima_allow_all_rejected_as_unsupported_policy(monkeypatch) -> None:
     monkeypatch.setenv("TLDW_SANDBOX_LIMA_AVAILABLE", "1")
     monkeypatch.setenv("TLDW_SANDBOX_LIMA_ENFORCER_DENY_ALL_READY", "1")
     monkeypatch.setenv("TLDW_SANDBOX_LIMA_ENFORCER_ALLOWLIST_READY", "1")
+    _stub_lima_preflight(monkeypatch, allowlist_ready=True)
 
     svc = SandboxService()
     spec = RunSpec(

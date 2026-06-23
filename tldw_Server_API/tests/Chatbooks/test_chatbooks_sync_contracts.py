@@ -141,8 +141,11 @@ def test_sync_import_endpoint_returns_imported_items_and_warnings(
     assert response.json() == {
         "success": True,
         "message": "Import completed",
+        "source_format": "chatbook",
         "job_id": None,
         "imported_items": {"note": 1},
+        "openwebui_result": None,
+        "openwebui_db_result": None,
         "warnings": ["renamed note"],
     }
 
@@ -187,8 +190,11 @@ def test_sync_import_endpoint_propagates_wrapper_result(
     assert response.json() == {
         "success": True,
         "message": "Import completed",
+        "source_format": "chatbook",
         "job_id": None,
         "imported_items": {"note": 2},
+        "openwebui_result": None,
+        "openwebui_db_result": None,
         "warnings": ["from-wrapper"],
     }
     assert captured["import_media"] is False

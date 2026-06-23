@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -76,18 +78,24 @@ def _install_fake_helper_socket(monkeypatch, responses: dict[str, object], socke
         "tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client.socket.socket",
         _socket_factory,
     )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client.socket.AF_UNIX",
+        1,
+        raising=False,
+    )
     monkeypatch.setenv("TLDW_SANDBOX_MACOS_HELPER_SOCKET", socket_path)
     return requests
 
 
 def _valid_create_vm_request(**overrides: object) -> dict[str, object]:
+    temp_dir = Path(tempfile.gettempdir())
     request: dict[str, object] = {
         "owner": "tldw",
         "runtime": "vz_linux",
         "vm_name": "run-1",
         "run_id": "run-1",
-        "template": "/tmp/template.img",
-        "workspace_path": "/tmp/workspace",
+        "template": str(temp_dir / "template.img"),
+        "workspace_path": str(temp_dir / "workspace"),
         "network_policy": "deny_all",
         "timeout_sec": 30,
     }
@@ -109,6 +117,10 @@ def test_helper_client_default_uses_expected_protocol_version(monkeypatch) -> No
     )
 
     monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delattr(
+        "tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client.socket.AF_UNIX",
+        raising=False,
+    )
     requests = _install_fake_helper_socket(
         monkeypatch,
         {
@@ -126,8 +138,11 @@ def test_helper_client_default_uses_expected_protocol_version(monkeypatch) -> No
     assert requests[0]["protocol_version"] == EXPECTED_HELPER_PROTOCOL_VERSION
 
 
-def test_fake_helper_supports_vz_linux_vm_create_and_exec(monkeypatch) -> None:
+def test_fake_helper_supports_vz_linux_vm_create_and_exec(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("TEST_MODE", "1")
+    template_path = str(tmp_path / "template.img")
+    manifest_path = str(tmp_path / "image-store" / "runs" / "run-1" / "manifest.json")
+    workspace_path = str(tmp_path / "workspace")
 
     client = MacOSVirtualizationHelperClient()
     created = client.create_vm(
@@ -139,10 +154,10 @@ def test_fake_helper_supports_vz_linux_vm_create_and_exec(monkeypatch) -> None:
             "session_id": "session-1",
             "session_mode": True,
             "template_id": "vz_linux:debian-bookworm-arm64",
-            "template": "/tmp/template.img",
-            "run_manifest_path": "/tmp/image-store/runs/run-1/manifest.json",
+            "template": template_path,
+            "run_manifest_path": manifest_path,
             "planning_source": "image_store",
-            "workspace_path": "/tmp/workspace",
+            "workspace_path": workspace_path,
         }
     )
 
@@ -153,10 +168,10 @@ def test_fake_helper_supports_vz_linux_vm_create_and_exec(monkeypatch) -> None:
     assert created.metadata.session_id == "session-1"
     assert created.metadata.session_mode is True
     assert created.metadata.template_id == "vz_linux:debian-bookworm-arm64"
-    assert created.metadata.template_path == "/tmp/template.img"
-    assert created.metadata.run_manifest_path == "/tmp/image-store/runs/run-1/manifest.json"
+    assert created.metadata.template_path == template_path
+    assert created.metadata.run_manifest_path == manifest_path
     assert created.metadata.planning_source == "image_store"
-    assert created.metadata.workspace_path == "/tmp/workspace"
+    assert created.metadata.workspace_path == workspace_path
     assert created.metadata.network_policy == "deny_all"
     assert created.metadata.created_at != ""
     assert "runtime" not in created.details
@@ -435,6 +450,18 @@ def test_helper_create_vm_fails_closed_without_test_mode(monkeypatch) -> None:
         client.create_vm(_valid_create_vm_request(vm_name="vz-linux-run-2"))
 
 
+def test_helper_client_fails_closed_when_unix_sockets_unavailable(monkeypatch) -> None:
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.setenv("TLDW_SANDBOX_MACOS_HELPER_SOCKET", "/tmp/vz-helper.sock")
+    monkeypatch.delattr(
+        "tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client.socket.AF_UNIX",
+        raising=False,
+    )
+
+    with pytest.raises(MacOSVirtualizationHelperUnavailable):
+        MacOSVirtualizationHelperClient().ping()
+
+
 def test_fake_helper_validates_vz_linux_host_readiness(monkeypatch) -> None:
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("TLDW_SANDBOX_MACOS_HELPER_READY", "1")
@@ -623,7 +650,7 @@ def test_parse_helper_vm_status_downgrades_non_string_metadata_fields_to_unknown
     assert result.metadata.has_tldw_owner is False
 
 
-def test_fake_helper_create_vm_normalizes_string_session_mode_and_created_at(monkeypatch) -> None:
+def test_fake_helper_create_vm_normalizes_string_session_mode_and_created_at(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("TEST_MODE", "1")
 
     client = MacOSVirtualizationHelperClient()
@@ -635,8 +662,8 @@ def test_fake_helper_create_vm_normalizes_string_session_mode_and_created_at(mon
             "run_id": "run-2",
             "session_id": "",
             "session_mode": "false",
-            "template": "/tmp/template.img",
-            "workspace_path": "/tmp/workspace",
+            "template": str(tmp_path / "template.img"),
+            "workspace_path": str(tmp_path / "workspace"),
         }
     )
 
@@ -676,8 +703,11 @@ def test_parse_helper_vm_list_normalizes_status_entries() -> None:
     assert result.vms[1].state == "stopped"
 
 
-def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(monkeypatch) -> None:
+def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("TEST_MODE", raising=False)
+    template_path = str(tmp_path / "template.img")
+    workspace_path = str(tmp_path / "workspace")
+    run_manifest_path = str(tmp_path / "image-store" / "runs" / "run-1" / "manifest.json")
     requests = _install_fake_helper_socket(
         monkeypatch,
         responses={
@@ -708,10 +738,10 @@ def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(m
                     "session_id": "",
                     "session_mode": False,
                     "template_id": "vz_linux:debian-bookworm-arm64",
-                    "template_path": "/tmp/template.img",
-                    "run_manifest_path": "/tmp/image-store/runs/run-1/manifest.json",
+                    "template_path": template_path,
+                    "run_manifest_path": run_manifest_path,
                     "planning_source": "image_store",
-                    "workspace_path": "/tmp/workspace",
+                    "workspace_path": workspace_path,
                     "created_at": "2026-04-30T18:00:00Z",
                 },
                 "details": {"runtime": "vz_linux", "transport": "vsock"},
@@ -749,10 +779,10 @@ def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(m
             "runtime": "vz_linux",
             "vm_name": "run-1",
             "template_id": "vz_linux:debian-bookworm-arm64",
-            "template": "/tmp/template.img",
-            "run_manifest_path": "/tmp/image-store/runs/run-1/manifest.json",
+            "template": template_path,
+            "run_manifest_path": run_manifest_path,
             "planning_source": "image_store",
-            "workspace_path": "/tmp/workspace",
+            "workspace_path": workspace_path,
         }
     )
     exec_reply = client.exec_guest(vm_id=vm.vm_id, request={"argv": ["/bin/echo", "ok"]})
@@ -765,7 +795,7 @@ def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(m
     assert vm.metadata.owner == "tldw"
     assert vm.metadata.run_id == "run-1"
     assert vm.metadata.template_id == "vz_linux:debian-bookworm-arm64"
-    assert vm.metadata.run_manifest_path == "/tmp/image-store/runs/run-1/manifest.json"
+    assert vm.metadata.run_manifest_path == run_manifest_path
     assert vm.metadata.planning_source == "image_store"
     assert exec_reply.stdout == b"ok\n"
     assert status.vm_id == "vm-transport-1"
@@ -779,7 +809,7 @@ def test_socket_helper_supports_ping_validate_create_exec_status_and_terminate(m
         "terminate_vm",
     ]
     assert requests[2]["request"]["template_id"] == "vz_linux:debian-bookworm-arm64"
-    assert requests[2]["request"]["run_manifest_path"] == "/tmp/image-store/runs/run-1/manifest.json"
+    assert requests[2]["request"]["run_manifest_path"] == run_manifest_path
     assert requests[2]["request"]["planning_source"] == "image_store"
     assert requests[3]["_socket_timeout"] == 35.0
 

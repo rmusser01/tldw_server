@@ -104,8 +104,9 @@ class _StaticExternalWriteManager:
 
     def get_virtual_tool_write_flag(self, virtual_tool_name: str) -> bool | None:
         """Return the static write flag for the virtual write-policy regression tool."""
-        if virtual_tool_name == "ext.docs.repo.set":
-            return True
+        for virtual_tool in self.list_virtual_tools():
+            if virtual_tool.virtual_name == virtual_tool_name:
+                return bool(virtual_tool.is_write)
         return None
 
     async def execute_virtual_tool(

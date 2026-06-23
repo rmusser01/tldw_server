@@ -74,7 +74,7 @@ async def create_admin_user_non_interactive(
                 return True
         except Exception as lookup_err:
             # get_user_by_username may raise if schema is fresh; treat as "no user"
-            logger.debug("User lookup failed (expected on fresh schema): %s", lookup_err)
+            logger.debug("User lookup failed (expected on fresh schema): {}", lookup_err)
 
         # Hash password
         password_service = PasswordService()

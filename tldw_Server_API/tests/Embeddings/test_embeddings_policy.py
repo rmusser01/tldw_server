@@ -11,9 +11,17 @@ from contextlib import contextmanager
 
 @contextmanager
 def _client():
-    with TestClient(app) as c:
-        c.cookies.set("csrf_token", "test-csrf")
-        yield c
+    previous_auto_download = os.environ.get("AUTO_DOWNLOAD_MODELS")
+    os.environ["AUTO_DOWNLOAD_MODELS"] = "false"
+    try:
+        with TestClient(app) as c:
+            c.cookies.set("csrf_token", "test-csrf")
+            yield c
+    finally:
+        if previous_auto_download is None:
+            os.environ.pop("AUTO_DOWNLOAD_MODELS", None)
+        else:
+            os.environ["AUTO_DOWNLOAD_MODELS"] = previous_auto_download
 
 
 def test_embeddings_token_limit_rejected():

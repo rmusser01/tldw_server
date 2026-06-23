@@ -1,9 +1,11 @@
 import os
 import stat
+from types import SimpleNamespace
 
 import pytest
 from cryptography.fernet import Fernet
 
+from tldw_Server_API.app.core.AuthNZ import session_manager as session_manager_module
 from tldw_Server_API.app.core.AuthNZ.session_manager import (
     SessionManager,
     reset_session_manager,
@@ -92,13 +94,14 @@ async def test_session_manager_persists_generated_key(monkeypatch, tmp_path):
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/auth.db")
     monkeypatch.setenv("JWT_SECRET_KEY", "old-secret-value-12345678901234567890ABCDEF")
+    api_key_path = tmp_path / "api_root" / "Config_Files" / "session_encryption.key"
+    monkeypatch.setattr(SessionManager, "_resolve_api_key_path", lambda self: api_key_path, raising=False)
     reset_settings()
 
     manager = SessionManager()
     sample = "persist-me"
     encrypted = manager.encrypt_token(sample)
     # Expect the API path to exist when SESSION_KEY_STORAGE=api
-    api_key_path = manager._resolve_api_key_path()
     assert api_key_path is not None and api_key_path.exists(), "API session_encryption.key should exist"
     assert manager.decrypt_token(encrypted) == sample
 
@@ -112,6 +115,22 @@ async def test_session_manager_persists_generated_key(monkeypatch, tmp_path):
     for env_key in ("AUTH_MODE", "DATABASE_URL", "JWT_SECRET_KEY", "SESSION_KEY_STORAGE"):
         monkeypatch.delenv(env_key, raising=False)
     reset_settings()
+
+
+def test_session_key_validation_allows_windows_mode_bits(monkeypatch, tmp_path):
+    key_path = tmp_path / "session_encryption.key"
+    key_path.write_text(Fernet.generate_key().decode("utf-8"), encoding="utf-8")
+    key_path.chmod(0o666)
+
+    fake_os = SimpleNamespace(
+        name="nt",
+        stat=os.stat,
+        getuid=os.getuid if hasattr(os, "getuid") else lambda: key_path.stat().st_uid,
+    )
+    monkeypatch.setattr(session_manager_module, "os", fake_os)
+
+    manager = object.__new__(SessionManager)
+    assert manager._is_valid_key_file(key_path) is True
 
 
 @pytest.mark.asyncio

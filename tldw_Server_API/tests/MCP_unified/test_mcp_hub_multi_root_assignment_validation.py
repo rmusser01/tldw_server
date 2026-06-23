@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from tldw_Server_API.app.core.exceptions import BadRequestError
+
+
+def _service_normalized_root(value: str) -> str:
+    return str(Path(value).expanduser().resolve(strict=False))
 
 
 class _FakeRepo:
@@ -203,7 +208,10 @@ async def test_validate_multi_root_assignment_readiness_rejects_overlapping_name
         "code": "assignment_multi_root_overlap",
         "message": "Named workspace source contains overlapping roots for multi-root execution.",
         "conflicting_workspace_ids": ["workspace-alpha", "workspace-beta"],
-        "conflicting_workspace_roots": ["/repo", "/repo/docs"],
+        "conflicting_workspace_roots": [
+            _service_normalized_root("/repo"),
+            _service_normalized_root("/repo/docs"),
+        ],
         "workspace_source_mode": "named",
         "workspace_trust_source": "user_local",
     }

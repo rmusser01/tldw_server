@@ -120,6 +120,10 @@ class RawSqlFallbackDisabledError(RuntimeError):
         )
 
 
+_RESIDUAL_ENCODED_PATH_CONTROL_RE = re.compile(r"%(?:2e|2f|5c)", re.IGNORECASE)
+_SQLITE_FTS_UNSAFE_PUNCTUATION_RE = re.compile(r"[^\w\s\"*]", re.UNICODE)
+
+
 def _normalize_sqlite_memory_path(path: str) -> Optional[str]:
     """Return a canonical SQLite in-memory spec, or None when path is file-backed."""
     raw = str(path).strip()
@@ -151,7 +155,25 @@ def _normalize_sqlite_memory_path(path: str) -> Optional[str]:
     return None
 
 
+def _extract_file_uri_path(raw: str) -> str:
+    """Extract the filesystem path from a file URI without query parameters."""
+    parsed = _urlparse.urlparse(raw)
+    extracted_path = _urlparse.unquote(parsed.path or "")
+    netloc = _urlparse.unquote(parsed.netloc or "")
+    if netloc:
+        if re.match(r"^[A-Za-z]:", netloc):
+            extracted_path = f"{netloc}{extracted_path}"
+        elif extracted_path:
+            extracted_path = f"//{netloc}{extracted_path}"
+        else:
+            extracted_path = netloc
+    if re.match(r"^/[A-Za-z]:[/\\]", extracted_path):
+        extracted_path = extracted_path[1:]
+    return extracted_path
+
+
 def _sanitize_media_fts_query(query: Optional[str]) -> Optional[str]:
+    """Normalize FTS syntax without changing the initial query's retrieval intent."""
     if query is None:
         return None
     try:
@@ -164,8 +186,9 @@ def _sanitize_media_fts_query(query: Optional[str]) -> Optional[str]:
         return text
     if "-" in text and " " not in text:
         return f"\"{text}\""
-    if re.search(r"[?!:;,.()[\]{}]", text):
-        return _derive_bounded_media_term_query(text) or text
+    if _SQLITE_FTS_UNSAFE_PUNCTUATION_RE.search(text):
+        text = _SQLITE_FTS_UNSAFE_PUNCTUATION_RE.sub(" ", text)
+        text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
@@ -583,9 +606,15 @@ class BaseRetriever(ABC):
         # Handle URI schemes - only allow file:// and validate the path component
         if '://' in path:
             if path.startswith('file://'):
-                parsed = _urlparse.urlparse(path)
                 # Extract and decode the path component
-                extracted_path = _urlparse.unquote(parsed.path)
+                extracted_path = _extract_file_uri_path(path)
+                extracted_parts = [part.lower() for part in extracted_path.split("/") if part]
+                if (
+                    extracted_path.startswith("/")
+                    and extracted_parts
+                    and extracted_parts[0] in {"etc", "proc", "sys", "dev", "boot", "root"}
+                ):
+                    raise RestrictedDatabasePathError()
                 # Recursively validate the extracted path (this will catch traversal, etc.)
                 validated = self._validate_path(extracted_path)
                 if validated is None:
@@ -601,6 +630,14 @@ class BaseRetriever(ABC):
 
         # Check for path traversal sequences BEFORE resolving
         # This catches attempts like "../../../etc/passwd" before they get normalized
+        if _RESIDUAL_ENCODED_PATH_CONTROL_RE.search(path):
+            logger.warning(f"Residual encoded path-control sequence detected in: {path}")
+            raise SuspiciousDatabasePathError()
+        normalized_input_path = path.replace("\\", "/")
+        if normalized_input_path.startswith("/"):
+            first_component = normalized_input_path.split("/", 2)[1].lower()
+            if first_component in {"etc", "proc", "sys", "dev", "boot", "root"}:
+                raise RestrictedDatabasePathError()
         if '..' in path:
             logger.warning(f"Path traversal attempt detected in: {path}")
             raise PathTraversalError()

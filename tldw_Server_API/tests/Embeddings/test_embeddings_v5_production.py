@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import time
+import uuid
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch, Mock
 import pytest
@@ -19,15 +20,29 @@ from httpx import AsyncClient, ASGITransport
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
+IN_CI = os.getenv("CI", "").lower() == "true"
+RUN_REAL_HF_EMBEDDING_TESTS = (
+    os.getenv("RUN_REAL_HF_EMBEDDING_TESTS", "").lower() in {"1", "true", "yes", "on"}
+    or not IN_CI
+)
+
 # Disable rate limiting for all tests
 @pytest.fixture(autouse=True)
 def disable_rate_limiting():
     """Disable rate limiting for all tests in this module"""
+    previous_auto_download = os.environ.get("AUTO_DOWNLOAD_MODELS")
     os.environ["TESTING"] = "true"
-    yield
-    # Clean up after tests
-    if "TESTING" in os.environ:
-        del os.environ["TESTING"]
+    os.environ["AUTO_DOWNLOAD_MODELS"] = "false"
+    try:
+        yield
+    finally:
+        # Clean up after tests
+        if "TESTING" in os.environ:
+            del os.environ["TESTING"]
+        if previous_auto_download is None:
+            os.environ.pop("AUTO_DOWNLOAD_MODELS", None)
+        else:
+            os.environ["AUTO_DOWNLOAD_MODELS"] = previous_auto_download
 
 # Mock metrics for tests to avoid registry conflicts
 @pytest.fixture(autouse=True)
@@ -69,7 +84,7 @@ def setup():
         data = SetupData()
         data.client = client
         # Set CSRF token in both cookie and header for double-submit pattern
-        csrf_token = "test-csrf-token-12345"
+        csrf_token = f"test-csrf-{uuid.uuid4().hex}"
         client.cookies.set("csrf_token", csrf_token)
         data.DEFAULT_API_KEY = "test-api-key"
         data.auth_headers = {
@@ -212,6 +227,26 @@ class TestTTLCache:
 
         # key2 should be evicted
         assert await cache.get("key2") is None
+
+    @pytest.mark.asyncio
+    async def test_cache_lru_eviction_uses_access_order_when_timestamps_tie(self, monkeypatch):
+        """Test LRU eviction remains deterministic when timer resolution ties."""
+        from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as embeddings_module
+
+        cache = embeddings_module.TTLCache(max_size=3, ttl_seconds=3600)
+        monkeypatch.setattr(embeddings_module.time, "time", lambda: 1000.0)
+
+        await cache.set("key1", [1.0])
+        await cache.set("key2", [2.0])
+        await cache.set("key3", [3.0])
+        await cache.get("key1")
+
+        await cache.set("key4", [4.0])
+
+        assert await cache.get("key1") == [1.0]
+        assert await cache.get("key2") is None
+        assert await cache.get("key3") == [3.0]
+        assert await cache.get("key4") == [4.0]
 
     @pytest.mark.asyncio
     async def test_cache_cleanup_task(self):
@@ -739,6 +774,10 @@ class TestEndToEnd:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    IN_CI and not RUN_REAL_HF_EMBEDDING_TESTS,
+    reason="Real HuggingFace embedding tests require RUN_REAL_HF_EMBEDDING_TESTS=true in CI",
+)
 class TestIntegration:
     """True integration tests without mocking - requires actual services"""
 

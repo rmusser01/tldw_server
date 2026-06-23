@@ -13,6 +13,13 @@ from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.audio._config import STTConfig
 
 
+def _speech_to_text(*args: Any, **kwargs: Any) -> Any:
+    """Load and call the full STT backend only when transcription is requested."""
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import speech_to_text
+
+    return speech_to_text(*args, **kwargs)
+
+
 @registry.register(
     "stt_transcribe",
     category="audio",
@@ -47,10 +54,8 @@ async def run_stt_transcribe_adapter(config: dict[str, Any], context: dict[str, 
     diarize = bool(config.get("diarize", False))
     word_ts = bool(config.get("word_timestamps", False))
     try:
-        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import speech_to_text
-
         # When language is None, allow the STT backend to auto-detect.
-        segs_or_pair = speech_to_text(
+        segs_or_pair = _speech_to_text(
             str(resolved_path),
             whisper_model=model,
             selected_source_lang=language,

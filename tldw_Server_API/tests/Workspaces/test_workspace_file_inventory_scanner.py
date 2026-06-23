@@ -3,6 +3,7 @@ from __future__ import annotations
 import builtins
 from dataclasses import dataclass
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -37,19 +38,18 @@ def test_scanner_records_relative_file_and_directory_metadata(tmp_path: Path) ->
     assert result.coverage_complete is True
 
 
-def test_scanner_does_not_open_ordinary_file_contents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_scanner_does_not_open_ordinary_file_contents(tmp_path: Path) -> None:
     (tmp_path / "notes.txt").write_text("do not read me", encoding="utf-8")
 
     def fail_open(*args: object, **kwargs: object) -> object:
         raise AssertionError("scanner opened an ordinary file")
 
-    monkeypatch.setattr(builtins, "open", fail_open)
-
-    result = scan_workspace_file_inventory(
-        tmp_path,
-        policy=build_inventory_ignore_policy(),
-        bounds=InventoryScanBounds(),
-    )
+    with mock.patch.object(builtins, "open", fail_open):
+        result = scan_workspace_file_inventory(
+            tmp_path,
+            policy=build_inventory_ignore_policy(),
+            bounds=InventoryScanBounds(),
+        )
 
     assert [item["relative_path"] for item in result.items] == ["notes.txt"]
     assert result.coverage_complete is True

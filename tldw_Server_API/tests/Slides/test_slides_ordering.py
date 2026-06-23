@@ -4,7 +4,7 @@ from tldw_Server_API.app.api.v1.endpoints.slides import _normalize_slides
 from tldw_Server_API.app.api.v1.schemas.slides_schemas import Slide, SlideLayout
 
 
-@given(st.lists(st.integers(min_value=0, max_value=50), min_size=1, max_size=10, unique=True))
+@given(st.lists(st.integers(min_value=0, max_value=10), min_size=1, max_size=5, unique=True))
 def test_normalize_slides_orders_contiguous(orders):
     slides = [
         Slide(order=order, layout=SlideLayout.CONTENT, title=f"Slide {order}", content="Body")

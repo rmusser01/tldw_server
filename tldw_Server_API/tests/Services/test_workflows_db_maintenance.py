@@ -129,7 +129,7 @@ async def test_sqlite_outer_failure_log_is_sanitized(monkeypatch):
     db = _FakeSqliteDB(_FakeSqliteConnection({}))
     real_getenv = service.os.getenv
 
-    def _fake_getenv(name: str, default: str = "") -> str:
+    def _fake_getenv(name: str, default: str | None = None) -> str | None:
         if name == "WORKFLOWS_DB_MAINTENANCE_INTERVAL_SEC":
             return "1"
         if name == "WORKFLOWS_SQLITE_CHECKPOINT":

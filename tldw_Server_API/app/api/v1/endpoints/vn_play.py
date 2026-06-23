@@ -10,7 +10,7 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_auth_principal, get_request_user
 from tldw_Server_API.app.api.v1.schemas.vn_play_schemas import (
     VNPlayGenerationActionRequest,
     VNPlayGenerationHistoryResponse,
@@ -43,7 +43,6 @@ from tldw_Server_API.app.api.v1.schemas.vn_play_schemas import (
     VNPlayTurnRequest,
     VNPlayTurnResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.VNPlay_DB import VNPlayRepository

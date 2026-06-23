@@ -13,8 +13,23 @@ import io
 import tempfile
 from pathlib import Path
 
-from tldw_Server_API.app.main import app as real_app
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
+
+
+def _ensure_media_add_route_registered(app) -> None:
+    """Mount the media router when another test package disables it at collection time."""
+    if any(getattr(route, "path", None) == "/api/v1/media/add" for route in app.routes):
+        return
+
+    from tldw_Server_API.app.api.v1.endpoints.media import router as media_router
+    from tldw_Server_API.app.api.v1.router_registry import include_router_idempotent
+
+    include_router_idempotent(
+        app,
+        media_router,
+        prefix="/api/v1/media",
+        tags=["media"],
+    )
 
 
 class TestMediaEndpointContextualIntegration:
@@ -24,6 +39,9 @@ class TestMediaEndpointContextualIntegration:
     def test_client(self, client_user_only):
         """Use the shared authenticated TestClient with a stub Media DB."""
         from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user as dep_get_db
+
+        app = client_user_only.app
+        _ensure_media_add_route_registered(app)
 
         mock_db = Mock(
             db_path="/test/path.db",
@@ -45,15 +63,15 @@ class TestMediaEndpointContextualIntegration:
         async def _override_db():
             yield mock_db
 
-        original_db_override = real_app.dependency_overrides.get(dep_get_db)
-        real_app.dependency_overrides[dep_get_db] = _override_db
+        original_db_override = app.dependency_overrides.get(dep_get_db)
+        app.dependency_overrides[dep_get_db] = _override_db
         try:
             yield client_user_only
         finally:
             if original_db_override is None:
-                real_app.dependency_overrides.pop(dep_get_db, None)
+                app.dependency_overrides.pop(dep_get_db, None)
             else:
-                real_app.dependency_overrides[dep_get_db] = original_db_override
+                app.dependency_overrides[dep_get_db] = original_db_override
 
     @pytest.fixture
     def auth_headers(self):
@@ -256,9 +274,9 @@ class TestMediaEndpointContextualIntegration:
         form_data = {
             "media_type": "document",
             "urls": json.dumps([
-                "https://example.com/doc1.pdf",
-                "https://example.com/doc2.pdf",
-                "https://example.com/doc3.pdf"
+                "https://example.com/doc1.txt",
+                "https://example.com/doc2.txt",
+                "https://example.com/doc3.txt"
             ]),
             "perform_chunking": True,
             "enable_contextual_chunking": True,
@@ -273,12 +291,15 @@ class TestMediaEndpointContextualIntegration:
             async def _fake_download_url_async(**kwargs):
                 url = kwargs.get("url")
                 target_dir = kwargs.get("target_dir")
-                p = Path(str(target_dir)) / (Path(url).name or "test.pdf")
-                p.write_text("dummy content")
+                p = Path(str(target_dir)) / (Path(url).name or "test.txt")
+                p.write_text("Test document content for contextual chunking.", encoding="utf-8")
                 return p
             with patch(
                 "tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils.download_url_async",
                 side_effect=_fake_download_url_async,
+            ), patch(
+                "tldw_Server_API.app.core.Security.url_validation.assert_url_safe",
+                return_value=None,
             ):
                 response = test_client.post(
                     "/api/v1/media/add",
@@ -287,7 +308,7 @@ class TestMediaEndpointContextualIntegration:
                 )
 
             # Should be called for each URL
-            assert mock_process.call_count >= 1
+            assert mock_process.call_count >= 1, response.text
 
             # Each call should have contextual options
             for call in mock_process.call_args_list:

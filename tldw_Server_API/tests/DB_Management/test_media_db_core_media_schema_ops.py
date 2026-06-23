@@ -104,6 +104,7 @@ def test_apply_sqlite_core_media_schema_runs_email_ensure_after_schema_script() 
         _CLAIMS_TABLE_SQL="claims sql",
         _MEDIA_FILES_TABLE_SQL="media files sql",
         _TTS_HISTORY_TABLE_SQL="tts history sql",
+        _AUDIO_PRESETS_TABLE_SQL="audio presets sql",
         _DATA_TABLES_SQL="data tables sql",
         _CURRENT_SCHEMA_VERSION=22,
         _ensure_sqlite_email_schema=lambda value: calls.append(("email", value)),
@@ -143,6 +144,7 @@ def test_apply_sqlite_core_media_schema_raises_on_media_validation_failure() -> 
         _CLAIMS_TABLE_SQL="claims sql",
         _MEDIA_FILES_TABLE_SQL="media files sql",
         _TTS_HISTORY_TABLE_SQL="tts history sql",
+        _AUDIO_PRESETS_TABLE_SQL="audio presets sql",
         _DATA_TABLES_SQL="data tables sql",
         _CURRENT_SCHEMA_VERSION=22,
         _ensure_sqlite_email_schema=lambda conn: None,
@@ -179,6 +181,7 @@ def test_apply_sqlite_core_media_schema_fts_failure_is_warning_only() -> None:
         _CLAIMS_TABLE_SQL="claims sql",
         _MEDIA_FILES_TABLE_SQL="media files sql",
         _TTS_HISTORY_TABLE_SQL="tts history sql",
+        _AUDIO_PRESETS_TABLE_SQL="audio presets sql",
         _DATA_TABLES_SQL="data tables sql",
         _CURRENT_SCHEMA_VERSION=22,
         _ensure_sqlite_email_schema=lambda value: calls.append(("email", value)),
@@ -215,6 +218,7 @@ def test_apply_postgres_core_media_schema_orders_base_tables_then_initializers_t
             "claims": ["CREATE TABLE claims (...)"],
             "mediafiles": ["CREATE TABLE mediafiles (...)"],
             "tts": ["CREATE TABLE tts_history (...)"],
+            "audio": ["CREATE TABLE audio_presets (...)"],
             "datatable": ["CREATE TABLE data_tables (...)"],
             "indices": ["CREATE INDEX idx_media_title ON media(title)"],
         }
@@ -225,6 +229,7 @@ def test_apply_postgres_core_media_schema_orders_base_tables_then_initializers_t
         _CLAIMS_TABLE_SQL="claims",
         _MEDIA_FILES_TABLE_SQL="mediafiles",
         _TTS_HISTORY_TABLE_SQL="tts",
+        _AUDIO_PRESETS_TABLE_SQL="audio",
         _DATA_TABLES_SQL="datatable",
         _INDICES_SQL_V1="indices",
         _CURRENT_SCHEMA_VERSION=22,
@@ -240,6 +245,7 @@ def test_apply_postgres_core_media_schema_orders_base_tables_then_initializers_t
         ("execute", "CREATE TABLE claims (...)", None),
         ("execute", "CREATE TABLE mediafiles (...)", None),
         ("execute", "CREATE TABLE tts_history (...)", None),
+        ("execute", "CREATE TABLE audio_presets (...)", None),
         ("execute", "CREATE TABLE data_tables (...)", None),
         ("execute", "INSERT INTO schema_version VALUES (0)", None),
         ("execute", "CREATE INDEX idx_media_title ON media(title)", None),
@@ -265,6 +271,7 @@ def test_apply_postgres_core_media_schema_orders_base_tables_then_initializers_t
         "sync_log",
         "chunkingtemplates",
         "claims",
+        "audio_presets",
     ]
 
 
@@ -288,6 +295,7 @@ def test_apply_postgres_core_media_schema_raises_when_critical_table_missing() -
         _CLAIMS_TABLE_SQL="claims",
         _MEDIA_FILES_TABLE_SQL="mediafiles",
         _TTS_HISTORY_TABLE_SQL="tts",
+        _AUDIO_PRESETS_TABLE_SQL="audio",
         _DATA_TABLES_SQL="datatable",
         _INDICES_SQL_V1="indices",
         _CURRENT_SCHEMA_VERSION=22,

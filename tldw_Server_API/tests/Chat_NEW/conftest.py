@@ -43,7 +43,6 @@ if _test_config and 'openai_api' in _test_config:
 os.environ["GROQ_API_KEY"] = "test-groq-key-for-testing"
 os.environ["MISTRAL_API_KEY"] = "test-mistral-key-for-testing"
 
-import tempfile
 from pathlib import Path
 from typing import Dict, Any, List, Generator, Optional
 from unittest.mock import MagicMock, AsyncMock, Mock
@@ -214,21 +213,22 @@ def test_env_vars(tmp_path_factory):
 # =====================================================================
 
 @pytest.fixture
-def temp_db_path() -> Generator[Path, None, None]:
-    """Create a temporary database path."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        db_path = Path(temp_dir) / "test_chacha.db"
-        yield db_path
+def temp_db_path(tmp_path: Path) -> Path:
+    """Create a temporary database path owned by pytest's temp cleanup."""
+    return tmp_path / "test_chacha.db"
 
 @pytest.fixture
-def chacha_db(temp_db_path) -> CharactersRAGDB:
+def chacha_db(temp_db_path) -> Generator[CharactersRAGDB, None, None]:
     """Create a real CharactersRAGDB instance for testing."""
     db = CharactersRAGDB(
         db_path=str(temp_db_path),
         client_id="test_user"
     )
     # Database is initialized in __init__, no need to call initialize_db
-    return db
+    try:
+        yield db
+    finally:
+        db.close_all_connections()
 
 @pytest.fixture
 def populated_chacha_db(chacha_db) -> CharactersRAGDB:

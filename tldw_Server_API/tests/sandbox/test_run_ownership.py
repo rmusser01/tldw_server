@@ -1,23 +1,41 @@
 from __future__ import annotations
 
-import os
-
 import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.Sandbox.models import RuntimeType
+from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
+from tldw_Server_API.app.core.Sandbox.service import SandboxService
 
 
 def _user(uid: int, *, admin: bool = False) -> User:
     return User(id=uid, username=f"user-{uid}", is_active=True, is_admin=admin)
 
 
+def _force_docker_preflight_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        SandboxService,
+        "_collect_runtime_preflights",
+        lambda self, network_policy=None: {
+            RuntimeType.docker: RuntimePreflightResult(
+                runtime=RuntimeType.docker,
+                available=True,
+                reasons=[],
+                execution_mode="mocked",
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        },
+    )
+
+
 def test_run_owner_enforced(monkeypatch) -> None:
-    os.environ.setdefault("TEST_MODE", "1")
-    os.environ.setdefault("SANDBOX_ENABLE_EXECUTION", "false")
-    os.environ.setdefault("SANDBOX_BACKGROUND_EXECUTION", "true")
-    os.environ.setdefault("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "1")
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "false")
+    monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "true")
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "1")
+    _force_docker_preflight_available(monkeypatch)
 
     client = TestClient(app)
     app.dependency_overrides[get_request_user] = lambda: _user(1)
@@ -46,12 +64,13 @@ def test_run_owner_enforced(monkeypatch) -> None:
 @pytest.mark.sandbox_ws_auth
 @pytest.mark.sandbox_no_auth
 def test_ws_requires_auth(monkeypatch) -> None:
-    os.environ.setdefault("TEST_MODE", "1")
-    os.environ["SANDBOX_WS_SIGNED_URLS"] = "false"
-    os.environ.pop("SANDBOX_WS_SIGNING_SECRET", None)
-    os.environ.setdefault("SANDBOX_ENABLE_EXECUTION", "false")
-    os.environ.setdefault("SANDBOX_BACKGROUND_EXECUTION", "true")
-    os.environ.setdefault("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "1")
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("SANDBOX_WS_SIGNED_URLS", "false")
+    monkeypatch.delenv("SANDBOX_WS_SIGNING_SECRET", raising=False)
+    monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "false")
+    monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "true")
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "1")
+    _force_docker_preflight_available(monkeypatch)
 
     client = TestClient(app)
     app.dependency_overrides[get_request_user] = lambda: _user(1)

@@ -50,6 +50,27 @@ def _schedule(schedule_id: str, *, inputs_json: str = "{}", user_id: str = "1") 
     )
 
 
+class _CoreSchedulerStub:
+    def __init__(self, *, task_id: str = "task-stub") -> None:
+        self.task_id = task_id
+        self.submissions: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.stop_calls = 0
+
+    async def submit(self, *args: Any, **kwargs: Any) -> str:
+        self.submissions.append((args, kwargs))
+        return self.task_id
+
+    async def stop(self) -> None:
+        self.stop_calls += 1
+
+
+def _patch_core_scheduler(monkeypatch: pytest.MonkeyPatch, stub: _CoreSchedulerStub) -> None:
+    async def _get_global_scheduler_stub() -> _CoreSchedulerStub:
+        return stub
+
+    monkeypatch.setattr(workflows_scheduler_mod, "get_global_scheduler", _get_global_scheduler_stub)
+
+
 @pytest.fixture()
 def client_admin(monkeypatch, auth_headers):
     async def override_user():
@@ -62,6 +83,7 @@ def client_admin(monkeypatch, auth_headers):
     fastapi_app.dependency_overrides[get_request_user] = override_user
 
     # Ensure scheduler is started for tests that need APScheduler instance
+    _patch_core_scheduler(monkeypatch, _CoreSchedulerStub())
     svc = get_workflows_scheduler()
     asyncio.run(svc.start())
 
@@ -356,82 +378,71 @@ async def test_load_all_uses_schedule_owner_when_shared_backend_returns_duplicat
 @pytest.mark.asyncio
 async def test_history_updates_on_fire(monkeypatch):
     # Start service directly without TestClient overhead for this unit test
+    core_scheduler = _CoreSchedulerStub(task_id="task-1")
+    _patch_core_scheduler(monkeypatch, core_scheduler)
     svc = get_workflows_scheduler()
     await svc.start()
-    # Create a schedule via DB helper to avoid HTTP
-    sid = svc.create(
-        tenant_id="default",
-        user_id="1",
-        workflow_id=None,
-        name="hist",
-        cron="*/5 * * * *",
-        timezone="UTC",
-        inputs={},
-        run_mode="async",
-        validation_mode="block",
-        enabled=True,
-        concurrency_mode="skip",
-        misfire_grace_sec=60,
-        coalesce=True,
-    )
+    try:
+        # Create a schedule via DB helper to avoid HTTP
+        sid = svc.create(
+            tenant_id="default",
+            user_id="1",
+            workflow_id=None,
+            name="hist",
+            cron="*/5 * * * *",
+            timezone="UTC",
+            inputs={},
+            run_mode="async",
+            validation_mode="block",
+            enabled=True,
+            concurrency_mode="skip",
+            misfire_grace_sec=60,
+            coalesce=True,
+        )
 
-    class _StubScheduler:
-        async def submit(self, *args: Any, **kwargs: Any) -> str:
-            return "task-1"
+        # Fire the job manually
+        await svc._run_schedule(sid)  # type: ignore[attr-defined]
 
-    # Monkeypatch core scheduler to avoid real submission
-    svc._core_scheduler = _StubScheduler()  # type: ignore[attr-defined]
-
-    # Fire the job manually
-    await svc._run_schedule(sid)  # type: ignore[attr-defined]
-
-    s = svc.get(sid)
-    assert s is not None
-    # last_run_at populated, last_status moved to queued
-    assert isinstance(s.last_run_at, str) and len(s.last_run_at) > 0
-    assert s.last_status in ("pending", "queued", "error", "running")
-
-    await svc.stop()
+        s = svc.get(sid)
+        assert s is not None
+        # last_run_at populated, last_status moved to queued
+        assert isinstance(s.last_run_at, str) and len(s.last_run_at) > 0
+        assert s.last_status in ("pending", "queued", "error", "running")
+    finally:
+        await svc.stop()
 
 
 @pytest.mark.asyncio
 async def test_run_schedule_routes_watchlist_backed_schedules_to_watchlists_queue(monkeypatch):
+    core_scheduler = _CoreSchedulerStub(task_id="task-watchlist-fire")
+    _patch_core_scheduler(monkeypatch, core_scheduler)
     svc = get_workflows_scheduler()
     await svc.start()
-    sid = svc.create(
-        tenant_id="default",
-        user_id="1",
-        workflow_id=None,
-        name="watchlist-fire",
-        cron="*/5 * * * *",
-        timezone="UTC",
-        inputs={"watchlist_job_id": 7},
-        run_mode="async",
-        validation_mode="block",
-        enabled=True,
-        concurrency_mode="skip",
-        misfire_grace_sec=60,
-        coalesce=True,
-    )
+    try:
+        sid = svc.create(
+            tenant_id="default",
+            user_id="1",
+            workflow_id=None,
+            name="watchlist-fire",
+            cron="*/5 * * * *",
+            timezone="UTC",
+            inputs={"watchlist_job_id": 7},
+            run_mode="async",
+            validation_mode="block",
+            enabled=True,
+            concurrency_mode="skip",
+            misfire_grace_sec=60,
+            coalesce=True,
+        )
 
-    captured: dict[str, Any] = {}
+        await svc._run_schedule(sid)  # type: ignore[attr-defined]
 
-    class _StubScheduler:
-        async def submit(self, *args: Any, **kwargs: Any) -> str:
-            captured["handler"] = kwargs.get("handler")
-            captured["queue_name"] = kwargs.get("queue_name")
-            captured["payload"] = kwargs.get("payload")
-            return "task-watchlist-fire"
-
-    svc._core_scheduler = _StubScheduler()  # type: ignore[attr-defined]
-
-    await svc._run_schedule(sid)  # type: ignore[attr-defined]
-
-    assert captured["handler"] == "watchlist_run"
-    assert captured["queue_name"] == "watchlists"
-    assert captured["payload"]["inputs"]["watchlist_job_id"] == 7
-
-    await svc.stop()
+        _args, kwargs = core_scheduler.submissions[-1]
+        assert kwargs.get("handler") == "watchlist_run"
+        assert kwargs.get("queue_name") == "watchlists"
+        assert kwargs.get("payload", {})["inputs"]["watchlist_job_id"] == 7
+    finally:
+        await svc.stop()
 
 
 @pytest.mark.asyncio
@@ -535,57 +546,55 @@ async def test_start_workflows_scheduler_enabled_with_y(monkeypatch):
 @pytest.mark.asyncio
 async def test_run_schedule_mints_virtual_key_when_enabled_with_y(monkeypatch):
     monkeypatch.setenv("WORKFLOWS_MINT_VIRTUAL_KEYS", "y")
+    core_scheduler = _CoreSchedulerStub(task_id="task-vk")
+    _patch_core_scheduler(monkeypatch, core_scheduler)
     svc = get_workflows_scheduler()
     await svc.start()
-    sid = svc.create(
-        tenant_id="default",
-        user_id="1",
-        workflow_id=None,
-        name="vk-y",
-        cron="*/5 * * * *",
-        timezone="UTC",
-        inputs={},
-        run_mode="async",
-        validation_mode="block",
-        enabled=True,
-        concurrency_mode="skip",
-        misfire_grace_sec=60,
-        coalesce=True,
-    )
+    try:
+        sid = svc.create(
+            tenant_id="default",
+            user_id="1",
+            workflow_id=None,
+            name="vk-y",
+            cron="*/5 * * * *",
+            timezone="UTC",
+            inputs={},
+            run_mode="async",
+            validation_mode="block",
+            enabled=True,
+            concurrency_mode="skip",
+            misfire_grace_sec=60,
+            coalesce=True,
+        )
 
-    captured: dict[str, Any] = {}
+        captured: dict[str, Any] = {}
 
-    class _StubScheduler:
-        async def submit(self, *args: Any, **kwargs: Any) -> str:
-            captured["payload"] = kwargs.get("payload")
-            return "task-vk"
+        class _StubJWTService:
+            def __init__(self, settings) -> None:  # noqa: ANN001
+                self.settings = settings
 
-    class _StubJWTService:
-        def __init__(self, settings) -> None:  # noqa: ANN001
-            self.settings = settings
+            def create_virtual_access_token(self, **kwargs: Any) -> str:
+                captured["vk_kwargs"] = kwargs
+                return "vk-token-y"
 
-        def create_virtual_access_token(self, **kwargs: Any) -> str:
-            captured["vk_kwargs"] = kwargs
-            return "vk-token-y"
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.AuthNZ.jwt_service.JWTService",
+            _StubJWTService,
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.AuthNZ.settings.get_settings",
+            lambda: object(),
+        )
 
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.AuthNZ.jwt_service.JWTService",
-        _StubJWTService,
-    )
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.AuthNZ.settings.get_settings",
-        lambda: object(),
-    )
-    svc._core_scheduler = _StubScheduler()  # type: ignore[attr-defined]
+        await svc._run_schedule(sid)  # type: ignore[attr-defined]
 
-    await svc._run_schedule(sid)  # type: ignore[attr-defined]
-
-    assert captured.get("vk_kwargs") is not None
-    payload = captured.get("payload")
-    assert isinstance(payload, dict)
-    assert payload.get("secrets", {}).get("jwt") == "vk-token-y"
-
-    await svc.stop()
+        assert captured.get("vk_kwargs") is not None
+        _args, kwargs = core_scheduler.submissions[-1]
+        payload = kwargs.get("payload")
+        assert isinstance(payload, dict)
+        assert payload.get("secrets", {}).get("jwt") == "vk-token-y"
+    finally:
+        await svc.stop()
 
 
 @pytest.mark.asyncio

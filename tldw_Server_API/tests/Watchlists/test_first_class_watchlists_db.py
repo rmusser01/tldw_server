@@ -21,6 +21,27 @@ def _make_db(tmp_path, *, user_id: int = 123) -> WatchlistsDatabase:
     return WatchlistsDatabase(user_id=user_id, backend=backend)
 
 
+def test_supplied_backend_schema_cache_uses_target_key(tmp_path) -> None:
+    db_path = tmp_path / "watchlists_external.db"
+    backend = DatabaseBackendFactory.create_backend(
+        DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(db_path))
+    )
+    original_keys = set(WatchlistsDatabase._schema_init_keys)
+    WatchlistsDatabase._schema_init_keys.clear()
+    try:
+        WatchlistsDatabase(user_id=123, backend=backend)
+
+        assert str(db_path) in WatchlistsDatabase._schema_init_keys
+        assert f"backend:{id(backend)}" not in WatchlistsDatabase._schema_init_keys
+    finally:
+        try:
+            backend.get_pool().close_all()
+        except Exception:
+            _ = None
+        WatchlistsDatabase._schema_init_keys.clear()
+        WatchlistsDatabase._schema_init_keys.update(original_keys)
+
+
 def _create_source(db: WatchlistsDatabase, *, label: str, watchlist_id: int | None = None):
     return db.create_source(
         name=f"{label} Feed",

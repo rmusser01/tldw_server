@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
 from tldw_Server_API.app.core.Sandbox.models import WorkspaceVolume, WorkspaceVolumeState
 from tldw_Server_API.app.core.Sandbox.store import (
-    IdempotencyConflict,
     InMemoryStore,
     SQLiteStore,
     sanitize_workspace_volume_mount_path,
@@ -80,7 +81,7 @@ def test_service_rejects_idempotency_conflict_for_different_workspace_or_runtime
         idempotency_key="provision-root",
     ).id
 
-    try:
+    with pytest.raises(Exception) as exc_info:
         service.provision_workspace_volume(
             workspace_id="workspace-1",
             user_id="user-1",
@@ -88,10 +89,8 @@ def test_service_rejects_idempotency_conflict_for_different_workspace_or_runtime
             idempotency_key="provision-root",
             requested_runtime="vz_linux",
         )
-    except IdempotencyConflict as exc:
-        assert exc.original_id
-    else:
-        raise AssertionError("Expected idempotency conflict for changed runtime")
+    assert exc_info.value.__class__.__name__ == "IdempotencyConflict"
+    assert getattr(exc_info.value, "original_id", None)
 
 
 def test_service_validate_and_resolve_fail_closed_for_wrong_owner_and_missing_mount(tmp_path):

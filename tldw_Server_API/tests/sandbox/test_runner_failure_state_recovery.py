@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from tldw_Server_API.app.core.Sandbox.models import RunSpec, RuntimeType
+from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
 
 
@@ -19,11 +20,27 @@ def _spec() -> RunSpec:
     )
 
 
+def _stub_docker_preflight(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        SandboxService,
+        "_collect_runtime_preflights",
+        lambda self, network_policy=None: {
+            RuntimeType.docker: RuntimePreflightResult(
+                runtime=RuntimeType.docker,
+                available=True,
+                reasons=[],
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        },
+    )
+
+
 @pytest.mark.unit
 def test_foreground_docker_runner_exception_marks_run_failed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "1")
     monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "0")
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "0")
+    _stub_docker_preflight(monkeypatch)
 
     svc = SandboxService()
 
@@ -54,6 +71,7 @@ def test_background_docker_runner_exception_marks_run_failed(monkeypatch: pytest
     monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "1")
     monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "1")
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "0")
+    _stub_docker_preflight(monkeypatch)
 
     svc = SandboxService()
 

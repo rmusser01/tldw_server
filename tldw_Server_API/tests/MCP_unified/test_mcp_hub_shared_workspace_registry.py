@@ -128,8 +128,15 @@ async def test_policy_resolver_marks_shared_workspace_set_as_shared_registry_sou
     assert policy["selected_workspace_set_object_name"] == "Team Workspaces"
     assert policy["selected_workspace_trust_source"] == "shared_registry"
     assert policy["selected_assignment_workspace_ids"] == ["shared-docs"]
-    for key, value in policy["authored_policy_document"].items():
-        assert key in policy["resolved_policy_document"]
-        assert policy["resolved_policy_document"][key] == value
-    assert policy["resolved_policy_document"]["tool_tier_overrides"] == {}
-    assert policy["resolved_policy_document"]["conditions"] == {}
+    assert policy["authored_policy_document"] == {
+        "allowed_tools": ["files.read"],
+        "path_scope_mode": "workspace_root",
+        "path_scope_enforcement": "approval_required_when_unenforceable",
+    }
+    assert policy["resolved_policy_document"] == {
+        "allowed_tools": ["files.read"],
+        "conditions": {},
+        "path_scope_mode": "workspace_root",
+        "path_scope_enforcement": "approval_required_when_unenforceable",
+        "tool_tier_overrides": {},
+    }

@@ -1,5 +1,7 @@
 import os
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import pytest
 
@@ -10,10 +12,19 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 
 
-def test_deck_visibility_and_share_records_persist():
+@contextmanager
+def _temporary_chacha_db(client_id: str = "owner-1") -> Iterator[CharactersRAGDB]:
+    """Yield a temp CharactersRAGDB and close all SQLite handles before cleanup."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        db = CharactersRAGDB(os.path.join(tmpdir, "ChaChaNotes.db"), client_id="owner-1")
+        db = CharactersRAGDB(os.path.join(tmpdir, "ChaChaNotes.db"), client_id=client_id)
+        try:
+            yield db
+        finally:
+            db.close_all_connections()
 
+
+def test_deck_visibility_and_share_records_persist():
+    with _temporary_chacha_db() as db:
         deck_id = db.add_deck("Shared Biology", visibility="team")
         deck = db.get_deck(deck_id)
 
@@ -37,8 +48,7 @@ def test_deck_visibility_and_share_records_persist():
 
 
 def test_deck_share_upsert_normalizes_role_and_updates_existing_share():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db = CharactersRAGDB(os.path.join(tmpdir, "ChaChaNotes.db"), client_id="owner-1")
+    with _temporary_chacha_db() as db:
         deck_id = db.add_deck("Role Update Deck")
         timestamps = iter(("2026-04-30T12:00:00Z", "2026-04-30T12:00:01Z"))
         db._get_current_utc_timestamp_iso = lambda: next(timestamps)
@@ -56,8 +66,7 @@ def test_deck_share_upsert_normalizes_role_and_updates_existing_share():
 
 
 def test_deck_share_rejects_invalid_role_missing_deck_and_self_share():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db = CharactersRAGDB(os.path.join(tmpdir, "ChaChaNotes.db"), client_id="owner-1")
+    with _temporary_chacha_db() as db:
         deck_id = db.add_deck("Private Deck")
 
         with pytest.raises(InputError):
@@ -71,8 +80,7 @@ def test_deck_share_rejects_invalid_role_missing_deck_and_self_share():
 
 
 def test_deleting_deck_removes_deck_share_records():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db = CharactersRAGDB(os.path.join(tmpdir, "ChaChaNotes.db"), client_id="owner-1")
+    with _temporary_chacha_db() as db:
         deck_id = db.add_deck("Temporary Shared Deck")
         db.upsert_deck_share(deck_id, user_id=22, role="viewer", shared_by=11)
 
@@ -82,8 +90,7 @@ def test_deleting_deck_removes_deck_share_records():
 
 
 def test_shared_with_user_filter_lists_matching_active_decks_only():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db = CharactersRAGDB(os.path.join(tmpdir, "ChaChaNotes.db"), client_id="owner-1")
+    with _temporary_chacha_db() as db:
         shared_deck = db.add_deck("Shared Deck")
         private_deck = db.add_deck("Private Deck")
         deleted_deck = db.add_deck("Deleted Shared Deck")
@@ -98,8 +105,7 @@ def test_shared_with_user_filter_lists_matching_active_decks_only():
 
 
 def test_add_deck_undelete_preserves_visibility_when_omitted():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db = CharactersRAGDB(os.path.join(tmpdir, "ChaChaNotes.db"), client_id="owner-1")
+    with _temporary_chacha_db() as db:
         deck_id = db.add_deck("Restored Shared Deck", visibility="team")
         db.soft_delete_deck_by_id(deck_id)
 
@@ -117,8 +123,7 @@ def test_add_deck_undelete_preserves_visibility_when_omitted():
 
 
 def test_shared_with_user_workspace_filter_can_include_general_scope():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db = CharactersRAGDB(os.path.join(tmpdir, "ChaChaNotes.db"), client_id="owner-1")
+    with _temporary_chacha_db() as db:
         db.upsert_workspace("ws-1", "Workspace One")
         db.upsert_workspace("ws-2", "Workspace Two")
         general_deck = db.add_deck("General Shared Deck")

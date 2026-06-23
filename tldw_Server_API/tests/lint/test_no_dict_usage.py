@@ -1,15 +1,15 @@
 from pathlib import Path
 
 TARGET_FILES = [
-    "tldw_Server_API/app/api/v1/endpoints/prompt_studio_optimization.py",
-    "tldw_Server_API/app/api/v1/endpoints/prompt_studio_projects.py",
-    "tldw_Server_API/app/api/v1/endpoints/prompt_studio_test_cases.py",
+    "tldw_Server_API/app/api/v1/endpoints/prompt_studio/prompt_studio_optimization.py",
+    "tldw_Server_API/app/api/v1/endpoints/prompt_studio/prompt_studio_projects.py",
+    "tldw_Server_API/app/api/v1/endpoints/prompt_studio/prompt_studio_test_cases.py",
     "tldw_Server_API/app/api/v1/endpoints/paper_search.py",
     "tldw_Server_API/app/api/v1/endpoints/vector_stores_openai.py",
-    "tldw_Server_API/app/api/v1/endpoints/prompt_studio_prompts.py",
+    "tldw_Server_API/app/api/v1/endpoints/prompt_studio/prompt_studio_prompts.py",
     "tldw_Server_API/app/api/v1/endpoints/chunking_templates.py",
     "tldw_Server_API/app/api/v1/endpoints/rag_unified.py",
-    "tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py",
+    "tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_unified.py",
     "tldw_Server_API/app/api/v1/endpoints/setup.py",
     "tldw_Server_API/app/api/v1/endpoints/sync.py",
     "tldw_Server_API/app/core/Setup/install_manager.py",

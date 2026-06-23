@@ -2,6 +2,7 @@ import io
 import json
 import sqlite3
 import zipfile
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import pytest
@@ -10,25 +11,27 @@ from tldw_Server_API.app.core.Flashcards.apkg_exporter import export_apkg_from_r
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
+@contextmanager
 def _open_sqlite_from_apkg(apkg_bytes: bytes):
-    zf = zipfile.ZipFile(io.BytesIO(apkg_bytes))
-    assert 'collection.anki2' in zf.namelist()
-    data = zf.read('collection.anki2')
-    # sqlite3 can open from file-like only; write to temp in-memory using URI? Simpler: write to BytesIO-backed temp file.
     import tempfile, os
-    with tempfile.TemporaryDirectory() as tmp:
-        p = os.path.join(tmp, 'collection.anki2')
-        with open(p, 'wb') as f:
-            f.write(data)
-        conn = sqlite3.connect(p)
-        # Return connection and zipfile for further access
-        return conn, zf
+
+    with zipfile.ZipFile(io.BytesIO(apkg_bytes)) as zf:
+        assert 'collection.anki2' in zf.namelist()
+        data = zf.read('collection.anki2')
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, 'collection.anki2')
+            with open(p, 'wb') as f:
+                f.write(data)
+            conn = sqlite3.connect(p)
+            try:
+                yield conn, zf
+            finally:
+                conn.close()
 
 
 def _import_rows_from_apkg(apkg_bytes: bytes):
     """Importer stub for tests: reconstruct note rows from APKG."""
-    conn, zf = _open_sqlite_from_apkg(apkg_bytes)
-    try:
+    with _open_sqlite_from_apkg(apkg_bytes) as (conn, zf):
         models = json.loads(conn.execute("SELECT models FROM col").fetchone()[0])
         decks = json.loads(conn.execute("SELECT decks FROM col").fetchone()[0])
         mid_to_model = {int(k): v.get('name') for k, v in models.items()}
@@ -93,9 +96,6 @@ def _import_rows_from_apkg(apkg_bytes: bytes):
                 'cards': cards,
             })
         return result
-    finally:
-        conn.close()
-        zf.close()
 
 
 def test_apkg_basic_reverse_two_cards():
@@ -116,8 +116,7 @@ def test_apkg_basic_reverse_two_cards():
         }
     ]
     apkg = export_apkg_from_rows(rows, include_reverse=False)
-    conn, zf = _open_sqlite_from_apkg(apkg)
-    try:
+    with _open_sqlite_from_apkg(apkg) as (conn, zf):
         cur = conn.execute("SELECT id,guid,mid,flds FROM notes")
         notes = cur.fetchall()
         assert len(notes) == 1
@@ -129,9 +128,6 @@ def test_apkg_basic_reverse_two_cards():
         assert all(c[0] == nid for c in cards)
         ords = sorted(c[1] for c in cards)
         assert ords == [0, 1]
-    finally:
-        conn.close()
-        zf.close()
 
 
 def test_apkg_cloze_multi_generates_multiple_cards():
@@ -153,8 +149,7 @@ def test_apkg_cloze_multi_generates_multiple_cards():
         }
     ]
     apkg = export_apkg_from_rows(rows)
-    conn, zf = _open_sqlite_from_apkg(apkg)
-    try:
+    with _open_sqlite_from_apkg(apkg) as (conn, zf):
         cur = conn.execute("SELECT id, mid, flds FROM notes")
         notes = cur.fetchall()
         assert len(notes) == 1
@@ -167,9 +162,6 @@ def test_apkg_cloze_multi_generates_multiple_cards():
         assert all(c[0] == nid for c in cards)
         ords = [c[1] for c in cards]
         assert ords == [0, 1]
-    finally:
-        conn.close()
-        zf.close()
 
 
 def test_apkg_media_data_uri_extracted_and_linked():
@@ -194,8 +186,7 @@ def test_apkg_media_data_uri_extracted_and_linked():
         }
     ]
     apkg = export_apkg_from_rows(rows)
-    conn, zf = _open_sqlite_from_apkg(apkg)
-    try:
+    with _open_sqlite_from_apkg(apkg) as (conn, zf):
         # Check media mapping exists
         media_json = zf.read('media').decode('utf-8')
         media_map = json.loads(media_json)
@@ -213,9 +204,6 @@ def test_apkg_media_data_uri_extracted_and_linked():
         flds = cur.fetchone()[0]
         assert 'data:image' not in flds
         assert fname in flds
-    finally:
-        conn.close()
-        zf.close()
 
 
 def test_apkg_round_trip_models_and_fields():
@@ -235,8 +223,7 @@ def test_apkg_round_trip_models_and_fields():
         },
     ]
     apkg = export_apkg_from_rows(rows)
-    conn, zf = _open_sqlite_from_apkg(apkg)
-    try:
+    with _open_sqlite_from_apkg(apkg) as (conn, zf):
         # Check models JSON
         models_json = conn.execute("SELECT models FROM col").fetchone()[0]
         models = json.loads(models_json)
@@ -277,9 +264,6 @@ def test_apkg_round_trip_models_and_fields():
         ords1 = [o for n, o in cards if n == nid1]
         assert ords0 == [0, 1]
         assert ords1 == [0, 1]
-    finally:
-        conn.close()
-        zf.close()
 
 
 def test_apkg_importer_stub_round_trip_content():
@@ -333,11 +317,10 @@ def test_apkg_export_translates_managed_asset_refs_and_preserves_notes():
             "content": b"\x89PNG\r\n\x1a\nmanaged-" + asset_uuid.encode("utf-8"),
             "mime_type": "image/png",
             "original_filename": f"{asset_uuid}.png",
-        }
+    }
 
     apkg = export_apkg_from_rows(rows, asset_loader=asset_loader)
-    conn, zf = _open_sqlite_from_apkg(apkg)
-    try:
+    with _open_sqlite_from_apkg(apkg) as (conn, zf):
         media_map = json.loads(zf.read("media").decode("utf-8"))
         assert len(media_map) == 2
 
@@ -347,9 +330,6 @@ def test_apkg_export_translates_managed_asset_refs_and_preserves_notes():
         assert "flashcard-asset://" not in flds[3]
         assert "<img" in flds[0]
         assert "<img" in flds[3]
-    finally:
-        conn.close()
-        zf.close()
 
 
 def test_apkg_export_rejects_oversized_total_media():
@@ -568,8 +548,7 @@ def test_apkg_scheduling_mapping():
         },
     ]
     apkg = export_apkg_from_rows(rows)
-    conn, zf = _open_sqlite_from_apkg(apkg)
-    try:
+    with _open_sqlite_from_apkg(apkg) as (conn, zf):
         cur = conn.execute("SELECT type, queue, due, ivl, factor FROM cards ORDER BY id ASC")
         cards = cur.fetchall()
         assert len(cards) == 3
@@ -585,6 +564,3 @@ def test_apkg_scheduling_mapping():
         t2, q2, due2, ivl2, f2 = cards[2]
         assert t2 == 2 and q2 == 2
         assert ivl2 == 10 and 2000 <= f2 <= 3000 and due2 > 0
-    finally:
-        conn.close()
-        zf.close()

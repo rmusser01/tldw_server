@@ -95,6 +95,16 @@ try:
 except _AUDIT_NONCRITICAL_EXCEPTIONS:
     _app_settings = {}
 
+
+def _current_app_settings() -> Any:
+    """Return the live config settings mapping, falling back to the import-time handle."""
+    try:
+        from tldw_Server_API.app.core.config import settings as current_settings  # type: ignore
+
+        return current_settings
+    except _AUDIT_NONCRITICAL_EXCEPTIONS:
+        return _app_settings
+
 # Consistent risk threshold constants (tunable via env var)
 try:
     HIGH_RISK_SCORE = int(os.getenv("AUDIT_HIGH_RISK_SCORE", "70"))
@@ -718,10 +728,12 @@ class RiskScorer:
                  *,
                  high_risk_ops_override: Optional[Union[list[str], str]] = None,
                  suspicious_thresholds_override: Optional[dict[str, Union[int, bool]]] = None) -> None:
+        app_settings = _current_app_settings()
+
         # Merge overrides from settings, then supplied overrides
         merged: dict[str, int] = dict(self.DEFAULT_ACTION_RISK_BONUS)
         try:
-            cfg = _app_settings.get("AUDIT_ACTION_RISK_BONUS")
+            cfg = app_settings.get("AUDIT_ACTION_RISK_BONUS")
             if isinstance(cfg, dict):
                 for k, v in cfg.items():
                     try:
@@ -759,7 +771,7 @@ class RiskScorer:
 
         default_ops = set(self.HIGH_RISK_OPERATIONS)
         try:
-            cfg_ops = _app_settings.get("AUDIT_HIGH_RISK_OPERATIONS")
+            cfg_ops = app_settings.get("AUDIT_HIGH_RISK_OPERATIONS")
             ops_from_settings = _parse_ops(cfg_ops)
         except _AUDIT_NONCRITICAL_EXCEPTIONS:
             ops_from_settings = set()
@@ -797,7 +809,7 @@ class RiskScorer:
 
         thresholds = dict(self.DEFAULT_SUSPICIOUS_THRESHOLDS)
         try:
-            cfg_thr = _app_settings.get("AUDIT_SUSPICIOUS_THRESHOLDS")
+            cfg_thr = app_settings.get("AUDIT_SUSPICIOUS_THRESHOLDS")
             thresholds = _merge_thresholds(thresholds, cfg_thr if isinstance(cfg_thr, dict) else None)
         except _AUDIT_NONCRITICAL_EXCEPTIONS:
             pass

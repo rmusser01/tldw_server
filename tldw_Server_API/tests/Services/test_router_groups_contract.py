@@ -10,6 +10,7 @@ from typing import Callable
 
 import pytest
 from fastapi import APIRouter, FastAPI
+from loguru import logger as loguru_logger
 
 from tldw_Server_API.app.api.v1.router_groups.admin import iter_admin_router_specs
 from tldw_Server_API.app.api.v1.router_groups.conditional import (
@@ -687,7 +688,7 @@ def test_append_imported_router_spec_skips_optional_import_error_at_registration
         ),
     )
 
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert len(specs) == 1
     assert register_router_specs(FastAPI(), specs) == 0
@@ -724,7 +725,7 @@ def test_append_imported_router_spec_raises_nested_module_not_found_at_registrat
         ),
     )
 
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert len(specs) == 1
     with pytest.raises(ModuleNotFoundError, match="internal dependency is unavailable"):
@@ -759,7 +760,7 @@ def test_append_imported_router_spec_raises_import_time_attribute_error_at_regis
         ),
     )
 
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert len(specs) == 1
     with pytest.raises(AttributeError, match="module initialization bug"):
@@ -794,7 +795,7 @@ def test_append_imported_router_spec_raises_unexpected_import_error_at_registrat
         ),
     )
 
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert len(specs) == 1
     with pytest.raises(RuntimeError, match="router module crashed during import"):
@@ -826,7 +827,7 @@ def test_append_imported_router_spec_skips_static_missing_attr_at_registration(
         ),
     )
 
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert len(specs) == 1
     assert register_router_specs(FastAPI(), specs) == 0
@@ -865,7 +866,7 @@ def test_append_imported_router_spec_logs_missing_lazy_attr_once(
         ),
     )
 
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert len(specs) == 1
     assert register_router_specs(FastAPI(), specs) == 0
@@ -1398,10 +1399,7 @@ def test_iter_core_router_specs_raises_crashing_chat_import(
         "tldw_Server_API.app.core.config.route_enabled",
         lambda *_args, **_kwargs: True,
     )
-    monkeypatch.setattr(
-        "loguru.logger.debug",
-        debug_messages.append,
-    )
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     specs = list(iter_core_router_specs())
     chat_specs = [
@@ -1498,7 +1496,7 @@ def test_register_router_specs_raises_unexpected_resolution_failures(
         "tldw_Server_API.app.core.config.route_enabled",
         lambda *_args, **_kwargs: True,
     )
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     with pytest.raises(RuntimeError, match="lazy router failed"):
         register_router_specs(
@@ -1531,7 +1529,7 @@ def test_register_router_specs_skips_configured_resolution_failures(
         "tldw_Server_API.app.core.config.route_enabled",
         lambda *_args, **_kwargs: True,
     )
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     count = register_router_specs(
         app,
@@ -1998,6 +1996,7 @@ def test_iter_content_router_specs_defers_media_audio_router_attr_lookup(
     monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO", "1")
     module_paths = {
         "tldw_Server_API.app.api.v1.endpoints.media": {"router": "/media/list"},
+        "tldw_Server_API.app.api.v1.endpoints.media.ingest_jobs": {"router": "/ingest/jobs"},
         "tldw_Server_API.app.api.v1.endpoints.audio.audio": {
             "router": "/transcriptions",
             "ws_router": "/stream/transcribe",
@@ -2046,12 +2045,15 @@ def test_iter_content_router_specs_defers_media_audio_router_attr_lookup(
     selected_specs = [
         spec
         for spec in specs
-        if spec.route_key in {"media", "audio", "audio-websocket", "audio-jobs"}
+        if spec.route_key in {"media", "media-ingest-jobs", "audio", "audio-websocket", "audio-jobs"}
     ]
     by_first_path = {_first_router_path(spec.router): spec for spec in selected_specs}
 
     assert by_first_path["/media/list"].prefix == "/api/v1/media"
     assert by_first_path["/media/list"].tags == ("media",)
+    assert by_first_path["/ingest/jobs"].prefix == "/api/v1/media"
+    assert by_first_path["/ingest/jobs"].tags == ("media",)
+    assert by_first_path["/ingest/jobs"].route_key == "media-ingest-jobs"
     assert by_first_path["/transcriptions"].prefix == "/api/v1/audio"
     assert by_first_path["/transcriptions"].tags == ("audio",)
     assert by_first_path["/stream/transcribe"].prefix == "/api/v1/audio"
@@ -2150,7 +2152,7 @@ def test_iter_content_router_specs_skips_ocr_missing_import_failures(
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), (selected_spec,)) == 0
     skip_debug_messages = [
@@ -2174,7 +2176,7 @@ def test_iter_content_router_specs_skips_ocr_missing_attribute_failures(
     selected_spec = next(spec for spec in specs if spec.name == "ocr")
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), (selected_spec,)) == 0
     skip_debug_messages = [
@@ -3237,7 +3239,7 @@ def test_iter_content_router_specs_defers_workspace_character_router_attr_lookup
     }
     assert import_calls == []
 
-    selected_specs = [
+    route_key_specs = [
         spec
         for spec in specs
         if spec.route_key
@@ -3248,6 +3250,12 @@ def test_iter_content_router_specs_defers_workspace_character_router_attr_lookup
             "characters",
             "character-messages",
         }
+    ]
+    expected_names = {
+        str(definition["expected_name"]) for definition in router_definitions
+    }
+    selected_specs = [
+        spec for spec in route_key_specs if spec.name in expected_names
     ]
     assert len(selected_specs) == len(router_definitions)
 
@@ -4192,7 +4200,7 @@ def test_iter_minimal_test_router_specs_populates_expected_specs(monkeypatch: py
     assert by_first_path["/search"].route_key == "research"
     assert by_first_path["/runs"].prefix == "/api/v1"
     assert by_first_path["/runs"].tags == ("research-runs",)
-    assert by_first_path["/runs"].route_key == "research"
+    assert by_first_path["/runs"].route_key == "research-runs"
     assert by_first_path["/papers"].prefix == "/api/v1/paper-search"
     assert by_first_path["/papers"].tags == ("paper-search",)
     assert by_first_path["/papers"].route_key == "paper-search"
@@ -4256,7 +4264,10 @@ def test_iter_minimal_test_router_specs_defers_endpoint_imports(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify minimal always-included router specs do not import endpoints during construction."""
-    from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_test_router_specs
+    from tldw_Server_API.app.api.v1.router_groups.minimal import (
+        MINIMAL_REQUIRED_ROUTER_NAMES,
+        iter_minimal_test_router_specs,
+    )
 
     endpoint_modules = {
         "tldw_Server_API.app.api.v1.endpoints.auth",
@@ -4295,7 +4306,7 @@ def test_iter_minimal_test_router_specs_defers_endpoint_imports(
     specs = list(iter_minimal_test_router_specs())
 
     assert import_attempts == []
-    assert len(specs) == 15
+    assert len(specs) == len(MINIMAL_REQUIRED_ROUTER_NAMES)
     assert all(not isinstance(spec.router, APIRouter) for spec in specs)
 
 
@@ -4314,26 +4325,20 @@ def test_minimal_test_router_specs_participate_in_route_policy(
 
     monkeypatch.setattr("tldw_Server_API.app.core.config.route_enabled", _route_enabled)
 
-    registered_count = register_router_specs(FastAPI(), iter_minimal_test_router_specs())
+    specs = list(iter_minimal_test_router_specs())
+    registered_count = register_router_specs(FastAPI(), specs)
+
+    expected_policy_calls = [
+        (spec.route_key, spec.default_stable)
+        for spec in specs
+        if spec.route_key
+    ]
+    actual_counts = Counter(route_policy_calls)
+    expected_counts = Counter(expected_policy_calls)
 
     assert registered_count == 0
-    assert route_policy_calls == [
-        ("health", True),
-        ("auth", True),
-        ("research", True),
-        ("research", True),
-        ("research-workspace", True),
-        ("paper-search", True),
-        ("chat", True),
-        ("chat", True),
-        ("chat", True),
-        ("characters", True),
-        ("character-memory", True),
-        ("character-chat-sessions", True),
-        ("character-messages", True),
-        ("workspaces", True),
-        ("workspaces", True),
-    ]
+    assert expected_counts - actual_counts == Counter()
+    assert set(actual_counts) - set(expected_counts) == set()
 
 
 def test_minimal_source_delegates_always_included_routers_to_imported_specs() -> None:
@@ -5768,7 +5773,7 @@ def test_iter_minimal_optional_router_specs_skips_workflow_missing_import_failur
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -5812,14 +5817,15 @@ def test_iter_minimal_optional_router_specs_propagates_workflow_runtime_import_f
         register_router_specs(FastAPI(), (selected_spec,))
 
 
-def test_iter_minimal_optional_router_specs_defers_monitoring_attr_lookup(
+def test_iter_minimal_required_router_specs_defers_monitoring_attr_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify minimal monitoring spec keeps router attr lookup lazy."""
     import importlib
 
     from tldw_Server_API.app.api.v1.router_groups.minimal import (
-        iter_minimal_optional_router_specs,
+        REQUIRED_ROUTER_SKIP_EXCEPTIONS,
+        iter_minimal_test_router_specs,
     )
 
     module_name = "tldw_Server_API.app.api.v1.endpoints.monitoring"
@@ -5856,7 +5862,7 @@ def test_iter_minimal_optional_router_specs_defers_monitoring_attr_lookup(
         _import_module,
     )
 
-    specs = list(iter_minimal_optional_router_specs())
+    specs = list(iter_minimal_test_router_specs())
     assert import_calls == []
     assert access_count == {f"{module_name}.router": 0}
 
@@ -5864,29 +5870,26 @@ def test_iter_minimal_optional_router_specs_defers_monitoring_attr_lookup(
     assert selected_spec.prefix == "/api/v1"
     assert selected_spec.tags == ("monitoring",)
     assert selected_spec.route_key == "monitoring"
-    assert selected_spec.skip_context == "in minimal test app"
+    assert selected_spec.skip_context == ""
     assert selected_spec.default_stable is True
-    assert selected_spec.skip_exceptions == (
-        OptionalRouterMissingModule,
-        OptionalRouterMissingAttribute,
-    )
+    assert selected_spec.skip_exceptions == REQUIRED_ROUTER_SKIP_EXCEPTIONS
     assert _first_router_path(selected_spec.router) == "/monitoring/status"
     assert import_calls == [module_name]
     assert access_count == {f"{module_name}.router": 1}
 
 
-def test_iter_minimal_optional_router_specs_skips_monitoring_missing_import_failures(
+def test_iter_minimal_required_router_specs_propagates_monitoring_missing_import_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify minimal monitoring spec skips missing optional router module."""
+    """Verify required minimal monitoring spec fails when the router module is missing."""
     import importlib
 
     from tldw_Server_API.app.api.v1.router_groups.minimal import (
-        iter_minimal_optional_router_specs,
+        iter_minimal_test_router_specs,
     )
 
     module_name = "tldw_Server_API.app.api.v1.endpoints.monitoring"
-    specs = list(iter_minimal_optional_router_specs())
+    specs = list(iter_minimal_test_router_specs())
     selected_spec = next(spec for spec in specs if spec.name == "monitoring")
 
     real_import_module = importlib.import_module
@@ -5905,18 +5908,8 @@ def test_iter_minimal_optional_router_specs_skips_monitoring_missing_import_fail
         _import_module,
     )
 
-    debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
-
-    assert register_router_specs(FastAPI(), (selected_spec,)) == 0
-    skip_debug_messages = [
-        message for message in debug_messages if message.startswith("Skipping ")
-    ]
-    assert len(skip_debug_messages) == 1
-    skip_message = skip_debug_messages[0]
-    assert skip_message.startswith("Skipping monitoring router in minimal test app:")
-    assert module_name in skip_message
-    assert "missing during import" in skip_message
+    with pytest.raises(OptionalRouterMissingModule, match="missing during import"):
+        register_router_specs(FastAPI(), (selected_spec,))
 
 
 @pytest.mark.parametrize(
@@ -5927,20 +5920,20 @@ def test_iter_minimal_optional_router_specs_skips_monitoring_missing_import_fail
         (AttributeError, "monitoring attribute failed during import"),
     ),
 )
-def test_iter_minimal_optional_router_specs_propagates_monitoring_runtime_import_failures(
+def test_iter_minimal_required_router_specs_propagates_monitoring_runtime_import_failures(
     monkeypatch: pytest.MonkeyPatch,
     exception_type: type[Exception],
     message: str,
 ) -> None:
-    """Verify minimal monitoring runtime import defects are not silently skipped."""
+    """Verify required minimal monitoring runtime import defects are not silently skipped."""
     import importlib
 
     from tldw_Server_API.app.api.v1.router_groups.minimal import (
-        iter_minimal_optional_router_specs,
+        iter_minimal_test_router_specs,
     )
 
     module_name = "tldw_Server_API.app.api.v1.endpoints.monitoring"
-    specs = list(iter_minimal_optional_router_specs())
+    specs = list(iter_minimal_test_router_specs())
     selected_spec = next(spec for spec in specs if spec.name == "monitoring")
 
     real_import_module = importlib.import_module
@@ -6054,7 +6047,7 @@ def test_iter_minimal_optional_router_specs_skips_media_missing_import_failures(
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), (selected_spec,)) == 0
     skip_debug_messages = [
@@ -6082,7 +6075,7 @@ def test_iter_minimal_optional_router_specs_skips_media_missing_attribute_failur
     selected_spec = next(spec for spec in specs if spec.name == "media")
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), (selected_spec,)) == 0
     skip_debug_messages = [
@@ -6347,7 +6340,7 @@ def test_iter_minimal_optional_router_specs_skips_utility_missing_import_failure
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert len(debug_messages) == len(utility_modules)
@@ -6594,7 +6587,7 @@ def test_iter_minimal_optional_router_specs_skips_kanban_missing_import_failures
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     skip_debug_messages = [
@@ -6845,7 +6838,7 @@ def test_iter_minimal_optional_router_specs_skips_study_missing_import_failures(
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     skip_debug_messages = [
@@ -7095,7 +7088,7 @@ def test_iter_minimal_optional_router_specs_skips_writing_email_missing_import_f
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     skip_debug_messages = [
@@ -7339,7 +7332,7 @@ def test_iter_minimal_optional_router_specs_skips_ops_missing_import_failures(
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -7568,7 +7561,7 @@ def test_iter_minimal_optional_router_specs_skips_org_missing_import_failures(
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -7797,7 +7790,7 @@ def test_iter_minimal_optional_router_specs_skips_access_resource_missing_import
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -8026,7 +8019,7 @@ def test_iter_minimal_optional_router_specs_skips_byok_shared_keys_missing_impor
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -8255,7 +8248,7 @@ def test_iter_minimal_optional_router_specs_skips_mcp_missing_import_failures(
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -8484,7 +8477,7 @@ def test_iter_minimal_optional_router_specs_skips_privileges_tools_missing_impor
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -8713,7 +8706,7 @@ def test_iter_minimal_optional_router_specs_skips_tail_missing_import_failures(
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -8954,7 +8947,7 @@ def test_iter_minimal_optional_router_specs_skips_experience_missing_import_fail
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert len(debug_messages) == len(experience_modules)
@@ -9204,7 +9197,7 @@ def test_iter_minimal_optional_router_specs_skips_guardian_safety_missing_import
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert len(debug_messages) == len(guardian_modules)
@@ -9445,7 +9438,7 @@ def test_iter_minimal_optional_router_specs_skips_persona_notes_missing_import_f
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs.values()) == 0
     assert debug_messages == [
@@ -10101,9 +10094,6 @@ def test_iter_minimal_optional_router_specs_populates_llm_specs(monkeypatch: pyt
     assert by_first_path["/evaluations"].prefix == "/api/v1"
     assert by_first_path["/evaluations"].tags == ("evaluations",)
     assert by_first_path["/evaluations"].route_key == "evaluations"
-    assert by_first_path["/monitoring/status"].prefix == "/api/v1"
-    assert by_first_path["/monitoring/status"].tags == ("monitoring",)
-    assert by_first_path["/monitoring/status"].route_key == "monitoring"
     assert by_first_path["/sharing"].prefix == "/api/v1"
     assert by_first_path["/sharing"].tags == ("sharing",)
     assert by_first_path["/sharing"].route_key == ""
@@ -10440,7 +10430,7 @@ def test_iter_minimal_optional_router_specs_skips_audio_jobs_missing_import_fail
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), (selected_spec,)) == 0
     skip_debug_messages = [
@@ -10470,7 +10460,7 @@ def test_iter_minimal_optional_router_specs_skips_audio_jobs_missing_attribute_f
     selected_spec = next(spec for spec in specs if spec.route_key == "audio-jobs")
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), (selected_spec,)) == 0
     skip_debug_messages = [
@@ -10536,6 +10526,11 @@ def test_iter_minimal_optional_router_specs_includes_media_audio_when_opted_in(
         monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.media",
         path="/media/list",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.media.ingest_jobs",
+        path="/ingest/jobs",
     )
     _install_fake_router_module(
         monkeypatch,
@@ -10695,7 +10690,7 @@ def test_iter_minimal_optional_router_specs_skips_audio_router_missing_import_fa
     )
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs) == 0
     skip_debug_messages = [
@@ -10736,7 +10731,7 @@ def test_iter_minimal_optional_router_specs_skips_audio_router_missing_attribute
     assert {spec.route_key for spec in selected_specs} == {"audio", "audio-websocket"}
 
     debug_messages: list[str] = []
-    monkeypatch.setattr("loguru.logger.debug", debug_messages.append)
+    monkeypatch.setattr(loguru_logger, "debug", debug_messages.append)
 
     assert register_router_specs(FastAPI(), selected_specs) == 0
     skip_debug_messages = [
@@ -11022,6 +11017,11 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     )
     _install_fake_router_module(
         monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.workspace_eligibility",
+        path="/workspace-eligibility/check",
+    )
+    _install_fake_router_module(
+        monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions",
         path="/character-chat-sessions/list",
     )
@@ -11290,6 +11290,10 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     assert by_key["media-embeddings"].tags == ("media-embeddings",)
     assert by_key["media"].prefix == "/api/v1/media"
     assert by_key["media"].tags == ("media",)
+    assert by_key["media-ingest-jobs"].prefix == "/api/v1/media"
+    assert by_key["media-ingest-jobs"].tags == ("media",)
+    assert by_first_path["/ingest/jobs"].prefix == "/api/v1/media"
+    assert by_first_path["/ingest/jobs"].route_key == "media-ingest-jobs"
     assert by_key["audio"].prefix == "/api/v1/audio"
     assert by_key["audio"].tags == ("audio",)
     assert by_key["audio-websocket"].prefix == "/api/v1/audio"
@@ -11349,8 +11353,12 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     assert by_first_path["/api/v1/prompt-studio/ws"].prefix == ""
     assert by_first_path["/api/v1/prompt-studio/ws"].tags == ("prompt-studio",)
     assert by_first_path["/api/v1/prompt-studio/ws"].route_key == "prompt-studio"
-    assert by_key["workspaces"].prefix == "/api/v1/workspaces"
-    assert by_key["workspaces"].tags == ("workspaces",)
+    assert by_first_path["/workspaces/list"].prefix == "/api/v1/workspaces"
+    assert by_first_path["/workspaces/list"].tags == ("workspaces",)
+    assert by_first_path["/workspaces/list"].route_key == "workspaces"
+    assert by_first_path["/workspace-eligibility/check"].prefix == "/api/v1/workspace-eligibility"
+    assert by_first_path["/workspace-eligibility/check"].tags == ("workspaces",)
+    assert by_first_path["/workspace-eligibility/check"].route_key == "workspaces"
     assert by_key["character-chat-sessions"].prefix == "/api/v1/chats"
     assert by_key["character-chat-sessions"].tags == ("character-chat-sessions",)
     assert by_key["character-memory"].prefix == "/api/v1/characters"
@@ -11471,8 +11479,11 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     assert by_key["vn-play"].tags == ("vn-play",)
     assert by_tags[("research",)].prefix == "/api/v1/research"
     assert by_tags[("research",)].tags == ("research",)
+    assert by_key["research-runs"].prefix == "/api/v1"
+    assert by_key["research-runs"].tags == ("research-runs",)
     assert by_tags[("research-runs",)].prefix == "/api/v1"
     assert by_tags[("research-runs",)].tags == ("research-runs",)
+    assert by_tags[("research-runs",)].route_key == "research-runs"
     assert by_tags[("paper-search",)].prefix == "/api/v1/paper-search"
     assert by_tags[("paper-search",)].tags == ("paper-search",)
 

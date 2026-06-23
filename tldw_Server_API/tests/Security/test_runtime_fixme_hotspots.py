@@ -1,12 +1,12 @@
 import importlib
-import json
 import os
+from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException, status
 
 from tldw_Server_API.app import main as app_main
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoints
-from tldw_Server_API.app.api.v1.schemas.sync_server_models import ClientChangesPayload, SyncSendLogEntry
 from tldw_Server_API.app.core import config as config_mod
 
 
@@ -16,10 +16,6 @@ pytestmark = pytest.mark.unit
 class _DummyUser:
     def __init__(self, username: str):
         self.username = username
-
-
-class _DummyDB:
-    db_path_str = ":memory:"
 
 
 def _restore_env(key: str, prior_value: str | None) -> None:
@@ -49,25 +45,6 @@ def get_cors_allow_origins(app) -> list[str]:
         origins = kwargs.get("allow_origins", [])
         return [str(origin) for origin in origins]
     return []
-
-
-def _build_sync_payload() -> ClientChangesPayload:
-    return ClientChangesPayload(
-        client_id="client_sender_1",
-        last_processed_server_id=0,
-        changes=[
-            SyncSendLogEntry(
-                change_id=1,
-                entity="Keywords",
-                entity_uuid="kw-uuid-1",
-                operation="create",
-                timestamp="2023-10-27T11:00:00Z",
-                client_id="client_sender_1",
-                version=1,
-                payload=json.dumps({"uuid": "kw-uuid-1", "keyword": "k1"}),
-            ),
-        ],
-    )
 
 
 def test_cors_policy_not_wildcard_in_production() -> None:
@@ -135,15 +112,26 @@ def test_non_production_empty_cors_origin_list_falls_back_to_local_defaults() ->
 
 
 @pytest.mark.asyncio
-async def test_sync_endpoint_enforces_fts_update_path(monkeypatch) -> None:
-    async def _fake_to_thread(*_args, **_kwargs):
-        return True, []
+async def test_legacy_sync_send_endpoint_is_replaced() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await sync_endpoints.receive_changes_from_client(
+            request=SimpleNamespace(),
+            user_id=_DummyUser("sync-user"),
+        )
 
-    monkeypatch.setattr(sync_endpoints.asyncio, "to_thread", _fake_to_thread)
-    response = await sync_endpoints.receive_changes_from_client(
-        payload=_build_sync_payload(),
-        user_id=_DummyUser("sync-user"),
-        db=_DummyDB(),
-    )
-    assert response["status"] == "success"  # nosec B101
-    assert "fts disabled" not in str(response).lower()  # nosec B101
+    assert exc_info.value.status_code == status.HTTP_410_GONE  # nosec B101
+    assert exc_info.value.detail["replacement"] == "/api/v1/sync/push"  # nosec B101
+    assert "fts disabled" not in str(exc_info.value.detail).lower()  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_legacy_sync_get_endpoint_is_replaced() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await sync_endpoints.send_changes_to_client(
+            request=SimpleNamespace(),
+            user_id=_DummyUser("sync-user"),
+        )
+
+    assert exc_info.value.status_code == status.HTTP_410_GONE  # nosec B101
+    assert exc_info.value.detail["replacement"] == "/api/v1/sync/pull"  # nosec B101
+    assert "fts disabled" not in str(exc_info.value.detail).lower()  # nosec B101

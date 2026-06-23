@@ -33,6 +33,11 @@ try:
     from opentelemetry.trace import Status, StatusCode
     OTEL_AVAILABLE = True
 except ImportError:
+    metrics = trace = None
+    OTLPMetricExporter = OTLPSpanExporter = None
+    MeterProvider = PeriodicExportingMetricReader = Resource = None
+    TracerProvider = BatchSpanProcessor = None
+    Status = StatusCode = None
     OTEL_AVAILABLE = False
     logger.warning("OpenTelemetry not available. Using fallback metrics.")
 

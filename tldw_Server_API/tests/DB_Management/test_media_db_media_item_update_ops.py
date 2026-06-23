@@ -143,7 +143,7 @@ def test_apply_media_item_update_updates_metadata_logs_sync_and_refreshes_title_
     ]
     execute_calls: list[tuple[str, tuple[object, ...]]] = []
     sync_payloads: list[dict[str, object]] = []
-    fts_calls: list[tuple[object, int, str, str]] = []
+    fts_calls: list[tuple[object, int, str, str, str | None, str | None]] = []
     doc_versions: list[dict[str, object]] = []
 
     def _fetchone(_conn, _query, _params):
@@ -166,8 +166,16 @@ def test_apply_media_item_update_updates_metadata_logs_sync_and_refreshes_title_
         doc_versions.append(kwargs)
         return {"uuid": "dv-should-not-be-created", "version_number": 99}
 
-    def _update_fts_media(conn, media_id, title, content):
-        fts_calls.append((conn, media_id, title, content))
+    def _update_fts_media(
+        conn,
+        media_id,
+        title,
+        content,
+        *,
+        old_title=None,
+        old_content=None,
+    ):
+        fts_calls.append((conn, media_id, title, content, old_title, old_content))
 
     db = SimpleNamespace(
         client_id="api-client",
@@ -215,7 +223,9 @@ def test_apply_media_item_update_updates_metadata_logs_sync_and_refreshes_title_
             "client_id": "api-client",
         }
     ]
-    assert fts_calls == [("conn", 9, "Updated Title", "existing body")]
+    assert fts_calls == [
+        ("conn", 9, "Updated Title", "existing body", "Current Title", "existing body")
+    ]
     assert doc_versions == []
 
 
@@ -241,7 +251,7 @@ def test_apply_media_item_update_changes_content_creates_version_logs_sync_and_m
     execute_calls: list[tuple[str, tuple[object, ...]]] = []
     doc_versions: list[dict[str, object]] = []
     sync_payloads: list[dict[str, object]] = []
-    fts_calls: list[tuple[object, int, str, str]] = []
+    fts_calls: list[tuple[object, int, str, str, str | None, str | None]] = []
     collection_calls: list[tuple[int, str]] = []
 
     class _FakeCollectionsDatabase:
@@ -276,8 +286,16 @@ def test_apply_media_item_update_changes_content_creates_version_logs_sync_and_m
     def _log_sync_event(_conn, _entity, _entity_uuid, _operation, _version, payload):
         sync_payloads.append(payload)
 
-    def _update_fts_media(conn, media_id, title, content):
-        fts_calls.append((conn, media_id, title, content))
+    def _update_fts_media(
+        conn,
+        media_id,
+        title,
+        content,
+        *,
+        old_title=None,
+        old_content=None,
+    ):
+        fts_calls.append((conn, media_id, title, content, old_title, old_content))
 
     db = SimpleNamespace(
         client_id="api-client",
@@ -346,7 +364,9 @@ def test_apply_media_item_update_changes_content_creates_version_logs_sync_and_m
             "created_doc_ver_num": 4,
         }
     ]
-    assert fts_calls == [("conn", 9, "Updated Title", "updated body")]
+    assert fts_calls == [
+        ("conn", 9, "Updated Title", "updated body", "Current Title", "existing body")
+    ]
     assert collection_calls == [(9, expected_hash)]
 
 
@@ -360,7 +380,7 @@ def test_apply_media_item_update_versions_identical_content_without_rechunking_o
     ]
     execute_calls: list[tuple[str, tuple[object, ...]]] = []
     doc_versions: list[dict[str, object]] = []
-    fts_calls: list[tuple[object, int, str, str]] = []
+    fts_calls: list[tuple[object, int, str, str, str | None, str | None]] = []
 
     def _fetchone(_conn, _query, _params):
         return fetch_rows.pop(0)
@@ -373,8 +393,16 @@ def test_apply_media_item_update_versions_identical_content_without_rechunking_o
         doc_versions.append(kwargs)
         return {"uuid": "dv-identical", "version_number": 6}
 
-    def _update_fts_media(conn, media_id, title, content):
-        fts_calls.append((conn, media_id, title, content))
+    def _update_fts_media(
+        conn,
+        media_id,
+        title,
+        content,
+        *,
+        old_title=None,
+        old_content=None,
+    ):
+        fts_calls.append((conn, media_id, title, content, old_title, old_content))
 
     db = SimpleNamespace(
         client_id="api-client",

@@ -6,15 +6,29 @@ from types import ModuleType
 import pytest
 
 
+def _parent_module_binding(name: str) -> tuple[ModuleType | None, str]:
+    parent_name, _, attr = name.rpartition(".")
+    parent = sys.modules.get(parent_name)
+    return parent if isinstance(parent, ModuleType) else None, attr
+
+
 def _pop_module(name: str) -> ModuleType | None:
     module = sys.modules.pop(name, None)
+    parent, attr = _parent_module_binding(name)
+    if parent is not None and hasattr(parent, attr):
+        delattr(parent, attr)
     return module if isinstance(module, ModuleType) else None
 
 
 def _restore_module(name: str, module: ModuleType | None) -> None:
     sys.modules.pop(name, None)
+    parent, attr = _parent_module_binding(name)
+    if parent is not None and hasattr(parent, attr):
+        delattr(parent, attr)
     if module is not None:
         sys.modules[name] = module
+        if parent is not None:
+            setattr(parent, attr, module)
 
 
 @pytest.mark.unit

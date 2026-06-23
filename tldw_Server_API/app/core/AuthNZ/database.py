@@ -449,6 +449,8 @@ class DatabasePool:
             if fs_path.startswith("//"):
                 fs_path = fs_path[1:]
             fs_path = unquote(fs_path or "")
+            if re.match(r"^/[A-Za-z]:[\\/]", fs_path):
+                fs_path = fs_path[1:]
             return url, True, fs_path or None
 
         if not scheme.startswith("sqlite"):

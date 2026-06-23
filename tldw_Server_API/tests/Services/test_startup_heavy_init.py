@@ -189,12 +189,14 @@ async def test_init_local_llm_manager_runs_llamacpp_runtime_reconciler(
     from tldw_Server_API.app.core import Local_LLM as local_llm_package
     from tldw_Server_API.app.core import config as config_module
     from tldw_Server_API.app.core.Local_LLM import llamacpp_runtime_reconciler
+    from tldw_Server_API.app.api.v1 import endpoints as endpoints_package
 
     llamacpp_endpoint_module = ModuleType("tldw_Server_API.app.api.v1.endpoints.llamacpp")
     monkeypatch.setattr(config_module, "get_llamacpp_handler_config", lambda: object())
     monkeypatch.setattr(local_llm_package, "LLMInferenceManager", _Manager, raising=False)
     monkeypatch.setattr(local_llm_package, "LLMManagerConfig", lambda **kwargs: kwargs, raising=False)
     monkeypatch.setattr(llamacpp_runtime_reconciler, "LlamaCppRuntimeReconciler", _Reconciler)
+    monkeypatch.setattr(endpoints_package, "llamacpp", llamacpp_endpoint_module, raising=False)
     monkeypatch.setitem(
         sys.modules,
         "tldw_Server_API.app.api.v1.endpoints.llamacpp",

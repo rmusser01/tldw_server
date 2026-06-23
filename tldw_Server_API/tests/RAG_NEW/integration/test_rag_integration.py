@@ -10,7 +10,6 @@ import warnings
 import pytest
 pytestmark = pytest.mark.integration
 import asyncio
-import tempfile
 import time
 from pathlib import Path
 from typing import List, Dict, Any
@@ -18,6 +17,7 @@ import numpy as np
 from uuid import uuid4
 from datetime import datetime
 
+from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
@@ -99,12 +99,11 @@ class TestRAGPipelineIntegration:
         assert len(result.documents) <= 10
 
     @pytest.mark.asyncio
-    async def test_pipeline_with_empty_database(self):
+    async def test_pipeline_with_empty_database(self, tmp_path: Path):
         """Test pipeline behavior with empty database."""
-        # Create empty database
-        with tempfile.TemporaryDirectory() as temp_dir:
-            db_path = Path(temp_dir) / "empty.db"
-            empty_db = MediaDatabase(str(db_path), "test_client")
+        db_path = tmp_path / "empty.db"
+        empty_db = MediaDatabase(str(db_path), "test_client")
+        try:
             empty_db.initialize_db()
 
             result = await unified_rag_pipeline(
@@ -118,6 +117,11 @@ class TestRAGPipelineIntegration:
             assert isinstance(result, UnifiedRAGResponse)
             assert len(result.documents) == 0
             # Should handle gracefully without errors
+        finally:
+            empty_db.close_connection()
+            reset_managed_sqlite_backends(
+                sqlite_targets=[str(db_path), str(db_path.resolve())]
+            )
 
     @pytest.mark.asyncio
     async def test_pipeline_with_large_dataset(self, media_database):
@@ -600,6 +604,16 @@ class TestPerformanceIntegration:
         import gc
 
         process = psutil.Process()
+
+        # Exclude one-time module/retriever initialization from the leak guard.
+        _ = await unified_rag_pipeline(
+            query="warmup",
+            top_k=10,
+            enable_cache=False,
+            search_mode="fts",
+            media_db_path=str(populated_media_db.db_path)
+        )
+        gc.collect()
         initial_memory = process.memory_info().rss / 1024 / 1024  # MB
 
         # Run many queries
@@ -608,6 +622,7 @@ class TestPerformanceIntegration:
                 query=f"Query {i}",
                 top_k=10,
                 enable_cache=False,
+                search_mode="fts",
                 media_db_path=str(populated_media_db.db_path)
             )
             if i % 10 == 0:

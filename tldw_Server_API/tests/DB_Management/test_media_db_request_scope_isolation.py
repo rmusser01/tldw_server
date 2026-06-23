@@ -136,10 +136,7 @@ def test_get_or_create_media_db_factory_logs_one_info_on_cache_miss(monkeypatch)
     second = deps._get_or_create_media_db_factory(_make_user())
 
     assert first is second
-    expected_target = str(Path("/tmp/1.db").resolve())
-    assert recorder.info_calls == [
-        f"Initializing MediaDbFactory user_id=1 backend=sqlite target={expected_target}"
-    ]
+    assert recorder.info_calls == ["Initializing MediaDbFactory backend=sqlite"]
 
 
 def _make_user(user_id: int = 1) -> User:
@@ -205,6 +202,7 @@ def test_resolve_media_db_for_user_reuses_shared_sqlite_backend_per_user(monkeyp
     monkeypatch.setattr(deps, "_get_db_path_for_user", lambda user_id: Path(f"/tmp/{user_id}.db"), raising=True)
     monkeypatch.setattr(deps, "get_content_backend_instance", lambda: None, raising=True)
     monkeypatch.setattr(deps, "get_scope", lambda: None, raising=True)
+    expected_db_path = str(deps._get_db_path_for_user(1))
     monkeypatch.setattr(
         media_db_session,
         "_create_sqlite_backend",
@@ -222,15 +220,15 @@ def test_resolve_media_db_for_user_reuses_shared_sqlite_backend_per_user(monkeyp
     second = deps._resolve_media_db_for_user(_make_user())
 
     assert first is not second
-    assert backend_calls == [("/tmp/1.db", "1")]
+    assert backend_calls == [(expected_db_path, "1")]
     assert database_calls == [
         {
-            "db_path": "/tmp/1.db",
+            "db_path": expected_db_path,
             "client_id": "1",
             "backend": sentinel_backend,
         },
         {
-            "db_path": "/tmp/1.db",
+            "db_path": expected_db_path,
             "client_id": "1",
             "backend": sentinel_backend,
         },
@@ -258,11 +256,12 @@ def test_get_or_create_media_db_factory_accepts_string_user_ids_via_id_int(monke
 
     string_user = _make_user()
     string_user.id = "7"
+    expected_db_path = str(deps._get_db_path_for_user(7))
 
     factory = deps._get_or_create_media_db_factory(string_user)
 
     assert factory is created[0]
-    assert factory.db_path == "/tmp/7.db"
+    assert factory.db_path == expected_db_path
 
 
 def test_resolve_media_db_for_user_returns_fresh_scoped_session_from_cached_factory(monkeypatch) -> None:

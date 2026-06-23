@@ -232,7 +232,7 @@ def test_date_range_max_age_zero_rejects_everything():
     milliseconds ago has a positive delta, so nothing matches. This is the
     correct behavior — it's an extremely tight boundary."""
     now = datetime.now(timezone.utc)
-    recent = now.isoformat()
+    recent = (now - timedelta(seconds=1)).isoformat()
     old = (now - timedelta(hours=25)).isoformat()
 
     payload = {

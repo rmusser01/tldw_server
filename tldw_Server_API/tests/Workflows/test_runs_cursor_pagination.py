@@ -89,8 +89,6 @@ def test_runs_cursor_pagination_flow(client: TestClient):
     for _ in range(3):
         rid = _start_run(client, wid)
         ids.append(rid)
-    # Ensure they reach terminal (order_by created_at desc)
-    for rid in ids:
         _wait_status(client, rid)
 
     # First page (offset-style)

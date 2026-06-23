@@ -477,7 +477,7 @@ class ShutdownCoordinator:
         if remaining_s <= 0:
             return
         with contextlib.suppress(asyncio.CancelledError, TimeoutError):
-            await asyncio.wait_for(asyncio.shield(task), timeout=remaining_s)
+            await asyncio.wait({task}, timeout=remaining_s)
 
     @staticmethod
     def _consume_stop_task_result(task: asyncio.Task[None]) -> None:

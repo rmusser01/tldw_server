@@ -46,9 +46,10 @@ def _sqlite_cfg(path: str) -> DatabaseConfig:
     return DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=path, client_id="caller-owned")
 
 
-def test_file_backed_sqlite_backends_reused_by_normalized_path_identity(tmp_path: Path):
+def test_file_backed_sqlite_backends_reused_by_normalized_path_identity(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     db_path = tmp_path / "registry.db"
-    relative = os.path.relpath(str(db_path.resolve()), str(Path.cwd()))
+    relative = os.path.relpath(str(db_path.resolve()), str(tmp_path))
     absolute = str(db_path.resolve())
 
     b1 = factory_mod.DatabaseBackendFactory.create_backend(_sqlite_cfg(relative))

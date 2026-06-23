@@ -177,6 +177,8 @@ class TestStateTransitionsSync:
                 failure_threshold=1,
                 recovery_timeout=0.05,
                 success_threshold=2,
+                backoff_factor=100.0,
+                max_recovery_timeout=10.0,
             ),
         )
         with pytest.raises(TransientError):
@@ -399,6 +401,7 @@ class TestHalfOpenSerialProbes:
                 recovery_timeout=0.05,
                 half_open_max_calls=1,
                 success_threshold=2,
+                max_recovery_timeout=1.0,
             ),
         )
         with pytest.raises(TransientError):
@@ -1086,7 +1089,7 @@ class TestPersistentStore:
         name = "lease-limit"
         cfg = CircuitBreakerConfig(
             failure_threshold=1,
-            recovery_timeout=0.05,
+            recovery_timeout=5.0,
             half_open_max_calls=1,
             success_threshold=1,
         )
@@ -1104,7 +1107,7 @@ class TestPersistentStore:
 
         cb_a.record_failure(TransientError("trip"))
         assert cb_a.is_open
-        time.sleep(0.06)
+        cb_a.force_half_open()
 
         release_event = threading.Event()
         result: dict[str, object] = {}
@@ -1175,7 +1178,6 @@ class TestPersistentStore:
             name,
             config=CircuitBreakerConfig(
                 failure_threshold=1,
-                recovery_timeout=0.05,
                 half_open_max_calls=1,
                 success_threshold=2,
             ),
@@ -1183,7 +1185,7 @@ class TestPersistentStore:
 
         cb.record_failure(TransientError("trip"))
         assert cb.is_open
-        time.sleep(0.06)
+        cb.force_half_open()
 
         assert cb.call(_succeed) == "ok"
         assert cb.is_half_open

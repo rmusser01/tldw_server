@@ -36,14 +36,16 @@ vi.mock("@/components/ui/state", () => ({
   SetupRequiredPanel: ({
     title,
     message,
+    titleHeadingLevel = 2,
     primaryAction
   }: {
     title: string
     message: string
+    titleHeadingLevel?: 1 | 2 | 3 | 4 | 5 | 6
     primaryAction: { label: string; onClick: () => void }
   }) => (
     <section data-testid="setup-required-panel">
-      <h2>{title}</h2>
+      {titleHeadingLevel === 1 ? <h1>{title}</h1> : <h2>{title}</h2>}
       <p>{message}</p>
       <button type="button" onClick={primaryAction.onClick}>
         {primaryAction.label}
@@ -85,6 +87,9 @@ describe("OptionSetup readiness route", () => {
     const headings = screen.getAllByRole("heading", { level: 1 })
     expect(headings).toHaveLength(1)
     expect(headings[0]).toHaveTextContent("Setup")
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Setup operator recovery" })
+    ).toBeInTheDocument()
     expect(screen.queryByTestId("unified-setup-shell")).not.toBeInTheDocument()
   })
 
@@ -101,6 +106,9 @@ describe("OptionSetup readiness route", () => {
     const headings = screen.getAllByRole("heading", { level: 1 })
     expect(headings).toHaveLength(1)
     expect(headings[0]).toHaveTextContent("First-time setup")
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Setup operator recovery" })
+    ).toBeInTheDocument()
     expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
   })
 
@@ -117,6 +125,9 @@ describe("OptionSetup readiness route", () => {
     const headings = screen.getAllByRole("heading", { level: 1 })
     expect(headings).toHaveLength(1)
     expect(headings[0]).toHaveTextContent("Setup")
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Setup operator recovery" })
+    ).toBeInTheDocument()
     expect(screen.getByTestId("page-assist-loader")).toBeInTheDocument()
     expect(screen.queryByTestId("unified-setup-shell")).not.toBeInTheDocument()
   })

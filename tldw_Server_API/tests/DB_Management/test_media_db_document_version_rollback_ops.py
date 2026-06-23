@@ -34,8 +34,13 @@ def test_rollback_to_version_returns_error_when_target_version_missing(monkeypat
             return "2026-03-22T00:00:00Z"
 
         def _fetchone_with_connection(self, _conn, query, _params=None):
-            if "SELECT uuid, version, title FROM Media" in query:
-                return {"uuid": "media-uuid", "version": 1, "title": "Rollback Doc"}
+            if "FROM Media WHERE id = ?" in query:
+                return {
+                    "uuid": "media-uuid",
+                    "version": 1,
+                    "title": "Rollback Doc",
+                    "content": "current",
+                }
             return None
 
     monkeypatch.setattr(rollback_ops, "get_document_version", lambda *_args, **_kwargs: None)
@@ -59,8 +64,13 @@ def test_rollback_to_version_returns_error_when_target_is_latest(monkeypatch) ->
             return "2026-03-22T00:00:00Z"
 
         def _fetchone_with_connection(self, _conn, query, _params=None):
-            if "SELECT uuid, version, title FROM Media" in query:
-                return {"uuid": "media-uuid", "version": 1, "title": "Rollback Doc"}
+            if "FROM Media WHERE id = ?" in query:
+                return {
+                    "uuid": "media-uuid",
+                    "version": 1,
+                    "title": "Rollback Doc",
+                    "content": "current",
+                }
             if "SELECT MAX(version_number)" in query:
                 return {"latest_vn": 2}
             return None
@@ -96,12 +106,17 @@ def test_rollback_to_version_success_keeps_hook_failures_non_blocking(monkeypatc
             return "2026-03-22T00:00:00Z"
 
         def _fetchone_with_connection(self, _conn, query, _params=None):
-            if "SELECT uuid, version, title FROM Media" in query:
-                return {"uuid": "media-uuid", "version": 1, "title": "Rollback Doc"}
-            if "SELECT MAX(version_number)" in query:
-                return {"latest_vn": 2}
             if "SELECT * FROM Media WHERE id = ?" in query:
                 return {"uuid": "media-uuid", "content": "rolled-back"}
+            if "FROM Media WHERE id = ?" in query:
+                return {
+                    "uuid": "media-uuid",
+                    "version": 1,
+                    "title": "Rollback Doc",
+                    "content": "current",
+                }
+            if "SELECT MAX(version_number)" in query:
+                return {"latest_vn": 2}
             return None
 
         def create_document_version(self, **_kwargs):
@@ -113,7 +128,7 @@ def test_rollback_to_version_success_keeps_hook_failures_non_blocking(monkeypatc
         def _log_sync_event(self, _conn, entity, entity_uuid, operation, version, payload=None):
             sync_events.append((entity, entity_uuid, version, payload))
 
-        def _update_fts_media(self, _conn, media_id, title, content):
+        def _update_fts_media(self, _conn, media_id, title, content, **_kwargs):
             fts_updates.append((media_id, title, content))
 
     class _FailingCollectionsDb:

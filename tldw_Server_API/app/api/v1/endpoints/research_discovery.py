@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, rbac_rate_limit
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    check_rate_limit,
+    get_request_user,
+    rbac_rate_limit,
+)
 from tldw_Server_API.app.api.v1.schemas.research_discovery_schemas import (
     ResearchDiscoverySearchRequest,
     ResearchDiscoverySearchResponse,
     ResearchSourceListResponse,
     ResearchSourceResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Research.discovery import (
     ResearchDiscoveryService,
     default_source_catalog,

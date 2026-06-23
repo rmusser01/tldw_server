@@ -105,7 +105,7 @@ async def test_pocket_tts_cpp_probe_accepts_only_when_later_stdout_progress_arri
         model_path=Path("/tmp/models"),
         tokenizer_path=Path("/tmp/tokenizer.model"),
         precision="int8",
-        timeout=0.1,
+        timeout=0.4,
         enable_voice_cache=True,
     )
 
@@ -287,6 +287,28 @@ async def test_write_runtime_file_writes_via_atomic_replace(tmp_path, monkeypatc
     assert dst_path == target_path
     assert temp_bytes == b"new-bytes"
     assert old_bytes == b"old-bytes"
+    assert target_path.read_bytes() == b"new-bytes"
+
+
+@pytest.mark.asyncio
+async def test_write_runtime_file_tolerates_directory_fsync_permission_error(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters import pocket_tts_cpp_runtime as runtime_module
+
+    target_path = tmp_path / "voices" / "providers" / "pocket_tts_cpp" / "voice.wav"
+    real_open = runtime_module.os.open
+    directory_open_attempts: list[Path] = []
+
+    def _fake_open(path, flags, *args, **kwargs):
+        if Path(path) == target_path.parent:
+            directory_open_attempts.append(Path(path))
+            raise PermissionError("directory fsync unsupported")
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(runtime_module.os, "open", _fake_open, raising=True)
+
+    await runtime_module._write_runtime_file(target_path, b"new-bytes")
+
+    assert directory_open_attempts == [target_path.parent]
     assert target_path.read_bytes() == b"new-bytes"
 
 
