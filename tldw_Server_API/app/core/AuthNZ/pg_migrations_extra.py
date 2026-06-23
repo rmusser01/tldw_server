@@ -2572,6 +2572,58 @@ async def ensure_privilege_snapshots_table_pg(pool: DatabasePool | None = None) 
         return False
 
 
+async def ensure_mcp_prompt_read_permission_pg(pool: DatabasePool | None = None) -> bool:
+    """Ensure prompts.read and default admin/user grants exist on PostgreSQL."""
+    try:
+        db_pool = pool or await get_db_pool()
+        if getattr(db_pool, "pool", None) is None:
+            return False
+
+        async with db_pool.transaction() as conn:
+            existing_tables = await conn.fetch(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = current_schema()
+                  AND table_name = ANY($1::text[])
+                """,
+                ["roles", "permissions", "role_permissions"],
+            )
+            table_names = {str(row["table_name"]) for row in existing_tables}
+            if {"roles", "permissions", "role_permissions"} - table_names:
+                logger.debug("PG MCP prompts.read seed skipped; RBAC core tables are incomplete")
+                return False
+
+            await conn.execute(
+                """
+                INSERT INTO permissions (name, description, category)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (name) DO NOTHING
+                """,
+                "prompts.read",
+                "Read MCP prompts",
+                "prompts",
+            )
+            await conn.execute(
+                """
+                INSERT INTO role_permissions (role_id, permission_id)
+                SELECT r.id, p.id
+                FROM roles r
+                JOIN permissions p ON p.name = $1
+                WHERE r.name = ANY($2::text[])
+                ON CONFLICT (role_id, permission_id) DO NOTHING
+                """,
+                "prompts.read",
+                ["admin", "user"],
+            )
+
+        logger.info("Ensured PostgreSQL MCP prompts.read permission and default grants")
+        return True
+    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(f"Failed to ensure PostgreSQL MCP prompts.read permission: {exc}")
+        return False
+
+
 async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool:
     """Ensure core AuthNZ tables exist for PostgreSQL backends.
 
@@ -2589,6 +2641,7 @@ async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool
                 await db_pool.execute(sql, *params)
             except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(f"PG ensure authnz core tables DDL failed: {exc}")
+        await ensure_mcp_prompt_read_permission_pg(db_pool)
         logger.info(
             "Ensured PostgreSQL AuthNZ core tables "
             "(audit_logs, sessions, registration_codes, RBAC, orgs/teams)"

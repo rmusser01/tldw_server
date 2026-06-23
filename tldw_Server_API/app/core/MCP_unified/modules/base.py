@@ -590,6 +590,24 @@ class BaseModule(ABC):
         """Get a prompt with arguments"""
         raise NotImplementedError(f"Prompt not implemented for {self.name}")
 
+    async def get_prompts_for_context(self, context: Optional[Any], params: dict[str, Any]) -> dict[str, Any]:
+        """Get prompts for a request context.
+
+        Dynamic modules can override this to honor per-user databases,
+        permissions, scopes, and pagination. Static modules inherit the
+        existing context-free prompt list behavior.
+        """
+        return {"prompts": await self.get_prompts()}
+
+    async def get_prompt_for_context(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context: Optional[Any],
+    ) -> dict[str, Any]:
+        """Get one prompt for a request context."""
+        return await self.get_prompt(name, arguments)
+
     # Validation helpers
 
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]):  # noqa: B027

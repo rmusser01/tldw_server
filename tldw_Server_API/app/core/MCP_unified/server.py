@@ -543,7 +543,7 @@ class MCPServer:
                 # Register default modules (will be implemented when migrating modules)
                 await self._register_default_modules()
 
-                # Ensure default tool permissions exist (wildcard)
+                # Ensure default MCP permissions exist.
                 await self._ensure_default_tool_permissions()
 
                 # Start background tasks
@@ -557,11 +557,11 @@ class MCPServer:
                 raise
 
     async def _ensure_default_tool_permissions(self):
-        """Seed wildcard tool permission tools.execute:* if missing."""
+        """Seed MCP startup permissions if missing."""
         try:
             await self.permission_seeder.seed_default_tool_permissions()
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Seed wildcard tool permission failed: {self._mask_secrets(str(e))}")
+            logger.debug(f"Seed default MCP permissions failed: {self._mask_secrets(str(e))}")
 
     async def shutdown(self):
         """Gracefully shutdown the server"""

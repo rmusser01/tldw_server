@@ -64,6 +64,12 @@ from .interfaces.runtime import (
     ToolHookCallContext,
     ToolHookDecision,
 )
+from .modules.implementations.prompts_catalog import (
+    CONFIG_PROMPT_PREFIX,
+    LIBRARY_PROMPT_PREFIX,
+    PromptCatalogError,
+    decode_prompt_cursor,
+)
 from .modules.base import BaseModule
 from .tool_observability import (
     attach_execution_eval_metadata,
@@ -1258,6 +1264,96 @@ class MCPProtocol:
         if await self._has_module_permission(context, module_id):
             return self._scope_allows(context, Resource.PROMPT.value, prompt_name)
         return False
+
+    async def _has_namespaced_prompt_permission(self, context: RequestContext, prompt_name: str) -> bool:
+        """Check prompt catalog namespace access without falling back to module permission."""
+        if not await self._rbac_check(context.user_id, Resource.PROMPT, Action.READ, prompt_name):
+            return False
+        if not self._scope_allows(context, Resource.PROMPT.value, prompt_name):
+            return False
+        return self._api_key_allows(context, is_write=None)
+
+    @staticmethod
+    def _prompt_warning_name(warning: dict[str, Any]) -> Optional[str]:
+        """Resolve an optional prompt name from catalog warning metadata."""
+
+        explicit_name = warning.get("_prompt_name") or warning.get("prompt_name")
+        if isinstance(explicit_name, str) and explicit_name:
+            return explicit_name
+
+        source = warning.get("source")
+        if source == "library":
+            prompt_uuid = warning.get("prompt_uuid")
+            if isinstance(prompt_uuid, str) and prompt_uuid:
+                return f"{LIBRARY_PROMPT_PREFIX}{prompt_uuid}"
+        if source == "config":
+            entry_id = warning.get("id")
+            if isinstance(entry_id, str) and entry_id:
+                return f"{CONFIG_PROMPT_PREFIX}{entry_id}"
+        return None
+
+    async def _visible_prompt_warning(
+        self,
+        context: RequestContext,
+        warning: dict[str, Any],
+        module_id: Optional[str],
+    ) -> Optional[dict[str, Any]]:
+        """Return sanitized prompt warning metadata when visible to the caller."""
+
+        prompt_name = self._prompt_warning_name(warning)
+        if prompt_name:
+            if self._is_namespaced_prompt_name(prompt_name):
+                if not await self._has_namespaced_prompt_permission(context, prompt_name):
+                    return None
+            elif not await self._has_prompt_permission(context, prompt_name, module_id):
+                return None
+
+        sanitized = warning.copy()
+        for key in ("_prompt_name", "prompt_name", "prompt_uuid", "prompt_id", "id"):
+            sanitized.pop(key, None)
+        return sanitized
+
+    @staticmethod
+    def _is_namespaced_prompt_name(prompt_name: Any) -> bool:
+        return (
+            isinstance(prompt_name, str)
+            and (
+                prompt_name.startswith(LIBRARY_PROMPT_PREFIX)
+                or prompt_name.startswith(CONFIG_PROMPT_PREFIX)
+            )
+        )
+
+    def _has_restrictive_prompt_scope(self, context: RequestContext) -> bool:
+        """Return whether MCP scopes restrict prompt visibility for this request."""
+
+        scopes = self._mcp_scopes(context)
+        if not scopes:
+            return False
+        for scope in scopes:
+            try:
+                parts = scope.strip().lower().split(":")
+            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
+                continue
+            if len(parts) == 2 and parts[0] == "mcp" and parts[1] == "*":
+                return False
+            if len(parts) >= 3 and parts[0] == "mcp":
+                kind = parts[1]
+                value = ":".join(parts[2:])
+                if kind in {"*", "prompt"} and value in {"", "*"}:
+                    return False
+        return True
+
+    @staticmethod
+    def _prompt_cursor_has_identifier_fields(cursor: Any) -> bool:
+        """Return whether a prompt catalog cursor carries prompt identifiers."""
+
+        if not isinstance(cursor, str) or not cursor:
+            return False
+        try:
+            decoded = decode_prompt_cursor(cursor)
+        except PromptCatalogError:
+            return False
+        return decoded.library_after_name is not None or decoded.library_after_uuid is not None
 
     @staticmethod
     def _hash_arguments(arguments: dict[str, Any]) -> Optional[str]:
@@ -2623,7 +2719,7 @@ class MCPProtocol:
         capabilities = {
             "tools": {"available": bool(modules)},
             "resources": {"available": bool(modules)},
-            "prompts": {"available": bool(modules)}
+            "prompts": {"listChanged": False}
         }
 
         return {
@@ -3996,27 +4092,73 @@ class MCPProtocol:
     ) -> dict[str, Any]:
         """List available prompts"""
         prompts = []
+        warnings: list[dict[str, Any]] = []
+        next_cursor: Any = None
         modules = await self.module_registry.get_all_modules()
 
         for module_id, module in modules.items():
             try:
-                if not await self._has_module_permission(context, module_id):
+                if module_id != "prompts" and not await self._has_module_permission(context, module_id):
                     continue
-                module_prompts = await module.get_prompts()
+                module_warnings: list[dict[str, Any]] = []
+                module_result = await module.get_prompts_for_context(context, params or {})
+                if not isinstance(module_result, dict):
+                    module_prompts = []
+                else:
+                    module_prompts = module_result.get("prompts", [])
+                    if "nextCursor" in module_result:
+                        next_cursor = module_result.get("nextCursor")
+                    meta = module_result.get("_meta")
+                    if isinstance(meta, dict):
+                        tldw_meta = meta.get("tldw")
+                        if isinstance(tldw_meta, dict):
+                            module_warnings = tldw_meta.get("warnings")
+                            if isinstance(module_warnings, list):
+                                module_warnings = [
+                                    warning for warning in module_warnings if isinstance(warning, dict)
+                                ]
 
                 for prompt in module_prompts:
                     name = prompt.get("name") if isinstance(prompt, dict) else None
-                    if name and not await self._has_prompt_permission(context, name, module_id):
+                    if self._is_namespaced_prompt_name(name):
+                        if not await self._has_namespaced_prompt_permission(context, name):
+                            continue
+                    elif name and not await self._has_prompt_permission(context, name, module_id):
                         continue
                     prompt_copy = prompt.copy() if isinstance(prompt, dict) else prompt
                     if isinstance(prompt_copy, dict):
                         prompt_copy["module"] = module_id
                     prompts.append(prompt_copy)
 
+                for warning in module_warnings:
+                    visible_warning = await self._visible_prompt_warning(context, warning, module_id)
+                    if visible_warning:
+                        warnings.append(visible_warning)
+
+            except PromptCatalogError as e:
+                if e.internal:
+                    context.logger.error(
+                        "Internal prompt catalog list error from module {}: {}",
+                        module_id,
+                        e.code,
+                    )
+                    raise RuntimeError("Failed to list prompts") from None
+                raise InvalidParamsException(str(e)) from e
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as e:
                 context.logger.exception(f"Error getting prompts from module {module_id}: {e}")
 
-        return {"prompts": prompts}
+        if (
+            self._has_restrictive_prompt_scope(context)
+            and self._prompt_cursor_has_identifier_fields(next_cursor)
+        ):
+            next_cursor = None
+
+        result: dict[str, Any] = {"prompts": prompts}
+        if next_cursor is not None:
+            result["nextCursor"] = next_cursor
+        if warnings:
+            result["_meta"] = {"tldw": {"warnings": warnings}}
+        return result
 
     async def _handle_prompts_get(
         self,
@@ -4025,10 +4167,40 @@ class MCPProtocol:
     ) -> dict[str, Any]:
         """Get a specific prompt"""
         name = params.get("name")
-        if not name:
+        if not isinstance(name, str) or not name:
             raise InvalidParamsException("Prompt name is required")
 
         arguments = params.get("arguments", {})
+        if arguments is None:
+            arguments = {}
+        if not isinstance(arguments, dict):
+            raise InvalidParamsException("Prompt arguments must be an object")
+
+        if self._is_namespaced_prompt_name(name):
+            module = await self.module_registry.get_module("prompts")
+            if not module:
+                raise InvalidParamsException(f"Prompt not found: {name}")
+            if not await self._has_namespaced_prompt_permission(context, name):
+                raise PermissionError(f"Permission denied for prompt: {name}")
+            try:
+                return await module.get_prompt_for_context(name, arguments, context)
+            except PromptCatalogError as e:
+                if e.code == "permission_denied":
+                    raise PermissionError(f"Permission denied for prompt: {name}") from e
+                if e.internal:
+                    if name.startswith(LIBRARY_PROMPT_PREFIX):
+                        prompt_namespace = "library"
+                    elif name.startswith(CONFIG_PROMPT_PREFIX):
+                        prompt_namespace = "config"
+                    else:
+                        prompt_namespace = "unknown"
+                    context.logger.error(
+                        "Internal prompt catalog get error for namespace {}: {}",
+                        prompt_namespace,
+                        e.code,
+                    )
+                    raise RuntimeError("Failed to get prompt") from None
+                raise InvalidParamsException(str(e)) from e
 
         # Find module for prompt
         module = await self.module_registry.find_module_for_prompt(name)
@@ -4040,7 +4212,7 @@ class MCPProtocol:
             raise PermissionError(f"Permission denied for prompt: {name}")
 
         # Get prompt
-        prompt = await module.get_prompt(name, arguments)
+        prompt = await module.get_prompt_for_context(name, arguments, context)
 
         return prompt
 

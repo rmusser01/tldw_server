@@ -899,7 +899,7 @@ def test_mcp_server_logs_host_adapter_fallbacks(
 
 
 @pytest.mark.asyncio
-async def test_tldw_permission_seeder_uses_acquired_connection(
+async def test_tldw_permission_seeder_uses_shared_rbac_seed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app.core.MCP_unified.adapters import tldw_runtime
@@ -922,34 +922,32 @@ async def test_tldw_permission_seeder_uses_acquired_connection(
             return _AcquireContext(self.conn)
 
     pool = _Pool()
-    ensure_calls: list[tuple[object, str, str, str]] = []
+    ensure_calls: list[tuple[object, bool, bool]] = []
 
     async def _get_db_pool() -> _Pool:
         return pool
 
-    async def _ensure_permission(
+    async def _ensure_baseline_rbac_seed(
         db: object,
-        name: str,
-        description: str,
         *,
-        category: str,
-    ) -> dict[str, Any]:
-        ensure_calls.append((db, name, description, category))
-        return {"id": 1, "name": name, "description": description, "category": category}
+        include_mcp_permissions: bool,
+        is_postgres: bool | None = None,
+    ) -> None:
+        ensure_calls.append((db, include_mcp_permissions, bool(is_postgres)))
 
     monkeypatch.setattr(
         "tldw_Server_API.app.core.AuthNZ.database.get_db_pool",
         _get_db_pool,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.services.admin_roles_permissions_service.ensure_permission",
-        _ensure_permission,
+        "tldw_Server_API.app.core.AuthNZ.rbac_seed.ensure_baseline_rbac_seed",
+        _ensure_baseline_rbac_seed,
     )
 
     await tldw_runtime.TldwPermissionSeeder().seed_default_tool_permissions()
 
     assert ensure_calls == [
-        (pool.conn, "tools.execute:*", "Wildcard tool execution", "tools")
+        (pool.conn, True, False)
     ]
 
 

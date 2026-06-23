@@ -493,7 +493,7 @@ async def setup_database():
             async with pool.transaction() as conn:
                 await ensure_baseline_rbac_seed(
                     conn,
-                    include_mcp_permissions=False,
+                    include_mcp_permissions=True,
                     is_postgres=True,
                 )
 

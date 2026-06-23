@@ -1476,6 +1476,7 @@ async def list_resources(
 @router.get("/prompts")
 async def list_prompts(
     http_request: Request,
+    cursor: str | None = Query(None, description="Opaque MCP prompt list cursor"),
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     _guard: None = Depends(enforce_http_security),
 ):
@@ -1484,7 +1485,8 @@ async def list_prompts(
 
     Prompts are filtered based on user permissions if authenticated.
     """
-    request = MCPRequest(method="prompts/list", id="http-prompts-list")
+    params = {"cursor": cursor} if cursor is not None else None
+    request = MCPRequest(method="prompts/list", params=params, id="http-prompts-list")
 
     server = get_mcp_server()
     if not server.initialized:

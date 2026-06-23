@@ -44,6 +44,7 @@ _BASELINE_PERMISSIONS: Sequence[PermissionDef] = (
 
 _MCP_PERMISSIONS: Sequence[PermissionDef] = (
     ("modules.read", "Read MCP modules", "modules"),
+    ("prompts.read", "Read MCP prompts", "prompts"),
     ("tools.execute:*", "Execute any MCP tool", "tools"),
 )
 
@@ -74,9 +75,10 @@ def _build_role_grants(permission_names: Iterable[str], *, include_mcp_permissio
     }
 
     if include_mcp_permissions:
-        if "modules.read" in base and "modules.read" not in grants["user"]:
-            grants["user"].append("modules.read")
-        for p in ("modules.read", "tools.execute:*"):
+        for p in ("modules.read", "prompts.read"):
+            if p in base and p not in grants["user"]:
+                grants["user"].append(p)
+        for p in ("modules.read", "prompts.read", "tools.execute:*"):
             if p in base and p not in grants["admin"]:
                 grants["admin"].append(p)
     return grants

@@ -64,6 +64,40 @@ modules:
     max_concurrent: 10
     settings: {}
 
+  - id: prompts
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.prompts_module:PromptsModule
+    enabled: true
+    name: Prompts
+    version: "1.0.0"
+    department: knowledge
+    max_concurrent: 10
+    settings:
+      prompt_list_page_size: 50
+      max_rendered_prompt_chars: 100000
+      config_prompts:
+        enabled: true
+        entries: []
+        # Example entries; replace entries: [] with explicit entries like these
+        # to publish config prompts through MCP.
+        # entries:
+        #   - id: rag.retrieval_guidance
+        #     module: rag
+        #     key: retrieval_guidance
+        #     title: Retrieval Guidance
+        #   - id: chat.summary
+        #     title: Conversation Summary
+        #     messages:
+        #       - role: system
+        #         module: chat
+        #         key: summary_system
+        #       - role: user
+        #         module: chat
+        #         key: summary_user
+        #   - id: mcp.search_knowledge
+        #     module: mcp
+        #     key: search_knowledge
+        #     title: Search Knowledge
+
   - id: persona_visuals
     class: tldw_Server_API.app.core.MCP_unified.modules.implementations.persona_visuals_module:PersonaVisualsModule
     enabled: false
