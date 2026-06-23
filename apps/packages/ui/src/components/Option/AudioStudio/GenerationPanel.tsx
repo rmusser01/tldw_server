@@ -1,74 +1,38 @@
 import React from "react"
 import { Button, Typography } from "antd"
 import { Play } from "lucide-react"
-import { useCreateAudioStudioGeneration } from "@/hooks/useAudioStudioGeneration"
 import { useAudioStudioStore } from "@/store/audio-studio"
-import {
-  createAudioStudioIdempotencyKey,
-  getFirstSectionTargetId,
-  getMusicTrackTargetId,
-  getProjectRevisionId
-} from "./generationPayload"
+import { useAudioStudioGenerationActions } from "./useAudioStudioGenerationActions"
 
 const { Text } = Typography
 
 export const GenerationPanel: React.FC = () => {
   const activeWorkflow = useAudioStudioStore((state) => state.activeWorkflow)
-  const activeProject = useAudioStudioStore((state) => state.activeProject)
-  const generation = useCreateAudioStudioGeneration(
-    activeProject?.project_id ?? null
-  )
+  const {
+    isPending,
+    musicDisabledReason,
+    queueMusicGeneration,
+    queueSpeechGeneration,
+    speechDisabledReason
+  } = useAudioStudioGenerationActions()
   const isMusic = activeWorkflow === "music"
-  const revisionId = getProjectRevisionId(activeProject)
-  const sectionTargetId = getFirstSectionTargetId(activeProject)
-  const disabledReason = !activeProject
-    ? "Select a project before queuing generation."
-    : !revisionId
-      ? "Save the project before queuing generation."
-      : !isMusic && !sectionTargetId
-        ? "Add a section before queuing speech generation."
-        : undefined
+  const disabledReason = isMusic ? musicDisabledReason : speechDisabledReason
 
   const queueGeneration = () => {
-    if (!activeProject || !revisionId) return
-
     if (isMusic) {
-      void generation.mutateAsync({
-        kind: "music",
-        provider: "ace_step",
-        idempotency_key: createAudioStudioIdempotencyKey(
-          "music",
-          activeProject.project_id
-        ),
-        target_resource_kind: "track",
-        target_resource_id: getMusicTrackTargetId(activeProject),
-        target_revision_id: revisionId,
-        options: {
+      queueMusicGeneration(
+        {
           prompt: "",
           lyrics: "",
           style: "",
           duration: 45
-        }
-      })
+        },
+        "ace_step"
+      )
       return
     }
 
-    if (!sectionTargetId) return
-
-    void generation.mutateAsync({
-      kind: "speech",
-      provider: "tts",
-      idempotency_key: createAudioStudioIdempotencyKey(
-        "speech",
-        activeProject.project_id
-      ),
-      target_resource_kind: "section",
-      target_resource_id: sectionTargetId,
-      target_revision_id: revisionId,
-      options: {
-        workflow: activeWorkflow
-      }
-    })
+    queueSpeechGeneration()
   }
 
   return (
@@ -86,8 +50,8 @@ export const GenerationPanel: React.FC = () => {
         type="primary"
         block
         icon={<Play className="h-4 w-4" />}
-        disabled={Boolean(disabledReason) || generation.isPending}
-        loading={generation.isPending}
+        disabled={Boolean(disabledReason) || isPending}
+        loading={isPending}
         title={disabledReason}
         onClick={queueGeneration}
       >

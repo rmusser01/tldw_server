@@ -3,8 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   createAudioStudioProject,
   listAudioStudioProjects,
+  updateAudioStudioProject,
   type CreateAudioStudioProjectRequest,
-  type ListAudioStudioProjectsParams
+  type ListAudioStudioProjectsParams,
+  type UpdateAudioStudioProjectRequest
 } from "@/services/audio-studio"
 import { useAudioStudioStore } from "@/store/audio-studio"
 
@@ -46,6 +48,28 @@ export const useCreateAudioStudioProject = () => {
     onSuccess: (project) => {
       upsertProjectFromServer(project)
       setActiveProjectId(project.project_id)
+      queryClient.invalidateQueries({
+        queryKey: audioStudioProjectQueryKeys.projects()
+      })
+    }
+  })
+}
+
+export const useUpdateAudioStudioProject = (projectId: string | null) => {
+  const queryClient = useQueryClient()
+  const upsertProjectFromServer = useAudioStudioStore(
+    (state) => state.upsertProjectFromServer
+  )
+  const markProjectClean = useAudioStudioStore((state) => state.markProjectClean)
+
+  return useMutation({
+    mutationFn: (payload: UpdateAudioStudioProjectRequest) => {
+      if (!projectId) throw new Error("Audio Studio project is required")
+      return updateAudioStudioProject(projectId, payload)
+    },
+    onSuccess: (project) => {
+      markProjectClean(project.project_id)
+      upsertProjectFromServer(project)
       queryClient.invalidateQueries({
         queryKey: audioStudioProjectQueryKeys.projects()
       })

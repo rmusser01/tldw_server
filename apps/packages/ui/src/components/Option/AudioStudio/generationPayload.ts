@@ -1,8 +1,16 @@
 import type { AudioStudioProject } from "@/store/audio-studio"
 
+const LOCAL_DRAFT_REVISION_ID = "local-draft"
+
+export const isUsableProjectRevisionId = (revisionId?: string | null) =>
+  Boolean(revisionId && revisionId !== LOCAL_DRAFT_REVISION_ID)
+
 export const getProjectRevisionId = (
   project: Pick<AudioStudioProject, "current_revision_id" | "revision_id"> | null
-) => project?.current_revision_id ?? project?.revision_id ?? null
+) => {
+  const revisionId = project?.current_revision_id ?? project?.revision_id ?? null
+  return isUsableProjectRevisionId(revisionId) ? revisionId : null
+}
 
 export const getMusicTrackTargetId = (
   project: Pick<AudioStudioProject, "tracks"> | null

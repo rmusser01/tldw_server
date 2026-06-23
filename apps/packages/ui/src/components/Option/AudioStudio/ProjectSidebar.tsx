@@ -3,39 +3,30 @@ import { Button, Empty, Typography } from "antd"
 import { Plus } from "lucide-react"
 import {
   AUDIO_STUDIO_WORKFLOWS,
-  useAudioStudioStore,
-  type AudioStudioProject
+  useAudioStudioStore
 } from "@/store/audio-studio"
+import { useCreateAudioStudioProject } from "@/hooks/useAudioStudioProjects"
 
 const { Text } = Typography
-
-const createDraftProject = (workflow: AudioStudioProject["workflow"]): AudioStudioProject => ({
-  project_id: crypto.randomUUID(),
-  title: `Untitled ${AUDIO_STUDIO_WORKFLOWS.find((item) => item.id === workflow)?.label ?? "Audio"} Project`,
-  workflow,
-  status: "draft",
-  revision_id: "local-draft",
-  updated_at: new Date().toISOString(),
-  sections: [],
-  tracks: [],
-  clips: [],
-  settings: {}
-})
 
 export const ProjectSidebar: React.FC = () => {
   const projects = useAudioStudioStore((state) => state.projects)
   const activeProjectId = useAudioStudioStore((state) => state.activeProjectId)
   const activeWorkflow = useAudioStudioStore((state) => state.activeWorkflow)
-  const setProjects = useAudioStudioStore((state) => state.setProjects)
-  const setActiveProjectId = useAudioStudioStore((state) => state.setActiveProjectId)
+  const createProjectMutation = useCreateAudioStudioProject()
   const visibleProjects = projects.filter(
     (project) => project.workflow === activeWorkflow
   )
 
   const createProject = () => {
-    const project = createDraftProject(activeWorkflow)
-    setProjects([...projects, project])
-    setActiveProjectId(project.project_id)
+    const workflowLabel =
+      AUDIO_STUDIO_WORKFLOWS.find((item) => item.id === activeWorkflow)?.label ??
+      "Audio"
+
+    void createProjectMutation.mutateAsync({
+      title: `Untitled ${workflowLabel} Project`,
+      workflow: activeWorkflow
+    })
   }
 
   return (
@@ -47,6 +38,8 @@ export const ProjectSidebar: React.FC = () => {
           type="text"
           aria-label="New Audio Studio project"
           icon={<Plus className="h-4 w-4" />}
+          disabled={createProjectMutation.isPending}
+          loading={createProjectMutation.isPending}
           onClick={createProject}
         />
       </div>

@@ -6,6 +6,14 @@ const generationMocks = vi.hoisted(() => ({
   mutateAsync: vi.fn()
 }))
 
+const projectHookMocks = vi.hoisted(() => ({
+  useProjects: vi.fn(),
+  createProject: vi.fn(),
+  updateProject: vi.fn(),
+  createPending: false,
+  updatePending: false
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, fallback?: string) => fallback ?? _key
@@ -43,6 +51,19 @@ vi.mock("@/hooks/useAudioStudioGeneration", () => ({
   useCreateAudioStudioGeneration: () => ({
     mutateAsync: generationMocks.mutateAsync,
     isPending: false
+  })
+}))
+
+vi.mock("@/hooks/useAudioStudioProjects", () => ({
+  useAudioStudioProjects: (...args: unknown[]) =>
+    projectHookMocks.useProjects(...args),
+  useCreateAudioStudioProject: () => ({
+    mutateAsync: projectHookMocks.createProject,
+    isPending: projectHookMocks.createPending
+  }),
+  useUpdateAudioStudioProject: () => ({
+    mutateAsync: projectHookMocks.updateProject,
+    isPending: projectHookMocks.updatePending
   })
 }))
 
@@ -84,12 +105,23 @@ const setActiveProject = (overrides: Record<string, unknown> = {}) => {
 describe("AudioStudioPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    projectHookMocks.createPending = false
+    projectHookMocks.updatePending = false
+    projectHookMocks.useProjects.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      error: null
+    })
     useAudioStudioStore.getState().resetAudioStudio()
   })
 
   it("renders all workflow labels as first-class choices", () => {
     render(<AudioStudioPage />)
 
+    expect(projectHookMocks.useProjects).toHaveBeenCalledWith({
+      workflow: "narration",
+      includeArchived: false
+    })
     expect(screen.getByRole("heading", { name: "Audio Studio" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /Narration/ })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /Podcast/ })).toBeInTheDocument()
@@ -135,6 +167,97 @@ describe("AudioStudioPage", () => {
     expect(screen.getByLabelText("Lyrics")).toBeInTheDocument()
     expect(screen.getByLabelText("Style")).toBeInTheDocument()
     expect(screen.getByLabelText("Provider")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("option", { name: "Server default" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("shows non-disruptive project loading and error states", () => {
+    projectHookMocks.useProjects.mockReturnValueOnce({
+      isLoading: true,
+      isError: false,
+      error: null
+    })
+    const { rerender } = render(<AudioStudioPage />)
+
+    expect(
+      screen.getByText("Loading Audio Studio projects...")
+    ).toBeInTheDocument()
+
+    projectHookMocks.useProjects.mockReturnValueOnce({
+      isLoading: false,
+      isError: true,
+      error: new Error("Nope")
+    })
+    rerender(<AudioStudioPage />)
+
+    expect(
+      screen.getByText("Audio Studio projects could not load.")
+    ).toBeInTheDocument()
+  })
+
+  it("creates new projects through the server-backed create hook", async () => {
+    useAudioStudioStore.getState().setActiveWorkflow("podcast")
+
+    render(<AudioStudioPage />)
+
+    fireEvent.click(screen.getByRole("button", { name: "New Audio Studio project" }))
+
+    await waitFor(() => expect(projectHookMocks.createProject).toHaveBeenCalled())
+    expect(projectHookMocks.createProject).toHaveBeenCalledWith({
+      title: "Untitled Podcast Project",
+      workflow: "podcast"
+    })
+    expect(
+      useAudioStudioStore
+        .getState()
+        .projects.some((project) => project.revision_id === "local-draft")
+    ).toBe(false)
+  })
+
+  it("saves active project edits through the update hook", async () => {
+    setActiveProject({
+      workflow: "briefing",
+      description: "Existing description",
+      settings: { voice: "Ava" }
+    })
+    useAudioStudioStore.getState().setActiveWorkflow("briefing")
+
+    render(<AudioStudioPage />)
+
+    fireEvent.change(screen.getByLabelText("Project title"), {
+      target: { value: "Renamed project" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(projectHookMocks.updateProject).toHaveBeenCalled())
+    expect(projectHookMocks.updateProject).toHaveBeenCalledWith({
+      title: "Renamed project",
+      description: "Existing description",
+      settings: { voice: "Ava" },
+      base_revision_id: "revision-current"
+    })
+  })
+
+  it("disables save and generation for projects without a real revision", () => {
+    setActiveProject({
+      workflow: "music",
+      current_revision_id: undefined,
+      revision_id: "local-draft"
+    })
+    useAudioStudioStore.getState().setActiveWorkflow("music")
+
+    render(<AudioStudioPage />)
+
+    fireEvent.change(screen.getByLabelText("Prompt"), {
+      target: { value: "Warm documentary intro" }
+    })
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Generate music" })).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: "Queue music generation" })
+    ).toBeDisabled()
   })
 
   it("queues music generation with controlled Music workflow inputs", async () => {
@@ -209,6 +332,41 @@ describe("AudioStudioPage", () => {
         kind: "speech",
         provider: "tts",
         target_resource_kind: "section",
+        target_resource_id: "section-1",
+        target_revision_id: "revision-current"
+      })
+    )
+  })
+
+  it("queues Podcast and Briefing inline speech actions when a section target exists", async () => {
+    setActiveProject({ workflow: "podcast" })
+    useAudioStudioStore.getState().setActiveWorkflow("podcast")
+    const { rerender } = render(<AudioStudioPage />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate segment speech" }))
+
+    await waitFor(() => expect(generationMocks.mutateAsync).toHaveBeenCalled())
+    expect(generationMocks.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "speech",
+        provider: "tts",
+        target_resource_kind: "section",
+        target_resource_id: "section-1",
+        target_revision_id: "revision-current"
+      })
+    )
+
+    generationMocks.mutateAsync.mockClear()
+    setActiveProject({ workflow: "briefing" })
+    useAudioStudioStore.getState().setActiveWorkflow("briefing")
+    rerender(<AudioStudioPage />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate briefing sections" }))
+
+    await waitFor(() => expect(generationMocks.mutateAsync).toHaveBeenCalled())
+    expect(generationMocks.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "speech",
         target_resource_id: "section-1",
         target_revision_id: "revision-current"
       })

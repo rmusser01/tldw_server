@@ -29,6 +29,7 @@ modified_files:
 - apps/packages/ui/src/components/Option/AudioStudio/MusicWorkflow.tsx
 - apps/packages/ui/src/components/Option/AudioStudio/GenerationPanel.tsx
 - apps/packages/ui/src/components/Option/AudioStudio/generationPayload.ts
+- apps/packages/ui/src/components/Option/AudioStudio/useAudioStudioGenerationActions.ts
 - apps/packages/ui/src/components/Option/AudioStudio/RenderExportPanel.tsx
 - apps/packages/ui/src/components/Option/AudioStudio/MigrationBanner.tsx
 - apps/packages/ui/src/components/Option/AudioStudio/CompatibilityRedirect.tsx
@@ -93,6 +94,14 @@ Follow-up verification:
 - `bunx vitest run ../packages/ui/src/components/Option/AudioStudio/__tests__/AudioStudioPage.test.tsx` - 8 passed.
 - `bunx vitest run ../packages/ui/src/services/__tests__/audio-studio.test.ts ../packages/ui/src/store/__tests__/audio-studio.test.tsx ../packages/ui/src/hooks/__tests__/useAudioStudioProjects.test.tsx ../packages/ui/src/routes/__tests__/route-metadata.coverage.test.ts __tests__/pages/audio-studio-route.test.tsx` - 20 passed.
 - `git diff --check` on TASK-2350 follow-up paths passed.
+- Bandit remains not applicable; frontend-only TypeScript/React changes, no Python/backend code touched.
+
+Code-quality review follow-up: mounted `useAudioStudioProjects` in `/audio-studio` with active workflow filtering and compact loading/error states. Replaced sidebar local-only draft creation with `useCreateAudioStudioProject`, added `useUpdateAudioStudioProject`, and wired ProjectHeader Save to update title/description/settings against a real base revision. Save and generation actions now treat `local-draft` or missing revisions as unavailable instead of submitting bogus IDs. Added a shared Audio Studio generation action hook so GenerationPanel plus Podcast/Briefing inline buttons use the same speech/music request path. Removed the unsupported `server_default` music provider option.
+
+Code-quality follow-up verification:
+- `bunx vitest run ../packages/ui/src/components/Option/AudioStudio/__tests__/AudioStudioPage.test.tsx` - 13 passed.
+- `bunx vitest run ../packages/ui/src/services/__tests__/audio-studio.test.ts ../packages/ui/src/store/__tests__/audio-studio.test.tsx ../packages/ui/src/hooks/__tests__/useAudioStudioProjects.test.tsx ../packages/ui/src/routes/__tests__/route-metadata.coverage.test.ts __tests__/pages/audio-studio-route.test.tsx` - 21 passed.
+- `git diff --check` on TASK-2350 code-quality follow-up paths passed.
 - Bandit remains not applicable; frontend-only TypeScript/React changes, no Python/backend code touched.
 
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
