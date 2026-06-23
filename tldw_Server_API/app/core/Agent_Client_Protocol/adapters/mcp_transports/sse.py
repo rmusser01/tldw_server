@@ -13,6 +13,10 @@ from loguru import logger
 from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_transport import (
     MCPTransport,
 )
+from tldw_Server_API.app.core.Agent_Client_Protocol.hardening import (
+    validate_mcp_http_url,
+    validate_sse_post_url,
+)
 
 
 class MCPSSETransport(MCPTransport):
@@ -35,11 +39,15 @@ class MCPSSETransport(MCPTransport):
         post_url: str | None = None,
         headers: dict[str, str] | None = None,
         timeout_sec: int = 30,
+        allow_private_network: bool | None = None,
+        allow_cross_origin_post_url: bool | None = None,
     ) -> None:
         self._sse_url = sse_url
         self._post_url = post_url
         self._headers = headers
         self._timeout_sec = timeout_sec
+        self._allow_private_network = allow_private_network
+        self._allow_cross_origin_post_url = allow_cross_origin_post_url
         self._http_client: httpx.AsyncClient | None = None
         self._pending: dict[str, asyncio.Future] = {}
         self._next_id = 1
@@ -59,6 +67,18 @@ class MCPSSETransport(MCPTransport):
 
     async def connect(self) -> None:
         """Open the SSE stream, discover post_url if needed, and perform MCP handshake."""
+        validate_mcp_http_url(
+            self._sse_url,
+            allow_private_network=self._allow_private_network,
+            label="MCP SSE URL",
+        )
+        if self._post_url:
+            validate_sse_post_url(
+                self._sse_url,
+                self._post_url,
+                allow_private_network=self._allow_private_network,
+                allow_cross_origin=self._allow_cross_origin_post_url,
+            )
         self._http_client = self._create_http_client()
         try:
             if not self._post_url:
@@ -139,7 +159,13 @@ class MCPSSETransport(MCPTransport):
                     if event_type == "endpoint":
                         # Resolve relative URL against sse_url base
                         base = self._sse_url.rsplit("/", 1)[0] + "/"
-                        return urljoin(base, data)
+                        post_url = urljoin(base, data)
+                        return validate_sse_post_url(
+                            self._sse_url,
+                            post_url,
+                            allow_private_network=self._allow_private_network,
+                            allow_cross_origin=self._allow_cross_origin_post_url,
+                        )
 
         raise RuntimeError(
             f"SSE stream at {self._sse_url} closed without sending an endpoint event"
@@ -255,6 +281,12 @@ class MCPSSETransport(MCPTransport):
             raise RuntimeError("HTTP client not initialized")
         if self._post_url is None:
             raise RuntimeError("post_url must be set before making calls")
+        validate_sse_post_url(
+            self._sse_url,
+            self._post_url,
+            allow_private_network=self._allow_private_network,
+            allow_cross_origin=self._allow_cross_origin_post_url,
+        )
 
         try:
             response = await self._http_client.post(
@@ -282,6 +314,12 @@ class MCPSSETransport(MCPTransport):
             raise RuntimeError("HTTP client not initialized")
         if self._post_url is None:
             raise RuntimeError("post_url must be set before making calls")
+        validate_sse_post_url(
+            self._sse_url,
+            self._post_url,
+            allow_private_network=self._allow_private_network,
+            allow_cross_origin=self._allow_cross_origin_post_url,
+        )
 
         response = await self._http_client.post(
             self._post_url,

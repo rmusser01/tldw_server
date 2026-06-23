@@ -24,6 +24,10 @@ class ACPRunnerConfig:
     cwd: str | None = None
     startup_timeout_sec: float = 10.0
     binary_path: str | None = None
+    allowed_session_cwd_roots: list[str] = field(default_factory=list)
+    allow_session_env: bool = False
+    allow_inline_stdio_mcp_servers: bool = False
+    allow_private_mcp_http: bool = False
 
 
 @dataclass
@@ -46,6 +50,7 @@ class ACPSandboxConfig:
     agent_command: str = ""
     agent_args: list[str] = field(default_factory=list)
     agent_env: dict[str, str] = field(default_factory=dict)
+    persist_ssh_private_keys: bool = False
 
     # Session TTL and quotas
     session_ttl_seconds: int = 86400  # 24h default
@@ -234,6 +239,13 @@ def load_acp_runner_config() -> ACPRunnerConfig:
         _parse_env(env_raw),
         resolve_relative_home=not has_env_override,
     )
+    allowed_roots_raw = (
+        os.getenv("ACP_ALLOWED_SESSION_CWD_ROOTS")
+        or section.get("allowed_session_cwd_roots")
+        or section.get("session_cwd_roots")
+        or ""
+    )
+    allowed_roots = _resolve_cwd_roots(_parse_string_list(allowed_roots_raw))
 
     return ACPRunnerConfig(
         command=str(command or ""),
@@ -242,6 +254,19 @@ def load_acp_runner_config() -> ACPRunnerConfig:
         cwd=resolved_cwd,
         startup_timeout_sec=timeout_sec,
         binary_path=str(binary_path) if binary_path else None,
+        allowed_session_cwd_roots=allowed_roots,
+        allow_session_env=_parse_bool(
+            os.getenv("ACP_ALLOW_SESSION_ENV") or section.get("allow_session_env"),
+            False,
+        ),
+        allow_inline_stdio_mcp_servers=_parse_bool(
+            os.getenv("ACP_ALLOW_INLINE_STDIO_MCP") or section.get("allow_inline_stdio_mcp_servers"),
+            False,
+        ),
+        allow_private_mcp_http=_parse_bool(
+            os.getenv("ACP_ALLOW_PRIVATE_MCP_HTTP") or section.get("allow_private_mcp_http"),
+            False,
+        ),
     )
 
 
@@ -278,6 +303,15 @@ def _parse_string_list(raw: str | None) -> list[str]:
             return [str(item) for item in data]
         return []
     return [s.strip() for s in text.split(",") if s.strip()]
+
+
+def _resolve_cwd_roots(raw_roots: list[str]) -> list[str]:
+    roots: list[str] = []
+    for root in raw_roots:
+        resolved = _resolve_cwd(root)
+        if resolved:
+            roots.append(resolved)
+    return roots
 
 
 ##############################################################################
@@ -358,6 +392,10 @@ def load_acp_sandbox_config() -> ACPSandboxConfig:
     agent_command = os.getenv("ACP_SANDBOX_AGENT_COMMAND") or section.get("agent_command", "")
     agent_args_raw = os.getenv("ACP_SANDBOX_AGENT_ARGS") or section.get("agent_args", "")
     agent_env_raw = os.getenv("ACP_SANDBOX_AGENT_ENV") or section.get("agent_env", "")
+    persist_ssh_private_keys = _parse_bool(
+        os.getenv("ACP_SSH_PERSIST_PRIVATE_KEYS") or section.get("persist_ssh_private_keys"),
+        False,
+    )
 
     # Session management config
     session_ttl = _parse_int(
@@ -396,6 +434,7 @@ def load_acp_sandbox_config() -> ACPSandboxConfig:
         agent_command=str(agent_command or ""),
         agent_args=_parse_args(agent_args_raw),
         agent_env=_parse_env(agent_env_raw),
+        persist_ssh_private_keys=bool(persist_ssh_private_keys),
         session_ttl_seconds=session_ttl,
         max_concurrent_sessions_per_user=max_concurrent,
         max_tokens_per_session=max_tokens,

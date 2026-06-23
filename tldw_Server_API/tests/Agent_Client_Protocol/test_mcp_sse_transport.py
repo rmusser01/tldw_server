@@ -23,6 +23,7 @@ def _make_transport(
     post_url: str | None = "http://localhost:8080/messages",
     **kwargs,
 ) -> MCPSSETransport:
+    kwargs.setdefault("allow_private_network", True)
     return MCPSSETransport(sse_url=sse_url, post_url=post_url, **kwargs)
 
 
@@ -357,7 +358,7 @@ async def test_sse_transport_reader_loop_tears_down_on_stream_end():
 @pytest.mark.asyncio
 async def test_sse_transport_discover_post_url():
     """_discover_post_url resolves relative URL against sse_url base."""
-    t = MCPSSETransport(sse_url="http://localhost:8080/sse")
+    t = MCPSSETransport(sse_url="http://localhost:8080/sse", allow_private_network=True)
 
     # Mock the HTTP client stream to return an endpoint event
     async def mock_stream_lines():
@@ -376,6 +377,42 @@ async def test_sse_transport_discover_post_url():
 
     url = await t._discover_post_url()
     assert url == "http://localhost:8080/messages"
+
+
+@pytest.mark.asyncio
+async def test_sse_transport_rejects_loopback_endpoint_before_client_creation():
+    t = MCPSSETransport(
+        sse_url="http://127.0.0.1:8080/sse",
+        post_url="http://127.0.0.1:8080/messages",
+    )
+
+    with patch.object(t, "_create_http_client") as create_client:
+        with pytest.raises(ValueError):
+            await t.connect()
+
+    create_client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sse_transport_rejects_cross_origin_discovered_post_url():
+    t = MCPSSETransport(sse_url="https://mcp.example.com/sse")
+
+    async def mock_stream_lines():
+        yield "event: endpoint"
+        yield "data: https://evil.example.com/messages"
+        yield ""
+
+    mock_response = AsyncMock()
+    mock_response.aiter_lines = mock_stream_lines
+    mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+    mock_response.__aexit__ = AsyncMock(return_value=False)
+
+    mock_http = AsyncMock()
+    mock_http.stream = MagicMock(return_value=mock_response)
+    t._http_client = mock_http
+
+    with pytest.raises(ValueError, match="same origin"):
+        await t._discover_post_url()
 
 
 @pytest.mark.asyncio

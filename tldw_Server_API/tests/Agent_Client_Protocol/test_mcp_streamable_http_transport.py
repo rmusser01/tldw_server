@@ -73,6 +73,7 @@ def transport():
         endpoint="http://localhost:8080/mcp",
         headers={"Authorization": "Bearer test"},
         timeout_sec=15,
+        allow_private_network=True,
     )
 
 
@@ -239,3 +240,14 @@ async def test_streamable_http_call_tool_not_connected(transport):
     """call_tool() raises RuntimeError when not connected."""
     with pytest.raises(RuntimeError, match="Not connected"):
         await transport.call_tool("echo", {})
+
+
+@pytest.mark.asyncio
+async def test_streamable_http_rejects_loopback_endpoint_before_client_creation():
+    transport = MCPStreamableHTTPTransport(endpoint="http://127.0.0.1:8080/mcp")
+
+    with patch.object(transport, "_create_http_client") as create_client:
+        with pytest.raises(ValueError):
+            await transport.connect()
+
+    create_client.assert_not_called()

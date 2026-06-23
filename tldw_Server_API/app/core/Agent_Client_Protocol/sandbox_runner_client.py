@@ -17,6 +17,11 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.endpoints import sandbox as sandbox_ep
 from tldw_Server_API.app.core.Agent_Client_Protocol.config import ACPSandboxConfig, load_acp_sandbox_config
+from tldw_Server_API.app.core.Agent_Client_Protocol.hardening import (
+    bounded_session_update_payload,
+    make_session_update_queue,
+    redact_agent_output,
+)
 from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import (
     ACPGovernanceCoordinator,
     ACPGovernanceDeniedError,
@@ -96,7 +101,7 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
         self.config = config or load_acp_sandbox_config()
         self._sessions: dict[str, SandboxSessionHandle] = {}
         self._sessions_lock = asyncio.Lock()
-        self._updates: dict[str, deque[dict[str, Any]]] = defaultdict(deque)
+        self._updates: dict[str, deque[dict[str, Any]]] = defaultdict(make_session_update_queue)
         self._agent_capabilities: dict[str, Any] = {}
         self._ws_registry: dict[str, SessionWebSocketRegistry] = {}
         self._ws_registry_lock = asyncio.Lock()
@@ -109,7 +114,12 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
         self._runtime_policy_refresh_tasks: dict[str, asyncio.Task[ACPRuntimePolicySnapshot | None]] = {}
         self._runtime_policy_refresh_lock = asyncio.Lock()
 
-    def _control_record_from_handle(self, sess: SandboxSessionHandle) -> dict[str, Any]:
+    def _control_record_from_handle(
+        self,
+        sess: SandboxSessionHandle,
+        *,
+        include_private_key: bool = True,
+    ) -> dict[str, Any]:
         return {
             "id": sess.session_id,
             "user_id": int(sess.user_id),
@@ -118,7 +128,7 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
             "ssh_host": sess.ssh_host,
             "ssh_port": sess.ssh_port,
             "ssh_user": sess.ssh_user,
-            "ssh_private_key": sess.ssh_private_key,
+            "ssh_private_key": sess.ssh_private_key if include_private_key else None,
             "persona_id": sess.persona_id,
             "workspace_id": sess.workspace_id,
             "workspace_group_id": sess.workspace_group_id,
@@ -144,7 +154,10 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
             if required:
                 raise ACPResponseError("ACP sandbox control metadata store does not support ACP session control")
             return False
-        control = self._control_record_from_handle(sess)
+        control = self._control_record_from_handle(
+            sess,
+            include_private_key=bool(getattr(self.config, "persist_ssh_private_keys", False)),
+        )
         try:
             putter(
                 session_id=str(control.get("id") or ""),
@@ -413,6 +426,11 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
 
     def _validate_runtime_requirements(self, runtime: RuntimeType) -> None:
         network_policy = str(self.config.network_policy or "deny_all").strip().lower() or "deny_all"
+        if self.config.allowed_egress_hosts:
+            raise ACPResponseError(
+                "ACP sandbox allowed egress hosts are not enforced by the ACP runner. "
+                "Use the core sandbox egress policy or clear ACP_SANDBOX_ALLOWED_EGRESS_HOSTS."
+            )
         runtime_preflights = collect_runtime_preflights(network_policy=network_policy)
         preflight = runtime_preflights.get(runtime)
         if runtime == RuntimeType.lima:
@@ -904,7 +922,7 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
         if not session_id:
             return
 
-        self._updates[session_id].append(params)
+        self._updates[str(session_id)].append(bounded_session_update_payload(params))
 
         update_message = {
             "type": "update",
@@ -1072,7 +1090,7 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
                     if ftype == "stdout":
                         await client.feed_bytes(raw)
                     else:
-                        logger.debug(f"ACP sandbox stderr: {data_field}")
+                        logger.debug("ACP sandbox stderr: {}", redact_agent_output(raw).rstrip())
                 elif ftype == "event" and frame.get("event") == "end":
                     await client.close()
                     return

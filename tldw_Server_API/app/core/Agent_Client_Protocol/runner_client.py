@@ -17,6 +17,11 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.config import (
     ACPRunnerConfig,
     load_acp_runner_config,
 )
+from tldw_Server_API.app.core.Agent_Client_Protocol.hardening import (
+    bounded_session_update_payload,
+    make_session_update_queue,
+    validate_acp_session_launch_inputs,
+)
 from tldw_Server_API.app.core.Agent_Client_Protocol.permission_tiers import determine_permission_tier
 from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import (
     ACPMessage,
@@ -534,7 +539,7 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
         )
         self._client.set_notification_handler(self._handle_notification)
         self._client.set_request_handler(self._handle_request)
-        self._updates: dict[str, deque[dict[str, Any]]] = defaultdict(deque)
+        self._updates: dict[str, deque[dict[str, Any]]] = defaultdict(make_session_update_queue)
         self._session_owners: dict[str, int] = {}
         self._agent_capabilities: dict[str, Any] = {}
         # WebSocket registry per session
@@ -595,6 +600,25 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
         user_id: int | None = None,
         session_env: dict[str, str] | None = None,
     ) -> str:
+        allowed_roots_raw = getattr(self.config, "allowed_session_cwd_roots", [])
+        allowed_roots = allowed_roots_raw if isinstance(allowed_roots_raw, list) else []
+        allow_session_env = getattr(self.config, "allow_session_env", False)
+        allow_stdio_mcp = getattr(self.config, "allow_inline_stdio_mcp_servers", False)
+        allow_private_mcp_http = getattr(self.config, "allow_private_mcp_http", False)
+        try:
+            validate_acp_session_launch_inputs(
+                cwd=cwd,
+                allowed_cwd_roots=list(allowed_roots),
+                runner_cwd=getattr(self.config, "cwd", None),
+                mcp_servers=mcp_servers,
+                session_env=session_env,
+                allow_session_env=allow_session_env if isinstance(allow_session_env, bool) else False,
+                allow_inline_stdio_mcp_servers=allow_stdio_mcp if isinstance(allow_stdio_mcp, bool) else False,
+                allow_private_mcp_http=allow_private_mcp_http if isinstance(allow_private_mcp_http, bool) else False,
+            )
+        except ValueError as exc:
+            raise ACPResponseError(str(exc)) from exc
+
         params: dict[str, Any] = {
             "cwd": cwd,
             "mcpServers": mcp_servers if mcp_servers is not None else [],
@@ -961,7 +985,7 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
             return
 
         # Queue update for polling clients
-        self._updates[session_id].append(params)
+        self._updates[str(session_id)].append(bounded_session_update_payload(params))
 
         # Broadcast to WebSocket clients
         update_message = {
