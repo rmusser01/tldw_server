@@ -1053,7 +1053,9 @@ describe("ReviewTab create CTA visibility", () => {
     expect(screen.queryByRole("button", { name: /Practice again/i })).not.toBeInTheDocument()
   })
 
-  it("offers completion actions for practice again and selected-deck scheduling", () => {
+  it("offers completion actions for recovery, creation, management, and scheduling", () => {
+    const onNavigateToCreate = vi.fn()
+    const onNavigateToManageDeck = vi.fn()
     vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
     vi.mocked(useDueCountsQuery).mockReturnValue({
       data: { due: 0, new: 0, learning: 0, total: 0 }
@@ -1088,17 +1090,35 @@ describe("ReviewTab create CTA visibility", () => {
 
     render(
       <ReviewTab
-        onNavigateToCreate={() => {}}
+        onNavigateToCreate={onNavigateToCreate}
         onNavigateToImport={() => {}}
         reviewDeckId={11}
         onReviewDeckChange={() => {}}
         isActive
+        onNavigateToManageDeck={onNavigateToManageDeck}
       />
     )
 
     expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
       expect.objectContaining({ enabled: true, limit: 1 })
     )
+
+    const completionCard = screen.getByTestId("flashcards-review-empty-card")
+    expect(completionCard).toHaveTextContent("You're all caught up!")
+    expect(completionCard).toHaveTextContent("No cards are due for review. Great job!")
+    expect(within(completionCard).getByRole("button", { name: "Practice again" })).toBeInTheDocument()
+    expect(within(completionCard).getByRole("button", { name: "Create card" })).toBeInTheDocument()
+    expect(within(completionCard).getByRole("button", { name: "Manage deck/cards" })).toBeInTheDocument()
+    expect(within(completionCard).getByRole("button", { name: "Open scheduler" })).toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-review-create-cta")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-deck-study-dashboard")).not.toBeInTheDocument()
+    expect(screen.getAllByRole("button", { name: "Create card" })).toHaveLength(1)
+
+    fireEvent.click(within(completionCard).getByRole("button", { name: "Create card" }))
+    expect(onNavigateToCreate).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(within(completionCard).getByRole("button", { name: "Manage deck/cards" }))
+    expect(onNavigateToManageDeck).toHaveBeenCalledWith(11)
 
     fireEvent.click(screen.getByTestId("flashcards-review-open-scheduler"))
     const schedulerRoute = navigateMock.mock.calls.at(-1)?.[0]
@@ -1183,10 +1203,19 @@ describe("ReviewTab create CTA visibility", () => {
     )
 
     expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent(
+      "Study queue"
+    )
+    expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent(
       "Available now: 1"
     )
     expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent(
-      "Scheduled due: 0"
+      "new: 1"
+    )
+    expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent(
+      "due: 0"
+    )
+    expect(screen.getByTestId("flashcards-review-progress")).not.toHaveTextContent(
+      "Scheduled due"
     )
   })
 

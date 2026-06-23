@@ -45,7 +45,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
       {
         keys: ["Ctrl+Z", "⌘Z"],
         description: t("option:flashcards.shortcutUndoVisibleControl", {
-          defaultValue: "Re-rate last card while the undo button is visible"
+          defaultValue: "Re-rate last card when the Re-rate button is available"
         })
       }
     ]
