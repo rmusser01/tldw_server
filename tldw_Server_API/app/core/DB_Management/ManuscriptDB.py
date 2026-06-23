@@ -122,6 +122,18 @@ _UPDATABLE_ANNOTATION_COLS = frozenset({
     "metadata",
 })
 _ANCHOR_STATUS_FILTER_CANDIDATE_CAP = 500
+_VALID_ANCHOR_STATUSES = frozenset({"scene_level", "attached", "reattached", "needs_review"})
+_ANNOTATION_DUPLICATE_KEY_FIELDS = (
+    "target_type",
+    "target_id",
+    "category",
+    "source",
+    "body",
+    "selected_text",
+    "scene_version",
+    "anchor_start",
+    "anchor_end",
+)
 
 
 def _word_count(text: str | None) -> int:
@@ -1186,6 +1198,28 @@ class ManuscriptDBHelper:
         if source is not None and source not in VALID_ANNOTATION_SOURCES:
             raise ValueError(f"Invalid annotation source: {source!r}")  # noqa: TRY003
 
+    @staticmethod
+    def _validate_annotation_anchor_status(anchor_status: str | None) -> None:
+        if anchor_status is not None and anchor_status not in _VALID_ANCHOR_STATUSES:
+            raise ValueError(f"Invalid annotation anchor_status: {anchor_status!r}")  # noqa: TRY003
+
+    @staticmethod
+    def _validate_annotation_structured_fields(
+        *,
+        tags: Any | None = None,
+        metadata: Any | None = None,
+    ) -> None:
+        if tags is not None and not isinstance(tags, list):
+            raise ValueError("Annotation tags must be a list.")  # noqa: TRY003
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("Annotation metadata must be a dict.")  # noqa: TRY003
+
+    @staticmethod
+    def _annotation_duplicate_key(values: dict[str, Any] | Any) -> tuple[Any, ...]:
+        if hasattr(values, "get"):
+            return tuple(values.get(field) for field in _ANNOTATION_DUPLICATE_KEY_FIELDS)
+        return tuple(values[field] for field in _ANNOTATION_DUPLICATE_KEY_FIELDS)
+
     def _validate_annotation_target(
         self,
         conn: Any,
@@ -1355,6 +1389,7 @@ class ManuscriptDBHelper:
             category=category,
             source=source,
         )
+        self._validate_annotation_structured_fields(tags=tags, metadata=metadata)
         aid = annotation_id or self._uuid()
         now = self._now()
 
@@ -1444,6 +1479,7 @@ class ManuscriptDBHelper:
             category=category,
             source=source,
         )
+        self._validate_annotation_anchor_status(anchor_status)
 
         clauses = ["project_id = ?", "deleted = 0"]
         params: list[Any] = [project_id]
@@ -1516,6 +1552,10 @@ class ManuscriptDBHelper:
             status=updates.get("status"),
             category=updates.get("category"),
             source=updates.get("source"),
+        )
+        self._validate_annotation_structured_fields(
+            tags=updates.get("tags") if "tags" in updates else None,
+            metadata=updates.get("metadata") if "metadata" in updates else None,
         )
 
         now = self._now()
@@ -1597,35 +1637,18 @@ class ManuscriptDBHelper:
         with self.db.transaction() as conn:
             existing_rows = conn.execute(
                 """
-                SELECT target_type, target_id, category, source, body, selected_text
+                SELECT target_type, target_id, category, source, body, selected_text,
+                       scene_version, anchor_start, anchor_end
                   FROM manuscript_annotations
                  WHERE project_id = ? AND status = 'open' AND deleted = 0
                 """,
                 (project_id,),
             ).fetchall()
-        existing = {
-            (
-                row["target_type"],
-                row["target_id"],
-                row["category"],
-                row["source"],
-                row["body"],
-                row["selected_text"],
-            )
-            for row in existing_rows
-        }
+        existing = {self._annotation_duplicate_key(row) for row in existing_rows}
         return [
             candidate
             for candidate in candidates
-            if (
-                candidate.get("target_type"),
-                candidate.get("target_id"),
-                candidate.get("category"),
-                candidate.get("source"),
-                candidate.get("body"),
-                candidate.get("selected_text"),
-            )
-            not in existing
+            if self._annotation_duplicate_key(candidate) not in existing
         ]
 
     def create_version(self, entity_type: str, entity_id: str, *, label: str | None = None) -> dict[str, Any]:

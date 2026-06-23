@@ -70,6 +70,15 @@ def _trigger_names(db: CharactersRAGDB) -> set[str]:
     return {row["name"] for row in rows}
 
 
+def _table_sql(db: CharactersRAGDB, table_name: str) -> str:
+    with db.transaction() as conn:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table_name,),
+        ).fetchone()
+    return row["sql"] if row is not None else ""
+
+
 def _schema_version(db: CharactersRAGDB) -> int:
     with db.transaction() as conn:
         row = conn.execute(
@@ -82,6 +91,8 @@ def _schema_version(db: CharactersRAGDB) -> int:
 def test_fresh_db_creates_manuscript_annotations_table(raw_db):
     assert _schema_version(raw_db) == 51
     assert "manuscript_annotations" in _table_names(raw_db)
+    table_sql = _table_sql(raw_db, "manuscript_annotations")
+    assert "CHECK(anchor_status IN ('scene_level','attached','reattached','needs_review'))" in table_sql
     assert {
         "idx_mann_project_target",
         "idx_mann_project_status",
@@ -123,6 +134,8 @@ def test_sqlite_v50_migration_routes_to_v51(tmp_path):
     try:
         assert _schema_version(migrated) == 51
         assert "manuscript_annotations" in _table_names(migrated)
+        table_sql = _table_sql(migrated, "manuscript_annotations")
+        assert "CHECK(anchor_status IN ('scene_level','attached','reattached','needs_review'))" in table_sql
         assert "idx_mann_project_target" in _index_names(migrated)
         assert "manuscript_annotations_sync_create" in _trigger_names(migrated)
     finally:
@@ -134,6 +147,7 @@ def test_postgres_v50_migration_script_contract_and_routing():
     assert "CREATE TABLE IF NOT EXISTS manuscript_annotations" in script
     assert "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP" in script
     assert "BOOLEAN NOT NULL DEFAULT FALSE" in script
+    assert "CHECK(anchor_status IN ('scene_level','attached','reattached','needs_review'))" in script
     assert "json_object(" not in script
     assert "UPDATE db_schema_version" in script
     assert "SET version = 51" in script
@@ -141,6 +155,28 @@ def test_postgres_v50_migration_script_contract_and_routing():
     steps = CharactersRAGDB(":memory:", client_id="test_client")._sqlite_linear_migration_steps()
     assert 50 in steps
     assert steps[50].__name__ == "_migrate_from_v50_to_v51"
+
+
+def test_manuscript_annotations_rejects_unknown_stored_anchor_status(mdb, manuscript):
+    with pytest.raises(sqlite3.IntegrityError):
+        with mdb.db.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO manuscript_annotations (
+                    id, project_id, target_type, target_id, status, category,
+                    tags_json, source, body, metadata_json, anchor_status, client_id
+                )
+                VALUES (?, ?, 'project', ?, 'open', 'other', '[]', 'user', ?, '{}', ?, ?)
+                """,
+                (
+                    "bad-anchor-status",
+                    manuscript["project_id"],
+                    manuscript["project_id"],
+                    "Invalid stored anchor status.",
+                    "unknown",
+                    "test_client",
+                ),
+            )
 
 
 def test_create_get_scene_range_annotation_validates_anchor(mdb, manuscript):
@@ -315,6 +351,23 @@ def test_list_annotations_filters_by_target_status_category_and_source(mdb, manu
     assert rows[0]["id"] == resolved_id
 
 
+def test_list_annotations_rejects_unknown_anchor_status_filter(mdb, manuscript):
+    mdb.create_annotation(
+        project_id=manuscript["project_id"],
+        target_type="project",
+        target_id=manuscript["project_id"],
+        category="other",
+        source="user",
+        body="Project note.",
+    )
+
+    with pytest.raises(ValueError, match="Invalid annotation anchor_status"):
+        mdb.list_annotations(
+            manuscript["project_id"],
+            anchor_status="unknown",
+        )
+
+
 def test_derived_anchor_status_changes_after_scene_edit_without_mutating_row(mdb, manuscript):
     scene = mdb.get_scene(manuscript["scene_id"])
     start = scene["content_plain"].index("gamma")
@@ -421,6 +474,89 @@ def test_unbounded_anchor_status_filter_rejects_when_candidate_set_exceeds_cap(m
             anchor_status="scene_level",
             limit=1,
         )
+
+
+def test_create_and_update_annotation_reject_non_structured_tags_and_metadata(mdb, manuscript):
+    with pytest.raises(ValueError, match="tags must be a list"):
+        mdb.create_annotation(
+            project_id=manuscript["project_id"],
+            target_type="project",
+            target_id=manuscript["project_id"],
+            category="other",
+            source="user",
+            body="Invalid tags.",
+            tags="not-a-list",
+        )
+
+    with pytest.raises(ValueError, match="metadata must be a dict"):
+        mdb.create_annotation(
+            project_id=manuscript["project_id"],
+            target_type="project",
+            target_id=manuscript["project_id"],
+            category="other",
+            source="user",
+            body="Invalid metadata.",
+            metadata=["not-a-dict"],
+        )
+
+    annotation_id = mdb.create_annotation(
+        project_id=manuscript["project_id"],
+        target_type="project",
+        target_id=manuscript["project_id"],
+        category="other",
+        source="user",
+        body="Original.",
+    )
+
+    with pytest.raises(ValueError, match="tags must be a list"):
+        mdb.update_annotation(annotation_id, {"tags": "not-a-list"}, expected_version=1)
+
+    with pytest.raises(ValueError, match="metadata must be a dict"):
+        mdb.update_annotation(annotation_id, {"metadata": ["not-a-dict"]}, expected_version=1)
+
+
+def test_duplicate_annotation_suppression_preserves_repeated_text_at_distinct_offsets(mdb, manuscript):
+    scene = mdb.get_scene(manuscript["scene_id"])
+    first_start = scene["content_plain"].index("beta")
+    second_start = scene["content_plain"].index("beta", first_start + 1)
+    body = "Clarify this repeated word."
+
+    mdb.create_annotation(
+        project_id=manuscript["project_id"],
+        target_type="scene",
+        target_id=manuscript["scene_id"],
+        category="clarity",
+        source="ai_selected_text",
+        body=body,
+        scene_version=scene["version"],
+        anchor_start=first_start,
+        anchor_end=first_start + len("beta"),
+        selected_text="beta",
+    )
+
+    same_anchor_candidate = {
+        "target_type": "scene",
+        "target_id": manuscript["scene_id"],
+        "category": "clarity",
+        "source": "ai_selected_text",
+        "body": body,
+        "scene_version": scene["version"],
+        "anchor_start": first_start,
+        "anchor_end": first_start + len("beta"),
+        "selected_text": "beta",
+    }
+    distinct_anchor_candidate = {
+        **same_anchor_candidate,
+        "anchor_start": second_start,
+        "anchor_end": second_start + len("beta"),
+    }
+
+    retained = mdb.suppress_duplicate_annotation_candidates(
+        manuscript["project_id"],
+        [same_anchor_candidate, distinct_anchor_candidate],
+    )
+
+    assert retained == [distinct_anchor_candidate]
 
 
 def test_sync_log_records_create_update_and_delete_for_annotations(mdb, manuscript):
