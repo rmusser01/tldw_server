@@ -48,6 +48,20 @@ def test_scope_resolution_normalizes_role_case():
     assert "rag.search" in scopes
 
 
+def test_scope_resolution_applies_explicit_denies_to_admin_roles():
+
+    catalog = _build_catalog()
+    service = PrivilegeMapService(route_registry={}, catalog=catalog)
+
+    scopes = service._resolve_scopes_for_user(
+        ["admin"],
+        [],
+        denied_permissions=["rag.search"],
+    )
+
+    assert "rag.search" not in scopes
+
+
 def test_group_by_role_normalizes_case():
 
     catalog = _build_catalog()

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
+import tldw_Server_API.app.core.PrivilegeMaps.service as service_module
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+from tldw_Server_API.app.core.AuthNZ.privilege_catalog import PrivilegeCatalog
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+from tldw_Server_API.app.core.PrivilegeMaps.introspection import RouteMetadata
 from tldw_Server_API.app.core.PrivilegeMaps.service import PrivilegeMapService
 
 
@@ -14,6 +18,39 @@ async def _fetch_id(pool, query: str, value: str) -> int:
     result = await pool.fetchval(query, (value,))
     assert result is not None, f"Expected ID for query {query} with value {value}"
     return int(result)
+
+
+def _test_catalog(scope_ids: list[str], *, version: str = "test-privileges") -> PrivilegeCatalog:
+    return PrivilegeCatalog.model_validate(
+        {
+            "version": version,
+            "updated_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "rate_limit_classes": [
+                {
+                    "id": "standard",
+                    "requests_per_min": 60,
+                    "burst": 10,
+                    "notes": None,
+                }
+            ],
+            "feature_flags": [],
+            "ownership_predicates": [],
+            "scopes": [
+                {
+                    "id": scope_id,
+                    "description": f"{scope_id} test scope",
+                    "resource_tags": ["test"],
+                    "sensitivity_tier": "low",
+                    "rate_limit_class": "standard",
+                    "default_roles": [],
+                    "feature_flag_id": None,
+                    "ownership_predicates": [],
+                    "doc_url": None,
+                }
+                for scope_id in scope_ids
+            ],
+        }
+    )
 
 
 @pytest.mark.asyncio
@@ -199,6 +236,120 @@ async def test_privilege_service_honors_authnz_role_mappings(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_privilege_service_honors_expiry_and_explicit_permission_denies(tmp_path, monkeypatch):
+    db_path = tmp_path / "authnz-effective-permissions.db"
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-key-effective-permissions-123456")
+    monkeypatch.setenv("TEST_MODE", "true")
+
+    reset_settings()
+    await reset_db_pool()
+    ensure_authnz_tables(Path(db_path))
+
+    pool = await get_db_pool()
+    async with pool.transaction() as conn:
+        await conn.execute(
+            """
+            INSERT INTO users (username, email, password_hash, is_active, role)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("effective-user", "effective@example.com", "hashed", 1, "viewer"),
+        )
+        for role_name in ["active-role", "expired-role"]:
+            await conn.execute(
+                "INSERT OR IGNORE INTO roles (name, description, is_system) VALUES (?, ?, 0)",
+                (role_name, f"{role_name} role"),
+            )
+        for permission_name in [
+            "scope.active",
+            "scope.denied",
+            "scope.expired_role",
+            "scope.expired_allow",
+        ]:
+            await conn.execute(
+                "INSERT OR IGNORE INTO permissions (name, description, category) VALUES (?, ?, ?)",
+                (permission_name, f"{permission_name} permission", "test"),
+            )
+
+    user_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "effective-user")
+    active_role_id = await _fetch_id(pool, "SELECT id FROM roles WHERE name = ?", "active-role")
+    expired_role_id = await _fetch_id(pool, "SELECT id FROM roles WHERE name = ?", "expired-role")
+    permission_ids = {
+        name: await _fetch_id(pool, "SELECT id FROM permissions WHERE name = ?", name)
+        for name in ["scope.active", "scope.denied", "scope.expired_role", "scope.expired_allow"]
+    }
+
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT OR IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)",
+            (user_id, active_role_id),
+        )
+        await conn.execute(
+            "INSERT OR REPLACE INTO user_roles (user_id, role_id, expires_at) VALUES (?, ?, ?)",
+            (user_id, expired_role_id, "2000-01-01T00:00:00+00:00"),
+        )
+        await conn.execute(
+            "INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
+            (active_role_id, permission_ids["scope.denied"]),
+        )
+        await conn.execute(
+            "INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)",
+            (expired_role_id, permission_ids["scope.expired_role"]),
+        )
+        await conn.execute(
+            "INSERT OR REPLACE INTO user_permissions (user_id, permission_id, granted) VALUES (?, ?, 1)",
+            (user_id, permission_ids["scope.active"]),
+        )
+        await conn.execute(
+            "INSERT OR REPLACE INTO user_permissions (user_id, permission_id, granted) VALUES (?, ?, 0)",
+            (user_id, permission_ids["scope.denied"]),
+        )
+        await conn.execute(
+            """
+            INSERT OR REPLACE INTO user_permissions (user_id, permission_id, granted, expires_at)
+            VALUES (?, ?, 1, ?)
+            """,
+            (user_id, permission_ids["scope.expired_allow"], "2000-01-01T00:00:00+00:00"),
+        )
+
+    service = PrivilegeMapService(
+        route_registry={},
+        catalog=_test_catalog(
+            ["scope.active", "scope.denied", "scope.expired_role", "scope.expired_allow"],
+            version="test-effective-permissions",
+        ),
+    )
+    users = await service._fetch_users()
+    effective_user = next(user for user in users if user["username"] == "effective-user")
+
+    assert effective_user["roles"] == ["active-role"]
+    assert set(effective_user["permissions"]) == {"scope.active"}
+    assert effective_user["allowed_scopes"] == {"scope.active"}
+
+    await reset_db_pool()
+    reset_settings()
+
+
+@pytest.mark.asyncio
+async def test_privilege_service_multi_user_fetch_failure_fails_closed(monkeypatch):
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-key-fetch-failure-123456")
+    reset_settings()
+
+    async def broken_pool():
+        raise RuntimeError("authnz database unavailable")
+
+    monkeypatch.setattr(service_module, "get_db_pool", broken_pool)
+    service = PrivilegeMapService(route_registry={}, catalog=_test_catalog(["scope.active"]))
+
+    with pytest.raises(RuntimeError, match="authnz database unavailable"):
+        await service._fetch_users()
+
+    reset_settings()
+
+
+@pytest.mark.asyncio
 async def test_privilege_service_org_filter_uses_org_members(tmp_path, monkeypatch):
     db_path = tmp_path / "authnz-org.db"
     monkeypatch.setenv("AUTH_MODE", "multi_user")
@@ -243,20 +394,30 @@ async def test_privilege_service_org_filter_uses_org_members(tmp_path, monkeypat
     org2_id = await _fetch_id(pool, "SELECT id FROM organizations WHERE slug = ?", "org-two")
 
     async with pool.transaction() as conn:
-        for user_id in [user1_id, user2_id]:
-            await conn.execute(
-                """
-                INSERT OR IGNORE INTO org_members (org_id, user_id, role, status)
-                VALUES (?, ?, ?, ?)
-                """,
-                (org1_id, user_id, "member", "active"),
-            )
+        await conn.execute(
+            """
+            INSERT OR IGNORE INTO org_members (org_id, user_id, role, status)
+            VALUES (?, ?, ?, ?)
+            """,
+            (org1_id, user1_id, "member", "active"),
+        )
+        await conn.execute(
+            """
+            INSERT OR IGNORE INTO org_members (org_id, user_id, role, status)
+            VALUES (?, ?, ?, ?)
+            """,
+            (org1_id, user2_id, "member", "suspended"),
+        )
         await conn.execute(
             """
             INSERT OR IGNORE INTO org_members (org_id, user_id, role, status)
             VALUES (?, ?, ?, ?)
             """,
             (org2_id, user3_id, "member", "active"),
+        )
+        await conn.execute(
+            "UPDATE organizations SET is_active = 0 WHERE id = ?",
+            (org2_id,),
         )
 
     service = PrivilegeMapService()
@@ -267,8 +428,17 @@ async def test_privilege_service_org_filter_uses_org_members(tmp_path, monkeypat
         team_id=None,
         user_ids=None,
     )
-    assert summary_org1["users"] == 2
-    assert len(org1_users) == 2
+    assert summary_org1["users"] == 1
+    assert {user["username"] for user in org1_users} == {"org-user-1"}
+
+    summary_org2, org2_users = await service.build_snapshot_summary(
+        target_scope="org",
+        org_id=str(org2_id),
+        team_id=None,
+        user_ids=None,
+    )
+    assert summary_org2["users"] == 0
+    assert len(org2_users) == 0
 
     summary_org_none, org_none_users = await service.build_snapshot_summary(
         target_scope="org",
@@ -281,3 +451,196 @@ async def test_privilege_service_org_filter_uses_org_members(tmp_path, monkeypat
 
     await reset_db_pool()
     reset_settings()
+
+
+@pytest.mark.asyncio
+async def test_privilege_service_team_filter_uses_active_memberships_and_teams(tmp_path, monkeypatch):
+    db_path = tmp_path / "authnz-team-filter.db"
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-key-team-filter-123456")
+    monkeypatch.setenv("TEST_MODE", "true")
+
+    reset_settings()
+    await reset_db_pool()
+    ensure_authnz_tables(Path(db_path))
+
+    pool = await get_db_pool()
+    async with pool.transaction() as conn:
+        for username, email in [
+            ("team-user-1", "team1@example.com"),
+            ("team-user-2", "team2@example.com"),
+        ]:
+            await conn.execute(
+                """
+                INSERT INTO users (username, email, password_hash, is_active, role)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (username, email, "hashed", 1, "viewer"),
+            )
+
+    user1_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "team-user-1")
+    user2_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "team-user-2")
+
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT INTO organizations (name, slug, owner_user_id) VALUES (?, ?, ?)",
+            ("Team Org", "team-org", user1_id),
+        )
+
+    org_id = await _fetch_id(pool, "SELECT id FROM organizations WHERE slug = ?", "team-org")
+
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT INTO teams (org_id, name, slug, is_active) VALUES (?, ?, ?, 1)",
+            (org_id, "Active Team", "active-team"),
+        )
+        await conn.execute(
+            "INSERT INTO teams (org_id, name, slug, is_active) VALUES (?, ?, ?, 0)",
+            (org_id, "Inactive Team", "inactive-team"),
+        )
+
+    active_team_id = await _fetch_id(pool, "SELECT id FROM teams WHERE slug = ?", "active-team")
+    inactive_team_id = await _fetch_id(pool, "SELECT id FROM teams WHERE slug = ?", "inactive-team")
+
+    async with pool.transaction() as conn:
+        await conn.execute(
+            "INSERT OR IGNORE INTO team_members (team_id, user_id, role, status) VALUES (?, ?, ?, ?)",
+            (active_team_id, user1_id, "member", "active"),
+        )
+        await conn.execute(
+            "INSERT OR IGNORE INTO team_members (team_id, user_id, role, status) VALUES (?, ?, ?, ?)",
+            (active_team_id, user2_id, "member", "suspended"),
+        )
+        await conn.execute(
+            "INSERT OR IGNORE INTO team_members (team_id, user_id, role, status) VALUES (?, ?, ?, ?)",
+            (inactive_team_id, user2_id, "member", "active"),
+        )
+
+    service = PrivilegeMapService()
+    active_summary, active_users = await service.build_snapshot_summary(
+        target_scope="team",
+        org_id=None,
+        team_id=str(active_team_id),
+        user_ids=None,
+    )
+    assert active_summary["users"] == 1
+    assert {user["username"] for user in active_users} == {"team-user-1"}
+
+    inactive_summary, inactive_users = await service.build_snapshot_summary(
+        target_scope="team",
+        org_id=None,
+        team_id=str(inactive_team_id),
+        user_ids=None,
+    )
+    assert inactive_summary["users"] == 0
+    assert inactive_users == []
+
+    await reset_db_pool()
+    reset_settings()
+
+
+def test_privilege_detail_generation_stops_at_configured_cap(monkeypatch):
+    monkeypatch.setattr(service_module, "MAX_DETAIL_ROWS", 2)
+    catalog = _test_catalog(["scope.active"], version="test-detail-cap")
+    service = PrivilegeMapService(
+        catalog=catalog,
+        route_registry={
+            "scope.active": [
+                RouteMetadata(
+                    path="/unit/detail-cap",
+                    methods=("GET", "POST", "DELETE"),
+                    name="detail_cap",
+                    tags=("test",),
+                    endpoint="tests.detail_cap",
+                )
+            ]
+        },
+    )
+
+    items = service.build_snapshot_detail(
+        [
+            {
+                "id": "user-1",
+                "username": "cap-user",
+                "primary_role": "viewer",
+                "roles": ["viewer"],
+                "permissions": [],
+                "feature_flags": set(),
+                "allowed_scopes": {"scope.active"},
+            }
+        ]
+    )
+
+    assert len(items) == 2
+
+
+@pytest.mark.asyncio
+async def test_privilege_org_trends_are_scoped_to_org_id(monkeypatch):
+    class RecordingTrendStore:
+        def __init__(self) -> None:
+            self.recorded_org_ids: list[str | None] = []
+            self.computed_org_ids: list[str | None] = []
+
+        async def record_snapshot(
+            self,
+            *,
+            scope,
+            group_by,
+            catalog_version,
+            generated_at,
+            buckets,
+            team_id=None,
+            org_id=None,
+        ):
+            self.recorded_org_ids.append(org_id)
+
+        async def compute_trends(
+            self,
+            *,
+            scope,
+            group_by,
+            bucket_counts,
+            window_start,
+            window_end,
+            team_id=None,
+            org_id=None,
+        ):
+            self.computed_org_ids.append(org_id)
+            return []
+
+    trend_store = RecordingTrendStore()
+    service = PrivilegeMapService(
+        route_registry={},
+        catalog=_test_catalog(["scope.active"], version="test-org-trends"),
+        trend_store=trend_store,
+    )
+
+    async def fetch_users():
+        return [
+            {
+                "id": "user-1",
+                "username": "org-user",
+                "primary_role": "viewer",
+                "roles": ["viewer"],
+                "permissions": [],
+                "feature_flags": set(),
+                "allowed_scopes": {"scope.active"},
+            }
+        ]
+
+    async def fetch_org_memberships():
+        return [{"org_id": "acme", "user_id": "user-1", "membership_role": "member"}]
+
+    monkeypatch.setattr(service, "_fetch_users", fetch_users)
+    monkeypatch.setattr(service, "_fetch_org_memberships", fetch_org_memberships)
+
+    await service.get_org_summary(
+        group_by="role",
+        include_trends=True,
+        since=None,
+        org_id="acme",
+    )
+
+    assert trend_store.recorded_org_ids == ["acme"]
+    assert trend_store.computed_org_ids == ["acme"]

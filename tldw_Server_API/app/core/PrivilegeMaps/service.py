@@ -14,7 +14,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.privilege_catalog import PrivilegeCatalog, ScopeEntry, load_catalog
-from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_profile_mode
+from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_mode, is_single_user_profile_mode
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_single_user_instance
 from tldw_Server_API.app.core.PrivilegeMaps.cache import get_privilege_cache
 from tldw_Server_API.app.core.PrivilegeMaps.introspection import (
@@ -135,14 +135,17 @@ class PrivilegeMapService:
         scope: str,
         group_by: str,
         team_id: str | None,
+        org_id: str | None,
         users_signature: str,
     ) -> str:
         team_component = str(team_id or "__none__")
+        org_component = str(org_id or "__none__")
         return "::".join(
             [
                 scope,
                 group_by,
                 team_component,
+                org_component,
                 users_signature,
                 self._route_signature,
                 self.catalog.version,
@@ -188,6 +191,7 @@ class PrivilegeMapService:
             scope="org",
             group_by=group_by,
             team_id=None,
+            org_id=org_id,
             users_signature=users_signature,
         )
         cached = self._summary_cache.get(cache_key)
@@ -213,6 +217,7 @@ class PrivilegeMapService:
                     buckets=buckets,
                     generated_at=generated_at,
                     team_id=None,
+                    org_id=org_id,
                 )
             except _PRIVILEGE_MAP_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug("Unable to record privilege trend snapshot: {}", exc)
@@ -228,6 +233,7 @@ class PrivilegeMapService:
                 generated_at=generated_at,
                 since=since,
                 team_id=None,
+                org_id=org_id,
             )
 
         return {
@@ -241,6 +247,7 @@ class PrivilegeMapService:
                     "group_by": group_by,
                     "include_trends": include_trends,
                     "since": since.isoformat() if since else None,
+                    "org_id": org_id,
                 }
             },
         }
@@ -277,6 +284,7 @@ class PrivilegeMapService:
             scope="team",
             group_by=group_by,
             team_id=team_id,
+            org_id=None,
             users_signature=users_signature,
         )
         cached = self._summary_cache.get(cache_key)
@@ -300,6 +308,7 @@ class PrivilegeMapService:
                     buckets=buckets,
                     generated_at=generated_at,
                     team_id=team_id,
+                    org_id=None,
                 )
             except _PRIVILEGE_MAP_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug("Unable to record team privilege trend snapshot: {}", exc)
@@ -315,6 +324,7 @@ class PrivilegeMapService:
                 generated_at=generated_at,
                 since=since,
                 team_id=team_id,
+                org_id=None,
             )
 
         return {
@@ -533,7 +543,7 @@ class PrivilegeMapService:
             base_users: dict[str, dict[str, Any]] = {}
             for row in rows:
                 record = self._row_to_dict(row)
-                if not record or not record.get("is_active", 1):
+                if not record or not self._truthy(record.get("is_active", 1)):
                     continue
                 user_id = str(record.get("id"))
                 base_users[user_id] = {
@@ -553,8 +563,13 @@ class PrivilegeMapService:
                 roles = payload.get("roles") or [payload.get("primary_role")]
                 roles = sorted({role for role in roles if role})
                 permissions = {perm for perm in payload.get("permissions", set()) if perm}
+                denied_permissions = {perm for perm in payload.get("denied_permissions", set()) if perm}
                 feature_flags = self._feature_flags_for_user(roles, permissions)
-                allowed_scopes = self._resolve_scopes_for_user(roles, permissions)
+                allowed_scopes = self._resolve_scopes_for_user(
+                    roles,
+                    permissions,
+                    denied_permissions=denied_permissions,
+                )
                 primary_role = roles[0] if roles else payload.get("primary_role", "user")
                 users.append(
                     {
@@ -565,10 +580,14 @@ class PrivilegeMapService:
                         "permissions": sorted(permissions),
                         "feature_flags": feature_flags,
                         "allowed_scopes": allowed_scopes,
+                        "denied_permissions": sorted(denied_permissions),
                     }
                 )
             return users
         except _PRIVILEGE_MAP_NONCRITICAL_EXCEPTIONS as exc:
+            if not is_single_user_mode():
+                logger.warning("Unable to load multi-user privilege dataset: {}", exc)
+                raise
             logger.debug("Falling back to single-user privilege dataset: {}", exc)
 
         # Fallback: single-user-style profile or empty DB
@@ -600,7 +619,8 @@ class PrivilegeMapService:
             rows = await pool.fetchall(
                 """
                 SELECT tm.team_id, tm.user_id, tm.role AS membership_role,
-                       t.name AS team_name, t.org_id
+                       tm.status AS membership_status,
+                       t.name AS team_name, t.org_id, t.is_active AS team_is_active
                 FROM team_members tm
                 JOIN teams t ON tm.team_id = t.id
                 """
@@ -608,7 +628,11 @@ class PrivilegeMapService:
             memberships: list[dict[str, Any]] = []
             for row in rows:
                 record = self._row_to_dict(row)
-                if record:
+                if (
+                    record
+                    and self._is_active_status(record.get("membership_status"))
+                    and self._truthy(record.get("team_is_active", 1))
+                ):
                     memberships.append(record)
             return memberships
         except _PRIVILEGE_MAP_NONCRITICAL_EXCEPTIONS as exc:
@@ -620,14 +644,21 @@ class PrivilegeMapService:
             pool: DatabasePool = await get_db_pool()
             rows = await pool.fetchall(
                 """
-                SELECT om.org_id, om.user_id, om.role AS membership_role
+                SELECT om.org_id, om.user_id, om.role AS membership_role,
+                       om.status AS membership_status,
+                       o.is_active AS org_is_active
                 FROM org_members om
+                JOIN organizations o ON om.org_id = o.id
                 """
             )
             memberships: list[dict[str, Any]] = []
             for row in rows:
                 record = self._row_to_dict(row)
-                if record:
+                if (
+                    record
+                    and self._is_active_status(record.get("membership_status"))
+                    and self._truthy(record.get("org_is_active", 1))
+                ):
                     memberships.append(record)
             return memberships
         except _PRIVILEGE_MAP_NONCRITICAL_EXCEPTIONS as exc:
@@ -675,7 +706,7 @@ class PrivilegeMapService:
         try:
             rows = await pool.fetchall(
                 """
-                SELECT ur.user_id, r.name AS role_name
+                SELECT ur.user_id, r.name AS role_name, ur.expires_at
                 FROM user_roles ur
                 JOIN roles r ON ur.role_id = r.id
                 """
@@ -686,7 +717,11 @@ class PrivilegeMapService:
                     continue
                 user_id = str(record.get("user_id"))
                 role_name = record.get("role_name")
-                if user_id in base_users and role_name:
+                if (
+                    user_id in base_users
+                    and role_name
+                    and self._not_expired(record.get("expires_at"))
+                ):
                     role_assignments[user_id].add(role_name)
         except _PRIVILEGE_MAP_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Unable to load role assignments: {}", exc)
@@ -712,11 +747,12 @@ class PrivilegeMapService:
         except _PRIVILEGE_MAP_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Unable to load role permissions: {}", exc)
 
-        user_permissions_direct: dict[str, set[str]] = defaultdict(set)
+        user_permissions_allow: dict[str, set[str]] = defaultdict(set)
+        user_permissions_deny: dict[str, set[str]] = defaultdict(set)
         try:
             rows = await pool.fetchall(
                 """
-                SELECT up.user_id, p.name AS permission_name, up.granted
+                SELECT up.user_id, p.name AS permission_name, up.granted, up.expires_at
                 FROM user_permissions up
                 JOIN permissions p ON up.permission_id = p.id
                 """
@@ -725,23 +761,29 @@ class PrivilegeMapService:
                 record = self._row_to_dict(row)
                 if not record:
                     continue
-                granted = record.get("granted")
-                if granted is not None and not bool(granted):
-                    continue
                 user_id = str(record.get("user_id"))
                 permission_name = record.get("permission_name")
-                if user_id in base_users and permission_name:
-                    user_permissions_direct[user_id].add(permission_name)
+                if user_id not in base_users or not permission_name:
+                    continue
+                if not self._not_expired(record.get("expires_at")):
+                    continue
+                if self._truthy(record.get("granted"), default=True):
+                    user_permissions_allow[user_id].add(permission_name)
+                else:
+                    user_permissions_deny[user_id].add(permission_name)
         except _PRIVILEGE_MAP_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Unable to load direct user permissions: {}", exc)
 
         for user_id, payload in base_users.items():
             roles = sorted(role_assignments.get(user_id, set())) or [payload.get("primary_role")]
             payload["roles"] = roles
-            perms: set[str] = set(user_permissions_direct.get(user_id, set()))
+            perms: set[str] = set(user_permissions_allow.get(user_id, set()))
             for role in roles:
                 perms.update(role_permissions.get(role, set()))
+            denied_permissions = set(user_permissions_deny.get(user_id, set()))
+            perms.difference_update(denied_permissions)
             payload["permissions"] = perms
+            payload["denied_permissions"] = denied_permissions
 
     def _feature_flags_for_user(
         self,
@@ -777,13 +819,20 @@ class PrivilegeMapService:
         self,
         roles: Sequence[str],
         permissions: Sequence[str],
+        *,
+        denied_permissions: Sequence[str] | None = None,
     ) -> set[str]:
         normalized_roles = [role.lower() for role in roles if role]
         role_set = set(normalized_roles)
         perm_set = {perm.lower() for perm in permissions if perm}
+        denied_perm_set = {perm.lower() for perm in denied_permissions or () if perm}
 
         if role_set & self._admin_roles:
-            return {scope.id for scope in self.catalog.scopes}
+            return {
+                scope.id
+                for scope in self.catalog.scopes
+                if not (denied_perm_set & self._permission_candidates_for_scope(scope.id))
+            }
 
         allowed: set[str] = set()
         for scope in self.catalog.scopes:
@@ -797,20 +846,24 @@ class PrivilegeMapService:
                     break
 
             if not granted:
-                candidate_permissions = {
-                    scope.id.lower(),
-                    scope.id.replace(".", "_").lower(),
-                    f"scope:{scope.id}".lower(),
-                    f"scope.{scope.id}".lower(),
-                    f"{scope.id}:read".lower(),
-                    f"{scope.id}:write".lower(),
-                }
+                candidate_permissions = self._permission_candidates_for_scope(scope.id)
                 if perm_set & candidate_permissions:
                     granted = True
 
-            if granted:
+            if granted and not (denied_perm_set & self._permission_candidates_for_scope(scope.id)):
                 allowed.add(scope.id)
         return allowed
+
+    @staticmethod
+    def _permission_candidates_for_scope(scope_id: str) -> set[str]:
+        return {
+            scope_id.lower(),
+            scope_id.replace(".", "_").lower(),
+            f"scope:{scope_id}".lower(),
+            f"scope.{scope_id}".lower(),
+            f"{scope_id}:read".lower(),
+            f"{scope_id}:write".lower(),
+        }
 
     def _scopes_from_ids(self, scope_ids: Sequence[str]) -> list[ScopeEntry]:
         return [self._scope_lookup[sid] for sid in scope_ids if sid in self._scope_lookup]
@@ -951,14 +1004,6 @@ class PrivilegeMapService:
             )
         return results
 
-    def _scopes_for_role(self, role: str | None) -> list[ScopeEntry]:
-        normalized = (role or "user").lower()
-        if normalized in self._admin_roles:
-            return list(self.catalog.scopes)
-        if normalized in self._role_scope_map:
-            return self._role_scope_map[normalized]
-        return []
-
     def _build_detail_items(
         self,
         users: Sequence[dict[str, Any]],
@@ -1024,6 +1069,13 @@ class PrivilegeMapService:
                         source_module = None
                         if route_meta.endpoint:
                             source_module = route_meta.endpoint.rsplit(".", 1)[0]
+
+                        if len(items) >= MAX_DETAIL_ROWS:
+                            logger.warning(
+                                "Privilege detail generation reached configured cap of {} rows",
+                                MAX_DETAIL_ROWS,
+                            )
+                            return items
 
                         items.append(
                             {
@@ -1092,6 +1144,7 @@ class PrivilegeMapService:
         buckets: Sequence[dict[str, Any]],
         generated_at: datetime,
         team_id: str | None,
+        org_id: str | None,
     ) -> None:
         if not buckets:
             return
@@ -1103,6 +1156,7 @@ class PrivilegeMapService:
             generated_at=normalized_ts,
             buckets=buckets,
             team_id=team_id,
+            org_id=org_id,
         )
 
     async def _build_trends(
@@ -1114,6 +1168,7 @@ class PrivilegeMapService:
         generated_at: datetime,
         since: datetime | None,
         team_id: str | None,
+        org_id: str | None,
     ) -> list[dict[str, Any]]:
         if not buckets:
             return []
@@ -1141,10 +1196,47 @@ class PrivilegeMapService:
                 window_start=window_start,
                 window_end=window_end,
                 team_id=team_id,
+                org_id=org_id,
             )
         except _PRIVILEGE_MAP_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Privilege trend computation failed: {}", exc)
             return []
+
+    @staticmethod
+    def _truthy(value: Any, *, default: bool = True) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if not normalized:
+                return default
+            return normalized not in {"0", "false", "f", "no", "n", "off", "inactive", "disabled"}
+        return bool(value)
+
+    @staticmethod
+    def _is_active_status(value: Any) -> bool:
+        return str(value or "active").strip().lower() == "active"
+
+    @classmethod
+    def _not_expired(cls, value: Any) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, datetime):
+            expires_at = value
+        else:
+            raw = str(value).strip()
+            if not raw:
+                return True
+            try:
+                expires_at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except _PRIVILEGE_MAP_COERCE_EXCEPTIONS:
+                return False
+        expires_at = cls._normalize_timestamp(expires_at)
+        return expires_at > datetime.now(timezone.utc)
 
     def _build_recommended_actions(
         self, items: Sequence[dict[str, Any]]

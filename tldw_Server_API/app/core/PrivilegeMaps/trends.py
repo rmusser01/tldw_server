@@ -10,6 +10,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
+from tldw_Server_API.app.core.PrivilegeMaps.db_utils import execute_transaction_sql
 
 
 @dataclass
@@ -61,7 +62,9 @@ class PrivilegeTrendStore:
                 }
                 metadata_json = json.dumps(metadata, default=str) if metadata else None
                 # Deduplicate exact timestamp snapshots for same bucket.
-                await conn.execute(
+                await execute_transaction_sql(
+                    pool,
+                    conn,
                     """
                     DELETE FROM privilege_trend_history
                     WHERE scope = ?
@@ -80,7 +83,9 @@ class PrivilegeTrendStore:
                         timestamp,
                     ),
                 )
-                await conn.execute(
+                await execute_transaction_sql(
+                    pool,
+                    conn,
                     """
                     INSERT INTO privilege_trend_history (
                         scope,
@@ -236,7 +241,9 @@ class PrivilegeTrendStore:
         await self._ensure_schema(pool)
         cutoff_iso = self._to_iso(cutoff)
         async with pool.transaction() as conn:
-            result = await conn.execute(
+            result = await execute_transaction_sql(
+                pool,
+                conn,
                 "DELETE FROM privilege_trend_history WHERE generated_at < ?",
                 (cutoff_iso,),
             )
