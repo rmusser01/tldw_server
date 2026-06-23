@@ -11,10 +11,19 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.writing_manuscript_schemas import (
+    AnnotationAnchorStatus,
+    AnnotationCategory,
+    AnnotationSource,
+    AnnotationStatus,
+    AnnotationTargetType,
     ChapterSummary,
     ManuscriptAnalysisListResponse,
     ManuscriptAnalysisRequest,
     ManuscriptAnalysisResponse,
+    ManuscriptAnnotationCreate,
+    ManuscriptAnnotationListResponse,
+    ManuscriptAnnotationResponse,
+    ManuscriptAnnotationUpdate,
     ManuscriptCharacterCreate,
     ManuscriptCharacterResponse,
     ManuscriptCharacterUpdate,
@@ -186,6 +195,42 @@ def _require_non_empty_text(value: str | None, label: str) -> str:
 def _normalize_mapping_field(value: dict[str, Any] | None) -> dict[str, Any]:
     """Normalize nullable mapping fields for storage."""
     return {} if value is None else value
+
+
+def _resolve_annotation_project_id(
+    helper: ManuscriptDBHelper,
+    target_type: str,
+    target_id: str,
+) -> str:
+    """Resolve an annotation target to its active manuscript project."""
+    if target_type == "project":
+        project = helper.get_project(target_id)
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found",
+            )
+        return project["id"]
+    if target_type == "chapter":
+        chapter = helper.get_chapter(target_id)
+        if not chapter:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Chapter not found",
+            )
+        return chapter["project_id"]
+    scene = helper.get_scene(target_id)
+    if not scene:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Scene not found",
+        )
+    return scene["project_id"]
+
+
+def _annotation_response(annotation: dict[str, Any]) -> ManuscriptAnnotationResponse:
+    """Build the public annotation response model."""
+    return ManuscriptAnnotationResponse(**annotation)
 
 
 # ===================================================================
@@ -1986,6 +2031,229 @@ async def unlink_scene_world_info(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
         _handle_db_errors(exc, "scene-world-info unlink")
+
+
+# ===================================================================
+# Annotations
+# ===================================================================
+
+
+@router.get(
+    "/projects/{project_id}/annotations",
+    response_model=ManuscriptAnnotationListResponse,
+    summary="List manuscript annotations for a project",
+    tags=["manuscripts"],
+)
+async def list_project_annotations(
+    project_id: str,
+    target_type: AnnotationTargetType | None = Query(None, description="Filter by target type"),
+    target_id: str | None = Query(None, description="Filter by target ID"),
+    status_filter: AnnotationStatus | None = Query(None, alias="status", description="Filter by status"),
+    category: AnnotationCategory | None = Query(None, description="Filter by category"),
+    source: AnnotationSource | None = Query(None, description="Filter by annotation source"),
+    anchor_status: AnnotationAnchorStatus | None = Query(None, description="Filter by derived anchor status"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.annotations.list")),
+) -> ManuscriptAnnotationListResponse:
+    """List manuscript annotations with offset pagination."""
+    if anchor_status is not None and not (target_type == "scene" and target_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="anchor_status filtering requires target_type='scene' and target_id.",
+        )
+    try:
+        helper = _get_helper(db)
+        if not helper.get_project(project_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found",
+            )
+        annotations, total = helper.list_annotations(
+            project_id,
+            target_type=target_type,
+            target_id=target_id,
+            status=status_filter,
+            category=category,
+            source=source,
+            anchor_status=anchor_status,
+            limit=limit,
+            offset=offset,
+        )
+        items = [_annotation_response(annotation) for annotation in annotations]
+        return ManuscriptAnnotationListResponse(
+            annotations=items,
+            total=total,
+            limit=limit,
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                limit=limit,
+                offset=offset,
+                total=total,
+                count=len(items),
+            ),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "manuscript annotations")
+
+
+@router.post(
+    "/annotations",
+    response_model=ManuscriptAnnotationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a manuscript annotation",
+    tags=["manuscripts"],
+)
+async def create_annotation(
+    payload: ManuscriptAnnotationCreate,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.annotations.create")),
+) -> ManuscriptAnnotationResponse:
+    """Create a manual manuscript annotation."""
+    try:
+        body = _require_non_empty_text(payload.body, "body")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    try:
+        helper = _get_helper(db)
+        project_id = _resolve_annotation_project_id(helper, payload.target_type, payload.target_id)
+        annotation_id = helper.create_annotation(
+            project_id=project_id,
+            target_type=payload.target_type,
+            target_id=payload.target_id,
+            category=payload.category,
+            source="user",
+            body=body,
+            tags=payload.tags,
+            suggested_fix=payload.suggested_fix,
+            followup_note=payload.followup_note,
+            metadata=payload.metadata,
+            scene_version=payload.scene_version,
+            anchor_start=payload.start,
+            anchor_end=payload.end,
+            selected_text=payload.selected_text,
+        )
+        annotation = helper.get_annotation(annotation_id)
+        if not annotation:
+            raise CharactersRAGDBError("Annotation created but could not be retrieved")
+        return _annotation_response(annotation)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "manuscript annotation")
+
+
+@router.get(
+    "/annotations/{annotation_id}",
+    response_model=ManuscriptAnnotationResponse,
+    summary="Get a manuscript annotation",
+    tags=["manuscripts"],
+)
+async def get_annotation(
+    annotation_id: str,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.annotations.list")),
+) -> ManuscriptAnnotationResponse:
+    """Fetch a manuscript annotation by ID."""
+    try:
+        annotation = _get_helper(db).get_annotation(annotation_id)
+        if not annotation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Annotation not found",
+            )
+        return _annotation_response(annotation)
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "manuscript annotation")
+
+
+@router.patch(
+    "/annotations/{annotation_id}",
+    response_model=ManuscriptAnnotationResponse,
+    summary="Update a manuscript annotation",
+    tags=["manuscripts"],
+)
+async def update_annotation(
+    annotation_id: str,
+    payload: ManuscriptAnnotationUpdate,
+    expected_version: int = Header(..., description="Expected version for optimistic locking"),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.annotations.update")),
+) -> ManuscriptAnnotationResponse:
+    """Update mutable annotation fields with optimistic locking."""
+    update_data: dict[str, Any] = {}
+    if _field_present(payload, "status"):
+        if payload.status is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="status cannot be null",
+            )
+        update_data["status"] = payload.status
+    if _field_present(payload, "category"):
+        if payload.category is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="category cannot be null",
+            )
+        update_data["category"] = payload.category
+    if _field_present(payload, "body"):
+        try:
+            update_data["body"] = _require_non_empty_text(payload.body, "body")
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if _field_present(payload, "tags"):
+        update_data["tags"] = payload.tags
+    if _field_present(payload, "suggested_fix"):
+        update_data["suggested_fix"] = payload.suggested_fix
+    if _field_present(payload, "followup_note"):
+        update_data["followup_note"] = payload.followup_note
+    if _field_present(payload, "metadata"):
+        update_data["metadata"] = _normalize_mapping_field(payload.metadata)
+    if not update_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No fields provided for update",
+        )
+
+    try:
+        helper = _get_helper(db)
+        helper.update_annotation(annotation_id, update_data, expected_version)
+        annotation = helper.get_annotation(annotation_id)
+        if not annotation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Annotation not found",
+            )
+        return _annotation_response(annotation)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "manuscript annotation")
+
+
+@router.delete(
+    "/annotations/{annotation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    summary="Delete a manuscript annotation",
+    tags=["manuscripts"],
+)
+async def delete_annotation(
+    annotation_id: str,
+    expected_version: int = Header(..., description="Expected version for optimistic locking"),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.annotations.delete")),
+) -> Response:
+    """Soft-delete a manuscript annotation."""
+    try:
+        _get_helper(db).soft_delete_annotation(annotation_id, expected_version)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "manuscript annotation")
 
 
 # ===================================================================

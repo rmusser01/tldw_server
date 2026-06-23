@@ -610,6 +610,122 @@ class ManuscriptCitationResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Annotations
+# ---------------------------------------------------------------------------
+
+
+AnnotationTargetType = Literal["scene", "chapter", "project"]
+AnnotationStatus = Literal["open", "resolved"]
+AnnotationSource = Literal["user", "ai_selected_text", "ai_scene_review"]
+AnnotationCategory = Literal[
+    "style",
+    "clarity",
+    "pacing",
+    "continuity",
+    "character",
+    "worldbuilding",
+    "structure",
+    "research",
+    "other",
+]
+AnnotationAnchorStatus = Literal["attached", "reattached", "needs_review", "scene_level"]
+
+
+class ManuscriptAnnotationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_type: AnnotationTargetType = Field(..., description="Annotation target type")
+    target_id: str = Field(..., min_length=1, description="Annotation target ID")
+    category: AnnotationCategory = Field(..., description="Annotation category")
+    body: str = Field(..., min_length=1, max_length=2000, description="Annotation body")
+    tags: list[str] = Field(default_factory=list, max_length=10, description="Annotation tags")
+    suggested_fix: str | None = Field(None, max_length=8000, description="Optional suggested fix")
+    followup_note: str | None = Field(None, max_length=2000, description="Optional follow-up note")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Annotation metadata")
+    scene_version: int | None = Field(None, ge=0, description="Scene version for range anchors")
+    start: int | None = Field(None, ge=0, description="Start offset for a scene range")
+    end: int | None = Field(None, ge=0, description="End offset for a scene range")
+    selected_text: str | None = Field(None, min_length=1, max_length=12000, description="Selected scene text")
+
+    @model_validator(mode="after")
+    def validate_range_fields(self):
+        range_fields = {
+            "scene_version": self.scene_version,
+            "start": self.start,
+            "end": self.end,
+            "selected_text": self.selected_text,
+        }
+        has_range = any(value is not None for value in range_fields.values())
+        if self.target_type != "scene":
+            if has_range:
+                raise ValueError("Chapter and project annotations cannot include range fields.")
+            return self
+        if has_range:
+            missing = [name for name, value in range_fields.items() if value is None]
+            if missing:
+                raise ValueError(
+                    "Scene range annotations require scene_version, start, end, and selected_text."
+                )
+            if self.end <= self.start:
+                raise ValueError("Scene range end must be greater than start.")
+        return self
+
+
+class ManuscriptAnnotationUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: AnnotationStatus | None = Field(None, description="Annotation status")
+    category: AnnotationCategory | None = Field(None, description="Annotation category")
+    body: str | None = Field(None, min_length=1, max_length=2000, description="Annotation body")
+    tags: list[str] | None = Field(None, max_length=10, description="Annotation tags")
+    suggested_fix: str | None = Field(None, max_length=8000, description="Optional suggested fix")
+    followup_note: str | None = Field(None, max_length=2000, description="Optional follow-up note")
+    metadata: dict[str, Any] | None = Field(None, description="Annotation metadata")
+
+
+class ManuscriptAnnotationResponse(BaseModel):
+    id: str
+    project_id: str
+    target_type: AnnotationTargetType
+    target_id: str
+    status: AnnotationStatus
+    category: AnnotationCategory
+    tags: list[str] = Field(default_factory=list)
+    source: AnnotationSource
+    body: str
+    suggested_fix: str | None = None
+    followup_note: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    scene_version: int | None = None
+    anchor_start: int | None = None
+    anchor_end: int | None = None
+    selected_text: str | None = None
+    anchor_status: AnnotationAnchorStatus
+    derived_start: int | None = None
+    derived_end: int | None = None
+    scene_level: bool = False
+    created_at: datetime
+    last_modified: datetime
+    deleted: bool = False
+    client_id: str
+    version: int
+
+
+class ManuscriptAnnotationListResponse(BaseModel):
+    annotations: list[ManuscriptAnnotationResponse]
+    total: int
+    limit: int = Field(..., ge=1)
+    offset: int = Field(..., ge=0)
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
+
+
+# ---------------------------------------------------------------------------
 # Scene linking
 # ---------------------------------------------------------------------------
 
