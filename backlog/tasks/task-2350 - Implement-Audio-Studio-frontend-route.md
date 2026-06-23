@@ -111,6 +111,13 @@ Small bug follow-up verification:
 - `bunx vitest run ../packages/ui/src/services/__tests__/audio-studio.test.ts ../packages/ui/src/store/__tests__/audio-studio.test.tsx ../packages/ui/src/hooks/__tests__/useAudioStudioProjects.test.tsx ../packages/ui/src/routes/__tests__/route-metadata.coverage.test.ts __tests__/pages/audio-studio-route.test.tsx` - 21 passed.
 - `git diff --check` on TASK-2350 small bug follow-up paths passed.
 
+Code-quality follow-up #2: aligned Audio Studio service contracts with backend response and request schemas. `listAudioStudioWorkflows` now unwraps `{ workflows }`, and `listAudioStudioProjects` unwraps `{ projects, limit, offset }` before hydrating stores/hooks. Section, track, and clip upsert request types/tests now use backend field names such as `order_index`, `metadata`, and required `clip_type`. Render/export buttons remain disabled with an explicit TASK-2351 title instead of being enabled and inert.
+
+Code-quality follow-up #2 verification:
+- `bunx vitest run ../packages/ui/src/components/Option/AudioStudio/__tests__/AudioStudioPage.test.tsx` - 15 passed.
+- `bunx vitest run ../packages/ui/src/services/__tests__/audio-studio.test.ts ../packages/ui/src/store/__tests__/audio-studio.test.tsx ../packages/ui/src/hooks/__tests__/useAudioStudioProjects.test.tsx ../packages/ui/src/routes/__tests__/route-metadata.coverage.test.ts __tests__/pages/audio-studio-route.test.tsx` - 21 passed.
+- `git diff --check` on TASK-2350 code-quality follow-up #2 paths passed.
+
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

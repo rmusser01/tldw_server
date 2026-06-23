@@ -18,6 +18,10 @@ export type AudioStudioWorkflowSummary = {
   priority?: number
 }
 
+export type AudioStudioWorkflowListResponse = {
+  workflows: AudioStudioWorkflowSummary[]
+}
+
 export type AudioStudioSection = {
   section_id: string
   workflow: AudioStudioWorkflow
@@ -68,6 +72,13 @@ export type AudioStudioProject = {
   clips?: AudioStudioClip[]
 }
 
+export type AudioStudioProjectListResponse = {
+  projects: AudioStudioProject[]
+  limit: number
+  offset: number
+  total?: number
+}
+
 export type ListAudioStudioProjectsParams = {
   workflow?: AudioStudioWorkflow
   includeArchived?: boolean
@@ -87,34 +98,49 @@ export type UpdateAudioStudioProjectRequest = Partial<
 }
 
 export type AudioStudioSectionUpsertRequest = {
-  workflow: AudioStudioWorkflow
-  title: string
+  base_revision_id: string
+  title?: string
   body_text?: string
   speaker_id?: string
-  order: number
-  base_revision_id: string
+  order_index?: number
   settings?: Record<string, unknown>
+  metadata?: Record<string, unknown>
 }
 
 export type AudioStudioTrackUpsertRequest = {
+  base_revision_id: string
   name: string
   kind: AudioStudioTrackKind
-  order: number
-  base_revision_id: string
+  order_index?: number
   muted?: boolean
   solo?: boolean
+  volume?: number
   settings?: Record<string, unknown>
+  metadata?: Record<string, unknown>
 }
 
 export type AudioStudioClipUpsertRequest = {
+  base_revision_id: string
   track_id: string
   section_id?: string
+  title?: string
+  clip_type:
+    | "speech"
+    | "music"
+    | "sfx"
+    | "ambience"
+    | "imported"
+    | "render"
+    | string
   artifact_id?: string
   start_ms: number
   duration_ms?: number
   volume?: number
-  base_revision_id: string
+  fade_in_ms?: number
+  fade_out_ms?: number
+  muted?: boolean
   settings?: Record<string, unknown>
+  metadata?: Record<string, unknown>
 }
 
 export type AudioStudioGenerationCreateRequest = {
@@ -181,11 +207,13 @@ const resourcePath = (projectId: string, resource: string, resourceId: string) =
 
 export const listAudioStudioWorkflows = async (): Promise<
   AudioStudioWorkflowSummary[]
-> =>
-  bgRequest<AudioStudioWorkflowSummary[]>({
+> => {
+  const response = await bgRequest<AudioStudioWorkflowListResponse>({
     path: apiPath(`${API_BASE}/workflows`),
     method: "GET"
   })
+  return response.workflows
+}
 
 export const listAudioStudioProjects = async (
   params: ListAudioStudioProjectsParams = {}
@@ -194,10 +222,11 @@ export const listAudioStudioProjects = async (
     workflow: params.workflow,
     include_archived: params.includeArchived
   })
-  return bgRequest<AudioStudioProject[]>({
+  const response = await bgRequest<AudioStudioProjectListResponse>({
     path: apiPath(`${API_BASE}/projects${query}`),
     method: "GET"
   })
+  return response.projects
 }
 
 export const createAudioStudioProject = async (

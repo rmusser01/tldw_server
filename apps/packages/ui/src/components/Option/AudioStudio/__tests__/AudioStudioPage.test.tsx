@@ -294,6 +294,24 @@ describe("AudioStudioPage", () => {
     ).toBeDisabled()
   })
 
+  it("keeps render and export controls disabled while TASK-2351 owns implementation", () => {
+    setActiveProject({ workflow: "narration" })
+    useAudioStudioStore.getState().setActiveWorkflow("narration")
+
+    render(<AudioStudioPage />)
+
+    expect(
+      screen.getByRole("button", { name: "Create preview render" })
+    ).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Create export" })).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: "Create preview render" })
+    ).toHaveAttribute("title", "Render/export controls land in TASK-2351.")
+    expect(
+      screen.getByRole("button", { name: "Create export" })
+    ).toHaveAttribute("title", "Render/export controls land in TASK-2351.")
+  })
+
   it("queues music generation with controlled Music workflow inputs", async () => {
     setActiveProject({ workflow: "music" })
     useAudioStudioStore.getState().setActiveWorkflow("music")

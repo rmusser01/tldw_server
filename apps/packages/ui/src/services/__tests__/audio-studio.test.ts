@@ -30,21 +30,62 @@ describe("audio-studio service", () => {
   })
 
   it("lists workflows through the shared request client", async () => {
-    await listAudioStudioWorkflows()
+    mocks.bgRequest.mockResolvedValueOnce({
+      workflows: [
+        {
+          id: "music",
+          label: "Music",
+          description: "Prompt-based music generation"
+        }
+      ]
+    })
+
+    const workflows = await listAudioStudioWorkflows()
 
     expect(mocks.bgRequest).toHaveBeenCalledWith({
       path: "/api/v1/audio-studio/workflows",
       method: "GET"
     })
+    expect(workflows).toEqual([
+      {
+        id: "music",
+        label: "Music",
+        description: "Prompt-based music generation"
+      }
+    ])
   })
 
   it("lists projects with workflow filters encoded in the query string", async () => {
-    await listAudioStudioProjects({ workflow: "podcast", includeArchived: false })
+    mocks.bgRequest.mockResolvedValueOnce({
+      projects: [
+        {
+          project_id: "pod-1",
+          title: "Interview",
+          workflow: "podcast",
+          status: "draft"
+        }
+      ],
+      limit: 50,
+      offset: 0
+    })
+
+    const projects = await listAudioStudioProjects({
+      workflow: "podcast",
+      includeArchived: false
+    })
 
     expect(mocks.bgRequest).toHaveBeenCalledWith({
       path: "/api/v1/audio-studio/projects?workflow=podcast&include_archived=false",
       method: "GET"
     })
+    expect(projects).toEqual([
+      {
+        project_id: "pod-1",
+        title: "Interview",
+        workflow: "podcast",
+        status: "draft"
+      }
+    ])
   })
 
   it("creates and updates projects without accepting client secrets", async () => {
@@ -83,22 +124,31 @@ describe("audio-studio service", () => {
     await upsertAudioStudioSection("p1", "s1", {
       title: "Intro",
       body_text: "Welcome",
-      workflow: "narration",
-      order: 0,
-      base_revision_id: "rev-1"
+      speaker_id: "speaker-1",
+      order_index: 0,
+      base_revision_id: "rev-1",
+      metadata: { source: "draft" }
     })
     await upsertAudioStudioTrack("p1", "speech", {
       name: "Speech",
       kind: "speech",
-      order: 0,
-      base_revision_id: "rev-2"
+      order_index: 0,
+      base_revision_id: "rev-2",
+      volume: 0.9,
+      metadata: { role: "main" }
     })
     await upsertAudioStudioClip("p1", "clip/a", {
       track_id: "speech",
       section_id: "s1",
+      title: "Intro clip",
+      clip_type: "speech",
       start_ms: 0,
       duration_ms: 1000,
-      base_revision_id: "rev-3"
+      fade_in_ms: 10,
+      fade_out_ms: 20,
+      muted: false,
+      base_revision_id: "rev-3",
+      metadata: { take: 1 }
     })
 
     expect(mocks.bgRequest).toHaveBeenNthCalledWith(1, {
@@ -108,9 +158,10 @@ describe("audio-studio service", () => {
       body: {
         title: "Intro",
         body_text: "Welcome",
-        workflow: "narration",
-        order: 0,
-        base_revision_id: "rev-1"
+        speaker_id: "speaker-1",
+        order_index: 0,
+        base_revision_id: "rev-1",
+        metadata: { source: "draft" }
       }
     })
     expect(mocks.bgRequest).toHaveBeenNthCalledWith(2, {
@@ -120,8 +171,10 @@ describe("audio-studio service", () => {
       body: {
         name: "Speech",
         kind: "speech",
-        order: 0,
-        base_revision_id: "rev-2"
+        order_index: 0,
+        base_revision_id: "rev-2",
+        volume: 0.9,
+        metadata: { role: "main" }
       }
     })
     expect(mocks.bgRequest).toHaveBeenNthCalledWith(3, {
@@ -131,9 +184,15 @@ describe("audio-studio service", () => {
       body: {
         track_id: "speech",
         section_id: "s1",
+        title: "Intro clip",
+        clip_type: "speech",
         start_ms: 0,
         duration_ms: 1000,
-        base_revision_id: "rev-3"
+        fade_in_ms: 10,
+        fade_out_ms: 20,
+        muted: false,
+        base_revision_id: "rev-3",
+        metadata: { take: 1 }
       }
     })
   })
