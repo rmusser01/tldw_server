@@ -40,6 +40,7 @@ STANDALONE_PYPROJECT = STANDALONE_PROJECT_ROOT / "pyproject.toml"
 PY_TYPED_MARKER = PACKAGE_ROOT / "py.typed"
 PACKAGE_README = STANDALONE_PROJECT_ROOT / "README.md"
 PACKAGE_USER_GUIDE = STANDALONE_PROJECT_ROOT / "USER_GUIDE.md"
+PACKAGE_LICENSE = STANDALONE_PROJECT_ROOT / "LICENSE"
 PACKAGE_RESOURCE_README = PACKAGE_ROOT / "README.md"
 PACKAGE_RESOURCE_USER_GUIDE = PACKAGE_ROOT / "USER_GUIDE.md"
 
@@ -543,6 +544,65 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
     }
 
 
+def test_mcp_unified_publish_metadata_is_ready_but_internal() -> None:
+    """Standalone package metadata should be publish-ready but still internal."""
+
+    metadata = importlib.import_module("mcp_unified.package_metadata")
+    pyproject = _load_standalone_pyproject()
+    project = pyproject["project"]
+    setuptools_config = pyproject["tool"]["setuptools"]
+
+    expected_urls = {
+        "Homepage": "https://tldwproject.com",
+        "Repository": "https://github.com/rmusser01/tldw_server",
+        "Issues": "https://github.com/rmusser01/tldw_server/issues",
+        "Source Package": "https://github.com/rmusser01/tldw_server/tree/dev/apps/mcp-unified",
+        "User Guide": "https://github.com/rmusser01/tldw_server/blob/dev/apps/mcp-unified/USER_GUIDE.md",
+    }
+    expected_classifiers = {
+        "Development Status :: 3 - Alpha",
+        "Framework :: FastAPI",
+        "Intended Audience :: Developers",
+        "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+        "Operating System :: OS Independent",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+    }
+
+    assert project["authors"] == list(metadata.PACKAGE_AUTHORS)  # nosec B101
+    assert project["maintainers"] == list(metadata.PACKAGE_MAINTAINERS)  # nosec B101
+    assert project["keywords"] == list(metadata.PACKAGE_KEYWORDS)  # nosec B101
+    assert set(project["classifiers"]) >= expected_classifiers  # nosec B101
+    assert project["urls"] == expected_urls  # nosec B101
+    assert setuptools_config["license-files"] == ["LICENSE"]  # nosec B101
+    assert expected_urls == metadata.PACKAGE_URLS  # nosec B101
+    assert metadata.LICENSE_FILES == ("LICENSE",)  # nosec B101
+
+    summary = metadata.package_metadata_summary()
+    assert summary["publishing_status"] == "not-published"  # nosec B101
+    assert summary["package_status"] == "internal-experimental"  # nosec B101
+    assert summary["authors"] == list(metadata.PACKAGE_AUTHORS)  # nosec B101
+    assert summary["maintainers"] == list(metadata.PACKAGE_MAINTAINERS)  # nosec B101
+    assert summary["keywords"] == list(metadata.PACKAGE_KEYWORDS)  # nosec B101
+    assert summary["classifiers"] == list(metadata.PACKAGE_CLASSIFIERS)  # nosec B101
+    assert summary["urls"] == expected_urls  # nosec B101
+    assert summary["license_files"] == ["LICENSE"]  # nosec B101
+
+
+def test_mcp_unified_package_license_file_is_local_to_project() -> None:
+    """Standalone artifacts should include a package-local license file."""
+
+    root_license = REPO_ROOT / "LICENSE"
+
+    assert root_license.is_file()  # nosec B101
+    assert PACKAGE_LICENSE.is_file()  # nosec B101
+    assert PACKAGE_LICENSE.read_text(encoding="utf-8") == root_license.read_text(encoding="utf-8")  # nosec B101
+
+
 def test_mcp_unified_package_declares_pep561_typed_marker() -> None:
     """The standalone package source must advertise typed-package support."""
 
@@ -569,12 +629,22 @@ def test_mcp_unified_package_docs_are_local_to_package_boundary() -> None:
     assert "# MCP Unified" in readme  # nosec B101
     assert "USER_GUIDE.md" in readme  # nosec B101
     assert "internal/experimental" in readme  # nosec B101
+    assert "Publishing Readiness" in readme  # nosec B101
+    assert "make mcp-unified-rc" in readme  # nosec B101
+    assert "make mcp-unified-publish-dry-run" in readme  # nosec B101
+    assert "TestPyPI" in readme  # nosec B101
+    assert "not-published" in readme  # nosec B101
     assert "mcp-unified-gateway package-info" in readme  # nosec B101
     assert "filesystem advisory lock backends" in readme  # nosec B101
     assert "memory backend" in readme  # nosec B101
     assert "optional SQLite backend" in readme  # nosec B101
     assert "same local database file" in readme  # nosec B101
     assert "# MCP Unified User Guide" in user_guide  # nosec B101
+    assert "Publishing Readiness" in user_guide  # nosec B101
+    assert "make mcp-unified-rc" in user_guide  # nosec B101
+    assert "make mcp-unified-publish-dry-run" in user_guide  # nosec B101
+    assert "MCP_UNIFIED_ALLOW_PUBLISH=1" in user_guide  # nosec B101
+    assert "maintainer-owned TestPyPI" in user_guide  # nosec B101
     assert "profiles" in user_guide  # nosec B101
     assert "external servers" in user_guide  # nosec B101
     assert "credential grants" in user_guide  # nosec B101
@@ -831,6 +901,7 @@ def test_mcp_unified_standalone_sdist_contains_only_package_boundary(
     members = _sdist_project_members(_read_sdist_members(sdist))
 
     allowed_project_root_members = {
+        "LICENSE",
         "PKG-INFO",
         "README.md",
         "USER_GUIDE.md",
@@ -907,6 +978,14 @@ def _load_workflow(path: Path) -> dict[str, object]:
     return workflow
 
 
+def _workflow_triggers(workflow: dict[str, object]) -> dict[str, object]:
+    """Return GitHub workflow triggers with YAML boolean-key fallback."""
+
+    triggers = workflow.get("on") or workflow.get(True)
+    assert isinstance(triggers, dict)  # nosec B101
+    return triggers
+
+
 def _workflow_run_blocks(workflow: dict[str, object]) -> list[str]:
     """Return shell run blocks from every workflow job step."""
 
@@ -920,8 +999,7 @@ def _workflow_run_blocks(workflow: dict[str, object]) -> list[str]:
 def _workflow_trigger_paths(workflow: dict[str, object]) -> dict[str, list[str]]:
     """Return GitHub workflow trigger paths with YAML boolean-key fallback."""
 
-    triggers = workflow.get("on") or workflow.get(True)
-    assert isinstance(triggers, dict)  # nosec B101
+    triggers = _workflow_triggers(workflow)
     return {
         trigger_name: trigger_config.get("paths", [])
         for trigger_name, trigger_config in triggers.items()
@@ -990,6 +1068,44 @@ def test_mcp_unified_rc_workflow_uses_private_permissions() -> None:
     assert "pip install --editable" not in install_runs  # nosec B101
 
 
+def test_mcp_unified_publish_workflow_is_manual_and_gated() -> None:
+    """Standalone publish workflow must be manual and explicitly gated."""
+
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "mcp-unified-publish.yml"
+    workflow = _load_workflow(workflow_path)
+    triggers = _workflow_triggers(workflow)
+    serialized_workflow = yaml.safe_dump(workflow, sort_keys=True)
+    run_blocks = "\n".join(_workflow_run_blocks(workflow))
+    jobs = workflow["jobs"]
+
+    assert set(triggers) == {"workflow_dispatch"}  # nosec B101
+    inputs = triggers["workflow_dispatch"]["inputs"]
+    assert inputs["target"]["options"] == ["dry-run", "testpypi", "pypi"]  # nosec B101
+    assert inputs["target"]["default"] == "dry-run"  # nosec B101
+    assert inputs["confirm_publish"]["required"] is False  # nosec B101
+    assert workflow["permissions"] == {"contents": "read"}  # nosec B101
+    assert "pull_request" not in serialized_workflow  # nosec B101
+    assert "push:" not in serialized_workflow  # nosec B101
+    assert "make mcp-unified-rc" in run_blocks  # nosec B101
+    assert "mcp-unified-publish-dry-run" in run_blocks  # nosec B101
+    assert "MCP_UNIFIED_ALLOW_PUBLISH=1" in run_blocks  # nosec B101
+
+    plan_job = jobs["publish-plan"]
+    assert plan_job["permissions"] == {"contents": "read"}  # nosec B101
+    for job_name, environment_name, token_secret in (
+        ("publish-testpypi", "testpypi", "MCP_UNIFIED_TESTPYPI_API_TOKEN"),
+        ("publish-pypi", "pypi", "MCP_UNIFIED_PYPI_API_TOKEN"),
+    ):
+        job = jobs[job_name]
+        assert job["needs"] == "publish-plan"  # nosec B101
+        assert "inputs.confirm_publish == 'MCP_UNIFIED_PUBLISH'" in job["if"]  # nosec B101
+        assert job["permissions"] == {"contents": "read"}  # nosec B101
+        assert job["environment"]["name"] == environment_name  # nosec B101
+        job_text = yaml.safe_dump(job, sort_keys=True)
+        assert token_secret in job_text  # nosec B101
+        assert "TWINE_USERNAME: __token__" in job_text  # nosec B101
+
+
 def test_mcp_unified_make_targets_do_not_call_root_pypi_check() -> None:
     """Standalone RC targets must not delegate to the root PyPI package check."""
 
@@ -999,6 +1115,7 @@ def test_mcp_unified_make_targets_do_not_call_root_pypi_check() -> None:
         "mcp-unified-check",
         "mcp-unified-uat",
         "mcp-unified-rc",
+        "mcp-unified-publish-dry-run",
     ):
         assert re.search(rf"^{target_name}:", makefile, flags=re.MULTILINE)  # nosec B101
 
@@ -1017,6 +1134,10 @@ def test_mcp_unified_make_targets_do_not_call_root_pypi_check() -> None:
     ]
     assert _make_target_commands(makefile, "mcp-unified-rc") == [  # nosec B101
         "$(MCP_UNIFIED_RC) all",
+    ]
+    assert _make_target_commands(makefile, "mcp-unified-publish-dry-run") == [  # nosec B101
+        "$(MCP_UNIFIED_RC) build",
+        "$(MCP_UNIFIED_RC) publish-plan --target testpypi --dry-run",
     ]
 
 

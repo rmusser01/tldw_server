@@ -7,6 +7,30 @@ credential grants, configuration snapshots, and remote runtime commands.
 The package is currently internal/experimental and distributed with the
 `tldw-server` source tree. It is not a separately published standalone package.
 
+## Publishing Readiness
+
+The standalone package has publish-ready metadata and package-local artifacts,
+but it remains `not-published`. New users should install it from the repository
+until maintainers complete a deliberate TestPyPI and PyPI promotion.
+
+Run the full internal release candidate gate from the repository root:
+
+```bash
+make mcp-unified-rc
+```
+
+Generate a TestPyPI publish plan without uploading artifacts:
+
+```bash
+make mcp-unified-publish-dry-run
+```
+
+Live upload is intentionally gated. A maintainer-owned TestPyPI or PyPI token
+must be configured in the manual publish workflow, the workflow confirmation
+must be set to `MCP_UNIFIED_PUBLISH`, and the RC helper refuses execution unless
+`MCP_UNIFIED_ALLOW_PUBLISH=1` is present in the environment. Do not use public
+PyPI install guidance while package metadata reports `not-published`.
+
 ## 1. Install The Package Boundary
 
 From the repository root:

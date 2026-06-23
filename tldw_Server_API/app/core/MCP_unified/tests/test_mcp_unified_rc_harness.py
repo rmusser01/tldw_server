@@ -54,6 +54,227 @@ def test_default_paths_point_to_apps_package() -> None:
     assert paths.evidence_dir == Path("/repo/.artifacts/mcp-unified-rc")  # nosec B101
 
 
+def _create_publish_plan_artifacts(tmp_path: Path) -> mcp_unified_rc.RcPaths:
+    """Create placeholder dist files for publish-plan unit tests."""
+
+    paths = mcp_unified_rc.RcPaths.from_repo_root(tmp_path)
+    paths.dist_dir.mkdir(parents=True)
+    (paths.dist_dir / "mcp_unified-0.1.0-py3-none-any.whl").write_text(
+        "wheel",
+        encoding="utf-8",
+    )
+    (paths.dist_dir / "mcp_unified-0.1.0.tar.gz").write_text(
+        "sdist",
+        encoding="utf-8",
+    )
+    return paths
+
+
+def test_rc_publish_plan_is_dry_run_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Publish plans should default to a non-uploading TestPyPI dry run."""
+
+    monkeypatch.delenv("MCP_UNIFIED_ALLOW_PUBLISH", raising=False)
+    paths = _create_publish_plan_artifacts(tmp_path)
+    parser = mcp_unified_rc.build_parser()
+
+    parsed = parser.parse_args(["publish-plan", "--target", "testpypi"])
+    plan = mcp_unified_rc.build_publish_plan(
+        paths,
+        target=parsed.target,
+        execute=parsed.execute,
+    )
+
+    assert parsed.command == "publish-plan"  # nosec B101
+    assert plan.target == "testpypi"  # nosec B101
+    assert plan.repository_url == "https://test.pypi.org/legacy/"  # nosec B101
+    assert plan.execute is False  # nosec B101
+    assert plan.dry_run is True  # nosec B101
+    assert plan.artifact_filenames == [  # nosec B101
+        "mcp_unified-0.1.0-py3-none-any.whl",
+        "mcp_unified-0.1.0.tar.gz",
+    ]
+    assert plan.command[:5] == [  # nosec B101
+        sys.executable,
+        "-m",
+        "twine",
+        "upload",
+        "--repository-url",
+    ]
+    assert "https://test.pypi.org/legacy/" in plan.command  # nosec B101
+    assert "--non-interactive" in plan.command  # nosec B101
+    assert not any("token" in part.lower() for part in plan.command)  # nosec B101
+
+
+def test_rc_publish_plan_parser_supports_no_dry_run() -> None:
+    """The publish-plan dry-run flag should be a real boolean option."""
+
+    parser = mcp_unified_rc.build_parser()
+
+    parsed = parser.parse_args(["publish-plan", "--target", "testpypi", "--no-dry-run"])
+
+    assert parsed.command == "publish-plan"  # nosec B101
+    assert parsed.dry_run is False  # nosec B101
+    assert parsed.execute is False  # nosec B101
+
+
+def test_rc_publish_plan_rejects_stale_extra_artifacts(tmp_path: Path) -> None:
+    """Publish plans should not include stale dist artifacts."""
+
+    paths = _create_publish_plan_artifacts(tmp_path)
+    (paths.dist_dir / "mcp_unified-0.1.0+stale-py3-none-any.whl").write_text(
+        "stale wheel",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="expected exactly one wheel and one sdist"):
+        mcp_unified_rc.build_publish_plan(paths, target="testpypi")
+
+
+def test_rc_publish_plan_execute_requires_opt_in_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Live publish plans should require an explicit environment opt-in."""
+
+    paths = _create_publish_plan_artifacts(tmp_path)
+    monkeypatch.delenv("MCP_UNIFIED_ALLOW_PUBLISH", raising=False)
+
+    with pytest.raises(RuntimeError, match="MCP_UNIFIED_ALLOW_PUBLISH"):
+        mcp_unified_rc.build_publish_plan(
+            paths,
+            target="pypi",
+            execute=True,
+        )
+
+    monkeypatch.setenv("MCP_UNIFIED_ALLOW_PUBLISH", "1")
+    plan = mcp_unified_rc.build_publish_plan(
+        paths,
+        target="pypi",
+        execute=True,
+    )
+
+    assert plan.target == "pypi"  # nosec B101
+    assert plan.repository_url == "https://upload.pypi.org/legacy/"  # nosec B101
+    assert plan.execute is True  # nosec B101
+    assert plan.dry_run is False  # nosec B101
+
+
+def test_run_publish_plan_records_dry_run_evidence(tmp_path: Path) -> None:
+    """run_publish_plan should directly record dry-run evidence."""
+
+    paths = _create_publish_plan_artifacts(tmp_path)
+
+    exit_code = mcp_unified_rc.run_publish_plan(
+        paths,
+        target="testpypi",
+        execute=False,
+        dry_run=True,
+    )
+
+    evidence = json.loads(
+        (paths.evidence_dir / mcp_unified_rc.EVIDENCE_JSON).read_text(
+            encoding="utf-8",
+        )
+    )
+    result = next(
+        item
+        for item in evidence["results"]
+        if item["phase"] == "publish_plan" and item["name"] == "twine_upload_plan"
+    )
+    assert exit_code == 0  # nosec B101
+    assert result["status"] == "passed"  # nosec B101
+    assert result["details"]["plan"]["dry_run"] is True  # nosec B101
+    assert result["details"]["plan"]["execute"] is False  # nosec B101
+
+
+def test_run_publish_plan_records_upload_execution_exception(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unexpected upload execution errors should be recorded as evidence."""
+
+    paths = _create_publish_plan_artifacts(tmp_path)
+    monkeypatch.setenv("MCP_UNIFIED_ALLOW_PUBLISH", "1")
+
+    def fail_run_command(
+        command: list[str],
+        *,
+        cwd: Path,
+        timeout: int = 180,
+        env: dict[str, str] | None = None,
+    ) -> mcp_unified_rc.RcCommandResult:
+        del env, timeout
+        if command[:3] == [sys.executable, "-m", "twine"]:
+            raise RuntimeError("upload transport failed")
+        return mcp_unified_rc.RcCommandResult(
+            command=command,
+            cwd=str(cwd),
+            returncode=0,
+            stdout="abc123\n",
+            stderr="",
+            duration_ms=0,
+        )
+
+    monkeypatch.setattr(mcp_unified_rc, "run_command", fail_run_command)
+
+    exit_code = mcp_unified_rc.run_publish_plan(
+        paths,
+        target="testpypi",
+        execute=True,
+        dry_run=False,
+    )
+
+    evidence = json.loads(
+        (paths.evidence_dir / mcp_unified_rc.EVIDENCE_JSON).read_text(
+            encoding="utf-8",
+        )
+    )
+    result = next(
+        item
+        for item in evidence["results"]
+        if item["phase"] == "publish_plan" and item["name"] == "twine_upload"
+    )
+    assert exit_code == 1  # nosec B101
+    assert result["status"] == "failed"  # nosec B101
+    assert "upload transport failed" in result["reason"]  # nosec B101
+    assert result["details"]["plan"]["execute"] is True  # nosec B101
+
+
+def test_read_package_constants_ignores_literal_eval_type_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Metadata extraction should not crash when literal_eval raises TypeError."""
+
+    metadata_path = tmp_path / "package_metadata.py"
+    metadata_path.write_text(
+        "\n".join(
+            [
+                "from typing import Final",
+                "PACKAGE_NAME: Final = 'mcp-unified'",
+                "PACKAGE_URLS: Final = {'Homepage': 'https://tldwproject.com'}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    original_literal_eval = mcp_unified_rc.ast.literal_eval
+
+    def literal_eval_with_type_error(node: object) -> object:
+        if isinstance(node, mcp_unified_rc.ast.Dict):
+            raise TypeError("unsupported literal")
+        return original_literal_eval(node)
+
+    monkeypatch.setattr(mcp_unified_rc.ast, "literal_eval", literal_eval_with_type_error)
+
+    constants = mcp_unified_rc._read_package_constants(metadata_path)
+
+    assert constants["PACKAGE_NAME"] == "mcp-unified"  # nosec B101
+    assert "PACKAGE_URLS" not in constants  # nosec B101
+
+
 def test_user_guide_uat_install_spec_uses_apps_project_by_default() -> None:
     """User-guide UAT install specs should default to the app package project."""
 

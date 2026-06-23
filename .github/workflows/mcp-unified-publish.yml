@@ -1,0 +1,133 @@
+name: MCP Unified Publish Readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Standalone MCP Unified publish target.
+        required: true
+        type: choice
+        options:
+          - dry-run
+          - testpypi
+          - pypi
+        default: dry-run
+      confirm_publish:
+        description: Type MCP_UNIFIED_PUBLISH to enable a live upload job.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-unified-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-plan:
+    name: Build RC and publish dry-run plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: Install packaging tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine setuptools wheel pytest pytest-asyncio bandit
+          python -m pip install "pydantic>=2.0.0" "loguru>=0.7.0" "PyYAML>=6.0.0" "httpx>=0.24.0" "websockets>=12.0"
+
+      - name: Run internal RC and publish dry run
+        run: |
+          make mcp-unified-rc
+          make mcp-unified-publish-dry-run
+
+      - name: Upload MCP Unified publish plan artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mcp-unified-publish-plan
+          path: .artifacts/mcp-unified-rc/**
+          if-no-files-found: error
+
+  publish-testpypi:
+    name: Upload MCP Unified to TestPyPI
+    needs: publish-plan
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi' && inputs.confirm_publish == 'MCP_UNIFIED_PUBLISH' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    environment:
+      name: testpypi
+    env:
+      TWINE_USERNAME: __token__
+      TWINE_PASSWORD: ${{ secrets.MCP_UNIFIED_TESTPYPI_API_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: Install packaging tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine setuptools wheel pytest pytest-asyncio bandit
+          python -m pip install "pydantic>=2.0.0" "loguru>=0.7.0" "PyYAML>=6.0.0" "httpx>=0.24.0" "websockets>=12.0"
+
+      - name: Build and upload to TestPyPI
+        run: |
+          python Helper_Scripts/mcp_unified_rc.py build
+          MCP_UNIFIED_ALLOW_PUBLISH=1 python Helper_Scripts/mcp_unified_rc.py publish-plan --target testpypi --execute
+
+  publish-pypi:
+    name: Upload MCP Unified to PyPI
+    needs: publish-plan
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'pypi' && inputs.confirm_publish == 'MCP_UNIFIED_PUBLISH' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    environment:
+      name: pypi
+    env:
+      TWINE_USERNAME: __token__
+      TWINE_PASSWORD: ${{ secrets.MCP_UNIFIED_PYPI_API_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12"
+
+      - name: Install packaging tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine setuptools wheel pytest pytest-asyncio bandit
+          python -m pip install "pydantic>=2.0.0" "loguru>=0.7.0" "PyYAML>=6.0.0" "httpx>=0.24.0" "websockets>=12.0"
+
+      - name: Build and upload to PyPI
+        run: |
+          python Helper_Scripts/mcp_unified_rc.py build
+          MCP_UNIFIED_ALLOW_PUBLISH=1 python Helper_Scripts/mcp_unified_rc.py publish-plan --target pypi --execute

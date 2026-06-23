@@ -38,6 +38,7 @@ help:
 	@echo "  make mcp-unified-check       Run MCP Unified RC artifact gates"
 	@echo "  make mcp-unified-uat         Run MCP Unified RC UAT checks"
 	@echo "  make mcp-unified-rc          Run the full MCP Unified internal RC"
+	@echo "  make mcp-unified-publish-dry-run"
 	@echo "  make lint-changed            Lint only changed files"
 	@echo "  make ci-local                Run gating CI checks locally (fast tier)"
 	@echo "  make ci-local-full           Run the full suite locally (-n auto)"
@@ -58,7 +59,7 @@ help:
 # -----------------------------------------------------------------------------
 # Quickstart targets (first-time setup)
 # -----------------------------------------------------------------------------
-.PHONY: setup-wizard-tools setup-docker-single start-docker-single verify-docker-single setup-docker-multi start-docker-multi verify-docker-multi install-local setup-local-single start-local-single verify-local-single quickstart quickstart-install quickstart-prereqs quickstart-local quickstart-docker quickstart-docker-bootstrap quickstart-docker-webui model-cycle verify pypi-build pypi-check tooling-install tooling-smoke show-api-key release release-patch release-minor mcp-unified-build mcp-unified-check mcp-unified-uat mcp-unified-rc
+.PHONY: setup-wizard-tools setup-docker-single start-docker-single verify-docker-single setup-docker-multi start-docker-multi verify-docker-multi install-local setup-local-single start-local-single verify-local-single quickstart quickstart-install quickstart-prereqs quickstart-local quickstart-docker quickstart-docker-bootstrap quickstart-docker-webui model-cycle verify pypi-build pypi-check tooling-install tooling-smoke show-api-key release release-patch release-minor mcp-unified-build mcp-unified-check mcp-unified-uat mcp-unified-rc mcp-unified-publish-dry-run
 
 PYTHON ?= python3
 VENV_DIR ?= .venv
@@ -284,6 +285,10 @@ mcp-unified-uat:
 
 mcp-unified-rc:
 	$(MCP_UNIFIED_RC) all
+
+mcp-unified-publish-dry-run:
+	$(MCP_UNIFIED_RC) build
+	$(MCP_UNIFIED_RC) publish-plan --target testpypi --dry-run
 
 # -----------------------------------------------------------------------------
 # PostgreSQL backup/restore

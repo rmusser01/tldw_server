@@ -12,6 +12,40 @@ PUBLISHING_STATUS: Final = "not-published"
 LICENSE_EXPRESSION: Final = "GPL-3.0-only"
 SOURCE_DISTRIBUTION: Final = "tldw-server"
 DEPENDENCY_VERSION_POLICY: Final = "names-only"
+PACKAGE_AUTHORS: Final = (
+    {"name": "Robert Musser", "email": "contact@tldwproject.com"},
+)
+PACKAGE_MAINTAINERS: Final = (
+    {"name": "Robert Musser", "email": "contact@tldwproject.com"},
+)
+PACKAGE_KEYWORDS: Final = (
+    "mcp",
+    "model-context-protocol",
+    "gateway",
+    "agent-tools",
+    "tool-governance",
+)
+PACKAGE_CLASSIFIERS: Final = (
+    "Development Status :: 3 - Alpha",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+)
+PACKAGE_URLS: Final = {
+    "Homepage": "https://tldwproject.com",
+    "Repository": "https://github.com/rmusser01/tldw_server",
+    "Issues": "https://github.com/rmusser01/tldw_server/issues",
+    "Source Package": "https://github.com/rmusser01/tldw_server/tree/dev/apps/mcp-unified",
+    "User Guide": "https://github.com/rmusser01/tldw_server/blob/dev/apps/mcp-unified/USER_GUIDE.md",
+}
+LICENSE_FILES: Final = ("LICENSE",)
 
 CORE_DEPENDENCIES: Final = (
     "pydantic",
@@ -72,6 +106,12 @@ def package_metadata_summary() -> dict[str, object]:
         "license_expression": LICENSE_EXPRESSION,
         "source_distribution": SOURCE_DISTRIBUTION,
         "dependency_version_policy": DEPENDENCY_VERSION_POLICY,
+        "authors": list(PACKAGE_AUTHORS),
+        "maintainers": list(PACKAGE_MAINTAINERS),
+        "keywords": list(PACKAGE_KEYWORDS),
+        "classifiers": list(PACKAGE_CLASSIFIERS),
+        "urls": dict(PACKAGE_URLS),
+        "license_files": list(LICENSE_FILES),
         "base_dependencies": list(PROJECT_DEPENDENCIES),
         "optional_extras": {
             extra: list(dependencies)

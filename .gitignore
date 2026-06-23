@@ -273,6 +273,9 @@ mediawiki_import.log
 audit.log
 errors.log
 
+# Local generated artifacts
+.artifacts/
+
 # Data files
 *.csv
 *.json
