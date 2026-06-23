@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -88,3 +89,12 @@ def test_openapi_contains_research_workspace_capabilities_path():
 
     assert "/api/v1/research-workspace/capabilities" in schema["paths"]
     assert "/api/v1/research-studio/capabilities" not in schema["paths"]
+
+
+def test_research_workspace_readme_names_current_collector_function():
+    readme = Path("tldw_Server_API/app/core/Research_Workspace/README.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "collect_research_workspace_capabilities()" in readme
+    assert "collect_research_workspace_health()" not in readme

@@ -35,7 +35,7 @@ Research_Workspace currently owns the capability-readiness contract for the Rese
 
 ### Core Flow
 
-- The endpoint calls `collect_research_workspace_health()`, then `build_research_workspace_capabilities()` maps subsystem health into capability modes and reason codes.
+- The endpoint calls `collect_research_workspace_capabilities()`, then `build_research_workspace_capabilities()` maps subsystem health into capability modes and reason codes.
 - Capability ids are composed from dependency health rather than direct feature execution. The response tells the WebUI whether to allow, warn, or block an action.
 - TTS readiness is derived from configured provider availability and should not initialize TTS providers during capability checks.
 
