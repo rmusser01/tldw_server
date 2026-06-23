@@ -52,10 +52,13 @@ PIP_NETWORK_FAILURE_MARKERS = (
 )
 PIP_DEPENDENCY_OUTAGE_REASON = "dependency resolution unavailable in this environment"
 LOCAL_ABSOLUTE_PATH_PATTERN = re.compile(
-    r"(?<![:/])/(?:Users|private|var|tmp|Volumes|home|opt|usr|workspace|runner)/"
-    r"[^\s\"',}\]]+"
+    r"(^|[\s\"'(\[{=,:])"
+    r"(/(?:Users|private|var|tmp|Volumes|home|opt|usr|workspace|runner)/"
+    r"[^\s\"',}\]]+)"
 )
-WINDOWS_ABSOLUTE_PATH_PATTERN = re.compile(r"(?i)\b[A-Z]:\\[^\s\"',}\]]+")
+WINDOWS_ABSOLUTE_PATH_PATTERN = re.compile(
+    r"(?i)(^|[\s\"'(\[{=,:])([A-Z]:\\[^\s\"',}\]]+)"
+)
 
 SECRET_KEY_VALUE_PATTERN = re.compile(
     r"(?i)\b(api[_-]?key|token|secret|password|bearer[_-]?token)\b"
@@ -278,8 +281,8 @@ def _redact_evidence_text(value: str, recorder: RcEvidenceRecorder) -> str:
     for path, marker in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
         if path:
             redacted = redacted.replace(path, marker)
-    redacted = LOCAL_ABSOLUTE_PATH_PATTERN.sub("<redacted-path>", redacted)
-    return WINDOWS_ABSOLUTE_PATH_PATTERN.sub("<redacted-path>", redacted)
+    redacted = LOCAL_ABSOLUTE_PATH_PATTERN.sub(r"\1<redacted-path>", redacted)
+    return WINDOWS_ABSOLUTE_PATH_PATTERN.sub(r"\1<redacted-path>", redacted)
 
 
 def sha256_file(path: Path) -> str:
@@ -724,6 +727,7 @@ def _run_cli_uat(paths: RcPaths, recorder: RcEvidenceRecorder) -> None:
         wheel,
         phase="cli_uat",
         name="user_guide_wheel_mode",
+        mode="cli",
     )
 
 
@@ -744,6 +748,7 @@ def _run_smoke_uat(paths: RcPaths, recorder: RcEvidenceRecorder) -> None:
         wheel,
         phase="smoke_uat",
         name="user_guide_smoke_transports",
+        mode="smoke",
     )
 
 
@@ -754,6 +759,7 @@ def _run_user_guide_wheel_uat(
     *,
     phase: str,
     name: str,
+    mode: str,
 ) -> None:
     """Run the standalone user-guide UAT harness against the built wheel."""
 
@@ -769,6 +775,8 @@ def _run_user_guide_wheel_uat(
             str(wheel),
             "--workspace",
             str(workspace),
+            "--mode",
+            mode,
             "--json-report",
             str(report_path),
         ]

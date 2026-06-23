@@ -118,6 +118,41 @@ def test_user_guide_uat_plan_uses_symlinked_venv_on_posix(tmp_path: Path) -> Non
     assert create_step.command == expected_command  # nosec B101
 
 
+def test_user_guide_uat_plan_filters_cli_and_smoke_modes(tmp_path: Path) -> None:
+    harness = _load_user_guide_harness()
+
+    cli_plan = harness.build_uat_plan(
+        repo_root=Path("/repo"),
+        workspace=tmp_path / "cli",
+        python_executable="python",
+        gateway_executable="mcp-unified-gateway",
+        smoke_executable="mcp-unified-smoke",
+        gateway_url=None,
+        package_install_args=["/repo/apps/mcp-unified[gateway]"],
+        mode="cli",
+    )
+    smoke_plan = harness.build_uat_plan(
+        repo_root=Path("/repo"),
+        workspace=tmp_path / "smoke",
+        python_executable="python",
+        gateway_executable="mcp-unified-gateway",
+        smoke_executable="mcp-unified-smoke",
+        gateway_url=None,
+        package_install_args=["/repo/apps/mcp-unified[gateway]"],
+        mode="smoke",
+    )
+
+    cli_ids = {step.step_id for step in cli_plan}
+    smoke_ids = {step.step_id for step in smoke_plan}
+    assert "gateway_package_info" in cli_ids  # nosec B101
+    assert "smoke_stdio_subprocess" not in cli_ids  # nosec B101
+    assert "smoke_websocket" not in cli_ids  # nosec B101
+    assert "smoke_stdio_subprocess" in smoke_ids  # nosec B101
+    assert "smoke_http" in smoke_ids  # nosec B101
+    assert "smoke_websocket" in smoke_ids  # nosec B101
+    assert "list_presets" not in smoke_ids  # nosec B101
+
+
 def test_user_guide_uat_result_payload_redacts_reason(tmp_path: Path) -> None:
     harness = _load_user_guide_harness()
     wheel_path = tmp_path / "dist" / "mcp_unified-0.1.0-py3-none-any.whl"
@@ -185,6 +220,51 @@ def test_user_guide_uat_result_payload_redacts_absolute_paths(tmp_path: Path) ->
     assert "/Users/" not in rendered  # nosec B101
     assert str(tmp_path) not in rendered  # nosec B101
     assert "<redacted-path>" in rendered  # nosec B101
+
+
+def test_user_guide_uat_redaction_preserves_url_paths(tmp_path: Path) -> None:
+    harness = _load_user_guide_harness()
+
+    redacted = harness.redact_text(
+        (
+            "download https://files.pythonhosted.org/packages/tmp/pkg.whl "
+            "and https://github.com/actions/runner/releases while "
+            "reading /Users/example/Library/Caches/pip"
+        ),
+        secrets=[],
+        sensitive_paths=[tmp_path],
+    )
+
+    assert "https://files.pythonhosted.org/packages/tmp/pkg.whl" in redacted  # nosec B101
+    assert "https://github.com/actions/runner/releases" in redacted  # nosec B101
+    assert "/Users/" not in redacted  # nosec B101
+
+
+def test_rc_evidence_redaction_preserves_url_paths(tmp_path: Path) -> None:
+    recorder = mcp_unified_rc.RcEvidenceRecorder(
+        evidence_dir=tmp_path / "evidence",
+        package_name="mcp-unified",
+        package_version="0.1.0",
+        package_status="internal-experimental",
+        publishing_status="not-published",
+        commit="abc1234",
+        source_path="apps/mcp-unified",
+        layout="src",
+        repo_root=tmp_path / "repo",
+    )
+
+    redacted = mcp_unified_rc._redact_evidence_text(
+        (
+            "download https://files.pythonhosted.org/packages/home/pkg.whl "
+            "and https://github.com/actions/runner/releases while "
+            "reading /Users/example/Library/Caches/pip"
+        ),
+        recorder,
+    )
+
+    assert "https://files.pythonhosted.org/packages/home/pkg.whl" in redacted  # nosec B101
+    assert "https://github.com/actions/runner/releases" in redacted  # nosec B101
+    assert "/Users/" not in redacted  # nosec B101
 
 
 def test_redact_text_removes_secret_like_values() -> None:
@@ -463,6 +543,8 @@ def test_rc_cli_uat_runs_user_guide_wheel_mode(
     assert recorder.results[0]["phase"] == "cli_uat"  # nosec B101
     assert recorder.results[0]["name"] == "user_guide_wheel_mode"  # nosec B101
     assert recorder.results[0]["status"] == "passed"  # nosec B101
+    assert "--mode" in command  # nosec B101
+    assert command[command.index("--mode") + 1] == "cli"  # nosec B101
 
 
 def test_rc_smoke_uat_runs_user_guide_transport_checks(
@@ -530,6 +612,8 @@ def test_rc_smoke_uat_runs_user_guide_transport_checks(
     assert recorder.results[0]["phase"] == "smoke_uat"  # nosec B101
     assert recorder.results[0]["name"] == "user_guide_smoke_transports"  # nosec B101
     assert recorder.results[0]["status"] == "passed"  # nosec B101
+    assert "--mode" in command  # nosec B101
+    assert command[command.index("--mode") + 1] == "smoke"  # nosec B101
 
 
 def test_rc_evidence_redacts_local_absolute_paths(tmp_path: Path) -> None:

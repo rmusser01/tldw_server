@@ -28,10 +28,29 @@ _DEFAULT_TIMEOUT_SECONDS = 120.0
 _FIXTURE_HOST = "127.0.0.1"
 _SERVER_STOP_TIMEOUT_SECONDS = 5.0
 _LOCAL_ABSOLUTE_PATH_PATTERN = re.compile(
-    r"(?<![:/])/(?:Users|private|var|tmp|Volumes|home|opt|usr|workspace|runner)/"
-    r"[^\s\"',}\]]+"
+    r"(^|[\s\"'(\[{=,:])"
+    r"(/(?:Users|private|var|tmp|Volumes|home|opt|usr|workspace|runner)/"
+    r"[^\s\"',}\]]+)"
 )
-_WINDOWS_ABSOLUTE_PATH_PATTERN = re.compile(r"(?i)\b[A-Z]:\\[^\s\"',}\]]+")
+_WINDOWS_ABSOLUTE_PATH_PATTERN = re.compile(
+    r"(?i)(^|[\s\"'(\[{=,:])([A-Z]:\\[^\s\"',}\]]+)"
+)
+_SMOKE_STEP_IDS = {
+    "smoke_cli_help",
+    "smoke_inprocess",
+    "write_stdio_fixture",
+    "smoke_stdio_subprocess",
+    "write_asgi_fixture",
+    "start_fixture_gateway",
+    "smoke_http",
+    "smoke_websocket",
+    "stop_fixture_gateway",
+}
+_SMOKE_MODE_SETUP_STEP_IDS = {
+    "create_venv",
+    "install_package_boundary",
+    *_SMOKE_STEP_IDS,
+}
 
 _STDIO_FIXTURE_SOURCE = '''\
 from __future__ import annotations
@@ -116,6 +135,7 @@ class UatRunContext:
     admin_key: str | None
     timeout_seconds: float
     package_install_args: list[str]
+    mode: str = "all"
     secrets: list[str] = field(default_factory=list)
     processes: dict[str, subprocess.Popen[str]] = field(default_factory=dict)
 
@@ -155,6 +175,7 @@ def build_uat_plan(
     gateway_url: str | None,
     package_install_args: list[str],
     fixture_port: int | None = None,
+    mode: str = "all",
 ) -> list[UatStep]:
     """Build the ordered standalone user-guide UAT command plan."""
 
@@ -577,7 +598,7 @@ def build_uat_plan(
             )
         )
 
-    return steps
+    return _filter_uat_plan(steps, mode=mode)
 
 
 def redact_text(
@@ -592,8 +613,8 @@ def redact_text(
     for path in sorted({str(path) for path in sensitive_paths if path}, key=len, reverse=True):
         if path:
             redacted = redacted.replace(path, "<redacted-path>")
-    redacted = _LOCAL_ABSOLUTE_PATH_PATTERN.sub("<redacted-path>", redacted)
-    redacted = _WINDOWS_ABSOLUTE_PATH_PATTERN.sub("<redacted-path>", redacted)
+    redacted = _LOCAL_ABSOLUTE_PATH_PATTERN.sub(r"\1<redacted-path>", redacted)
+    redacted = _WINDOWS_ABSOLUTE_PATH_PATTERN.sub(r"\1<redacted-path>", redacted)
     for secret in sorted({secret for secret in secrets if secret}, key=len, reverse=True):
         redacted = redacted.replace(secret, "<redacted-secret>")
     redacted = re.sub(
@@ -628,6 +649,7 @@ def run_uat(context: UatRunContext) -> dict[str, Any]:
         smoke_executable=smoke_executable,
         gateway_url=context.gateway_url,
         package_install_args=context.package_install_args,
+        mode=context.mode,
     )
     try:
         results = [_run_step(step, context) for step in plan]
@@ -675,6 +697,7 @@ def main(argv: list[str] | None = None) -> int:
                 admin_key=admin_key,
                 timeout_seconds=args.timeout_seconds,
                 package_install_args=package_install_args,
+                mode=args.mode,
                 secrets=secrets,
             )
         )
@@ -689,6 +712,7 @@ def main(argv: list[str] | None = None) -> int:
                     admin_key=admin_key,
                     timeout_seconds=args.timeout_seconds,
                     package_install_args=package_install_args,
+                    mode=args.mode,
                     secrets=secrets,
                 )
             )
@@ -803,6 +827,18 @@ def _run_step(step: UatStep, context: UatRunContext) -> UatStepResult:
         stderr=_truncate(completed.stderr),
         reason=None if status == "passed" else "unexpected exit code",
     )
+
+
+def _filter_uat_plan(steps: list[UatStep], *, mode: str) -> list[UatStep]:
+    """Return the selected UAT plan slice."""
+
+    if mode == "all":
+        return steps
+    if mode == "cli":
+        return [step for step in steps if step.step_id not in _SMOKE_STEP_IDS]
+    if mode == "smoke":
+        return [step for step in steps if step.step_id in _SMOKE_MODE_SETUP_STEP_IDS]
+    raise ValueError(f"unsupported UAT mode: {mode}")
 
 
 def _start_background_process(
@@ -1054,6 +1090,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
             "Install the app package project in editable mode for local guide iteration. "
             "Ignored when --wheel is supplied."
         ),
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("all", "cli", "smoke"),
+        default="all",
+        help="Select the UAT plan slice to run.",
     )
     parser.add_argument(
         "--gateway-url",
