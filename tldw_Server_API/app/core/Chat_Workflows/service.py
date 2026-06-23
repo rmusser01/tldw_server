@@ -321,6 +321,21 @@ class ChatWorkflowService:
             raise ValueError("user_message must not be empty")
 
         run = await self._require_run_async(run_id)
+        if idempotency_key is not None:
+            existing_by_key = await self._db_call_async(
+                "get_round_by_idempotency_key",
+                run_id,
+                idempotency_key,
+            )
+            if existing_by_key is not None:
+                self._validate_replayed_round(
+                    existing_round=existing_by_key,
+                    round_index=round_index,
+                    user_message=normalized_user_message,
+                )
+                if str(existing_by_key.get("status") or "").strip().lower() != "failed":
+                    return await self._build_run_result(run_id)
+
         if run.get("status") != "active":
             raise ValueError("run is not active")
 
@@ -556,6 +571,22 @@ class ChatWorkflowService:
                 "idempotency key has already been used for a different answer"
             )
 
+    def _validate_replayed_round(
+        self,
+        *,
+        existing_round: dict[str, Any],
+        round_index: int,
+        user_message: str,
+    ) -> None:
+        if int(existing_round["round_index"]) != round_index:
+            raise ChatWorkflowConflictError(
+                "idempotency key has already been used for a different dialogue round"
+            )
+        if existing_round["user_message"] != user_message:
+            raise ChatWorkflowConflictError(
+                "idempotency key has already been used for a different dialogue round"
+            )
+
     def _get_template_snapshot(self, run: dict[str, Any]) -> dict[str, Any]:
         snapshot = _json_loads(run.get("template_snapshot_json"), default={})
         steps = snapshot.get("steps", [])
@@ -674,7 +705,11 @@ class ChatWorkflowService:
         if step.get("question_mode") != "llm_phrased":
             return stock_result
         if self.question_renderer is None:
-            return stock_result
+            return self._build_question_fallback_result(
+                base_question,
+                reason="renderer_unavailable",
+                model=model,
+            )
 
         try:
             rendered = await self.question_renderer.render_question(
@@ -693,23 +728,43 @@ class ChatWorkflowService:
                 "fallback_used": bool(rendered.get("fallback_used", False)),
             }
         except Exception as exc:  # noqa: BLE001
+            error_type = type(exc).__name__
             logger.warning(
                 "Falling back to base question for chat workflow step "
-                "run_id={} step_index={} step_id={} model={} error={}",
+                "run_id={} step_index={} step_id={} model={} error_type={}",
                 run_id,
                 step_index,
                 step.get("id"),
                 model,
-                exc,
+                error_type,
             )
-            return {
-                "displayed_question": base_question,
-                "question_generation_meta": {
-                    "mode": "fallback",
-                    "error": str(exc),
-                },
-                "fallback_used": True,
-            }
+            return self._build_question_fallback_result(
+                base_question,
+                reason="renderer_error",
+                model=model,
+                error_type=error_type,
+            )
+
+    def _build_question_fallback_result(
+        self,
+        base_question: str,
+        *,
+        reason: str,
+        model: str | None = None,
+        error_type: str | None = None,
+    ) -> dict[str, Any]:
+        meta: dict[str, Any] = {
+            "mode": "fallback",
+            "reason": reason,
+            "model": model,
+        }
+        if error_type is not None:
+            meta["error_type"] = error_type
+        return {
+            "displayed_question": base_question,
+            "question_generation_meta": meta,
+            "fallback_used": True,
+        }
 
     def _render_question_sync(
         self,

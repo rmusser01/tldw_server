@@ -687,6 +687,8 @@ class ChatWorkflowsDatabase:
                         "run": dict(run_row),
                     }
                 if idempotency_key is not None and existing_round.get("idempotency_key") == idempotency_key:
+                    if existing_round.get("user_message") != user_message:
+                        return {"outcome": "conflict", "round": existing_round, "run": dict(run_row)}
                     return {"outcome": "replayed", "round": existing_round, "run": dict(run_row)}
                 return {"outcome": "conflict", "round": existing_round, "run": dict(run_row)}
 
@@ -715,6 +717,27 @@ class ChatWorkflowsDatabase:
             "round": dict(round_row) if round_row is not None else None,
             "run": dict(run_row),
         }
+
+    def get_round_by_idempotency_key(
+        self,
+        run_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        """Return a dialogue round previously claimed with a run-level idempotency key."""
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT id, run_id, step_index, round_index, user_message, debate_llm_message,
+                       moderator_decision, moderator_summary, next_user_prompt, status,
+                       idempotency_key, created_at, updated_at
+                FROM chat_workflow_rounds
+                WHERE run_id = ? AND idempotency_key = ?
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (run_id, idempotency_key),
+            ).fetchone()
+        return dict(row) if row is not None else None
 
     def complete_dialogue_round(
         self,
