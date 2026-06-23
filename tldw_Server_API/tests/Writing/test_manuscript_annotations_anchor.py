@@ -53,6 +53,19 @@ def test_prefix_suffix_context_reattaches_ambiguous_selected_text():
     assert status["derived_end"] == revised.index("beta gamma") + len("beta")
 
 
+def test_prefix_suffix_context_reattaches_replacement_when_selected_text_absent():
+    original = "Alpha beta gamma"
+    anchor = build_scene_anchor(original, start=6, end=10, scene_version=1)
+    revised = "Alpha delta gamma"
+
+    status = derive_scene_anchor_status(anchor, revised, current_scene_version=2)
+
+    expected_start = revised.index("delta")
+    assert status["anchor_status"] == "reattached"
+    assert status["derived_start"] == expected_start
+    assert status["derived_end"] == expected_start + len("delta")
+
+
 def test_prefix_suffix_context_must_be_unambiguous():
     original = "Alpha beta gamma"
     anchor = build_scene_anchor(original, start=6, end=10, scene_version=1)
@@ -73,6 +86,18 @@ def test_derive_scene_anchor_status_does_not_mutate_anchor():
     derive_scene_anchor_status(anchor, "Intro Alpha beta gamma", current_scene_version=2)
 
     assert anchor == before
+
+
+def test_malformed_scene_version_does_not_raise_when_exact_range_matches():
+    text = "Alpha beta gamma"
+    anchor = build_scene_anchor(text, start=6, end=10, scene_version=1)
+    anchor["scene_version"] = "not-a-number"
+
+    status = derive_scene_anchor_status(anchor, text, current_scene_version=2)
+
+    assert status["anchor_status"] == "attached"
+    assert status["derived_start"] == 6
+    assert status["derived_end"] == 10
 
 
 def test_missing_scene_range_fields_are_scene_level():

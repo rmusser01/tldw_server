@@ -62,14 +62,15 @@ def derive_scene_anchor_status(
     if not isinstance(start, int) or not isinstance(end, int):
         return _status("scene_level")
 
-    scene_version = anchor.get("scene_version")
-    version_matches = (
-        current_scene_version is None
-        or scene_version is None
-        or int(scene_version) == current_scene_version
-    )
     if (
-        version_matches
+        _scene_version_matches(anchor.get("scene_version"), current_scene_version)
+        and _is_valid_existing_range(text, start, end)
+        and text[start:end] == selected_text
+    ):
+        return _status("attached", start, end)
+
+    if (
+        _scene_version_is_malformed(anchor.get("scene_version"), current_scene_version)
         and _is_valid_existing_range(text, start, end)
         and text[start:end] == selected_text
     ):
@@ -80,10 +81,10 @@ def derive_scene_anchor_status(
         match_start = selected_matches[0]
         return _status("reattached", match_start, match_start + len(selected_text))
 
-    context_matches = _find_context_matches(anchor, text, selected_text, selected_matches)
+    context_matches = _find_context_ranges(anchor, text, selected_text, selected_matches)
     if len(context_matches) == 1:
-        match_start = context_matches[0]
-        return _status("reattached", match_start, match_start + len(selected_text))
+        match_start, match_end = context_matches[0]
+        return _status("reattached", match_start, match_end)
 
     return _status("needs_review")
 
@@ -100,6 +101,31 @@ def _is_valid_existing_range(text: str, start: int, end: int) -> bool:
     return 0 <= start < end <= len(text)
 
 
+def _scene_version_matches(
+    scene_version: object,
+    current_scene_version: int | None,
+) -> bool:
+    if current_scene_version is None or scene_version is None:
+        return True
+    try:
+        return int(scene_version) == current_scene_version
+    except (TypeError, ValueError):
+        return False
+
+
+def _scene_version_is_malformed(
+    scene_version: object,
+    current_scene_version: int | None,
+) -> bool:
+    if current_scene_version is None or scene_version is None:
+        return False
+    try:
+        int(scene_version)
+    except (TypeError, ValueError):
+        return True
+    return False
+
+
 def _find_all(text: str, needle: str) -> list[int]:
     matches: list[int] = []
     position = text.find(needle)
@@ -109,12 +135,12 @@ def _find_all(text: str, needle: str) -> list[int]:
     return matches
 
 
-def _find_context_matches(
+def _find_context_ranges(
     anchor: Mapping[str, object],
     text: str,
     selected_text: str,
     selected_matches: list[int],
-) -> list[int]:
+) -> list[tuple[int, int]]:
     prefix = anchor.get("anchor_prefix")
     suffix = anchor.get("anchor_suffix")
     if not isinstance(prefix, str):
@@ -124,12 +150,35 @@ def _find_context_matches(
     if not prefix and not suffix:
         return []
 
-    matches = selected_matches or _find_all(text, selected_text)
-    return [
-        match_start
-        for match_start in matches
-        if _context_matches(text, match_start, match_start + len(selected_text), prefix, suffix)
-    ]
+    if selected_matches:
+        return [
+            (match_start, match_start + len(selected_text))
+            for match_start in selected_matches
+            if _context_matches(text, match_start, match_start + len(selected_text), prefix, suffix)
+        ]
+
+    return _find_replacement_ranges(text, prefix, suffix)
+
+
+def _find_replacement_ranges(text: str, prefix: str, suffix: str) -> list[tuple[int, int]]:
+    candidates: set[tuple[int, int]] = set()
+
+    if prefix:
+        prefix_ends = [start + len(prefix) for start in _find_all(text, prefix)]
+    else:
+        prefix_ends = [0]
+
+    if suffix:
+        suffix_starts = _find_all(text, suffix)
+    else:
+        suffix_starts = [len(text)]
+
+    for start in prefix_ends:
+        for end in suffix_starts:
+            if start < end:
+                candidates.add((start, end))
+
+    return sorted(candidates)
 
 
 def _context_matches(text: str, start: int, end: int, prefix: str, suffix: str) -> bool:
