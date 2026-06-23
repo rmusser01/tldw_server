@@ -40,6 +40,9 @@ GATEWAY_DEPENDENCIES: Final = (
     "uvicorn",
 )
 DEV_DEPENDENCIES: Final = (
+    "build",
+    "setuptools",
+    "tomli",
     "pytest",
     "pytest-asyncio",
     "bandit",

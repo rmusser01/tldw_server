@@ -10,6 +10,11 @@ from typing import Any
 
 from Helper_Scripts import mcp_unified_rc
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility.
+    import tomli as tomllib
+
 REPO_ROOT = Path(__file__).resolve().parents[5]
 USER_GUIDE_UAT_PATH = (
     REPO_ROOT
@@ -744,6 +749,41 @@ def test_rc_extras_matrix_records_tier_specific_checks(
     assert any("mcp-unified-gateway validate-config" in command for command in flattened_commands)  # nosec B101
     assert any("SQLiteMCPStore" in command for command in flattened_commands)  # nosec B101
     assert any(".github/tests/test_mcp_unified_artifact_gate.py" in command for command in flattened_commands)  # nosec B101
+
+
+def test_mcp_unified_dev_extra_declares_artifact_gate_dependencies() -> None:
+    pyproject = tomllib.loads((REPO_ROOT / "apps" / "mcp-unified" / "pyproject.toml").read_text())
+    dev_dependencies = pyproject["project"]["optional-dependencies"]["dev"]
+    build_dependencies = pyproject["build-system"]["requires"]
+    dev_dependency_names = {
+        dependency.split(";", 1)[0]
+        .split("[", 1)[0]
+        .split("<", 1)[0]
+        .split(">", 1)[0]
+        .split("=", 1)[0]
+        .strip()
+        .lower()
+        .replace("_", "-")
+        for dependency in dev_dependencies
+    }
+    build_dependency_names = {
+        dependency.split("<", 1)[0]
+        .split(">", 1)[0]
+        .split("=", 1)[0]
+        .strip()
+        .lower()
+        .replace("_", "-")
+        for dependency in build_dependencies
+    }
+
+    assert "build" in dev_dependency_names  # nosec B101
+    assert "tomli" in dev_dependency_names  # nosec B101
+    assert build_dependency_names.issubset(dev_dependency_names)  # nosec B101
+    assert any(  # nosec B101
+        "python_version" in dependency
+        for dependency in dev_dependencies
+        if dependency.startswith("tomli")
+    )
 
 
 def test_result_recorder_writes_json_and_markdown(tmp_path: Path) -> None:
