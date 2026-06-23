@@ -16,14 +16,18 @@ export const ProjectHeader: React.FC = () => {
   )
   const title = activeProject?.title ?? "Untitled Audio Project"
   const revisionId = getProjectRevisionId(activeProject)
+  const workflowMismatch =
+    activeProject !== null && activeProject.workflow !== activeWorkflow
   const saveDisabledReason = !activeProject
     ? "Select a project before saving."
+    : workflowMismatch
+      ? "Select a project for this workflow before saving."
     : !revisionId
       ? "Save requires a server-backed project revision."
       : undefined
 
   const saveProject = () => {
-    if (!activeProject || !revisionId) return
+    if (!activeProject || workflowMismatch || !revisionId) return
 
     void updateProjectMutation.mutateAsync({
       title: activeProject.title,

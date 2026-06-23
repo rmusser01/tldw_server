@@ -50,6 +50,25 @@ describe("audio studio store", () => {
     expect(useAudioStudioStore.getState().activeProject?.project_id).toBe("pod-1")
   })
 
+  it("does not keep a hidden project active after switching workflows", () => {
+    const store = useAudioStudioStore.getState()
+    store.setProjects([
+      project({ project_id: "nar-1", workflow: "narration" }),
+      project({ project_id: "music-1", workflow: "music" })
+    ])
+    store.setActiveProjectId("nar-1")
+
+    store.setActiveWorkflow("music")
+
+    expect(useAudioStudioStore.getState().activeProjectId).toBe("music-1")
+    expect(useAudioStudioStore.getState().activeProject?.workflow).toBe("music")
+
+    store.setActiveWorkflow("briefing")
+
+    expect(useAudioStudioStore.getState().activeProjectId).toBeNull()
+    expect(useAudioStudioStore.getState().activeProject).toBeNull()
+  })
+
   it("does not overwrite local dirty project changes with a newer server revision", () => {
     const store = useAudioStudioStore.getState()
     store.setProjects([project({ title: "Local title", revision_id: "rev-1" })])

@@ -118,6 +118,8 @@ Code-quality follow-up #2 verification:
 - `bunx vitest run ../packages/ui/src/services/__tests__/audio-studio.test.ts ../packages/ui/src/store/__tests__/audio-studio.test.tsx ../packages/ui/src/hooks/__tests__/useAudioStudioProjects.test.tsx ../packages/ui/src/routes/__tests__/route-metadata.coverage.test.ts __tests__/pages/audio-studio-route.test.tsx` - 21 passed.
 - `git diff --check` on TASK-2350 code-quality follow-up #2 paths passed.
 Direct service-contract follow-up: resource upsert helpers now return typed section/track/clip response models instead of AudioStudioProject, matching backend response_model contracts. Added service assertions for returned current_revision_id values. Verification: AudioStudioPage test 15 passed; audio-studio service test 5 passed; broader route/service/store/hook suite 21 passed; scoped diff check clean.
+
+Code-quality follow-up #3: fixed cross-workflow active project drift. Workflow changes now select a matching project or clear the active project, and save/generation actions are guarded against active project workflow mismatches. Added store and AudioStudioPage regression tests. Verification: AudioStudioPage 16 passed; store 4 passed; broader route/service/store/hook suite 22 passed; scoped diff check clean.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -22,9 +22,13 @@ export const useAudioStudioGenerationActions = () => {
   )
   const revisionId = getProjectRevisionId(activeProject)
   const sectionTargetId = getFirstSectionTargetId(activeProject)
+  const workflowMismatch =
+    activeProject !== null && activeProject.workflow !== activeWorkflow
 
   const projectDisabledReason = !activeProject
     ? "Select a project before queuing generation."
+    : workflowMismatch
+      ? "Select a project for this workflow before queuing generation."
     : !revisionId
       ? "Save the project before queuing generation."
       : undefined
@@ -39,7 +43,7 @@ export const useAudioStudioGenerationActions = () => {
     options: MusicOptions,
     provider = "ace_step"
   ) => {
-    if (!activeProject || !revisionId) return
+    if (!activeProject || workflowMismatch || !revisionId) return
 
     void generation.mutateAsync({
       kind: "music",
@@ -56,7 +60,7 @@ export const useAudioStudioGenerationActions = () => {
   }
 
   const queueSpeechGeneration = () => {
-    if (!activeProject || !revisionId || !sectionTargetId) return
+    if (!activeProject || workflowMismatch || !revisionId || !sectionTargetId) return
 
     void generation.mutateAsync({
       kind: "speech",

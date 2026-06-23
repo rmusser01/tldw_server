@@ -294,6 +294,26 @@ describe("AudioStudioPage", () => {
     ).toBeDisabled()
   })
 
+  it("does not keep a hidden project active after changing workflows", () => {
+    setActiveProject({ workflow: "narration" })
+    useAudioStudioStore.getState().setActiveWorkflow("narration")
+
+    render(<AudioStudioPage />)
+
+    fireEvent.click(screen.getByRole("tab", { name: /Music/ }))
+    fireEvent.change(screen.getByLabelText("Prompt"), {
+      target: { value: "Warm documentary intro" }
+    })
+
+    expect(useAudioStudioStore.getState().activeProject).toBeNull()
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Generate music" })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate music" }))
+
+    expect(generationMocks.mutateAsync).not.toHaveBeenCalled()
+  })
+
   it("keeps render and export controls disabled while TASK-2351 owns implementation", () => {
     setActiveProject({ workflow: "narration" })
     useAudioStudioStore.getState().setActiveWorkflow("narration")

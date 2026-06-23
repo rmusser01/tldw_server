@@ -119,7 +119,18 @@ export const useAudioStudioStore = createWithEqualityFn<AudioStudioStore>(
   (set, get) => ({
     ...initialState,
 
-    setActiveWorkflow: (workflow) => set({ activeWorkflow: workflow }),
+    setActiveWorkflow: (workflow) =>
+      set((state) => {
+        const activeProject =
+          state.activeProject?.workflow === workflow
+            ? state.activeProject
+            : state.projects.find((project) => project.workflow === workflow) ?? null
+        return {
+          activeWorkflow: workflow,
+          activeProjectId: activeProject?.project_id ?? null,
+          activeProject
+        }
+      }),
 
     setProjects: (projects) => {
       const normalized = projects.map(normalizeProject)
