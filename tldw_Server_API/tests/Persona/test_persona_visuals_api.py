@@ -867,6 +867,60 @@ def test_accept_and_reject_generated_candidates(persona_db: CharactersRAGDB) -> 
         assert rejected_response.json()["failure_reason"] == "not useful"
 
 
+def test_review_generated_candidate_terminal_status_cannot_be_changed(
+    persona_db: CharactersRAGDB,
+) -> None:
+    with _client_for_user(1, persona_db) as client:
+        persona_id = _create_persona(client, name="Candidate Terminal Persona")
+        pack = _create_visual_pack(client, persona_id)
+        asset = _upload_png(client, persona_id, pack["id"])
+        candidate = persona_db.create_persona_visual_candidate(
+            pack_id=pack["id"],
+            persona_id=persona_id,
+            user_id="1",
+            job_id="job-terminal",
+            proposed_manifest_patch={
+                "states": {"thinking": {"animation_id": "generated-thinking"}},
+                "animations": {
+                    "generated-thinking": {
+                        "asset_ids": [asset["id"]],
+                        "frame_rate": 1,
+                        "loop": True,
+                    }
+                },
+            },
+            generated_asset_ids=[asset["id"]],
+            prompt="make thinking",
+        )
+
+        accepted_response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/candidates/{candidate['id']}/review",
+            json={"status": "accepted"},
+        )
+        reject_response = client.post(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}/candidates/{candidate['id']}/review",
+            json={"status": "rejected", "failure_reason": "changed my mind"},
+        )
+
+        assert accepted_response.status_code == 200, accepted_response.text
+        assert reject_response.status_code == 409, reject_response.text
+        assert reject_response.json()["detail"]["code"] == "candidate_status_conflict"
+        stored_candidate = persona_db.get_persona_visual_candidate(
+            candidate_id=candidate["id"],
+            pack_id=pack["id"],
+            persona_id=persona_id,
+            user_id="1",
+        )
+        assert stored_candidate is not None
+        assert stored_candidate["status"] == "accepted"
+        assert stored_candidate["failure_reason"] is None
+        detail = client.get(
+            f"/api/v1/persona/profiles/{persona_id}/visual-packs/{pack['id']}"
+        )
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["manifest"]["states"]["thinking"]["animation_id"] == "generated-thinking"
+
+
 def test_list_generated_candidates_returns_preview_asset_urls(persona_db: CharactersRAGDB) -> None:
     with _client_for_user(1, persona_db) as client:
         persona_id = _create_persona(client, name="Candidate List Persona")

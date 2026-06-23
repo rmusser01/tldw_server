@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from threading import RLock
 from typing import Any
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 from tldw_Server_API.app.core.Persona.session_manager import SessionManager
 from tldw_Server_API.app.core.Persona.session_materialization import (
     DEFAULT_PERSONA_ID,
@@ -20,7 +20,10 @@ LIVE_CONTROL_PREFS_KEY = "persona_live_control"
 _TERMINAL_STATUSES = {"closed", "archived"}
 _CAPABILITIES = {"text": True, "voice": False, "browser_microphone_required": False}
 _generation_lock = RLock()
+_live_session_mutation_lock = RLock()
 _last_focus_generation = 0
+_PREFERENCE_UPDATE_RETRIES = 3
+_FOCUS_RECONCILIATION_PASSES = 3
 _SESSION_SCAN_PAGE_SIZE = 200
 _FOCUSED_SESSION_LOOKUP_LIMIT = 1000
 
@@ -127,10 +130,12 @@ def _update_preferences(db: CharactersRAGDB, *, row: dict[str, Any], user_id: st
     session_id = str(row.get("id") or "").strip()
     if not session_id:
         return
+    expected_version = row.get("version")
     db.update_persona_session(
         session_id=session_id,
         user_id=user_id,
         update_data={"preferences_json": preferences},
+        expected_version=int(expected_version) if expected_version is not None else None,
     )
 
 
@@ -145,13 +150,23 @@ def _update_live_control_preferences(
     session_id = str(row.get("id") or "").strip()
     if not session_id:
         return
-    fresh_row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False) or row
-    _update_preferences(
-        db,
-        row=fresh_row,
-        user_id=user_id,
-        preferences=_live_preferences_patch(fresh_row, focus=focus, idempotency_key=idempotency_key),
-    )
+    last_conflict: ConflictError | None = None
+    latest_row = row
+    for _ in range(_PREFERENCE_UPDATE_RETRIES):
+        fresh_row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False) or latest_row
+        try:
+            _update_preferences(
+                db,
+                row=fresh_row,
+                user_id=user_id,
+                preferences=_live_preferences_patch(fresh_row, focus=focus, idempotency_key=idempotency_key),
+            )
+            return
+        except ConflictError as exc:
+            last_conflict = exc
+            latest_row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False) or fresh_row
+    if last_conflict is not None:
+        raise last_conflict
 
 
 def _load_owned_session_or_raise(db: CharactersRAGDB, *, user_id: str, session_id: str) -> dict[str, Any]:
@@ -309,7 +324,9 @@ def build_live_session_summary(
     return {
         "session_id": session_id,
         "persona_id": persona_id,
-        "persona_name": persona_name if persona_name is not None else _persona_name_for_row(db, row=row, user_id=user_id),
+        "persona_name": (
+            persona_name if persona_name is not None else _persona_name_for_row(db, row=row, user_id=user_id)
+        ),
         "lifecycle": lifecycle,
         "status": status,
         "is_focused": bool(is_focused),
@@ -345,6 +362,82 @@ def _focused_session_id(rows: list[dict[str, Any]]) -> str | None:
             winner_generation = generation
             winner_id = str(row.get("id") or "").strip() or None
     return winner_id
+
+
+def _clear_other_focused_sessions(
+    db: CharactersRAGDB,
+    *,
+    user_id: str,
+    target_session_id: str,
+    focused_rows: list[dict[str, Any]],
+) -> list[str]:
+    """Clear known non-target focused rows and report rows that still conflicted."""
+    conflicted_session_ids: list[str] = []
+    for existing in focused_rows:
+        existing_id = str(existing.get("id") or "").strip()
+        if not existing_id or existing_id == target_session_id:
+            continue
+        try:
+            _update_live_control_preferences(
+                db,
+                row=existing,
+                user_id=user_id,
+                focus={"focused": False},
+            )
+        except ConflictError:
+            conflicted_session_ids.append(existing_id)
+    return conflicted_session_ids
+
+
+def _non_target_focused_rows(rows: list[dict[str, Any]], *, target_session_id: str) -> list[dict[str, Any]]:
+    """Return focused rows that do not represent the desired target session."""
+    return [
+        row
+        for row in rows
+        if str(row.get("id") or "").strip() != target_session_id and _focus_metadata(row).get("focused")
+    ]
+
+
+def _reconcile_focused_sessions(
+    db: CharactersRAGDB,
+    *,
+    user_id: str,
+    target_session_id: str,
+    initially_focused_rows: list[dict[str, Any]],
+) -> None:
+    """Run bounded focus cleanup until only the target row remains focused."""
+    focused_rows = initially_focused_rows
+    for _ in range(_FOCUS_RECONCILIATION_PASSES):
+        _clear_other_focused_sessions(
+            db,
+            user_id=user_id,
+            target_session_id=target_session_id,
+            focused_rows=focused_rows,
+        )
+        remaining = _non_target_focused_rows(
+            _focused_session_rows(db, user_id=user_id),
+            target_session_id=target_session_id,
+        )
+        if not remaining:
+            return
+        focused_rows = remaining
+
+    target_row = db.get_persona_session(target_session_id, user_id=user_id, include_deleted=False)
+    if target_row is not None:
+        try:
+            _update_live_control_preferences(
+                db,
+                row=target_row,
+                user_id=user_id,
+                focus={"focused": False},
+            )
+        except ConflictError:
+            pass
+    raise ConflictError(
+        "Unable to reconcile focused Persona Live sessions.",
+        entity="persona_sessions",
+        entity_id=target_session_id,
+    )
 
 
 def list_live_session_summaries(
@@ -444,6 +537,31 @@ def create_or_resume_live_session(
     stream_registry: PersonaLiveStreamRegistry = persona_live_stream_registry,
 ) -> dict[str, Any]:
     """Create or resume a Persona Live session using the requested reuse policy and focus it."""
+    with _live_session_mutation_lock:
+        return _create_or_resume_live_session_unlocked(
+            db,
+            session_manager=session_manager,
+            user_id=user_id,
+            persona_id=persona_id,
+            reuse_policy=reuse_policy,
+            idempotency_key=idempotency_key,
+            surface=surface,
+            stream_registry=stream_registry,
+        )
+
+
+def _create_or_resume_live_session_unlocked(
+    db: CharactersRAGDB,
+    *,
+    session_manager: SessionManager,
+    user_id: str,
+    persona_id: str,
+    reuse_policy: str,
+    idempotency_key: str | None,
+    surface: str | None,
+    stream_registry: PersonaLiveStreamRegistry,
+) -> dict[str, Any]:
+    """Create or resume a live session while the caller holds the mutation lock."""
     resolved_persona_id = _resolve_live_control_persona_id(db, user_id=user_id, persona_id=persona_id)
     requested_key = str(idempotency_key or "").strip() or None
     row: dict[str, Any] | None = None
@@ -510,6 +628,23 @@ def focus_live_session(
     stream_registry: PersonaLiveStreamRegistry = persona_live_stream_registry,
 ) -> dict[str, Any]:
     """Mark one non-terminal Persona Live session as focused and clear prior focused rows."""
+    with _live_session_mutation_lock:
+        return _focus_live_session_unlocked(
+            db,
+            user_id=user_id,
+            session_id=session_id,
+            stream_registry=stream_registry,
+        )
+
+
+def _focus_live_session_unlocked(
+    db: CharactersRAGDB,
+    *,
+    user_id: str,
+    session_id: str,
+    stream_registry: PersonaLiveStreamRegistry,
+) -> dict[str, Any]:
+    """Focus a live session while the caller holds the mutation lock."""
     row = _load_owned_session_or_raise(db, user_id=user_id, session_id=session_id)
     if _is_terminal(row):
         raise ValueError("Cannot focus a terminal persona session.")
@@ -517,25 +652,20 @@ def focus_live_session(
     focused_at = _utc_now_iso()
     previously_focused_rows = _focused_session_rows(db, user_id=user_id)
     fresh_target_row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False) or row
-    _update_preferences(
+    _update_live_control_preferences(
         db,
         row=fresh_target_row,
         user_id=user_id,
-        preferences=_live_preferences_patch(
-            fresh_target_row,
-            focus={"focused": True, "focused_at": focused_at, "focus_generation": generation},
-        ),
+        focus={"focused": True, "focused_at": focused_at, "focus_generation": generation},
     )
-    for existing in previously_focused_rows:
-        existing_id = str(existing.get("id") or "").strip()
-        if not existing_id or existing_id == session_id:
-            continue
-        _update_preferences(
-            db,
-            row=existing,
-            user_id=user_id,
-            preferences=_live_preferences_patch(existing, focus={"focused": False}),
-        )
+    # Reconcile the pre-focus snapshot first, then any rows that became focused
+    # during concurrent requests so only the target session remains focused.
+    _reconcile_focused_sessions(
+        db,
+        user_id=user_id,
+        target_session_id=session_id,
+        initially_focused_rows=previously_focused_rows,
+    )
     row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False) or row
     return build_live_session_summary(
         db,

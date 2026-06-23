@@ -42,6 +42,7 @@ _IMAGE_VALIDATION_ERRORS = (
     ValueError,
     UnidentifiedImageError,
 )
+_REVIEWABLE_CANDIDATE_STATUSES = frozenset({"review"})
 
 
 class PersonaVisualServiceError(Exception):
@@ -438,6 +439,7 @@ class PersonaVisualService:
                 "Persona visual candidate not found for user.",
                 details={"candidate_id": candidate_id},
             )
+        self._ensure_candidate_reviewable(candidate)
         pack = self._db.get_persona_visual_pack(
             pack_id=pack_id,
             persona_id=persona_id,
@@ -452,9 +454,11 @@ class PersonaVisualService:
 
         merged_manifest = self._merge_candidate_patch(
             pack.get("manifest") if isinstance(pack.get("manifest"), dict) else {},
-            candidate.get("proposed_manifest_patch")
-            if isinstance(candidate.get("proposed_manifest_patch"), dict)
-            else {},
+            (
+                candidate.get("proposed_manifest_patch")
+                if isinstance(candidate.get("proposed_manifest_patch"), dict)
+                else {}
+            ),
         )
         assets = self._db.list_persona_visual_assets(
             pack_id=pack_id,
@@ -494,8 +498,17 @@ class PersonaVisualService:
             persona_id=persona_id,
             user_id=user_id,
             status="accepted",
+            expected_statuses=set(_REVIEWABLE_CANDIDATE_STATUSES),
         )
         if not updated:
+            latest = self._db.get_persona_visual_candidate(
+                candidate_id=candidate_id,
+                pack_id=pack_id,
+                persona_id=persona_id,
+                user_id=user_id,
+            )
+            if latest:
+                self._raise_candidate_status_conflict(latest)
             raise PersonaVisualServiceError(
                 "candidate_not_found",
                 "Persona visual candidate not found for user.",
@@ -513,6 +526,19 @@ class PersonaVisualService:
         status: str = "rejected",
         failure_reason: str | None = None,
     ) -> dict[str, Any]:
+        candidate = self._db.get_persona_visual_candidate(
+            candidate_id=candidate_id,
+            pack_id=pack_id,
+            persona_id=persona_id,
+            user_id=user_id,
+        )
+        if not candidate:
+            raise PersonaVisualServiceError(
+                "candidate_not_found",
+                "Persona visual candidate not found for user.",
+                details={"candidate_id": candidate_id},
+            )
+        self._ensure_candidate_reviewable(candidate)
         updated = self._db.update_persona_visual_candidate_status(
             candidate_id=candidate_id,
             pack_id=pack_id,
@@ -520,14 +546,40 @@ class PersonaVisualService:
             user_id=user_id,
             status=status,
             failure_reason=failure_reason,
+            expected_statuses=set(_REVIEWABLE_CANDIDATE_STATUSES),
         )
         if not updated:
+            latest = self._db.get_persona_visual_candidate(
+                candidate_id=candidate_id,
+                pack_id=pack_id,
+                persona_id=persona_id,
+                user_id=user_id,
+            )
+            if latest:
+                self._raise_candidate_status_conflict(latest)
             raise PersonaVisualServiceError(
                 "candidate_not_found",
                 "Persona visual candidate not found for user.",
                 details={"candidate_id": candidate_id},
             )
         return updated
+
+    def _ensure_candidate_reviewable(self, candidate: dict[str, Any]) -> None:
+        """Raise when a generated visual candidate has already reached a terminal state."""
+        if str(candidate.get("status") or "").strip() in _REVIEWABLE_CANDIDATE_STATUSES:
+            return
+        self._raise_candidate_status_conflict(candidate)
+
+    def _raise_candidate_status_conflict(self, candidate: dict[str, Any]) -> None:
+        """Raise a typed service error for terminal candidate review transitions."""
+        raise PersonaVisualServiceError(
+            "candidate_status_conflict",
+            "Persona visual candidate has already reached a terminal review status.",
+            details={
+                "candidate_id": str(candidate.get("id") or ""),
+                "status": str(candidate.get("status") or ""),
+            },
+        )
 
     @staticmethod
     def _merge_candidate_patch(
@@ -657,7 +709,7 @@ class PersonaVisualService:
 
     def _asset_storage_path(self, *, user_id: str, storage_key: str) -> Path:
         prefix = f"{VISUAL_STORAGE_PREFIX}/"
-        relative_key = storage_key[len(prefix):] if storage_key.startswith(prefix) else storage_key
+        relative_key = storage_key[len(prefix) :] if storage_key.startswith(prefix) else storage_key
         relative_path = Path(*Path(relative_key).parts)
         if relative_path.is_absolute() or ".." in relative_path.parts:
             raise PersonaVisualServiceError(
