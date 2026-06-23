@@ -160,7 +160,7 @@ class McpHubWorkspaceRootResolver:
         except (ValueError, TypeError):
             return None
         try:
-            from tldw_Server_API.app.core.Agent_Orchestration.orchestration_service import (
+            from tldw_Server_API.app.core.Agent_Orchestration.db_factory import (
                 get_orchestration_db,
             )
             db = get_orchestration_db(uid)

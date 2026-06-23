@@ -45,6 +45,7 @@ def _build_context(tmp_path):
         reviewer_agent_type="reviewer",
     )
     run = orch_db.create_run(task.id, agent_type="codex", session_id="session-run-1")
+    orch_db.complete_run(run.id, result_summary="Brief ready")
     review_run = orch_db.create_run(task.id, agent_type="reviewer", session_id="session-review-1")
     return orch_db, note_db, project, workspace, task, run, review_run
 
@@ -364,6 +365,42 @@ def test_malformed_promotion_payload_is_not_promoted(tmp_path):
         assert result.updated_artifact_ids == []
         assert result.skipped == []
         assert result.errors == [{"artifact_id": "brief-1", "reason": "missing_source_lineage"}]
+        assert note_db.list_workspace_artifacts("workspace-alpha") == []
+    finally:
+        note_db.close_all_connections()
+        orch_db.close()
+
+
+def test_oversized_promoted_artifact_is_not_written(tmp_path):
+    orch_db, note_db, project, workspace, task, run, review_run = _build_context(tmp_path)
+    signal = TaskCompletionSignal(
+        status="completed",
+        summary="Oversized artifact",
+        artifacts=[
+            _brief_payload(
+                content="x" * 500_001,
+            )
+        ],
+        raw_payload={},
+    )
+
+    try:
+        result = promote_acp_completion_artifacts(
+            note_db,
+            task=task,
+            project=project,
+            workspace=workspace,
+            run=run,
+            completion_signal=signal,
+            final_status=TaskStatus.COMPLETE,
+            review_decision=TaskReviewDecision(approved=True, feedback="Accepted"),
+            review_run=review_run,
+        )
+
+        assert result.created_artifact_ids == []
+        assert result.updated_artifact_ids == []
+        assert result.skipped == []
+        assert result.errors == [{"artifact_id": "brief-1", "reason": "content_too_large"}]
         assert note_db.list_workspace_artifacts("workspace-alpha") == []
     finally:
         note_db.close_all_connections()

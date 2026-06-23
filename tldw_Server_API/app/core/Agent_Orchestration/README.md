@@ -5,7 +5,8 @@ Agent_Orchestration coordinates ACP-backed workspaces, projects, tasks, runs, re
 ## Start Here
 
 - `models.py` defines workspaces, projects, tasks, runs, task statuses, run statuses, and valid state transitions.
-- `orchestration_service.py` contains the service-level task and run orchestration rules.
+- `db_factory.py` exposes the production per-user SQLite factory.
+- `orchestration_service.py` is a legacy in-memory service retained for older service-level tests.
 - `completion_signals.py` parses structured ACP completion and review markers.
 - `artifact_promotion.py` promotes accepted ACP work products into workspace artifacts.
 - Related API surface: `tldw_Server_API/app/api/v1/endpoints/agent_orchestration.py`, declared under `/agent-orchestration`.
@@ -25,7 +26,8 @@ Agent_Orchestration coordinates ACP-backed workspaces, projects, tasks, runs, re
 ## Module Map
 
 - `models.py`: dataclasses, enums, and state-transition helpers.
-- `orchestration_service.py`: orchestration operations, dependency checks, review handling, and run coordination.
+- `db_factory.py`: cached per-user `OrchestrationDB` construction for production callers.
+- `orchestration_service.py`: legacy in-memory orchestration operations used by older tests.
 - `completion_signals.py`: parsing and validation for structured ACP completion and review markers.
 - `artifact_promotion.py`: conversion of accepted ACP work products into durable workspace artifacts.
 - `__init__.py`: package marker.
@@ -62,22 +64,22 @@ Agent_Orchestration coordinates ACP-backed workspaces, projects, tasks, runs, re
 
 ### Extension Checklist
 
-- New task or run state: update `models.py`, `orchestration_service.py`, `DB_Management/Orchestration_DB.py`, API schemas, and service/API tests.
+- New task or run state: update `models.py`, `DB_Management/Orchestration_DB.py`, API schemas, and DB/API tests.
 - New completion or review marker: update `completion_signals.py`, endpoint review handling, parser tests, and orchestration API tests.
 - New promotable artifact type: update `artifact_promotion.py`, workspace artifact expectations, and `tests/Agent_Orchestration/test_artifact_promotion_contract.py`.
 
 ## Extension Points
 
-- Add a task transition by starting in `models.py`, then update `orchestration_service.py`, API schemas, and tests.
+- Add a task transition by starting in `models.py`, then update `DB_Management/Orchestration_DB.py`, API schemas, and tests.
 - Add new completion or review payload fields in `completion_signals.py` before changing endpoint behavior.
 - Add a promotable artifact type in `artifact_promotion.py` and verify the corresponding workspace artifact storage contract.
 - Extend workspace discovery or health behavior in `agent_orchestration.py` together with `Orchestration_DB.py`.
-- Change run creation or reviewer behavior by inspecting `orchestration_service.py` and ACP runner interactions first.
+- Change run creation or reviewer behavior by inspecting `DB_Management/Orchestration_DB.py`, `agent_orchestration.py`, and ACP runner interactions first.
 
 ## Testing
 
 - Direct tests live under `tldw_Server_API/tests/Agent_Orchestration/`.
-- Use `test_orchestration_service.py` for service-level task and run rules.
+- Use `test_orchestration_service.py` for legacy in-memory service behavior.
 - Use `test_orchestration_api.py` for route behavior.
 - Use `test_orchestration_db.py`, `test_workspace_db.py`, and workspace discovery or health tests for persistence changes.
 - Use `test_artifact_promotion.py` and `test_artifact_promotion_contract.py` for promoted work-product behavior.

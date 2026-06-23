@@ -556,6 +556,19 @@ class TestWorkspaceMCPServers:
         servers = db.list_workspace_mcp_servers(ws.id)
         assert len(servers) == 2
 
+    def test_list_mcp_servers_wrong_user_returns_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db1 = OrchestrationDB(user_id=1, db_dir=tmp)
+            db2 = OrchestrationDB(user_id=2, db_dir=tmp)
+            try:
+                ws = db1.create_workspace(name="WS1", root_path="/tmp/ws1")
+                db1.create_workspace_mcp_server(ws.id, "server-a", command="cmd-a")
+
+                assert db2.list_workspace_mcp_servers(ws.id) == []
+            finally:
+                db1.close()
+                db2.close()
+
     def test_delete_mcp_server(self, db):
         ws = db.create_workspace(name="WS1", root_path="/tmp/ws1")
         server = db.create_workspace_mcp_server(ws.id, "server-a", command="cmd")

@@ -248,7 +248,7 @@ class TestMcpResolverAcpFallback:
 
             # Patch get_orchestration_db where it's imported inside _resolve_acp_workspace
             with patch(
-                "tldw_Server_API.app.core.Agent_Orchestration.orchestration_service.get_orchestration_db",
+                "tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db",
                 return_value=db,
             ):
                 result = McpHubWorkspaceRootResolver._resolve_acp_workspace("1", str(ws.id))
@@ -261,7 +261,7 @@ class TestMcpResolverAcpFallback:
             db = OrchestrationDB(user_id=1, db_dir=tmp)
             db._ensure_schema()
             with patch(
-                "tldw_Server_API.app.core.Agent_Orchestration.orchestration_service.get_orchestration_db",
+                "tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db",
                 return_value=db,
             ):
                 result = McpHubWorkspaceRootResolver._resolve_acp_workspace("1", "99999")

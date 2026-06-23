@@ -30,6 +30,8 @@ _DIRECT_REVIEW_KEYS = (
 
 _ACCEPTED_STATUSES = {"completed", "complete", "succeeded", "success", "accepted"}
 _REJECTED_STATUSES = {"rejected", "failed", "failure", "incomplete"}
+MAX_COMPLETION_ARTIFACTS = 20
+MAX_COMPLETION_SIGNAL_JSON_CHARS = 1_000_000
 
 
 class CompletionSignalValidationError(ValueError):
@@ -71,6 +73,11 @@ def _coerce_payload(candidate: Any) -> dict[str, Any]:
     if isinstance(candidate, dict):
         return dict(candidate)
     if isinstance(candidate, str):
+        if len(candidate) > MAX_COMPLETION_SIGNAL_JSON_CHARS:
+            raise CompletionSignalValidationError(
+                "too_large",
+                "ACP completion signal JSON exceeds maximum size",
+            )
         try:
             loaded = json.loads(candidate)
         except json.JSONDecodeError as exc:
@@ -208,6 +215,11 @@ def validate_task_completion_signal(acp_result: dict[str, Any]) -> TaskCompletio
         raise CompletionSignalValidationError(
             "malformed",
             "malformed ACP completion signal: artifacts must be a list",
+        )
+    if len(artifacts) > MAX_COMPLETION_ARTIFACTS:
+        raise CompletionSignalValidationError(
+            "too_many_artifacts",
+            f"ACP completion signal artifacts exceed limit of {MAX_COMPLETION_ARTIFACTS}",
         )
 
     return TaskCompletionSignal(

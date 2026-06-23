@@ -10,6 +10,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
+    MAX_COMPLETION_ARTIFACTS,
     TaskCompletionSignal,
     TaskReviewDecision,
 )
@@ -38,6 +39,10 @@ _PROMOTABLE_ARTIFACT_TYPES = frozenset(
 )
 _DEFAULT_REDACTION = {"support_safe": True, "redacted": False}
 _PREVIEW_TEXT_MAX_CHARS = 500
+MAX_PROMOTED_ARTIFACT_CONTENT_CHARS = 500_000
+MAX_PROMOTED_ARTIFACT_TITLE_CHARS = 1_000
+MAX_PROMOTED_ARTIFACT_SUMMARY_CHARS = 10_000
+MAX_PROMOTED_ARTIFACT_EXPORT_REFS = 50
 _OPTIONAL_MAPPING_FIELDS = {
     "producer_metadata": "invalid_producer_metadata",
     "review_metadata": "invalid_review_metadata",
@@ -79,6 +84,10 @@ def promote_acp_completion_artifacts(
     result = ACPArtifactPromotionResult()
     if not completion_signal.artifacts:
         return result
+    if len(completion_signal.artifacts) > MAX_COMPLETION_ARTIFACTS:
+        return ACPArtifactPromotionResult(
+            errors=[{"artifact_id": "all", "reason": "too_many_artifacts"}]
+        )
 
     decision = _promotion_decision(final_status, review_decision)
     target_workspace_id = _target_workspace_id(workspace)
@@ -223,10 +232,19 @@ def _validate_artifact_payload(
         return "missing_workspace"
     if note_db.get_workspace(target_workspace_id) is None:
         return "workspace_not_found"
-    if not str(artifact.get("title") or "").strip():
+    title = str(artifact.get("title") or "").strip()
+    if not title:
         return "missing_title"
-    if not str(artifact.get("content") or "").strip():
+    if len(title) > MAX_PROMOTED_ARTIFACT_TITLE_CHARS:
+        return "title_too_large"
+    content = str(artifact.get("content") or "").strip()
+    if not content:
         return "missing_content"
+    if len(content) > MAX_PROMOTED_ARTIFACT_CONTENT_CHARS:
+        return "content_too_large"
+    summary = str(artifact.get("summary") or "").strip()
+    if len(summary) > MAX_PROMOTED_ARTIFACT_SUMMARY_CHARS:
+        return "summary_too_large"
     source_lineage = artifact.get("source_lineage")
     if not isinstance(source_lineage, Mapping) or not source_lineage:
         return "missing_source_lineage"
@@ -237,6 +255,11 @@ def _validate_artifact_payload(
     export_refs = artifact.get("export_refs")
     if export_refs is not None and not isinstance(export_refs, (list, tuple)):
         return "invalid_export_refs"
+    if (
+        export_refs is not None
+        and len(export_refs) > MAX_PROMOTED_ARTIFACT_EXPORT_REFS
+    ):
+        return "too_many_export_refs"
     if "schema_version" in artifact:
         try:
             _schema_version(artifact.get("schema_version"))

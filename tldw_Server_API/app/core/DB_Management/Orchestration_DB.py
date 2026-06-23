@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.Agent_Orchestration.models import (
     AgentTask,
     RunStatus,
     TaskStatus,
+    is_valid_run_transition,
     is_valid_transition,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -457,7 +458,8 @@ class OrchestrationDB:
         # Validate parent exists if provided
         if parent_workspace_id is not None:
             if conn.execute(
-                "SELECT 1 FROM acp_workspaces WHERE id = ?", (parent_workspace_id,)
+                "SELECT 1 FROM acp_workspaces WHERE id = ? AND user_id = ?",
+                (parent_workspace_id, self._user_id),
             ).fetchone() is None:
                 raise OrchestrationNotFoundError(
                     f"Parent workspace {parent_workspace_id} not found"
@@ -739,11 +741,12 @@ class OrchestrationDB:
         sets.append("updated_at = ?")
         params.append(_now_iso())
         params.append(workspace_id)
+        params.append(self._user_id)
 
         try:
             # Column names are constrained by the local allowlist above.
             conn.execute(
-                f"UPDATE acp_workspaces SET {', '.join(sets)} WHERE id = ?",  # nosec B608
+                f"UPDATE acp_workspaces SET {', '.join(sets)} WHERE id = ? AND user_id = ?",  # nosec B608
                 params,
             )
             conn.commit()
@@ -756,7 +759,8 @@ class OrchestrationDB:
             raise
 
         row = conn.execute(
-            "SELECT * FROM acp_workspaces WHERE id = ?", (workspace_id,)
+            "SELECT * FROM acp_workspaces WHERE id = ? AND user_id = ?",
+            (workspace_id, self._user_id),
         ).fetchone()
         return self._row_to_workspace(row)
 
@@ -793,17 +797,18 @@ class OrchestrationDB:
         conn.execute(
             "UPDATE acp_workspaces SET health_status = ?, git_remote_url = ?, "
             "git_default_branch = ?, git_current_branch = ?, git_is_dirty = ?, "
-            "last_health_check = ?, updated_at = ? WHERE id = ?",
+            "last_health_check = ?, updated_at = ? WHERE id = ? AND user_id = ?",
             (
                 health_status, git_remote_url, git_default_branch,
                 git_current_branch,
                 int(git_is_dirty) if git_is_dirty is not None else None,
-                now, _now_iso(), workspace_id,
+                now, _now_iso(), workspace_id, self._user_id,
             ),
         )
         conn.commit()
         row = conn.execute(
-            "SELECT * FROM acp_workspaces WHERE id = ?", (workspace_id,)
+            "SELECT * FROM acp_workspaces WHERE id = ? AND user_id = ?",
+            (workspace_id, self._user_id),
         ).fetchone()
         return self._row_to_workspace(row)
 
@@ -875,8 +880,11 @@ class OrchestrationDB:
         self._ensure_schema()
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT * FROM acp_workspace_mcp_servers WHERE workspace_id = ? ORDER BY server_name",
-            (workspace_id,),
+            "SELECT s.* FROM acp_workspace_mcp_servers s "
+            "JOIN acp_workspaces w ON w.id = s.workspace_id "
+            "WHERE s.workspace_id = ? AND w.user_id = ? "
+            "ORDER BY s.server_name",
+            (workspace_id, self._user_id),
         ).fetchall()
         return [self._row_to_mcp_server(r) for r in rows]
 
@@ -936,7 +944,10 @@ class OrchestrationDB:
     def get_project(self, project_id: int) -> AgentProject | None:
         self._ensure_schema()
         conn = self._get_conn()
-        row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM projects WHERE id = ? AND user_id = ?",
+            (project_id, self._user_id),
+        ).fetchone()
         if row is None:
             return None
         return self._row_to_project(row)
@@ -973,7 +984,10 @@ class OrchestrationDB:
     def delete_project(self, project_id: int) -> bool:
         self._ensure_schema()
         conn = self._get_conn()
-        cur = conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        cur = conn.execute(
+            "DELETE FROM projects WHERE id = ? AND user_id = ?",
+            (project_id, self._user_id),
+        )
         conn.commit()
         return cur.rowcount > 0
 
@@ -997,12 +1011,18 @@ class OrchestrationDB:
         conn = self._get_conn()
 
         # Validate project exists
-        if conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is None:
+        if conn.execute(
+            "SELECT 1 FROM projects WHERE id = ? AND user_id = ?",
+            (project_id, self._user_id),
+        ).fetchone() is None:
             raise OrchestrationNotFoundError(f"Project {project_id} not found")
 
         # Validate dependency exists
         if dependency_id is not None:
-            if conn.execute("SELECT 1 FROM tasks WHERE id = ?", (dependency_id,)).fetchone() is None:
+            if conn.execute(
+                "SELECT 1 FROM tasks WHERE id = ? AND user_id = ?",
+                (dependency_id, self._user_id),
+            ).fetchone() is None:
                 raise OrchestrationNotFoundError(f"Dependency task {dependency_id} not found")
 
         now = _now_iso()
@@ -1040,7 +1060,10 @@ class OrchestrationDB:
     def get_task(self, task_id: int) -> AgentTask | None:
         self._ensure_schema()
         conn = self._get_conn()
-        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, self._user_id),
+        ).fetchone()
         if row is None:
             return None
         return self._row_to_task(row)
@@ -1054,20 +1077,26 @@ class OrchestrationDB:
         conn = self._get_conn()
         if status is not None:
             rows = conn.execute(
-                "SELECT * FROM tasks WHERE project_id = ? AND status = ? ORDER BY created_at",
-                (project_id, status.value),
+                "SELECT * FROM tasks "
+                "WHERE project_id = ? AND user_id = ? AND status = ? "
+                "ORDER BY created_at",
+                (project_id, self._user_id, status.value),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at",
-                (project_id,),
+                "SELECT * FROM tasks WHERE project_id = ? AND user_id = ? "
+                "ORDER BY created_at",
+                (project_id, self._user_id),
             ).fetchall()
         return [self._row_to_task(r) for r in rows]
 
     def transition_task(self, task_id: int, new_status: TaskStatus) -> AgentTask:
         self._ensure_schema()
         conn = self._get_conn()
-        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, self._user_id),
+        ).fetchone()
         if row is None:
             raise OrchestrationNotFoundError(f"Task {task_id} not found")
 
@@ -1079,18 +1108,22 @@ class OrchestrationDB:
 
         now = _now_iso()
         conn.execute(
-            "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
-            (new_status.value, now, task_id),
+            "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+            (new_status.value, now, task_id, self._user_id),
         )
         conn.commit()
-        updated = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        updated = conn.execute(
+            "SELECT * FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, self._user_id),
+        ).fetchone()
         return self._row_to_task(updated)
 
     def check_dependency_ready(self, task_id: int) -> bool:
         self._ensure_schema()
         conn = self._get_conn()
         row = conn.execute(
-            "SELECT dependency_id FROM tasks WHERE id = ?", (task_id,),
+            "SELECT dependency_id FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, self._user_id),
         ).fetchone()
         if row is None:
             raise OrchestrationNotFoundError(f"Task {task_id} not found")
@@ -1098,7 +1131,8 @@ class OrchestrationDB:
         if dep_id is None:
             return True
         dep_row = conn.execute(
-            "SELECT status FROM tasks WHERE id = ?", (dep_id,),
+            "SELECT status FROM tasks WHERE id = ? AND user_id = ?",
+            (dep_id, self._user_id),
         ).fetchone()
         if dep_row is None:
             return True  # dependency deleted
@@ -1117,7 +1151,8 @@ class OrchestrationDB:
                 return True  # already a cycle in the chain
             visited.add(current)
             row = conn.execute(
-                "SELECT dependency_id FROM tasks WHERE id = ?", (current,),
+                "SELECT dependency_id FROM tasks WHERE id = ? AND user_id = ?",
+                (current, self._user_id),
             ).fetchone()
             if row is None:
                 break
@@ -1128,6 +1163,25 @@ class OrchestrationDB:
     # Runs
     # ------------------------------------------------------------------
 
+    def _get_owned_run_row(
+        self,
+        conn: sqlite3.Connection,
+        run_id: int,
+    ) -> sqlite3.Row | None:
+        return conn.execute(
+            "SELECT r.* FROM runs r "
+            "JOIN tasks t ON t.id = r.task_id "
+            "WHERE r.id = ? AND t.user_id = ?",
+            (run_id, self._user_id),
+        ).fetchone()
+
+    @staticmethod
+    def _validate_run_transition(current: RunStatus, target: RunStatus) -> None:
+        if not is_valid_run_transition(current, target):
+            raise InvalidTransitionError(
+                f"Invalid run transition from {current.value} to {target.value}"
+            )
+
     def create_run(
         self,
         task_id: int,
@@ -1136,11 +1190,25 @@ class OrchestrationDB:
     ) -> AgentRun:
         self._ensure_schema()
         conn = self._get_conn()
+        task_row = conn.execute(
+            "SELECT * FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, self._user_id),
+        ).fetchone()
+        if task_row is None:
+            raise OrchestrationNotFoundError(f"Task {task_id} not found")
+        active = conn.execute(
+            "SELECT 1 FROM runs WHERE task_id = ? AND status = ?",
+            (task_id, RunStatus.RUNNING.value),
+        ).fetchone()
+        if active is not None:
+            raise InvalidTransitionError(f"Task {task_id} already has a running run")
+
         now = _now_iso()
+        resolved_agent_type = agent_type or task_row["agent_type"]
         cur = conn.execute(
             "INSERT INTO runs (task_id, session_id, status, agent_type, started_at) "
             "VALUES (?, ?, ?, ?, ?)",
-            (task_id, session_id, RunStatus.RUNNING.value, agent_type, now),
+            (task_id, session_id, RunStatus.RUNNING.value, resolved_agent_type, now),
         )
         conn.commit()
         return AgentRun(
@@ -1148,9 +1216,23 @@ class OrchestrationDB:
             task_id=task_id,
             session_id=session_id,
             status=RunStatus.RUNNING,
-            agent_type=agent_type,
+            agent_type=resolved_agent_type,
             started_at=now,
         )
+
+    def update_run_session_id(self, run_id: int, session_id: str | None) -> AgentRun:
+        self._ensure_schema()
+        conn = self._get_conn()
+        row = self._get_owned_run_row(conn, run_id)
+        if row is None:
+            raise OrchestrationNotFoundError(f"Run {run_id} not found")
+        conn.execute(
+            "UPDATE runs SET session_id = ? WHERE id = ?",
+            (session_id, run_id),
+        )
+        conn.commit()
+        updated = self._get_owned_run_row(conn, run_id)
+        return self._row_to_run(updated)
 
     def complete_run(
         self,
@@ -1160,6 +1242,10 @@ class OrchestrationDB:
     ) -> AgentRun:
         self._ensure_schema()
         conn = self._get_conn()
+        row = self._get_owned_run_row(conn, run_id)
+        if row is None:
+            raise OrchestrationNotFoundError(f"Run {run_id} not found")
+        self._validate_run_transition(RunStatus(row["status"]), RunStatus.COMPLETED)
         now = _now_iso()
         conn.execute(
             "UPDATE runs SET status = ?, completed_at = ?, result_summary = ?, token_usage = ? "
@@ -1170,27 +1256,34 @@ class OrchestrationDB:
             ),
         )
         conn.commit()
-        row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
-        return self._row_to_run(row)
+        updated = self._get_owned_run_row(conn, run_id)
+        return self._row_to_run(updated)
 
     def fail_run(self, run_id: int, error: str = "") -> AgentRun:
         self._ensure_schema()
         conn = self._get_conn()
+        row = self._get_owned_run_row(conn, run_id)
+        if row is None:
+            raise OrchestrationNotFoundError(f"Run {run_id} not found")
+        self._validate_run_transition(RunStatus(row["status"]), RunStatus.FAILED)
         now = _now_iso()
         conn.execute(
             "UPDATE runs SET status = ?, completed_at = ?, error = ? WHERE id = ?",
             (RunStatus.FAILED.value, now, error, run_id),
         )
         conn.commit()
-        row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
-        return self._row_to_run(row)
+        updated = self._get_owned_run_row(conn, run_id)
+        return self._row_to_run(updated)
 
     def list_runs(self, task_id: int) -> list[AgentRun]:
         self._ensure_schema()
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT * FROM runs WHERE task_id = ? ORDER BY started_at DESC",
-            (task_id,),
+            "SELECT r.* FROM runs r "
+            "JOIN tasks t ON t.id = r.task_id "
+            "WHERE r.task_id = ? AND t.user_id = ? "
+            "ORDER BY r.started_at DESC",
+            (task_id, self._user_id),
         ).fetchall()
         return [self._row_to_run(r) for r in rows]
 
@@ -1207,7 +1300,10 @@ class OrchestrationDB:
     ) -> AgentTask:
         self._ensure_schema()
         conn = self._get_conn()
-        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, self._user_id),
+        ).fetchone()
         if row is None:
             raise OrchestrationNotFoundError(f"Task {task_id} not found")
         if TaskStatus(row["status"]) != TaskStatus.REVIEW:
@@ -1225,8 +1321,9 @@ class OrchestrationDB:
             new_status = TaskStatus.IN_PROGRESS
 
         conn.execute(
-            "UPDATE tasks SET status = ?, review_count = ?, updated_at = ? WHERE id = ?",
-            (new_status.value, new_review_count, now, task_id),
+            "UPDATE tasks SET status = ?, review_count = ?, updated_at = ? "
+            "WHERE id = ? AND user_id = ?",
+            (new_status.value, new_review_count, now, task_id, self._user_id),
         )
         conn.execute(
             "INSERT INTO reviews (task_id, approved, feedback, reviewer, created_at) "
@@ -1234,15 +1331,21 @@ class OrchestrationDB:
             (task_id, int(approved), feedback, reviewer, now),
         )
         conn.commit()
-        updated = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        updated = conn.execute(
+            "SELECT * FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, self._user_id),
+        ).fetchone()
         return self._row_to_task(updated)
 
     def list_reviews(self, task_id: int) -> list[dict[str, Any]]:
         self._ensure_schema()
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT * FROM reviews WHERE task_id = ? ORDER BY created_at",
-            (task_id,),
+            "SELECT r.* FROM reviews r "
+            "JOIN tasks t ON t.id = r.task_id "
+            "WHERE r.task_id = ? AND t.user_id = ? "
+            "ORDER BY r.created_at",
+            (task_id, self._user_id),
         ).fetchall()
         return [
             {
@@ -1264,8 +1367,11 @@ class OrchestrationDB:
         self._ensure_schema()
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT status, COUNT(*) as cnt FROM tasks WHERE project_id = ? GROUP BY status",
-            (project_id,),
+            "SELECT t.status, COUNT(*) as cnt FROM tasks t "
+            "JOIN projects p ON p.id = t.project_id "
+            "WHERE t.project_id = ? AND p.user_id = ? "
+            "GROUP BY t.status",
+            (project_id, self._user_id),
         ).fetchall()
         status_counts: dict[str, int] = {}
         total = 0

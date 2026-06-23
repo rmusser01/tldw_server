@@ -27,10 +27,10 @@ from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
     validate_review_decision_signal,
     validate_task_completion_signal,
 )
-from tldw_Server_API.app.core.Agent_Orchestration.models import ACPWorkspace, TaskStatus
+from tldw_Server_API.app.core.Agent_Orchestration.db_factory import get_orchestration_db
+from tldw_Server_API.app.core.Agent_Orchestration.models import ACPWorkspace, RunStatus, TaskStatus
 from tldw_Server_API.app.core.Agent_Orchestration.orchestration_service import (
     CycleDependencyError,
-    get_orchestration_db,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Orchestration_DB import (
@@ -1774,11 +1774,12 @@ async def dispatch_run(
             detail=f"Task dependency {task.dependency_id} is not complete",
         )
 
-    # Transition to in_progress
-    try:
-        await _run_sync(lambda: db.transition_task(task_id, TaskStatus.IN_PROGRESS))
-    except (InvalidTransitionError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    active_runs = await _run_sync(lambda: db.list_runs(task_id))
+    if any(run.status == RunStatus.RUNNING for run in active_runs):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Task already has a running run",
+        )
 
     # --- CWD resolution: explicit > workspace root > "." ---
     project = await _run_sync(lambda: db.get_project(task.project_id))
@@ -1818,6 +1819,7 @@ async def dispatch_run(
     # Create ACP session
     session_id: str | None = None
     agent_type = payload.agent_type or task.agent_type
+    run = None
     try:
         from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import get_runner_client
         from tldw_Server_API.app.services.admin_acp_sessions_service import get_acp_session_store
@@ -1831,6 +1833,15 @@ async def dispatch_run(
                 detail=quota_error,
             )
 
+        if task.status != TaskStatus.IN_PROGRESS:
+            task = await _run_sync(
+                lambda: db.transition_task(task_id, TaskStatus.IN_PROGRESS)
+            )
+
+        run = await _run_sync(lambda: db.create_run(
+            task_id,
+            agent_type=agent_type,
+        ))
         client = await get_runner_client()
         session_id = await client.create_session(
             effective_cwd,
@@ -1839,6 +1850,7 @@ async def dispatch_run(
             user_id=user.id,
             session_env=session_env_param,
         )
+        run = await _run_sync(lambda: db.update_run_session_id(run.id, session_id))
 
         # Register in session store
         try:
@@ -1854,30 +1866,37 @@ async def dispatch_run(
 
     except HTTPException:
         raise
+    except OrchestrationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InvalidTransitionError as exc:
+        status_code = (
+            status.HTTP_409_CONFLICT
+            if "running run" in str(exc)
+            else status.HTTP_400_BAD_REQUEST
+        )
+        detail = (
+            "Task already has a running run"
+            if status_code == status.HTTP_409_CONFLICT
+            else str(exc)
+        )
+        raise HTTPException(status_code=status_code, detail=detail) from exc
     except Exception as exc:
         logger.exception("Failed to create ACP session")
-        # Create a failed run record
-        run = await _run_sync(lambda: db.create_run(task_id, agent_type=agent_type))
-        await _run_sync(lambda: db.fail_run(run.id, error=SESSION_CREATE_FAILED))
-        triaged_task = await _run_sync(lambda: db.transition_task(task_id, TaskStatus.TRIAGE))
-        _record_orchestration_audit_event(
-            action="orchestration_task_triaged",
-            user=user,
-            task=triaged_task,
-            run_id=run.id,
-            metadata={"reason_code": SESSION_CREATE_FAILED},
-        )
+        if run is not None:
+            await _run_sync(lambda: db.fail_run(run.id, error=SESSION_CREATE_FAILED))
+            triaged_task = await _run_sync(lambda: db.transition_task(task_id, TaskStatus.TRIAGE))
+            _record_orchestration_audit_event(
+                action="orchestration_task_triaged",
+                user=user,
+                task=triaged_task,
+                session_id=session_id,
+                run_id=run.id,
+                metadata={"reason_code": SESSION_CREATE_FAILED},
+            )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Failed to create ACP session",
         ) from exc
-
-    # Create run record
-    run = await _run_sync(lambda: db.create_run(
-        task_id,
-        agent_type=payload.agent_type or task.agent_type,
-        session_id=session_id,
-    ))
     _record_orchestration_audit_event(
         action="orchestration_dispatch_started",
         user=user,

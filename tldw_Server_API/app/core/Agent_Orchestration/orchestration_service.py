@@ -1,7 +1,8 @@
-"""In-memory orchestration service for agent projects, tasks, and runs.
+"""Legacy in-memory orchestration service for agent projects, tasks, and runs.
 
 Provides CRUD operations, dependency gating, cycle detection,
-and reviewer gate logic. A future iteration can persist to SQLite.
+and reviewer gate logic for older service-level tests. Production code uses
+``db_factory.get_orchestration_db`` for durable per-user SQLite state.
 """
 from __future__ import annotations
 
@@ -295,16 +296,6 @@ async def get_orchestration_service() -> OrchestrationService:
     return _service
 
 
-# ---------------------------------------------------------------------------
-# Per-user SQLite-backed factory
-# ---------------------------------------------------------------------------
-
-import functools
-
-from tldw_Server_API.app.core.DB_Management.Orchestration_DB import OrchestrationDB
-
-
-@functools.lru_cache(maxsize=64)
-def get_orchestration_db(user_id: int) -> OrchestrationDB:
-    """Get or create per-user OrchestrationDB instance."""
-    return OrchestrationDB.for_user(user_id)
+# Backward-compatible import for older callers. New production code should
+# import this from Agent_Orchestration.db_factory directly.
+from .db_factory import get_orchestration_db  # noqa: E402

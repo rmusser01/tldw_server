@@ -1,16 +1,14 @@
 """Tests for Agent Orchestration service (Phase 4)."""
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
+from tldw_Server_API.app.core.Agent_Orchestration import db_factory
 from tldw_Server_API.app.core.Agent_Orchestration.models import (
     TaskStatus,
     RunStatus,
     is_valid_transition,
 )
-import tldw_Server_API.app.core.Agent_Orchestration.orchestration_service as orchestration_service_module
 from tldw_Server_API.app.core.Agent_Orchestration.orchestration_service import (
     CycleDependencyError,
     OrchestrationService,
@@ -200,22 +198,26 @@ async def test_fail_run(svc):
     assert failed.error == "Timeout"
 
 
-def test_get_orchestration_db_uses_safe_for_user_factory(monkeypatch, tmp_path):
+def test_legacy_sqlite_factory_reexports_dedicated_factory():
+    assert get_orchestration_db is db_factory.get_orchestration_db
+
+
+def test_sqlite_factory_is_available_from_dedicated_module(monkeypatch, tmp_path):
     sentinel = object()
 
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
-    get_orchestration_db.cache_clear()
+    db_factory.get_orchestration_db.cache_clear()
     monkeypatch.setattr(
-        orchestration_service_module.OrchestrationDB,
+        db_factory.OrchestrationDB,
         "for_user",
         classmethod(lambda cls, user_id: sentinel),
         raising=False,
     )
 
     try:
-        assert get_orchestration_db(7) is sentinel
+        assert db_factory.get_orchestration_db(7) is sentinel
     finally:
-        get_orchestration_db.cache_clear()
+        db_factory.get_orchestration_db.cache_clear()
 
 
 @pytest.mark.asyncio

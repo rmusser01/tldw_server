@@ -1074,6 +1074,27 @@ async def test_task_completion_signal_rejects_multiple_markers():
     assert exc_info.value.reason == "multiple"
 
 
+async def test_task_completion_signal_rejects_too_many_artifacts():
+    """Completion validation should bound agent-provided artifact fanout."""
+    from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
+        CompletionSignalValidationError,
+        validate_task_completion_signal,
+    )
+
+    with pytest.raises(CompletionSignalValidationError) as exc_info:
+        validate_task_completion_signal(
+            {
+                "taskCompletion": {
+                    "status": "completed",
+                    "summary": "too many artifacts",
+                    "artifacts": [{} for _ in range(21)],
+                }
+            }
+        )
+
+    assert exc_info.value.reason == "too_many_artifacts"
+
+
 async def test_review_decision_signal_rejects_multiple_markers():
     """Reviewer validation should require exactly one structured marker."""
     from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
@@ -1305,6 +1326,89 @@ async def test_dispatch_run_reviewer_agent_rejection_retries_with_history(monkey
         assert "Missing required tests" not in serialized
     finally:
         _clear_acp_audit_events()
+        db.close()
+
+
+async def test_dispatch_run_allows_retry_after_rejected_review(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    project = db.create_project(name="P1")
+    task = db.create_task(
+        project.id,
+        title="T1",
+        description="Dispatch me",
+        agent_type="codex",
+        reviewer_agent_type="reviewer",
+        max_review_attempts=3,
+    )
+    client_holder = {
+        "client": _ReviewerDecisionClient(
+            {"approved": False, "feedback": "Needs another pass"}
+        )
+    }
+
+    async def fake_store():
+        return _NoopSessionStore()
+
+    async def fake_client():
+        return client_holder["client"]
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+
+    try:
+        first = await orch_mod.dispatch_run(
+            task.id,
+            orch_mod.RunDispatchRequest(),
+            user=_TestUser(),
+        )
+        assert first["status"] == TaskStatus.IN_PROGRESS
+
+        client_holder["client"] = _ReviewerDecisionClient(
+            {"approved": True, "feedback": "Ready now"}
+        )
+        second = await orch_mod.dispatch_run(
+            task.id,
+            orch_mod.RunDispatchRequest(),
+            user=_TestUser(),
+        )
+
+        assert second["status"] == TaskStatus.COMPLETE
+        runs = db.list_runs(task.id)
+        assert len(runs) == 4
+        assert all(run.status.value == "completed" for run in runs)
+        assert [review["approved"] for review in db.list_reviews(task.id)] == [False, True]
+    finally:
+        db.close()
+
+
+async def test_dispatch_run_rejects_duplicate_active_run(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db, task = await _build_dispatch_task(tmp_path)
+    db.transition_task(task.id, TaskStatus.IN_PROGRESS)
+    db.create_run(task.id, agent_type="codex", session_id="active-session")
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await orch_mod.dispatch_run(
+                task.id,
+                orch_mod.RunDispatchRequest(),
+                user=_TestUser(),
+            )
+
+        assert exc_info.value.status_code == 409
+        assert exc_info.value.detail == "Task already has a running run"
+    finally:
         db.close()
 
 
