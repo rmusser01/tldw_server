@@ -4,7 +4,7 @@ title: Resolve PR 1982 dev-to-main conflicts with dev precedence
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: 2026-06-23 17:37
+updated_date: 2026-06-23 18:24
 labels:
 - merge-conflict
 - pr-1982
@@ -21,6 +21,8 @@ modified_files:
 - tldw_Server_API/tests/CI/test_required_workflow_contracts.py
 - tldw_Server_API/tests/Helper_Scripts/test_mcp_standalone_user_guide_uat.py
 - tldw_Server_API/tests/RAG_NEW/unit/test_analytics_db_dev_reconciliation.py
+- tldw_Server_API/app/core/DB_Management/media_db/runtime/fts_ops.py
+- tldw_Server_API/tests/DB_Management/test_media_postgres_support.py
 ---
 
 ## Description
@@ -59,6 +61,8 @@ Docs/Plans/2026-06-23-pr1982-dev-main-conflict-resolution.md
 - `Watchlists Extension E2E (No Skips)` failed because the extension launch skipped all tests when no system Chrome extension target appeared; updated the workflow to use Playwright Chromium and minimal locales, with a workflow contract test covering that behavior.
 - GitHub Advanced Security CodeQL reported checklist label metadata sanitization in `task-markdown.ts`; replaced the HTML-comment regex with a scanner that removes multiline and dangling checklist metadata comments, with Vitest regressions.
 - Local verification after these fixes: `bunx vitest run src/components/Notes/__tests__/task-markdown.test.ts` passed; focused Python pytest covering UAT, RAG reconciliation, workflow contract, and MCP package-boundary checks passed with 12 tests; `git diff --check` passed; Bandit on touched Python files passed with no issues.
+
+Old-head CI later exposed Full Suite shard integrations failing test_reconcile_content_update_updates_media_fts_versions_and_binding because SQLite external-content FTS deleted using the already-updated media_fts row. Changed _update_fts_media to delete with the supplied old title/content payload, preserving synonym expansion for old and new content, and updated the unit expectation. Local verification: focused failing integration plus FTS unit passed, full test_media_postgres_support.py passed, and test_sync_coordinator.py passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -490,7 +490,7 @@ def test_runtime_fts_ops_update_fts_media_sqlite_preserves_synonym_expansion_and
     assert conn_fallback.calls[0][1] == (10, "Title", "Body")
 
 
-def test_runtime_fts_ops_update_fts_media_sqlite_deletes_exact_existing_fts_values(
+def test_runtime_fts_ops_update_fts_media_sqlite_deletes_supplied_old_values(
     monkeypatch,
 ) -> None:
     from tldw_Server_API.app.core.DB_Management.media_db.runtime import fts_ops
@@ -509,7 +509,7 @@ def test_runtime_fts_ops_update_fts_media_sqlite_deletes_exact_existing_fts_valu
         def execute(self, sql: str, params: tuple[object, ...]):
             self.calls.append((sql, params))
             if sql.startswith("SELECT title, content FROM media_fts"):
-                return _Cursor(("Old title", "Old content alias"))
+                raise AssertionError("old FTS payload should come from supplied old values")
             return _Cursor(None)
 
     class _Db:
@@ -517,8 +517,12 @@ def test_runtime_fts_ops_update_fts_media_sqlite_deletes_exact_existing_fts_valu
 
     module_name = "tldw_Server_API.app.core.RAG.rag_service.synonyms_registry"
     synonym_module = types.ModuleType(module_name)
-    synonym_module.get_corpus_synonyms = lambda _corpus: {}  # type: ignore[attr-defined]
+    synonym_module.get_corpus_synonyms = lambda _corpus: {  # type: ignore[attr-defined]
+        "original": ["legacy"],
+        "updated": ["fresh"],
+    }
     monkeypatch.setitem(sys.modules, module_name, synonym_module)
+    monkeypatch.setenv("DEFAULT_FTS_CORPUS", "test-corpus")
 
     conn = _Conn()
     fts_ops._update_fts_media(
@@ -526,22 +530,18 @@ def test_runtime_fts_ops_update_fts_media_sqlite_deletes_exact_existing_fts_valu
         conn,
         11,
         "New title",
-        "New content",
+        "Updated content",
         old_title="Old title",
-        old_content="Old content",
+        old_content="Original content",
     )
 
     assert conn.calls[0] == (
-        "SELECT title, content FROM media_fts WHERE rowid = ?",
-        (11,),
+        "INSERT INTO media_fts (media_fts, rowid, title, content) VALUES ('delete', ?, ?, ?)",
+        (11, "Old title", "Original content legacy"),
     )
     assert conn.calls[1] == (
-        "INSERT INTO media_fts (media_fts, rowid, title, content) VALUES ('delete', ?, ?, ?)",
-        (11, "Old title", "Old content alias"),
-    )
-    assert conn.calls[2] == (
         "INSERT OR REPLACE INTO media_fts (rowid, title, content) VALUES (?, ?, ?)",
-        (11, "New title", "New content"),
+        (11, "New title", "Updated content fresh"),
     )
 
 
