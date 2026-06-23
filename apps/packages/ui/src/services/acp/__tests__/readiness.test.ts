@@ -1,4 +1,17 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+
+const designSystemLabels = vi.hoisted(() => ({
+  setupRequired: "Registry setup required"
+}))
+
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    SETUP_REQUIRED_STATE_LABEL: designSystemLabels.setupRequired
+  }
+})
 
 import {
   buildACPAgentSetupSummary,
@@ -9,6 +22,12 @@ import {
 import type { ACPAgentInfo } from "@/services/acp/types"
 
 describe("ACP readiness normalization", () => {
+  it("preserves non-overridden design-system exports in the test mock", async () => {
+    const designSystem = await import("@/design-system")
+
+    expect(typeof designSystem.getDesignSystemState).toBe("function")
+  })
+
   it("treats an empty agent inventory as unavailable even when overall is degraded", () => {
     const health = normalizeACPHealthStatus({
       runner: { status: "ok" },
@@ -190,5 +209,37 @@ describe("ACP readiness normalization", () => {
     expect(summary.disabled).toBe(true)
     expect(summary.title).toBe("Install agent binary")
     expect(summary.description).toContain("Install Goose")
+  })
+
+  it("uses the design-system setup-required label for generic setup blockers", () => {
+    const missingEntrypointAgent: ACPAgentInfo = {
+      type: "custom",
+      name: "Custom Agent",
+      description: "Custom ACP agent.",
+      is_configured: false
+    }
+    const blockedEntrypointAgent: ACPAgentInfo = {
+      type: "custom",
+      name: "Custom Agent",
+      description: "Custom ACP agent.",
+      is_configured: false,
+      entrypoint: {
+        profile_key: "custom",
+        entrypoint_strategy: "native_acp",
+        probe_state: "blocked",
+        acp_command: "custom-acp",
+        acp_args: [],
+        primary_blocker: null,
+        blockers: [],
+        credential_state: "delegated"
+      }
+    }
+
+    expect(buildACPAgentSetupSummary(missingEntrypointAgent).title).toBe(
+      designSystemLabels.setupRequired
+    )
+    expect(buildACPAgentSetupSummary(blockedEntrypointAgent).title).toBe(
+      designSystemLabels.setupRequired
+    )
   })
 })
