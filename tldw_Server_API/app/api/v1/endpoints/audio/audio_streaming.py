@@ -844,21 +844,22 @@ ws_router = APIRouter()
 
 @ws_router.websocket("/stream/transcribe")
 async def websocket_transcribe(
-    websocket: WebSocket, token: Optional[str] = Query(None)  # Get token from query parameter
+    websocket: WebSocket, token: Optional[str] = Query(None)  # Legacy query-token auth; disabled by default.
 ):
     """
     Handle a WebSocket connection to perform real-time streaming audio transcription.
 
-    Accepts a WebSocket and an optional query token. Authentication is supported via:
-    - Multi-user: X-API-KEY header, Authorization: Bearer <JWT>, `token` query parameter (API key or JWT), or an initial auth message.
-    - Single-user: API key via header, `token` query parameter, or an initial auth message; an IP allowlist may be enforced.
+    Accepts a WebSocket. Authentication is supported via:
+    - Multi-user: X-API-KEY header, Authorization: Bearer <JWT>, or an initial auth message.
+    - Single-user: API key via header or an initial auth message; an IP allowlist may be enforced.
+    - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     Supported incoming message types: "auth" (for token-based auth), "config" (streaming configuration), "audio" (base64-encoded audio chunks), and "commit" (finalize current utterance).
     Outgoing message types include partial updates ("partial"), interim/final transcriptions ("transcription"), the final transcript ("full_transcript"), and structured error frames ("error").
     Per-user limits are enforced (concurrent streams and daily minute quotas); when a quota is exceeded the server sends an "error" with `code="quota_exceeded"` and closes the connection with code 4003 (or 1008 when `AUDIO_WS_QUOTA_CLOSE_1008=1`). A compatibility alias `error_type` is included when `AUDIO_WS_COMPAT_ERROR_TYPE=1` (default).
     A server-side default streaming configuration is used if the client does not provide one before audio arrives.
     Parameters:
         websocket (WebSocket): The active WebSocket connection.
-        token (Optional[str]): Optional API key or JWT token supplied via the query string for both multi-user and single-user authentication.
+        token (Optional[str]): Legacy API key or JWT query-string token, ignored unless AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
     # Create a lightweight WebSocketStream for uniform metrics on outer error paths
     _outer_stream = None
@@ -1567,9 +1568,9 @@ async def websocket_audio_chat_stream(
       - Streaming TTS audio back (binary frames)
 
     Authentication:
-      - Multi-user: `X-API-KEY` header, `Authorization: Bearer <JWT>`, `token` query parameter (API key or JWT),
-        or an initial auth message frame (JWT).
-      - Single-user: API key via header, `token` query parameter, or an initial auth message; optional IP allowlist.
+      - Multi-user: `X-API-KEY` header, `Authorization: Bearer <JWT>`, or an initial auth message frame (JWT).
+      - Single-user: API key via header or an initial auth message; optional IP allowlist.
+      - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
     await websocket.accept()
 
@@ -3002,8 +3003,9 @@ async def websocket_tts(
     WebSocket TTS streaming endpoint: accepts a prompt frame and streams audio bytes.
 
     Authentication mirrors `_audio_ws_authenticate`:
-    - Multi-user: `X-API-KEY` header, `Authorization: Bearer <JWT>`, or `token` query parameter (API key or JWT).
-    - Single-user: fixed API key via header, `token` query parameter, or initial auth message; optional IP allowlist.
+    - Multi-user: `X-API-KEY` header, `Authorization: Bearer <JWT>`, or initial auth message.
+    - Single-user: fixed API key via header or initial auth message; optional IP allowlist.
+    - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
     await websocket.accept()
 
