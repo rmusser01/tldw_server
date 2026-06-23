@@ -52,6 +52,25 @@ Review evidence:
 Security/static checks:
 - Bandit on `tldw_Server_API/app/core/Writing/manuscript_annotations.py` wrote `/tmp/bandit_manuscript_annotations_task1_verify_after_fix.json` with no findings.
 - `git diff --check HEAD~2..HEAD` passed.
+
+Task 2 complete: added manuscript annotation persistence schema, migrations, DB helper methods, and regression tests.
+
+TDD evidence:
+- Initial DB red run failed as expected before the schema/helper implementation.
+- Review-fix red run failed as expected for duplicate suppression, anchor_status constraints/filter validation, and structured tags/metadata validation.
+- Green run: `../../.venv/bin/python -m pytest tldw_Server_API/tests/Writing/test_manuscript_annotations_db.py tldw_Server_API/tests/Writing/test_manuscript_annotations_anchor.py -q` -> 31 passed, 6 warnings.
+
+Review evidence:
+- Spec review initially found anchor_status filtering after SQL LIMIT could return incomplete results.
+- Fix commit `68f2c9f412` filters derived anchor status before pagination and enforces the unbounded candidate cap.
+- Spec re-review approved.
+- Code-quality review found duplicate suppression ignored anchor identity and schema lacked anchor_status CHECK constraints.
+- Fix commit `6766200de7` added anchor identity duplicate keys, SQLite/PostgreSQL anchor_status CHECK constraints, anchor_status filter validation, and structured tags/metadata validation.
+- Code-quality re-review approved with no remaining Critical or Important issues.
+
+Security/static checks:
+- Bandit on `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py` and `tldw_Server_API/app/core/DB_Management/ManuscriptDB.py` wrote `/tmp/bandit_task_2402.json` with no findings.
+- `git diff --check origin/dev..HEAD` passed before the Task 2 review-fix commit and will be rerun before the next task starts.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
