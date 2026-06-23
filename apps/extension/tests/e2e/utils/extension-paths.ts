@@ -119,12 +119,14 @@ const ensureDeterministicManifestKey = (stagedPath: string) => {
 export const prepareExtensionLaunchPath = (
   extensionPath: string,
   {
+    deterministicManifestKey = false,
     minimalLocales = isTruthyEnvValue(
       process.env.TLDW_E2E_EXTENSION_MINIMAL_LOCALES ||
         process.env.TLDW_E2E_EXTENSION_LOCALE_MODE
     ),
     rootDir = path.resolve("tmp-playwright-profile", "extension-launch")
   }: {
+    deterministicManifestKey?: boolean
     minimalLocales?: boolean
     rootDir?: string
   } = {}
@@ -141,7 +143,9 @@ export const prepareExtensionLaunchPath = (
   const stagedPath = fs.mkdtempSync(path.join(rootDir, "chrome-mv3-"))
 
   copyExtensionTreeWithoutLocales(extensionPath, stagedPath)
-  ensureDeterministicManifestKey(stagedPath)
+  if (deterministicManifestKey) {
+    ensureDeterministicManifestKey(stagedPath)
+  }
 
   copyDefaultLocaleCatalog(
     extensionPath,

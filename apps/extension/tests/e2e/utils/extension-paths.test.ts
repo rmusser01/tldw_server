@@ -69,6 +69,7 @@ describe("prioritizeExtensionBuildCandidates", () => {
     fs.writeFileSync(path.join(extensionDir, "chunks", "page.js"), "export {}", "utf8")
 
     const stagedPath = prepareExtensionLaunchPath(extensionDir, {
+      deterministicManifestKey: true,
       minimalLocales: true,
       rootDir: path.join(tempRoot, "staged")
     })
@@ -91,6 +92,33 @@ describe("prioritizeExtensionBuildCandidates", () => {
         )
       )
     ).toEqual({ appName: { message: "tldw Assistant" } })
+  })
+
+  it("does not add a deterministic manifest key unless requested", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tldw-extension-paths-"))
+    tempRoots.push(tempRoot)
+    const extensionDir = path.join(tempRoot, "chrome-mv3")
+    fs.mkdirSync(path.join(extensionDir, "_locales", "en"), { recursive: true })
+    fs.writeFileSync(
+      path.join(extensionDir, "manifest.json"),
+      JSON.stringify({ manifest_version: 3, default_locale: "en" }),
+      "utf8"
+    )
+    fs.writeFileSync(
+      path.join(extensionDir, "_locales", "en", "messages.json"),
+      JSON.stringify({ appName: { message: "tldw Assistant" } }),
+      "utf8"
+    )
+
+    const stagedPath = prepareExtensionLaunchPath(extensionDir, {
+      minimalLocales: true,
+      rootDir: path.join(tempRoot, "staged")
+    })
+
+    const stagedManifest = JSON.parse(
+      fs.readFileSync(path.join(stagedPath, "manifest.json"), "utf8")
+    )
+    expect(stagedManifest.key).toBeUndefined()
   })
 
   it("uses the manifest default locale catalog when staging minimal locales", () => {
