@@ -1,5 +1,6 @@
 import { bgRequest } from "@/services/background-proxy"
 import { buildQuery } from "@/services/resource-client"
+import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import type { LegacyAudiobookProjectMigrationPayload } from "@/db/dexie/audiobook-projects"
 
 export type AudioStudioWorkflow = "narration" | "podcast" | "briefing" | "music"
@@ -225,19 +226,15 @@ export type AudioStudioJobResponse = {
 }
 
 export type AudiobookMigrationPreviewRequest = {
-  legacy_project_ids?: string[]
   legacy_project_id?: string
   project_payload?: LegacyAudiobookProjectMigrationPayload | Record<string, unknown>
-  projects?: LegacyAudiobookProjectMigrationPayload[]
   options?: Record<string, unknown>
 }
 
 export type AudiobookMigrationCommitRequest = {
-  legacy_project_ids?: string[]
   legacy_project_id?: string
   preview_id?: string
   project_payload?: LegacyAudiobookProjectMigrationPayload | Record<string, unknown>
-  projects?: LegacyAudiobookProjectMigrationPayload[]
   options?: Record<string, unknown>
   idempotency_key: string
 }
@@ -251,16 +248,24 @@ export type AudiobookMigrationCounts = {
 }
 
 export type AudiobookMigrationResponse = {
-  migration_id?: string
-  status: string
+  preview_id?: string
+  fingerprint?: string
+  workflow?: AudioStudioWorkflow
+  project_count?: number
+  section_count?: number
+  audio_reference_count?: number
+  needs_regeneration_count?: number
+  warnings?: string[]
+  project?: AudioStudioProject
+  imported_section_count?: number
+  replayed?: boolean
   counts?: AudiobookMigrationCounts
-  projects?: Array<{ legacy_project_id: string; project_id?: string; status: string }>
 }
 
 const JSON_HEADERS = { "Content-Type": "application/json" }
 const API_BASE = "/api/v1/audio-studio"
 
-const apiPath = (path: string) => path as any
+const apiPath = (path: string) => path as AllowedPath
 const projectPath = (projectId: string) =>
   apiPath(`${API_BASE}/projects/${encodeURIComponent(projectId)}`)
 const resourcePath = (projectId: string, resource: string, resourceId: string) =>

@@ -4,6 +4,8 @@ import {
   createAudioStudioProject,
   listAudioStudioProjects,
   updateAudioStudioProject,
+  upsertAudioStudioSection,
+  type AudioStudioSectionUpsertRequest,
   type CreateAudioStudioProjectRequest,
   type ListAudioStudioProjectsParams,
   type UpdateAudioStudioProjectRequest
@@ -70,6 +72,28 @@ export const useUpdateAudioStudioProject = (projectId: string | null) => {
     onSuccess: (project) => {
       markProjectClean(project.project_id)
       upsertProjectFromServer(project)
+      queryClient.invalidateQueries({
+        queryKey: audioStudioProjectQueryKeys.projects()
+      })
+    }
+  })
+}
+
+export const useUpsertAudioStudioSection = (projectId: string | null) => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      sectionId,
+      payload
+    }: {
+      sectionId: string
+      payload: AudioStudioSectionUpsertRequest
+    }) => {
+      if (!projectId) throw new Error("Audio Studio project is required")
+      return upsertAudioStudioSection(projectId, sectionId, payload)
+    },
+    onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: audioStudioProjectQueryKeys.projects()
       })

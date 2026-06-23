@@ -5388,12 +5388,16 @@ class CollectionsDatabase:
         limit: int = 100,
         offset: int = 0,
         include_archived: bool = False,
+        workflow: str | None = None,
     ) -> list[AudioStudioProjectRow]:
         clauses = ["user_id = ?", "deleted = ?"]
         params: list[Any] = [
             self.user_id,
             self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
         ]
+        if workflow:
+            clauses.append("workflow = ?")
+            params.append(str(workflow))
         if not include_archived:
             clauses.append("archived_at IS NULL")
         params.extend([limit, offset])

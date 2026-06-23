@@ -71,19 +71,27 @@ describe("CompatibilityRedirect", () => {
     dexieMocks.listProjects.mockResolvedValue([legacyProject])
     dexieMocks.serializeProject.mockResolvedValue(serializedProject)
     migrationMocks.previewMutateAsync.mockResolvedValue({
-      status: "preview",
-      counts: { projects: 1, chapters: 2, audio_assets: 0 }
+      preview_id: "preview-1",
+      fingerprint: "fingerprint-1",
+      workflow: "narration",
+      project_count: 1,
+      section_count: 2,
+      audio_reference_count: 0,
+      needs_regeneration_count: 1,
+      warnings: []
     })
     migrationMocks.commitMutateAsync.mockResolvedValue({
-      status: "completed",
-      migration_id: "migration-1",
-      projects: [
-        {
-          legacy_project_id: "legacy-1",
-          project_id: "server-project-1",
-          status: "migrated"
-        }
-      ]
+      project: {
+        project_id: "server-project-1",
+        title: "Local Audiobook",
+        workflow: "narration",
+        status: "draft"
+      },
+      imported_section_count: 2,
+      audio_reference_count: 0,
+      needs_regeneration_count: 1,
+      fingerprint: "fingerprint-1",
+      replayed: false
     })
   })
 
@@ -120,7 +128,8 @@ describe("CompatibilityRedirect", () => {
 
     await waitFor(() =>
       expect(migrationMocks.previewMutateAsync).toHaveBeenCalledWith({
-        projects: [serializedProject]
+        legacy_project_id: "legacy-1",
+        project_payload: serializedProject
       })
     )
     expect(dexieMocks.markMigrated).not.toHaveBeenCalled()
@@ -139,11 +148,12 @@ describe("CompatibilityRedirect", () => {
     await waitFor(() =>
       expect(migrationMocks.commitMutateAsync).toHaveBeenCalledWith({
         idempotency_key: expect.stringMatching(/^audiobook-migration-/),
-        projects: [serializedProject]
+        legacy_project_id: "legacy-1",
+        project_payload: serializedProject
       })
     )
     expect(dexieMocks.markMigrated).toHaveBeenCalledWith("legacy-1", {
-      migrationId: "migration-1",
+      migrationId: "fingerprint-1",
       projectId: "server-project-1"
     })
     expect(routerMocks.navigate).toHaveBeenCalledWith(

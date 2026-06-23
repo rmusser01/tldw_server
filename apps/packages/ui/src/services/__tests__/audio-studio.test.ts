@@ -264,9 +264,13 @@ describe("audio-studio service", () => {
       idempotency_key: "export-key-1234",
       format: "zip"
     })
-    await previewAudiobookMigration({ legacy_project_ids: ["legacy-1"] })
+    await previewAudiobookMigration({
+      legacy_project_id: "legacy-1",
+      project_payload: { legacy_project_id: "legacy-1" }
+    })
     await commitAudiobookMigration({
-      legacy_project_ids: ["legacy-1"],
+      legacy_project_id: "legacy-1",
+      project_payload: { legacy_project_id: "legacy-1" },
       idempotency_key: "migration-key-1234"
     })
 
@@ -306,14 +310,18 @@ describe("audio-studio service", () => {
       path: "/api/v1/audio-studio/migrations/audiobook/preview",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: { legacy_project_ids: ["legacy-1"] }
+      body: {
+        legacy_project_id: "legacy-1",
+        project_payload: { legacy_project_id: "legacy-1" }
+      }
     })
     expect(mocks.bgRequest).toHaveBeenNthCalledWith(5, {
       path: "/api/v1/audio-studio/migrations/audiobook/commit",
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: {
-        legacy_project_ids: ["legacy-1"],
+        legacy_project_id: "legacy-1",
+        project_payload: { legacy_project_id: "legacy-1" },
         idempotency_key: "migration-key-1234"
       }
     })

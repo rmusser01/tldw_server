@@ -53,6 +53,40 @@ def test_create_project_supports_first_class_workflows(client_audio_studio: Test
         assert response.json()["workflow"] == workflow
 
 
+def test_project_list_filters_by_workflow_and_archived_state(client_audio_studio: TestClient) -> None:
+    narration = client_audio_studio.post(
+        "/api/v1/audio-studio/projects",
+        json={"title": "Narration", "workflow": "narration"},
+    ).json()
+    music = client_audio_studio.post(
+        "/api/v1/audio-studio/projects",
+        json={"title": "Music", "workflow": "music"},
+    ).json()
+
+    music_response = client_audio_studio.get("/api/v1/audio-studio/projects?workflow=music")
+
+    assert music_response.status_code == 200
+    assert [project["project_id"] for project in music_response.json()["projects"]] == [music["project_id"]]
+
+    delete_response = client_audio_studio.request(
+        "DELETE",
+        f"/api/v1/audio-studio/projects/{music['project_id']}",
+        json={"base_revision_id": music["current_revision_id"]},
+    )
+    assert delete_response.status_code == 200
+
+    active_response = client_audio_studio.get("/api/v1/audio-studio/projects?workflow=music")
+    archived_response = client_audio_studio.get(
+        "/api/v1/audio-studio/projects?workflow=music&include_archived=true"
+    )
+
+    assert active_response.status_code == 200
+    assert active_response.json()["projects"] == []
+    assert archived_response.status_code == 200
+    assert [project["project_id"] for project in archived_response.json()["projects"]] == [music["project_id"]]
+    assert narration["workflow"] == "narration"
+
+
 def test_project_crud_and_resource_upserts(client_audio_studio: TestClient) -> None:
     create_response = client_audio_studio.post(
         "/api/v1/audio-studio/projects",

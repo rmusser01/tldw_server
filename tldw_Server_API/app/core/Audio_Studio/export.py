@@ -147,12 +147,15 @@ def record_audio_studio_export_artifact(
     project: Any,
     manifest: dict[str, Any],
     package_result: AudioStudioExportPackageResult,
+    artifact_id_prefix: str | None = None,
 ) -> AudioStudioRecordedExport:
     """Record export package and manifest artifacts separately from source artifacts."""
 
     export_id = str(manifest.get("export_id") or "export")
-    package_artifact_id = f"art_{_safe_name(export_id)}_package"
-    manifest_artifact_id = f"art_{_safe_name(export_id)}_manifest"
+    artifact_prefix = _safe_name(artifact_id_prefix or export_id)
+    export_name = _safe_name(export_id)
+    package_artifact_id = f"art_{artifact_prefix}_{export_name}_package"
+    manifest_artifact_id = f"art_{artifact_prefix}_{export_name}_manifest"
     metadata = {
         "export_id": export_id,
         "export_type": package_result.export_type,

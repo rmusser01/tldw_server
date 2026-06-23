@@ -281,6 +281,7 @@ const EXTRA_PAGES: PageEntry[] = [
   // Workspace / Tools (missing)
   // ═══════════════════════════════════════════════════════════════════════════
   { path: "/acp-playground", name: "ACP Playground", category: "workspace" },
+  { path: "/audio-studio", name: "Audio Studio", category: "workspace" },
   { path: "/audiobook-studio", name: "Audiobook Studio", category: "workspace" },
   { path: "/chatbooks-playground", name: "Chatbooks Playground", category: "workspace" },
   { path: "/document-workspace", name: "Document Workspace", category: "workspace" },

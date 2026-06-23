@@ -60,7 +60,14 @@ export const useAudioStudioGenerationActions = () => {
   }
 
   const queueSpeechGeneration = () => {
-    if (!activeProject || workflowMismatch || !revisionId || !sectionTargetId) return
+    queueSpeechGenerationForSection(sectionTargetId ?? undefined)
+  }
+
+  const queueSpeechGenerationForSection = (
+    sectionId?: string,
+    targetRevisionId = revisionId
+  ) => {
+    if (!activeProject || workflowMismatch || !targetRevisionId || !sectionId) return
 
     void generation.mutateAsync({
       kind: "speech",
@@ -70,8 +77,8 @@ export const useAudioStudioGenerationActions = () => {
         activeProject.project_id
       ),
       target_resource_kind: "section",
-      target_resource_id: sectionTargetId,
-      target_revision_id: revisionId,
+      target_resource_id: sectionId,
+      target_revision_id: targetRevisionId,
       options: {
         workflow: activeWorkflow
       }
@@ -83,6 +90,8 @@ export const useAudioStudioGenerationActions = () => {
     musicDisabledReason,
     queueMusicGeneration,
     queueSpeechGeneration,
+    queueSpeechGenerationForSection,
+    speechDraftDisabledReason: projectDisabledReason,
     speechDisabledReason
   }
 }

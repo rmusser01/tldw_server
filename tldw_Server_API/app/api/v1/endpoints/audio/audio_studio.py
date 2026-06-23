@@ -539,12 +539,19 @@ async def create_audio_studio_project(
 async def list_audio_studio_projects(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    workflow: AudioStudioWorkflow | None = Query(None),
+    include_archived: bool = Query(False),
     current_user: User = Depends(get_request_user),
     collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
 ) -> AudioStudioProjectListResponse:
     """List current user's non-archived Audio Studio projects."""
     _ = current_user
-    rows = collections_db.list_audio_studio_projects(limit=limit, offset=offset)
+    rows = collections_db.list_audio_studio_projects(
+        limit=limit,
+        offset=offset,
+        include_archived=include_archived,
+        workflow=workflow.value if workflow else None,
+    )
     return AudioStudioProjectListResponse(
         projects=[_project_response(row) for row in rows],
         limit=limit,

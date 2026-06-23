@@ -179,36 +179,14 @@ def commit_audio_studio_audiobook_migration(
             payload_json=_json_dumps(chapter),
         )
         current_revision = section.current_revision_id
-        artifact_id = None
         if chapter.get("audio_upload_ref"):
             audio_reference_count += 1
-            artifact_id = f"art_mig_{normalized['fingerprint'][:8]}_{index:04d}"
-            collections_db.create_audio_studio_artifact(
-                project_row_id=project.id,
-                artifact_id=artifact_id,
-                artifact_type="clip_audio",
-                provider="legacy_audiobook_migration",
-                output_id=None,
-                storage_path=None,
-                mime_type=chapter.get("audio_mime_type") or "audio/mpeg",
-                size_bytes=chapter.get("audio_size_bytes"),
-                source_resource_kind="section",
-                source_resource_id=section_id,
-                source_revision_id=current_revision,
-                content_hash=chapter.get("audio_sha256") or _sha256_json({"upload_ref": chapter["audio_upload_ref"]}),
-                metadata_json=_json_dumps(
-                    {
-                        "upload_ref": chapter["audio_upload_ref"],
-                        "legacy_chapter_id": chapter["id"],
-                        "source": "legacy_audiobook_migration",
-                    }
-                ),
-            )
         clip_revision = f"rev_mig_{normalized['fingerprint'][:8]}_clip_{index:04d}"
         clip_payload = {
             "section_id": section_id,
             "track_id": track_id,
-            "artifact_id": artifact_id,
+            "artifact_id": None,
+            "legacy_audio_upload_ref": chapter.get("audio_upload_ref"),
             "migration": True,
         }
         clip = collections_db.upsert_audio_studio_clip(
@@ -226,7 +204,7 @@ def commit_audio_studio_audiobook_migration(
             fade_in_ms=0,
             fade_out_ms=0,
             muted=False,
-            artifact_id=artifact_id,
+            artifact_id=None,
             settings_json=_json_dumps({"settings": {}, "metadata": {"migration": True}}),
             content_hash=_sha256_json(clip_payload),
             payload_json=_json_dumps(clip_payload),

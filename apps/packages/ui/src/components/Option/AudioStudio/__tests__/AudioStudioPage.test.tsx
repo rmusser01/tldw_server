@@ -10,8 +10,10 @@ const projectHookMocks = vi.hoisted(() => ({
   useProjects: vi.fn(),
   createProject: vi.fn(),
   updateProject: vi.fn(),
+  upsertSection: vi.fn(),
   createPending: false,
-  updatePending: false
+  updatePending: false,
+  upsertSectionPending: false
 }))
 
 vi.mock("react-i18next", () => ({
@@ -64,13 +66,20 @@ vi.mock("@/hooks/useAudioStudioProjects", () => ({
   useUpdateAudioStudioProject: () => ({
     mutateAsync: projectHookMocks.updateProject,
     isPending: projectHookMocks.updatePending
+  }),
+  useUpsertAudioStudioSection: () => ({
+    mutateAsync: projectHookMocks.upsertSection,
+    isPending: projectHookMocks.upsertSectionPending
   })
 }))
 
 import { AudioStudioPage } from "../AudioStudioPage"
-import { useAudioStudioStore } from "@/store/audio-studio"
+import {
+  useAudioStudioStore,
+  type AudioStudioProject
+} from "@/store/audio-studio"
 
-const setActiveProject = (overrides: Record<string, unknown> = {}) => {
+const setActiveProject = (overrides: Partial<AudioStudioProject> = {}) => {
   useAudioStudioStore.getState().setProjects([
     {
       project_id: "project-1",
@@ -97,7 +106,7 @@ const setActiveProject = (overrides: Record<string, unknown> = {}) => {
       clips: [],
       settings: {},
       ...overrides
-    } as any
+    } satisfies AudioStudioProject
   ])
   useAudioStudioStore.getState().setActiveProjectId("project-1")
 }
@@ -107,6 +116,15 @@ describe("AudioStudioPage", () => {
     vi.clearAllMocks()
     projectHookMocks.createPending = false
     projectHookMocks.updatePending = false
+    projectHookMocks.upsertSectionPending = false
+    projectHookMocks.upsertSection.mockResolvedValue({
+      section_id: "section_draft",
+      workflow: "podcast",
+      title: "Podcast script",
+      body_text: "Saved script",
+      order_index: 0,
+      current_revision_id: "revision-section-saved"
+    })
     projectHookMocks.useProjects.mockReturnValue({
       isLoading: false,
       isError: false,
@@ -127,6 +145,23 @@ describe("AudioStudioPage", () => {
     expect(screen.getByRole("tab", { name: /Podcast/ })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /Briefing/ })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /Music/ })).toBeInTheDocument()
+  })
+
+  it("gives workflow tabs keyboard navigation and panel relationships", () => {
+    render(<AudioStudioPage />)
+
+    const narrationTab = screen.getByRole("tab", { name: /Narration/ })
+    const podcastTab = screen.getByRole("tab", { name: /Podcast/ })
+    const panel = screen.getByRole("tabpanel", { name: /Narration/ })
+
+    expect(narrationTab).toHaveAttribute("aria-controls", "audio-studio-workflow-panel")
+    expect(narrationTab).toHaveAttribute("tabindex", "0")
+    expect(podcastTab).toHaveAttribute("tabindex", "-1")
+    expect(panel).toHaveAttribute("id", "audio-studio-workflow-panel")
+
+    fireEvent.keyDown(narrationTab, { key: "ArrowRight" })
+
+    expect(useAudioStudioStore.getState().activeWorkflow).toBe("podcast")
   })
 
   it("shows imported audiobook controls in Narration without the old top heading", () => {
@@ -239,7 +274,7 @@ describe("AudioStudioPage", () => {
         clips: [],
         settings: {}
       }
-    ] as any)
+    ] satisfies AudioStudioProject[])
     useAudioStudioStore.getState().setActiveProjectId("project-1")
 
     render(<AudioStudioPage />)
@@ -410,11 +445,14 @@ describe("AudioStudioPage", () => {
     )
   })
 
-  it("queues Podcast and Briefing inline speech actions when a section target exists", async () => {
+  it("queues Podcast and Briefing inline speech actions from their saved draft sections", async () => {
     setActiveProject({ workflow: "podcast" })
     useAudioStudioStore.getState().setActiveWorkflow("podcast")
     const { rerender } = render(<AudioStudioPage />)
 
+    fireEvent.change(screen.getByLabelText("Podcast script"), {
+      target: { value: "Host: Welcome." }
+    })
     fireEvent.click(screen.getByRole("button", { name: "Generate segment speech" }))
 
     await waitFor(() => expect(generationMocks.mutateAsync).toHaveBeenCalled())
@@ -423,24 +461,117 @@ describe("AudioStudioPage", () => {
         kind: "speech",
         provider: "tts",
         target_resource_kind: "section",
-        target_resource_id: "section-1",
-        target_revision_id: "revision-current"
+        target_resource_id: "section_podcast_script",
+        target_revision_id: "revision-section-saved"
       })
     )
 
     generationMocks.mutateAsync.mockClear()
+    projectHookMocks.upsertSection.mockResolvedValueOnce({
+      section_id: "section_briefing_outline",
+      workflow: "briefing",
+      title: "Briefing outline",
+      body_text: "Briefing text",
+      order_index: 0,
+      current_revision_id: "revision-briefing-saved"
+    })
     setActiveProject({ workflow: "briefing" })
     useAudioStudioStore.getState().setActiveWorkflow("briefing")
     rerender(<AudioStudioPage />)
 
+    fireEvent.change(screen.getByLabelText("Briefing outline"), {
+      target: { value: "Briefing text" }
+    })
     fireEvent.click(screen.getByRole("button", { name: "Generate briefing sections" }))
 
     await waitFor(() => expect(generationMocks.mutateAsync).toHaveBeenCalled())
     expect(generationMocks.mutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "speech",
-        target_resource_id: "section-1",
-        target_revision_id: "revision-current"
+        target_resource_id: "section_briefing_outline",
+        target_revision_id: "revision-briefing-saved"
+      })
+    )
+  })
+
+  it("saves Podcast and Briefing draft text before queuing inline speech generation", async () => {
+    setActiveProject({ workflow: "podcast", sections: [] })
+    useAudioStudioStore.getState().setActiveWorkflow("podcast")
+    const { rerender } = render(<AudioStudioPage />)
+
+    fireEvent.change(screen.getByLabelText("Podcast script"), {
+      target: { value: "Host: Welcome.\nGuest: Good to be here." }
+    })
+    fireEvent.change(screen.getByLabelText("Host speaker"), {
+      target: { value: "Ava" }
+    })
+    fireEvent.change(screen.getByLabelText("Guest speaker"), {
+      target: { value: "Noah" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Generate segment speech" }))
+
+    await waitFor(() => expect(projectHookMocks.upsertSection).toHaveBeenCalled())
+    expect(projectHookMocks.upsertSection).toHaveBeenCalledWith({
+      sectionId: "section_podcast_script",
+      payload: {
+        base_revision_id: "revision-current",
+        title: "Podcast script",
+        body_text: "Host: Welcome.\nGuest: Good to be here.",
+        order_index: 0,
+        settings: {
+          hostSpeaker: "Ava",
+          guestSpeaker: "Noah"
+        }
+      }
+    })
+    await waitFor(() => expect(generationMocks.mutateAsync).toHaveBeenCalled())
+    expect(generationMocks.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target_resource_id: "section_podcast_script",
+        target_revision_id: "revision-section-saved"
+      })
+    )
+
+    generationMocks.mutateAsync.mockClear()
+    projectHookMocks.upsertSection.mockClear()
+    projectHookMocks.upsertSection.mockResolvedValueOnce({
+      section_id: "section_briefing_outline",
+      workflow: "briefing",
+      title: "Briefing outline",
+      body_text: "Top story and implications.",
+      order_index: 0,
+      current_revision_id: "revision-briefing-saved"
+    })
+    setActiveProject({ workflow: "briefing", sections: [] })
+    useAudioStudioStore.getState().setActiveWorkflow("briefing")
+    rerender(<AudioStudioPage />)
+
+    fireEvent.change(screen.getByLabelText("Briefing outline"), {
+      target: { value: "Top story and implications." }
+    })
+    fireEvent.change(screen.getByLabelText("Source notes"), {
+      target: { value: "Source note A" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Generate briefing sections" }))
+
+    await waitFor(() => expect(projectHookMocks.upsertSection).toHaveBeenCalled())
+    expect(projectHookMocks.upsertSection).toHaveBeenCalledWith({
+      sectionId: "section_briefing_outline",
+      payload: {
+        base_revision_id: "revision-current",
+        title: "Briefing outline",
+        body_text: "Top story and implications.",
+        order_index: 0,
+        settings: {
+          sourceNotes: "Source note A"
+        }
+      }
+    })
+    await waitFor(() => expect(generationMocks.mutateAsync).toHaveBeenCalled())
+    expect(generationMocks.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target_resource_id: "section_briefing_outline",
+        target_revision_id: "revision-briefing-saved"
       })
     )
   })

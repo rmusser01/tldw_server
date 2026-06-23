@@ -186,11 +186,14 @@ def record_audio_studio_render_artifact(
     project: Any,
     plan: AudioStudioRenderPlan,
     render_result: AudioStudioRenderResult,
+    artifact_id_prefix: str | None = None,
 ) -> AudioStudioRecordedRender:
     """Record render mix and manifest as artifacts distinct from generation outputs."""
 
-    mix_artifact_id = f"art_{_safe_name(plan.render_id)}_mix"
-    manifest_artifact_id = f"art_{_safe_name(plan.render_id)}_manifest"
+    artifact_prefix = _safe_name(artifact_id_prefix or plan.render_id)
+    render_name = _safe_name(plan.render_id)
+    mix_artifact_id = f"art_{artifact_prefix}_{render_name}_mix"
+    manifest_artifact_id = f"art_{artifact_prefix}_{render_name}_manifest"
     common_metadata = {
         "render_id": plan.render_id,
         "render_type": plan.render_type,

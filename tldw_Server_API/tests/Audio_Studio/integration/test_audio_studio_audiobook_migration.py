@@ -112,6 +112,12 @@ def test_audiobook_migration_commit_creates_narration_project_and_is_idempotent(
     ).rows
     assert [row["title"] for row in sections] == ["Chapter One", "Chapter Two"]
     assert sections[0]["body_text"] == "Opening chapter text."
+    clips = db.backend.execute(
+        "SELECT artifact_id FROM audio_studio_clips WHERE project_row_id = ? ORDER BY id",
+        (project.id,),
+    ).rows
+    assert [row["artifact_id"] for row in clips] == [None, None]
+    assert db.list_audio_studio_artifacts(project_row_id=project.id) == []
 
 
 def test_audiobook_migration_rejects_external_urls_in_payload(

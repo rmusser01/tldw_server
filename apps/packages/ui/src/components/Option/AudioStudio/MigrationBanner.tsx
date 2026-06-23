@@ -18,6 +18,9 @@ type MigrationBannerProps = {
 const pluralize = (count: number, singular: string, plural: string) =>
   `${count} ${count === 1 ? singular : plural}`
 
+const EMPTY_PROJECTS: AudiobookProject[] = []
+const EMPTY_PROJECT_IDS: string[] = []
+
 const toCount = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) ? value : 0
 
@@ -44,8 +47,8 @@ export const MigrationBanner: React.FC<MigrationBannerProps> = ({
   onPreview,
   onCommit
 }) => {
-  const normalizedProjects = projects ?? []
-  const normalizedSelectedProjectIds = selectedProjectIds ?? []
+  const normalizedProjects = projects ?? EMPTY_PROJECTS
+  const normalizedSelectedProjectIds = selectedProjectIds ?? EMPTY_PROJECT_IDS
   const selectedProjectIdSet = React.useMemo(
     () => new Set(normalizedSelectedProjectIds),
     [normalizedSelectedProjectIds]

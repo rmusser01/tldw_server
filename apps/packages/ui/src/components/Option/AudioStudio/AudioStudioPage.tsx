@@ -78,7 +78,13 @@ export const AudioStudioPage: React.FC = () => {
         <MigrationBanner />
         <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)_320px]">
           <ProjectSidebar />
-          <WorkflowEditor workflow={activeWorkflow} />
+          <div
+            id="audio-studio-workflow-panel"
+            role="tabpanel"
+            aria-labelledby={`audio-studio-workflow-tab-${activeWorkflow}`}
+          >
+            <WorkflowEditor workflow={activeWorkflow} />
+          </div>
           <div className="space-y-4">
             <GenerationPanel />
             <RenderExportPanel />

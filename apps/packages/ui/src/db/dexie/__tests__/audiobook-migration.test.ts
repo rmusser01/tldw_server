@@ -5,7 +5,9 @@ import type {
 } from "@/db/dexie/types"
 
 const { projectRows, assetRows, projectTable, assetTable } = vi.hoisted(() => {
-  const projectRows = new Map<string, AudiobookProject & Record<string, any>>()
+  type ProjectRow = AudiobookProject & Record<string, unknown>
+
+  const projectRows = new Map<string, ProjectRow>()
   const assetRows = new Map<string, AudiobookChapterAsset>()
 
   const projectTable = {
@@ -13,7 +15,7 @@ const { projectRows, assetRows, projectTable, assetTable } = vi.hoisted(() => {
       reverse: vi.fn(() => ({
         toArray: vi.fn(async () => {
           const rows = Array.from(projectRows.values())
-          rows.sort((a, b) => (b[field] ?? 0) - (a[field] ?? 0))
+          rows.sort((a, b) => Number(b[field] ?? 0) - Number(a[field] ?? 0))
           return rows
         })
       }))
@@ -34,7 +36,10 @@ const { projectRows, assetRows, projectTable, assetTable } = vi.hoisted(() => {
     where: vi.fn((field: string) => ({
       equals: vi.fn((value: string) => ({
         toArray: vi.fn(async () =>
-          Array.from(assetRows.values()).filter((asset) => asset[field] === value)
+          Array.from(assetRows.values()).filter((asset) => {
+            const fieldValue = asset[field as keyof AudiobookChapterAsset]
+            return fieldValue === value
+          })
         )
       }))
     })),

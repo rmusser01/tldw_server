@@ -21,16 +21,6 @@ import { MigrationBanner } from "./MigrationBanner"
 export const AUDIOBOOK_COMPATIBILITY_TARGET =
   "/audio-studio?workflow=narration"
 
-const migratedProjectStatuses = new Set([
-  "completed",
-  "committed",
-  "complete",
-  "created",
-  "migrated",
-  "success",
-  "succeeded"
-])
-
 const projectTarget = (projectId: string) =>
   `${AUDIOBOOK_COMPATIBILITY_TARGET}&project=${encodeURIComponent(projectId)}`
 
@@ -58,15 +48,51 @@ const fallbackCounts = (
   )
 })
 
-const committedProjectsFromResponse = (
-  response: AudiobookMigrationResponse
-) =>
-  (response.projects ?? []).filter(
-    (project) =>
-      typeof project.project_id === "string" &&
-      project.project_id.length > 0 &&
-      migratedProjectStatuses.has(project.status.toLowerCase())
-  )
+const countsFromPreviewResponse = (
+  response: AudiobookMigrationResponse,
+  fallbackProject: LegacyAudiobookProjectMigrationPayload
+): AudiobookMigrationCounts => ({
+  projects: response.project_count ?? response.counts?.projects ?? 1,
+  chapters:
+    response.section_count ??
+    response.counts?.chapters ??
+    fallbackProject.chapters.length,
+  audio_assets:
+    response.audio_reference_count ??
+    response.counts?.audio_assets ??
+    response.counts?.audioAssets ??
+    fallbackProject.audio_assets.length
+})
+
+const addCounts = (
+  left: AudiobookMigrationCounts,
+  right: AudiobookMigrationCounts
+): AudiobookMigrationCounts => ({
+  projects: (left.projects ?? 0) + (right.projects ?? 0),
+  chapters: (left.chapters ?? 0) + (right.chapters ?? 0),
+  audio_assets:
+    (left.audio_assets ?? left.audioAssets ?? 0) +
+    (right.audio_assets ?? right.audioAssets ?? 0)
+})
+
+const committedProjectFromResponse = (
+  response: AudiobookMigrationResponse,
+  legacyProjectId: string
+) => {
+  const project = response.project
+  if (
+    project &&
+    typeof project.project_id === "string" &&
+    project.project_id.length > 0
+  ) {
+    return {
+      legacy_project_id: legacyProjectId,
+      project_id: project.project_id,
+      migration_id: response.fingerprint
+    }
+  }
+  return null
+}
 
 export const CompatibilityRedirect: React.FC = () => {
   const navigate = useNavigate()
@@ -133,10 +159,18 @@ export const CompatibilityRedirect: React.FC = () => {
     try {
       setErrorMessage(null)
       const serializedProjects = await serializeSelectedProjects()
-      const response = await previewMigration.mutateAsync({
-        projects: serializedProjects
-      })
-      setPreviewCounts(response.counts ?? fallbackCounts(serializedProjects))
+      const previewCounts = await Promise.all(
+        serializedProjects.map(async (project) => {
+          const response = await previewMigration.mutateAsync({
+            legacy_project_id: project.legacy_project_id,
+            project_payload: project
+          })
+          return countsFromPreviewResponse(response, project)
+        })
+      )
+      setPreviewCounts(
+        previewCounts.reduce(addCounts, fallbackCounts([]))
+      )
     } catch (error) {
       setErrorMessage(extractErrorMessage(error))
     }
@@ -151,15 +185,22 @@ export const CompatibilityRedirect: React.FC = () => {
     try {
       setErrorMessage(null)
       const serializedProjects = await serializeSelectedProjects()
-      const response = await commitMigration.mutateAsync({
-        idempotency_key: createMigrationIdempotencyKey(),
-        projects: serializedProjects
-      })
-      const committedProjects = committedProjectsFromResponse(response)
+      const committedProjects = (
+        await Promise.all(
+          serializedProjects.map(async (project) => {
+            const response = await commitMigration.mutateAsync({
+              idempotency_key: createMigrationIdempotencyKey(),
+              legacy_project_id: project.legacy_project_id,
+              project_payload: project
+            })
+            return committedProjectFromResponse(response, project.legacy_project_id)
+          })
+        )
+      ).filter((project): project is NonNullable<typeof project> => Boolean(project))
 
       for (const project of committedProjects) {
         await markLegacyAudiobookProjectMigrated(project.legacy_project_id, {
-          migrationId: response.migration_id,
+          migrationId: project.migration_id,
           projectId: project.project_id as string
         })
       }

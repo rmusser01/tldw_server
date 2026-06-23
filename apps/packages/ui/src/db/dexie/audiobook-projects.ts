@@ -14,7 +14,7 @@ export type LegacyAudiobookMigrationChapter = {
   title: string
   body_text: string
   order: number
-  voice_config: Record<string, any>
+  voice_config: Record<string, unknown>
   status: SerializedAudioChapter["status"]
   audio_duration?: number
   error_message?: string
@@ -43,7 +43,7 @@ export type LegacyAudiobookProjectMigrationPayload = {
   total_duration?: number
   created_at: number
   updated_at: number
-  default_voice_config: Record<string, any>
+  default_voice_config: Record<string, unknown>
   chapter_audio_asset_ids: Record<string, string>
   chapters: LegacyAudiobookMigrationChapter[]
   audio_assets: LegacyAudiobookMigrationAudioAsset[]
@@ -395,7 +395,7 @@ export function serializeChapters(
     title: string
     content: string
     order: number
-    voiceConfig: Record<string, any>
+    voiceConfig: Record<string, unknown>
     status: string
     audioDuration?: number
     errorMessage?: string
