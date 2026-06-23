@@ -71,6 +71,23 @@ Review evidence:
 Security/static checks:
 - Bandit on `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py` and `tldw_Server_API/app/core/DB_Management/ManuscriptDB.py` wrote `/tmp/bandit_task_2402.json` with no findings.
 - `git diff --check origin/dev..HEAD` passed before the Task 2 review-fix commit and will be rerun before the next task starts.
+
+Task 3 complete: added manuscript annotation API schemas and CRUD/list endpoints.
+
+TDD evidence:
+- API red run failed as expected before routes existed: `../../.venv/bin/python -m pytest tldw_Server_API/tests/Writing/test_manuscript_annotations_api.py -q` -> 8 failed, 1 passed.
+- Review-fix red run failed as expected for stale annotation exposure after target deletion.
+- Green run: `../../.venv/bin/python -m pytest tldw_Server_API/tests/Writing/test_manuscript_annotations_api.py tldw_Server_API/tests/Writing/test_manuscript_annotations_db.py tldw_Server_API/tests/Writing/test_manuscript_annotations_anchor.py tldw_Server_API/tests/Writing/test_writing_error_mapping.py -q` -> 59 passed, 6 warnings.
+
+Review evidence:
+- Spec review approved the schema literals, create/update/response/list schemas, five endpoints, RBAC scopes, expected-version headers, and required API coverage.
+- Code-quality review found existing annotations could still be exposed after their scene/chapter targets were soft-deleted.
+- Fix commit `d47dcd70e0` added a shared active-target predicate to `get_annotation()` and `list_annotations()` plus DB/API regressions.
+- Code-quality re-review approved with no remaining Critical or Important issues.
+
+Security/static checks:
+- Bandit on Task 3 endpoint/schema/helper touched scope wrote `/tmp/bandit_task_2401_task3_review_fix.json` with no findings.
+- `git diff --check HEAD~1..HEAD` passed for the Task 3 review-fix commit.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
