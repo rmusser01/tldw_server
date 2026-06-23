@@ -6282,6 +6282,8 @@ class CollectionsDatabase:
             raise DatabaseError("audio_studio_idempotency_record_upsert_failed")
         if record.request_hash != request_hash:
             raise ValueError("audio_studio_idempotency_conflict")
+        if record.project_row_id != project_row_id:
+            raise ValueError("audio_studio_idempotency_conflict")
         return record
 
     def create_voice_profile(

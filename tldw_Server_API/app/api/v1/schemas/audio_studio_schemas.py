@@ -195,6 +195,16 @@ class AudioStudioProjectUpdate(_SecretFreePayloadMixin):
     settings: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
 
+    @field_validator("status")
+    @classmethod
+    def _reject_archived_status(
+        cls,
+        value: AudioStudioProjectStatus | None,
+    ) -> AudioStudioProjectStatus | None:
+        if value == AudioStudioProjectStatus.ARCHIVED:
+            raise ValueError("Use the archive endpoint to archive Audio Studio projects.")
+        return value
+
 
 class AudioStudioProjectArchiveRequest(_BaseAudioStudioModel):
     """Archive a project with optimistic concurrency."""

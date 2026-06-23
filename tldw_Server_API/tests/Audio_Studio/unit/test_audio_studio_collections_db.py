@@ -600,6 +600,42 @@ def test_audio_studio_artifacts_generation_jobs_and_idempotency(db_user_1: Colle
         )
 
 
+def test_audio_studio_idempotency_conflicts_on_same_hash_different_project(
+    db_user_1: CollectionsDatabase,
+) -> None:
+    first_project = _create_audio_studio_project(
+        db_user_1,
+        project_id="ast_idempotency_first",
+        title="First Project",
+        workflow="music",
+        revision_id="rev_first",
+    )
+    second_project = _create_audio_studio_project(
+        db_user_1,
+        project_id="ast_idempotency_second",
+        title="Second Project",
+        workflow="music",
+        revision_id="rev_second",
+    )
+    inserted = db_user_1.put_audio_studio_idempotency_record(
+        namespace="audio_studio",
+        key="client-key-cross-project",
+        project_row_id=first_project.id,
+        request_hash="hash_001",
+        response_json=json.dumps({"project_id": first_project.project_id}),
+    )
+    assert inserted.project_row_id == first_project.id
+
+    with pytest.raises(ValueError, match="audio_studio_idempotency_conflict"):
+        db_user_1.put_audio_studio_idempotency_record(
+            namespace="audio_studio",
+            key="client-key-cross-project",
+            project_row_id=second_project.id,
+            request_hash="hash_001",
+            response_json=json.dumps({"project_id": second_project.project_id}),
+        )
+
+
 def test_audio_studio_idempotency_insert_ignores_backend_conflict_and_returns_first_record(
     db_user_1: CollectionsDatabase,
 ) -> None:

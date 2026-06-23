@@ -203,6 +203,33 @@ def test_project_update_with_stale_base_does_not_change_state(client_audio_studi
     assert current["current_revision_id"] == first_update.json()["current_revision_id"]
 
 
+def test_project_update_rejects_archived_status_without_archiving(
+    client_audio_studio: TestClient,
+) -> None:
+    create_response = client_audio_studio.post(
+        "/api/v1/audio-studio/projects",
+        json={"title": "Patch Archive", "workflow": "narration"},
+    )
+    assert create_response.status_code == 200
+    created = create_response.json()
+
+    archive_patch = client_audio_studio.patch(
+        f"/api/v1/audio-studio/projects/{created['project_id']}",
+        json={"status": "archived", "base_revision_id": created["current_revision_id"]},
+    )
+    assert archive_patch.status_code == 422
+
+    get_response = client_audio_studio.get(f"/api/v1/audio-studio/projects/{created['project_id']}")
+    assert get_response.status_code == 200
+    current = get_response.json()
+    assert current["status"] == "draft"
+    assert current["archived_at"] is None
+
+    list_response = client_audio_studio.get("/api/v1/audio-studio/projects")
+    assert list_response.status_code == 200
+    assert [row["project_id"] for row in list_response.json()["projects"]] == [created["project_id"]]
+
+
 def test_project_description_can_be_cleared_intentionally(client_audio_studio: TestClient) -> None:
     create_response = client_audio_studio.post(
         "/api/v1/audio-studio/projects",

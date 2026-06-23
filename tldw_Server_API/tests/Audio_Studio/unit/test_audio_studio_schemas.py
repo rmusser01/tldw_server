@@ -107,6 +107,11 @@ def test_project_update_rejects_unknown_status() -> None:
     assert payload.status == AudioStudioProjectStatus.ACTIVE
 
 
+def test_project_update_rejects_archived_status() -> None:
+    with pytest.raises(ValidationError, match="archive endpoint"):
+        AudioStudioProjectUpdate(base_revision_id="rev_001", status="archived")
+
+
 @pytest.mark.parametrize(
     ("model", "payload"),
     [
