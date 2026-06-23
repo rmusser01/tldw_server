@@ -603,7 +603,7 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 50  # Schema v50 adds Workspace activity/index event storage
+    _CURRENT_SCHEMA_VERSION = 51  # Schema v51 adds manuscript annotation storage
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _SQLITE_SCHEMA_INIT_LOCKS_GUARD: ClassVar[threading.RLock] = threading.RLock()
     _SQLITE_SCHEMA_INIT_LOCKS: ClassVar[dict[str, threading.RLock]] = {}
@@ -5669,6 +5669,139 @@ UPDATE db_schema_version
    AND version < 50;
 """
 
+    _MIGRATION_SQL_V50_TO_V51 = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 51 — Manuscript annotations (2026-06-23)
+───────────────────────────────────────────────────────────────*/
+CREATE TABLE IF NOT EXISTS manuscript_annotations (
+  id                   TEXT PRIMARY KEY,
+  project_id           TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  target_type          TEXT NOT NULL CHECK(target_type IN ('scene','chapter','project')),
+  target_id            TEXT NOT NULL,
+  status               TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','resolved')),
+  category             TEXT NOT NULL CHECK(category IN ('style','clarity','pacing','continuity','character','worldbuilding','structure','research','other')),
+  tags_json            TEXT NOT NULL DEFAULT '[]',
+  source               TEXT NOT NULL CHECK(source IN ('user','ai_selected_text','ai_scene_review')),
+  body                 TEXT NOT NULL,
+  suggested_fix        TEXT,
+  followup_note        TEXT,
+  metadata_json        TEXT NOT NULL DEFAULT '{}',
+  scene_version        INTEGER,
+  anchor_start         INTEGER,
+  anchor_end           INTEGER,
+  selected_text        TEXT,
+  document_fingerprint TEXT,
+  anchor_prefix        TEXT,
+  anchor_suffix        TEXT,
+  anchor_status        TEXT NOT NULL DEFAULT 'scene_level',
+  created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted              BOOLEAN NOT NULL DEFAULT 0,
+  client_id            TEXT NOT NULL,
+  version              INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mann_project_target
+  ON manuscript_annotations(project_id, target_type, target_id, status, deleted);
+CREATE INDEX IF NOT EXISTS idx_mann_project_status
+  ON manuscript_annotations(project_id, status, last_modified);
+CREATE INDEX IF NOT EXISTS idx_mann_source
+  ON manuscript_annotations(project_id, source, deleted);
+CREATE INDEX IF NOT EXISTS idx_mann_deleted
+  ON manuscript_annotations(deleted);
+
+DROP TRIGGER IF EXISTS manuscript_annotations_sync_create;
+DROP TRIGGER IF EXISTS manuscript_annotations_sync_update;
+DROP TRIGGER IF EXISTS manuscript_annotations_sync_delete;
+DROP TRIGGER IF EXISTS manuscript_annotations_sync_undelete;
+
+CREATE TRIGGER manuscript_annotations_sync_create
+AFTER INSERT ON manuscript_annotations BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_annotations', NEW.id, 'create', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'target_type',NEW.target_type,
+                     'target_id',NEW.target_id,'status',NEW.status,'category',NEW.category,
+                     'tags_json',NEW.tags_json,'source',NEW.source,'body',NEW.body,
+                     'suggested_fix',NEW.suggested_fix,'followup_note',NEW.followup_note,
+                     'metadata_json',NEW.metadata_json,'scene_version',NEW.scene_version,
+                     'anchor_start',NEW.anchor_start,'anchor_end',NEW.anchor_end,
+                     'selected_text',NEW.selected_text,'document_fingerprint',NEW.document_fingerprint,
+                     'anchor_prefix',NEW.anchor_prefix,'anchor_suffix',NEW.anchor_suffix,
+                     'anchor_status',NEW.anchor_status,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,
+                     'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_annotations_sync_update
+AFTER UPDATE ON manuscript_annotations
+WHEN OLD.deleted = NEW.deleted AND (
+     OLD.status IS NOT NEW.status OR OLD.category IS NOT NEW.category OR
+     OLD.tags_json IS NOT NEW.tags_json OR OLD.source IS NOT NEW.source OR
+     OLD.body IS NOT NEW.body OR OLD.suggested_fix IS NOT NEW.suggested_fix OR
+     OLD.followup_note IS NOT NEW.followup_note OR
+     OLD.metadata_json IS NOT NEW.metadata_json OR
+     OLD.scene_version IS NOT NEW.scene_version OR OLD.anchor_start IS NOT NEW.anchor_start OR
+     OLD.anchor_end IS NOT NEW.anchor_end OR OLD.selected_text IS NOT NEW.selected_text OR
+     OLD.document_fingerprint IS NOT NEW.document_fingerprint OR
+     OLD.anchor_prefix IS NOT NEW.anchor_prefix OR OLD.anchor_suffix IS NOT NEW.anchor_suffix OR
+     OLD.anchor_status IS NOT NEW.anchor_status OR
+     OLD.last_modified IS NOT NEW.last_modified OR OLD.version IS NOT NEW.version)
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_annotations', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'target_type',NEW.target_type,
+                     'target_id',NEW.target_id,'status',NEW.status,'category',NEW.category,
+                     'tags_json',NEW.tags_json,'source',NEW.source,'body',NEW.body,
+                     'suggested_fix',NEW.suggested_fix,'followup_note',NEW.followup_note,
+                     'metadata_json',NEW.metadata_json,'scene_version',NEW.scene_version,
+                     'anchor_start',NEW.anchor_start,'anchor_end',NEW.anchor_end,
+                     'selected_text',NEW.selected_text,'document_fingerprint',NEW.document_fingerprint,
+                     'anchor_prefix',NEW.anchor_prefix,'anchor_suffix',NEW.anchor_suffix,
+                     'anchor_status',NEW.anchor_status,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,
+                     'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+CREATE TRIGGER manuscript_annotations_sync_delete
+AFTER UPDATE ON manuscript_annotations
+WHEN OLD.deleted = 0 AND NEW.deleted = 1
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_annotations', NEW.id, 'delete', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'target_type',NEW.target_type,
+                     'target_id',NEW.target_id,'scene_version',NEW.scene_version,
+                     'anchor_start',NEW.anchor_start,'anchor_end',NEW.anchor_end,
+                     'selected_text',NEW.selected_text,'document_fingerprint',NEW.document_fingerprint,
+                     'anchor_prefix',NEW.anchor_prefix,'anchor_suffix',NEW.anchor_suffix,
+                     'anchor_status',NEW.anchor_status,'deleted',NEW.deleted,
+                     'last_modified',NEW.last_modified,'version',NEW.version,
+                     'client_id',NEW.client_id));
+END;
+
+CREATE TRIGGER manuscript_annotations_sync_undelete
+AFTER UPDATE ON manuscript_annotations
+WHEN OLD.deleted = 1 AND NEW.deleted = 0
+BEGIN
+  INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+  VALUES('manuscript_annotations', NEW.id, 'update', NEW.last_modified, NEW.client_id, NEW.version,
+         json_object('id',NEW.id,'project_id',NEW.project_id,'target_type',NEW.target_type,
+                     'target_id',NEW.target_id,'status',NEW.status,'category',NEW.category,
+                     'tags_json',NEW.tags_json,'source',NEW.source,'body',NEW.body,
+                     'suggested_fix',NEW.suggested_fix,'followup_note',NEW.followup_note,
+                     'metadata_json',NEW.metadata_json,'scene_version',NEW.scene_version,
+                     'anchor_start',NEW.anchor_start,'anchor_end',NEW.anchor_end,
+                     'selected_text',NEW.selected_text,'document_fingerprint',NEW.document_fingerprint,
+                     'anchor_prefix',NEW.anchor_prefix,'anchor_suffix',NEW.anchor_suffix,
+                     'anchor_status',NEW.anchor_status,'created_at',NEW.created_at,
+                     'last_modified',NEW.last_modified,'deleted',NEW.deleted,
+                     'client_id',NEW.client_id,'version',NEW.version));
+END;
+
+UPDATE db_schema_version
+   SET version = 51
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 51;
+"""
+
     _MIGRATION_SQL_V47_TO_V48_POSTGRES = """
 /*───────────────────────────────────────────────────────────────
   Migration to Version 48 — Notes task-backed checklist storage (2026-06-05) [Postgres]
@@ -5817,6 +5950,52 @@ UPDATE db_schema_version
    SET version = 50
  WHERE schema_name = 'rag_char_chat_schema'
    AND version < 50;
+"""
+
+    _MIGRATION_SQL_V50_TO_V51_POSTGRES = """
+/*───────────────────────────────────────────────────────────────
+  Migration to Version 51 — Manuscript annotations (2026-06-23) [Postgres]
+───────────────────────────────────────────────────────────────*/
+CREATE TABLE IF NOT EXISTS manuscript_annotations (
+  id                   TEXT PRIMARY KEY,
+  project_id           TEXT NOT NULL REFERENCES manuscript_projects(id) ON DELETE CASCADE,
+  target_type          TEXT NOT NULL CHECK(target_type IN ('scene','chapter','project')),
+  target_id            TEXT NOT NULL,
+  status               TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','resolved')),
+  category             TEXT NOT NULL CHECK(category IN ('style','clarity','pacing','continuity','character','worldbuilding','structure','research','other')),
+  tags_json            TEXT NOT NULL DEFAULT '[]',
+  source               TEXT NOT NULL CHECK(source IN ('user','ai_selected_text','ai_scene_review')),
+  body                 TEXT NOT NULL,
+  suggested_fix        TEXT,
+  followup_note        TEXT,
+  metadata_json        TEXT NOT NULL DEFAULT '{}',
+  scene_version        INTEGER,
+  anchor_start         INTEGER,
+  anchor_end           INTEGER,
+  selected_text        TEXT,
+  document_fingerprint TEXT,
+  anchor_prefix        TEXT,
+  anchor_suffix        TEXT,
+  anchor_status        TEXT NOT NULL DEFAULT 'scene_level',
+  created_at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_modified        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted              BOOLEAN NOT NULL DEFAULT FALSE,
+  client_id            TEXT NOT NULL,
+  version              INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_mann_project_target
+  ON manuscript_annotations(project_id, target_type, target_id, status, deleted);
+CREATE INDEX IF NOT EXISTS idx_mann_project_status
+  ON manuscript_annotations(project_id, status, last_modified);
+CREATE INDEX IF NOT EXISTS idx_mann_source
+  ON manuscript_annotations(project_id, source, deleted);
+CREATE INDEX IF NOT EXISTS idx_mann_deleted
+  ON manuscript_annotations(deleted);
+
+UPDATE db_schema_version
+   SET version = 51
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version < 51;
 """
 
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
@@ -6834,6 +7013,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (47, "_migrate_from_v47_to_v48"),
             (48, "_migrate_from_v48_to_v49"),
             (49, "_migrate_from_v49_to_v50"),
+            (50, "_migrate_from_v50_to_v51"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -8211,6 +8391,34 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V49->V50: {e}", exc_info=True)
             raise SchemaError(f"Unexpected error migrating to V50 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
 
+    def _migrate_from_v50_to_v51(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V50 to V51 (Manuscript annotations)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V50 to V51 for DB: {self.db_path_str}...")
+        try:
+            self._ensure_manuscript_annotations_schema_sqlite(conn)
+            conn.executescript(
+                """
+                UPDATE db_schema_version
+                   SET version = 51
+                 WHERE schema_name = 'rag_char_chat_schema'
+                   AND version < 51;
+                """
+            )
+            final_version = self._get_db_version(conn)
+            if final_version != 51:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V50->V51 failed version check. Expected 51, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V51 completed.")
+        except sqlite3.Error as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V50->V51 failed: {e}", exc_info=True)
+            raise SchemaError(f"Migration V50->V51 failed for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V50->V51: {e}", exc_info=True)
+            raise SchemaError(f"Unexpected error migrating to V51 for '{self._SCHEMA_NAME}': {e}") from e  # noqa: TRY003
+
     def _ensure_persona_persistence_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure persona persistence tables and columns exist for drifted SQLite schemas."""
         try:
@@ -9486,6 +9694,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "ON workspace_activity_events(workspace_id, category, created_at)"
         )
 
+    def _ensure_manuscript_annotations_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure manuscript annotation storage and sync triggers exist for SQLite."""
+        try:
+            ddl, _, _version_update = self._MIGRATION_SQL_V50_TO_V51.partition("UPDATE db_schema_version")
+            conn.executescript(ddl)
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring SQLite manuscript annotations schema: {exc}") from exc  # noqa: TRY003
+
     def _ensure_workspace_assistant_defaults_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure Workspace Assistant Defaults storage exists for SQLite."""
         try:
@@ -10266,6 +10482,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         self._ensure_note_folder_schema_sqlite(conn)
                         self._ensure_note_studio_schema_sqlite(conn)
                         self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
+                        self._ensure_manuscript_annotations_schema_sqlite(conn)
                         # Seed/heal character_cards_fts before request traffic. Schema V4
                         # inserts "Default Assistant" before FTS triggers are created.
                         self._self_heal_character_cards_fts_sqlite(conn)
@@ -10419,6 +10636,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         current_db_version = self._get_db_version(conn)
                     if target_version >= 50 and current_db_version == 49:
                         self._migrate_from_v49_to_v50(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 51 and current_db_version == 50:
+                        self._migrate_from_v50_to_v51(conn)
                         current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
@@ -10819,6 +11039,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 50 and current_db_version == 49:
                     self._migrate_from_v49_to_v50(conn)
                     current_db_version = self._get_db_version(conn)
+                if target_version >= 51 and current_db_version == 50:
+                    self._migrate_from_v50_to_v51(conn)
+                    current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
                 self._ensure_recent_voice_command_schema_sqlite(conn)
@@ -10828,6 +11051,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._ensure_prompt_presets_schema_sqlite(conn)
                 self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
                 self._ensure_workspace_activity_events_schema_sqlite(conn)
+                self._ensure_manuscript_annotations_schema_sqlite(conn)
 
                 final_version_check = self._get_db_version(conn)
                 if final_version_check != target_version:
@@ -14713,6 +14937,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if current_version < 50:
                 self._apply_postgres_migration_script(self._MIGRATION_SQL_V49_TO_V50_POSTGRES, conn, expected_version=50)
                 current_version = 50
+            if current_version < 51:
+                self._apply_postgres_migration_script(self._MIGRATION_SQL_V50_TO_V51_POSTGRES, conn, expected_version=51)
+                current_version = 51
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
