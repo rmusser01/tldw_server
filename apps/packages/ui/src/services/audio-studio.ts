@@ -10,6 +10,14 @@ export type AudioStudioTrackKind =
   | "ambience"
   | "mixed"
   | string
+export type AudioStudioClipType =
+  | "speech"
+  | "music"
+  | "sfx"
+  | "ambience"
+  | "imported"
+  | "render"
+  | string
 
 export type AudioStudioWorkflowSummary = {
   id: AudioStudioWorkflow
@@ -107,6 +115,18 @@ export type AudioStudioSectionUpsertRequest = {
   metadata?: Record<string, unknown>
 }
 
+export type AudioStudioSectionResponse = {
+  section_id: string
+  workflow: AudioStudioWorkflow
+  title?: string | null
+  body_text?: string | null
+  speaker_id?: string | null
+  order_index: number
+  settings?: Record<string, unknown>
+  current_revision_id?: string | null
+  archived_at?: string | null
+}
+
 export type AudioStudioTrackUpsertRequest = {
   base_revision_id: string
   name: string
@@ -119,19 +139,25 @@ export type AudioStudioTrackUpsertRequest = {
   metadata?: Record<string, unknown>
 }
 
+export type AudioStudioTrackResponse = {
+  track_id: string
+  name: string
+  kind: AudioStudioTrackKind
+  order_index: number
+  muted: boolean
+  solo: boolean
+  volume: number
+  settings?: Record<string, unknown>
+  current_revision_id?: string | null
+  archived_at?: string | null
+}
+
 export type AudioStudioClipUpsertRequest = {
   base_revision_id: string
   track_id: string
   section_id?: string
   title?: string
-  clip_type:
-    | "speech"
-    | "music"
-    | "sfx"
-    | "ambience"
-    | "imported"
-    | "render"
-    | string
+  clip_type: AudioStudioClipType
   artifact_id?: string
   start_ms: number
   duration_ms?: number
@@ -141,6 +167,24 @@ export type AudioStudioClipUpsertRequest = {
   muted?: boolean
   settings?: Record<string, unknown>
   metadata?: Record<string, unknown>
+}
+
+export type AudioStudioClipResponse = {
+  clip_id: string
+  section_id?: string | null
+  track_id: string
+  title?: string | null
+  clip_type: AudioStudioClipType
+  start_ms: number
+  duration_ms?: number | null
+  volume: number
+  fade_in_ms: number
+  fade_out_ms: number
+  muted: boolean
+  artifact_id?: string | null
+  settings?: Record<string, unknown>
+  current_revision_id?: string | null
+  archived_at?: string | null
 }
 
 export type AudioStudioGenerationCreateRequest = {
@@ -254,8 +298,8 @@ export const upsertAudioStudioSection = async (
   projectId: string,
   sectionId: string,
   body: AudioStudioSectionUpsertRequest
-): Promise<AudioStudioProject> =>
-  bgRequest<AudioStudioProject>({
+): Promise<AudioStudioSectionResponse> =>
+  bgRequest<AudioStudioSectionResponse>({
     path: resourcePath(projectId, "sections", sectionId),
     method: "PUT",
     headers: JSON_HEADERS,
@@ -266,8 +310,8 @@ export const upsertAudioStudioTrack = async (
   projectId: string,
   trackId: string,
   body: AudioStudioTrackUpsertRequest
-): Promise<AudioStudioProject> =>
-  bgRequest<AudioStudioProject>({
+): Promise<AudioStudioTrackResponse> =>
+  bgRequest<AudioStudioTrackResponse>({
     path: resourcePath(projectId, "tracks", trackId),
     method: "PUT",
     headers: JSON_HEADERS,
@@ -278,8 +322,8 @@ export const upsertAudioStudioClip = async (
   projectId: string,
   clipId: string,
   body: AudioStudioClipUpsertRequest
-): Promise<AudioStudioProject> =>
-  bgRequest<AudioStudioProject>({
+): Promise<AudioStudioClipResponse> =>
+  bgRequest<AudioStudioClipResponse>({
     path: resourcePath(projectId, "clips", clipId),
     method: "PUT",
     headers: JSON_HEADERS,

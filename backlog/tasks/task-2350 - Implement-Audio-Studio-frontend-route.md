@@ -1,7 +1,7 @@
 ---
 id: TASK-2350
 title: Implement Audio Studio frontend route
-status: Done
+status: In Progress
 labels:
 - audio
 - webui
@@ -117,7 +117,7 @@ Code-quality follow-up #2 verification:
 - `bunx vitest run ../packages/ui/src/components/Option/AudioStudio/__tests__/AudioStudioPage.test.tsx` - 15 passed.
 - `bunx vitest run ../packages/ui/src/services/__tests__/audio-studio.test.ts ../packages/ui/src/store/__tests__/audio-studio.test.tsx ../packages/ui/src/hooks/__tests__/useAudioStudioProjects.test.tsx ../packages/ui/src/routes/__tests__/route-metadata.coverage.test.ts __tests__/pages/audio-studio-route.test.tsx` - 21 passed.
 - `git diff --check` on TASK-2350 code-quality follow-up #2 paths passed.
-
+Direct service-contract follow-up: resource upsert helpers now return typed section/track/clip response models instead of AudioStudioProject, matching backend response_model contracts. Added service assertions for returned current_revision_id values. Verification: AudioStudioPage test 15 passed; audio-studio service test 5 passed; broader route/service/store/hook suite 21 passed; scoped diff check clean.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

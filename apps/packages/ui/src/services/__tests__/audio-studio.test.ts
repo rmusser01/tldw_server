@@ -121,7 +121,44 @@ describe("audio-studio service", () => {
   })
 
   it("upserts project resources on the typed section, track, and clip endpoints", async () => {
-    await upsertAudioStudioSection("p1", "s1", {
+    mocks.bgRequest
+      .mockResolvedValueOnce({
+        section_id: "s1",
+        workflow: "narration",
+        title: "Intro",
+        body_text: "Welcome",
+        order_index: 0,
+        settings: {},
+        current_revision_id: "rev-section"
+      })
+      .mockResolvedValueOnce({
+        track_id: "speech",
+        name: "Speech",
+        kind: "speech",
+        order_index: 0,
+        muted: false,
+        solo: false,
+        volume: 0.9,
+        settings: {},
+        current_revision_id: "rev-track"
+      })
+      .mockResolvedValueOnce({
+        clip_id: "clip/a",
+        track_id: "speech",
+        section_id: "s1",
+        title: "Intro clip",
+        clip_type: "speech",
+        start_ms: 0,
+        duration_ms: 1000,
+        volume: 1,
+        fade_in_ms: 10,
+        fade_out_ms: 20,
+        muted: false,
+        settings: {},
+        current_revision_id: "rev-clip"
+      })
+
+    const section = await upsertAudioStudioSection("p1", "s1", {
       title: "Intro",
       body_text: "Welcome",
       speaker_id: "speaker-1",
@@ -129,7 +166,7 @@ describe("audio-studio service", () => {
       base_revision_id: "rev-1",
       metadata: { source: "draft" }
     })
-    await upsertAudioStudioTrack("p1", "speech", {
+    const track = await upsertAudioStudioTrack("p1", "speech", {
       name: "Speech",
       kind: "speech",
       order_index: 0,
@@ -137,7 +174,7 @@ describe("audio-studio service", () => {
       volume: 0.9,
       metadata: { role: "main" }
     })
-    await upsertAudioStudioClip("p1", "clip/a", {
+    const clip = await upsertAudioStudioClip("p1", "clip/a", {
       track_id: "speech",
       section_id: "s1",
       title: "Intro clip",
@@ -151,6 +188,18 @@ describe("audio-studio service", () => {
       metadata: { take: 1 }
     })
 
+    expect(section).toMatchObject({
+      section_id: "s1",
+      current_revision_id: "rev-section"
+    })
+    expect(track).toMatchObject({
+      track_id: "speech",
+      current_revision_id: "rev-track"
+    })
+    expect(clip).toMatchObject({
+      clip_id: "clip/a",
+      current_revision_id: "rev-clip"
+    })
     expect(mocks.bgRequest).toHaveBeenNthCalledWith(1, {
       path: "/api/v1/audio-studio/projects/p1/sections/s1",
       method: "PUT",
