@@ -496,19 +496,41 @@ class MeetingsDatabase:
         session_id: str,
         status: str,
         user_id: int | str | None = None,
+        expected_status: str | None = None,
     ) -> bool:
         resolved_user_id = self._resolve_user_id(user_id)
         normalized_status = self._validate_status(status)
+        normalized_expected_status = (
+            self._validate_status(expected_status)
+            if expected_status is not None
+            else None
+        )
         now = self._utcnow_iso()
         with self.transaction() as conn:
-            cursor = conn.execute(
-                """
-                UPDATE meeting_sessions
-                SET status = ?, updated_at = ?
-                WHERE id = ? AND user_id = ?
-                """,
-                (normalized_status, now, str(session_id), resolved_user_id),
-            )
+            if normalized_expected_status is not None:
+                cursor = conn.execute(
+                    """
+                    UPDATE meeting_sessions
+                    SET status = ?, updated_at = ?
+                    WHERE id = ? AND user_id = ? AND status = ?
+                    """,
+                    (
+                        normalized_status,
+                        now,
+                        str(session_id),
+                        resolved_user_id,
+                        normalized_expected_status,
+                    ),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    UPDATE meeting_sessions
+                    SET status = ?, updated_at = ?
+                    WHERE id = ? AND user_id = ?
+                    """,
+                    (normalized_status, now, str(session_id), resolved_user_id),
+                )
             return int(cursor.rowcount or 0) > 0
 
     def create_template(
@@ -629,6 +651,79 @@ class MeetingsDatabase:
                 ),
             )
         return artifact_id
+
+    def replace_artifacts(
+        self,
+        *,
+        session_id: str,
+        artifacts: list[dict[str, Any]],
+        user_id: int | str | None = None,
+    ) -> list[str]:
+        resolved_user_id = self._resolve_user_id(user_id)
+        prepared: list[tuple[str, str, str, str, int, str]] = []
+
+        for artifact in artifacts:
+            normalized_kind = self._validate_artifact_kind(str(artifact.get("kind") or ""))
+            clean_format = str(artifact.get("format") or "").strip()
+            if not clean_format:
+                raise InputError("artifact format is required")
+            payload_json = artifact.get("payload_json")
+            if not isinstance(payload_json, dict):
+                raise InputError("artifact payload_json must be an object")
+            version = max(1, int(artifact.get("version") or 1))
+            prepared.append(
+                (
+                    f"art_{uuid.uuid4().hex}",
+                    str(session_id),
+                    normalized_kind,
+                    clean_format,
+                    version,
+                    json.dumps(payload_json),
+                )
+            )
+
+        now = self._utcnow_iso()
+        with self.transaction() as conn:
+            session_row = conn.execute(
+                """
+                SELECT 1
+                FROM meeting_sessions
+                WHERE id = ? AND user_id = ?
+                """,
+                (str(session_id), resolved_user_id),
+            ).fetchone()
+            if session_row is None:
+                raise KeyError(f"meeting session not found: {session_id}")
+
+            for _artifact_id, prepared_session_id, kind, _format, version, _payload in prepared:
+                conn.execute(
+                    """
+                    DELETE FROM meeting_artifacts
+                    WHERE user_id = ? AND session_id = ? AND kind = ? AND version = ?
+                    """,
+                    (resolved_user_id, prepared_session_id, kind, version),
+                )
+
+            for artifact_id, prepared_session_id, kind, format_, version, payload in prepared:
+                conn.execute(
+                    """
+                    INSERT INTO meeting_artifacts (
+                        id, user_id, session_id, kind, format, payload_json, version, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        artifact_id,
+                        resolved_user_id,
+                        prepared_session_id,
+                        kind,
+                        format_,
+                        payload,
+                        version,
+                        now,
+                    ),
+                )
+
+        return [artifact_id for artifact_id, *_rest in prepared]
 
     def get_artifact(self, artifact_id: str, user_id: int | str | None = None) -> dict[str, Any] | None:
         resolved_user_id = self._resolve_user_id(user_id)

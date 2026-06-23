@@ -62,7 +62,20 @@ class MeetingSessionService:
                 f"Invalid meeting session status transition: {current_status!r} -> {target_status!r}"
             )
 
-        updated = self._db.update_session_status(session_id=session_id, status=target_status)
+        updated = self._db.update_session_status(
+            session_id=session_id,
+            status=target_status,
+            expected_status=current_status,
+        )
         if not updated:
-            raise KeyError(f"meeting session not found: {session_id}")
+            latest = self._db.get_session(session_id=session_id)
+            if latest is None:
+                raise KeyError(f"meeting session not found: {session_id}")
+            latest_status = str(latest.get("status") or "").strip().lower()
+            if latest_status == target_status:
+                return latest
+            raise ValueError(
+                "Meeting session status changed concurrently: "
+                f"{current_status!r} -> {latest_status!r}; requested {target_status!r}"
+            )
         return self.get_session(session_id=session_id)

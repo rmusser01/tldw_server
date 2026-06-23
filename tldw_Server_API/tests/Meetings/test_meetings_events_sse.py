@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from tldw_Server_API.app.core.Meetings.stream_adapter import to_sse_frame
+
 
 pytestmark = pytest.mark.unit
 
@@ -22,3 +24,21 @@ def test_sse_events_streams_structured_frames(meetings_api_client):
     assert "text/event-stream" in resp.headers.get("content-type", "")
     assert "event:" in resp.text
     assert "\"session_id\"" in resp.text
+
+
+def test_sse_frame_sanitizes_control_fields():
+    frame = to_sse_frame(
+        {
+            "id": "evt-1\nretry: 0",
+            "type": "transcript.final\ndata: forged",
+            "session_id": "sess_1",
+            "timestamp": "2026-06-23T00:00:00+00:00",
+            "data": {"text": "hello"},
+        }
+    )
+
+    lines = frame.splitlines()
+    assert lines[0] == "id: evt-1_retry:_0"
+    assert lines[1] == "event: transcript.final_data:_forged"
+    assert all(line != "retry: 0" for line in lines)
+    assert all(line != "data: forged" for line in lines)

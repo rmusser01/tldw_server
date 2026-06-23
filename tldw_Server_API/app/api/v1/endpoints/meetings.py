@@ -319,7 +319,7 @@ def finalize_session(
         artifacts = artifact_service.generate_final_artifacts(
             session_id=session_id,
             transcript_text=payload.transcript_text,
-            include=list(payload.include) if payload.include else None,
+            include=list(payload.include) if payload.include is not None else None,
         )
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting session not found") from exc
