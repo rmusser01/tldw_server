@@ -2106,6 +2106,8 @@ class WorkflowsDatabase:
             conn.execute("UPDATE workflow_runs SET cancel_requested = ? WHERE run_id = ?", params)
             conn.commit()
         except sqlite3.OperationalError as e:
+            with contextlib.suppress(sqlite3.Error):
+                conn.rollback()
             if "locked" not in str(e).lower():
                 raise
             import time as _time
@@ -2118,9 +2120,13 @@ class WorkflowsDatabase:
                     break
                 except sqlite3.OperationalError as retry_error:
                     if "locked" in str(retry_error).lower() and tries < 4:
+                        with contextlib.suppress(sqlite3.Error):
+                            conn.rollback()
                         _time.sleep(0.05 * (2 ** tries))
                         tries += 1
                         continue
+                    with contextlib.suppress(sqlite3.Error):
+                        conn.rollback()
                     raise
         finally:
             self._release_sqlite(conn)

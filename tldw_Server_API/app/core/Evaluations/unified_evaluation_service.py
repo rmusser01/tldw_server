@@ -1573,6 +1573,20 @@ _MAX_SERVICE_INSTANCES = 128
 _service_instances_by_user: "OrderedDict[str, UnifiedEvaluationService]" = OrderedDict()  # type: ignore[name-defined]
 
 
+def _schedule_service_shutdown(svc: "UnifiedEvaluationService") -> None:
+    """Schedule best-effort async shutdown for a cached service instance."""
+    shutdown = getattr(svc, "shutdown", None)
+    if not callable(shutdown):
+        return
+    try:
+        loop = asyncio.get_running_loop()
+        result = shutdown()
+        if asyncio.iscoroutine(result):
+            loop.create_task(result)
+    except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
+        pass
+
+
 def get_unified_evaluation_service(db_path: Optional[str] = None) -> UnifiedEvaluationService:
     """
     Get or create the unified evaluation service singleton.
@@ -1617,7 +1631,9 @@ def get_unified_evaluation_service_for_user(user_id: str | int) -> UnifiedEvalua
                 import os as _os
                 override_path = _os.getenv("EVALUATIONS_TEST_DB_PATH")
                 if override_path and getattr(getattr(svc, "db", None), "db_path", None) != override_path:
-                    return UnifiedEvaluationService(db_path=override_path)
+                    replacement = UnifiedEvaluationService(db_path=override_path)
+                    _schedule_service_shutdown(svc)
+                    return replacement
             except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
                 pass
             return svc
@@ -1647,13 +1663,7 @@ def get_unified_evaluation_service_for_user(user_id: str | int) -> UnifiedEvalua
         if hasattr(_service_instances_by_user, "popitem") and len(_service_instances_by_user) > _MAX_SERVICE_INSTANCES:  # type: ignore[attr-defined]
             try:
                 old_user_id, old_svc = _service_instances_by_user.popitem(last=False)  # type: ignore[arg-type]
-                # Best effort shutdown without blocking
-                try:
-                    import asyncio as _aio
-                    if hasattr(old_svc, "shutdown"):
-                        _aio.create_task(old_svc.shutdown())
-                except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
-                    pass
+                _schedule_service_shutdown(old_svc)
             except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
                 pass
         return svc

@@ -1865,12 +1865,11 @@ class ServerSyncProcessor:
     callers that still exercise the old batch-application semantics.
     """
 
-    _server_column_cache: dict[str, list[str]] = {}
-
     def __init__(self, db: Any, user_id: str, requesting_client_id: str) -> None:
         self.db = db
         self.user_id = user_id
         self.requesting_client_id = requesting_client_id
+        self._server_column_cache: dict[str, list[str]] = {}
 
     @staticmethod
     def _validate_entity_operation(entity: str, operation: str) -> Optional[str]:

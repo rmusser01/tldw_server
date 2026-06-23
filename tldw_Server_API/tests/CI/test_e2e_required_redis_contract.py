@@ -4,6 +4,10 @@ import yaml
 
 
 EXPECTED_REDIS_URL = "redis://127.0.0.1:6379/0"
+EXPECTED_REDIS_IMAGE = (
+    "mirror.gcr.io/library/redis:8-alpine@"
+    "sha256:9eb6a7ba3d344e1958c7e1589fa3dee90373a934e8159c634562a91d622759a0"
+)
 
 
 def _load_workflow() -> dict:
@@ -23,8 +27,8 @@ def test_e2e_required_declares_redis_service_and_environment_contract() -> None:
     redis_service = services.get("redis")
     _expect(isinstance(redis_service, dict), "e2e-required.redis service missing")
     _expect(
-        redis_service.get("image") == "mirror.gcr.io/library/redis:8-alpine",
-        "e2e-required redis image must be mirror.gcr.io/library/redis:8-alpine (mirror avoids Docker Hub rate limits; matches ci.yml)",
+        redis_service.get("image") == EXPECTED_REDIS_IMAGE,
+        "e2e-required redis image must use the pinned mirror.gcr.io Redis 8-alpine digest",
     )
     _expect(
         "6379:6379" in (redis_service.get("ports") or []),

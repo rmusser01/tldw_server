@@ -68,6 +68,7 @@ class _FakeBackend:
         self.execute_calls: list[tuple[str, tuple | None, _FakeConnection | None]] = []
         self.execute_many_calls: list[tuple[str, list | None, _FakeConnection | None]] = []
         self.create_tables_calls: list[tuple[str, _FakeConnection | None]] = []
+        self.existing_tables: set[str] = set()
         self.config = type(
             "_FakeConfig",
             (),
@@ -96,6 +97,17 @@ class _FakeBackend:
 
     def create_tables(self, ddl: str, connection=None) -> None:
         self.create_tables_calls.append((ddl, connection))
+        for table_name in (
+            "search_analytics",
+            "document_performance",
+            "feedback_analytics",
+            "analytics_events",
+        ):
+            if table_name in ddl:
+                self.existing_tables.add(table_name)
+
+    def table_exists(self, table_name: str, connection=None) -> bool:
+        return table_name in self.existing_tables
 
     def get_table_info(self, _table: str):
         return []
@@ -688,6 +700,7 @@ def test_analytics_database_initialization_uses_pinned_backend_during_refresh(
         "_resolve_backend",
         lambda self, *, db_path, backend, config: holder["backend"],
     )
+    monkeypatch.setattr(analytics_db.AnalyticsDatabase, "_bootstrapped_backend_targets", set())
     _ = analytics_db.AnalyticsDatabase(db_path="analytics.db")
 
     assert len(old_backend.create_tables_calls) == 1
@@ -787,6 +800,10 @@ def test_analytics_database_bootstrap_runs_once_per_shared_target_across_instanc
     shared_backend = _FakeBackend(label="shared")
     bootstrap_calls: list[str] = []
 
+    def fake_bootstrap(self, backend, target_identifier=None):
+        bootstrap_calls.append(target_identifier or self._describe_backend(backend))
+        backend.existing_tables.update(analytics_db.AnalyticsDatabase._REQUIRED_BOOTSTRAP_TABLES)
+
     monkeypatch.setattr(analytics_db.AnalyticsDatabase, "_bootstrapped_backend_targets", set())
     monkeypatch.setattr(
         analytics_db.AnalyticsDatabase,
@@ -796,9 +813,7 @@ def test_analytics_database_bootstrap_runs_once_per_shared_target_across_instanc
     monkeypatch.setattr(
         analytics_db.AnalyticsDatabase,
         "_bootstrap_backend_schema",
-        lambda self, backend, target_identifier=None: bootstrap_calls.append(
-            target_identifier or self._describe_backend(backend)
-        ),
+        fake_bootstrap,
     )
 
     _ = analytics_db.AnalyticsDatabase(db_path="analytics.db")

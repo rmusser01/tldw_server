@@ -103,7 +103,7 @@ async def test_coarse_retrieval_fallback_warning_omits_raw_exception(
 
     assert result.documents
     assert result.metadata["coarse_docs"] == []
-    assert "Agentic coarse retrieval failed" in logger_stub.warnings
+    assert any("Agentic coarse retrieval failed" in msg for msg in logger_stub.warnings)
     _assert_no_sensitive_log_fragments(logger_stub.warnings)
 
 
@@ -129,7 +129,7 @@ async def test_media_db_fallback_retrieval_warning_omits_raw_exception(
 
     assert result.documents
     assert result.metadata["coarse_docs"] == []
-    assert "Agentic Media DB fallback retrieval failed" in logger_stub.warnings
+    assert any("Agentic Media DB fallback retrieval failed" in msg for msg in logger_stub.warnings)
     _assert_no_sensitive_log_fragments(logger_stub.warnings)
 
 

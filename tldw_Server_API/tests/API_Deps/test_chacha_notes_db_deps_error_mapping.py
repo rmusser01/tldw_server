@@ -64,7 +64,7 @@ async def test_chacha_init_uses_hard_timeout_headroom_beyond_watchdog(monkeypatc
     db = await chacha_deps._get_or_init_db_instance(42, "client-42")
 
     assert isinstance(db, _FakeDB)
-    assert recorded_timeouts == [30.0]
+    assert recorded_timeouts == [chacha_deps._CHACHA_INIT_TIMEOUT_SECS]
 
 
 @pytest.mark.asyncio

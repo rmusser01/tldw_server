@@ -1,4 +1,3 @@
-import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -64,7 +63,7 @@ def _setup_sqlite_media_db(db_path: str):
 @pytest.mark.integration
 def test_bm25_title_vs_content_weights_flip_order(monkeypatch, tmp_path: Path):
     # Ensure raw SQL fallback is allowed (not production)
-    os.environ["tldw_production"] = "false"
+    monkeypatch.setenv("tldw_production", "false")
 
     db_path = str(tmp_path / "media.db")
     _setup_sqlite_media_db(db_path)

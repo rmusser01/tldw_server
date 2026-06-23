@@ -445,12 +445,15 @@ def test_skip_if_external_fixture_url_unreachable_preserves_unrelated_download_e
         }
     )
 
-    skip_if_external_fixture_url_unreachable(
-        response,
-        VALID_EPUB_URL,
-        "EPUB fixture",
-        allow_single_error_fallback=False,
-    )
+    try:
+        skip_if_external_fixture_url_unreachable(
+            response,
+            VALID_EPUB_URL,
+            "EPUB fixture",
+            allow_single_error_fallback=False,
+        )
+    except pytest.skip.Exception as exc:
+        pytest.fail(f"Unexpected skip for unrelated fixture error: {exc}")
 
 
 # --- Test Classes ---
@@ -711,7 +714,7 @@ class TestProcessAudios:
                 or "Audio processing failed" in error_str
                 or "Processing execution failed" in response_str
                 or "Transcription failed" in response_str
-            ) or errors:
+            ):
                 pytest.skip(
                     "Audio URL download/transcription failed in the processing "
                     "pipeline - likely due to restricted test environment egress "
@@ -786,8 +789,7 @@ class TestProcessAudios:
             response_str = str(data_debug)
             errors = data_debug.get("errors", [])
             if data_debug.get("processed_count") == 0 and (
-                errors
-                or "Download failed" in response_str
+                "Download failed" in response_str
                 or "Host could not be resolved" in response_str
                 or "URL blocked by security policy" in response_str
                 or "Host not in allowlist" in response_str
@@ -846,8 +848,7 @@ class TestProcessAudios:
                 data_debug = {}
             response_str = str(data_debug)
             if data_debug.get("processed_count") == 0 and (
-                data_debug.get("errors")
-                or "Audio processing failed" in response_str
+                "Audio processing failed" in response_str
                 or "Processing execution failed" in response_str
                 or "Transcription failed" in response_str
                 or "No module named" in response_str

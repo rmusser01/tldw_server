@@ -24,11 +24,13 @@ def collections_db(monkeypatch: pytest.MonkeyPatch) -> CollectionsDatabase:
     settings.USER_DB_BASE_DIR = str(base_dir)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
 
-    db = CollectionsDatabase.for_user(user_id=778)
+    db: CollectionsDatabase | None = None
     try:
+        db = CollectionsDatabase.for_user(user_id=778)
         yield db
     finally:
-        db.close()
+        if db is not None:
+            db.close()
         close_all_backends()
         if prev_base_dir is not None:
             settings.USER_DB_BASE_DIR = prev_base_dir

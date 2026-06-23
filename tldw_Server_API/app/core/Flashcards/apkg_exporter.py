@@ -358,254 +358,251 @@ def export_apkg_from_rows(
     # Open temp sqlite
     with tempfile.TemporaryDirectory() as tmp:
         col_path = os.path.join(tmp, "collection.anki2")
-        conn = sqlite3.connect(col_path)
-        c = conn.cursor()
-        # Create schema
-        c.executescript(
-            """
-            PRAGMA foreign_keys=ON;
-            CREATE TABLE IF NOT EXISTS col(
-              id integer primary key,
-              crt integer not null,
-              mod integer not null,
-              scm integer not null,
-              ver integer not null,
-              dty integer not null,
-              usn integer not null,
-              ls integer not null,
-              conf text not null,
-              models text not null,
-              decks text not null,
-              dconf text not null,
-              tags text not null
-            );
-            CREATE TABLE IF NOT EXISTS notes(
-              id integer primary key,
-              guid text not null,
-              mid integer not null,
-              mod integer not null,
-              usn integer not null,
-              tags text not null,
-              flds text not null,
-              sfld integer not null,
-              csum integer not null,
-              flags integer not null,
-              data text not null
-            );
-            CREATE TABLE IF NOT EXISTS cards(
-              id integer primary key,
-              nid integer not null,
-              did integer not null,
-              ord integer not null,
-              mod integer not null,
-              usn integer not null,
-              type integer not null,
-              queue integer not null,
-              due integer not null,
-              ivl integer not null,
-              factor integer not null,
-              reps integer not null,
-              lapses integer not null,
-              left integer not null,
-              odue integer not null,
-              odid integer not null,
-              flags integer not null,
-              data text not null
-            );
-            CREATE TABLE IF NOT EXISTS revlog(
-              id integer primary key,
-              cid integer not null,
-              usn integer not null,
-              ease integer not null,
-              ivl integer not null,
-              lastIvl integer not null,
-              factor integer not null,
-              time integer not null,
-              type integer not null
-            );
-            CREATE TABLE IF NOT EXISTS graves(
-              usn integer not null,
-              oid integer not null,
-              type integer not null
-            );
-            """
-        )
-
-        col_id = 1
-        crt = _day_start_secs()
-        now_ms = _now_millis()
-        models_json = _build_models_json(basic_mid, cloze_mid)
-        decks_json = _build_decks_json({deck_ids[name]: name for name in unique_decks})
-        dconf_json = _build_dconf_json()
-        conf_json = _build_conf_json(next(iter(deck_ids.values())))
-        tags_json = {}
-        c.execute(
-            "INSERT INTO col(id,crt,mod,scm,ver,dty,usn,ls,conf,models,decks,dconf,tags) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                col_id, crt, now_ms, now_ms, 11, 0, 0, now_ms,
-                json.dumps(conf_json), json.dumps(models_json), json.dumps(decks_json), json.dumps(dconf_json), json.dumps(tags_json)
+        with contextlib.closing(sqlite3.connect(col_path)) as conn:
+            c = conn.cursor()
+            # Create schema
+            c.executescript(
+                """
+                PRAGMA foreign_keys=ON;
+                CREATE TABLE IF NOT EXISTS col(
+                  id integer primary key,
+                  crt integer not null,
+                  mod integer not null,
+                  scm integer not null,
+                  ver integer not null,
+                  dty integer not null,
+                  usn integer not null,
+                  ls integer not null,
+                  conf text not null,
+                  models text not null,
+                  decks text not null,
+                  dconf text not null,
+                  tags text not null
+                );
+                CREATE TABLE IF NOT EXISTS notes(
+                  id integer primary key,
+                  guid text not null,
+                  mid integer not null,
+                  mod integer not null,
+                  usn integer not null,
+                  tags text not null,
+                  flds text not null,
+                  sfld integer not null,
+                  csum integer not null,
+                  flags integer not null,
+                  data text not null
+                );
+                CREATE TABLE IF NOT EXISTS cards(
+                  id integer primary key,
+                  nid integer not null,
+                  did integer not null,
+                  ord integer not null,
+                  mod integer not null,
+                  usn integer not null,
+                  type integer not null,
+                  queue integer not null,
+                  due integer not null,
+                  ivl integer not null,
+                  factor integer not null,
+                  reps integer not null,
+                  lapses integer not null,
+                  left integer not null,
+                  odue integer not null,
+                  odid integer not null,
+                  flags integer not null,
+                  data text not null
+                );
+                CREATE TABLE IF NOT EXISTS revlog(
+                  id integer primary key,
+                  cid integer not null,
+                  usn integer not null,
+                  ease integer not null,
+                  ivl integer not null,
+                  lastIvl integer not null,
+                  factor integer not null,
+                  time integer not null,
+                  type integer not null
+                );
+                CREATE TABLE IF NOT EXISTS graves(
+                  usn integer not null,
+                  oid integer not null,
+                  type integer not null
+                );
+                """
             )
-        )
 
-        # Insert notes + cards
-        next_new_pos = 1
-        nid_base = now_ms + 200000
-        cid_base = now_ms + 300000
-        card_seq = 0
-        media_accum: list[tuple[str, bytes]] = []
-        media_idx_map: dict[str, int] = {}
-        media_total_bytes = [0]
-        managed_asset_filenames: dict[str, str] = {}
-
-        def _register_managed_asset(asset_uuid: str) -> str:
-            if asset_uuid in managed_asset_filenames:
-                return managed_asset_filenames[asset_uuid]
-            if asset_loader is None:
-                raise ValueError(f"Managed flashcard asset export is unavailable for {asset_uuid}")
-
-            loaded = asset_loader(asset_uuid)
-            if isinstance(loaded, dict):
-                content = loaded.get("content") or loaded.get("bytes")
-                mime_type = loaded.get("mime_type")
-                original_filename = loaded.get("original_filename")
-            elif isinstance(loaded, (tuple, list)) and len(loaded) >= 2:
-                content = loaded[0]
-                mime_type = loaded[1]
-                original_filename = loaded[2] if len(loaded) > 2 else None
-            else:
-                raise ValueError(f"Unsupported asset loader payload for {asset_uuid}")
-
-            if not isinstance(content, (bytes, bytearray, memoryview)):
-                raise ValueError(f"Managed flashcard asset {asset_uuid} is missing bytes")
-            content_bytes = bytes(content)
-            media_total_bytes[0] += len(content_bytes)
-            if max_total_media_bytes is not None and media_total_bytes[0] > max_total_media_bytes:
-                with contextlib.suppress(Exception):
-                    conn.close()
-                raise ValueError(f"APKG media exceeds max total size of {max_total_media_bytes} bytes")
-
-            filename = f"managed_{asset_uuid.replace('-', '')[:12]}.{_guess_extension(mime_type, original_filename)}"
-            media_idx_map[filename] = len(media_accum)
-            media_accum.append((filename, content_bytes))
-            managed_asset_filenames[asset_uuid] = filename
-            return filename
-
-        for i, r in enumerate(rows):
-            deck_name = r.get("deck_name") or default_deck_name
-            did = deck_ids[deck_name]
-            model_type = r.get("model_type") or ("cloze" if r.get("is_cloze") else "basic")
-            is_cloze = (model_type == 'cloze')
-            reverse_flag = bool(r.get("reverse"))
-            ef = float(r.get("ef") or 2.5)
-            interval_days = int(r.get("interval_days") or 0)
-            repetitions = int(r.get("repetitions") or 0)
-            lapses = int(r.get("lapses") or 0)
-            due_at = r.get("due_at")
-
-            front = r.get("front") or ""
-            back = r.get("back") or ""
-            notes = r.get("notes") or ""
-            extra = r.get("extra") or ""
-            if asset_loader is not None:
-                front = replace_markdown_asset_refs_for_export(front, _register_managed_asset)
-                back = replace_markdown_asset_refs_for_export(back, _register_managed_asset)
-                extra = replace_markdown_asset_refs_for_export(extra, _register_managed_asset)
-                notes = replace_markdown_asset_refs_for_export(notes, _register_managed_asset)
-            # Extract media from HTML fields and replace with filenames
-            front = _extract_media_from_html(
-                front,
-                media_accum,
-                media_idx_map,
-                media_total_bytes=media_total_bytes,
-                max_total_media_bytes=max_total_media_bytes,
-            )
-            back = _extract_media_from_html(
-                back,
-                media_accum,
-                media_idx_map,
-                media_total_bytes=media_total_bytes,
-                max_total_media_bytes=max_total_media_bytes,
-            )
-            extra = _extract_media_from_html(
-                extra,
-                media_accum,
-                media_idx_map,
-                media_total_bytes=media_total_bytes,
-                max_total_media_bytes=max_total_media_bytes,
-            )
-            notes = _extract_media_from_html(
-                notes,
-                media_accum,
-                media_idx_map,
-                media_total_bytes=media_total_bytes,
-                max_total_media_bytes=max_total_media_bytes,
-            )
-            tags_json_str = r.get("tags_json")
-            tags_list = []
-            if tags_json_str:
-                try:
-                    tags_list = json.loads(tags_json_str)
-                except Exception:
-                    tags_list = []
-            tags_str = " " + " ".join(t for t in tags_list) + " " if tags_list else ""
-
-            if is_cloze:
-                mid = cloze_mid
-                flds = f"{front}\x1f{extra}\x1f{notes}"
-                sfld = 0
-            else:
-                mid = basic_mid
-                flds = f"{front}\x1f{back}\x1f{extra}\x1f{notes}"
-                sfld = 0
-
-            nid = nid_base + i
-            guid = uuid.uuid4().hex[:10]
-            csum = _sha1_8_int(front)
+            col_id = 1
+            crt = _day_start_secs()
+            now_ms = _now_millis()
+            models_json = _build_models_json(basic_mid, cloze_mid)
+            decks_json = _build_decks_json({deck_ids[name]: name for name in unique_decks})
+            dconf_json = _build_dconf_json()
+            conf_json = _build_conf_json(next(iter(deck_ids.values())))
+            tags_json = {}
             c.execute(
-                "INSERT INTO notes(id,guid,mid,mod,usn,tags,flds,sfld,csum,flags,data) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                (nid, guid, mid, _now_secs(), -1, tags_str, flds, sfld, csum, 0, "")
+                "INSERT INTO col(id,crt,mod,scm,ver,dty,usn,ls,conf,models,decks,dconf,tags) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    col_id, crt, now_ms, now_ms, 11, 0, 0, now_ms,
+                    json.dumps(conf_json), json.dumps(models_json), json.dumps(decks_json), json.dumps(dconf_json), json.dumps(tags_json)
+                )
             )
 
-            if is_cloze:
-                # Generate one card per unique cloze index N in Text
-                cloze_ids = {int(m.group(1)) for m in re.finditer(r"\{\{c(\d+)::", front)}
-                if not cloze_ids:
-                    cloze_ids = {1}
-                for n in sorted(cloze_ids):
+            # Insert notes + cards
+            next_new_pos = 1
+            nid_base = now_ms + 200000
+            cid_base = now_ms + 300000
+            card_seq = 0
+            media_accum: list[tuple[str, bytes]] = []
+            media_idx_map: dict[str, int] = {}
+            media_total_bytes = [0]
+            managed_asset_filenames: dict[str, str] = {}
+
+            def _register_managed_asset(asset_uuid: str) -> str:
+                if asset_uuid in managed_asset_filenames:
+                    return managed_asset_filenames[asset_uuid]
+                if asset_loader is None:
+                    raise ValueError(f"Managed flashcard asset export is unavailable for {asset_uuid}")
+
+                loaded = asset_loader(asset_uuid)
+                if isinstance(loaded, dict):
+                    content = loaded.get("content") or loaded.get("bytes")
+                    mime_type = loaded.get("mime_type")
+                    original_filename = loaded.get("original_filename")
+                elif isinstance(loaded, (tuple, list)) and len(loaded) >= 2:
+                    content = loaded[0]
+                    mime_type = loaded[1]
+                    original_filename = loaded[2] if len(loaded) > 2 else None
+                else:
+                    raise ValueError(f"Unsupported asset loader payload for {asset_uuid}")
+
+                if not isinstance(content, (bytes, bytearray, memoryview)):
+                    raise ValueError(f"Managed flashcard asset {asset_uuid} is missing bytes")
+                content_bytes = bytes(content)
+                media_total_bytes[0] += len(content_bytes)
+                if max_total_media_bytes is not None and media_total_bytes[0] > max_total_media_bytes:
+                    raise ValueError(f"APKG media exceeds max total size of {max_total_media_bytes} bytes")
+
+                filename = f"managed_{asset_uuid.replace('-', '')[:12]}.{_guess_extension(mime_type, original_filename)}"
+                media_idx_map[filename] = len(media_accum)
+                media_accum.append((filename, content_bytes))
+                managed_asset_filenames[asset_uuid] = filename
+                return filename
+
+            for i, r in enumerate(rows):
+                deck_name = r.get("deck_name") or default_deck_name
+                did = deck_ids[deck_name]
+                model_type = r.get("model_type") or ("cloze" if r.get("is_cloze") else "basic")
+                is_cloze = (model_type == 'cloze')
+                reverse_flag = bool(r.get("reverse"))
+                ef = float(r.get("ef") or 2.5)
+                interval_days = int(r.get("interval_days") or 0)
+                repetitions = int(r.get("repetitions") or 0)
+                lapses = int(r.get("lapses") or 0)
+                due_at = r.get("due_at")
+
+                front = r.get("front") or ""
+                back = r.get("back") or ""
+                notes = r.get("notes") or ""
+                extra = r.get("extra") or ""
+                if asset_loader is not None:
+                    front = replace_markdown_asset_refs_for_export(front, _register_managed_asset)
+                    back = replace_markdown_asset_refs_for_export(back, _register_managed_asset)
+                    extra = replace_markdown_asset_refs_for_export(extra, _register_managed_asset)
+                    notes = replace_markdown_asset_refs_for_export(notes, _register_managed_asset)
+                # Extract media from HTML fields and replace with filenames
+                front = _extract_media_from_html(
+                    front,
+                    media_accum,
+                    media_idx_map,
+                    media_total_bytes=media_total_bytes,
+                    max_total_media_bytes=max_total_media_bytes,
+                )
+                back = _extract_media_from_html(
+                    back,
+                    media_accum,
+                    media_idx_map,
+                    media_total_bytes=media_total_bytes,
+                    max_total_media_bytes=max_total_media_bytes,
+                )
+                extra = _extract_media_from_html(
+                    extra,
+                    media_accum,
+                    media_idx_map,
+                    media_total_bytes=media_total_bytes,
+                    max_total_media_bytes=max_total_media_bytes,
+                )
+                notes = _extract_media_from_html(
+                    notes,
+                    media_accum,
+                    media_idx_map,
+                    media_total_bytes=media_total_bytes,
+                    max_total_media_bytes=max_total_media_bytes,
+                )
+                tags_json_str = r.get("tags_json")
+                tags_list = []
+                if tags_json_str:
+                    try:
+                        tags_list = json.loads(tags_json_str)
+                    except Exception:
+                        tags_list = []
+                tags_str = " " + " ".join(t for t in tags_list) + " " if tags_list else ""
+
+                if is_cloze:
+                    mid = cloze_mid
+                    flds = f"{front}\x1f{extra}\x1f{notes}"
+                    sfld = 0
+                else:
+                    mid = basic_mid
+                    flds = f"{front}\x1f{back}\x1f{extra}\x1f{notes}"
+                    sfld = 0
+
+                nid = nid_base + i
+                guid = uuid.uuid4().hex[:10]
+                csum = _sha1_8_int(front)
+                c.execute(
+                    "INSERT INTO notes(id,guid,mid,mod,usn,tags,flds,sfld,csum,flags,data) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    (nid, guid, mid, _now_secs(), -1, tags_str, flds, sfld, csum, 0, "")
+                )
+
+                if is_cloze:
+                    # Generate one card per unique cloze index N in Text
+                    cloze_ids = {int(m.group(1)) for m in re.finditer(r"\{\{c(\d+)::", front)}
+                    if not cloze_ids:
+                        cloze_ids = {1}
+                    for n in sorted(cloze_ids):
+                        type_v, queue_v, due_v, ivl_v, factor_v, reps_v, lapses_v = _compute_card_sched(model_type, ef, interval_days, repetitions, lapses, due_at, crt)
+                        if type_v == 0:
+                            due_v = next_new_pos
+                            next_new_pos += 1
+                        cid = cid_base + card_seq
+                        card_seq += 1
+                        ord_n = max(0, n - 1)
+                        c.execute(
+                            "INSERT INTO cards(id,nid,did,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,odid,flags,data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            (cid, nid, did, ord_n, _now_secs(), -1, type_v, queue_v, due_v, ivl_v, factor_v, reps_v, lapses_v, 0, 0, 0, 0, "")
+                        )
+                else:
+                    # Card 1
                     type_v, queue_v, due_v, ivl_v, factor_v, reps_v, lapses_v = _compute_card_sched(model_type, ef, interval_days, repetitions, lapses, due_at, crt)
                     if type_v == 0:
                         due_v = next_new_pos
                         next_new_pos += 1
                     cid = cid_base + card_seq
                     card_seq += 1
-                    ord_n = max(0, n - 1)
                     c.execute(
                         "INSERT INTO cards(id,nid,did,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,odid,flags,data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                        (cid, nid, did, ord_n, _now_secs(), -1, type_v, queue_v, due_v, ivl_v, factor_v, reps_v, lapses_v, 0, 0, 0, 0, "")
+                        (cid, nid, did, 0, _now_secs(), -1, type_v, queue_v, due_v, ivl_v, factor_v, reps_v, lapses_v, 0, 0, 0, 0, "")
                     )
-            else:
-                # Card 1
-                type_v, queue_v, due_v, ivl_v, factor_v, reps_v, lapses_v = _compute_card_sched(model_type, ef, interval_days, repetitions, lapses, due_at, crt)
-                if type_v == 0:
-                    due_v = next_new_pos
-                    next_new_pos += 1
-                cid = cid_base + card_seq
-                card_seq += 1
-                c.execute(
-                    "INSERT INTO cards(id,nid,did,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,odid,flags,data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (cid, nid, did, 0, _now_secs(), -1, type_v, queue_v, due_v, ivl_v, factor_v, reps_v, lapses_v, 0, 0, 0, 0, "")
-                )
-                # Reverse card if requested/model says so
-                if reverse_flag or model_type == 'basic_reverse' or include_reverse:
-                    cid2 = cid_base + card_seq
-                    card_seq += 1
-                    c.execute(
-                        "INSERT INTO cards(id,nid,did,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,odid,flags,data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                        (cid2, nid, did, 1, _now_secs(), -1, type_v, queue_v, due_v, ivl_v, factor_v, reps_v, lapses_v, 0, 0, 0, 0, "")
-                    )
+                    # Reverse card if requested/model says so
+                    if reverse_flag or model_type == 'basic_reverse' or include_reverse:
+                        cid2 = cid_base + card_seq
+                        card_seq += 1
+                        c.execute(
+                            "INSERT INTO cards(id,nid,did,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,odid,flags,data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            (cid2, nid, did, 1, _now_secs(), -1, type_v, queue_v, due_v, ivl_v, factor_v, reps_v, lapses_v, 0, 0, 0, 0, "")
+                        )
 
-        conn.commit()
-        conn.close()
+            conn.commit()
 
         # Package zip
         apkg_bytes = io.BytesIO()

@@ -76,7 +76,7 @@ jobs:
         # Fails if a NEW test file is in no full-suite shard (would be silently
         # skipped). Known-unshared backlog is tracked in
         # Helper_Scripts/ci/shard_coverage_baseline.txt; shrink it over time.
-        run: python Helper_Scripts/ci/check_shard_coverage.py
+        run: python Helper_Scripts/ci/check_shard_coverage.py --ci-file .github/workflows/ci.yml
   quickstart-dry-run:
     name: Quickstart Dry-Run Smoke
     runs-on: ubuntu-latest
@@ -168,7 +168,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       redis:
-        image: mirror.gcr.io/library/redis:8-alpine
+        image: mirror.gcr.io/library/redis:8-alpine@sha256:9eb6a7ba3d344e1958c7e1589fa3dee90373a934e8159c634562a91d622759a0
         ports:
           - 6379/tcp
         options: >-
@@ -226,6 +226,8 @@ jobs:
           DB_PASSWORD="${POSTGRES_TEST_PASSWORD:?POSTGRES_TEST_PASSWORD is required}"
           DB_NAME="${POSTGRES_TEST_DB:-tldw_content}"
           DB_URL="postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:${PORT}/${DB_NAME}"
+          echo "::add-mask::${DB_PASSWORD}"
+          echo "::add-mask::${DB_URL}"
           {
             echo "POSTGRES_TEST_PORT=${PORT}"
             echo "TEST_DB_PORT=${PORT}"
@@ -392,6 +394,8 @@ jobs:
           DB_PASSWORD="${POSTGRES_TEST_PASSWORD:?POSTGRES_TEST_PASSWORD is required}"
           DB_NAME="${POSTGRES_TEST_DB:-tldw_content}"
           DB_URL="postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:${PORT}/${DB_NAME}"
+          echo "::add-mask::${DB_PASSWORD}"
+          echo "::add-mask::${DB_URL}"
           {
             echo "POSTGRES_TEST_PORT=${PORT}"
             echo "TEST_DB_PORT=${PORT}"
@@ -1655,6 +1659,8 @@ jobs:
           DB_PASSWORD="${POSTGRES_TEST_PASSWORD:?POSTGRES_TEST_PASSWORD is required}"
           DB_NAME="${POSTGRES_TEST_DB:-tldw_content}"
           DB_URL="postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:${PORT}/${DB_NAME}"
+          echo "::add-mask::${DB_PASSWORD}"
+          echo "::add-mask::${DB_URL}"
           {
             echo "POSTGRES_TEST_PORT=${PORT}"
             echo "TEST_DB_PORT=${PORT}"
@@ -3022,6 +3028,8 @@ jobs:
           DB_PASSWORD="${POSTGRES_TEST_PASSWORD:?POSTGRES_TEST_PASSWORD is required}"
           DB_NAME="${POSTGRES_TEST_DB:-tldw_content}"
           DB_URL="postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:${PORT}/${DB_NAME}"
+          echo "::add-mask::${DB_PASSWORD}"
+          echo "::add-mask::${DB_URL}"
           {
             echo "POSTGRES_TEST_PORT=${PORT}"
             echo "TEST_DB_PORT=${PORT}"

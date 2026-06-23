@@ -88,6 +88,12 @@ class AnalyticsDatabase:
     """
 
     _bootstrapped_backend_targets: set[str] = set()
+    _REQUIRED_BOOTSTRAP_TABLES: tuple[str, ...] = (
+        "search_analytics",
+        "document_performance",
+        "feedback_analytics",
+        "analytics_events",
+    )
 
     _SCHEMA_SQLITE = """
     CREATE TABLE IF NOT EXISTS search_analytics (
@@ -465,7 +471,12 @@ class AnalyticsDatabase:
         target = self._describe_backend(backend)
         with self._lock:
             if target in type(self)._bootstrapped_backend_targets:
-                return
+                with backend.transaction() as conn:
+                    if all(
+                        backend.table_exists(table, connection=conn)
+                        for table in self._REQUIRED_BOOTSTRAP_TABLES
+                    ):
+                        return
             self._bootstrap_backend_schema(backend, target)
             type(self)._bootstrapped_backend_targets.add(target)
 

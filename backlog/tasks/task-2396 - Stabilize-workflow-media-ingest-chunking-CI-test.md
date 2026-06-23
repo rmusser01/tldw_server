@@ -51,7 +51,7 @@ Fix PR #2258 CI failures in workflow test shards: media ingest polling should fa
 - [x] #4 Approval permission tests set up waiting approval runs deterministically without depending on background scheduler timing.
 <!-- AC:END -->
 
-## Implementation Notes
+## Additional CI Failure Notes
 
 <!-- SECTION:NOTES:BEGIN -->
 CI run 27886920141 direct failures addressed:
