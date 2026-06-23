@@ -1583,8 +1583,12 @@ def _schedule_service_shutdown(svc: "UnifiedEvaluationService") -> None:
         result = shutdown()
         if asyncio.iscoroutine(result):
             loop.create_task(result)
-    except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
-        pass
+    except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug(
+            "Unified evaluation service shutdown scheduling skipped for {}: {}",
+            type(svc).__name__,
+            exc,
+        )
 
 
 def get_unified_evaluation_service(db_path: Optional[str] = None) -> UnifiedEvaluationService:

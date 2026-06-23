@@ -10579,30 +10579,23 @@ async def persona_stream(
                             summary_text=assistant_text,
                             surface=activity_surface,
                         )
+                        await _record_turn(
+                            session_id=session_id,
+                            role="assistant",
+                            content=assistant_text,
+                            turn_type="assistant_delta",
+                            metadata={"source": "plan", "step_idx": step.idx, "step_type": step_type},
+                            persist_as_memory=True,
+                            persona_id_override=runtime_persona_id,
+                            runtime_mode_override=runtime_mode,
+                            scope_snapshot_id_override=runtime_scope_snapshot_id,
+                            memory_kind="summary",
+                        )
                         await _emit_assistant_delta(
                             session_id=session_id,
                             step_idx=step.idx,
                             text_delta=assistant_text,
                         )
-                        try:
-                            await _record_turn(
-                                session_id=session_id,
-                                role="assistant",
-                                content=assistant_text,
-                                turn_type="assistant_delta",
-                                metadata={"source": "plan", "step_idx": step.idx, "step_type": step_type},
-                                persist_as_memory=True,
-                                persona_id_override=runtime_persona_id,
-                                runtime_mode_override=runtime_mode,
-                                scope_snapshot_id_override=runtime_scope_snapshot_id,
-                                memory_kind="summary",
-                            )
-                        except Exception as exc:
-                            logger.debug(
-                                "persona assistant turn persistence skipped for session_hash {}: {}",
-                                _redacted_id_for_logs(session_id),
-                                exc,
-                            )
                         await _emit_persona_live_tts_for_assistant_text(
                             session_id=session_id,
                             assistant_text=assistant_text,

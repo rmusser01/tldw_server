@@ -12,7 +12,7 @@ priority: medium
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Track follow-up work after PR #2258 merged the full-suite shard split into dev. Initial scope: monitor the merged workflow behavior on dev/main/release triggers, inspect any remaining queued or stale workflow-run behavior, and address residual CI runtime/stability issues without reintroducing early pytest maxfail behavior.
+Track follow-up work after PR #2258 merged the full-suite shard split into `dev`. Initial scope: monitor the merged workflow behavior on `dev`/`main`/release triggers, inspect any remaining queued or stale workflow-run behavior, and address residual CI runtime/stability issues without reintroducing early pytest `--maxfail` behavior.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -36,6 +36,7 @@ Track follow-up work after PR #2258 merged the full-suite shard split into dev. 
 - Qodo's prior PR full-suite and OS Postgres auto-start concerns are obsolete in this branch: macOS/Windows full-suite shards run for PRs with backend changes and set `TLDW_TEST_NO_DOCKER=1`.
 - Local verification for the review follow-up: py_compile on touched Python passed; CI contract tests 36 passed; focused backend regression suite 81 passed, 1 skipped; APKG/media guard/embeddings suite 64 passed, 14 skipped; frontend quickstart networking Vitest 11 passed; `git diff --check` passed; Bandit exited 0 for touched production Python and touched tests.
 - Known skip: real HuggingFace embedding tests now require explicit `RUN_REAL_HF_EMBEDDING_TESTS=true` to avoid accidental local/network-dependent runs.
+- PR #2431 review comments addressed: Qodo shutdown scheduling now logs non-critical failures, persona final-answer turns persist before assistant deltas are emitted, and the task description now formats `dev`, `main`, and `--maxfail` consistently. The Backlog task filename remains in the existing Backlog.md task-file convention used throughout `backlog/tasks/`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
