@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from typing import Annotated, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
@@ -41,6 +41,8 @@ from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 
 
 router = APIRouter(prefix="/audio-studio", tags=["audio-studio"])
+_AUDIO_STUDIO_ID_PATTERN = r"^[A-Za-z0-9_-]+$"
+AudioStudioIdPath = Annotated[str, Path(min_length=1, max_length=120, pattern=_AUDIO_STUDIO_ID_PATTERN)]
 
 
 def _new_project_id() -> str:
@@ -168,6 +170,12 @@ def _load_project_or_404(collections_db: CollectionsDatabase, project_id: str) -
 def _raise_conflict_for_stale_base(exc: ValueError) -> None:
     if str(exc) == "stale_base_revision":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="stale_base_revision") from exc
+    if str(exc) in {
+        "audio_studio_track_not_found",
+        "audio_studio_section_not_found",
+        "audio_studio_artifact_not_found",
+    }:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_audio_studio_request") from exc
 
 
@@ -200,25 +208,21 @@ async def create_audio_studio_project(
         metadata=request.metadata,
         description=request.description,
     )
+    payload = request.model_dump(mode="json")
     try:
-        project = collections_db.create_audio_studio_project(
+        project = collections_db.create_audio_studio_project_with_revision(
             project_id=project_id,
             title=request.title,
             workflow=request.workflow.value,
-            settings_json=settings_json,
-        )
-        payload = request.model_dump(mode="json")
-        collections_db.create_audio_studio_revision(
-            project_row_id=project.id,
             revision_id=revision_id,
-            parent_revision_id=None,
             mutation_kind="project.create",
             resource_kind="project",
-            resource_id=project.project_id,
+            resource_id=project_id,
             content_hash=_content_hash(payload),
             payload_json=_json_dumps(payload),
+            settings_json=settings_json,
         )
-        return _project_response(collections_db.get_audio_studio_project(project.id))
+        return _project_response(project)
     except DatabaseError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="audio_studio_project_create_failed") from exc
 
@@ -242,7 +246,7 @@ async def list_audio_studio_projects(
 
 @router.get("/projects/{project_id}", response_model=AudioStudioProjectResponse)
 async def get_audio_studio_project(
-    project_id: str = Path(..., min_length=1),
+    project_id: AudioStudioIdPath,
     current_user: User = Depends(get_request_user),
     collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
 ) -> AudioStudioProjectResponse:
@@ -254,39 +258,36 @@ async def get_audio_studio_project(
 @router.patch("/projects/{project_id}", response_model=AudioStudioProjectResponse)
 async def update_audio_studio_project(
     request: AudioStudioProjectUpdate,
-    project_id: str = Path(..., min_length=1),
+    project_id: AudioStudioIdPath,
     current_user: User = Depends(get_request_user),
     collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
 ) -> AudioStudioProjectResponse:
     """Update project metadata with optimistic concurrency."""
     _ = current_user
     project = _load_project_or_404(collections_db, project_id)
-    if project.current_revision_id != request.base_revision_id:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="stale_base_revision")
     payload = _settings_payload(project.settings_json)
     settings = request.settings if request.settings is not None else payload["settings"]
     metadata = request.metadata if request.metadata is not None else payload["metadata"]
+    description = request.description if "description" in request.model_fields_set else payload["description"]
     revision_id = _new_revision_id()
     revision_payload = request.model_dump(mode="json", exclude_unset=True)
     try:
-        updated = collections_db.update_audio_studio_project(
-            project.id,
-            title=request.title,
-            status=request.status,
-            settings_json=_settings_json(settings=settings, metadata=metadata, description=request.description or payload["description"]),
-            current_revision_id=revision_id,
-        )
-        collections_db.create_audio_studio_revision(
+        updated = collections_db.mutate_audio_studio_project(
             project_row_id=project.id,
+            base_revision_id=request.base_revision_id,
             revision_id=revision_id,
-            parent_revision_id=request.base_revision_id,
             mutation_kind="project.update",
             resource_kind="project",
             resource_id=project.project_id,
             content_hash=_content_hash(revision_payload),
             payload_json=_json_dumps(revision_payload),
+            title=request.title,
+            status=request.status,
+            settings_json=_settings_json(settings=settings, metadata=metadata, description=description),
         )
         return _project_response(updated)
+    except ValueError as exc:
+        _raise_conflict_for_stale_base(exc)
     except DatabaseError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="audio_studio_project_update_failed") from exc
 
@@ -294,24 +295,35 @@ async def update_audio_studio_project(
 @router.delete("/projects/{project_id}")
 async def archive_audio_studio_project(
     request: AudioStudioProjectArchiveRequest,
-    project_id: str = Path(..., min_length=1),
+    project_id: AudioStudioIdPath,
     current_user: User = Depends(get_request_user),
     collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
 ) -> dict[str, str | bool]:
     """Archive a project owned by the current user."""
     _ = current_user
     project = _load_project_or_404(collections_db, project_id)
-    if project.current_revision_id != request.base_revision_id:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="stale_base_revision")
-    collections_db.archive_audio_studio_project(project.id)
-    return {"project_id": project.project_id, "archived": True}
+    revision_id = _new_revision_id()
+    payload = request.model_dump(mode="json")
+    try:
+        archived = collections_db.archive_audio_studio_project_with_revision(
+            project_row_id=project.id,
+            base_revision_id=request.base_revision_id,
+            revision_id=revision_id,
+            content_hash=_content_hash(payload),
+            payload_json=_json_dumps(payload),
+        )
+        return {"project_id": archived.project_id, "archived": True, "current_revision_id": archived.current_revision_id}
+    except ValueError as exc:
+        _raise_conflict_for_stale_base(exc)
+    except DatabaseError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="audio_studio_project_archive_failed") from exc
 
 
 @router.put("/projects/{project_id}/sections/{section_id}", response_model=AudioStudioSectionResponse)
 async def upsert_audio_studio_section(
     request: AudioStudioSectionUpsert,
-    project_id: str = Path(..., min_length=1),
-    section_id: str = Path(..., min_length=1),
+    project_id: AudioStudioIdPath,
+    section_id: AudioStudioIdPath,
     current_user: User = Depends(get_request_user),
     collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
 ) -> AudioStudioSectionResponse:
@@ -321,25 +333,17 @@ async def upsert_audio_studio_section(
     revision_id = _new_revision_id()
     payload = request.model_dump(mode="json")
     try:
-        row = collections_db.upsert_audio_studio_section(
+        row = collections_db.upsert_audio_studio_section_with_revision(
             project_row_id=project.id,
             section_id=section_id,
             base_revision_id=request.base_revision_id,
+            revision_id=revision_id,
             workflow=project.workflow,
             title=request.title,
             body_text=request.body_text,
             speaker_id=request.speaker_id,
             order_index=request.order_index,
             settings_json=_settings_json(settings=request.settings, metadata=request.metadata),
-            current_revision_id=revision_id,
-        )
-        collections_db.create_audio_studio_revision(
-            project_row_id=project.id,
-            revision_id=revision_id,
-            parent_revision_id=request.base_revision_id,
-            mutation_kind="section.upsert",
-            resource_kind="section",
-            resource_id=section_id,
             content_hash=_content_hash(payload),
             payload_json=_json_dumps(payload),
         )
@@ -353,8 +357,8 @@ async def upsert_audio_studio_section(
 @router.put("/projects/{project_id}/tracks/{track_id}", response_model=AudioStudioTrackResponse)
 async def upsert_audio_studio_track(
     request: AudioStudioTrackUpsert,
-    project_id: str = Path(..., min_length=1),
-    track_id: str = Path(..., min_length=1),
+    project_id: AudioStudioIdPath,
+    track_id: AudioStudioIdPath,
     current_user: User = Depends(get_request_user),
     collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
 ) -> AudioStudioTrackResponse:
@@ -364,10 +368,11 @@ async def upsert_audio_studio_track(
     revision_id = _new_revision_id()
     payload = request.model_dump(mode="json")
     try:
-        row = collections_db.upsert_audio_studio_track(
+        row = collections_db.upsert_audio_studio_track_with_revision(
             project_row_id=project.id,
             track_id=track_id,
             base_revision_id=request.base_revision_id,
+            revision_id=revision_id,
             name=request.name,
             kind=request.kind.value,
             order_index=request.order_index,
@@ -375,15 +380,6 @@ async def upsert_audio_studio_track(
             solo=request.solo,
             volume=request.volume,
             settings_json=_settings_json(settings=request.settings, metadata=request.metadata),
-            current_revision_id=revision_id,
-        )
-        collections_db.create_audio_studio_revision(
-            project_row_id=project.id,
-            revision_id=revision_id,
-            parent_revision_id=request.base_revision_id,
-            mutation_kind="track.upsert",
-            resource_kind="track",
-            resource_id=track_id,
             content_hash=_content_hash(payload),
             payload_json=_json_dumps(payload),
         )
@@ -397,8 +393,8 @@ async def upsert_audio_studio_track(
 @router.put("/projects/{project_id}/clips/{clip_id}", response_model=AudioStudioClipResponse)
 async def upsert_audio_studio_clip(
     request: AudioStudioClipUpsert,
-    project_id: str = Path(..., min_length=1),
-    clip_id: str = Path(..., min_length=1),
+    project_id: AudioStudioIdPath,
+    clip_id: AudioStudioIdPath,
     current_user: User = Depends(get_request_user),
     collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
 ) -> AudioStudioClipResponse:
@@ -408,10 +404,11 @@ async def upsert_audio_studio_clip(
     revision_id = _new_revision_id()
     payload = request.model_dump(mode="json")
     try:
-        row = collections_db.upsert_audio_studio_clip(
+        row = collections_db.upsert_audio_studio_clip_with_revision(
             project_row_id=project.id,
             clip_id=clip_id,
             base_revision_id=request.base_revision_id,
+            revision_id=revision_id,
             section_id=request.section_id,
             track_id=request.track_id,
             title=request.title,
@@ -424,15 +421,6 @@ async def upsert_audio_studio_clip(
             muted=request.muted,
             artifact_id=request.artifact_id,
             settings_json=_settings_json(settings=request.settings, metadata=request.metadata),
-            current_revision_id=revision_id,
-        )
-        collections_db.create_audio_studio_revision(
-            project_row_id=project.id,
-            revision_id=revision_id,
-            parent_revision_id=request.base_revision_id,
-            mutation_kind="clip.upsert",
-            resource_kind="clip",
-            resource_id=clip_id,
             content_hash=_content_hash(payload),
             payload_json=_json_dumps(payload),
         )
