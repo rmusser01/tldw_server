@@ -63,6 +63,7 @@ Docs/Plans/2026-06-23-pr1982-dev-main-conflict-resolution.md
 - Local verification after these fixes: `bunx vitest run src/components/Notes/__tests__/task-markdown.test.ts` passed; focused Python pytest covering UAT, RAG reconciliation, workflow contract, and MCP package-boundary checks passed with 12 tests; `git diff --check` passed; Bandit on touched Python files passed with no issues.
 
 Old-head CI later exposed Full Suite shard integrations failing test_reconcile_content_update_updates_media_fts_versions_and_binding because SQLite external-content FTS deleted using the already-updated media_fts row. Changed _update_fts_media to delete with the supplied old title/content payload, preserving synonym expansion for old and new content, and updated the unit expectation. Local verification: focused failing integration plus FTS unit passed, full test_media_postgres_support.py passed, and test_sync_coordinator.py passed.
+- New-head Watchlists Extension E2E was canceled after `bunx playwright install --with-deps chromium` spent about 43 minutes downloading browsers and exhausted the 45-minute job window before the backend could start. Reverted that job to the runner's system Chrome channel while keeping `TLDW_E2E_EXTENSION_MINIMAL_LOCALES=1`; local verification: targeted workflow contract passed, full workflow-contract test file passed (36 tests), focused prior-failure Python regression set passed (16 tests), `git diff --check` passed, and Bandit on the touched CI contract test found no issues.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
