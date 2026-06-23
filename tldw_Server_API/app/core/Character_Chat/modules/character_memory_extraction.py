@@ -31,9 +31,9 @@ _EXTRACTION_SYSTEM_PROMPT = (
     "- content: concise statement (1-2 sentences max)\n"
     "- salience: float 0.0-1.0 indicating importance (0.8+ = very important)\n\n"
     "Already known memories (do not duplicate):\n{existing_memories}\n\n"
-    "Respond ONLY with a JSON array:\n"
-    "[{{\"category\": \"...\", \"content\": \"...\", \"salience\": 0.8}}]\n"
-    "If nothing new, respond: []"
+    "Respond ONLY with a JSON object:\n"
+    "{{\"memories\": [{{\"category\": \"...\", \"content\": \"...\", \"salience\": 0.8}}]}}\n"
+    "If nothing new, respond: {{\"memories\": []}}"
 )
 
 
@@ -109,6 +109,10 @@ def parse_extraction_response(raw_text: str) -> list[dict[str, Any]]:
         parsed = json.loads(text)
         if isinstance(parsed, list):
             return _validate_memory_list(parsed)
+        if isinstance(parsed, dict):
+            memories = parsed.get("memories")
+            if isinstance(memories, list):
+                return _validate_memory_list(memories)
     except json.JSONDecodeError:
         pass
 

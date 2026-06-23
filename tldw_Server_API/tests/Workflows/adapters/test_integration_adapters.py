@@ -1621,6 +1621,119 @@ async def test_character_chat_adapter_message_test_mode_y(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_character_chat_adapter_message_uses_current_core_writer(monkeypatch):
+    """Non-test mode message action should use the current low-level message writer contract."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.is_test_mode",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.DatabasePaths.get_chacha_db_path",
+        lambda _user_id: Path(":memory:"),
+    )
+
+    fake_db = object()
+    posts: list[dict[str, Any]] = []
+
+    def fake_load_chat_and_character(db: object, conversation_id_str: str, user_name: str):
+        assert db is fake_db
+        assert conversation_id_str == "conv-123"
+        assert user_name == "Dana"
+        return (
+            {"name": "Luna", "system_prompt": "Stay in character."},
+            [("Earlier user message", "Earlier assistant reply")],
+            None,
+        )
+
+    def fake_post_message_to_conversation(
+        db: object,
+        conversation_id: str,
+        character_name: str,
+        message_content: str,
+        is_user_message: bool,
+        **_kwargs: Any,
+    ) -> str:
+        assert db is fake_db
+        posts.append(
+            {
+                "conversation_id": conversation_id,
+                "character_name": character_name,
+                "message_content": message_content,
+                "is_user_message": is_user_message,
+            }
+        )
+        return f"msg-{len(posts)}"
+
+    async def fake_perform_chat_api_call_async(**kwargs: Any):
+        assert kwargs["api_endpoint"] == "openai"
+        assert kwargs["model"] == "gpt-test"
+        assert kwargs["temp"] == 0.4
+        assert kwargs["system_message"] == "Stay in character."
+        assert kwargs["messages_payload"] == [
+            {"role": "user", "content": "Earlier user message"},
+            {"role": "assistant", "content": "Earlier assistant reply"},
+            {"role": "user", "content": "Hello!"},
+        ]
+        return {"choices": [{"message": {"content": "Hello from Luna"}}]}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDB",
+        lambda *_args, **_kwargs: fake_db,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Character_Chat.modules.character_chat.load_chat_and_character",
+        fake_load_chat_and_character,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Character_Chat.modules.character_chat.post_message_to_conversation",
+        fake_post_message_to_conversation,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+        fake_perform_chat_api_call_async,
+    )
+
+    from tldw_Server_API.app.core.Workflows.adapters.integration import run_character_chat_adapter
+
+    result = await run_character_chat_adapter(
+        {
+            "action": "message",
+            "conversation_id": "conv-123",
+            "message": "Hello!",
+            "api_name": "openai",
+            "model": "gpt-test",
+            "temperature": 0.4,
+            "user_name": "Dana",
+        },
+        {"user_id": "1"},
+    )
+
+    assert result == {
+        "response": "Hello from Luna",
+        "text": "Hello from Luna",
+        "conversation_id": "conv-123",
+        "character_name": "Luna",
+        "turn_count": 4,
+    }
+    assert posts == [
+        {
+            "conversation_id": "conv-123",
+            "character_name": "Luna",
+            "message_content": "Hello!",
+            "is_user_message": True,
+        },
+        {
+            "conversation_id": "conv-123",
+            "character_name": "Luna",
+            "message_content": "Hello from Luna",
+            "is_user_message": False,
+        },
+    ]
+
+
+@pytest.mark.asyncio
 async def test_character_chat_adapter_load_test_mode(monkeypatch):
     """Test Character chat adapter load in test mode."""
     monkeypatch.setenv("TEST_MODE", "1")

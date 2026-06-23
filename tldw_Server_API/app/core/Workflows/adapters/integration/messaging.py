@@ -56,6 +56,32 @@ def _safe_kanban_error_detail(exc: Exception) -> str:
     return "Kanban operation failed"
 
 
+def _extract_character_chat_response_text(response: Any) -> str:
+    """Extract assistant text from common chat adapter response shapes."""
+    if response is None:
+        return ""
+    if isinstance(response, str):
+        return response
+    if isinstance(response, dict):
+        choices = response.get("choices")
+        if isinstance(choices, list) and choices:
+            first_choice = choices[0]
+            if isinstance(first_choice, dict):
+                message = first_choice.get("message")
+                if isinstance(message, dict):
+                    content = message.get("content")
+                    if content is not None:
+                        return str(content)
+                text = first_choice.get("text")
+                if text is not None:
+                    return str(text)
+        for key in ("response", "content", "text"):
+            value = response.get(key)
+            if value is not None:
+                return str(value)
+    return str(response)
+
+
 @registry.register(
     "kanban",
     category="integration",
@@ -765,6 +791,7 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
         return {"error": f"unknown_action:{action}", "simulated": True}
 
     try:
+        from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
         from tldw_Server_API.app.core.Character_Chat.modules.character_chat import (
             load_chat_and_character,
             post_message_to_conversation,
@@ -852,31 +879,67 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
             if not message:
                 return {"error": "missing_message"}
 
-            api_name = _render(config.get("api_name") or config.get("api_provider") or "openai")
+            api_name = _render(config.get("api_name") or config.get("api_provider") or config.get("provider") or "openai")
             temperature = float(config.get("temperature") or 0.8)
+            model = _render(config.get("model")) if config.get("model") else None
+            max_tokens = config.get("max_tokens")
+            system_prompt = _render(config.get("system_prompt")) if config.get("system_prompt") else None
 
-            # Post message and get response
-            result = await post_message_to_conversation(
+            char_data, history, _ = load_chat_and_character(
+                db=db,
+                conversation_id_str=str(conversation_id),
+                user_name=user_name,
+            )
+            if char_data is None:
+                return {"error": "conversation_not_found", "conversation_id": conversation_id}
+
+            char_name = char_data.get("name", "Character") if char_data else "Character"
+            messages_payload: list[dict[str, str]] = []
+            for user_msg, char_msg in history:
+                if user_msg:
+                    messages_payload.append({"role": "user", "content": str(user_msg)})
+                if char_msg:
+                    messages_payload.append({"role": "assistant", "content": str(char_msg)})
+            messages_payload.append({"role": "user", "content": message})
+
+            effective_system_prompt = system_prompt or (char_data.get("system_prompt") if char_data else None)
+            llm_response = await perform_chat_api_call_async(
+                api_endpoint=api_name,
+                messages_payload=messages_payload,
+                system_message=effective_system_prompt,
+                model=model,
+                temp=temperature,
+                max_tokens=max_tokens,
+            )
+            response_text = _extract_character_chat_response_text(llm_response).strip()
+
+            user_message_id = post_message_to_conversation(
                 db=db,
                 conversation_id=str(conversation_id),
-                user_message=message,
-                user_name=user_name,
-                api_name=api_name,
-                temperature=temperature,
+                character_name=char_name,
+                message_content=message,
+                is_user_message=True,
             )
-
-            if result is None:
+            if not user_message_id:
                 return {"error": "failed_to_post_message"}
 
-            response_text = result.get("response") or result.get("content") or ""
-            char_name = result.get("character_name") or "Character"
+            assistant_message_id = post_message_to_conversation(
+                db=db,
+                conversation_id=str(conversation_id),
+                character_name=char_name,
+                message_content=response_text or " ",
+                is_user_message=False,
+                parent_message_id=user_message_id,
+            )
+            if not assistant_message_id:
+                return {"error": "failed_to_post_message"}
 
             return {
                 "response": response_text,
                 "text": response_text,  # Alias for downstream steps
                 "conversation_id": conversation_id,
                 "character_name": char_name,
-                "turn_count": result.get("turn_count", 0),
+                "turn_count": len(messages_payload) + 1,
             }
 
         return {"error": f"unknown_action:{action}"}

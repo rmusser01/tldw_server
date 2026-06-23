@@ -43,6 +43,7 @@ except ImportError:
 from tldw_Server_API.app.core.Character_Chat.constants import (
     MAX_BOOK_CACHE_SIZE,
     MAX_ENTRY_CACHE_SIZE,
+    MAX_REGEX_MATCH_TIME_MS,
     MAX_RECURSIVE_DEPTH,
     safe_parse_json_dict,
     safe_parse_json_list,
@@ -50,6 +51,7 @@ from tldw_Server_API.app.core.Character_Chat.constants import (
 
 # Import shared regex safety utilities
 from tldw_Server_API.app.core.Character_Chat.regex_safety import (
+    safe_compile_regex as _safe_compile_regex,
     validate_regex_safety as _validate_regex_safety,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
@@ -260,14 +262,14 @@ class WorldBookEntry:
         # Compile patterns for efficient matching
         self._patterns = self._compile_patterns()
 
-    def _compile_patterns(self) -> list[tuple[re.Pattern, str]]:
+    def _compile_patterns(self) -> list[tuple[Any, str]]:
         """
         Compile keyword patterns for matching.
 
         For regex patterns, validates against potential ReDoS vulnerabilities
         before compilation. Dangerous patterns are rejected with a warning.
         """
-        patterns: list[tuple[re.Pattern, str]] = []
+        patterns: list[tuple[Any, str]] = []
 
         for keyword in self.keywords:
             if self.regex_match:
@@ -284,7 +286,7 @@ class WorldBookEntry:
                 # Use keyword as regex directly
                 try:
                     flags = 0 if self.case_sensitive else re.IGNORECASE
-                    pattern = re.compile(keyword, flags)
+                    pattern = _safe_compile_regex(keyword, flags)
                     patterns.append((pattern, keyword))
                 except re.error as e:
                     logger.warning("Invalid regex pattern '{}': {}", keyword, e)
@@ -297,6 +299,20 @@ class WorldBookEntry:
                 patterns.append((re.compile(pattern_str, flags), keyword))
 
         return patterns
+
+    def _search_pattern(self, pattern: Any, text: str):
+        """Search *text* with runtime timeout for user-provided regex entries."""
+        try:
+            if self.regex_match:
+                return pattern.search(text, timeout=MAX_REGEX_MATCH_TIME_MS / 1000.0)
+            return pattern.search(text)
+        except TimeoutError:
+            logger.warning(
+                "World book regex pattern timed out after {}ms for entry {}",
+                MAX_REGEX_MATCH_TIME_MS,
+                self.entry_id,
+            )
+            return None
 
     def matches(self, text: str) -> bool:
         """
@@ -311,7 +327,7 @@ class WorldBookEntry:
         if not self.enabled or not self._patterns:
             return False
 
-        return any(pattern.search(text) for pattern, _keyword in self._patterns)
+        return any(self._search_pattern(pattern, text) for pattern, _keyword in self._patterns)
 
     def get_first_match_info(self, text: str) -> Optional[dict[str, Any]]:
         """Return the first matching keyword and reason, if any."""
@@ -319,7 +335,7 @@ class WorldBookEntry:
             return None
 
         for pattern, keyword in self._patterns:
-            if pattern.search(text):
+            if self._search_pattern(pattern, text):
                 return {
                     "reason": "regex_match" if self.regex_match else "keyword_match",
                     "keyword": keyword,
@@ -342,7 +358,7 @@ class WorldBookEntry:
 
         count = 0
         for pattern, _keyword in self._patterns:
-            if pattern.search(text):
+            if self._search_pattern(pattern, text):
                 count += 1
 
         return count

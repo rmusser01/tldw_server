@@ -19,6 +19,7 @@ from loguru import logger
 from PIL import Image
 
 from tldw_Server_API.app.core.Character_Chat.constants import MAX_PERSIST_CONTENT_LENGTH
+from tldw_Server_API.app.core.Character_Chat.character_limits import check_message_limit
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -1208,6 +1209,19 @@ def post_message_to_conversation(
         "image_data": image_data,
         "image_mime_type": image_mime_type,
     }
+
+    try:
+        current_message_count = db.count_messages_for_conversation(conversation_id)
+    except _CHAR_CHAT_NONCRITICAL_EXCEPTIONS as exc:
+        logger.error(
+            "Failed to count messages for conversation {} before posting: {}",
+            conversation_id,
+            exc,
+        )
+        raise CharactersRAGDBError(
+            f"Failed to count messages for conversation {conversation_id}"
+        ) from exc
+    check_message_limit(conversation_id, current_message_count + 1)
 
     try:
         message_id = db.add_message(msg_payload)
