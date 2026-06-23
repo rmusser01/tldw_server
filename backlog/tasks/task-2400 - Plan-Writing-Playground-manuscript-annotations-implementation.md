@@ -13,6 +13,7 @@ documentation:
 - Docs/superpowers/specs/2026-05-24-writing-playground-manuscript-annotations-design.md
 modified_files:
 - Docs/superpowers/plans/2026-06-23-writing-playground-manuscript-annotations-implementation-plan.md
+- Docs/superpowers/specs/2026-05-24-writing-playground-manuscript-annotations-design.md
 ---
 
 ## Description
@@ -40,7 +41,7 @@ Created an implementation plan for the approved Writing Playground manuscript an
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implementation plan completed and locally reviewed. Verification: git diff --check passed for the plan/task files; ASCII scan returned no matches; placeholder scan returned no matches. Bandit was not run because this task only adds planning/backlog Markdown artifacts and no executable code.
+Implementation plan reviewed and hardened before subagent-driven execution. Updates cover exact provider/model contract, Unicode code-point offset handling, per-user Jobs worker ownership through owner_user_id, startup poller regression coverage, PostgreSQL migration verification, mandatory dirty-scene navigation behavior, hook barrel exports, browser margin-rail smoke checks, package-local dev/e2e commands, and expanded Bandit touched scope. Verification: git diff --check passed for plan/spec/task files; ASCII scan returned no matches; stale-contract/placeholder scan returned no matches. Bandit was not run because this task only edits Markdown planning/spec/backlog artifacts.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

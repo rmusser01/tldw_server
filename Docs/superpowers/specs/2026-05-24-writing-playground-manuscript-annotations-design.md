@@ -305,6 +305,15 @@ At creation time, store:
 - a fingerprint of the saved `content_plain`
 - bounded prefix and suffix windows around the selected text
 
+Offset contract:
+
+- Backend APIs store and validate `start` and `end` as Unicode code-point offsets, matching Python
+  string indexing.
+- Browser and ProseMirror selection utilities must convert DOM UTF-16 code-unit positions to
+  backend code-point offsets before submitting annotation requests.
+- Tests must include scenes with astral symbols before and inside selected ranges so comments do
+  not drift in emoji-containing text.
+
 On read or on explicit refresh, compute anchor state against the current saved `content_plain`:
 
 1. If the scene version and exact range still match `selected_text`, mark `attached`.
@@ -441,7 +450,7 @@ Synchronous AI critique for one selected range. Request includes:
 - selected text
 - optional category hints
 - optional instruction
-- required `api_provider` and `model` fields matching the active Writing Playground generation
+- required `provider` and `model` fields matching the active Writing Playground generation
   context
 - optional bounded generation options if already supported by the existing writing generation
   conventions
@@ -465,7 +474,7 @@ Jobs-backed scene review. Request includes:
 - category filters or review focus
 - maximum comment count
 - optional instruction
-- required `api_provider` and `model` fields matching the active Writing Playground generation
+- required `provider` and `model` fields matching the active Writing Playground generation
   context
 - optional bounded generation options if already supported by the existing writing generation
   conventions
@@ -505,7 +514,7 @@ Security and privacy constraints:
 
 Provider/model handling:
 
-- The frontend should send the active Writing Playground `api_provider` and `model` to selected-text
+- The frontend should send the active Writing Playground `provider` and `model` to selected-text
   and scene-review endpoints.
 - The backend should validate provider/model availability using the same provider metadata and
   "known model" conventions already used by manuscript analysis endpoints.
@@ -790,7 +799,7 @@ Success criteria:
 
 ## Open Questions For Implementation Planning
 
-- Which exact optional generation settings beyond `api_provider` and `model` should V1 expose?
+- Which exact optional generation settings beyond `provider` and `model` should V1 expose?
 - Should chapter/project notes be creatable from the manuscript tree context menu in the first
   frontend slice, or only from the annotations tab?
 

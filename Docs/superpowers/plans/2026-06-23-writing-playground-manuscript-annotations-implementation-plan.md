@@ -32,6 +32,15 @@ Before executing Task 1, create a separate Backlog.md implementation task for th
 
 Use @superpowers:test-driven-development for implementation tasks and @superpowers:verification-before-completion before claiming the implementation is complete.
 
+## Cross-Cutting Implementation Contracts
+
+- Persisted and API text offsets are Unicode code-point offsets, matching Python string indexing. Browser and ProseMirror selection helpers must convert DOM UTF-16 code-unit positions to code-point offsets before calling backend APIs, and convert back only when restoring editor selections. Anchor tests must include astral symbols before and inside selections.
+- AI review requests use `provider` and `model`, matching existing Writing Playground analysis contracts. Do not introduce a second provider field for annotation review unless the existing manuscript analysis contract is changed first.
+- Jobs-backed scene review passes `owner_user_id` as top-level Jobs metadata from the authenticated request user. The Jobs payload must never carry user ids, scene text, selected text, annotation body, suggested fix, or raw model output.
+- The scene-review worker loads the per-user ChaChaNotes DB from the Jobs row `owner_user_id` via `get_chacha_db_for_user_id(...)` before constructing `ManuscriptDBHelper`.
+- The in-process worker route key is `writing`; the worker env flag is `WRITING_ANNOTATION_REVIEW_JOBS_WORKER_ENABLED`.
+- Application logs must not include manuscript text, selected text, raw model output, annotation body, or suggested fix. Sync-log payloads remain database records for sync/export and should be bounded to the annotation fields required by the schema contract.
+
 ## File Structure
 
 ### Backend Files
@@ -52,7 +61,7 @@ Use @superpowers:test-driven-development for implementation tasks and @superpowe
 - Create `tldw_Server_API/app/core/Writing/manuscript_annotation_jobs.py`
   - Jobs payload builder, enqueue helper, and worker-facing processor for scene review jobs.
 - Create `tldw_Server_API/app/services/writing_annotation_review_jobs_worker.py`
-  - WorkerSDK loop that acquires `writing_scene_annotation_review` Jobs and calls the Writing annotation job processor.
+  - WorkerSDK loop that acquires `writing_scene_annotation_review` Jobs, resolves the per-user DB from top-level `owner_user_id`, and calls the Writing annotation job processor.
 - Modify `tldw_Server_API/app/services/startup_primary_jobs_pollers.py`
   - Register the in-process writing annotation review Jobs worker behind `WRITING_ANNOTATION_REVIEW_JOBS_WORKER_ENABLED`, matching the workspace file-inventory worker pattern.
 - Modify `tldw_Server_API/app/api/v1/schemas/writing_manuscript_schemas.py`
@@ -73,7 +82,10 @@ Use @superpowers:test-driven-development for implementation tasks and @superpowe
   - Tests endpoint contracts, pagination, filters, conflicts, and provider validation.
 - Create `tldw_Server_API/tests/Writing/test_manuscript_annotation_review_jobs.py`
   - Tests Jobs payloads, idempotency keys, enqueue failures, and worker processor behavior.
-- Modify import or router contract tests only if adding the new worker or endpoint imports requires it.
+- Create `tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py`
+  - Tests WorkerSDK payload validation, missing/invalid owner handling, per-user DB loading, retry classification, and sanitized logging.
+- Modify `tldw_Server_API/tests/Services/test_startup_primary_jobs_pollers.py`
+  - Update exact worker spec names/order, factory delegation, route predicate calls, handle fields, and `worker_inventory` pass-through for the new writing worker.
 
 ### Frontend Files
 
@@ -89,6 +101,8 @@ Use @superpowers:test-driven-development for implementation tasks and @superpowe
   - Loads active saved scenes, binds editor state to saved scene content/version, tracks dirty scene state, and saves scene edits.
 - Create `apps/packages/ui/src/components/Option/WritingPlayground/hooks/useWritingAnnotations.ts`
   - Owns query/mutation orchestration for annotations and exposes stable UI actions.
+- Modify `apps/packages/ui/src/components/Option/WritingPlayground/hooks/index.ts`
+  - Export the new scene-binding and annotation hooks when they are consumed through the existing hook barrel.
 - Create `apps/packages/ui/src/components/Option/WritingPlayground/WritingAnnotationsTab.tsx`
   - Inspector tab with filters, create forms, status transitions, review actions, and fallback surface.
 - Create `apps/packages/ui/src/components/Option/WritingPlayground/WritingAnnotationList.tsx`
@@ -136,6 +150,7 @@ Use @superpowers:test-driven-development for implementation tasks and @superpowe
 - [ ] **Step 1: Write failing anchor tests**
 
 Cover exact attachment, unique selected-text reattachment, ambiguous selected-text matches, prefix/suffix local reattachment, needs-review fallback, and non-scene notes.
+Include cases where text before and inside the selected range contains astral Unicode symbols so code-point offsets are verified independent of browser UTF-16 selection offsets.
 
 ```python
 from tldw_Server_API.app.core.Writing.manuscript_annotations import (
@@ -221,6 +236,7 @@ def build_scene_anchor(text: str, *, start: int, end: int, scene_version: int) -
 ```
 
 Keep `derive_scene_anchor_status()` side-effect free. It must return derived fields but must not mutate database rows.
+All helper range validation and returned offsets use Unicode code-point indexes. Do not encode offsets as bytes or UTF-16 code units.
 
 - [ ] **Step 4: Pass the anchor tests**
 
@@ -251,6 +267,8 @@ git commit -m "feat: add manuscript annotation anchor helpers"
 Cover:
 
 - fresh DB creates `manuscript_annotations`
+- migrating an existing SQLite v50 DB registers and applies `_migrate_from_v50_to_v51`, then leaves schema version 51 with annotation table/indexes/triggers present
+- PostgreSQL migration routing registers `_MIGRATION_SQL_V50_TO_V51_POSTGRES`, applies through `_apply_postgres_migration_script(..., expected_version=51)`, and contains PostgreSQL-compatible syntax; use an available Postgres fixture when present, otherwise unit-test the routing and migration script contract directly
 - create/get scene range annotation validates saved scene version and selected text
 - chapter/project note creation has no range offsets and returns `scene_level`
 - update/delete use optimistic locking
@@ -394,8 +412,9 @@ Update:
 
 - `_CURRENT_SCHEMA_VERSION = 51`
 - SQLite migration function `_migrate_from_v50_to_v51`
-- SQLite routing after `_migrate_from_v49_to_v50`
-- PostgreSQL bootstrap routing after version 50
+- `_sqlite_linear_migration_steps()` to include `(50, "_migrate_from_v50_to_v51")`
+- normal SQLite migration routing after `_migrate_from_v49_to_v50`
+- PostgreSQL bootstrap and normal migration routing from version 50 to 51
 
 - [ ] **Step 6: Implement helper methods**
 
@@ -428,6 +447,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Writing/test
 ```
 
 Expected: PASS.
+If the Postgres fixture is unavailable, the SQL-routing/unit test for `_MIGRATION_SQL_V50_TO_V51_POSTGRES` must still run and pass.
 
 - [ ] **Step 8: Commit**
 
@@ -454,6 +474,7 @@ Cover:
 - `DELETE /api/v1/writing/manuscripts/annotations/{annotation_id}` soft deletes with `expected-version`.
 - Broad `anchor_status` filtering is rejected unless bounded.
 - Soft-deleted targets return not found.
+- Manual range annotation offsets are interpreted as Unicode code-point offsets and validated correctly when scene text contains astral symbols.
 
 - [ ] **Step 2: Run the failing API tests**
 
@@ -557,6 +578,7 @@ Test:
 - Range text mismatch returns conflict.
 - Valid JSON model output persists one `source="ai_selected_text"` annotation.
 - Unparseable output returns diagnostics and creates no annotation.
+- Request schema uses `provider` and `model`, matching `ManuscriptAnalysisRequest` and the frontend writing service contract.
 
 Patch `tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async` with `AsyncMock`, following `test_manuscript_analysis_integration.py`.
 
@@ -643,6 +665,7 @@ Expected helper behavior:
 - queue: environment override `WRITING_ANNOTATION_REVIEW_JOBS_QUEUE`, default `"default"`
 - job type: `"writing_scene_annotation_review"`
 - payload includes `scene_id`, `scene_version`, `project_id`, `max_comments`, category filters, provider, model, and no raw manuscript text
+- `owner_user_id` is passed to `JobManager.create_job` as top-level Jobs metadata and is not duplicated in the payload
 - idempotency key includes scene id, scene version, review focus, provider, model, and max comments
 
 - [ ] **Step 2: Implement enqueue helper**
@@ -657,10 +680,10 @@ def writing_annotation_review_jobs_queue() -> str: ...
 
 def build_scene_annotation_review_job_payload(...) -> dict[str, Any]: ...
 
-def enqueue_scene_annotation_review_job(*, job_manager: JobManager, owner_user_id: str | None, ...) -> dict[str, Any]: ...
+def enqueue_scene_annotation_review_job(*, job_manager: JobManager, owner_user_id: str, ...) -> dict[str, Any]: ...
 ```
 
-Do not put scene text or selected text in the Jobs payload. The worker must load saved scene text by id/version.
+Do not put user ids, scene text, selected text, annotation body, suggested fix, or raw model output in the Jobs payload. The worker must load saved scene text by id/version after resolving the per-user DB from the top-level Jobs row `owner_user_id`.
 
 - [ ] **Step 3: Add API endpoint tests**
 
@@ -671,17 +694,18 @@ Test `POST /scenes/{scene_id}/annotations/review-scene`:
 - rejects `max_comments > 10`
 - returns a job response when enqueue succeeds
 - returns a sanitized 503/500-style error when Jobs are unavailable, following the selected project convention
+- depends on `get_request_user` and passes `str(current_user.id)` as the enqueue helper `owner_user_id`
 
 - [ ] **Step 4: Implement API endpoint**
 
-Inject Jobs through `try_get_job_manager` or `get_job_manager` based on whether failure should block the request. Since scene review is explicitly Jobs-backed, fail the request when Jobs is unavailable and return a clear error.
+Inject Jobs through `try_get_job_manager` or `get_job_manager` based on whether failure should block the request. Since scene review is explicitly Jobs-backed, fail the request when Jobs is unavailable and return a clear error. Use `current_user: User = Depends(get_request_user)` and pass `owner_user_id=str(current_user.id)` into `enqueue_scene_annotation_review_job(...)`.
 
 - [ ] **Step 5: Implement worker-facing processor**
 
-Add a function that accepts a job payload and dependencies:
+Add a processor that accepts a resolved per-user manuscript helper and sanitized job payload:
 
 ```python
-async def process_scene_annotation_review_job(*, db_factory, job_payload: dict[str, Any], job_manager: JobManager | None = None) -> dict[str, Any]:
+async def process_scene_annotation_review_job(*, manuscript_db: ManuscriptDBHelper, job_payload: dict[str, Any], job_manager: JobManager | None = None) -> dict[str, Any]:
     ...
 ```
 
@@ -701,6 +725,8 @@ Create `tldw_Server_API/app/services/writing_annotation_review_jobs_worker.py` b
 
 - build `WorkerConfig` for domain `"writing"` and `writing_annotation_review_jobs_queue()`
 - acquire only `writing_scene_annotation_review` jobs
+- consume the full Jobs row, require non-empty `owner_user_id`, and treat missing or invalid owner metadata as non-retryable
+- call `get_chacha_db_for_user_id(owner_user_id, client_id=f"writing-annotation-review-worker-{owner_user_id}")` before constructing `ManuscriptDBHelper`
 - call `process_scene_annotation_review_job(...)`
 - complete successful jobs with created annotation ids and diagnostics
 - fail invalid payloads as non-retryable
@@ -711,8 +737,17 @@ Modify `startup_primary_jobs_pollers.py`:
 
 - add `writing_annotation_review_jobs_stop_event` and `writing_annotation_review_jobs_task` to `PrimaryJobsPollerHandles`
 - add a `provide_primary_jobs_worker_specs()` entry named `"writing_annotation_review_jobs_task"` behind `WRITING_ANNOTATION_REVIEW_JOBS_WORKER_ENABLED`
+- use `route_enabled_predicate("WRITING_ANNOTATION_REVIEW_JOBS_WORKER_ENABLED", "writing")` in the declarative worker spec
 - start the worker in `start_primary_jobs_pollers()` with the same `worker_inventory.register_custom(...)` and `register_owned_job_poller(...)` branches used by `_start_workspace_file_inventory_jobs_worker`
-- route enablement key should be `"writing-annotations"` or the closest existing Writing route key if one already exists
+- use `should_start_worker("WRITING_ANNOTATION_REVIEW_JOBS_WORKER_ENABLED", "writing_annotation_review_jobs_task")` in the legacy startup branch
+
+Update `tldw_Server_API/tests/Services/test_startup_primary_jobs_pollers.py`:
+
+- add `"writing_annotation_review_jobs_task"` to the expected spec names in the exact order chosen in `provide_primary_jobs_worker_specs()`
+- assert factory delegation to `_run_writing_annotation_review_jobs_worker_service`
+- assert route predicate calls include `("writing",)` when `WRITING_ANNOTATION_REVIEW_JOBS_WORKER_ENABLED=true`
+- assert handles include `writing_annotation_review_jobs_stop_event` and `writing_annotation_review_jobs_task`
+- assert `worker_inventory.register_custom(...)` receives the writing worker metadata in startup paths that use custom inventory registration
 
 - [ ] **Step 7: Pass Jobs tests**
 
@@ -720,6 +755,7 @@ Run:
 
 ```bash
 source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Writing/test_manuscript_annotation_review_jobs.py tldw_Server_API/tests/Writing/test_manuscript_annotations_api.py -q
+source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py tldw_Server_API/tests/Services/test_startup_primary_jobs_pollers.py -q
 ```
 
 Expected: PASS.
@@ -727,7 +763,7 @@ Expected: PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add tldw_Server_API/app/core/Writing/manuscript_annotation_jobs.py tldw_Server_API/app/services/writing_annotation_review_jobs_worker.py tldw_Server_API/app/services/startup_primary_jobs_pollers.py tldw_Server_API/app/core/Writing/manuscript_annotations.py tldw_Server_API/app/api/v1/schemas/writing_manuscript_schemas.py tldw_Server_API/app/api/v1/endpoints/writing_manuscripts.py tldw_Server_API/tests/Writing/test_manuscript_annotation_review_jobs.py tldw_Server_API/tests/Writing/test_manuscript_annotations_api.py
+git add tldw_Server_API/app/core/Writing/manuscript_annotation_jobs.py tldw_Server_API/app/services/writing_annotation_review_jobs_worker.py tldw_Server_API/app/services/startup_primary_jobs_pollers.py tldw_Server_API/app/core/Writing/manuscript_annotations.py tldw_Server_API/app/api/v1/schemas/writing_manuscript_schemas.py tldw_Server_API/app/api/v1/endpoints/writing_manuscripts.py tldw_Server_API/tests/Writing/test_manuscript_annotation_review_jobs.py tldw_Server_API/tests/Writing/test_manuscript_annotations_api.py tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py tldw_Server_API/tests/Services/test_startup_primary_jobs_pollers.py
 git commit -m "feat: queue manuscript scene annotation review"
 ```
 
@@ -749,6 +785,7 @@ Assert exact paths/methods:
 - `deleteManuscriptAnnotation(annotationId, version)`
 - `reviewManuscriptSelection(sceneId, input)`
 - `reviewManuscriptScene(sceneId, input)`
+- review request payloads use `provider` and `model`, with no alternate provider field
 
 - [ ] **Step 2: Run failing service tests**
 
@@ -785,8 +822,9 @@ git commit -m "feat: add manuscript annotation client methods"
 
 **Files:**
 - Create: `apps/packages/ui/src/components/Option/WritingPlayground/hooks/useActiveManuscriptScene.ts`
+- Modify: `apps/packages/ui/src/components/Option/WritingPlayground/hooks/index.ts`
 - Modify: `apps/packages/ui/src/components/Option/WritingPlayground/index.tsx`
-- Modify: `apps/packages/ui/src/components/Option/WritingPlayground/ManuscriptTreePanel.tsx` only if selection needs a dirty-change guard at the tree boundary.
+- Modify: `apps/packages/ui/src/components/Option/WritingPlayground/ManuscriptTreePanel.tsx`
 - Test: `apps/packages/ui/src/components/Option/WritingPlayground/__tests__/useActiveManuscriptScene.test.tsx`
 - Modify: `apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingPlayground.phase1-baseline.test.tsx`
 
@@ -799,6 +837,7 @@ Cases:
 - tracks `isSceneBound`, `sceneId`, `sceneVersion`, and dirty state
 - save calls `updateManuscriptScene` with the saved version
 - annotation range actions are disabled when editor text differs from saved scene text
+- switching to a different active manuscript scene while the editor is dirty preserves unsaved content or blocks/prompts navigation; it must not silently overwrite or rebind the editor to another scene
 
 - [ ] **Step 2: Run failing hook tests**
 
@@ -835,10 +874,11 @@ The hook must:
 - record the last saved plain text and rich JSON signature
 - prevent annotation range actions unless the editor matches the saved scene baseline
 - expose a save action using `updateManuscriptScene(sceneId, { content_plain, content }, scene.version)`
+- export through `hooks/index.ts` when `index.tsx` consumes the hook through the existing hook barrel
 
 - [ ] **Step 4: Wire the hook in `index.tsx`**
 
-Replace the existing active-node comment with the hook. Add a small save-status affordance to the existing editor toolbar/statusbar and keep session save behavior separate from scene save behavior.
+Replace the existing active-node comment with the hook. Add a small save-status affordance to the existing editor toolbar/statusbar and keep session save behavior separate from scene save behavior. Wire dirty scene navigation at the active-node selection boundary in `ManuscriptTreePanel.tsx` or its owning handler so scene switches cannot discard unsaved editor text without an explicit user action.
 
 - [ ] **Step 5: Pass scene binding tests**
 
@@ -853,7 +893,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add apps/packages/ui/src/components/Option/WritingPlayground/hooks/useActiveManuscriptScene.ts apps/packages/ui/src/components/Option/WritingPlayground/index.tsx apps/packages/ui/src/components/Option/WritingPlayground/__tests__/useActiveManuscriptScene.test.tsx apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingPlayground.phase1-baseline.test.tsx
+git add apps/packages/ui/src/components/Option/WritingPlayground/hooks/useActiveManuscriptScene.ts apps/packages/ui/src/components/Option/WritingPlayground/hooks/index.ts apps/packages/ui/src/components/Option/WritingPlayground/index.tsx apps/packages/ui/src/components/Option/WritingPlayground/ManuscriptTreePanel.tsx apps/packages/ui/src/components/Option/WritingPlayground/__tests__/useActiveManuscriptScene.test.tsx apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingPlayground.phase1-baseline.test.tsx
 git commit -m "feat: bind writing editor to saved manuscript scenes"
 ```
 
@@ -863,6 +903,7 @@ git commit -m "feat: bind writing editor to saved manuscript scenes"
 - Create: `apps/packages/ui/src/components/Option/WritingPlayground/writing-annotation-types.ts`
 - Create: `apps/packages/ui/src/components/Option/WritingPlayground/writing-annotation-anchor-utils.ts`
 - Create: `apps/packages/ui/src/components/Option/WritingPlayground/hooks/useWritingAnnotations.ts`
+- Modify: `apps/packages/ui/src/components/Option/WritingPlayground/hooks/index.ts`
 - Create: `apps/packages/ui/src/components/Option/WritingPlayground/WritingAnnotationsTab.tsx`
 - Create: `apps/packages/ui/src/components/Option/WritingPlayground/WritingAnnotationList.tsx`
 - Modify: `apps/packages/ui/src/components/Option/WritingPlayground/WritingPlayground.types.ts`
@@ -878,6 +919,7 @@ git commit -m "feat: bind writing editor to saved manuscript scenes"
 Test:
 
 - client prefix/suffix capture clamps to 240 chars
+- client selection conversion maps UTF-16 DOM/ProseMirror positions to backend Unicode code-point offsets when text contains astral symbols
 - selected range validation rejects empty or stale selections
 - query key includes project id, target context, and filters
 - `enabled === false` keeps annotation queries unpopulated
@@ -912,6 +954,7 @@ Important contracts:
 - Scene range creation sends `scene_version`, offsets, selected text, prefix, suffix, and fingerprint only when `canCreateRangeAnnotation` is true.
 - Disable AI review actions if provider/model is unavailable.
 - Keep UI components small; do not grow annotation rendering inside `index.tsx`.
+- Export `useWritingAnnotations` through `hooks/index.ts` when the caller imports it from the existing hook barrel.
 
 - [ ] **Step 5: Pass frontend inspector tests**
 
@@ -922,7 +965,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add apps/packages/ui/src/components/Option/WritingPlayground/writing-annotation-types.ts apps/packages/ui/src/components/Option/WritingPlayground/writing-annotation-anchor-utils.ts apps/packages/ui/src/components/Option/WritingPlayground/hooks/useWritingAnnotations.ts apps/packages/ui/src/components/Option/WritingPlayground/WritingAnnotationsTab.tsx apps/packages/ui/src/components/Option/WritingPlayground/WritingAnnotationList.tsx apps/packages/ui/src/components/Option/WritingPlayground/WritingPlayground.types.ts apps/packages/ui/src/components/Option/WritingPlayground/WritingPlaygroundInspectorPanel.tsx apps/packages/ui/src/components/Option/WritingPlayground/index.tsx apps/packages/ui/src/components/Option/WritingPlayground/__tests__/writing-annotation-anchor-utils.test.ts apps/packages/ui/src/components/Option/WritingPlayground/__tests__/useWritingAnnotations.test.tsx apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingAnnotationsTab.test.tsx apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingPlayground.inspector-tabs.test.tsx
+git add apps/packages/ui/src/components/Option/WritingPlayground/writing-annotation-types.ts apps/packages/ui/src/components/Option/WritingPlayground/writing-annotation-anchor-utils.ts apps/packages/ui/src/components/Option/WritingPlayground/hooks/useWritingAnnotations.ts apps/packages/ui/src/components/Option/WritingPlayground/hooks/index.ts apps/packages/ui/src/components/Option/WritingPlayground/WritingAnnotationsTab.tsx apps/packages/ui/src/components/Option/WritingPlayground/WritingAnnotationList.tsx apps/packages/ui/src/components/Option/WritingPlayground/WritingPlayground.types.ts apps/packages/ui/src/components/Option/WritingPlayground/WritingPlaygroundInspectorPanel.tsx apps/packages/ui/src/components/Option/WritingPlayground/index.tsx apps/packages/ui/src/components/Option/WritingPlayground/__tests__/writing-annotation-anchor-utils.test.ts apps/packages/ui/src/components/Option/WritingPlayground/__tests__/useWritingAnnotations.test.tsx apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingAnnotationsTab.test.tsx apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingPlayground.inspector-tabs.test.tsx
 git commit -m "feat: add writing annotations inspector"
 ```
 
@@ -936,7 +979,7 @@ git commit -m "feat: add writing annotations inspector"
 - Modify: `apps/packages/ui/src/components/Option/WritingPlayground/index.tsx`
 - Test: `apps/packages/ui/src/components/Option/WritingPlayground/__tests__/writing-editor-adapter.test.ts`
 - Test: `apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingAnnotationMarginRail.test.tsx`
-- Modify: `apps/extension/tests/e2e/writing-playground-mode-parity.spec.ts` if the visible layout changes require e2e smoke coverage.
+- Modify: `apps/extension/tests/e2e/writing-playground-mode-parity.spec.ts`
 
 - [ ] **Step 1: Write failing adapter measurement tests**
 
@@ -956,6 +999,7 @@ Test pure layout behavior:
 - rail hides when measurement is unavailable
 - resolved comments are excluded by default
 - focus callbacks sync card to editor selection
+- browser smoke path renders two attached comments at desktop width with non-null measurements, no overlapping cards, and hidden rail when measurement is unavailable
 
 - [ ] **Step 3: Run failing rail tests**
 
@@ -1013,10 +1057,21 @@ bunx vitest run apps/packages/ui/src/components/Option/WritingPlayground/__tests
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 8: Run browser rail smoke**
+
+Run the extension parity smoke from the extension package so Playwright uses the existing extension configuration:
 
 ```bash
-git add apps/packages/ui/src/components/Option/WritingPlayground/writing-editor-adapter.ts apps/packages/ui/src/components/Option/WritingPlayground/WritingTipTapEditor.tsx apps/packages/ui/src/components/Option/WritingPlayground/WritingAnnotationCard.tsx apps/packages/ui/src/components/Option/WritingPlayground/WritingAnnotationMarginRail.tsx apps/packages/ui/src/components/Option/WritingPlayground/index.tsx apps/packages/ui/src/components/Option/WritingPlayground/__tests__/writing-editor-adapter.test.ts apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingAnnotationMarginRail.test.tsx apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingPlayground.phase1-baseline.test.tsx
+cd apps/extension
+bunx playwright test tests/e2e/writing-playground-mode-parity.spec.ts --reporter=line
+```
+
+Expected: PASS, including checks that desktop TipTap geometry produces non-overlapping margin cards and measurement-unavailable modes fall back to the inspector.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add apps/packages/ui/src/components/Option/WritingPlayground/writing-editor-adapter.ts apps/packages/ui/src/components/Option/WritingPlayground/WritingTipTapEditor.tsx apps/packages/ui/src/components/Option/WritingPlayground/WritingAnnotationCard.tsx apps/packages/ui/src/components/Option/WritingPlayground/WritingAnnotationMarginRail.tsx apps/packages/ui/src/components/Option/WritingPlayground/index.tsx apps/packages/ui/src/components/Option/WritingPlayground/__tests__/writing-editor-adapter.test.ts apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingAnnotationMarginRail.test.tsx apps/packages/ui/src/components/Option/WritingPlayground/__tests__/WritingPlayground.phase1-baseline.test.tsx apps/extension/tests/e2e/writing-playground-mode-parity.spec.ts
 git commit -m "feat: add manuscript annotation margin rail"
 ```
 
@@ -1097,7 +1152,7 @@ git commit -m "feat: connect annotation review actions"
 Run:
 
 ```bash
-source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Writing/test_manuscript_annotations_anchor.py tldw_Server_API/tests/Writing/test_manuscript_annotations_db.py tldw_Server_API/tests/Writing/test_manuscript_annotations_api.py tldw_Server_API/tests/Writing/test_manuscript_annotation_review_jobs.py -q
+source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Writing/test_manuscript_annotations_anchor.py tldw_Server_API/tests/Writing/test_manuscript_annotations_db.py tldw_Server_API/tests/Writing/test_manuscript_annotations_api.py tldw_Server_API/tests/Writing/test_manuscript_annotation_review_jobs.py tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py -q
 ```
 
 Expected: PASS.
@@ -1107,7 +1162,7 @@ Expected: PASS.
 Run:
 
 ```bash
-source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Writing/test_manuscript_db.py tldw_Server_API/tests/Writing/test_manuscript_analysis_integration.py tldw_Server_API/tests/Writing/test_writing_error_mapping.py -q
+source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Writing/test_manuscript_db.py tldw_Server_API/tests/Writing/test_manuscript_analysis_integration.py tldw_Server_API/tests/Writing/test_writing_error_mapping.py tldw_Server_API/tests/Services/test_startup_primary_jobs_pollers.py -q
 ```
 
 Expected: PASS.
@@ -1134,7 +1189,7 @@ Expected: PASS.
 
 - [ ] **Step 5: Run browser layout checks**
 
-Start the frontend dev server with the repo's existing command, then use Playwright to check:
+Start the WebUI dev server from its package, then use Playwright from the extension package to check:
 
 - desktop width shows editor plus margin rail when TipTap and attached scene comments are present
 - medium width keeps cards compact and active card expanded
@@ -1144,8 +1199,13 @@ Start the frontend dev server with the repo's existing command, then use Playwri
 Command shape:
 
 ```bash
+# terminal 1
+cd apps/tldw-frontend
 bun run dev
-bunx playwright test apps/extension/tests/e2e/writing-playground-mode-parity.spec.ts --reporter=line
+
+# terminal 2
+cd apps/extension
+bunx playwright test tests/e2e/writing-playground-mode-parity.spec.ts --reporter=line
 ```
 
 Expected: PASS, or document any environment-specific skip with the exact missing dependency.
@@ -1165,7 +1225,7 @@ Expected: no output and exit 0.
 Run:
 
 ```bash
-source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Writing tldw_Server_API/app/core/DB_Management/ManuscriptDB.py tldw_Server_API/app/api/v1/endpoints/writing_manuscripts.py -f json -o /tmp/bandit_writing_manuscript_annotations.json
+source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Writing tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/DB_Management/ManuscriptDB.py tldw_Server_API/app/api/v1/schemas/writing_manuscript_schemas.py tldw_Server_API/app/api/v1/endpoints/writing_manuscripts.py tldw_Server_API/app/services/writing_annotation_review_jobs_worker.py tldw_Server_API/app/services/startup_primary_jobs_pollers.py -f json -o /tmp/bandit_writing_manuscript_annotations.json
 ```
 
 Expected: no new high or medium findings in touched code. Fix new findings before continuing.
@@ -1207,3 +1267,5 @@ Skip this commit if no files changed during verification.
 - Suggested fixes feed the existing revision proposal queue and do not create a second mutation path.
 - Keyboard users can access annotation actions and return focus to the editor selection.
 - WebUI and extension continue using the shared Writing Playground implementation.
+- Browser/editor offsets round-trip through Unicode code-point offsets without breaking emoji-containing scenes.
+- Annotation review request contracts use `provider` and `model` consistently across backend schemas and frontend services.
