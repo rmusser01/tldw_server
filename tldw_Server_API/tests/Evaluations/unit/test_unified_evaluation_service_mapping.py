@@ -7,6 +7,29 @@ import pytest
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import UnifiedEvaluationService
 
 
+def test_schedule_service_shutdown_logs_noncritical_failure(monkeypatch):
+    from tldw_Server_API.app.core.Evaluations import unified_evaluation_service as svc_mod
+
+    class _BrokenService:
+        def shutdown(self):
+            raise RuntimeError("shutdown unavailable")
+
+    debug_calls: list[tuple[str, tuple[object, ...]]] = []
+    monkeypatch.setattr(
+        svc_mod.logger,
+        "debug",
+        lambda message, *args, **_kwargs: debug_calls.append((message, args)),
+    )
+
+    svc_mod._schedule_service_shutdown(_BrokenService())  # type: ignore[arg-type]
+
+    assert debug_calls
+    message, args = debug_calls[0]
+    assert "shutdown scheduling skipped" in message
+    assert args[0] == "_BrokenService"
+    assert isinstance(args[1], RuntimeError)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("eval_type", "expected_sub_type"),

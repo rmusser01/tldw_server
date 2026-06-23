@@ -20,16 +20,15 @@ from httpx import AsyncClient, ASGITransport
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
-IN_CI = os.getenv("CI", "").lower() == "true"
 RUN_REAL_HF_EMBEDDING_TESTS = (
     os.getenv("RUN_REAL_HF_EMBEDDING_TESTS", "").lower() in {"1", "true", "yes", "on"}
-    or not IN_CI
 )
 
 # Disable rate limiting for all tests
 @pytest.fixture(autouse=True)
 def disable_rate_limiting():
     """Disable rate limiting for all tests in this module"""
+    previous_testing = os.environ.get("TESTING")
     previous_auto_download = os.environ.get("AUTO_DOWNLOAD_MODELS")
     os.environ["TESTING"] = "true"
     os.environ["AUTO_DOWNLOAD_MODELS"] = "false"
@@ -37,8 +36,10 @@ def disable_rate_limiting():
         yield
     finally:
         # Clean up after tests
-        if "TESTING" in os.environ:
-            del os.environ["TESTING"]
+        if previous_testing is None:
+            os.environ.pop("TESTING", None)
+        else:
+            os.environ["TESTING"] = previous_testing
         if previous_auto_download is None:
             os.environ.pop("AUTO_DOWNLOAD_MODELS", None)
         else:
@@ -775,8 +776,8 @@ class TestEndToEnd:
 
 @pytest.mark.integration
 @pytest.mark.skipif(
-    IN_CI and not RUN_REAL_HF_EMBEDDING_TESTS,
-    reason="Real HuggingFace embedding tests require RUN_REAL_HF_EMBEDDING_TESTS=true in CI",
+    not RUN_REAL_HF_EMBEDDING_TESTS,
+    reason="Real HuggingFace embedding tests require RUN_REAL_HF_EMBEDDING_TESTS=true",
 )
 class TestIntegration:
     """True integration tests without mocking - requires actual services"""

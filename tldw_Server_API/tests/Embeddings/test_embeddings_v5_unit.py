@@ -4,6 +4,9 @@
 
 import os
 import uuid
+_ORIG_TESTING = os.environ.get("TESTING")
+_ORIG_AUTO_DOWNLOAD_MODELS = os.environ.get("AUTO_DOWNLOAD_MODELS")
+
 # Set TESTING environment variable BEFORE importing anything else
 os.environ["TESTING"] = "true"
 os.environ["AUTO_DOWNLOAD_MODELS"] = "false"
@@ -26,19 +29,17 @@ from starlette.requests import Request
 @pytest.fixture(autouse=True, scope="module")
 def cleanup_testing_env():
     """Cleanup TESTING environment variable after module tests"""
-    previous_testing = os.environ.get("TESTING")
-    previous_auto_download = os.environ.get("AUTO_DOWNLOAD_MODELS")
     os.environ["TESTING"] = "true"
     os.environ["AUTO_DOWNLOAD_MODELS"] = "false"
     yield
-    if previous_testing is None:
+    if _ORIG_TESTING is None:
         os.environ.pop("TESTING", None)
     else:
-        os.environ["TESTING"] = previous_testing
-    if previous_auto_download is None:
+        os.environ["TESTING"] = _ORIG_TESTING
+    if _ORIG_AUTO_DOWNLOAD_MODELS is None:
         os.environ.pop("AUTO_DOWNLOAD_MODELS", None)
     else:
-        os.environ["AUTO_DOWNLOAD_MODELS"] = previous_auto_download
+        os.environ["AUTO_DOWNLOAD_MODELS"] = _ORIG_AUTO_DOWNLOAD_MODELS
 
 # Mock metrics for tests to avoid registry conflicts
 @pytest.fixture(autouse=True)

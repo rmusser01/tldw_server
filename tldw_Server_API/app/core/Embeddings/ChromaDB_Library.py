@@ -1746,16 +1746,17 @@ class ChromaDBManager:
                 )
             # Use the more specific ChromaError imports if they work for your version
             except ChromaError as ce:
-                if collection_name and _is_transient_chroma_segment_error(ce):
+                retry_collection_name = target_collection.name
+                if _is_transient_chroma_segment_error(ce):
                     for retry_attempt, retry_delay in enumerate(_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS, start=1):
                         logger.warning(
                             f"User '{self.user_id}': Retrying ChromaDB query for collection "
-                            f"'{target_collection.name}' after transient segment-reader error "
+                            f"'{retry_collection_name}' after transient segment-reader error "
                             f"(attempt {retry_attempt}/{len(_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS)}): {ce}"
                         )
                         time.sleep(retry_delay)
                         try:
-                            target_collection = self.client.get_or_create_collection(name=collection_name)
+                            target_collection = self.client.get_or_create_collection(name=retry_collection_name)
                             return target_collection.query(
                                 query_embeddings=query_embeddings,
                                 n_results=n_results,

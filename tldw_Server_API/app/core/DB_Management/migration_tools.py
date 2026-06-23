@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import logging
 import sqlite3
+import sys
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -499,7 +499,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument('--log-level', default='INFO')
 
     args = parser.parse_args(argv)
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
+    log_level = args.log_level.upper()
+    try:
+        logger.level(log_level)
+    except ValueError:
+        log_level = "INFO"
+    logger.remove()
+    logger.add(sys.stderr, level=log_level)
 
     targets = list(_iter_migration_targets(args))
     if args.workflows_sqlite:

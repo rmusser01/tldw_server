@@ -13,7 +13,7 @@ runs:
   using: "composite"
   steps:
     - name: Install FFmpeg (Linux)
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && (inputs.install-ffmpeg == 'true' || inputs.install-portaudio == 'true')
       shell: bash
       run: |
         if [ -d /etc/apt/sources.list.d ]; then
@@ -23,9 +23,7 @@ runs:
         if [ -f /etc/apt/sources.list ]; then
           sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
         fi
-        if [ "${{ inputs.install-ffmpeg }}" = "true" ] || [ "${{ inputs.install-portaudio }}" = "true" ]; then
-          sudo apt-get update -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20
-        fi
+        sudo apt-get update -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20
         if [ "${{ inputs.install-ffmpeg }}" = "true" ] && [ "${{ inputs.install-portaudio }}" = "true" ]; then
           sudo apt-get install -y --no-install-recommends ffmpeg portaudio19-dev python3-all-dev
         elif [ "${{ inputs.install-ffmpeg }}" = "true" ]; then

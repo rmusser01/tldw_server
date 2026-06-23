@@ -10,7 +10,6 @@ from tldw_Server_API.app.api.v1.schemas.sync_server_models import (
 )
 from tldw_Server_API.app.api.v1.schemas.sync_server_models import (
     ClientChangesPayload,
-    SyncSendLogEntry,
 )
 from tldw_Server_API.app.core.Sync.Sync_Client import (
     ALLOWED_SYNC_SEND_ENTITIES as CLIENT_ALLOWED_SYNC_SEND_ENTITIES,
@@ -55,16 +54,16 @@ def test_client_changes_payload_schema_rejects_non_send_entity() -> None:
             client_id="client_sender_1",
             last_processed_server_id=0,
             changes=[
-                SyncSendLogEntry(
-                    change_id=1,
-                    entity="Transcripts",
-                    entity_uuid="entity-uuid-1",
-                    operation="create",
-                    timestamp="2023-10-27T11:00:00Z",
-                    client_id="client_sender_1",
-                    version=1,
-                    payload='{"uuid":"entity-uuid-1","keyword":"k1"}',
-                )
+                {
+                    "change_id": 1,
+                    "entity": "Transcripts",
+                    "entity_uuid": "entity-uuid-1",
+                    "operation": "create",
+                    "timestamp": "2023-10-27T11:00:00Z",
+                    "client_id": "client_sender_1",
+                    "version": 1,
+                    "payload": '{"uuid":"entity-uuid-1","keyword":"k1"}',
+                }
             ],
         )
 

@@ -58,7 +58,9 @@ def test_personalization_dependency_uses_safe_for_user_factory(monkeypatch):
 
 
 def test_personalization_db_constructor_does_not_resolve_input_path(monkeypatch, tmp_path) -> None:
-    db_path = tmp_path / "personalization.db"
+    nested_dir = tmp_path / "nested"
+    nested_dir.mkdir()
+    db_path = nested_dir / ".." / "personalization.db"
 
     def fake_require_trusted_database_parent_exists(path, **kwargs):
         assert path == db_path

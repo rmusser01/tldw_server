@@ -490,6 +490,61 @@ def test_runtime_fts_ops_update_fts_media_sqlite_preserves_synonym_expansion_and
     assert conn_fallback.calls[0][1] == (10, "Title", "Body")
 
 
+def test_runtime_fts_ops_update_fts_media_sqlite_deletes_exact_existing_fts_values(
+    monkeypatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.runtime import fts_ops
+
+    class _Cursor:
+        def __init__(self, row):
+            self._row = row
+
+        def fetchone(self):
+            return self._row
+
+    class _Conn:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+        def execute(self, sql: str, params: tuple[object, ...]):
+            self.calls.append((sql, params))
+            if sql.startswith("SELECT title, content FROM media_fts"):
+                return _Cursor(("Old title", "Old content alias"))
+            return _Cursor(None)
+
+    class _Db:
+        backend_type = BackendType.SQLITE
+
+    module_name = "tldw_Server_API.app.core.RAG.rag_service.synonyms_registry"
+    synonym_module = types.ModuleType(module_name)
+    synonym_module.get_corpus_synonyms = lambda _corpus: {}  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, module_name, synonym_module)
+
+    conn = _Conn()
+    fts_ops._update_fts_media(
+        _Db(),
+        conn,
+        11,
+        "New title",
+        "New content",
+        old_title="Old title",
+        old_content="Old content",
+    )
+
+    assert conn.calls[0] == (
+        "SELECT title, content FROM media_fts WHERE rowid = ?",
+        (11,),
+    )
+    assert conn.calls[1] == (
+        "INSERT INTO media_fts (media_fts, rowid, title, content) VALUES ('delete', ?, ?, ?)",
+        (11, "Old title", "Old content alias"),
+    )
+    assert conn.calls[2] == (
+        "INSERT OR REPLACE INTO media_fts (rowid, title, content) VALUES (?, ?, ?)",
+        (11, "New title", "New content"),
+    )
+
+
 def test_runtime_fts_ops_sync_refresh_noops_when_update_payload_has_no_relevant_fields() -> None:
     from tldw_Server_API.app.core.DB_Management.media_db.runtime import fts_ops
 

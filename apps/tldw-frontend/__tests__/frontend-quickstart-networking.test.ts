@@ -245,7 +245,7 @@ describe("frontend quickstart networking", () => {
     expect(makefile).toContain("TLDW_INTERNAL_API_ORIGIN ?= http://app:8000")
   })
 
-  it("passes the generated single-user key through WebUI quickstart compose interpolation", () => {
+  it("keeps server single-user keys out of WebUI public compose interpolation", () => {
     const makefile = readFileSync(makefilePath, "utf8")
     const compose = readFileSync(composeWebuiPath, "utf8")
     const startTarget = makefile.match(
@@ -254,12 +254,9 @@ describe("frontend quickstart networking", () => {
 
     expect(startTarget?.groups?.recipe).toBeTruthy()
     expect(startTarget?.groups?.recipe).not.toMatch(/grep '\^SINGLE_USER_API_KEY='/)
-    expect(compose).toContain(
-      "NEXT_PUBLIC_X_API_KEY: ${NEXT_PUBLIC_X_API_KEY:-${SINGLE_USER_API_KEY:-}}"
-    )
-    expect(compose).toContain(
-      "NEXT_PUBLIC_X_API_KEY=${NEXT_PUBLIC_X_API_KEY:-${SINGLE_USER_API_KEY:-}}"
-    )
+    expect(compose).toContain("NEXT_PUBLIC_X_API_KEY: ${NEXT_PUBLIC_X_API_KEY:-}")
+    expect(compose).toContain("NEXT_PUBLIC_X_API_KEY=${NEXT_PUBLIC_X_API_KEY:-}")
+    expect(compose).not.toContain("NEXT_PUBLIC_X_API_KEY:-${SINGLE_USER_API_KEY")
     expect(makefile).toContain(
       "docker compose --env-file \"$(TLDW_ENV_FILE)\" -f \"$(DOCKER_SINGLE_COMPOSE)\" -f \"$(DOCKER_WEBUI_COMPOSE)\""
     )

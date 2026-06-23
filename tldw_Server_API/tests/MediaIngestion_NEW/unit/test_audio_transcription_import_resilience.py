@@ -15,7 +15,7 @@ def _parent_module_binding(name: str) -> tuple[ModuleType | None, str]:
 def _pop_module(name: str) -> ModuleType | None:
     module = sys.modules.pop(name, None)
     parent, attr = _parent_module_binding(name)
-    if parent is not None and hasattr(parent, attr):
+    if isinstance(module, ModuleType) and parent is not None and getattr(parent, attr, None) is module:
         delattr(parent, attr)
     return module if isinstance(module, ModuleType) else None
 

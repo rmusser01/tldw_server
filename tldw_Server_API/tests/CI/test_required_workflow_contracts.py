@@ -87,6 +87,24 @@ def _assert_setup_skips_ffmpeg_but_keeps_portaudio(
     assert install_step["with"]["install-portaudio"] == "true"
 
 
+def test_ci_postgres_url_exports_are_masked_before_env_write() -> None:
+    workflow = _load(".github/workflows/ci.yml")
+    export_steps = [
+        step
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if step.get("name") == "Export PG env vars"
+    ]
+    assert export_steps, "Export PG env vars steps missing"
+    for step in export_steps:
+        run_script = step["run"]
+        password_mask_index = run_script.index('echo "::add-mask::${DB_PASSWORD}"')
+        url_mask_index = run_script.index('echo "::add-mask::${DB_URL}"')
+        env_write_index = run_script.index('echo "TEST_DATABASE_URL=${DB_URL}"')
+        assert password_mask_index < env_write_index
+        assert url_mask_index < env_write_index
+
+
 def test_backend_required_has_noop_and_execute_paths() -> None:
     workflow = _load(".github/workflows/backend-required.yml")
     jobs = workflow["jobs"]
@@ -390,6 +408,10 @@ def test_setup_ffmpeg_action_can_skip_ffmpeg_but_keep_portaudio() -> None:
     assert action["inputs"]["install-ffmpeg"]["default"] == "true"
 
     linux_step = _get_step(action["runs"]["steps"], "Install FFmpeg (Linux)")
+    assert (
+        "runner.os == 'Linux' && (inputs.install-ffmpeg == 'true' || inputs.install-portaudio == 'true')"
+        in linux_step["if"]
+    )
     linux_script = linux_step["run"]
     assert 'inputs.install-ffmpeg' in linux_script
     assert "azure.archive.ubuntu.com" in linux_script
@@ -407,10 +429,6 @@ def test_setup_ffmpeg_action_can_skip_ffmpeg_but_keep_portaudio() -> None:
         in linux_script
     )
     assert "Acquire::http::Timeout=20" in linux_script
-    assert (
-        '"${{ inputs.install-ffmpeg }}" = "true" ] || [ "${{ inputs.install-portaudio }}" = "true"'
-        in linux_script
-    )
     assert (
         "sudo apt-get install -y --no-install-recommends ffmpeg portaudio19-dev python3-all-dev"
         in linux_script
