@@ -1,7 +1,7 @@
 ---
 id: TASK-2399
 title: Implement MCP Unified internal RC artifact pipeline
-status: In Progress
+status: Done
 labels:
 - mcp
 - packaging
@@ -77,15 +77,15 @@ Quality re-review follow-up completed: the standalone `dev` extra now also inclu
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented the MCP Unified internal RC artifact pipeline around the standalone package under `apps/mcp-unified`: package-boundary hardening, RC build/check/UAT harnesses, private RC workflow, Make targets, installed-wheel/user-guide UAT slices, artifact-gate selection, evidence redaction, and local-offline/CI-fail-closed behavior. Final review follow-ups made the isolated `dev` extra self-contained for artifact-gate execution by declaring `build`, build-system backend `setuptools`, and Python 3.10 `tomli` fallback dependencies, with names-only release metadata parity and regression coverage. Final validation recorded: RC harness pytest 24 passed; runtime package-boundary pytest 39 passed; artifact-gate pytest 4 passed; compileall passed; Bandit reported zero findings on touched helper/UAT/test scope; `git diff --check` passed; `make mcp-unified-rc` passed with evidence ok=True, 13 passed, 9 optional local dependency skips, 0 failed; evidence commit matched HEAD and redaction scans found no local path leaks or package-index URL damage.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
