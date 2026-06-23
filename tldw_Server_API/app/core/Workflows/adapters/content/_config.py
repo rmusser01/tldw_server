@@ -44,15 +44,21 @@ class ImageGenConfig(BaseAdapterConfig):
     """Config for image generation adapter."""
 
     prompt: str = Field(..., description="Image generation prompt (templated)")
-    provider: Literal["openai", "stability", "midjourney", "local"] = Field(
-        "openai", description="Image generation provider"
-    )
-    model: str | None = Field(None, description="Model to use (e.g., dall-e-3)")
-    size: str = Field("1024x1024", description="Image size (e.g., '1024x1024')")
-    quality: Literal["standard", "hd"] = Field("standard", description="Image quality")
-    style: str | None = Field(None, description="Style preset")
+    backend: str = Field("stable_diffusion_cpp", description="Image generation backend")
     negative_prompt: str | None = Field(None, description="Negative prompt")
-    num_images: int = Field(1, ge=1, le=4, description="Number of images to generate")
+    width: int = Field(512, ge=1, description="Image width in pixels")
+    height: int = Field(512, ge=1, description="Image height in pixels")
+    steps: int = Field(20, ge=1, description="Sampling steps")
+    cfg_scale: float = Field(7.0, gt=0, description="Classifier-free guidance scale")
+    seed: int | None = Field(None, description="Optional deterministic seed")
+    sampler: str | None = Field(None, description="Optional sampler name")
+    model: str | None = Field(None, description="Optional backend model override")
+    format: Literal["png", "jpg", "jpeg", "webp"] = Field("png", description="Output image format")
+    extra_params: dict[str, Any] | None = Field(None, description="Backend-specific allowlisted parameters")
+    prompt_refinement: bool | Literal["off", "auto", "basic"] | None = Field(
+        None,
+        description="Prompt refinement mode",
+    )
 
 
 class ImageDescribeConfig(BaseAdapterConfig):

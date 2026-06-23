@@ -542,6 +542,202 @@ class TestImageGenAdapter:
 
         assert result == {"error": "image_gen_error"}
 
+    @pytest.mark.asyncio
+    async def test_image_gen_adapter_uses_thread_for_backend_generation(self, monkeypatch, tmp_path, base_context):
+        """Backend generation is synchronous and must run off the event loop."""
+        monkeypatch.delenv("TEST_MODE", raising=False)
+        monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+
+        from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenResult
+        from tldw_Server_API.app.core.Image_Generation.config import ImageGenerationConfig
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_image_gen_adapter
+        from tldw_Server_API.app.core.Workflows.adapters.content import image as image_module
+
+        cfg = ImageGenerationConfig(
+            default_backend="stable_diffusion_cpp",
+            enabled_backends=["stable_diffusion_cpp"],
+            max_width=1024,
+            max_height=1024,
+            max_pixels=1024 * 1024,
+            max_steps=50,
+            max_prompt_length=1000,
+            inline_max_bytes=4000000,
+            sd_cpp_diffusion_model_path=None,
+            sd_cpp_llm_path=None,
+            sd_cpp_binary_path=None,
+            sd_cpp_model_path=None,
+            sd_cpp_vae_path=None,
+            sd_cpp_lora_paths=[],
+            sd_cpp_allowed_extra_params=[],
+            sd_cpp_default_steps=25,
+            sd_cpp_default_cfg_scale=7.5,
+            sd_cpp_default_sampler="euler_a",
+            sd_cpp_device="auto",
+            sd_cpp_timeout_seconds=120,
+            swarmui_base_url=None,
+            swarmui_default_model=None,
+            swarmui_swarm_token=None,
+            swarmui_allowed_extra_params=[],
+            swarmui_timeout_seconds=120,
+            openrouter_image_base_url=None,
+            openrouter_image_api_key=None,
+            openrouter_image_default_model=None,
+            openrouter_image_allowed_extra_params=[],
+            openrouter_image_timeout_seconds=120,
+            novita_image_base_url=None,
+            novita_image_api_key=None,
+            novita_image_default_model=None,
+            novita_image_allowed_extra_params=[],
+            novita_image_timeout_seconds=180,
+            novita_image_poll_interval_seconds=2,
+            together_image_base_url=None,
+            together_image_api_key=None,
+            together_image_default_model=None,
+            together_image_allowed_extra_params=[],
+            together_image_timeout_seconds=120,
+            modelstudio_image_base_url=None,
+            modelstudio_image_api_key=None,
+            modelstudio_image_default_model=None,
+            modelstudio_image_region="sg",
+            modelstudio_image_mode="auto",
+            modelstudio_image_poll_interval_seconds=2,
+            modelstudio_image_timeout_seconds=180,
+            modelstudio_image_allowed_extra_params=[],
+        )
+
+        class FakeAdapter:
+            def __init__(self) -> None:
+                self.requests = []
+
+            def generate(self, request):
+                self.requests.append(request)
+                return ImageGenResult(content=b"\x89PNG\r\n\x1a\nabc", content_type="image/png", bytes_len=11)
+
+        adapter = FakeAdapter()
+
+        class FakeRegistry:
+            def resolve_backend(self, backend):
+                return backend
+
+            def get_adapter(self, backend):
+                return adapter
+
+        to_thread_calls = []
+
+        async def fake_to_thread(func, *args, **kwargs):
+            to_thread_calls.append((func, args, kwargs))
+            return func(*args, **kwargs)
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Image_Generation.config.get_image_generation_config",
+            lambda: cfg,
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Image_Generation.adapter_registry.get_registry",
+            lambda: FakeRegistry(),
+        )
+        monkeypatch.setattr(image_module, "is_test_mode", lambda: False)
+        monkeypatch.setattr(image_module, "resolve_artifacts_dir", lambda _step_run_id: tmp_path)
+        monkeypatch.setattr(
+            image_module,
+            "asyncio",
+            type("AsyncioStub", (), {"to_thread": staticmethod(fake_to_thread)}),
+            raising=False,
+        )
+
+        result = await run_image_gen_adapter({"prompt": "A clean test image", "prompt_refinement": "off"}, base_context)
+
+        assert result["count"] == 1
+        assert to_thread_calls
+        assert adapter.requests[0].prompt == "A clean test image"
+
+    @pytest.mark.asyncio
+    async def test_image_gen_adapter_rejects_invalid_generation_params(self, monkeypatch, base_context):
+        """Workflow image generation uses the same bounds and extra-param allowlist as other entry points."""
+        monkeypatch.delenv("TEST_MODE", raising=False)
+        monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+
+        from tldw_Server_API.app.core.Image_Generation.config import ImageGenerationConfig
+        from tldw_Server_API.app.core.Workflows.adapters.content import run_image_gen_adapter
+        from tldw_Server_API.app.core.Workflows.adapters.content import image as image_module
+
+        cfg = ImageGenerationConfig(
+            default_backend="stable_diffusion_cpp",
+            enabled_backends=["stable_diffusion_cpp"],
+            max_width=512,
+            max_height=512,
+            max_pixels=512 * 512,
+            max_steps=50,
+            max_prompt_length=1000,
+            inline_max_bytes=4000000,
+            sd_cpp_diffusion_model_path=None,
+            sd_cpp_llm_path=None,
+            sd_cpp_binary_path=None,
+            sd_cpp_model_path=None,
+            sd_cpp_vae_path=None,
+            sd_cpp_lora_paths=[],
+            sd_cpp_allowed_extra_params=[],
+            sd_cpp_default_steps=25,
+            sd_cpp_default_cfg_scale=7.5,
+            sd_cpp_default_sampler="euler_a",
+            sd_cpp_device="auto",
+            sd_cpp_timeout_seconds=120,
+            swarmui_base_url=None,
+            swarmui_default_model=None,
+            swarmui_swarm_token=None,
+            swarmui_allowed_extra_params=[],
+            swarmui_timeout_seconds=120,
+            openrouter_image_base_url=None,
+            openrouter_image_api_key=None,
+            openrouter_image_default_model=None,
+            openrouter_image_allowed_extra_params=[],
+            openrouter_image_timeout_seconds=120,
+            novita_image_base_url=None,
+            novita_image_api_key=None,
+            novita_image_default_model=None,
+            novita_image_allowed_extra_params=[],
+            novita_image_timeout_seconds=180,
+            novita_image_poll_interval_seconds=2,
+            together_image_base_url=None,
+            together_image_api_key=None,
+            together_image_default_model=None,
+            together_image_allowed_extra_params=[],
+            together_image_timeout_seconds=120,
+            modelstudio_image_base_url=None,
+            modelstudio_image_api_key=None,
+            modelstudio_image_default_model=None,
+            modelstudio_image_region="sg",
+            modelstudio_image_mode="auto",
+            modelstudio_image_poll_interval_seconds=2,
+            modelstudio_image_timeout_seconds=180,
+            modelstudio_image_allowed_extra_params=[],
+        )
+
+        class FailingRegistry:
+            def resolve_backend(self, backend):
+                raise AssertionError("registry should not be reached for invalid params")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Image_Generation.config.get_image_generation_config",
+            lambda: cfg,
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Image_Generation.adapter_registry.get_registry",
+            lambda: FailingRegistry(),
+        )
+        monkeypatch.setattr(image_module, "is_test_mode", lambda: False)
+
+        result = await run_image_gen_adapter(
+            {
+                "prompt": "A clean test image",
+                "width": 2048,
+                "extra_params": {"cli_args": ["--unsafe"]},
+            },
+            base_context,
+        )
+
+        assert result["error"] == "image_params_invalid"
+
 
 # =============================================================================
 # Test: run_image_describe_adapter

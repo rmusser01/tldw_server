@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import subprocess
+# The adapter intentionally invokes a configured local stable-diffusion.cpp binary.
+import subprocess  # nosec B404
 import tempfile
 from pathlib import Path
 
 from loguru import logger
 
 from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenRequest, ImageGenResult
+from tldw_Server_API.app.core.Image_Generation.adapters.image_format_utils import validate_and_convert_image_output
 from tldw_Server_API.app.core.Image_Generation.config import (
     DEFAULT_SD_CPP_CFG_SCALE,
     DEFAULT_SD_CPP_SAMPLER,
@@ -16,6 +18,7 @@ from tldw_Server_API.app.core.Image_Generation.config import (
     get_image_generation_config,
 )
 from tldw_Server_API.app.core.Image_Generation.exceptions import ImageBackendUnavailableError, ImageGenerationError
+from tldw_Server_API.app.core.Image_Generation.request_validation import effective_inline_max_bytes
 
 
 class StableDiffusionCppAdapter:
@@ -77,9 +80,19 @@ class StableDiffusionCppAdapter:
                 extra_params=extra_params,
                 device=self._config.sd_cpp_device,
             )
-            logger.info("stable-diffusion.cpp: running {}", " ".join(cmd))
+            logger.info(
+                "stable-diffusion.cpp: running backend binary={} model_flag={} width={} height={} steps={} format={} extra_keys={}",
+                binary_path.name,
+                model_flag,
+                width,
+                height,
+                steps,
+                output_format,
+                sorted(str(key) for key in extra_params),
+            )
             try:
-                result = subprocess.run(
+                # `cmd` is an argv list for the configured local binary; shell execution is not used.
+                result = subprocess.run(  # nosec B603
                     cmd,
                     cwd=str(binary_path.parent),
                     capture_output=True,
@@ -90,9 +103,12 @@ class StableDiffusionCppAdapter:
                 raise ImageGenerationError("stable-diffusion.cpp timed out") from exc
 
             if result.returncode != 0:
-                stderr_tail = (result.stderr or "").strip().splitlines()[-5:]
-                detail = "\n".join(stderr_tail) if stderr_tail else "unknown error"
-                raise ImageGenerationError(f"stable-diffusion.cpp failed: {detail}")
+                logger.warning(
+                    "stable-diffusion.cpp failed exit_code={} stderr_lines={}",
+                    result.returncode,
+                    len((result.stderr or "").splitlines()),
+                )
+                raise ImageGenerationError("stable-diffusion.cpp failed")
 
             if not output_path.exists():
                 raise ImageGenerationError("stable-diffusion.cpp did not produce output")
@@ -100,6 +116,12 @@ class StableDiffusionCppAdapter:
             content = output_path.read_bytes()
 
         content_type = _content_type_for_format(output_format)
+        content, content_type = validate_and_convert_image_output(
+            content,
+            content_type,
+            output_format,
+            max_bytes=effective_inline_max_bytes(self._config),
+        )
         return ImageGenResult(content=content, content_type=content_type, bytes_len=len(content))
 
     @staticmethod

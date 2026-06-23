@@ -9,6 +9,8 @@ from tldw_Server_API.app.core.Image_Generation.capabilities import ResolvedRefer
 from tldw_Server_API.app.core.Image_Generation.config import ImageGenerationConfig
 from tldw_Server_API.app.core.Image_Generation.exceptions import ImageGenerationError
 
+PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg=="
+
 
 def _make_config(**overrides) -> ImageGenerationConfig:
     base = dict(
@@ -158,7 +160,7 @@ def test_modelstudio_generate_sync_data_url(monkeypatch):
                     {
                         "message": {
                             "content": [
-                                {"image_url": "data:image/png;base64,aGVsbG8="},
+                                {"image_url": f"data:image/png;base64,{PNG_B64}"},
                             ]
                         }
                     }
@@ -170,9 +172,9 @@ def test_modelstudio_generate_sync_data_url(monkeypatch):
 
     adapter = modelstudio_module.ModelStudioImageAdapter()
     result = adapter.generate(_make_request())
-    assert result.content == b"hello"
+    assert result.content.startswith(b"\x89PNG\r\n\x1a\n")
     assert result.content_type == "image/png"
-    assert result.bytes_len == 5
+    assert result.bytes_len == len(result.content)
     assert captured["method"] == "POST"
     assert captured["url"].endswith("/services/aigc/multimodal-generation/generation")
 

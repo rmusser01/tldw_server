@@ -2,6 +2,8 @@ from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenRequ
 from tldw_Server_API.app.core.Image_Generation.adapters import openrouter_image_adapter as openrouter_module
 from tldw_Server_API.app.core.Image_Generation.config import ImageGenerationConfig
 
+PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg=="
+
 
 def _make_config(**overrides) -> ImageGenerationConfig:
     base = dict(
@@ -96,7 +98,7 @@ def test_openrouter_generate_data_url(monkeypatch):
                     "message": {
                         "images": [
                             {
-                                "image_url": "data:image/png;base64,aGVsbG8=",
+                                "image_url": f"data:image/png;base64,{PNG_B64}",
                             }
                         ]
                     }
@@ -108,9 +110,9 @@ def test_openrouter_generate_data_url(monkeypatch):
 
     adapter = openrouter_module.OpenRouterImageAdapter()
     result = adapter.generate(_make_request())
-    assert result.content == b"hello"
+    assert result.content.startswith(b"\x89PNG\r\n\x1a\n")
     assert result.content_type == "image/png"
-    assert result.bytes_len == 5
+    assert result.bytes_len == len(result.content)
     assert captured["method"] == "POST"
     assert captured["url"].endswith("/chat/completions")
     assert captured["json"]["modalities"] == ["image", "text"]
@@ -142,7 +144,7 @@ def test_openrouter_generate_image_url(monkeypatch):
     monkeypatch.setattr(
         openrouter_module,
         "fetch_image_bytes",
-        lambda url, timeout: (b"\x89PNG\r\n\x1a\nabc", "image/png"),
+        lambda url, timeout, **kwargs: (b"\x89PNG\r\n\x1a\nabc", "image/png"),
     )
 
     adapter = openrouter_module.OpenRouterImageAdapter()

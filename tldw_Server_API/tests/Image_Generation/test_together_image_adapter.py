@@ -2,6 +2,8 @@ from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenRequ
 from tldw_Server_API.app.core.Image_Generation.adapters import together_image_adapter as together_module
 from tldw_Server_API.app.core.Image_Generation.config import ImageGenerationConfig
 
+PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg=="
+
 
 def _make_config(**overrides) -> ImageGenerationConfig:
     base = dict(
@@ -90,15 +92,15 @@ def test_together_generate_b64_json(monkeypatch):
         captured["url"] = url
         captured["headers"] = headers
         captured["json"] = json
-        return {"data": [{"b64_json": "aGVsbG8="}]}
+        return {"data": [{"b64_json": PNG_B64}]}
 
     monkeypatch.setattr(together_module, "fetch_json", fake_fetch_json)
 
     adapter = together_module.TogetherImageAdapter()
     result = adapter.generate(_make_request())
-    assert result.content == b"hello"
+    assert result.content.startswith(b"\x89PNG\r\n\x1a\n")
     assert result.content_type == "image/png"
-    assert result.bytes_len == 5
+    assert result.bytes_len == len(result.content)
     assert captured["method"] == "POST"
     assert captured["url"].endswith("/images/generations")
     assert captured["json"]["response_format"] == "b64_json"
@@ -116,7 +118,7 @@ def test_together_generate_from_image_url(monkeypatch):
     monkeypatch.setattr(
         together_module,
         "fetch_image_bytes",
-        lambda url, timeout: (b"\x89PNG\r\n\x1a\nxyz", "image/png"),
+        lambda url, timeout, **kwargs: (b"\x89PNG\r\n\x1a\nxyz", "image/png"),
     )
 
     adapter = together_module.TogetherImageAdapter()

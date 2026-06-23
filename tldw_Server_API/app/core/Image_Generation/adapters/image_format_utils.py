@@ -19,7 +19,7 @@ except Exception:  # pragma: no cover - optional dependency guard
     Image = None  # type: ignore
 
 
-def decode_data_url(data_url: str) -> tuple[bytes, str]:
+def decode_data_url(data_url: str, *, max_bytes: int | None = None) -> tuple[bytes, str]:
     header, _, encoded = data_url.partition(",")
     if not header.startswith("data:"):
         raise ImageGenerationError("invalid data URL")
@@ -28,21 +28,26 @@ def decode_data_url(data_url: str) -> tuple[bytes, str]:
     content_type = meta.split(";", 1)[0] or content_type if ";" in meta else meta or content_type
     if ";base64" not in header:
         raise ImageGenerationError("unsupported data URL encoding")
+    _enforce_base64_encoded_limit(encoded, max_bytes)
     try:
-        content = base64.b64decode(encoded)
+        content = base64.b64decode(encoded, validate=True)
     except (binascii.Error, TypeError, ValueError) as exc:
         raise ImageGenerationError("invalid base64 data") from exc
+    _enforce_max_bytes(content, max_bytes)
     return content, content_type
 
 
-def decode_base64_image(encoded: str) -> bytes:
+def decode_base64_image(encoded: str, *, max_bytes: int | None = None) -> bytes:
+    _enforce_base64_encoded_limit(encoded, max_bytes)
     try:
-        return base64.b64decode(encoded, validate=True)
+        content = base64.b64decode(encoded, validate=True)
     except (binascii.Error, TypeError, ValueError) as exc:
         raise ImageGenerationError("invalid base64 image data") from exc
+    _enforce_max_bytes(content, max_bytes)
+    return content
 
 
-def maybe_decode_base64_image(encoded: str | None) -> bytes | None:
+def maybe_decode_base64_image(encoded: str | None, *, max_bytes: int | None = None) -> bytes | None:
     if not isinstance(encoded, str):
         return None
     raw = encoded.strip()
@@ -50,16 +55,21 @@ def maybe_decode_base64_image(encoded: str | None) -> bytes | None:
         return None
     if raw.startswith("data:"):
         try:
-            content, _content_type = decode_data_url(raw)
+            content, _content_type = decode_data_url(raw, max_bytes=max_bytes)
             return content
-        except ImageGenerationError:
+        except ImageGenerationError as exc:
+            if "too large" in str(exc):
+                raise
             return None
     if any(ch.isspace() for ch in raw):
         return None
+    _enforce_base64_encoded_limit(raw, max_bytes)
     try:
-        return base64.b64decode(raw, validate=True)
+        content = base64.b64decode(raw, validate=True)
     except (binascii.Error, TypeError, ValueError):
         return None
+    _enforce_max_bytes(content, max_bytes)
+    return content
 
 
 def reference_image_data_url(reference_image: ResolvedReferenceImage) -> str:
@@ -125,11 +135,11 @@ def maybe_convert_format(
     requested_format: str,
 ) -> tuple[bytes, str]:
     if requested_format == actual_format:
-        return content, content_type
+        return content, content_type or content_type_for_format(requested_format)
     if requested_format not in {"png", "jpg", "webp"}:
         raise ImageGenerationError(f"unsupported output format: {requested_format}")
-    if actual_format is None and requested_format == "png":
-        return content, content_type or "image/png"
+    if actual_format is None:
+        raise ImageGenerationError("invalid image content")
     if Image is None:
         raise ImageGenerationError("Pillow is required for image format conversion")
     try:
@@ -151,17 +161,45 @@ def maybe_convert_format(
     return converted, content_type_for_format(requested_format)
 
 
+def validate_and_convert_image_output(
+    content: bytes,
+    content_type: str,
+    requested_format: str,
+    *,
+    max_bytes: int | None = None,
+) -> tuple[bytes, str]:
+    """Validate actual image bytes, enforce size caps, and convert when requested."""
+
+    _enforce_max_bytes(content, max_bytes)
+    output_format = "jpg" if requested_format == "jpeg" else requested_format
+    actual_format = format_from_bytes(content)
+    if actual_format is None:
+        raise ImageGenerationError("invalid image content")
+    actual_content_type = content_type_for_format(actual_format)
+    converted, converted_content_type = maybe_convert_format(
+        content,
+        actual_content_type,
+        actual_format,
+        output_format,
+    )
+    _enforce_max_bytes(converted, max_bytes)
+    return converted, converted_content_type
+
+
 def fetch_image_bytes(
     url: str,
     *,
     timeout: int | float,
     headers: dict[str, Any] | None = None,
+    cookies: dict[str, Any] | None = None,
+    max_bytes: int | None = None,
 ) -> tuple[bytes, str]:
     try:
         response = fetch(
             method="GET",
             url=url,
             headers=headers,
+            cookies=cookies,
             timeout=timeout,
         )
     except Exception as exc:
@@ -176,6 +214,17 @@ def fetch_image_bytes(
             response.close()
         raise ImageGenerationError(f"image fetch failed with status {status}")
 
+    headers_obj = getattr(response, "headers", {}) or {}
+    content_length = headers_obj.get("content-length") or headers_obj.get("Content-Length")
+    if max_bytes is not None and content_length is not None:
+        try:
+            if int(str(content_length).strip()) > max_bytes:
+                with contextlib.suppress(Exception):
+                    response.close()
+                raise ImageGenerationError("image content too large")
+        except ValueError:
+            pass
+
     try:
         content = response.content
     except Exception as exc:
@@ -183,7 +232,33 @@ def fetch_image_bytes(
             response.close()
         raise ImageGenerationError(f"image fetch failed: {exc}") from exc
 
-    content_type = response.headers.get("content-type", "application/octet-stream")
+    _enforce_max_bytes(content, max_bytes)
+    content_type = headers_obj.get("content-type") or headers_obj.get("Content-Type") or "application/octet-stream"
     with contextlib.suppress(Exception):
         response.close()
     return content, content_type.split(";", 1)[0].strip().lower()
+
+
+def _enforce_base64_encoded_limit(encoded: str, max_bytes: int | None) -> None:
+    if max_bytes is None:
+        return
+    try:
+        limit = int(max_bytes)
+    except (TypeError, ValueError):
+        return
+    if limit <= 0:
+        return
+    max_encoded_chars = ((limit + 2) // 3) * 4
+    if len(encoded.strip()) > max_encoded_chars:
+        raise ImageGenerationError("image content too large")
+
+
+def _enforce_max_bytes(content: bytes, max_bytes: int | None) -> None:
+    if max_bytes is None:
+        return
+    try:
+        limit = int(max_bytes)
+    except (TypeError, ValueError):
+        return
+    if limit > 0 and len(content) > limit:
+        raise ImageGenerationError("image content too large")

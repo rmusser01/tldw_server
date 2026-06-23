@@ -12,10 +12,8 @@ from tldw_Server_API.app.core.Image_Generation.adapters.image_format_utils impor
     decode_base64_image,
     decode_data_url,
     fetch_image_bytes,
-    format_from_bytes,
-    format_from_content_type,
-    maybe_convert_format,
     maybe_decode_base64_image,
+    validate_and_convert_image_output,
 )
 from tldw_Server_API.app.core.Image_Generation.config import (
     DEFAULT_NOVITA_IMAGE_BASE_URL,
@@ -24,6 +22,7 @@ from tldw_Server_API.app.core.Image_Generation.config import (
     get_image_generation_config,
 )
 from tldw_Server_API.app.core.Image_Generation.exceptions import ImageBackendUnavailableError, ImageGenerationError
+from tldw_Server_API.app.core.Image_Generation.request_validation import effective_inline_max_bytes
 
 
 class NovitaImageAdapter:
@@ -49,9 +48,16 @@ class NovitaImageAdapter:
         result_payload = self._poll_task_result(base_url, api_key, task_id)
 
         content, content_type = self._extract_image_content(result_payload)
-        actual_format = format_from_content_type(content_type) or format_from_bytes(content)
-        content, content_type = maybe_convert_format(content, content_type, actual_format, output_format)
+        content, content_type = validate_and_convert_image_output(
+            content,
+            content_type,
+            output_format,
+            max_bytes=self._max_output_bytes(),
+        )
         return ImageGenResult(content=content, content_type=content_type, bytes_len=len(content))
+
+    def _max_output_bytes(self) -> int:
+        return effective_inline_max_bytes(self._config)
 
     def _resolve_api_key(self) -> str:
         api_key = (self._config.novita_image_api_key or "").strip()
@@ -218,7 +224,7 @@ class NovitaImageAdapter:
             for key in ("b64_json", "image_base64", "base64", "image_b64"):
                 value = node.get(key)
                 if isinstance(value, str) and value.strip():
-                    return decode_base64_image(value.strip()), "image/png"
+                    return decode_base64_image(value.strip(), max_bytes=self._max_output_bytes()), "image/png"
             for key in ("image_url", "url", "image"):
                 if key in node:
                     extracted = self._extract_from_link_value(node.get(key))
@@ -254,13 +260,14 @@ class NovitaImageAdapter:
         if not raw:
             return None
         if raw.startswith("data:"):
-            return decode_data_url(raw)
+            return decode_data_url(raw, max_bytes=self._max_output_bytes())
         if raw.startswith("http://") or raw.startswith("https://"):
             return fetch_image_bytes(
                 raw,
                 timeout=self._config.novita_image_timeout_seconds or DEFAULT_NOVITA_IMAGE_TIMEOUT_SECONDS,
+                max_bytes=self._max_output_bytes(),
             )
-        decoded = maybe_decode_base64_image(raw)
+        decoded = maybe_decode_base64_image(raw, max_bytes=self._max_output_bytes())
         if decoded is not None:
             return decoded, "image/png"
         return None

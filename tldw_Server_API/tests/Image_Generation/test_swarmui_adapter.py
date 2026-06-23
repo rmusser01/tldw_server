@@ -1,6 +1,11 @@
+import pytest
+
 import tldw_Server_API.app.core.Image_Generation.adapters.swarmui_adapter as swarmui_module
 from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenRequest
 from tldw_Server_API.app.core.Image_Generation.config import ImageGenerationConfig
+from tldw_Server_API.app.core.Image_Generation.exceptions import ImageGenerationError
+
+PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg=="
 
 
 def _make_config(**overrides) -> ImageGenerationConfig:
@@ -92,21 +97,35 @@ def test_swarmui_generate_data_url(monkeypatch):
         if url.endswith("/API/GenerateText2Image"):
             assert json["prompt"] == "hello"
             assert json["negativeprompt"] == "nope"
-            return {"images": ["data:image/png;base64,aGVsbG8="]}
+            return {"images": [f"data:image/png;base64,{PNG_B64}"]}
         raise AssertionError("unexpected URL")
 
-    def fake_fetch(*args, **kwargs):
-        raise AssertionError("fetch should not be called for data URLs")
-
     monkeypatch.setattr(swarmui_module, "fetch_json", fake_fetch_json)
-    monkeypatch.setattr(swarmui_module, "fetch", fake_fetch)
 
     adapter = swarmui_module.SwarmUIAdapter()
     result = adapter.generate(_make_request())
-    assert result.content == b"hello"
+    assert result.content.startswith(b"\x89PNG\r\n\x1a\n")
     assert result.content_type == "image/png"
-    assert result.bytes_len == 5
+    assert result.bytes_len == len(result.content)
     assert len(calls) == 2
+
+
+def test_swarmui_rejects_off_origin_image_url_with_token(monkeypatch):
+    cfg = _make_config(swarmui_swarm_token="secret-token")
+    monkeypatch.setattr(swarmui_module, "get_image_generation_config", lambda: cfg)
+
+    def fake_fetch_json(method, url, json, **kwargs):
+        if url.endswith("/API/GetNewSession"):
+            return {"session_id": "sess"}
+        if url.endswith("/API/GenerateText2Image"):
+            return {"images": ["https://attacker.example/out.png"]}
+        raise AssertionError("unexpected URL")
+
+    monkeypatch.setattr(swarmui_module, "fetch_json", fake_fetch_json)
+
+    adapter = swarmui_module.SwarmUIAdapter()
+    with pytest.raises(ImageGenerationError, match="off-origin"):
+        adapter.generate(_make_request())
 
 
 def test_swarmui_invalid_session_refresh(monkeypatch):
@@ -127,24 +146,16 @@ def test_swarmui_invalid_session_refresh(monkeypatch):
             return {"images": ["View/local/raw/test.png"]}
         raise AssertionError("unexpected URL")
 
-    class _FakeResponse:
-        status_code = 200
-        headers = {"content-type": "image/png"}
-        content = b"\x89PNG"  # minimal header
-
-        def close(self):
-            return None
-
-    def fake_fetch(method, url, **kwargs):
+    def fake_fetch_image_bytes(url, **kwargs):
         assert url.endswith("/View/local/raw/test.png")
-        return _FakeResponse()
+        return b"\x89PNG\r\n\x1a\nabc", "image/png"
 
     monkeypatch.setattr(swarmui_module, "fetch_json", fake_fetch_json)
-    monkeypatch.setattr(swarmui_module, "fetch", fake_fetch)
+    monkeypatch.setattr(swarmui_module, "fetch_shared_image_bytes", fake_fetch_image_bytes)
 
     adapter = swarmui_module.SwarmUIAdapter()
     result = adapter.generate(_make_request())
-    assert result.content == b"\x89PNG"
+    assert result.content.startswith(b"\x89PNG\r\n\x1a\n")
     assert result.content_type == "image/png"
     assert len(session_calls) == 2
     assert len(generate_calls) == 2
@@ -167,7 +178,6 @@ def test_swarmui_converts_to_jpg(monkeypatch):
         raise AssertionError("unexpected URL")
 
     monkeypatch.setattr(swarmui_module, "fetch_json", fake_fetch_json)
-    monkeypatch.setattr(swarmui_module, "fetch", lambda *args, **kwargs: None)
 
     adapter = swarmui_module.SwarmUIAdapter()
     result = adapter.generate(_make_request(format="jpg"))

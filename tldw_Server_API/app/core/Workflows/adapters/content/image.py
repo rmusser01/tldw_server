@@ -8,6 +8,7 @@ This module includes adapters for image operations:
 from __future__ import annotations
 
 import base64
+import asyncio
 import time
 import uuid
 from typing import Any
@@ -110,6 +111,7 @@ async def run_image_gen_adapter(config: dict[str, Any], context: dict[str, Any])
         normalize_prompt_refinement_mode,
         refine_image_prompt,
     )
+    from tldw_Server_API.app.core.Image_Generation.request_validation import validate_image_generation_request
 
     image_generation_cfg = get_image_generation_config()
     prompt_refinement_mode = normalize_prompt_refinement_mode(config.get("prompt_refinement"))
@@ -126,24 +128,51 @@ async def run_image_gen_adapter(config: dict[str, Any], context: dict[str, Any])
         negative_prompt = apply_template_to_string(str(neg_prompt_t), context) or str(neg_prompt_t)
 
     # Parameters
-    backend = str(config.get("backend") or "stable_diffusion_cpp").strip().lower()
-    width = int(config.get("width") or 512)
-    height = int(config.get("height") or 512)
-    steps = int(config.get("steps") or 20)
-    cfg_scale = float(config.get("cfg_scale") or 7.0)
-    seed = config.get("seed")
-    if seed is not None:
-        try:
+    try:
+        backend = str(config.get("backend") or "stable_diffusion_cpp").strip().lower()
+        width = int(config.get("width") or 512)
+        height = int(config.get("height") or 512)
+        steps = int(config.get("steps") or 20)
+        cfg_scale = float(config.get("cfg_scale") or 7.0)
+        seed = config.get("seed")
+        if seed is not None:
             seed = int(seed)
-        except Exception:
-            seed = None
-    sampler = config.get("sampler")
-    model = config.get("model")
-    img_format = str(config.get("format") or "png").strip().lower()
-    if img_format not in ("png", "jpg", "jpeg", "webp"):
-        img_format = "png"
+        sampler = config.get("sampler")
+        model = config.get("model")
+        img_format = str(config.get("format") or "png").strip().lower()
+        if img_format == "jpeg":
+            img_format = "jpg"
+        if img_format not in ("png", "jpg", "webp"):
+            img_format = "png"
+        extra_params = config.get("extra_params") or {}
+        if not isinstance(extra_params, dict):
+            return {"error": "image_params_invalid"}
+        extra_params = dict(extra_params)
+    except (TypeError, ValueError):
+        return {"error": "image_params_invalid"}
+
     save_artifact = config.get("save_artifact")
     save_artifact = True if save_artifact is None else bool(save_artifact)
+
+    validation_issues = validate_image_generation_request(
+        {
+            "backend": backend,
+            "prompt": prompt,
+            "width": width,
+            "height": height,
+            "steps": steps,
+            "extra_params": extra_params,
+        },
+        config=image_generation_cfg,
+    )
+    if validation_issues:
+        return {
+            "error": "image_params_invalid",
+            "validation_errors": [
+                {"code": issue.code, "message": issue.message, "path": issue.path}
+                for issue in validation_issues
+            ],
+        }
 
     # Test mode simulation
     if is_test_mode():
@@ -197,12 +226,12 @@ async def run_image_gen_adapter(config: dict[str, Any], context: dict[str, Any])
             sampler=sampler,
             model=model,
             format=img_format,
-            extra_params=dict(config.get("extra_params") or {}),
+            extra_params=extra_params,
         )
 
         # Generate
         start_ts = time.time()
-        result = adapter.generate(request)
+        result = await asyncio.to_thread(adapter.generate, request)
         duration_ms = (time.time() - start_ts) * 1000
 
         # Save image artifact
