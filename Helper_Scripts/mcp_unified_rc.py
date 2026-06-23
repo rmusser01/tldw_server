@@ -43,6 +43,11 @@ EVIDENCE_JSON = "mcp-unified-rc-evidence.json"
 EVIDENCE_MARKDOWN = "mcp-unified-rc-summary.md"
 PACKAGE_IMPORT_NAME = "mcp_unified"
 OPTIONAL_EXTRAS = ("core", "fastapi", "sqlite", "federation", "gateway", "dev")
+PUBLISH_ALLOW_ENV = "MCP_UNIFIED_ALLOW_PUBLISH"
+PUBLISH_TARGET_REPOSITORIES = {
+    "testpypi": "https://test.pypi.org/legacy/",
+    "pypi": "https://upload.pypi.org/legacy/",
+}
 USER_GUIDE_UAT_SCRIPT = Path("Helper_Scripts") / "Testing-related" / "mcp_standalone_user_guide_uat.py"
 PIP_DEPENDENCY_FAILURE_MARKERS = (
     "could not find a version that satisfies the requirement",
@@ -124,6 +129,30 @@ class RcCommandResult:
             "stdout": self.stdout,
             "stderr": self.stderr,
             "duration_ms": self.duration_ms,
+        }
+
+
+@dataclass(frozen=True)
+class PublishPlan:
+    """Dry-run or executable publish command plan for built MCP Unified artifacts."""
+
+    target: str
+    repository_url: str
+    dry_run: bool
+    execute: bool
+    artifact_filenames: list[str]
+    command: list[str]
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-safe representation for RC evidence output."""
+
+        return {
+            "target": self.target,
+            "repository_url": self.repository_url,
+            "dry_run": self.dry_run,
+            "execute": self.execute,
+            "artifact_filenames": self.artifact_filenames,
+            "command": self.command,
         }
 
 
@@ -435,6 +464,102 @@ def run_evidence(paths: RcPaths) -> int:
     return _write_and_report(recorder)
 
 
+def build_publish_plan(
+    paths: RcPaths,
+    *,
+    target: str,
+    execute: bool = False,
+    dry_run: bool = True,
+) -> PublishPlan:
+    """Build a guarded twine upload plan for existing MCP Unified artifacts."""
+
+    repository_url = PUBLISH_TARGET_REPOSITORIES.get(target)
+    if repository_url is None:
+        valid_targets = ", ".join(sorted(PUBLISH_TARGET_REPOSITORIES))
+        raise ValueError(f"invalid publish target {target!r}; expected one of: {valid_targets}")
+
+    if execute and os.environ.get(PUBLISH_ALLOW_ENV) != "1":
+        raise RuntimeError(
+            f"live MCP Unified publishing requires {PUBLISH_ALLOW_ENV}=1"
+        )
+
+    wheels, sdists = _dist_artifacts(paths)
+    if not wheels or not sdists:
+        raise FileNotFoundError(
+            "expected built wheel and sdist in .artifacts/mcp-unified-rc/dist; run build first"
+        )
+
+    artifact_paths = [*wheels, *sdists]
+    return PublishPlan(
+        target=target,
+        repository_url=repository_url,
+        dry_run=False if execute else dry_run,
+        execute=execute,
+        artifact_filenames=[artifact.name for artifact in artifact_paths],
+        command=[
+            sys.executable,
+            "-m",
+            "twine",
+            "upload",
+            "--repository-url",
+            repository_url,
+            "--non-interactive",
+            *[str(artifact) for artifact in artifact_paths],
+        ],
+    )
+
+
+def run_publish_plan(
+    paths: RcPaths,
+    *,
+    target: str,
+    execute: bool,
+    dry_run: bool,
+) -> int:
+    """Record or execute a guarded publish plan for built artifacts."""
+
+    started = time.perf_counter()
+    recorder = _new_recorder(paths)
+    _record_existing_artifacts(paths, recorder)
+    try:
+        plan = build_publish_plan(
+            paths,
+            target=target,
+            execute=execute,
+            dry_run=dry_run,
+        )
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        recorder.record(
+            phase="publish_plan",
+            name="twine_upload_plan",
+            status="failed",
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            reason=str(exc),
+            details={"target": target, "execute": execute, "dry_run": dry_run},
+        )
+        return _write_and_report(recorder)
+
+    if not plan.execute:
+        recorder.record(
+            phase="publish_plan",
+            name="twine_upload_plan",
+            status="passed",
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            details={"plan": plan.as_dict()},
+        )
+        return _write_and_report(recorder)
+
+    result = run_command(plan.command, cwd=paths.repo_root, timeout=300)
+    _record_command_result(
+        recorder,
+        phase="publish_plan",
+        name="twine_upload",
+        result=result,
+        details={"plan": plan.as_dict()},
+    )
+    return _write_and_report(recorder)
+
+
 def run_all(paths: RcPaths) -> int:
     """Run the internal RC sequence and write combined evidence."""
 
@@ -473,6 +598,27 @@ def build_parser() -> argparse.ArgumentParser:
         "all",
     ):
         subparsers.add_parser(name, help=f"Run the {name} RC phase.")
+    publish_parser = subparsers.add_parser(
+        "publish-plan",
+        help="Build or execute a guarded MCP Unified publish plan.",
+    )
+    publish_parser.add_argument(
+        "--target",
+        choices=tuple(PUBLISH_TARGET_REPOSITORIES),
+        default="testpypi",
+        help="Publish target repository. Defaults to TestPyPI.",
+    )
+    publish_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=True,
+        help="Record the publish command without uploading artifacts.",
+    )
+    publish_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help=f"Run twine upload. Requires {PUBLISH_ALLOW_ENV}=1.",
+    )
     return parser
 
 
@@ -496,6 +642,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_smoke_uat(paths)
     if args.command == "evidence":
         return run_evidence(paths)
+    if args.command == "publish-plan":
+        return run_publish_plan(
+            paths,
+            target=args.target,
+            execute=args.execute,
+            dry_run=args.dry_run,
+        )
     return run_all(paths)
 
 
@@ -1080,7 +1233,7 @@ def _new_recorder(paths: RcPaths) -> RcEvidenceRecorder:
             "pyproject": pyproject_metadata,
         },
         known_limitations=[
-            "Internal RC only: this harness does not upload or publish to TestPyPI or PyPI.",
+            "Publishing is guarded: publish-plan is dry-run by default and live upload requires MCP_UNIFIED_ALLOW_PUBLISH=1.",
             "Remote runtime UAT requires MCP_UNIFIED_GATEWAY_URL or --gateway-url and is optional in local RC runs.",
         ],
         repo_root=paths.repo_root,
@@ -1282,6 +1435,12 @@ def _read_package_constants(metadata_path: Path) -> dict[str, Any]:
         "LICENSE_EXPRESSION",
         "SOURCE_DISTRIBUTION",
         "DEPENDENCY_VERSION_POLICY",
+        "PACKAGE_AUTHORS",
+        "PACKAGE_MAINTAINERS",
+        "PACKAGE_KEYWORDS",
+        "PACKAGE_CLASSIFIERS",
+        "PACKAGE_URLS",
+        "LICENSE_FILES",
     }
     for node in tree.body:
         target_name: str | None = None
@@ -1292,8 +1451,12 @@ def _read_package_constants(metadata_path: Path) -> dict[str, Any]:
         elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             target_name = node.targets[0].id
             value_node = node.value
-        if target_name in wanted and isinstance(value_node, ast.Constant):
-            constants[target_name] = value_node.value
+        if target_name in wanted and value_node is not None:
+            try:
+                constants[target_name] = ast.literal_eval(value_node)
+            except (SyntaxError, ValueError):
+                if isinstance(value_node, ast.Constant):
+                    constants[target_name] = value_node.value
     return constants
 
 

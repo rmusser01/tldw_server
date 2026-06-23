@@ -54,6 +54,89 @@ def test_default_paths_point_to_apps_package() -> None:
     assert paths.evidence_dir == Path("/repo/.artifacts/mcp-unified-rc")  # nosec B101
 
 
+def _create_publish_plan_artifacts(tmp_path: Path) -> mcp_unified_rc.RcPaths:
+    """Create placeholder dist files for publish-plan unit tests."""
+
+    paths = mcp_unified_rc.RcPaths.from_repo_root(tmp_path)
+    paths.dist_dir.mkdir(parents=True)
+    (paths.dist_dir / "mcp_unified-0.1.0-py3-none-any.whl").write_text(
+        "wheel",
+        encoding="utf-8",
+    )
+    (paths.dist_dir / "mcp_unified-0.1.0.tar.gz").write_text(
+        "sdist",
+        encoding="utf-8",
+    )
+    return paths
+
+
+def test_rc_publish_plan_is_dry_run_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Publish plans should default to a non-uploading TestPyPI dry run."""
+
+    monkeypatch.delenv("MCP_UNIFIED_ALLOW_PUBLISH", raising=False)
+    paths = _create_publish_plan_artifacts(tmp_path)
+    parser = mcp_unified_rc.build_parser()
+
+    parsed = parser.parse_args(["publish-plan", "--target", "testpypi"])
+    plan = mcp_unified_rc.build_publish_plan(
+        paths,
+        target=parsed.target,
+        execute=parsed.execute,
+    )
+
+    assert parsed.command == "publish-plan"  # nosec B101
+    assert plan.target == "testpypi"  # nosec B101
+    assert plan.repository_url == "https://test.pypi.org/legacy/"  # nosec B101
+    assert plan.execute is False  # nosec B101
+    assert plan.dry_run is True  # nosec B101
+    assert plan.artifact_filenames == [  # nosec B101
+        "mcp_unified-0.1.0-py3-none-any.whl",
+        "mcp_unified-0.1.0.tar.gz",
+    ]
+    assert plan.command[:5] == [  # nosec B101
+        sys.executable,
+        "-m",
+        "twine",
+        "upload",
+        "--repository-url",
+    ]
+    assert "https://test.pypi.org/legacy/" in plan.command  # nosec B101
+    assert "--non-interactive" in plan.command  # nosec B101
+    assert not any("token" in part.lower() for part in plan.command)  # nosec B101
+
+
+def test_rc_publish_plan_execute_requires_opt_in_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Live publish plans should require an explicit environment opt-in."""
+
+    paths = _create_publish_plan_artifacts(tmp_path)
+    monkeypatch.delenv("MCP_UNIFIED_ALLOW_PUBLISH", raising=False)
+
+    with pytest.raises(RuntimeError, match="MCP_UNIFIED_ALLOW_PUBLISH"):
+        mcp_unified_rc.build_publish_plan(
+            paths,
+            target="pypi",
+            execute=True,
+        )
+
+    monkeypatch.setenv("MCP_UNIFIED_ALLOW_PUBLISH", "1")
+    plan = mcp_unified_rc.build_publish_plan(
+        paths,
+        target="pypi",
+        execute=True,
+    )
+
+    assert plan.target == "pypi"  # nosec B101
+    assert plan.repository_url == "https://upload.pypi.org/legacy/"  # nosec B101
+    assert plan.execute is True  # nosec B101
+    assert plan.dry_run is False  # nosec B101
+
+
 def test_user_guide_uat_install_spec_uses_apps_project_by_default() -> None:
     """User-guide UAT install specs should default to the app package project."""
 

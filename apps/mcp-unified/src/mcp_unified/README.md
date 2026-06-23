@@ -52,6 +52,29 @@ Expected current status:
 The package ships `py.typed` as a PEP 561 marker so downstream type checkers can
 recognize the inline type annotations when consuming built artifacts.
 
+## Publishing Readiness
+
+Standalone package publishing is prepared but still guarded. The package
+metadata is PyPI-shaped, while the runtime metadata remains
+`internal-experimental` and `not-published` until maintainers intentionally
+promote it.
+
+Run the full internal release candidate gate:
+
+```bash
+make mcp-unified-rc
+```
+
+Build artifacts and generate the TestPyPI upload plan without uploading:
+
+```bash
+make mcp-unified-publish-dry-run
+```
+
+Live TestPyPI or PyPI upload is not part of normal PR CI. It requires the manual
+workflow, maintainer-owned credentials, an explicit confirmation input, and the
+RC helper's publish opt-in guard.
+
 ## Install From This Repository
 
 Use the package-local project file when testing the standalone boundary:

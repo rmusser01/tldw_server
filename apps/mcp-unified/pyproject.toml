@@ -9,6 +9,26 @@ description = "Standalone MCP Unified runtime and gateway package boundary."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "GPL-3.0-only"}
+authors = [
+  { name = "Robert Musser", email = "contact@tldwproject.com" },
+]
+maintainers = [
+  { name = "Robert Musser", email = "contact@tldwproject.com" },
+]
+keywords = ["mcp", "model-context-protocol", "gateway", "agent-tools", "tool-governance"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
   "pydantic>=2.0.0",
   "loguru>=0.7.0",
@@ -16,6 +36,13 @@ dependencies = [
   "httpx>=0.24.0",
   "websockets>=12.0",
 ]
+
+[project.urls]
+Homepage = "https://tldwproject.com"
+Repository = "https://github.com/rmusser01/tldw_server"
+Issues = "https://github.com/rmusser01/tldw_server/issues"
+"Source Package" = "https://github.com/rmusser01/tldw_server/tree/dev/apps/mcp-unified"
+"User Guide" = "https://github.com/rmusser01/tldw_server/blob/dev/apps/mcp-unified/USER_GUIDE.md"
 
 [project.optional-dependencies]
 core = [
@@ -61,6 +88,7 @@ mcp-unified-smoke = "mcp_unified.smoke.cli:main"
 
 [tool.setuptools]
 include-package-data = false
+license-files = ["LICENSE"]
 packages = [
   "mcp_unified",
   "mcp_unified.federation",
