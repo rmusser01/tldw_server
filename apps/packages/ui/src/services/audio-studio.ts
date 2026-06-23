@@ -1,5 +1,6 @@
 import { bgRequest } from "@/services/background-proxy"
 import { buildQuery } from "@/services/resource-client"
+import type { LegacyAudiobookProjectMigrationPayload } from "@/db/dexie/audiobook-projects"
 
 export type AudioStudioWorkflow = "narration" | "podcast" | "briefing" | "music"
 export type AudioStudioProjectStatus = "draft" | "active" | "archived" | string
@@ -225,16 +226,34 @@ export type AudioStudioJobResponse = {
 
 export type AudiobookMigrationPreviewRequest = {
   legacy_project_ids?: string[]
+  legacy_project_id?: string
+  project_payload?: LegacyAudiobookProjectMigrationPayload | Record<string, unknown>
+  projects?: LegacyAudiobookProjectMigrationPayload[]
+  options?: Record<string, unknown>
 }
 
 export type AudiobookMigrationCommitRequest = {
   legacy_project_ids?: string[]
+  legacy_project_id?: string
+  preview_id?: string
+  project_payload?: LegacyAudiobookProjectMigrationPayload | Record<string, unknown>
+  projects?: LegacyAudiobookProjectMigrationPayload[]
+  options?: Record<string, unknown>
   idempotency_key: string
+}
+
+export type AudiobookMigrationCounts = {
+  projects?: number
+  chapters?: number
+  audio_assets?: number
+  audioAssets?: number
+  [key: string]: unknown
 }
 
 export type AudiobookMigrationResponse = {
   migration_id?: string
   status: string
+  counts?: AudiobookMigrationCounts
   projects?: Array<{ legacy_project_id: string; project_id?: string; status: string }>
 }
 
