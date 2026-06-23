@@ -1,6 +1,7 @@
 import React from "react";
 import { MessageCircle } from "lucide-react";
 
+import { getDesignSystemState } from "@/design-system";
 import type {
   FirstChatVerifyRequest,
   FirstChatVerifyResponse,
@@ -27,6 +28,7 @@ type FirstChatStepProps = {
 };
 
 const DEFAULT_FIRST_PROMPT = "Say hello in one short sentence.";
+const FIRST_CHAT_RETRYING_STATE = getDesignSystemState("retrying");
 
 type FirstChatRecoveryCategory =
   | "auth_failed"
@@ -292,7 +294,7 @@ export function FirstChatStep({
             </div>
             {running ? (
               <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted">
-                Retrying
+                {FIRST_CHAT_RETRYING_STATE.label}
               </span>
             ) : null}
           </div>
