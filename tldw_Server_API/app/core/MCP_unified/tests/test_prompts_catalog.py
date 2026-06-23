@@ -35,9 +35,11 @@ pytestmark = pytest.mark.unit
 
 
 def test_prompt_catalog_error_uses_core_exception_type() -> None:
-    from tldw_Server_API.app.core.exceptions import PromptCatalogError as CorePromptCatalogError
+    from tldw_Server_API.app.core.exception_types import PromptCatalogError as CorePromptCatalogError
+    from tldw_Server_API.app.core.exceptions import PromptCatalogError as ReexportedPromptCatalogError
 
     assert PromptCatalogError is CorePromptCatalogError
+    assert ReexportedPromptCatalogError is CorePromptCatalogError
 
 
 def test_prompt_cursor_encodes_none_as_none() -> None:

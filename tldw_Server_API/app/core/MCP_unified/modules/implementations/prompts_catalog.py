@@ -13,7 +13,7 @@ from typing import Any
 from loguru import logger
 
 from ....DB_Management.Prompts_DB import DatabaseError, PromptsDatabase
-from ....exceptions import PromptCatalogError
+from ....exception_types import PromptCatalogError
 from ....Prompt_Management.structured_prompts import (
     PromptBlock,
     PromptDefinition,

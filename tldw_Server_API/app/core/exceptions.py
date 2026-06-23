@@ -7,6 +7,8 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
 
+from .exception_types import PromptCatalogError
+
 if hasattr(status, "HTTP_422_UNPROCESSABLE_CONTENT"):
     DEFAULT_VALIDATION_STATUS = status.HTTP_422_UNPROCESSABLE_CONTENT
 else:
@@ -39,24 +41,6 @@ class TokenizerUnavailable(Exception):
 
 class BadRequestError(ValueError):
     """Raised when a caller provides invalid arguments for an operation."""
-
-
-class PromptCatalogError(Exception):
-    """Sanitized prompt catalog error suitable for MCP protocol mapping."""
-
-    def __init__(self, code: str, message: str, internal: bool = False) -> None:
-        """Create a sanitized prompt catalog error.
-
-        Args:
-            code: Stable machine-readable prompt catalog error code.
-            message: Safe public message for MCP protocol responses.
-            internal: Whether the underlying failure should be mapped to a
-                generic internal error for clients.
-        """
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.internal = internal
 
 
 class RecipeEnqueueError(RuntimeError):

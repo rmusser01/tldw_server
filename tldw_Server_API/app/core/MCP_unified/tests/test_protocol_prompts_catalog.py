@@ -132,6 +132,28 @@ class ContextPromptModule(BaseModule):
         }
 
 
+class ToolOnlyModule(BaseModule):
+    async def on_initialize(self) -> None:
+        return None
+
+    async def on_shutdown(self) -> None:
+        return None
+
+    async def check_health(self) -> dict[str, bool]:
+        return {"ok": True}
+
+    async def get_tools(self) -> list[dict[str, Any]]:
+        return [{"name": "tool.echo", "description": "Echo tool"}]
+
+    async def execute_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: Any | None = None,
+    ) -> Any:
+        return {"tool": tool_name, "arguments": arguments, "context": context}
+
+
 class FailingPromptModule(ContextPromptModule):
     async def get_prompts_for_context(
         self,
@@ -282,6 +304,16 @@ def _prompt_module() -> ContextPromptModule:
     )
 
 
+def _tool_only_module() -> ToolOnlyModule:
+    return ToolOnlyModule(
+        ModuleConfig(
+            name="tools",
+            version="1.0.0",
+            description="Tool-only test module",
+        )
+    )
+
+
 def _context() -> RequestContext:
     return RequestContext(request_id="prompt-catalog", user_id="u1", client_id="unit")
 
@@ -304,6 +336,19 @@ async def test_initialize_declares_mcp_prompt_capability() -> None:
 
     assert result["capabilities"]["prompts"] == {  # nosec B101
         "available": True,
+        "listChanged": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_initialize_does_not_advertise_prompts_for_tool_only_modules() -> None:
+    handler = _handler_with_registry(PromptOnlyRegistry({"tools": _tool_only_module()}))
+
+    result = await handler._handle_initialize({"clientInfo": {"name": "unit"}}, _context())
+
+    assert result["capabilities"]["tools"] == {"available": True}  # nosec B101
+    assert result["capabilities"]["prompts"] == {  # nosec B101
+        "available": False,
         "listChanged": False,
     }
 
