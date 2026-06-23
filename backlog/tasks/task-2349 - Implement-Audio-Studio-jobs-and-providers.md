@@ -35,6 +35,7 @@ Follow Stage 2 tasks 2.1 through 2.5 in Docs/superpowers/plans/2026-06-23-audio-
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-06-23 recovery: inspected the partial TASK-2349 implementation against the Stage 2 requirements. No additional code fixes were needed after focused verification. Removed generated __pycache__ directories from the Audio Studio app/test scope before staging.
 2026-06-23 follow-up: fixed idempotent generation replays so existing Jobs rows with known terminal statuses, including completed, return the existing generation job row instead of raising a client error. Added focused unit coverage for completed replay preserving a single Jobs row and generation index record. Verification: focused jobs/API pytest 7 passed, broader TASK-2349 suite 33 passed, Bandit on jobs.py 0 findings, scoped git diff check clean.
+2026-06-23 code-quality follow-up: hardened ACE-Step redirects to reject cross-origin redirects when bearer auth is present, expanded Audio Studio payload sanitization for credential and URL-bearing variants, updated generation rows for skipped stale revisions and provider failures, and scoped handler-created CollectionsDatabase instances with context managers. Verification: affected unit group 15 passed, full TASK-2349 suite 37 passed, Bandit on touched Audio Studio app paths 0 findings, scoped git diff check clean.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

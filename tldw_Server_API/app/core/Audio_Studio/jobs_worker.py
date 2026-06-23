@@ -82,9 +82,17 @@ def build_audio_studio_job_handler(
         owner_user_id = str(job.get("owner_user_id") or "").strip()
         if not owner_user_id:
             raise AudioStudioJobError("missing_owner_user_id", retryable=False)
+        collections_db = db_factory(owner_user_id)
+        if hasattr(collections_db, "__enter__") and hasattr(collections_db, "__exit__"):
+            with collections_db as scoped_db:
+                return await handle_audio_studio_job(
+                    job,
+                    collections_db=scoped_db,
+                    provider_registry=provider_registry_factory(),
+                )
         return await handle_audio_studio_job(
             job,
-            collections_db=db_factory(owner_user_id),
+            collections_db=collections_db,
             provider_registry=provider_registry_factory(),
         )
 
@@ -126,26 +134,39 @@ async def _handle_generation_job(
     target_revision_id = _required_text(payload.get("target_revision_id"), "target_revision_id")
     project = collections_db.get_audio_studio_project_by_project_id(project_id)
     if str(getattr(project, "current_revision_id", "")) != target_revision_id:
-        return {"status": "skipped", "reason": "stale_target_revision"}
+        response = {"status": "skipped", "reason": "stale_target_revision"}
+        _update_generation_job_result(collections_db, project=project, job=job, status="skipped", result=response)
+        return response
     try:
         collections_db.get_audio_studio_revision(target_revision_id)
     except KeyError:
-        return {"status": "skipped", "reason": "stale_target_revision"}
+        response = {"status": "skipped", "reason": "stale_target_revision"}
+        _update_generation_job_result(collections_db, project=project, job=job, status="skipped", result=response)
+        return response
 
-    kind = _required_text(payload.get("kind"), "kind")
-    provider = _required_text(payload.get("provider"), "provider")
-    adapter = provider_registry.get_adapter(provider, kind)
-    request = AudioGenerationRequest(
-        workflow=_required_text(payload.get("workflow") or getattr(project, "workflow", ""), "workflow"),
-        kind=kind,
-        prompt=payload.get("prompt") if payload.get("prompt") is None else str(payload.get("prompt")),
-        text=payload.get("text") if payload.get("text") is None else str(payload.get("text")),
-        provider_options=payload.get("provider_options") if isinstance(payload.get("provider_options"), dict) else {},
-        target_resource_kind=_required_text(payload.get("target_resource_kind"), "target_resource_kind"),
-        target_resource_id=_required_text(payload.get("target_resource_id"), "target_resource_id"),
-        target_revision_id=target_revision_id,
-    )
-    result = await adapter.generate(request, user_id=int(owner_user_id) if owner_user_id.isdigit() else None)
+    try:
+        kind = _required_text(payload.get("kind"), "kind")
+        provider = _required_text(payload.get("provider"), "provider")
+        adapter = provider_registry.get_adapter(provider, kind)
+        request = AudioGenerationRequest(
+            workflow=_required_text(payload.get("workflow") or getattr(project, "workflow", ""), "workflow"),
+            kind=kind,
+            prompt=payload.get("prompt") if payload.get("prompt") is None else str(payload.get("prompt")),
+            text=payload.get("text") if payload.get("text") is None else str(payload.get("text")),
+            provider_options=payload.get("provider_options") if isinstance(payload.get("provider_options"), dict) else {},
+            target_resource_kind=_required_text(payload.get("target_resource_kind"), "target_resource_kind"),
+            target_resource_id=_required_text(payload.get("target_resource_id"), "target_resource_id"),
+            target_revision_id=target_revision_id,
+        )
+        result = await adapter.generate(request, user_id=int(owner_user_id) if owner_user_id.isdigit() else None)
+    except Exception as exc:
+        response = {
+            "status": "failed",
+            "reason": str(exc) or type(exc).__name__,
+            "retryable": bool(getattr(exc, "retryable", True)),
+        }
+        _update_generation_job_result(collections_db, project=project, job=job, status="failed", result=response)
+        raise
     artifact_id = f"art_{uuid4().hex[:16]}"
     content_hash = hashlib.sha256(result.content_bytes).hexdigest()
     job_id = str(job.get("uuid") or job.get("id") or "")
@@ -173,18 +194,29 @@ async def _handle_generation_job(
         "mime_type": result.mime_type,
         "size_bytes": len(result.content_bytes),
     }
-    updater = getattr(collections_db, "update_audio_studio_generation_job", None)
-    if callable(updater):
-        updater(
-            project_row_id=getattr(project, "id"),
-            job_id=job_id,
-            status="completed",
-            result_json=json.dumps(response, sort_keys=True),
-        )
+    _update_generation_job_result(collections_db, project=project, job=job, status="completed", result=response)
     return {
         **response,
         "artifact_row_id": getattr(artifact, "id", None),
     }
+
+
+def _update_generation_job_result(
+    collections_db: Any,
+    *,
+    project: Any,
+    job: dict[str, Any],
+    status: str,
+    result: dict[str, Any],
+) -> None:
+    updater = getattr(collections_db, "update_audio_studio_generation_job", None)
+    if callable(updater):
+        updater(
+            project_row_id=getattr(project, "id"),
+            job_id=str(job.get("uuid") or job.get("id") or ""),
+            status=status,
+            result_json=json.dumps(result, sort_keys=True),
+        )
 
 
 def _required_text(value: Any, field_name: str) -> str:

@@ -3,21 +3,52 @@
 from __future__ import annotations
 
 import os
+import re
 from urllib.parse import urlparse
 
 from tldw_Server_API.app.core.testing import is_truthy
 
 _SECRET_KEYS = {
+    "access_token",
     "api_key",
     "apikey",
     "authorization",
     "bearer_token",
+    "credential",
+    "credentials",
     "client_secret",
+    "id_token",
     "password",
+    "private_key",
+    "refresh_token",
     "secret",
+    "session_token",
     "token",
 }
 _URL_KEYS = {"base_url", "endpoint", "endpoint_url", "external_url", "provider_base_url", "url"}
+_SECRET_KEY_COMPONENTS = {"authorization", "credential", "credentials", "password", "secret"}
+_URL_KEY_COMPONENTS = {"callback", "endpoint", "uri", "url", "webhook"}
+_TOKEN_QUALIFIERS = {"access", "auth", "bearer", "client", "id", "refresh", "session"}
+_KEY_QUALIFIERS = {"api", "auth", "client", "private", "secret"}
+_URL_VALUE_SCHEMES = {
+    "data",
+    "file",
+    "ftp",
+    "ftps",
+    "gopher",
+    "http",
+    "https",
+    "ldap",
+    "ldaps",
+    "mailto",
+    "nfs",
+    "sftp",
+    "smb",
+    "ssh",
+    "ws",
+    "wss",
+}
+_DROP = object()
 
 
 def validate_external_audio_endpoint(
@@ -60,16 +91,29 @@ def redact_audio_studio_secret(message: str, *, secrets: list[str | None] | tupl
 def sanitize_audio_studio_payload(value):
     """Return a copy with secret and URL-bearing client fields removed."""
 
+    sanitized = _sanitize_audio_studio_payload(value)
+    return None if sanitized is _DROP else sanitized
+
+
+def _sanitize_audio_studio_payload(value):
     if isinstance(value, dict):
         sanitized = {}
         for key, nested in value.items():
-            normalized = _normalize_key(key)
-            if normalized in _SECRET_KEYS or normalized in _URL_KEYS or normalized.endswith("_secret"):
+            if _is_forbidden_client_key(key):
                 continue
-            sanitized[key] = sanitize_audio_studio_payload(nested)
+            sanitized_nested = _sanitize_audio_studio_payload(nested)
+            if sanitized_nested is _DROP:
+                continue
+            sanitized[key] = sanitized_nested
         return sanitized
     if isinstance(value, list):
-        return [sanitize_audio_studio_payload(item) for item in value]
+        return [
+            sanitized_item
+            for item in value
+            if (sanitized_item := _sanitize_audio_studio_payload(item)) is not _DROP
+        ]
+    if isinstance(value, str) and _is_forbidden_url_value(value):
+        return _DROP
     return value
 
 
@@ -97,4 +141,32 @@ def _effective_port(scheme: str, port: int | None) -> int:
 
 
 def _normalize_key(key: object) -> str:
-    return str(key).strip().lower().replace("-", "_")
+    raw = str(key)
+    with_separators = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", raw)
+    return re.sub(r"[^a-zA-Z0-9]+", "_", with_separators).strip("_").lower()
+
+
+def _is_forbidden_client_key(key: object) -> bool:
+    normalized = _normalize_key(key)
+    if normalized in _SECRET_KEYS or normalized in _URL_KEYS or normalized.endswith("_secret"):
+        return True
+    parts = [part for part in normalized.split("_") if part]
+    if any(part in _SECRET_KEY_COMPONENTS for part in parts):
+        return True
+    if any(part in _URL_KEY_COMPONENTS for part in parts):
+        return True
+    if "token" in parts and (normalized == "token" or any(part in _TOKEN_QUALIFIERS for part in parts)):
+        return True
+    if "key" in parts and any(part in _KEY_QUALIFIERS for part in parts):
+        return True
+    return False
+
+
+def _is_forbidden_url_value(value: str) -> bool:
+    stripped = value.strip()
+    if not stripped:
+        return False
+    parsed = urlparse(stripped)
+    if parsed.netloc:
+        return True
+    return parsed.scheme.lower() in _URL_VALUE_SCHEMES

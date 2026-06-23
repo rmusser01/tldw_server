@@ -6,6 +6,7 @@ import pytest
 
 from tldw_Server_API.app.core.Audio_Studio.security import (
     redact_audio_studio_secret,
+    sanitize_audio_studio_payload,
     validate_external_audio_endpoint,
 )
 
@@ -77,3 +78,40 @@ def test_redact_audio_studio_secret_masks_known_secret_values() -> None:
     assert "sk-live-abc123" not in message
     assert "secret-token" not in message
     assert message == "using key [REDACTED] and token [REDACTED]"
+
+
+def test_sanitize_audio_studio_payload_strips_credential_and_url_variants() -> None:
+    payload = {
+        "voice": "af_heart",
+        "duration": 12,
+        "access_token": "secret-access-token",
+        "refresh-token": "secret-refresh-token",
+        "private_key": "secret-private-key",
+        "credentials": {"token": "secret-nested-token"},
+        "callback_url": "not a url but still endpoint-bearing",
+        "webhookUrl": "disabled",
+        "nested": {
+            "safe": "keep",
+            "media": "https://attacker.example/audio.wav",
+            "protocol_relative": "//attacker.example/audio.wav",
+            "items": [
+                "ok",
+                "wss://attacker.example/socket",
+                {"clientCredential": "secret", "label": "kept"},
+            ],
+        },
+    }
+
+    sanitized = sanitize_audio_studio_payload(payload)
+
+    assert sanitized == {
+        "voice": "af_heart",
+        "duration": 12,
+        "nested": {
+            "safe": "keep",
+            "items": [
+                "ok",
+                {"label": "kept"},
+            ],
+        },
+    }

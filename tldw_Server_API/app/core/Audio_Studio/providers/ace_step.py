@@ -82,6 +82,9 @@ class AceStepHttpAdapter:
             if not location:
                 return response
             next_url = str(httpx.URL(current_url).join(location))
-            validate_external_audio_endpoint(next_url, redirect_from=current_url)
+            current_origin = validate_external_audio_endpoint(current_url)
+            next_origin = validate_external_audio_endpoint(next_url, redirect_from=current_url)
+            if headers.get("authorization") and next_origin != current_origin:
+                raise ValueError("external_audio_redirect_cross_origin_with_auth")
             current_url = next_url
         raise ValueError("external_audio_redirect_limit_exceeded")

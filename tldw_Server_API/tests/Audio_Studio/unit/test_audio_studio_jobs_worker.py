@@ -9,7 +9,11 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.Audio_Studio.jobs import JOB_TYPE_GENERATE, JOB_TYPE_RENDER
-from tldw_Server_API.app.core.Audio_Studio.jobs_worker import handle_audio_studio_job
+from tldw_Server_API.app.core.Audio_Studio.jobs_worker import (
+    AudioStudioJobError,
+    build_audio_studio_job_handler,
+    handle_audio_studio_job,
+)
 from tldw_Server_API.app.core.Audio_Studio.models import AudioGenerationResult
 
 
@@ -29,6 +33,13 @@ class _FakeCollectionsDb:
         self.project = _Project()
         self.artifacts: list[dict[str, Any]] = []
         self.updated_jobs: list[dict[str, Any]] = []
+        self.closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.closed = True
 
     def get_audio_studio_project_by_project_id(self, project_id: str) -> _Project:
         assert project_id == self.project.project_id
@@ -67,6 +78,20 @@ class _FakeRegistry:
     def get_adapter(self, provider: str, kind: str) -> _FakeAdapter:
         assert (provider, kind) == ("tts", "speech")
         return _FakeAdapter()
+
+
+class _FailingAdapter:
+    provider_id = "tts"
+    supported_kinds = frozenset({"speech"})
+
+    async def generate(self, request, **kwargs):
+        raise AudioStudioJobError("provider_unavailable", retryable=True)
+
+
+class _FailingRegistry:
+    def get_adapter(self, provider: str, kind: str) -> _FailingAdapter:
+        assert (provider, kind) == ("tts", "speech")
+        return _FailingAdapter()
 
 
 def _generation_job() -> dict[str, Any]:
@@ -128,6 +153,49 @@ async def test_generation_handler_skips_stale_revision_without_provider_call() -
 
     assert result == {"status": "skipped", "reason": "stale_target_revision"}
     assert db.artifacts == []
+    updated = db.updated_jobs[0]
+    assert updated["job_id"] == "job-uuid-99"
+    assert updated["status"] == "skipped"
+    assert json.loads(updated["result_json"]) == {
+        "status": "skipped",
+        "reason": "stale_target_revision",
+    }
+
+
+@pytest.mark.asyncio
+async def test_generation_handler_updates_generation_row_before_provider_failure() -> None:
+    db = _FakeCollectionsDb()
+
+    with pytest.raises(AudioStudioJobError, match="provider_unavailable"):
+        await handle_audio_studio_job(
+            _generation_job(),
+            collections_db=db,
+            provider_registry=_FailingRegistry(),
+        )
+
+    assert db.artifacts == []
+    updated = db.updated_jobs[0]
+    assert updated["job_id"] == "job-uuid-99"
+    assert updated["status"] == "failed"
+    assert json.loads(updated["result_json"]) == {
+        "status": "failed",
+        "reason": "provider_unavailable",
+        "retryable": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_build_audio_studio_job_handler_closes_context_managed_db() -> None:
+    db = _FakeCollectionsDb()
+    handler = build_audio_studio_job_handler(
+        collections_db_factory=lambda owner_user_id: db,
+        provider_registry_factory=lambda: _FakeRegistry(),
+    )
+
+    result = await handler(_generation_job())
+
+    assert result["status"] == "completed"
+    assert db.closed is True
 
 
 @pytest.mark.asyncio

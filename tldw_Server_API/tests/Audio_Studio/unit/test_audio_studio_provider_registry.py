@@ -105,3 +105,32 @@ async def test_ace_step_adapter_uses_configured_endpoint_and_runtime_api_key(
     assert result.provider == "ace_step"
     assert result.mime_type == "audio/wav"
     assert result.content_bytes == b"RIFF"
+
+
+@pytest.mark.asyncio
+async def test_ace_step_adapter_rejects_cross_origin_redirect_with_bearer_auth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUDIO_STUDIO_ACE_STEP_BASE_URL", "https://ace.example.test")
+    monkeypatch.setenv(
+        "AUDIO_STUDIO_EXTERNAL_ENDPOINT_ALLOWLIST",
+        "https://ace.example.test,https://other.example.test",
+    )
+    monkeypatch.setenv("AUDIO_STUDIO_ACE_STEP_API_KEY", "secret-runtime-key")
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.host == "ace.example.test":
+            assert request.headers["authorization"] == "Bearer secret-runtime-key"
+            return httpx.Response(307, headers={"location": "https://other.example.test/generate"})
+        return httpx.Response(200, content=b"must-not-receive-token")
+
+    adapter = AceStepHttpAdapter(
+        client_factory=lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kwargs)
+    )
+
+    with pytest.raises(ValueError, match="external_audio_redirect_cross_origin_with_auth"):
+        await adapter.generate(_request("music"))
+
+    assert [request.url.host for request in requests] == ["ace.example.test"]
