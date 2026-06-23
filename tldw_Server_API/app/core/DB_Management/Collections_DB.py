@@ -946,6 +946,7 @@ class CollectionsDatabase:
                 delivered_at TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_user_notifications_user_created ON user_notifications(user_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_user_notifications_user_snooze ON user_notifications(user_id, snooze_task_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_user_notifications_user_unread ON user_notifications(user_id, read_at);
             CREATE UNIQUE INDEX IF NOT EXISTS ux_user_notifications_user_dedupe ON user_notifications(user_id, dedupe_key) WHERE dedupe_key IS NOT NULL;
 
@@ -1198,6 +1199,7 @@ class CollectionsDatabase:
                 delivered_at TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_user_notifications_user_created ON user_notifications(user_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_user_notifications_user_snooze ON user_notifications(user_id, snooze_task_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_user_notifications_user_unread ON user_notifications(user_id, read_at);
             CREATE UNIQUE INDEX IF NOT EXISTS ux_user_notifications_user_dedupe ON user_notifications(user_id, dedupe_key);
 
@@ -5557,6 +5559,63 @@ class CollectionsDatabase:
             (
                 "SELECT * FROM user_notifications "
                 "WHERE user_id = ? AND dismissed_at IS NOT NULL "
+                "ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            ),
+            (self.user_id, limit, offset),
+        ).rows
+        return [self._notification_row_from_db(row) for row in rows]
+
+    def list_user_notifications_by_snooze_task_ids(
+        self,
+        task_ids: Iterable[str],
+    ) -> list[UserNotificationRow]:
+        """Return dismissed notifications linked to the supplied snooze task IDs."""
+        normalized_ids = sorted({str(task_id).strip() for task_id in task_ids if str(task_id).strip()})
+        if not normalized_ids:
+            return []
+
+        all_rows: list[dict[str, Any]] = []
+        chunk_size = 500
+        for start in range(0, len(normalized_ids), chunk_size):
+            chunk = normalized_ids[start : start + chunk_size]
+            placeholders = ",".join(["?"] * len(chunk))
+            rows = self.backend.execute(
+                (
+                    "SELECT * FROM user_notifications "
+                    f"WHERE user_id = ? AND dismissed_at IS NOT NULL AND snooze_task_id IN ({placeholders}) "  # nosec B608
+                    "ORDER BY created_at DESC"
+                ),
+                (self.user_id, *chunk),
+            ).rows
+            all_rows.extend(rows)
+
+        all_rows.sort(key=lambda row: (str(row.get("created_at") or ""), int(row.get("id") or 0)), reverse=True)
+        return [self._notification_row_from_db(row) for row in all_rows]
+
+    def list_user_notification_snooze_task_ids(self) -> list[str]:
+        """Return distinct non-empty snooze task IDs referenced by dismissed notifications."""
+        rows = self.backend.execute(
+            (
+                "SELECT DISTINCT snooze_task_id FROM user_notifications "
+                "WHERE user_id = ? AND dismissed_at IS NOT NULL "
+                "AND snooze_task_id IS NOT NULL AND snooze_task_id != '' "
+                "ORDER BY snooze_task_id"
+            ),
+            (self.user_id,),
+        ).rows
+        return [str(row.get("snooze_task_id") or "") for row in rows if row.get("snooze_task_id")]
+
+    def list_user_legacy_snooze_candidate_notifications(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[UserNotificationRow]:
+        """Return dismissed legacy notifications that predate explicit snooze links."""
+        rows = self.backend.execute(
+            (
+                "SELECT * FROM user_notifications "
+                "WHERE user_id = ? AND dismissed_at IS NOT NULL AND snooze_task_id IS NULL "
                 "ORDER BY created_at DESC LIMIT ? OFFSET ?"
             ),
             (self.user_id, limit, offset),
