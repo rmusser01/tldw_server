@@ -8,7 +8,7 @@ labels:
 - design
 - refactor
 priority: medium
-updated_date: 2026-06-24 17:58
+updated_date: 2026-06-24 19:29
 ---
 
 ## Description
@@ -28,12 +28,14 @@ Write the approved contract-first staged cleanup design for the UserProfiles mod
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Wrote and self-reviewed Docs/superpowers/specs/2026-06-24-userprofiles-contract-first-refactor-design.md. Placeholder scan found no TODO/TBD markers; scope remains design-only; storage schema changes are explicitly deferred to a separate future plan if needed.
+Reopened after review to clarify required audit timing, v2 route default, transactional atomicity scope, bulk scope-before-disclosure, bulk diff defaults, and milestone sizing before implementation planning.
+Applied second review clarifications: v2 defaults to explicit versioned routes, required audit is pre-commit/transactional, v2 atomicity covers DB mutations only, bulk performs scope-before-disclosure, bulk diffs default to before-snapshots plus masking, and implementation planning must be milestone-based.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created and self-reviewed the UserProfiles contract-first refactor design spec at Docs/superpowers/specs/2026-06-24-userprofiles-contract-first-refactor-design.md. The spec captures the approved staged architecture, clean v2 contract direction, legacy compatibility strategy, planner/executor flow, effects/audit rules, backend transaction notes, testing strategy, and migration gates.
+Created and self-reviewed the UserProfiles contract-first refactor design spec at Docs/superpowers/specs/2026-06-24-userprofiles-contract-first-refactor-design.md. The spec captures the approved staged architecture, clean v2 contract direction, legacy compatibility strategy, planner/executor flow, pre-commit audit and post-commit effect rules, backend transaction notes, bulk security/diff defaults, testing strategy, and migration gates.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

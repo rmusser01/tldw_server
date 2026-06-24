@@ -111,9 +111,11 @@ helpers with focused backend-selection tests.
 ### Contract And Compatibility Layer
 
 Existing routes keep legacy-compatible response mapping. The clean contract
-should use an explicit surface, such as versioned routes or documented API
-version/media-type negotiation. Avoid ad hoc query parameters such as
-`?contract=v2`.
+should use explicit versioned routes by default, for example a future
+`/api/v2/...` profile surface or clearly versioned v1 sub-routes. Documented
+API-version or media-type negotiation remains an alternative only if the project
+adopts that convention consistently before implementation. Avoid ad hoc query
+parameters such as `?contract=v2`.
 
 ## Read Flow
 
@@ -149,12 +151,15 @@ failures.
 5. For apply mode, the service starts the write transaction.
 6. Apply mode rechecks `profile_version` inside the write transaction.
 7. Executors apply the validated mutation plan.
-8. The transaction commits.
-9. After-commit effects run according to their required or best-effort policy.
-10. The response mapper returns the selected contract shape.
+8. Required pre-commit effects, such as durable admin audit when policy requires
+   it, run inside the transactional success path before commit.
+9. The transaction commits.
+10. Post-commit best-effort effects run after commit.
+11. The response mapper returns the selected contract shape.
 
 Dry-run and apply must share all validation and authorization paths. Apply mode
-adds only the transactional version recheck and mutation execution.
+adds only the transactional version recheck, mutation execution, and effect
+dispatch steps.
 
 ## Bulk Flow
 
@@ -163,6 +168,8 @@ adds only the transactional version recheck and mutation execution.
 Bulk behavior:
 
 - resolve candidate users,
+- apply scope filtering and authorization before returning per-user existence or
+  membership details,
 - enforce confirmation thresholds,
 - run each target user as an isolated unit,
 - keep per-user atomicity,
@@ -171,8 +178,9 @@ Bulk behavior:
 - compute diffs only where requested and within configured cost limits.
 
 Bulk diffs should be optional or capped for large target sets. The service should
-define whether diffs come from preloaded before-snapshots, post-apply reads, or
-both for each endpoint contract.
+default to preloaded before-snapshots and response-value masking. Post-apply
+reads are allowed only for small/capped target sets or explicit requests where
+the contract and performance budget allow them.
 
 ## Contract Rules
 
@@ -182,6 +190,8 @@ Clean v2 single updates are atomic all-or-reject:
 
 - if the request is valid and authorized, all planned mutations apply;
 - if any entry is invalid or forbidden, no mutation occurs;
+- atomicity applies to planned transactional database mutations, not to
+  post-commit best-effort effects;
 - the clean single-update response does not include `skipped`.
 
 `skipped` remains only in legacy adapters and bulk per-user results.
@@ -221,21 +231,23 @@ Membership-specific mapping:
 
 ## Effects And Audit
 
-Separate transactional database mutations from after-commit effects.
+Separate transactional database mutations, required pre-commit effects, and
+post-commit best-effort effects.
 
 Effect descriptors should identify:
 
 - effect type,
 - target user/org/team,
-- required vs best-effort policy,
+- pre-commit required vs post-commit best-effort policy,
 - sanitized failure behavior,
 - logging/metric/audit metadata.
 
 Required admin audit follows the project's strict audit policy. When durable
-audit is required, audit failure blocks success rather than returning a false
-success. Best-effort effects such as cache invalidation and limiter refresh are
-logged and tracked in metrics, but do not make a committed database mutation
-appear failed.
+audit is required, it must run before the commit point or inside the same
+transactional success boundary so audit failure blocks success without leaving a
+committed write that the API reports as failed. Best-effort effects such as cache
+invalidation and limiter refresh run after commit, are logged and tracked in
+metrics, but do not make a committed database mutation appear failed.
 
 Effect internals are not exposed in normal v2 responses. If the API needs to
 surface non-critical issues, use a generic warnings mechanism rather than
@@ -258,7 +270,9 @@ Tests should cover backend-specific behavior only where behavior differs.
 
 ## Migration Strategy
 
-Use readiness gates instead of a big-bang rewrite:
+Use readiness gates instead of a big-bang rewrite. The implementation plan
+should be milestone-based; this design is too broad for a single implementation
+chunk.
 
 1. Add typed internal request/result/plan models and tests while preserving
    current behavior.
