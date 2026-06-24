@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping, Protocol
+from datetime import datetime, timezone
+from typing import Any, Literal, Mapping, Protocol, cast
 
 from .resolver import resolve_effective_action
-from .types import CandidateAction, GovernanceAction
+from .types import CandidateAction, GovernanceAction, utc_now
 
 CategorySource = Literal["explicit", "metadata", "pattern", "default"]
 
@@ -29,6 +30,12 @@ _CATEGORY_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("dependencies", ("dependency", "dependencies", "package", "library", "version")),
     ("compliance", ("compliance", "policy", "governance", "audit", "regulation")),
 )
+
+_VALID_ACTIONS = frozenset({"allow", "warn", "require_approval", "deny"})
+
+
+class InvalidGovernanceCandidateError(ValueError):
+    """Raised when a policy source returns a malformed governance candidate."""
 
 
 class _GapStoreProtocol(Protocol):
@@ -68,11 +75,11 @@ class GovernanceService:
         default_fallback_mode: str = "warn_only",
     ) -> None:
         self._store = store
-        self._policy_loader = policy_loader
+        self._policy_loader = policy_loader if policy_loader is not None else store
         self._default_fallback_mode = default_fallback_mode
 
     @staticmethod
-    def _normalize_text(value: str | None) -> str:
+    def _normalize_text(value: Any) -> str:
         return " ".join(str(value or "").strip().split())
 
     def _resolve_category(
@@ -87,8 +94,8 @@ class GovernanceService:
             return explicit, "explicit"
 
         metadata_category = ""
-        if metadata:
-            metadata_category = self._normalize_text(str(metadata.get("category", ""))).lower()
+        if metadata and isinstance(metadata.get("category"), str):
+            metadata_category = self._normalize_text(metadata.get("category")).lower()
         if metadata_category:
             return metadata_category, "metadata"
 
@@ -99,13 +106,52 @@ class GovernanceService:
         return "general", "default"
 
     @staticmethod
+    def _coerce_action(value: Any) -> GovernanceAction:
+        normalized = GovernanceService._normalize_text(value).lower()
+        action = _FALLBACK_ACTIONS.get(normalized, normalized)
+        if action not in _VALID_ACTIONS:
+            raise InvalidGovernanceCandidateError("invalid_candidate_action")
+        return cast(GovernanceAction, action)
+
+    @staticmethod
+    def _coerce_int(value: Any, *, field: str) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError) as exc:
+            raise InvalidGovernanceCandidateError(f"invalid_candidate_{field}") from exc
+
+    @staticmethod
+    def _coerce_updated_at(value: Any) -> datetime:
+        if value is None:
+            return utc_now()
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            parsed = datetime.fromtimestamp(float(value), tz=timezone.utc)
+        else:
+            rendered = GovernanceService._normalize_text(value)
+            if not rendered:
+                return utc_now()
+            if rendered.endswith("Z"):
+                rendered = f"{rendered[:-1]}+00:00"
+            try:
+                parsed = datetime.fromisoformat(rendered)
+            except ValueError as exc:
+                raise InvalidGovernanceCandidateError("invalid_candidate_updated_at") from exc
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    @staticmethod
     def _coerce_candidate(raw: CandidateAction | Mapping[str, Any]) -> CandidateAction:
         if isinstance(raw, CandidateAction):
+            GovernanceService._coerce_action(raw.action)
             return raw
         return CandidateAction(
-            action=str(raw.get("action", "allow")),  # type: ignore[arg-type]
-            scope_level=int(raw.get("scope_level", 0)),
-            priority=int(raw.get("priority", 0)),
+            action=GovernanceService._coerce_action(raw.get("action", "allow")),
+            scope_level=GovernanceService._coerce_int(raw.get("scope_level", 0), field="scope_level"),
+            priority=GovernanceService._coerce_int(raw.get("priority", 0), field="priority"),
+            updated_at=GovernanceService._coerce_updated_at(raw.get("updated_at")),
             source_id=(None if raw.get("source_id") is None else str(raw.get("source_id"))),
             reason=(None if raw.get("reason") is None else str(raw.get("reason"))),
         )
@@ -156,7 +202,7 @@ class GovernanceService:
                 }
                 for candidate in candidates
             )
-        except (AttributeError, RuntimeError, TypeError, ValueError):
+        except (AttributeError, InvalidGovernanceCandidateError, RuntimeError, TypeError, ValueError):
             rules = ()
 
         return GovernanceKnowledgeResult(
@@ -199,6 +245,15 @@ class GovernanceService:
                 summary=summary,
                 category=resolved_category,
                 metadata=metadata or {},
+            )
+        except InvalidGovernanceCandidateError as exc:
+            return GovernanceValidationResult(
+                action="deny",
+                status="deny",
+                category=resolved_category,
+                category_source=category_source,
+                fallback_reason=str(exc) or "invalid_candidate",
+                matched_rules=(),
             )
         except (AttributeError, RuntimeError, TypeError, ValueError):
             fallback_action = self.resolve_fallback(effective_fallback_mode)

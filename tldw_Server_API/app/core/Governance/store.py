@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 import aiosqlite
+
+_VALID_ACTIONS = frozenset({"allow", "warn", "require_approval", "deny"})
 
 
 @dataclass(frozen=True)
@@ -68,6 +70,7 @@ class GovernanceStore:
                     persona_id TEXT,
                     workspace_id TEXT,
                     category TEXT NOT NULL,
+                    action TEXT NOT NULL DEFAULT 'warn',
                     title TEXT NOT NULL DEFAULT '',
                     body_markdown TEXT NOT NULL DEFAULT '',
                     status TEXT NOT NULL DEFAULT 'active',
@@ -108,9 +111,22 @@ class GovernanceStore:
                     COALESCE(workspace_id, '')
                 )
                 WHERE status = 'open';
+
+                CREATE INDEX IF NOT EXISTS idx_governance_rules_active_category
+                ON governance_rules (status, category, priority, updated_at);
                 """
             )
+            await self._ensure_schema_columns(db)
             await db.commit()
+
+    async def _ensure_schema_columns(self, db: aiosqlite.Connection) -> None:
+        """Apply lightweight additive migrations for existing governance DBs."""
+        cursor = await db.execute("PRAGMA table_info(governance_rules)")
+        columns = {str(row[1]) for row in await cursor.fetchall()}
+        if "action" not in columns:
+            await db.execute(
+                "ALTER TABLE governance_rules ADD COLUMN action TEXT NOT NULL DEFAULT 'warn'"
+            )
 
     async def table_exists(self, table_name: str) -> bool:
         """Return True when a SQLite table exists."""
@@ -124,13 +140,117 @@ class GovernanceStore:
             return bool(row)
 
     @staticmethod
-    def _normalize_text(text: str) -> str:
+    def _normalize_text(text: Any) -> str:
         return " ".join(str(text or "").strip().split())
+
+    @classmethod
+    def _normalize_optional_scope_text(cls, text: str | None) -> str | None:
+        normalized = cls._normalize_text(text)
+        return normalized or None
+
+    @staticmethod
+    def _validate_optional_scope_id(field: str, value: int | None) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            raise ValueError(f"{field} must be an integer")
+        normalized = int(value)
+        if normalized < 0:
+            raise ValueError(f"{field} must be non-negative")
+        return normalized
+
+    @classmethod
+    def _coerce_metadata_scope_id(cls, field: str, metadata: Mapping[str, Any]) -> int | None:
+        value = metadata.get(field)
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            raise ValueError(f"{field} must be an integer")
+        try:
+            normalized = int(str(value))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field} must be an integer") from exc
+        return cls._validate_optional_scope_id(field, normalized)
+
+    @classmethod
+    def _normalize_category(cls, category: str | None) -> str:
+        return cls._normalize_text(category).lower() or "general"
 
     @classmethod
     def _question_fingerprint(cls, question: str) -> str:
         normalized = cls._normalize_text(question).lower()
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _scope_level(row: aiosqlite.Row) -> int:
+        if row["workspace_id"] is not None:
+            return 4
+        if row["persona_id"] is not None:
+            return 3
+        if row["team_id"] is not None:
+            return 2
+        if row["org_id"] is not None:
+            return 1
+        return 0
+
+    async def get_candidates(
+        self,
+        *,
+        surface: str | None = None,
+        summary: str | None = None,
+        category: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return active governance rule candidates for a category and optional scope."""
+        del surface, summary
+        metadata_map = metadata or {}
+        normalized_category = self._normalize_category(category)
+        org_id = self._coerce_metadata_scope_id("org_id", metadata_map)
+        team_id = self._coerce_metadata_scope_id("team_id", metadata_map)
+        persona_id = self._normalize_optional_scope_text(
+            None if metadata_map.get("persona_id") is None else str(metadata_map.get("persona_id"))
+        )
+        workspace_id = self._normalize_optional_scope_text(
+            None if metadata_map.get("workspace_id") is None else str(metadata_map.get("workspace_id"))
+        )
+
+        async with self._connect() as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """
+                SELECT id, org_id, team_id, persona_id, workspace_id,
+                       category, action, title, priority, updated_at
+                FROM governance_rules
+                WHERE status = 'active'
+                  AND LOWER(category) IN (?, 'general')
+                  AND (effective_from IS NULL OR effective_from <= CURRENT_TIMESTAMP)
+                  AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+                  AND (org_id IS NULL OR org_id = ?)
+                  AND (team_id IS NULL OR team_id = ?)
+                  AND (persona_id IS NULL OR persona_id = ?)
+                  AND (workspace_id IS NULL OR workspace_id = ?)
+                ORDER BY priority DESC, updated_at DESC, id ASC
+                """,
+                (normalized_category, org_id, team_id, persona_id, workspace_id),
+            )
+            rows = await cursor.fetchall()
+
+        candidates: list[dict[str, Any]] = []
+        for row in rows:
+            action = self._normalize_text(row["action"]).lower()
+            if action not in _VALID_ACTIONS:
+                action = "deny"
+            candidates.append(
+                {
+                    "action": action,
+                    "scope_level": self._scope_level(row),
+                    "priority": int(row["priority"]),
+                    "updated_at": str(row["updated_at"]),
+                    "source_id": f"governance_rules:{int(row['id'])}",
+                    "reason": self._normalize_text(row["title"]) or None,
+                }
+            )
+        return candidates
 
     async def upsert_open_gap(
         self,
@@ -146,6 +266,10 @@ class GovernanceStore:
         """Create or return an existing open gap for the same normalized question/scope."""
         normalized_question = self._normalize_text(question)
         normalized_category = self._normalize_text(category).lower()
+        normalized_org_id = self._validate_optional_scope_id("org_id", org_id)
+        normalized_team_id = self._validate_optional_scope_id("team_id", team_id)
+        normalized_persona_id = self._normalize_optional_scope_text(persona_id)
+        normalized_workspace_id = self._normalize_optional_scope_text(workspace_id)
         if not normalized_question:
             raise ValueError("question is required")
         if not normalized_category:
@@ -163,10 +287,10 @@ class GovernanceStore:
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)
                     """,
                     (
-                        org_id,
-                        team_id,
-                        persona_id,
-                        workspace_id,
+                        normalized_org_id,
+                        normalized_team_id,
+                        normalized_persona_id,
+                        normalized_workspace_id,
                         normalized_question,
                         fingerprint,
                         normalized_category,
@@ -197,10 +321,10 @@ class GovernanceStore:
                 (
                     fingerprint,
                     normalized_category,
-                    org_id,
-                    team_id,
-                    persona_id,
-                    workspace_id,
+                    normalized_org_id,
+                    normalized_team_id,
+                    normalized_persona_id,
+                    normalized_workspace_id,
                 ),
             )
             row = await cursor.fetchone()
