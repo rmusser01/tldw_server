@@ -8,8 +8,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from tldw_Server_API.app.core.exceptions import ThirdPartyHTTPStatusError
 from tldw_Server_API.app.core.Third_Party._http_helpers import (
-    ThirdPartyHTTPStatusError,
     fetch_json_checked,
 )
 

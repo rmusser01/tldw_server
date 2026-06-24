@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from tldw_Server_API.app.core.Third_Party import RePEc as repec
@@ -6,10 +8,10 @@ from tldw_Server_API.app.core.Third_Party import RePEc as repec
 pytestmark = pytest.mark.unit
 
 
-def test_get_ref_by_handle_sanitizes_fetch_failures(monkeypatch):
+def test_get_ref_by_handle_sanitizes_fetch_failures(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("REPEC_API_CODE", "test-code")
 
-    def fail_fetch(**_kwargs):
+    def fail_fetch(**_kwargs: Any) -> None:
         raise RuntimeError("repec token at /private/repec.key")
 
     monkeypatch.setattr(repec, "fetch", fail_fetch)
@@ -22,10 +24,10 @@ def test_get_ref_by_handle_sanitizes_fetch_failures(monkeypatch):
     assert "/private/repec.key" not in error
 
 
-def test_get_ref_by_handle_preserves_timeout_classification(monkeypatch):
+def test_get_ref_by_handle_preserves_timeout_classification(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("REPEC_API_CODE", "test-code")
 
-    def fail_fetch(**_kwargs):
+    def fail_fetch(**_kwargs: Any) -> None:
         raise TimeoutError("timed out at /private/repec-timeout.key")
 
     monkeypatch.setattr(repec, "fetch", fail_fetch)
@@ -38,8 +40,8 @@ def test_get_ref_by_handle_preserves_timeout_classification(monkeypatch):
     assert "/private/repec-timeout.key" not in error
 
 
-def test_get_citations_plain_sanitizes_fetch_failures(monkeypatch):
-    def fail_fetch(**_kwargs):
+def test_get_citations_plain_sanitizes_fetch_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_fetch(**_kwargs: Any) -> None:
         raise RuntimeError("citec token at /private/citec.key")
 
     monkeypatch.setattr(repec, "fetch", fail_fetch)
@@ -52,8 +54,8 @@ def test_get_citations_plain_sanitizes_fetch_failures(monkeypatch):
     assert "/private/citec.key" not in error
 
 
-def test_get_citations_plain_preserves_timeout_classification(monkeypatch):
-    def fail_fetch(**_kwargs):
+def test_get_citations_plain_preserves_timeout_classification(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_fetch(**_kwargs: Any) -> None:
         raise TimeoutError("timed out at /private/citec-timeout.key")
 
     monkeypatch.setattr(repec, "fetch", fail_fetch)
@@ -66,8 +68,8 @@ def test_get_citations_plain_preserves_timeout_classification(monkeypatch):
     assert "/private/citec-timeout.key" not in error
 
 
-def test_get_citations_amf_raw_sanitizes_fetch_failures(monkeypatch):
-    def fail_fetch(**_kwargs):
+def test_get_citations_amf_raw_sanitizes_fetch_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_fetch(**_kwargs: Any) -> None:
         raise RuntimeError("citec amf token at /private/citec-amf.key")
 
     monkeypatch.setattr(repec, "fetch", fail_fetch)
@@ -80,8 +82,8 @@ def test_get_citations_amf_raw_sanitizes_fetch_failures(monkeypatch):
     assert "/private/citec-amf.key" not in error
 
 
-def test_get_citations_amf_raw_preserves_timeout_classification(monkeypatch):
-    def fail_fetch(**_kwargs):
+def test_get_citations_amf_raw_preserves_timeout_classification(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_fetch(**_kwargs: Any) -> None:
         raise TimeoutError("timed out at /private/citec-amf-timeout.key")
 
     monkeypatch.setattr(repec, "fetch", fail_fetch)
@@ -94,18 +96,18 @@ def test_get_citations_amf_raw_preserves_timeout_classification(monkeypatch):
     assert "/private/citec-amf-timeout.key" not in error
 
 
-def test_citec_base_uses_https():
+def test_citec_base_uses_https() -> None:
     assert repec._CITEC_BASE.startswith("https://")
 
 
-def test_get_citations_plain_uses_https_citec_url(monkeypatch):
-    captured = {}
+def test_get_citations_plain_uses_https_citec_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, str] = {}
 
     class FakeResponse:
         status_code = 200
         text = "<citationData id=\"RePEc:abc:def:123\"><citedBy>1</citedBy><cites>2</cites></citationData>"
 
-    def fake_fetch(**kwargs):
+    def fake_fetch(**kwargs: Any) -> FakeResponse:
         captured["url"] = kwargs["url"]
         return FakeResponse()
 

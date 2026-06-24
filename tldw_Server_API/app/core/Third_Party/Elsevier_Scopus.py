@@ -9,11 +9,9 @@ import contextlib
 import os
 from typing import Any
 
+from tldw_Server_API.app.core.exceptions import ThirdPartyHTTPStatusError
 from tldw_Server_API.app.core.http_client import fetch
-from tldw_Server_API.app.core.Third_Party._http_helpers import (
-    ThirdPartyHTTPStatusError,
-    fetch_json_checked,
-)
+from tldw_Server_API.app.core.Third_Party._http_helpers import fetch_json_checked
 
 
 def fetch_json(**kwargs: Any) -> Any:
@@ -129,20 +127,20 @@ def get_scopus_by_doi(doi: str) -> tuple[dict | None, str | None]:
             "view": "STANDARD",
         }
         r = fetch(method="GET", url=BASE_URL, headers=_headers(), params=params, timeout=20)
-        if r.status_code == 404:
+        try:
+            if r.status_code == 404:
+                return None, None
+            if r.status_code >= 400:
+                return None, f"Scopus API HTTP Error: {r.status_code}"
+            data = r.json() or {}
+            sr = data.get("search-results") or {}
+            entries = sr.get("entry") or []
+            if not entries:
+                return None, None
+            return _normalize_entry(entries[0]), None
+        finally:
             with contextlib.suppress(Exception):
                 r.close()
-            return None, None
-        if r.status_code >= 400:
-            with contextlib.suppress(Exception):
-                r.close()
-            return None, f"Scopus API HTTP Error: {r.status_code}"
-        data = r.json() or {}
-        sr = data.get("search-results") or {}
-        entries = sr.get("entry") or []
-        if not entries:
-            return None, None
-        return _normalize_entry(entries[0]), None
     except TimeoutError:
         return None, "Scopus request timed out."
     except Exception:

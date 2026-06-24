@@ -6,8 +6,8 @@ Adapter for the Semantic Scholar API using the centralized HTTP client.
 
 from typing import Any, Optional
 
+from tldw_Server_API.app.core.exceptions import ThirdPartyHTTPStatusError
 from tldw_Server_API.app.core.Third_Party._http_helpers import (
-    ThirdPartyHTTPStatusError,
     fetch_json_checked,
 )
 

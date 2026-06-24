@@ -2,6 +2,7 @@
 id: TASK-11000
 title: Harden Third_Party provider review findings
 status: Done
+updated_date: 2026-06-24 20:18
 ---
 
 ## Description
@@ -33,12 +34,28 @@ Verification:
 Finalization update:
 - Bandit report path aligned to /tmp/bandit_third_party_review_11000.json (0 findings).
 - No known skips or blockers.
+Review follow-up in progress:
+- Rebase PR branch onto latest dev.
+- Verify Qodo inline comments against current code.
+- Address accepted review items with focused regression coverage and verification.
+Review follow-up complete:
+- Rebasing: PR branch rebased onto latest origin/dev on 2026-06-24.
+- Centralized ThirdPartyHTTPStatusError in app/core/exceptions.py and updated adapters to import it from the shared module.
+- Closed successful fetch responses in viXra lookup/search paths and Scopus DOI lookup.
+- Added type annotations to the newly added tests/helpers and regression coverage for successful Scopus/viXra response closure.
+
+Follow-up verification:
+- python -m compileall -q tldw_Server_API/app/core/Third_Party tldw_Server_API/app/core/exceptions.py touched tests (clean)
+- git diff --check (clean)
+- python -m pytest focused Third_Party/Research suites -q (120 passed)
+- python -m bandit -r tldw_Server_API/app/core/exceptions.py tldw_Server_API/app/core/Third_Party -f json -o /tmp/bandit_third_party_review_11000_followup.json (0 findings)
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Fixed the accepted Third_Party review findings: BioRxiv filtered pagination now advances based on upstream batch size, PMC OA PDF downloads use bounded temp-file streaming plus PMCID/PDF validation, selected JSON adapters surface HTTP status failures, arXiv/CitEc metadata URLs use HTTPS, and viXra search applies requested pagination before enrichment. Added focused regression coverage and ran security verification.
+Review follow-up rebased the PR onto latest dev, moved the Third_Party HTTP status exception into core exceptions, closed successful Scopus/viXra responses, annotated the added tests/helpers, and added closure regression coverage. Focused tests, compile check, whitespace check, and Bandit all passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

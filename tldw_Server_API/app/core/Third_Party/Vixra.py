@@ -15,6 +15,7 @@ extracted unless trivially available; PDF ingest path uses the resolved pdf_url.
 """
 from __future__ import annotations
 
+import contextlib
 import re
 from typing import Any
 from urllib.parse import quote as urlquote
@@ -39,26 +40,35 @@ def _try_pdf(url: str) -> str | None:
     try:
         # Prefer a tiny GET with Range to preflight content-type without fetching the body
         r = fetch(method="GET", url=url, timeout=15, allow_redirects=True, headers={"Range": "bytes=0-0"})
-        if getattr(r, "status_code", 0) == 200 or getattr(r, "status_code", 0) == 206:
-            ct = (r.headers.get("content-type") or "").lower()
-            if "pdf" in ct or url.lower().endswith(".pdf"):
-                return url
-        return None
+        try:
+            if getattr(r, "status_code", 0) == 200 or getattr(r, "status_code", 0) == 206:
+                ct = (r.headers.get("content-type") or "").lower()
+                if "pdf" in ct or url.lower().endswith(".pdf"):
+                    return url
+            return None
+        finally:
+            with contextlib.suppress(Exception):
+                r.close()
     except _VIXRA_NONCRITICAL_EXCEPTIONS:
         return None
+
 
 def _extract_pdf_from_abs(abs_url: str) -> str | None:
     try:
         r = fetch(method="GET", url=abs_url, timeout=20)
-        if r.status_code >= 400:
+        try:
+            if r.status_code >= 400:
+                return None
+            text = r.text or ""
+            m = re.search(r"href=\"(/pdf/[A-Za-z0-9\./v_-]+?\.pdf)\"", text, re.IGNORECASE)
+            if m:
+                href = m.group(1)
+                if href.startswith("/"):
+                    return f"https://vixra.org{href}"
             return None
-        text = r.text or ""
-        m = re.search(r"href=\"(/pdf/[A-Za-z0-9\./v_-]+?\.pdf)\"", text, re.IGNORECASE)
-        if m:
-            href = m.group(1)
-            if href.startswith("/"):
-                return f"https://vixra.org{href}"
-        return None
+        finally:
+            with contextlib.suppress(Exception):
+                r.close()
     except _VIXRA_NONCRITICAL_EXCEPTIONS:
         return None
 
@@ -83,8 +93,12 @@ def get_vixra_by_id(vid: str) -> tuple[dict[str, Any] | None, str | None]:
         html = None
         try:
             r_abs = fetch(method="GET", url=abs_url, timeout=20)
-            if r_abs.status_code == 200:
-                html = r_abs.text or None
+            try:
+                if r_abs.status_code == 200:
+                    html = r_abs.text or None
+            finally:
+                with contextlib.suppress(Exception):
+                    r_abs.close()
         except _VIXRA_NONCRITICAL_EXCEPTIONS:
             html = None
 
@@ -135,9 +149,13 @@ def search(term: str, page: int = 1, results_per_page: int = 10) -> tuple[list[d
         for url in candidates:
             try:
                 r = fetch(method="GET", url=url, timeout=20)
-                if r.status_code == 200 and r.text:
-                    html = r.text
-                    break
+                try:
+                    if r.status_code == 200 and r.text:
+                        html = r.text
+                        break
+                finally:
+                    with contextlib.suppress(Exception):
+                        r.close()
             except _VIXRA_NONCRITICAL_EXCEPTIONS:
                 continue
         if not html:
@@ -173,8 +191,12 @@ def search(term: str, page: int = 1, results_per_page: int = 10) -> tuple[list[d
             pub_date = None
             try:
                 r_abs = fetch(method="GET", url=abs_url, timeout=12)
-                if r_abs.status_code == 200 and r_abs.text:
-                    better_title, authors, pub_date = _parse_abs_details(r_abs.text)
+                try:
+                    if r_abs.status_code == 200 and r_abs.text:
+                        better_title, authors, pub_date = _parse_abs_details(r_abs.text)
+                finally:
+                    with contextlib.suppress(Exception):
+                        r_abs.close()
             except _VIXRA_NONCRITICAL_EXCEPTIONS:
                 pass
             item = {

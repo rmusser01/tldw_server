@@ -1,7 +1,9 @@
+from collections.abc import Callable
 import os
 from typing import Any
 
 import httpx
+import pytest
 
 import tldw_Server_API.app.core.http_client as http_client
 from tldw_Server_API.app.core.Third_Party import HAL as hal
@@ -18,11 +20,11 @@ from tldw_Server_API.app.core.Third_Party import Semantic_Scholar as semantic_sc
 from tldw_Server_API.app.core.Third_Party import Springer_Nature as springer
 
 
-def _mock_transport(handler):
+def _mock_transport(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.MockTransport:
     return httpx.MockTransport(handler)
 
 
-def test_hal_raw_media_types(monkeypatch):
+def test_hal_raw_media_types(monkeypatch: pytest.MonkeyPatch) -> None:
     # Allow HAL host in egress policy
     monkeypatch.setenv("EGRESS_ALLOWLIST", "api.archives-ouvertes.fr")
 
@@ -57,7 +59,7 @@ def test_hal_raw_media_types(monkeypatch):
     assert media_type == "application/json"
 
 
-def test_crossref_get_by_doi_404_and_success(monkeypatch):
+def test_crossref_get_by_doi_404_and_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EGRESS_ALLOWLIST", "api.crossref.org")
     def handler(request: httpx.Request) -> httpx.Response:
         # Works lookup path
@@ -93,7 +95,7 @@ def test_crossref_get_by_doi_404_and_success(monkeypatch):
     assert item["doi"] == "10.123/ok"
 
 
-def test_openalex_get_by_doi_404_and_success(monkeypatch):
+def test_openalex_get_by_doi_404_and_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EGRESS_ALLOWLIST", "api.openalex.org")
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -125,7 +127,7 @@ def test_openalex_get_by_doi_404_and_success(monkeypatch):
     assert item["doi"] == "10.321/ok"
 
 
-def test_scopus_get_by_doi_404_and_success(monkeypatch):
+def test_scopus_get_by_doi_404_and_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EGRESS_ALLOWLIST", "api.elsevier.com")
     os.environ["ELSEVIER_API_KEY"] = "test_key"
 
@@ -165,7 +167,7 @@ def test_scopus_get_by_doi_404_and_success(monkeypatch):
     assert item["doi"] == "10.123/ok"
 
 
-def test_eartharxiv_get_by_doi_404_and_success(monkeypatch):
+def test_eartharxiv_get_by_doi_404_and_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EGRESS_ALLOWLIST", "api.osf.io")
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -207,7 +209,7 @@ def test_eartharxiv_get_by_doi_404_and_success(monkeypatch):
     assert item["doi"] == "10.321/ok"
 
 
-def test_ieee_get_by_doi_404_and_success(monkeypatch):
+def test_ieee_get_by_doi_404_and_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EGRESS_ALLOWLIST", "ieeexploreapi.ieee.org")
     os.environ["IEEE_API_KEY"] = "abc"
 
@@ -234,7 +236,7 @@ def test_ieee_get_by_doi_404_and_success(monkeypatch):
     assert item["doi"] == "10.1111/ok"
 
 
-def test_osf_get_by_doi_404_and_success(monkeypatch):
+def test_osf_get_by_doi_404_and_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EGRESS_ALLOWLIST", "api.osf.io")
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -268,7 +270,7 @@ def test_osf_get_by_doi_404_and_success(monkeypatch):
     assert err is None and item is not None and item["doi"] == "10.333/also-ok"
 
 
-def test_biorxiv_get_by_doi_404_and_success(monkeypatch):
+def test_biorxiv_get_by_doi_404_and_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EGRESS_ALLOWLIST", "api.biorxiv.org")
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -293,7 +295,7 @@ def test_biorxiv_get_by_doi_404_and_success(monkeypatch):
     assert err is None and item is not None and item["doi"] == "10.987/ok"
 
 
-def test_iacr_fetch_conference_and_raw(monkeypatch):
+def test_iacr_fetch_conference_and_raw(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EGRESS_ALLOWLIST", "www.iacr.org")
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -317,7 +319,7 @@ def test_iacr_fetch_conference_and_raw(monkeypatch):
     assert err2 is None and media_type.startswith("application/json") and content
 
 
-def test_figshare_search_and_oai_raw(monkeypatch):
+def test_figshare_search_and_oai_raw(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EGRESS_ALLOWLIST", "api.figshare.com")
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -352,7 +354,7 @@ def test_figshare_search_and_oai_raw(monkeypatch):
     assert err2 is None and content == b"<oai/>" and media_type == "application/xml"
 
 
-def test_semantic_scholar_search_surfaces_http_error_status(monkeypatch):
+def test_semantic_scholar_search_surfaces_http_error_status(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EGRESS_ALLOWLIST", "api.semanticscholar.org")
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -371,7 +373,7 @@ def test_semantic_scholar_search_surfaces_http_error_status(monkeypatch):
     assert "HTTP Error: 429" in err
 
 
-def test_ieee_search_surfaces_http_error_status(monkeypatch):
+def test_ieee_search_surfaces_http_error_status(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EGRESS_ALLOWLIST", "ieeexploreapi.ieee.org")
     monkeypatch.setenv("IEEE_API_KEY", "bad-key")
 
@@ -392,7 +394,7 @@ def test_ieee_search_surfaces_http_error_status(monkeypatch):
     assert "HTTP Error: 401" in err
 
 
-def test_springer_search_surfaces_http_error_status(monkeypatch):
+def test_springer_search_surfaces_http_error_status(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EGRESS_ALLOWLIST", "api.springernature.com")
     monkeypatch.setenv("SPRINGER_NATURE_API_KEY", "bad-key")
 
@@ -413,7 +415,7 @@ def test_springer_search_surfaces_http_error_status(monkeypatch):
     assert "HTTP Error: 500" in err
 
 
-def test_scopus_lookup_surfaces_non_404_http_error_status(monkeypatch):
+def test_scopus_lookup_surfaces_non_404_http_error_status(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EGRESS_ALLOWLIST", "api.elsevier.com")
     monkeypatch.setenv("ELSEVIER_API_KEY", "bad-key")
 

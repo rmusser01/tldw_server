@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from tldw_Server_API.app.core.Third_Party import Arxiv as arxiv
@@ -6,8 +8,11 @@ from tldw_Server_API.app.core.Third_Party import Arxiv as arxiv
 pytestmark = pytest.mark.unit
 
 
-def test_fetch_arxiv_pdf_url_sanitizes_fetch_logs(monkeypatch, capsys):
-    def fail_fetch(**_kwargs):
+def test_fetch_arxiv_pdf_url_sanitizes_fetch_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail_fetch(**_kwargs: Any) -> None:
         raise RuntimeError("arxiv pdf token at /private/arxiv-pdf.key")
 
     monkeypatch.setattr(arxiv, "fetch", fail_fetch)
@@ -22,8 +27,8 @@ def test_fetch_arxiv_pdf_url_sanitizes_fetch_logs(monkeypatch, capsys):
     assert "paper-id-from-/private/request" not in output
 
 
-def test_search_arxiv_custom_api_sanitizes_fetch_failures(monkeypatch):
-    def fail_fetch(**_kwargs):
+def test_search_arxiv_custom_api_sanitizes_fetch_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_fetch(**_kwargs: Any) -> None:
         raise RuntimeError("arxiv search token at /private/arxiv-search.key")
 
     monkeypatch.setattr(arxiv, "fetch", fail_fetch)
@@ -43,8 +48,8 @@ def test_search_arxiv_custom_api_sanitizes_fetch_failures(monkeypatch):
     assert "/private/arxiv-search.key" not in error
 
 
-def test_search_arxiv_custom_api_preserves_timeout_classification(monkeypatch):
-    def fail_fetch(**_kwargs):
+def test_search_arxiv_custom_api_preserves_timeout_classification(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_fetch(**_kwargs: Any) -> None:
         raise TimeoutError("timed out at /private/arxiv-timeout.key")
 
     monkeypatch.setattr(arxiv, "fetch", fail_fetch)
@@ -64,8 +69,11 @@ def test_search_arxiv_custom_api_preserves_timeout_classification(monkeypatch):
     assert "/private/arxiv-timeout.key" not in error
 
 
-def test_fetch_arxiv_xml_sanitizes_fetch_logs(monkeypatch, capsys):
-    def fail_fetch(**_kwargs):
+def test_fetch_arxiv_xml_sanitizes_fetch_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail_fetch(**_kwargs: Any) -> None:
         raise RuntimeError("arxiv xml token at /private/arxiv.xml")
 
     monkeypatch.setattr(arxiv, "fetch", fail_fetch)
@@ -80,12 +88,15 @@ def test_fetch_arxiv_xml_sanitizes_fetch_logs(monkeypatch, capsys):
     assert "paper-id-from-/private/request" not in output
 
 
-def test_parse_arxiv_feed_sanitizes_parser_fallback_warning(monkeypatch, capsys):
+def test_parse_arxiv_feed_sanitizes_parser_fallback_warning(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     class EmptySoup:
-        def find_all(self, _name):
+        def find_all(self, _name: str) -> list[Any]:
             return []
 
-    def fake_soup(_xml_content, parser):
+    def fake_soup(_xml_content: bytes, parser: str) -> EmptySoup:
         if parser == "lxml-xml":
             raise arxiv.FeatureNotFound("lxml load failed at /private/lxml-plugin.so")
         return EmptySoup()
@@ -101,8 +112,8 @@ def test_parse_arxiv_feed_sanitizes_parser_fallback_warning(monkeypatch, capsys)
     assert "/private/lxml-plugin.so" not in output
 
 
-def test_get_arxiv_by_id_sanitizes_parse_failures(monkeypatch):
-    def fail_parse(_xml_content):
+def test_get_arxiv_by_id_sanitizes_parse_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_parse(_xml_content: str) -> None:
         raise ValueError("arxiv parse path at /private/arxiv-feed.xml")
 
     monkeypatch.setattr(arxiv, "fetch_arxiv_xml", lambda _paper_id: "<feed />")
@@ -116,8 +127,8 @@ def test_get_arxiv_by_id_sanitizes_parse_failures(monkeypatch):
     assert "/private/arxiv-feed.xml" not in error
 
 
-def test_get_arxiv_by_id_sanitizes_fetch_failures(monkeypatch):
-    def fail_fetch_xml(_paper_id):
+def test_get_arxiv_by_id_sanitizes_fetch_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_fetch_xml(_paper_id: str) -> None:
         raise RuntimeError("arxiv by-id token at /private/arxiv-by-id.xml")
 
     monkeypatch.setattr(arxiv, "fetch_arxiv_xml", fail_fetch_xml)
@@ -131,20 +142,20 @@ def test_get_arxiv_by_id_sanitizes_fetch_failures(monkeypatch):
     assert "paper-id-from-/private/request" not in error
 
 
-def test_arxiv_query_builder_uses_https_export_endpoint():
+def test_arxiv_query_builder_uses_https_export_endpoint() -> None:
     url = arxiv.build_query_url("retrieval", author=None, year=None, start=0, max_results=1)
 
     assert url.startswith("https://export.arxiv.org/api/query?")
 
 
-def test_fetch_arxiv_xml_uses_https_export_endpoint(monkeypatch):
-    captured = {}
+def test_fetch_arxiv_xml_uses_https_export_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, str] = {}
 
     class FakeResponse:
         status_code = 200
         text = "<feed />"
 
-    def fake_fetch(**kwargs):
+    def fake_fetch(**kwargs: Any) -> FakeResponse:
         captured["url"] = kwargs["url"]
         return FakeResponse()
 

@@ -2,18 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from tldw_Server_API.app.core.exceptions import JSONDecodeError
+from tldw_Server_API.app.core.exceptions import JSONDecodeError, ThirdPartyHTTPStatusError
 from tldw_Server_API.app.core.http_client import fetch
-
-
-class ThirdPartyHTTPStatusError(RuntimeError):
-    def __init__(self, status_code: int, reason: str | None = None) -> None:
-        self.status_code = int(status_code)
-        self.reason = reason or ""
-        message = f"HTTP Error: {self.status_code}"
-        if self.reason:
-            message = f"{message} - {self.reason}"
-        super().__init__(message)
 
 
 def fetch_json_checked(

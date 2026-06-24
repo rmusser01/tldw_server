@@ -1,3 +1,6 @@
+from collections.abc import Callable
+from typing import Any
+
 import pytest
 
 from tldw_Server_API.app.core.Third_Party import BioRxiv as biorxiv
@@ -105,15 +108,15 @@ _BIORXIV_ERROR_CASES = (
     _BIORXIV_ERROR_CASES,
 )
 def test_biorxiv_provider_paths_sanitize_fetch_failures(
-    monkeypatch,
-    patch_attr,
-    call_provider,
-    error_index,
-    expected_error,
-    _expected_timeout,
-    sensitive_terms,
-):
-    def fail_fetch(*_args, **_kwargs):
+    monkeypatch: pytest.MonkeyPatch,
+    patch_attr: str,
+    call_provider: Callable[[], tuple[Any, ...]],
+    error_index: int,
+    expected_error: str,
+    _expected_timeout: str,
+    sensitive_terms: tuple[str, ...],
+) -> None:
+    def fail_fetch(*_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError(f"{sensitive_terms[0]} at {sensitive_terms[1]}")
 
     monkeypatch.setattr(biorxiv, patch_attr, fail_fetch)
@@ -131,15 +134,15 @@ def test_biorxiv_provider_paths_sanitize_fetch_failures(
     _BIORXIV_ERROR_CASES,
 )
 def test_biorxiv_provider_paths_preserve_timeout_classification(
-    monkeypatch,
-    patch_attr,
-    call_provider,
-    error_index,
-    _expected_error,
-    expected_timeout,
-    sensitive_terms,
-):
-    def fail_fetch(*_args, **_kwargs):
+    monkeypatch: pytest.MonkeyPatch,
+    patch_attr: str,
+    call_provider: Callable[[], tuple[Any, ...]],
+    error_index: int,
+    _expected_error: str,
+    expected_timeout: str,
+    sensitive_terms: tuple[str, ...],
+) -> None:
+    def fail_fetch(*_args: Any, **_kwargs: Any) -> None:
         raise TimeoutError(f"timed out for {sensitive_terms[0]} at {sensitive_terms[1]}")
 
     monkeypatch.setattr(biorxiv, patch_attr, fail_fetch)
@@ -152,10 +155,12 @@ def test_biorxiv_provider_paths_preserve_timeout_classification(
         assert term not in error
 
 
-def test_search_biorxiv_filtered_query_continues_after_empty_filtered_batch(monkeypatch):
+def test_search_biorxiv_filtered_query_continues_after_empty_filtered_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     cursors: list[int] = []
 
-    def fake_get_json(url, params=None, timeout=15):
+    def fake_get_json(url: str, params: dict[str, Any] | None = None, timeout: int = 15) -> dict[str, Any]:
         del params, timeout
         cursor = int(url.rstrip("/").split("/")[-1])
         cursors.append(cursor)
@@ -199,10 +204,12 @@ def test_search_biorxiv_filtered_query_continues_after_empty_filtered_batch(monk
     assert cursors == [0, 100]
 
 
-def test_search_biorxiv_pubs_filtered_query_continues_after_empty_filtered_batch(monkeypatch):
+def test_search_biorxiv_pubs_filtered_query_continues_after_empty_filtered_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     cursors: list[int] = []
 
-    def fake_get_json(url, timeout=15, params=None):
+    def fake_get_json(url: str, timeout: int = 15, params: dict[str, Any] | None = None) -> dict[str, Any]:
         del timeout, params
         cursor = int(url.rstrip("/").split("/")[-1])
         cursors.append(cursor)
