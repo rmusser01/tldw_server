@@ -23,6 +23,8 @@ modified_files:
 - apps/packages/ui/src/services/tldw/request-core.ts
 - apps/packages/ui/src/services/tldw/TldwApiClient.ts
 - apps/packages/ui/src/services/tldw/TldwAuth.ts
+- apps/tldw-frontend/pages/_app.tsx
+- apps/tldw-frontend/__tests__/app/app-layout.test.tsx
 ---
 
 ## Description
@@ -63,6 +65,8 @@ Docs/superpowers/plans/2026-06-24-docker-webui-runtime-auth-bootstrap-implementa
 2026-06-24 Task 2 runtime-auth preservation follow-up: Added regression coverage for manual multi-user tldwConfig with accessToken and updated runtime bootstrap persistence ownership so runtime API key still wins request precedence without overwriting stored multi-user credentials or writing runtime metadata. Red/green verification: bunx vitest run __tests__/extension/runtime-bootstrap.test.ts failed on the new regression before the fix and passed after the fix. Required verification passed: bunx vitest run __tests__/extension/runtime-bootstrap.test.ts __tests__/auth.mode.test.ts __tests__/auth.logout.test.ts (29 tests). Bandit not run: touched implementation is TypeScript frontend code only.
 
 2026-06-24 Task 2 shared-client follow-up: added a non-persistent shared runtime single-user auth override consumed by runtime-bootstrap, request-core, TldwApiClient, and TldwAuth so runtime auth takes request precedence even when persisted manual single-user or multi-user credentials are preserved. Added runtime-bootstrap regressions for shared tldwRequest headers over manual single-user and multi-user configs. Verification: bunx vitest run __tests__/extension/runtime-bootstrap.test.ts __tests__/auth.mode.test.ts __tests__/auth.logout.test.ts ../packages/ui/src/services/tldw/__tests__/request-core.quickstart.test.ts ../packages/ui/src/services/tldw/__tests__/request-core.hosted.test.ts passed (34 tests); git diff --check clean.
+
+2026-06-24 Task 3 update: `_app.tsx` now imports and awaits runtimeBootstrapReady before reading build-time env auth or persisted configured auth state, preventing the first-load app shell from resolving unauthenticated before runtime auth bootstrap completes. Added a delayed-bootstrap app-layout regression that failed before the production change and passed after it. Verification: bunx vitest run __tests__/app/app-layout.test.tsx passed (10 tests); bunx vitest run __tests__/app/app-layout.test.tsx __tests__/extension/runtime-bootstrap.test.ts __tests__/auth.mode.test.ts __tests__/auth.logout.test.ts ../packages/ui/src/services/tldw/__tests__/request-core.quickstart.test.ts ../packages/ui/src/services/tldw/__tests__/request-core.hosted.test.ts passed (44 tests). Bandit not run: touched implementation is TypeScript frontend code only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

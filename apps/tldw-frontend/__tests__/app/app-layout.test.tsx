@@ -14,6 +14,27 @@ vi.mock("wxt/browser", () => ({
   }
 }))
 
+let resolveRuntimeBootstrap: (() => void) | null = null
+let runtimeBootstrapReady: Promise<void> = Promise.resolve()
+
+const resetRuntimeBootstrap = (deferred = false) => {
+  if (!deferred) {
+    runtimeBootstrapReady = Promise.resolve()
+    resolveRuntimeBootstrap = null
+    return
+  }
+
+  runtimeBootstrapReady = new Promise<void>((resolve) => {
+    resolveRuntimeBootstrap = resolve
+  })
+}
+
+vi.mock("@web/extension/shims/runtime-bootstrap", () => ({
+  get runtimeBootstrapReady() {
+    return runtimeBootstrapReady
+  }
+}))
+
 import App from "@web/pages/_app"
 
 const mockRouter = {
@@ -128,6 +149,7 @@ beforeEach(() => {
   delete process.env.NEXT_PUBLIC_X_API_KEY
   delete process.env.NEXT_PUBLIC_API_BEARER
   delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+  resetRuntimeBootstrap()
 })
 
 afterAll(() => {
@@ -267,6 +289,33 @@ describe("App layout routing", () => {
       expect(layout).toHaveAttribute("data-hide-header", "true")
     })
     expect(layout).toHaveAttribute("data-hide-sidebar", "true")
+  })
+
+  it("waits for runtime bootstrap before reading configured auth state", async () => {
+    resetRuntimeBootstrap(true)
+    currentConfig = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "runtime-key"
+    }
+
+    renderApp("/media")
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mockGetConfig).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveRuntimeBootstrap?.()
+      await runtimeBootstrapReady
+    })
+
+    await waitFor(() => {
+      expect(mockGetConfig).toHaveBeenCalled()
+    })
   })
 
   it("keeps sidebar hidden on settings routes even when authenticated", async () => {

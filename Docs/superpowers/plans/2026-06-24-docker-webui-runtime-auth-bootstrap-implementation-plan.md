@@ -737,7 +737,7 @@ git commit -m "feat: bootstrap webui auth from runtime config"
 - Modify: `apps/tldw-frontend/pages/_app.tsx`
 - Modify: `apps/tldw-frontend/__tests__/app/app-layout.test.tsx`
 
-- [ ] **Step 1: Write failing app auth-order test**
+- [x] **Step 1: Write failing app auth-order test**
 
 In `apps/tldw-frontend/__tests__/app/app-layout.test.tsx`, replace the side-effect runtime bootstrap behavior with a controllable mock before importing `App`:
 
@@ -778,6 +778,11 @@ Add this test inside `describe("App layout routing", () => { ... })`:
 
     renderApp("/media")
 
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
     expect(mockGetConfig).not.toHaveBeenCalled()
 
     await act(async () => {
@@ -791,7 +796,7 @@ Add this test inside `describe("App layout routing", () => { ... })`:
   })
 ```
 
-- [ ] **Step 2: Run app layout test to verify it fails**
+- [x] **Step 2: Run app layout test to verify it fails**
 
 Run from `apps/tldw-frontend`:
 
@@ -801,7 +806,7 @@ bunx vitest run __tests__/app/app-layout.test.tsx
 
 Expected: FAIL because `_app.tsx` does not import or await `runtimeBootstrapReady`.
 
-- [ ] **Step 3: Await runtime bootstrap in `_app.tsx`**
+- [x] **Step 3: Await runtime bootstrap in `_app.tsx`**
 
 Modify the import in `apps/tldw-frontend/pages/_app.tsx`.
 
@@ -837,7 +842,7 @@ Update `refreshAuthState`:
     }
 ```
 
-- [ ] **Step 4: Run app layout test to verify it passes**
+- [x] **Step 4: Run app layout test to verify it passes**
 
 Run from `apps/tldw-frontend`:
 
@@ -847,7 +852,7 @@ bunx vitest run __tests__/app/app-layout.test.tsx
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
 ```bash
 git add apps/tldw-frontend/pages/_app.tsx apps/tldw-frontend/__tests__/app/app-layout.test.tsx

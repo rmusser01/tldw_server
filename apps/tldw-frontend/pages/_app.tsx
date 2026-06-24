@@ -1,6 +1,6 @@
 import "../styles/globals.css"
 import "@/assets/react-pdf.css"
-import "@web/extension/shims/runtime-bootstrap"
+import { runtimeBootstrapReady } from "@web/extension/shims/runtime-bootstrap"
 // Use web-specific i18n that works with SSR/static generation
 import "@web/lib/i18n-web"
 import type { AppProps } from "next/app"
@@ -176,6 +176,9 @@ export default function App({ Component, pageProps }: AppProps) {
 
     let cancelled = false
     const refreshAuthState = async () => {
+      await runtimeBootstrapReady.catch(() => undefined)
+      if (cancelled) return
+
       const envAuthed = hasEnvApiAuth()
       const configuredAuth = await getConfiguredAuthState()
       const authed = configuredAuth.hasConfig
