@@ -1509,14 +1509,22 @@ def test_candidate_notes_for_task_discovery_excludes_currently_reconciled_notes(
     assert plain_note_id not in {row["id"] for row in candidates}  # nosec B101
 
 
-def test_candidate_notes_for_task_discovery_matches_parser_checkbox_bullets(db: CharactersRAGDB) -> None:
+def test_candidate_notes_for_task_discovery_matches_parser_checkbox_bullets_and_spacing(db: CharactersRAGDB) -> None:
     dash_note_id = _create_note(db, content="- [ ] Dash task\n")
     star_note_id = _create_note(db, content="* [x] Star task\n")
     plus_note_id = _create_note(db, content="+ [X] Plus task\n")
+    tab_note_id = _create_note(db, content="-\t[ ] Tab task\n")
+    spaced_note_id = _create_note(db, content="*   [x] Spaced task\n")
 
     candidates = db.candidate_notes_for_task_discovery(limit=10)
 
-    assert {row["id"] for row in candidates} == {dash_note_id, star_note_id, plus_note_id}  # nosec B101
+    assert {row["id"] for row in candidates} == {  # nosec B101
+        dash_note_id,
+        star_note_id,
+        plus_note_id,
+        tab_note_id,
+        spaced_note_id,
+    }
 
 
 def test_candidate_notes_for_task_discovery_excludes_current_warning_state_until_note_changes(

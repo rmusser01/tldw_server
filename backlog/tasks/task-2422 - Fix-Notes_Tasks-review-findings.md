@@ -4,7 +4,7 @@ title: Fix Notes_Tasks review findings
 status: Done
 assignee: []
 created_date: '2026-06-23 14:44'
-updated_date: '2026-06-23 15:05'
+updated_date: '2026-06-24 12:36'
 labels:
   - notes
   - tasks
@@ -44,6 +44,17 @@ Verification:
 - `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Notes_Tasks tldw_Server_API/app/core/DB_Management/chacha/task_store.py -f json -o /tmp/bandit_notes_tasks_review_fixes.json` -> 0 findings.
 
 Known skips/blockers: none.
+
+PR review follow-up:
+- Added docstrings for the task metadata-token helper functions.
+- Marked the service test module as unit tests.
+- Broadened stale discovery to handle parser-valid tab and multi-space checkbox syntax.
+
+Rebase/review verification:
+- `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Notes_Tasks/unit -q` -> 55 passed.
+- `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_chacha_task_store.py -q` -> 60 passed.
+- `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Notes_NEW/integration/test_notes_tasks_api.py tldw_Server_API/tests/Notes_NEW/integration/test_notes_tasks_reconciliation_api.py -q` -> 37 passed.
+- `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Notes_Tasks tldw_Server_API/app/core/DB_Management/chacha/task_store.py -f json -o /tmp/bandit_notes_tasks_review_rebase.json` -> 0 findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

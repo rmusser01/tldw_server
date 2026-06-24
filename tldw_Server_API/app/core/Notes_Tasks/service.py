@@ -27,6 +27,8 @@ _TASK_STATUSES = {"open", "done"}
 
 
 def _task_text_contains_parseable_metadata_token(text: str) -> bool:
+    """Return True when literal task text contains metadata syntax the parser would consume."""
+
     for match in _TASK_TEXT_METADATA_TOKEN_RE.finditer(text):
         if _is_parseable_task_text_metadata_token(name=match.group("name"), value=match.group("value")):
             return True
@@ -34,6 +36,8 @@ def _task_text_contains_parseable_metadata_token(text: str) -> bool:
 
 
 def _is_parseable_task_text_metadata_token(*, name: str, value: str) -> bool:
+    """Validate one allowlisted task metadata token using the markdown parser's value rules."""
+
     normalized_name = name.casefold()
     normalized_value = value.strip()
     if normalized_name == "due":

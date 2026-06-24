@@ -12,6 +12,9 @@ from tldw_Server_API.app.core.Notes_Tasks.models import TaskActor
 from tldw_Server_API.app.core.Notes_Tasks.service import NotesTaskService
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture()
 def db(tmp_path: Path) -> CharactersRAGDB:
     database = CharactersRAGDB(str(tmp_path / "notes_task_service.db"), client_id="notes_task_service_test")
