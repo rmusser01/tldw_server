@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 import tldw_Server_API.app.core.Chat.validate_dictionary as validate_module
 from tldw_Server_API.app.core.Chat.validate_dictionary import validate_dictionary
+
+pytestmark = pytest.mark.unit
 
 
 def _mk(payload_entries):
@@ -39,6 +43,22 @@ def test_template_forbidden_construct():
 
 
     payload = _mk([{"type": "literal", "pattern": "hello", "replacement": "{% for x in y %}hi{% endfor %}"}])
+    res = validate_dictionary(payload)
+    assert any(e.get("code") == "template_forbidden_construct" for e in res.errors)
+
+
+def test_template_expensive_operator_forbidden():
+
+
+    payload = _mk([{"type": "literal", "pattern": "hello", "replacement": "{{ 'x' * 100 }}"}])
+    res = validate_dictionary(payload)
+    assert any(e.get("code") == "template_forbidden_construct" for e in res.errors)
+
+
+def test_template_arbitrary_method_call_forbidden():
+
+
+    payload = _mk([{"type": "literal", "pattern": "hello", "replacement": "{{ obj.public_method() }}"}])
     res = validate_dictionary(payload)
     assert any(e.get("code") == "template_forbidden_construct" for e in res.errors)
 
