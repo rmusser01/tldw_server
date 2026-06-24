@@ -14,6 +14,7 @@ import httpx
 from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_transport import (
     MCPTransport,
 )
+from tldw_Server_API.app.core.Agent_Client_Protocol.hardening import validate_mcp_http_url
 
 
 class MCPStreamableHTTPTransport(MCPTransport):
@@ -31,10 +32,12 @@ class MCPStreamableHTTPTransport(MCPTransport):
         endpoint: str,
         headers: dict[str, str] | None = None,
         timeout_sec: int = 30,
+        allow_private_network: bool | None = None,
     ) -> None:
         self._endpoint = endpoint
         self._headers = headers or {}
         self._timeout_sec = timeout_sec
+        self._allow_private_network = allow_private_network
         self._http_client: httpx.AsyncClient | None = None
         self._next_id = 1
         self._connected = False
@@ -47,6 +50,11 @@ class MCPStreamableHTTPTransport(MCPTransport):
 
     async def connect(self) -> None:
         """Establish a connection: create HTTP client, run MCP handshake."""
+        validate_mcp_http_url(
+            self._endpoint,
+            allow_private_network=self._allow_private_network,
+            label="MCP streamable HTTP endpoint",
+        )
         self._http_client = self._create_http_client()
         try:
             await self._json_rpc_call(
@@ -113,6 +121,11 @@ class MCPStreamableHTTPTransport(MCPTransport):
         }
         if self._http_client is None:
             raise RuntimeError("Not connected")
+        validate_mcp_http_url(
+            self._endpoint,
+            allow_private_network=self._allow_private_network,
+            label="MCP streamable HTTP endpoint",
+        )
         resp = await self._http_client.post(self._endpoint, json=payload)
         resp.raise_for_status()
 
@@ -134,6 +147,11 @@ class MCPStreamableHTTPTransport(MCPTransport):
         }
         if self._http_client is None:
             raise RuntimeError("Not connected")
+        validate_mcp_http_url(
+            self._endpoint,
+            allow_private_network=self._allow_private_network,
+            label="MCP streamable HTTP endpoint",
+        )
         resp = await self._http_client.post(self._endpoint, json=payload)
         resp.raise_for_status()
 

@@ -93,12 +93,15 @@ def create_transport(protocol_config: dict[str, Any]) -> MCPTransport:
             post_url=protocol_config.get("post_url"),
             headers=protocol_config.get("headers"),
             timeout_sec=protocol_config.get("timeout_sec", 30),
+            allow_private_network=protocol_config.get("allow_private_network"),
+            allow_cross_origin_post_url=protocol_config.get("allow_cross_origin_post_url"),
         )
     elif protocol == "streamable_http":
         return MCPStreamableHTTPTransport(
             endpoint=_require_key("endpoint"),
             headers=protocol_config.get("headers"),
             timeout_sec=protocol_config.get("timeout_sec", 30),
+            allow_private_network=protocol_config.get("allow_private_network"),
         )
     else:
         raise ValidationError(

@@ -1,17 +1,22 @@
 import asyncio
 import json
+from typing import Any
 
 import pytest
 
 from tldw_Server_API.app.core.Agent_Client_Protocol.stream_client import ACPStreamClient
-from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPMessage
+from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import (
+    ACPMessage,
+    ACPResponseError,
+    ACPStdioClient,
+)
 
 
 @pytest.mark.asyncio
-async def test_stream_client_call_roundtrip():
-    sent = []
+async def test_stream_client_call_roundtrip() -> None:
+    sent: list[bytes] = []
 
-    async def send_bytes(data: bytes):
+    async def send_bytes(data: bytes) -> None:
         sent.append(data)
 
     client = ACPStreamClient(send_bytes=send_bytes)
@@ -34,13 +39,13 @@ async def test_stream_client_call_roundtrip():
 
 
 @pytest.mark.asyncio
-async def test_stream_client_notification_handler():
-    seen = []
+async def test_stream_client_notification_handler() -> None:
+    seen: list[ACPMessage] = []
 
-    async def send_bytes(_: bytes):
+    async def send_bytes(_: bytes) -> None:
         return
 
-    async def on_note(msg: ACPMessage):
+    async def on_note(msg: ACPMessage) -> None:
         seen.append(msg)
 
     client = ACPStreamClient(send_bytes=send_bytes)
@@ -57,13 +62,13 @@ async def test_stream_client_notification_handler():
 
 
 @pytest.mark.asyncio
-async def test_stream_client_request_handler():
-    sent = []
+async def test_stream_client_request_handler() -> None:
+    sent: list[bytes] = []
 
-    async def send_bytes(data: bytes):
+    async def send_bytes(data: bytes) -> None:
         sent.append(data)
 
-    async def on_request(msg: ACPMessage):
+    async def on_request(msg: ACPMessage) -> ACPMessage:
         return ACPMessage(jsonrpc="2.0", id=msg.id, result={"outcome": {"outcome": "approved"}})
 
     client = ACPStreamClient(send_bytes=send_bytes)
@@ -79,3 +84,35 @@ async def test_stream_client_request_handler():
     payload = json.loads(sent[0].decode("utf-8").strip())
     assert payload["id"] == 7
     assert payload["result"]["outcome"]["outcome"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_stream_client_call_times_out_and_cleans_pending() -> None:
+    async def send_bytes(_: bytes) -> None:
+        return None
+
+    client = ACPStreamClient(send_bytes=send_bytes, rpc_timeout_sec=0.01)
+    await client.start()
+
+    with pytest.raises(ACPResponseError, match="timed out"):
+        await client.call("ping", {})
+
+    assert client._pending == {}
+
+
+@pytest.mark.asyncio
+async def test_stdio_client_call_times_out_and_cleans_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[dict[str, Any]] = []
+    client = ACPStdioClient("agent", [], rpc_timeout_sec=0.01)
+    client._proc = object()
+
+    async def send(payload: dict[str, Any]) -> None:
+        sent.append(payload)
+
+    monkeypatch.setattr(client, "_send", send)
+
+    with pytest.raises(ACPResponseError, match="timed out"):
+        await client.call("ping", {})
+
+    assert sent and sent[0]["method"] == "ping"
+    assert client._pending == {}
