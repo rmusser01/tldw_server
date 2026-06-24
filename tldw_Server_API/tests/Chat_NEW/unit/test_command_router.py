@@ -1,9 +1,11 @@
 from typing import Optional
 
 import asyncio
+import threading
 import pytest
 
 from tldw_Server_API.app.core.Chat import command_router
+from tldw_Server_API.app.core.Integrations import weather_providers
 
 
 @pytest.fixture(autouse=True)
@@ -72,6 +74,86 @@ async def test_weather_stub(monkeypatch):
     res = await command_router.async_dispatch_command(ctx, "weather", "Boston")
     assert res.ok
     assert "Sunny" in res.content
+
+
+@pytest.mark.unit
+def test_weather_provider_does_not_block_event_loop(monkeypatch):
+    monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+    monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_USER", "100")
+    monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_GLOBAL", "100")
+
+    provider_thread_ids: list[int] = []
+
+    class SlowClient:
+        def get_current(
+            self,
+            location: Optional[str] = None,
+            lat: float | None = None,
+            lon: float | None = None,
+        ) -> weather_providers.WeatherResult:
+            provider_thread_ids.append(threading.get_ident())
+            return weather_providers.WeatherResult(
+                ok=True,
+                summary=f"Sunny at {location or 'somewhere'}",
+                metadata={"provider": "test", "lat": lat, "lon": lon},
+            )
+
+    monkeypatch.setattr(command_router, "get_weather_client", lambda ctx=None: SlowClient())
+    command_router._acquire_global_bucket("weather")
+    command_router._acquire_bucket("weather-nonblocking-user", "weather")
+
+    async def exercise() -> None:
+        event_loop_thread_id = threading.get_ident()
+        res = await command_router.async_dispatch_command(
+            command_router.CommandContext(user_id="weather-nonblocking-user"),
+            "weather",
+            "Boston",
+        )
+
+        assert provider_thread_ids
+        assert provider_thread_ids[0] != event_loop_thread_id
+        assert res.ok
+        assert "Sunny" in res.content
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.unit
+def test_async_dispatch_awaits_task_returning_handler(monkeypatch):
+    monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+    monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_USER", "100")
+    monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_GLOBAL", "100")
+
+    async def build_result() -> command_router.CommandResult:
+        await asyncio.sleep(0)
+        return command_router.CommandResult(
+            ok=True,
+            command="taskresult",
+            content="task result",
+            metadata={},
+        )
+
+    def task_handler(
+        ctx: command_router.CommandContext,
+        args: Optional[str],
+    ) -> asyncio.Task[command_router.CommandResult]:
+        return asyncio.create_task(build_result())
+
+    async def exercise() -> command_router.CommandResult:
+        return await command_router.async_dispatch_command(
+            command_router.CommandContext(user_id="task-awaitable-user"),
+            "taskresult",
+            None,
+        )
+
+    command_router.register_command("taskresult", "task result", task_handler)
+    try:
+        res = asyncio.run(exercise())
+    finally:
+        command_router._registry.pop("taskresult", None)
+
+    assert res.ok
+    assert res.content == "task result"
 
 
 @pytest.mark.unit

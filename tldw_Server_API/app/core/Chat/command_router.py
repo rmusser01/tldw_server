@@ -25,12 +25,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import os
 import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from loguru import logger
 
@@ -286,7 +287,7 @@ class CommandResult:
     metadata: dict[str, Any]
 
 
-Handler = Callable[[CommandContext, Optional[str]], CommandResult]
+Handler = Callable[[CommandContext, Optional[str]], CommandResult | Awaitable[CommandResult]]
 
 
 @dataclass
@@ -518,7 +519,7 @@ async def async_dispatch_command(ctx: CommandContext, command: str, args: str | 
 
     try:
         res = spec.handler(ctx, args)
-        if asyncio.iscoroutine(res):  # future-proof if handlers become async
+        if inspect.isawaitable(res):  # future-proof if handlers become async
             res = await res  # type: ignore[assignment]
         if not isinstance(res, CommandResult):
             raise TypeError(f"Command handler for /{cmd} returned {type(res)}")
@@ -587,7 +588,7 @@ def _time_handler(ctx: CommandContext, args: str | None) -> CommandResult:
         return CommandResult(ok=False, command="time", content=f"Time lookup failed: {e}", metadata={"error": "time_error"})
 
 
-def _weather_handler(ctx: CommandContext, args: str | None) -> CommandResult:
+async def _weather_handler(ctx: CommandContext, args: str | None) -> CommandResult:
     location = (args or "").strip()
     if not location:
         location = _cfg_str("DEFAULT_LOCATION", "default_location", "").strip()
@@ -598,7 +599,7 @@ def _weather_handler(ctx: CommandContext, args: str | None) -> CommandResult:
         # Backward-compatible: some tests patch a zero-arg seam
         client = get_weather_client()
     try:
-        result = client.get_current(location=location or None)
+        result = await asyncio.to_thread(client.get_current, location=location or None)
         metadata = dict(getattr(result, "metadata", {}) or {})
         if result.ok:
             return CommandResult(ok=True, command="weather", content=result.summary, metadata=metadata)
