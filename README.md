@@ -685,7 +685,7 @@ docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.p
 Notes
 - Run compose commands from the repository root. The public profile compose files are `Dockerfiles/docker-compose.single-user.yml` and `Dockerfiles/docker-compose.multi-user-postgres.yml`.
 - For `Dockerfiles/docker-compose.webui.yml`, the default quickstart leaves `NEXT_PUBLIC_API_URL` empty so browsers stay on same-origin browser API requests through the WebUI proxy. Set `NEXT_PUBLIC_API_URL` only for the advanced/custom-host path for LAN, reverse-proxy, or custom-domain browser access.
-- Single-user WebUI auth is runtime-configured in the default Docker quickstart. The `webui` service receives `AUTH_MODE`, `SINGLE_USER_API_KEY`, and `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH`; browsers do not require `NEXT_PUBLIC_X_API_KEY`.
+- Single-user WebUI auth is runtime-configured in the default Docker quickstart. The `webui` service receives `AUTH_MODE`, `SINGLE_USER_API_KEY`, and the explicit local-quickstart `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1` opt-in written by setup; browsers do not require `NEXT_PUBLIC_X_API_KEY`. The shared WebUI compose overlay defaults runtime-auth exposure to disabled when this opt-in is absent.
 - `NEXT_PUBLIC_API_VERSION` and `NEXT_PUBLIC_X_API_KEY` are build-time public values in the client bundle for advanced/static WebUI builds only.
 - The primary UI is the Next.js WebUI in `apps/tldw-frontend/`.
   - Run it separately for development, or use `Dockerfiles/docker-compose.webui.yml` for a containerized WebUI.

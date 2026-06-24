@@ -28,7 +28,7 @@ py -3.12 -m venv .setup-venv
 .\.setup-venv\Scripts\python -m tldw_Server_API.cli.wizard.cli init --profile docker-single-webui --env-file tldw_Server_API/Config_Files/.env --default --yes
 ```
 
-`make setup-docker-single` creates or updates `tldw_Server_API/Config_Files/.env` for `AUTH_MODE=single_user` and generates a strong `SINGLE_USER_API_KEY` when needed. Keep that `.env` file with your backups.
+`make setup-docker-single` creates or updates `tldw_Server_API/Config_Files/.env` for `AUTH_MODE=single_user`, generates a strong `SINGLE_USER_API_KEY` when needed, and explicitly sets `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1` for the local loopback WebUI quickstart. Keep that `.env` file with your backups.
 
 `make quickstart` is the shortest alias for this same Docker single-user + WebUI lifecycle. It runs setup, start, and verification in order.
 
@@ -46,7 +46,7 @@ docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docke
 
 The API starts at http://127.0.0.1:8000 and the WebUI starts at http://127.0.0.1:8080. The default browser path uses same-origin browser API requests through the WebUI proxy. Treat LAN/custom-host browser access as advanced configuration; if you intentionally need that path, set `NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=advanced` together with `NEXT_PUBLIC_API_URL`.
 
-The WebUI image is not tied to a specific single-user API key. In the default local compose profile, the WebUI receives `SINGLE_USER_API_KEY` at container runtime and bootstraps browser auth from the local WebUI origin. Keep the default `127.0.0.1:8080:3000` binding unless you are intentionally configuring an advanced remote deployment.
+The WebUI image is not tied to a specific single-user API key. In the default local compose profile, the WebUI receives `SINGLE_USER_API_KEY` at container runtime and bootstraps browser auth from the local WebUI origin because the setup step writes the explicit `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1` opt-in to `.env`. The shared WebUI compose overlay defaults that flag to disabled when `.env` does not opt in. Keep the default `127.0.0.1:8080:3000` binding unless you are intentionally configuring an advanced remote deployment; if you expose the WebUI beyond loopback, set `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=0` and use advanced/static auth configuration instead.
 
 Default persistence uses Docker named volumes:
 

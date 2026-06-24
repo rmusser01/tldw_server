@@ -92,7 +92,7 @@ The route returns runtime WebUI bootstrap data from the WebUI server process. It
 Runtime auth is available only when all guards pass:
 
 - `AUTH_MODE=single_user`
-- `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1`
+- `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1` explicitly set by the local Docker quickstart setup path
 - `SINGLE_USER_API_KEY` exists and is not a placeholder value such as `change-me`
 - the browser request `Host` is loopback/local, including `localhost`, `127.0.0.1`, `[::1]`, and `::1`
 - the Docker WebUI port remains bound to loopback in the default compose overlay, currently `127.0.0.1:8080:3000`
@@ -172,7 +172,7 @@ Update the WebUI compose overlay so the WebUI container receives the backend aut
 environment:
   - AUTH_MODE=${AUTH_MODE:-single_user}
   - SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}
-  - TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-1}
+  - TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-0}
 ```
 
 Keep `NEXT_PUBLIC_X_API_KEY` as an optional build arg for compatibility, but stop presenting it as the Docker quickstart requirement.
@@ -223,7 +223,7 @@ The runtime config endpoint intentionally exposes the single-user API key to bro
 The exposure boundary is therefore:
 
 - loopback/local browser access only by default
-- explicit `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1`
+- explicit `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1` in the local Docker quickstart `.env`
 - single-user mode only
 - no forwarded-host trust
 - no forwarded request headers on the default runtime-auth path
@@ -232,7 +232,7 @@ The exposure boundary is therefore:
 
 This is safer than baking the key into a reusable image, and it keeps accidental remote exposure out of the default compose binding.
 
-The Host-header guard is not a substitute for keeping the quickstart port loopback-bound. Documentation should warn operators that if they publish the WebUI port beyond localhost, they should disable runtime auth bootstrap and use an explicit advanced auth configuration instead.
+The Host-header and peer-address guards are not substitutes for keeping the quickstart port loopback-bound. Documentation should warn operators that if they publish the WebUI port beyond localhost, they should disable runtime auth bootstrap and use an explicit advanced auth configuration instead. The reusable WebUI compose overlay should fail closed with `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH` defaulting to `0`; the local Docker quickstart setup path is responsible for writing the explicit `1` opt-in.
 
 ## Test Plan
 

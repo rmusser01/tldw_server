@@ -31,7 +31,7 @@ describe("PR 916 review follow-ups", () => {
       "- SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}"
     )
     expect(compose).toContain(
-      "- TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-1}"
+      "- TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-0}"
     )
   })
 

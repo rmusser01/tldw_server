@@ -443,7 +443,7 @@ The server auto-creates per-user subdirectories on first use.
 **Fix:**
 Docker single-user WebUI quickstart uses runtime auth bootstrap. Check these when the WebUI returns `401`:
 
-- `Dockerfiles/docker-compose.webui.yml` passes `AUTH_MODE`, `SINGLE_USER_API_KEY`, and `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1` to the `webui` service.
+- `make setup-docker-single` or the equivalent `tldw-setup init --profile docker-single-webui` command wrote `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1` to `tldw_Server_API/Config_Files/.env`; the shared WebUI compose overlay defaults that flag to `0` without this explicit local quickstart opt-in.
 - The WebUI is opened through the default loopback URL, `http://127.0.0.1:8080`.
 - `SINGLE_USER_API_KEY` is not `change-me`.
 - The backend `app` service has the same `SINGLE_USER_API_KEY`.

@@ -75,7 +75,7 @@ This folder contains the base Compose stack for tldw_server, optional overlays, 
 - WebUI overlay: `Dockerfiles/docker-compose.webui.yml`
   - `docker compose -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml up -d --build`
   - Adds `webui` (Next.js standalone) on `http://localhost:8080`.
-  - Single-user WebUI auth is runtime-configured. The `webui` service receives `AUTH_MODE`, `SINGLE_USER_API_KEY`, and `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH`; the browser does not require `NEXT_PUBLIC_X_API_KEY` for the default local quickstart.
+  - Single-user WebUI auth is runtime-configured. The `webui` service receives `AUTH_MODE`, `SINGLE_USER_API_KEY`, and `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH`; the browser does not require `NEXT_PUBLIC_X_API_KEY` for the default local quickstart. The overlay defaults runtime-auth exposure to disabled unless `setup-docker-single` or another local setup path writes `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1` to the compose env file.
 
 - Embeddings workers + monitoring: `Dockerfiles/docker-compose.embeddings.yml`
   - Base workers only: `docker compose -f Dockerfiles/docker-compose.embeddings.yml up -d`

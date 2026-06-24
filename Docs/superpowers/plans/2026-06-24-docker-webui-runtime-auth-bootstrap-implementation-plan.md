@@ -29,7 +29,7 @@
 - Modify `apps/tldw-frontend/__tests__/app/app-layout.test.tsx`
   - Mock and control `runtimeBootstrapReady` so auth state is not read before bootstrap completes.
 - Modify `Dockerfiles/docker-compose.webui.yml`
-  - Pass runtime `AUTH_MODE`, `SINGLE_USER_API_KEY`, and `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH` into the WebUI container.
+  - Pass runtime `AUTH_MODE`, `SINGLE_USER_API_KEY`, and `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH` into the WebUI container, with runtime-auth exposure disabled by default unless a local setup path explicitly opts in.
   - Keep host binding `127.0.0.1:8080:3000`.
 - Modify `Dockerfiles/docker-compose.single-user.yml`
   - Set `TLDW_SETUP_ALLOW_REMOTE=${TLDW_SETUP_ALLOW_REMOTE:-1}` on `app`.
@@ -886,7 +886,7 @@ Add these tests inside `describe("frontend quickstart networking", () => { ... }
 
     expect(compose).toContain("- AUTH_MODE=${AUTH_MODE:-single_user}")
     expect(compose).toContain("- SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}")
-    expect(compose).toContain("- TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-1}")
+    expect(compose).toContain("- TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-0}")
     expect(compose).toContain('"127.0.0.1:8080:3000"')
     expect(compose).toContain("- TLDW_INTERNAL_API_ORIGIN=${TLDW_INTERNAL_API_ORIGIN:-http://app:8000}")
   })
@@ -905,7 +905,7 @@ In `apps/tldw-frontend/__tests__/pr-916-review-followups.test.ts`, extend the fi
 ```ts
     expect(compose).toContain("- AUTH_MODE=${AUTH_MODE:-single_user}")
     expect(compose).toContain("- SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}")
-    expect(compose).toContain("- TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-1}")
+    expect(compose).toContain("- TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-0}")
 ```
 
 - [x] **Step 2: Run compose assertions to verify they fail**
@@ -925,7 +925,7 @@ Modify `Dockerfiles/docker-compose.webui.yml` service `webui.environment` to inc
 ```yaml
       - AUTH_MODE=${AUTH_MODE:-single_user}
       - SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}
-      - TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-1}
+      - TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-0}
 ```
 
 The environment block should become:
@@ -937,7 +937,7 @@ The environment block should become:
       - PORT=3000
       - AUTH_MODE=${AUTH_MODE:-single_user}
       - SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}
-      - TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-1}
+      - TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-0}
       - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-}
       - NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=${NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE:-quickstart}
       - TLDW_INTERNAL_API_ORIGIN=${TLDW_INTERNAL_API_ORIGIN:-http://app:8000}
@@ -1096,7 +1096,7 @@ In `Docs/Getting_Started/TROUBLESHOOTING.md`, update the `"NEXT_PUBLIC_X_API_KEY
 ```md
 Docker single-user WebUI quickstart uses runtime auth bootstrap. Check these when the WebUI returns `401`:
 
-- `Dockerfiles/docker-compose.webui.yml` passes `AUTH_MODE`, `SINGLE_USER_API_KEY`, and `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1` to the `webui` service.
+- `make setup-docker-single` or the equivalent `tldw-setup init --profile docker-single-webui` command wrote `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1` to `tldw_Server_API/Config_Files/.env`; the shared WebUI compose overlay defaults that flag to `0` without this explicit local quickstart opt-in.
 - The WebUI is opened through the default loopback URL, `http://127.0.0.1:8080`.
 - `SINGLE_USER_API_KEY` is not `change-me`.
 - The backend `app` service has the same `SINGLE_USER_API_KEY`.
@@ -1117,7 +1117,7 @@ The WebUI image is not tied to a specific single-user API key. In the default lo
 In `Dockerfiles/README.md`, add:
 
 ```md
-Single-user WebUI auth is runtime-configured. The `webui` service receives `AUTH_MODE`, `SINGLE_USER_API_KEY`, and `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH`; the browser does not require `NEXT_PUBLIC_X_API_KEY` for the default local quickstart.
+Single-user WebUI auth is runtime-configured. The `webui` service receives `AUTH_MODE`, `SINGLE_USER_API_KEY`, and `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH`; the browser does not require `NEXT_PUBLIC_X_API_KEY` for the default local quickstart. The reusable overlay defaults runtime-auth exposure to disabled unless local setup writes `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1`.
 ```
 
 - [x] **Step 5: Run doc guard tests**

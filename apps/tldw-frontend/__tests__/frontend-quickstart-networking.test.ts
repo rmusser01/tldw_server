@@ -293,7 +293,7 @@ describe("frontend quickstart networking", () => {
       "- SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}"
     )
     expect(compose).toContain(
-      "- TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-1}"
+      "- TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-0}"
     )
     expect(compose).toContain('"127.0.0.1:8080:3000"')
     expect(compose).toContain(

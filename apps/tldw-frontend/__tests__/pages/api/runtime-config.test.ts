@@ -119,6 +119,21 @@ describe("WebUI runtime config API", () => {
     }
   })
 
+  it("returns unavailable when the exposure flag is omitted", async () => {
+    delete process.env.TLDW_WEBUI_EXPOSE_RUNTIME_AUTH
+
+    const res = await callRuntimeConfig()
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatchObject({
+      runtimeAuth: {
+        available: false,
+        reason: "disabled"
+      }
+    })
+    expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
+  })
+
   it.each([
     ["127.0.0.1"],
     ["::1"],
