@@ -140,6 +140,53 @@ async def test_stream_tts_to_websocket_cancels_producer_when_consumer_send_fails
 
 
 @pytest.mark.asyncio
+async def test_stream_tts_to_websocket_propagates_parent_cancellation_during_cleanup():
+    class SlowCancelTTSService:
+        def __init__(self):
+            self.cleanup_started = asyncio.Event()
+
+        async def generate_speech(self, *_args, **_kwargs):  # noqa: ARG002
+            try:
+                yield b"first-chunk"
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cleanup_started.set()
+                await asyncio.sleep(0.2)
+                raise
+
+    class FailingWebSocket:
+        async def send_bytes(self, _data: bytes):
+            raise RuntimeError("client disconnected while reading stream")
+
+        async def close(self, code=1000, reason=None):  # noqa: ARG002
+            return None
+
+    class DummyRegistry:
+        def increment(self, *_args, **_kwargs):  # noqa: ARG002
+            return None
+
+    service = SlowCancelTTSService()
+    stream_task = asyncio.create_task(
+        streaming_service._stream_tts_to_websocket(
+            websocket=FailingWebSocket(),
+            speech_req=SimpleNamespace(model="test-model"),
+            tts_service=service,
+            provider="test-provider",
+            outer_stream=None,
+            reg=DummyRegistry(),
+            route="audio.stream.tts",
+            component_label="audio_tts_ws",
+        )
+    )
+
+    await asyncio.wait_for(service.cleanup_started.wait(), timeout=0.5)
+    stream_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(stream_task, timeout=0.5)
+
+
+@pytest.mark.asyncio
 async def test_stream_tts_to_websocket_drains_queue_when_producer_finishes():
     class FastTTSService:
         async def generate_speech(self, *_args, **_kwargs):  # noqa: ARG002
@@ -175,3 +222,67 @@ async def test_stream_tts_to_websocket_drains_queue_when_producer_finishes():
     )
 
     assert websocket.sent == [b"first-chunk", b"second-chunk"]
+
+
+@pytest.mark.asyncio
+async def test_stream_tts_to_websocket_cancels_consumer_when_completion_signal_fails():
+    consumer_cancelled = asyncio.Event()
+
+    class BrokenSentinelQueue:
+        def __init__(self, maxsize=0):  # noqa: ARG002
+            self.items = []
+
+        def put_nowait(self, item):
+            self.items.append(item)
+
+        async def put(self, item):
+            if item is None:
+                raise RuntimeError("sentinel enqueue failed")
+            self.items.append(item)
+
+        async def get(self):
+            if self.items:
+                return self.items.pop(0)
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                consumer_cancelled.set()
+                raise
+
+    class EmptyTTSService:
+        async def generate_speech(self, *_args, **_kwargs):  # noqa: ARG002
+            if False:
+                yield b"unreachable"
+
+    class PassiveWebSocket:
+        async def send_bytes(self, _data: bytes):
+            return None
+
+    class DummyRegistry:
+        def increment(self, *_args, **_kwargs):  # noqa: ARG002
+            return None
+
+    fake_asyncio = SimpleNamespace(
+        Queue=BrokenSentinelQueue,
+        QueueFull=asyncio.QueueFull,
+        create_task=asyncio.create_task,
+        wait=asyncio.wait,
+        FIRST_COMPLETED=asyncio.FIRST_COMPLETED,
+    )
+
+    await asyncio.wait_for(
+        streaming_service._stream_tts_to_websocket(
+            websocket=PassiveWebSocket(),
+            speech_req=SimpleNamespace(model="test-model"),
+            tts_service=EmptyTTSService(),
+            provider="test-provider",
+            outer_stream=None,
+            reg=DummyRegistry(),
+            route="audio.stream.tts",
+            component_label="audio_tts_ws",
+            asyncio_module=fake_asyncio,
+        ),
+        timeout=0.5,
+    )
+
+    assert consumer_cancelled.is_set()

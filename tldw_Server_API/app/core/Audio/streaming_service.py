@@ -157,8 +157,10 @@ async def _stream_tts_to_websocket(
     provider_label = (provider or getattr(speech_req, "model", None) or "default").lower()
     underrun_labels = {"provider": provider_label}
     error_labels = {"component": component_label, "provider": provider_label}
+    sentinel_enqueued = False
 
     async def _producer() -> None:
+        nonlocal sentinel_enqueued
         try:
             generate_kwargs: dict[str, Any] = {
                 "provider": provider,
@@ -194,6 +196,8 @@ async def _stream_tts_to_websocket(
                         logger.debug(f"{route} queue recovery after full failed: error={m_err}")
                         with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
                             reg.increment("audio_stream_errors_total", 1, labels=error_labels)
+        except asyncio.CancelledError:
+            raise
         except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
             try:
                 reg.increment("audio_stream_errors_total", 1, labels=error_labels)
@@ -202,11 +206,16 @@ async def _stream_tts_to_websocket(
             if error_handler is not None:
                 try:
                     await error_handler(exc)
+                except asyncio.CancelledError:
+                    raise
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as send_exc:
                     logger.debug(f"{route} error handler failed: error={send_exc}")
         finally:
             try:
                 await queue.put(None)
+                sentinel_enqueued = True
+            except asyncio.CancelledError:
+                raise
             except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as q_err:
                 logger.debug(f"{route} queue sentinel enqueue failed: error={q_err}")
 
@@ -220,6 +229,8 @@ async def _stream_tts_to_websocket(
                     await websocket.send_bytes(item)
                     if outer_stream:
                         outer_stream.mark_activity()
+                except asyncio.CancelledError:
+                    raise
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
                     try:
                         reg.increment("audio_stream_errors_total", 1, labels=error_labels)
@@ -227,14 +238,20 @@ async def _stream_tts_to_websocket(
                         logger.debug(f"{route} consumer metrics update failed: error={m_err}")
                     try:
                         await websocket.close(code=1011)
+                    except asyncio.CancelledError:
+                        raise
                     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as close_exc:
                         logger.debug(f"{route} websocket close in consumer failed: error={close_exc}")
                     if error_handler is not None:
                         try:
                             await error_handler(exc)
+                        except asyncio.CancelledError:
+                            raise
                         except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as send_exc:
                             logger.debug(f"{route} consumer error handler failed: error={send_exc}")
                     break
+        except asyncio.CancelledError:
+            raise
         except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
             try:
                 reg.increment("audio_stream_errors_total", 1, labels=error_labels)
@@ -245,25 +262,36 @@ async def _stream_tts_to_websocket(
     consumer_task = create_task(_consumer())
 
     async def _cancel_task(task: Any, task_name: str) -> None:
+        """Cancel one child task while preserving cancellation of this stream."""
         if task.done():
             return
         task.cancel()
         try:
             await task
         except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
             logger.debug(f"{route} {task_name} task cancelled")
         except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as wait_exc:
             logger.debug(f"{route} wait for {task_name} task failed after cancel: error={wait_exc}")
 
-    def _observe_task_result(task: Any, task_name: str) -> None:
+    def _observe_task_result(task: Any, task_name: str) -> bool:
+        """Return whether a completed task exited without a handled stream error."""
         if not task.done():
-            return
+            return False
         try:
             task.result()
         except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
             logger.debug(f"{route} {task_name} task cancelled")
+            return False
         except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as done_exc:
             logger.debug(f"{route} {task_name} task returned error: error={done_exc}")
+            return False
+        return True
 
     try:
         done, pending = await wait(
@@ -271,22 +299,34 @@ async def _stream_tts_to_websocket(
             return_when=FIRST_COMPLETED,
         )
         if producer_task in done:
-            _observe_task_result(producer_task, "producer")
+            producer_ok = _observe_task_result(producer_task, "producer")
             if consumer_task in pending:
-                try:
-                    await consumer_task
-                except asyncio.CancelledError:
-                    raise
-                except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as wait_exc:
-                    logger.debug(f"{route} wait for consumer task failed: error={wait_exc}")
-                _observe_task_result(consumer_task, "consumer")
+                if producer_ok and sentinel_enqueued:
+                    try:
+                        await consumer_task
+                    except asyncio.CancelledError:
+                        raise
+                    except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as wait_exc:
+                        logger.debug(f"{route} wait for consumer task failed: error={wait_exc}")
+                    _observe_task_result(consumer_task, "consumer")
+                else:
+                    await _cancel_task(consumer_task, "consumer")
         elif consumer_task in done:
             _observe_task_result(consumer_task, "consumer")
             if producer_task in pending:
                 await _cancel_task(producer_task, "producer")
     finally:
-        await _cancel_task(producer_task, "producer")
-        await _cancel_task(consumer_task, "consumer")
+        cleanup_cancelled = False
+        for task, task_name in ((producer_task, "producer"), (consumer_task, "consumer")):
+            try:
+                await _cancel_task(task, task_name)
+            except asyncio.CancelledError:
+                cleanup_cancelled = True
+                logger.debug(f"{route} parent cancellation while cleaning up {task_name} task")
+            except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as cleanup_exc:
+                logger.debug(f"{route} cleanup for {task_name} task failed: error={cleanup_exc}")
+        if cleanup_cancelled:
+            raise asyncio.CancelledError
 
 
 async def _audio_ws_authenticate(

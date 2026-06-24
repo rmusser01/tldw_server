@@ -4,7 +4,7 @@ title: Harden audio core review findings
 status: Done
 assignee: []
 created_date: '2026-06-23 18:11'
-updated_date: '2026-06-23 18:47'
+updated_date: '2026-06-24 01:43'
 labels:
   - audio
   - security
@@ -52,6 +52,12 @@ Final verification refresh after tokenizer loader-function refinement:
 - py_compile passed for updated tokenizer source and tests.
 - Focused tokenizer pytest with parent conftest cut off passed: 6 passed in 1.74s.
 - Bandit rerun on touched audio source scope completed with 0 results and 0 errors (/tmp/bandit_audio_core_2407.json).
+
+PR review follow-up:
+- Added docstrings for new stream/tokenizer helper functions flagged by Qodo.
+- Preserved parent cancellation by re-raising asyncio.CancelledError in producer/consumer paths before broad noncritical handlers.
+- Added regression tests for parent cancellation during TTS stream cleanup and failed completion-sentinel enqueue cancelling the consumer instead of hanging.
+- Focused audio pytest after follow-up: 8 passed in 3.62s.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

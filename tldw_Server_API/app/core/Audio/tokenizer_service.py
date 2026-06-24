@@ -172,6 +172,7 @@ def _resolve_tokenizer_frame_rate(tokenizer: Any) -> Optional[float]:
 
 
 def _callable_supports_keyword(fn: Any, keyword: str) -> bool:
+    """Return whether a callable explicitly accepts the named keyword."""
     try:
         params = signature(fn).parameters.values()
     except (TypeError, ValueError):
@@ -180,6 +181,7 @@ def _callable_supports_keyword(fn: Any, keyword: str) -> bool:
 
 
 def _local_only_not_supported() -> HTTPException:
+    """Build the fail-closed response for backends without local-only loading."""
     return HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail="Tokenizer backend cannot enforce local-only model loading",
