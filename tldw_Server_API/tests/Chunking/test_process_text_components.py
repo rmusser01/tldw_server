@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.Chunking import Chunker
+from tldw_Server_API.app.core.Chunking.constants import FRONTMATTER_SENTINEL_KEY
 from tldw_Server_API.app.core.Chunking.error_policy import CHUNKER_NONCRITICAL_EXCEPTIONS
 from tldw_Server_API.app.core.Chunking.exceptions import (
     ChunkingError,
@@ -14,6 +15,10 @@ from tldw_Server_API.app.core.Chunking.exceptions import (
 )
 from tldw_Server_API.app.core.Chunking.llm_context import _LLM_UNSET, llm_override_scope
 from tldw_Server_API.app.core.Chunking.option_utils import _coerce_bool_option
+from tldw_Server_API.app.core.Chunking.process_text.preparation import (
+    extract_header,
+    prepare_frontmatter,
+)
 from tldw_Server_API.app.core.Chunking.process_text import models
 from tldw_Server_API.app.core.Chunking.process_text.models import (
     NormalizedChunk,
@@ -147,3 +152,113 @@ def test_process_text_models_module_does_not_import_chunker() -> None:
     assert not hasattr(models, "Chunker")
     assert ".chunker" not in source
     assert "Chunking.chunker" not in source
+
+
+def test_prepare_frontmatter_extracts_default_sentinel_metadata() -> None:
+    text = f'  {{"title": "Example", "{FRONTMATTER_SENTINEL_KEY}": true}}\n\r\nBody text'
+
+    prepared = prepare_frontmatter(text, {"method": "words"}, tokenizer_name_or_path=None)
+
+    assert prepared.original_text == text
+    assert prepared.processed_text == "Body text"
+    assert prepared.prefix_offset == len(text) - len("Body text")
+    assert prepared.json_meta == {"title": "Example"}
+    assert prepared.header_text == ""
+    assert prepared.options == {"method": "words"}
+
+
+def test_prepare_frontmatter_extracts_custom_sentinel_metadata() -> None:
+    text = '{"title": "Custom", "custom_sentinel": 1}\nBody text'
+
+    prepared = prepare_frontmatter(
+        text,
+        {"frontmatter_sentinel_key": "custom_sentinel"},
+        tokenizer_name_or_path=None,
+    )
+
+    assert prepared.processed_text == "Body text"
+    assert prepared.prefix_offset == len(text) - len("Body text")
+    assert prepared.json_meta == {"title": "Custom"}
+    assert "frontmatter_sentinel_key" not in prepared.options
+
+
+def test_prepare_frontmatter_disabled_false_leaves_frontmatter_in_text() -> None:
+    text = f'{{"title": "Example", "{FRONTMATTER_SENTINEL_KEY}": true}}\nBody text'
+
+    prepared = prepare_frontmatter(
+        text,
+        {"enable_frontmatter_parsing": False},
+        tokenizer_name_or_path=None,
+    )
+
+    assert prepared.processed_text == text
+    assert prepared.prefix_offset == 0
+    assert prepared.json_meta == {}
+    assert "enable_frontmatter_parsing" not in prepared.options
+
+
+def test_prepare_frontmatter_string_false_remains_enabled() -> None:
+    text = f'{{"title": "Example", "{FRONTMATTER_SENTINEL_KEY}": true}}\nBody text'
+
+    prepared = prepare_frontmatter(
+        text,
+        {"enable_frontmatter_parsing": "false"},
+        tokenizer_name_or_path=None,
+    )
+
+    assert prepared.processed_text == "Body text"
+    assert prepared.json_meta == {"title": "Example"}
+
+
+def test_prepare_frontmatter_tokenizer_override_precedence() -> None:
+    injected = prepare_frontmatter(
+        "Body",
+        {"method": "words"},
+        tokenizer_name_or_path="fallback-tokenizer",
+    )
+    path_existing = prepare_frontmatter(
+        "Body",
+        {"tokenizer_name_or_path": "explicit-path"},
+        tokenizer_name_or_path="fallback-tokenizer",
+    )
+    name_existing = prepare_frontmatter(
+        "Body",
+        {"tokenizer_name": "explicit-name"},
+        tokenizer_name_or_path="fallback-tokenizer",
+    )
+
+    assert injected.options["tokenizer_name_or_path"] == "fallback-tokenizer"
+    assert path_existing.options["tokenizer_name_or_path"] == "explicit-path"
+    assert "tokenizer_name_or_path" not in name_existing.options
+    assert name_existing.options["tokenizer_name"] == "explicit-name"
+
+
+def test_extract_header_removes_legacy_transcription_header_and_updates_offset() -> None:
+    header = "This text was transcribed using faster-whisper\nmodel: base\n\n"
+    prepared = PreparedText(
+        original_text=header + " \tBody text",
+        processed_text=header + " \tBody text",
+        prefix_offset=5,
+        json_meta={"source": "frontmatter"},
+        header_text="",
+        options={"method": "words"},
+    )
+
+    extracted = extract_header(prepared)
+
+    assert extracted is not prepared
+    assert extracted.header_text == header
+    assert extracted.processed_text == "Body text"
+    assert extracted.prefix_offset == 5 + len(header) + 2
+    assert extracted.json_meta == prepared.json_meta
+    assert extracted.options == prepared.options
+
+
+def test_prepare_frontmatter_malformed_leading_json_does_not_raise() -> None:
+    text = f'{{"title": "Broken", "{FRONTMATTER_SENTINEL_KEY}": true\nBody text'
+
+    prepared = prepare_frontmatter(text, None, tokenizer_name_or_path=None)
+
+    assert prepared.processed_text == text
+    assert prepared.prefix_offset == 0
+    assert prepared.json_meta == {}

@@ -22,11 +22,11 @@ from loguru import logger
 
 from tldw_Server_API.app.core.testing import is_test_mode
 from .base import ChunkerConfig, ChunkingMethod, ChunkMetadata, ChunkResult
-from .constants import FRONTMATTER_SENTINEL_KEY
 from .error_policy import CHUNKER_NONCRITICAL_EXCEPTIONS as _CHUNKER_NONCRITICAL_EXCEPTIONS
 from .exceptions import ChunkingError, InvalidChunkingMethodError, InvalidInputError
 from .llm_context import _LLM_UNSET
 from .option_utils import _coerce_bool_option
+from .process_text.preparation import extract_header, prepare_frontmatter
 from .security_logger import get_security_logger
 from .strategies.fixed_size import FixedSizeChunkingStrategy
 from .strategies.rolling_summarize import RollingSummarizeStrategy
@@ -2279,49 +2279,17 @@ class Chunker:
         increment_counter("chunker_process_total", labels=labels)
         if text is None or not isinstance(text, str):
             raise InvalidInputError(f"Expected string input, got {type(text).__name__}")
-        # Shallow copy of options
-        opts = dict(options or {})
-        if tokenizer_name_or_path and 'tokenizer_name_or_path' not in opts and 'tokenizer_name' not in opts:
-            opts['tokenizer_name_or_path'] = tokenizer_name_or_path
-
-        # Extract and remove frontmatter controls so they are not forwarded downstream
-        frontmatter_enabled_opt = opts.pop("enable_frontmatter_parsing", None)
-        frontmatter_enabled = True if frontmatter_enabled_opt is None else bool(frontmatter_enabled_opt)
-        sentinel_key_raw = opts.pop("frontmatter_sentinel_key", FRONTMATTER_SENTINEL_KEY)
-        sentinel_key = str(sentinel_key_raw or FRONTMATTER_SENTINEL_KEY)
-
-        # Attempt to parse JSON frontmatter when explicitly enabled and sentinel present
         fm_start = time.perf_counter()
-        json_meta: dict[str, Any] = {}
-        processed_text = text
-        # Offsets emitted by process_text are relative to the original input text.
-        # Track how many leading characters we strip so we can restore offsets later.
-        prefix_offset = 0
-        if frontmatter_enabled:
-            try:
-                stripped = processed_text.lstrip()
-                if stripped.startswith("{"):
-                    decoder = json.JSONDecoder()
-                    try:
-                        parsed_candidate, end_idx = decoder.raw_decode(stripped)
-                    except ValueError:
-                        parsed_candidate = None
-                        end_idx = 0
-                    if (
-                        isinstance(parsed_candidate, dict)
-                        and len(stripped[:end_idx]) <= 1_000_000
-                        and sentinel_key in parsed_candidate
-                        and bool(parsed_candidate.get(sentinel_key))
-                    ):
-                        json_meta = {k: v for k, v in parsed_candidate.items() if k != sentinel_key}
-                        # Account for any leading whitespace trimmed before JSON parsing.
-                        leading_ws = len(processed_text) - len(stripped)
-                        tail = stripped[end_idx:]
-                        tail_trimmed = tail.lstrip("\n\r")
-                        prefix_offset += leading_ws + end_idx + (len(tail) - len(tail_trimmed))
-                        processed_text = tail_trimmed
-            except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                pass
+        prepared = prepare_frontmatter(
+            text,
+            options,
+            tokenizer_name_or_path=tokenizer_name_or_path,
+        )
+        opts = prepared.options
+        processed_text = prepared.processed_text
+        prefix_offset = prepared.prefix_offset
+        json_meta = prepared.json_meta
+        header_text = prepared.header_text
         observe_histogram("chunker_frontmatter_duration_seconds", time.perf_counter() - fm_start, labels=labels)
 
         # Recheck size constraints after optional trimming
@@ -2329,18 +2297,12 @@ class Chunker:
 
         # Optional header text extraction (legacy heuristic)
         hdr_start = time.perf_counter()
-        header_text = ""
-        try:
-            header_re = re.compile(r"^ (This[ ]text[ ]was[ ]transcribed[ ]using (?:[^\n]*\n)*?\n) ", re.MULTILINE | re.VERBOSE)
-            m = header_re.match(processed_text)
-            if m:
-                header_text = m.group(1)
-                tail = processed_text[len(header_text):]
-                tail_trimmed = tail.lstrip()
-                prefix_offset += len(header_text) + (len(tail) - len(tail_trimmed))
-                processed_text = tail_trimmed
-        except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-            pass
+        prepared = extract_header(prepared)
+        opts = prepared.options
+        processed_text = prepared.processed_text
+        prefix_offset = prepared.prefix_offset
+        json_meta = prepared.json_meta
+        header_text = prepared.header_text
         observe_histogram("chunker_header_extract_seconds", time.perf_counter() - hdr_start, labels=labels)
 
         # Resolve main parameters
