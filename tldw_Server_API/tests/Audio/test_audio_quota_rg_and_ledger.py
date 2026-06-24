@@ -56,14 +56,62 @@ async def test_add_daily_minutes_writes_to_resource_daily_ledger(tmp_path, monke
         # Default tier is "free" with a nonzero daily_minutes cap; ledger is
         # the enforcement source of truth.
         await audio_quota.add_daily_minutes(user_id, 2.5)
+        await audio_quota.add_daily_minutes(user_id, 2.5)
 
         # ResourceDailyLedger lives in the same AuthNZ DB; query totals via DAL
         ledger = ResourceDailyLedger(db_pool=pool)
         await ledger.initialize()
         today = datetime.now(timezone.utc).date().strftime("%Y-%m-%d")
-        # Units are stored as whole seconds; 2.5 minutes ≈ 150 seconds
+        # Units are stored as whole seconds; two 2.5 minute events ≈ 300 seconds.
         total_units = await ledger.total_for_day("user", str(user_id), "minutes", day_utc=today)
-        assert 145 <= total_units <= 155, f"Expected ~150 seconds, got {total_units}"
+        assert 295 <= total_units <= 305, f"Expected ~300 seconds, got {total_units}"
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_consume_daily_minutes_if_allowed_is_atomic_and_idempotent(tmp_path, monkeypatch):
+    db_path = tmp_path / "users_audio_atomic_ledger.db"
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+
+    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import ResourceDailyLedger
+    from tldw_Server_API.app.core.Usage import audio_quota
+
+    audio_quota._daily_ledger = None  # type: ignore[attr-defined]
+    audio_quota._audio_minutes_legacy_backfill_done = False  # type: ignore[attr-defined]
+
+    async def _limits(_user_id: int):
+        return {
+            "daily_minutes": 2.0,
+            "concurrent_streams": 1,
+            "concurrent_jobs": 1,
+            "max_file_size_mb": 25,
+        }
+
+    monkeypatch.setattr(audio_quota, "get_limits_for_user", _limits)
+    await reset_db_pool()
+    pool = await get_db_pool()
+    try:
+        allowed_1, remaining_1 = await audio_quota.consume_daily_minutes_if_allowed(51, 1.0, op_id="evt-1")
+        allowed_2, remaining_2 = await audio_quota.consume_daily_minutes_if_allowed(51, 1.0, op_id="evt-2")
+        retry_allowed, retry_remaining = await audio_quota.consume_daily_minutes_if_allowed(51, 1.0, op_id="evt-2")
+        denied, remaining_3 = await audio_quota.consume_daily_minutes_if_allowed(51, 0.1, op_id="evt-3")
+
+        assert allowed_1 is True
+        assert remaining_1 == pytest.approx(1.0)
+        assert allowed_2 is True
+        assert remaining_2 == pytest.approx(0.0)
+        assert retry_allowed is True
+        assert retry_remaining == pytest.approx(0.0)
+        assert denied is False
+        assert remaining_3 == pytest.approx(0.0)
+
+        ledger = ResourceDailyLedger(db_pool=pool)
+        await ledger.initialize()
+        today = datetime.now(timezone.utc).date().strftime("%Y-%m-%d")
+        assert await ledger.total_for_day("user", "51", "minutes", day_utc=today) == 120
     finally:
         await pool.close()
 
@@ -131,6 +179,61 @@ async def test_can_start_stream_and_finish_stream_via_rg_integration(monkeypatch
     await audio_quota.finish_stream(user_id)
     active_after = await audio_quota.active_streams_count(user_id)
     assert active_after == 1
+
+
+@pytest.mark.asyncio
+async def test_can_start_stream_real_rg_enforces_limit_with_distinct_reservations(monkeypatch):
+    from tldw_Server_API.app.core.Resource_Governance import MemoryResourceGovernor
+    from tldw_Server_API.app.core.Usage import audio_quota
+
+    audio_quota._reset_in_process_counters_for_tests()
+    gov = MemoryResourceGovernor(
+        policies={
+            "audio.default": {
+                "streams": {"max_concurrent": 2, "ttl_sec": 30},
+                "scopes": ["user"],
+            }
+        }
+    )
+
+    async def _fake_get_audio_rg():
+        return gov
+
+    monkeypatch.setattr(audio_quota, "_get_audio_rg_governor", _fake_get_audio_rg)
+
+    assert await audio_quota.can_start_stream(211) == (True, "OK")
+    assert await audio_quota.can_start_stream(211) == (True, "OK")
+
+    allowed, reason = await audio_quota.can_start_stream(211)
+    assert allowed is False
+    assert "Concurrent streams" in reason
+
+
+@pytest.mark.asyncio
+async def test_can_start_job_real_rg_enforces_limit_with_distinct_reservations(monkeypatch):
+    from tldw_Server_API.app.core.Resource_Governance import MemoryResourceGovernor
+    from tldw_Server_API.app.core.Usage import audio_quota
+
+    audio_quota._reset_in_process_counters_for_tests()
+    gov = MemoryResourceGovernor(
+        policies={
+            "audio.default": {
+                "jobs": {"max_concurrent": 1, "ttl_sec": 30},
+                "scopes": ["user"],
+            }
+        }
+    )
+
+    async def _fake_get_audio_rg():
+        return gov
+
+    monkeypatch.setattr(audio_quota, "_get_audio_rg_governor", _fake_get_audio_rg)
+
+    assert await audio_quota.can_start_job(212) == (True, "OK")
+
+    allowed, reason = await audio_quota.can_start_job(212)
+    assert allowed is False
+    assert "Concurrent job" in reason
 
 
 @pytest.mark.asyncio

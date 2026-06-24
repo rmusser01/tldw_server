@@ -366,17 +366,8 @@ async def log_llm_usage(
                 float(t_cost),
                 labels={"provider": str(provider or "unknown"), "model": str(model or "unknown")},
             )
-            # Per-user and per-operation breakdowns
-            if user_id is not None:
-                increment_counter(
-                    "llm_cost_dollars_by_user",
-                    float(t_cost),
-                    labels={
-                        "provider": str(provider or "unknown"),
-                        "model": str(model or "unknown"),
-                        "user_id": str(user_id),
-                    },
-                )
+            # Per-operation breakdowns are low-cardinality enough for metrics;
+            # user-level usage remains available in the durable usage log.
             if operation:
                 increment_counter(
                     "llm_cost_dollars_by_operation",
@@ -393,17 +384,6 @@ async def log_llm_usage(
                     float(pt),
                     labels={"provider": str(provider or "unknown"), "model": str(model or "unknown"), "type": "prompt"},
                 )
-                if user_id is not None:
-                    increment_counter(
-                        "llm_tokens_used_total_by_user",
-                        float(pt),
-                        labels={
-                            "provider": str(provider or "unknown"),
-                            "model": str(model or "unknown"),
-                            "type": "prompt",
-                            "user_id": str(user_id),
-                        },
-                    )
                 if operation:
                     increment_counter(
                         "llm_tokens_used_total_by_operation",
@@ -421,17 +401,6 @@ async def log_llm_usage(
                     float(ct),
                     labels={"provider": str(provider or "unknown"), "model": str(model or "unknown"), "type": "completion"},
                 )
-                if user_id is not None:
-                    increment_counter(
-                        "llm_tokens_used_total_by_user",
-                        float(ct),
-                        labels={
-                            "provider": str(provider or "unknown"),
-                            "model": str(model or "unknown"),
-                            "type": "completion",
-                            "user_id": str(user_id),
-                        },
-                    )
                 if operation:
                     increment_counter(
                         "llm_tokens_used_total_by_operation",
@@ -443,9 +412,11 @@ async def log_llm_usage(
                             "operation": str(operation or ""),
                         },
                     )
-        except _USAGE_NONCRITICAL_EXCEPTIONS:
+        except asyncio.CancelledError:
+            raise
+        except Exception:
             # Metrics must never impact request flow
-            pass
+            logger.debug("LLM usage metrics update skipped/failed")
 
         db_pool: DatabasePool = await get_db_pool()
         repo = AuthnzUsageRepo(db_pool)
@@ -524,9 +495,13 @@ async def log_llm_usage(
                             occurred_at=datetime.now(timezone.utc),
                         )
                         await ledger.add(entry)
-        except _USAGE_NONCRITICAL_EXCEPTIONS:
+        except asyncio.CancelledError:
+            raise
+        except Exception:
             # Ledger writes must never affect request flow
-            pass
-    except _USAGE_NONCRITICAL_EXCEPTIONS:
+            logger.debug("LLM usage daily ledger write skipped/failed")
+    except asyncio.CancelledError:
+        raise
+    except Exception:
         # Never break request processing due to logging errors
         logger.debug("LLM usage logging skipped/failed")

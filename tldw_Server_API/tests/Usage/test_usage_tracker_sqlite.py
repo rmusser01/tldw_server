@@ -413,6 +413,49 @@ async def test_log_llm_usage_failure_log_is_sanitized(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_log_llm_usage_repo_backend_error_is_best_effort(monkeypatch):
+    from tldw_Server_API.app.core.Usage import usage_tracker as usage_tracker_module
+
+    class _FailingRepo:
+        def __init__(self, _pool):
+            pass
+
+        async def get_api_key_name(self, *, key_id: int):  # noqa: ARG002
+            return None
+
+        async def insert_llm_usage_log(self, **_kwargs):
+            raise Exception("postgres usage insert failed at /private/usage-db")
+
+    async def _fake_get_db_pool():
+        return object()
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(usage_tracker_module, "get_settings", _safe_usage_settings)
+    monkeypatch.setattr(usage_tracker_module, "get_db_pool", _fake_get_db_pool)
+    monkeypatch.setattr(usage_tracker_module, "AuthnzUsageRepo", _FailingRepo)
+    monkeypatch.setattr(usage_tracker_module, "logger", logger_stub)
+
+    await usage_tracker_module.log_llm_usage(
+        user_id=1,
+        key_id=None,
+        endpoint="POST:/api/v1/chat/completions",
+        operation="chat",
+        provider="test",
+        model="test-model",
+        status=200,
+        latency_ms=1,
+        prompt_tokens=1,
+        completion_tokens=1,
+        total_tokens=2,
+        request_id="raw-request-id",
+    )
+
+    assert logger_stub.debugs == ["LLM usage logging skipped/failed"]
+    assert "postgres usage insert failed" not in str(logger_stub.debugs)
+    assert "/private/usage-db" not in str(logger_stub.debugs)
+
+
+@pytest.mark.asyncio
 async def test_log_llm_usage_persists_router_enrichment(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "ut-key-" + uuid.uuid4().hex)

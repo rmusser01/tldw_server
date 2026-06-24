@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 
@@ -297,6 +299,24 @@ async def test_can_start_stream_rg_reserve_failure_log_is_sanitized(monkeypatch)
     assert logger_stub.debugs == ["RG reserve failed for streams, failing open"]
     assert "rg streams reserve failed" not in str(logger_stub.debugs)
     assert "/private/rg.sock" not in str(logger_stub.debugs)
+
+
+@pytest.mark.asyncio
+async def test_can_start_stream_propagates_cancellation(monkeypatch):
+    from tldw_Server_API.app.core.Usage import audio_quota
+
+    class _CancellingGovernor:
+        async def reserve(self, req, op_id=None):  # noqa: ARG002
+            raise asyncio.CancelledError()
+
+    async def _fake_get_audio_rg_governor():
+        return _CancellingGovernor()
+
+    monkeypatch.setattr(audio_quota, "_get_audio_rg_governor", _fake_get_audio_rg_governor)
+    monkeypatch.setattr(audio_quota, "RGRequest", _SimpleRGRequest)
+
+    with pytest.raises(asyncio.CancelledError):
+        await audio_quota.can_start_stream(123)
 
 
 @pytest.mark.asyncio
