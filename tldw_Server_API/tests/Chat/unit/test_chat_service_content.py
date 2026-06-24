@@ -105,6 +105,7 @@ async def _run_non_stream_content_test(
     should_persist: bool = False,
     response_format: dict | None = None,
     metrics: object | None = None,
+    save_calls: list[dict[str, object]] | None = None,
 ) -> tuple[dict, list[dict[str, object]], dict[str, object]]:
     logged_usage: dict[str, object] = {}
 
@@ -114,7 +115,8 @@ async def _run_non_stream_content_test(
     monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
     monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
 
-    save_calls: list[dict[str, object]] = []
+    if save_calls is None:
+        save_calls = []
 
     async def save_message_fn(_db, _conv_id, payload, use_transaction=True):
         save_calls.append(payload)
@@ -493,6 +495,7 @@ async def test_execute_non_stream_call_blocks_when_later_choice_violates(monkeyp
 
 @pytest.mark.asyncio
 async def test_execute_non_stream_call_validates_all_structured_choices_before_persist(monkeypatch):
+    save_calls: list[dict[str, object]] = []
     response_format = {
         "type": "json_schema",
         "json_schema": {
@@ -517,6 +520,7 @@ async def test_execute_non_stream_call_validates_all_structured_choices_before_p
             moderation=_NoModeration(),
             should_persist=True,
             response_format=response_format,
+            save_calls=save_calls,
         )
 
     assert exc_info.value.status_code == 400
@@ -524,6 +528,7 @@ async def test_execute_non_stream_call_validates_all_structured_choices_before_p
         "code": "structured_output_schema_error",
         "message": "Model output did not match the requested JSON schema.",
     }
+    assert save_calls == []
 
 
 @pytest.mark.asyncio
