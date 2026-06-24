@@ -182,6 +182,7 @@ async def test_execute_non_stream_call_redacts_list_content(monkeypatch):
                         "role": "assistant",
                         "content": [
                             {"type": "text", "text": "secret"},
+                            "loose secret",
                             {
                                 "type": "image_url",
                                 "image_url": {"url": "data:image/png;base64,AAA"},
@@ -238,7 +239,8 @@ async def test_execute_non_stream_call_redacts_list_content(monkeypatch):
     content = response["choices"][0]["message"]["content"]
     assert isinstance(content, list)
     assert content[0]["text"].startswith("REDACTED:")
-    assert content[1]["type"] == "image_url"
+    assert content[1] == "REDACTED:loose secret"
+    assert content[2]["type"] == "image_url"
 
 
 @pytest.mark.asyncio

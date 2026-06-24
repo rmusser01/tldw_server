@@ -51,6 +51,38 @@ class _NoModeration:
         return text
 
 
+class _KeywordModeration:
+    class _Policy:
+        enabled = True
+        output_enabled = True
+        output_action = "redact"
+
+    def __init__(self, *, keyword: str) -> None:
+        self.keyword = keyword
+
+    def get_effective_policy(self, *_args, **_kwargs):
+        return self._Policy()
+
+    def evaluate_action_with_match(self, text, *_args, **_kwargs):
+        if self.keyword in str(text):
+            return (
+                "redact",
+                str(text).replace(self.keyword, "[redacted]"),
+                "keyword",
+                "default",
+                (0, len(self.keyword)),
+            )
+        return ("pass", None, None, None, None)
+
+    def check_text(self, text, *_args, **_kwargs):
+        if self.keyword in str(text):
+            return (True, "keyword")
+        return (False, None)
+
+    def redact_text(self, text, *_args, **_kwargs):
+        return str(text).replace(self.keyword, "[redacted]")
+
+
 def _build_llm_response_with_tool_calls() -> dict[str, Any]:
     return {
         "choices": [
@@ -82,6 +114,7 @@ async def _run_execute_non_stream_call(
     provider_manager: Any | None = None,
     enable_provider_fallback: bool = False,
     refresh_provider_params=None,
+    moderation_getter=None,
 ) -> dict[str, Any]:
     cleaned_args = {
         "api_endpoint": "openai",
@@ -122,7 +155,7 @@ async def _run_execute_non_stream_call(
         enable_provider_fallback=enable_provider_fallback,
         llm_call_func=llm_call_func,
         refresh_provider_params=refresh_provider_params or (lambda *_args, **_kwargs: None),
-        moderation_getter=lambda: _NoModeration(),
+        moderation_getter=moderation_getter or (lambda: _NoModeration()),
     )
 
 
@@ -1135,6 +1168,76 @@ async def test_non_stream_auto_continue_runs_once_when_enabled(monkeypatch: pyte
     assert [p["role"] for p in saved_payloads] == ["assistant", "tool", "assistant"]
     assert response["choices"][0]["message"]["content"] == "Final answer from continuation"
     assert response["tldw_tool_results"][0]["tool_call_id"] == "c1"
+    assert response["tldw_tool_auto_continue"] == {"attempted": True, "succeeded": True}
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_non_stream_auto_continue_redacts_continuation_before_return_and_persist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_log_llm_usage(**_kwargs):
+        return None
+
+    monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
+    monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+    monkeypatch.setattr(chat_service, "get_chat_max_tool_calls", lambda: 2)
+    monkeypatch.setattr(chat_service, "get_chat_tool_timeout_ms", lambda: 3500)
+    monkeypatch.setattr(chat_service, "get_chat_tool_allow_catalog", lambda: ["notes.*"])
+    monkeypatch.setattr(chat_service, "should_attach_tool_idempotency", lambda: True)
+    monkeypatch.setattr(chat_service, "should_auto_continue_tools_once", lambda: True)
+
+    async def fake_autoexec(**_kwargs):
+        rec = ToolExecutionRecord(
+            tool_call_id="c1",
+            tool_name="notes.search",
+            ok=True,
+            result={"ok": 1},
+            module="notes",
+            content='{"ok":true}',
+        )
+        return ToolExecutionBatchResult(
+            requested_calls=1,
+            processed_calls=1,
+            execution_attempts=1,
+            executed_calls=1,
+            truncated=False,
+            results=[rec],
+        )
+
+    monkeypatch.setattr(chat_service, "execute_assistant_tool_calls", fake_autoexec)
+
+    async def fake_followup_call(**_kwargs):
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Final answer includes unsafe-token",
+                    },
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_followup_call)
+
+    saved_payloads: list[dict[str, Any]] = []
+
+    async def save_message_fn(_db, _conv_id, payload, use_transaction=True):
+        saved_payloads.append(payload)
+        return f"m-{len(saved_payloads)}"
+
+    response = await _run_execute_non_stream_call(
+        llm_call_func=_build_llm_response_with_tool_calls,
+        save_message_fn=save_message_fn,
+        moderation_getter=lambda: _KeywordModeration(keyword="unsafe-token"),
+    )
+
+    assert [p["role"] for p in saved_payloads] == ["assistant", "tool", "assistant"]
+    assert saved_payloads[2]["content"] == "Final answer includes [redacted]"
+    assert response["choices"][0]["message"]["content"] == "Final answer includes [redacted]"
     assert response["tldw_tool_auto_continue"] == {"attempted": True, "succeeded": True}
 
 

@@ -5234,165 +5234,221 @@ async def execute_non_stream_call(
         else:
             content_text_for_usage = _extract_text_from_content(content_to_save)
 
-    # Self-monitoring output check (awareness/notifications)
-    if self_monitoring_service and (processed_choices or content_text_for_usage):
-        try:
-            _sm_uid = None
-            try:
-                if request is not None and hasattr(request, "state"):
-                    _sm_uid = getattr(request.state, "user_id", None)
-            except _CHAT_NONCRITICAL_EXCEPTIONS:
-                _sm_uid = None
-            _sm_user = str(_sm_uid or client_id)
-            _sm_loop = asyncio.get_running_loop()
-            sm_targets: list[NonStreamChoice | None] = list(processed_choices) if processed_choices else [None]
-            for sm_choice in sm_targets:
-                sm_text = sm_choice.content_text if sm_choice is not None else content_text_for_usage
-                if not sm_text:
-                    continue
-                sm_result = await _sm_loop.run_in_executor(
-                    None,
-                    lambda text=sm_text: self_monitoring_service.check_text(
-                        text=text,
-                        user_id=_sm_user,
-                        phase="output",
-                        conversation_id=str(final_conversation_id) if final_conversation_id else None,
-                    ),
-                )
-                if sm_result.action == "block":
-                    _emit_chat_run_first_completion_metric(
-                        metrics,
-                        context=run_first_metric_context,
-                        outcome="blocked",
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=sm_result.block_message or "Output blocked by self-monitoring rule",
-                    )
-                if sm_result.action == "redact" and sm_result.redacted_text is not None:
-                    if sm_choice is not None:
-                        set_choice_content(sm_choice, sm_result.redacted_text)
-                    else:
-                        content_to_save = sm_result.redacted_text
-                    _refresh_primary_choice_state()
-        except HTTPException:
-            raise
-        except _CHAT_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Self-monitoring output check skipped: {e}")
+    async def _apply_output_safety_to_current_choices() -> None:
+        nonlocal content_to_save
 
-    # Output moderation (non-streaming)
-    try:
-        moderation_targets: list[NonStreamChoice | None] = (
-            list(processed_choices) if processed_choices else [None]
-        )
-        if any(
-            (target.content_text if target is not None else content_text_for_usage)
-            for target in moderation_targets
-        ):
-            _get_mod = moderation_getter or get_moderation_service
-            moderation = _get_mod()
-            req_user_id = None
+        # Self-monitoring output check (awareness/notifications)
+        if self_monitoring_service and (processed_choices or content_text_for_usage):
             try:
-                if request is not None and hasattr(request, "state"):
-                    req_user_id = getattr(request.state, "user_id", None)
-            except _CHAT_NONCRITICAL_EXCEPTIONS:
-                req_user_id = None
-            eff_policy = moderation.get_effective_policy(str(req_user_id) if req_user_id is not None else client_id)
-            if eff_policy.enabled and eff_policy.output_enabled:
-                for moderation_choice in moderation_targets:
-                    target_content = moderation_choice.content if moderation_choice is not None else content_to_save
-                    target_text = moderation_choice.content_text if moderation_choice is not None else content_text_for_usage
-                    if not target_text:
+                _sm_uid = None
+                try:
+                    if request is not None and hasattr(request, "state"):
+                        _sm_uid = getattr(request.state, "user_id", None)
+                except _CHAT_NONCRITICAL_EXCEPTIONS:
+                    _sm_uid = None
+                _sm_user = str(_sm_uid or client_id)
+                _sm_loop = asyncio.get_running_loop()
+                sm_targets: list[NonStreamChoice | None] = list(processed_choices) if processed_choices else [None]
+                for sm_choice in sm_targets:
+                    sm_text = sm_choice.content_text if sm_choice is not None else content_text_for_usage
+                    if not sm_text:
                         continue
-                    resolved_action = None
-                    sample = None
-                    redacted_val = None
-                    out_category2 = None
-                    matched_pattern = None
-                    match_span = None
-                    if hasattr(moderation, "evaluate_action_with_match"):
-                        try:
-                            eval_res = moderation.evaluate_action_with_match(target_text, eff_policy, "output")
-                            if isinstance(eval_res, tuple) and len(eval_res) >= 3:
-                                resolved_action, redacted_val, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
-                                out_category2 = eval_res[3] if len(eval_res) >= 4 else None
-                                match_span = eval_res[4] if len(eval_res) >= 5 else None
-                            else:
-                                resolved_action, redacted_val, matched_pattern = eval_res  # type: ignore
-                        except _CHAT_NONCRITICAL_EXCEPTIONS:
-                            resolved_action = None
-                        if match_span and hasattr(moderation, "build_sanitized_snippet"):
+                    sm_result = await _sm_loop.run_in_executor(
+                        None,
+                        lambda text=sm_text: self_monitoring_service.check_text(
+                            text=text,
+                            user_id=_sm_user,
+                            phase="output",
+                            conversation_id=str(final_conversation_id) if final_conversation_id else None,
+                        ),
+                    )
+                    if sm_result.action == "block":
+                        _emit_chat_run_first_completion_metric(
+                            metrics,
+                            context=run_first_metric_context,
+                            outcome="blocked",
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=sm_result.block_message or "Output blocked by self-monitoring rule",
+                        )
+                    if sm_result.action == "redact" and sm_result.redacted_text is not None:
+                        if sm_choice is not None:
+                            set_choice_content(sm_choice, sm_result.redacted_text)
+                        else:
+                            content_to_save = sm_result.redacted_text
+                        _refresh_primary_choice_state()
+            except HTTPException:
+                raise
+            except _CHAT_NONCRITICAL_EXCEPTIONS as e:
+                logger.debug(f"Self-monitoring output check skipped: {e}")
+
+        # Output moderation (non-streaming)
+        try:
+            moderation_targets: list[NonStreamChoice | None] = (
+                list(processed_choices) if processed_choices else [None]
+            )
+            if any(
+                (target.content_text if target is not None else content_text_for_usage)
+                for target in moderation_targets
+            ):
+                _get_mod = moderation_getter or get_moderation_service
+                moderation = _get_mod()
+                req_user_id = None
+                try:
+                    if request is not None and hasattr(request, "state"):
+                        req_user_id = getattr(request.state, "user_id", None)
+                except _CHAT_NONCRITICAL_EXCEPTIONS:
+                    req_user_id = None
+                eff_policy = moderation.get_effective_policy(str(req_user_id) if req_user_id is not None else client_id)
+                if eff_policy.enabled and eff_policy.output_enabled:
+                    for moderation_choice in moderation_targets:
+                        target_content = moderation_choice.content if moderation_choice is not None else content_to_save
+                        target_text = moderation_choice.content_text if moderation_choice is not None else content_text_for_usage
+                        if not target_text:
+                            continue
+                        resolved_action = None
+                        sample = None
+                        redacted_val = None
+                        out_category2 = None
+                        matched_pattern = None
+                        match_span = None
+                        if hasattr(moderation, "evaluate_action_with_match"):
                             try:
-                                sample = moderation.build_sanitized_snippet(target_text, eff_policy, match_span, matched_pattern)
+                                eval_res = moderation.evaluate_action_with_match(target_text, eff_policy, "output")
+                                if isinstance(eval_res, tuple) and len(eval_res) >= 3:
+                                    resolved_action, redacted_val, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
+                                    out_category2 = eval_res[3] if len(eval_res) >= 4 else None
+                                    match_span = eval_res[4] if len(eval_res) >= 5 else None
+                                else:
+                                    resolved_action, redacted_val, matched_pattern = eval_res  # type: ignore
+                            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                                resolved_action = None
+                            if match_span and hasattr(moderation, "build_sanitized_snippet"):
+                                try:
+                                    sample = moderation.build_sanitized_snippet(target_text, eff_policy, match_span, matched_pattern)
+                                except _CHAT_NONCRITICAL_EXCEPTIONS:
+                                    sample = None
+                        elif hasattr(moderation, "evaluate_action"):
+                            try:
+                                eval_res = moderation.evaluate_action(target_text, eff_policy, "output")
+                                if isinstance(eval_res, tuple) and len(eval_res) >= 3:
+                                    resolved_action, redacted_val, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
+                                    out_category2 = eval_res[3] if len(eval_res) >= 4 else None
+                                else:
+                                    resolved_action, redacted_val, matched_pattern = eval_res  # type: ignore
+                            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                                resolved_action = None
+                        if resolved_action and resolved_action != "pass" and sample is None:
+                            try:
+                                _, sample = moderation.check_text(target_text, eff_policy, "output")
                             except _CHAT_NONCRITICAL_EXCEPTIONS:
                                 sample = None
-                    elif hasattr(moderation, "evaluate_action"):
+                        if not resolved_action:
+                            flagged, sample = moderation.check_text(target_text, eff_policy, "output")
+                            if flagged:
+                                resolved_action = eff_policy.output_action
+                                redacted_val = moderation.redact_text(target_text, eff_policy) if resolved_action == "redact" else None
+                        # Topic monitoring (final output)
                         try:
-                            eval_res = moderation.evaluate_action(target_text, eff_policy, "output")
-                            if isinstance(eval_res, tuple) and len(eval_res) >= 3:
-                                resolved_action, redacted_val, matched_pattern = eval_res[0], eval_res[1], eval_res[2]
-                                out_category2 = eval_res[3] if len(eval_res) >= 4 else None
-                            else:
-                                resolved_action, redacted_val, matched_pattern = eval_res  # type: ignore
-                        except _CHAT_NONCRITICAL_EXCEPTIONS:
-                            resolved_action = None
-                    if resolved_action and resolved_action != "pass" and sample is None:
-                        try:
-                            _, sample = moderation.check_text(target_text, eff_policy, "output")
-                        except _CHAT_NONCRITICAL_EXCEPTIONS:
-                            sample = None
-                    if not resolved_action:
-                        flagged, sample = moderation.check_text(target_text, eff_policy, "output")
-                        if flagged:
-                            resolved_action = eff_policy.output_action
-                            redacted_val = moderation.redact_text(target_text, eff_policy) if resolved_action == "redact" else None
-                    # Topic monitoring (final output)
-                    try:
-                        mon3 = None
-                        try:
-                            mon3 = get_topic_monitoring_service()
-                        except _CHAT_NONCRITICAL_EXCEPTIONS:
                             mon3 = None
-                        team_ids = None
-                        org_ids = None
-                        try:
-                            if request is not None and hasattr(request, "state"):
-                                team_ids = getattr(request.state, "team_ids", None)
-                                org_ids = getattr(request.state, "org_ids", None)
-                        except _CHAT_NONCRITICAL_EXCEPTIONS:
-                            pass
-                        if mon3 is not None and target_text:
-                            mon3.schedule_evaluate_and_alert(
-                                user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
-                                text=target_text,
-                                source="chat.output",
-                                scope_type="user",
-                                scope_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
-                                team_ids=team_ids,
-                                org_ids=org_ids,
-                                source_id=str(final_conversation_id) if final_conversation_id else None,
-                            )
-                    except _CHAT_NONCRITICAL_EXCEPTIONS as _ex:
-                        logger.debug(f"Topic monitoring (non-stream final) skipped: {_ex}")
+                            try:
+                                mon3 = get_topic_monitoring_service()
+                            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                                mon3 = None
+                            team_ids = None
+                            org_ids = None
+                            try:
+                                if request is not None and hasattr(request, "state"):
+                                    team_ids = getattr(request.state, "team_ids", None)
+                                    org_ids = getattr(request.state, "org_ids", None)
+                            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                                pass
+                            if mon3 is not None and target_text:
+                                mon3.schedule_evaluate_and_alert(
+                                    user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
+                                    text=target_text,
+                                    source="chat.output",
+                                    scope_type="user",
+                                    scope_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
+                                    team_ids=team_ids,
+                                    org_ids=org_ids,
+                                    source_id=str(final_conversation_id) if final_conversation_id else None,
+                                )
+                        except _CHAT_NONCRITICAL_EXCEPTIONS as _ex:
+                            logger.debug(f"Topic monitoring (non-stream final) skipped: {_ex}")
 
-                    if resolved_action == "block":
-                        if audit_service and audit_context:
-                            await write_mandatory_moderation_audit(
-                                audit_service=audit_service,
-                                audit_context=audit_context,
-                                audit_event_type=AuditEventType.SECURITY_VIOLATION,
-                                action="moderation.output",
-                                result="failure",
-                                metadata={
-                                    "phase": "output",
-                                    "streaming": False,
-                                    "action": "block",
-                                    "pattern": sample,
-                                },
+                        if resolved_action == "block":
+                            if audit_service and audit_context:
+                                await write_mandatory_moderation_audit(
+                                    audit_service=audit_service,
+                                    audit_context=audit_context,
+                                    audit_event_type=AuditEventType.SECURITY_VIOLATION,
+                                    action="moderation.output",
+                                    result="failure",
+                                    metadata={
+                                        "phase": "output",
+                                        "streaming": False,
+                                        "action": "block",
+                                        "pattern": sample,
+                                    },
+                                )
+                                await _capture_moderation_review_item_safely_async(
+                                    phase="output",
+                                    action="block",
+                                    excerpt=sample,
+                                    category=out_category2,
+                                    matched_pattern=matched_pattern,
+                                    effective_policy=eff_policy,
+                                    source_id=str(final_conversation_id) if final_conversation_id else None,
+                                    user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
+                                )
+                            _emit_chat_run_first_completion_metric(
+                                metrics,
+                                context=run_first_metric_context,
+                                outcome="blocked",
                             )
+                            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Output violates moderation policy")
+                        if resolved_action == "redact":
+                            try:
+                                if sample is not None:
+                                    metrics.track_moderation_output(str(req_user_id or client_id), "redact", streaming=False, category=(out_category2 or "default"))
+                            except _CHAT_NONCRITICAL_EXCEPTIONS:
+                                pass
+                            try:
+                                if audit_service and audit_context:
+                                    await write_mandatory_moderation_audit(
+                                        audit_service=audit_service,
+                                        audit_context=audit_context,
+                                        audit_event_type=AuditEventType.SECURITY_VIOLATION,
+                                        action="moderation.output",
+                                        result="success",
+                                        metadata={
+                                            "phase": "output",
+                                            "streaming": False,
+                                            "action": "redact",
+                                            "pattern": sample,
+                                        },
+                                    )
+                            except MandatoryAuditWriteError:
+                                raise
+                            if isinstance(target_content, str):
+                                redacted_content = (
+                                    redacted_val
+                                    if isinstance(redacted_val, str)
+                                    else moderation.redact_text(target_text, eff_policy)
+                                )
+                            else:
+                                redacted_content = _apply_redaction_to_content(target_content, moderation, eff_policy)
+                            if moderation_choice is not None:
+                                set_choice_content(moderation_choice, redacted_content)
+                            else:
+                                content_to_save = redacted_content
+                            _refresh_primary_choice_state()
+                        if resolved_action == "warn":
                             await _capture_moderation_review_item_safely_async(
                                 phase="output",
-                                action="block",
+                                action="warn",
                                 excerpt=sample,
                                 category=out_category2,
                                 matched_pattern=matched_pattern,
@@ -5400,65 +5456,14 @@ async def execute_non_stream_call(
                                 source_id=str(final_conversation_id) if final_conversation_id else None,
                                 user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
                             )
-                        _emit_chat_run_first_completion_metric(
-                            metrics,
-                            context=run_first_metric_context,
-                            outcome="blocked",
-                        )
-                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Output violates moderation policy")
-                    if resolved_action == "redact":
-                        try:
-                            if sample is not None:
-                                metrics.track_moderation_output(str(req_user_id or client_id), "redact", streaming=False, category=(out_category2 or "default"))
-                        except _CHAT_NONCRITICAL_EXCEPTIONS:
-                            pass
-                        try:
-                            if audit_service and audit_context:
-                                await write_mandatory_moderation_audit(
-                                    audit_service=audit_service,
-                                    audit_context=audit_context,
-                                    audit_event_type=AuditEventType.SECURITY_VIOLATION,
-                                    action="moderation.output",
-                                    result="success",
-                                    metadata={
-                                        "phase": "output",
-                                        "streaming": False,
-                                        "action": "redact",
-                                        "pattern": sample,
-                                    },
-                                )
-                        except MandatoryAuditWriteError:
-                            raise
-                        if isinstance(target_content, str):
-                            redacted_content = (
-                                redacted_val
-                                if isinstance(redacted_val, str)
-                                else moderation.redact_text(target_text, eff_policy)
-                            )
-                        else:
-                            redacted_content = _apply_redaction_to_content(target_content, moderation, eff_policy)
-                        if moderation_choice is not None:
-                            set_choice_content(moderation_choice, redacted_content)
-                        else:
-                            content_to_save = redacted_content
-                        _refresh_primary_choice_state()
-                    if resolved_action == "warn":
-                        await _capture_moderation_review_item_safely_async(
-                            phase="output",
-                            action="warn",
-                            excerpt=sample,
-                            category=out_category2,
-                            matched_pattern=matched_pattern,
-                            effective_policy=eff_policy,
-                            source_id=str(final_conversation_id) if final_conversation_id else None,
-                            user_id=str(req_user_id or client_id) if (req_user_id or client_id) else None,
-                        )
-    except HTTPException:
-        raise
-    except MandatoryAuditWriteError:
-        raise
-    except _CHAT_NONCRITICAL_EXCEPTIONS as e:
-        logger.warning(f"Moderation output processing error: {e}")
+        except HTTPException:
+            raise
+        except MandatoryAuditWriteError:
+            raise
+        except _CHAT_NONCRITICAL_EXCEPTIONS as e:
+            logger.warning(f"Moderation output processing error: {e}")
+
+    await _apply_output_safety_to_current_choices()
 
     assistant_message_id: str | None = None
     tool_execution_payload: list[dict[str, Any]] | None = None
@@ -5586,11 +5591,20 @@ async def execute_non_stream_call(
                     if isinstance(continuation_response, str) and should_force_normalize_string_responses():
                         continuation_response = _wrap_raw_string_response(continuation_response, model)
 
-                    continuation_choices = collect_non_stream_choices(continuation_response)
                     if continuation_response is not None:
+                        llm_response = continuation_response
+                        processed_choices = collect_non_stream_choices(llm_response)
+                        first_choice = primary_choice(processed_choices)
+                        content_to_save = first_choice.content if first_choice else None
+                        tool_calls_to_save = first_choice.tool_calls if first_choice else None
+                        function_call_to_save = first_choice.function_call if first_choice else None
+                        if first_choice is None and isinstance(llm_response, str):
+                            content_to_save = llm_response
+                        content_text_for_usage = _extract_text_from_content(content_to_save)
+                        await _apply_output_safety_to_current_choices()
                         try:
                             continuation_structured_metadata = validate_structured_choices(
-                                choices=continuation_choices,
+                                choices=processed_choices,
                                 structured_request_context=structured_request_context,
                                 validate_structured_response=validate_structured_response,
                             )
@@ -5605,15 +5619,6 @@ async def execute_non_stream_call(
                                 outcome="error",
                             )
                             raise build_structured_http_exception(structured_exc) from structured_exc
-                        llm_response = continuation_response
-                        processed_choices = collect_non_stream_choices(llm_response)
-                        first_choice = primary_choice(processed_choices)
-                        content_to_save = first_choice.content if first_choice else None
-                        tool_calls_to_save = first_choice.tool_calls if first_choice else None
-                        function_call_to_save = first_choice.function_call if first_choice else None
-                        if first_choice is None and isinstance(llm_response, str):
-                            content_to_save = llm_response
-                        content_text_for_usage = _extract_text_from_content(content_to_save)
                         if continuation_structured_metadata is not None:
                             structured_metadata = continuation_structured_metadata
 
@@ -5659,6 +5664,8 @@ async def execute_non_stream_call(
                     raise
                 except _CHAT_NONCRITICAL_EXCEPTIONS as continue_err:
                     logger.warning("Chat tool auto-continue skipped due to error: {}", continue_err)
+        except HTTPException:
+            raise
         except _CHAT_NONCRITICAL_EXCEPTIONS as autoexec_err:
             logger.warning("Chat tool auto-execution skipped due to error: {}", autoexec_err)
 

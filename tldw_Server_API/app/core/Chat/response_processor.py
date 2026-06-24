@@ -82,6 +82,8 @@ def apply_redaction_to_content(content: Any | None, redact_text: Callable[[str],
                 if isinstance(new_item.get("text"), str):
                     new_item["text"] = redact_text(new_item["text"])
                 redacted_items.append(new_item)
+            elif isinstance(item, str):
+                redacted_items.append(redact_text(item))
             else:
                 redacted_items.append(item)
         return redacted_items
