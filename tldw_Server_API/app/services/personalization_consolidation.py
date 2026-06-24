@@ -18,7 +18,9 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.Personalization.companion_derivations import derive_companion_knowledge_cards
-from tldw_Server_API.app.core.Personalization.companion_user_ids import resolve_companion_storage_user_id
+from tldw_Server_API.app.core.Personalization.companion_user_ids import (
+    resolve_existing_companion_storage_user_id,
+)
 
 _PERSONALIZATION_CONSOLIDATION_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -35,7 +37,7 @@ _PERSONALIZATION_CONSOLIDATION_NONCRITICAL_EXCEPTIONS = (
 
 def _resolve_user_storage_id(user_id: str) -> str:
     """Return the shared personalization storage id for logical user ids."""
-    return resolve_companion_storage_user_id(user_id)
+    return resolve_existing_companion_storage_user_id(user_id)
 
 
 @dataclass

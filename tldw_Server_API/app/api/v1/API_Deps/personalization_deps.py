@@ -15,13 +15,13 @@ from tldw_Server_API.app.core.DB_Management.Personalization_DB import (
     UsageEvent,
 )
 from tldw_Server_API.app.core.Personalization.companion_user_ids import (
-    resolve_companion_storage_user_id,
+    resolve_existing_companion_storage_user_id,
 )
 
 
 def get_personalization_db_for_user(user: User = Depends(get_request_user)) -> PersonalizationDB:
     """Return a PersonalizationDB instance bound to the current user's DB path."""
-    uid = resolve_companion_storage_user_id(user.id)
+    uid = resolve_existing_companion_storage_user_id(user.id)
     return PersonalizationDB.for_user(uid)
 
 

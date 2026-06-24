@@ -17,7 +17,7 @@ from tldw_Server_API.app.core.Personalization.companion_proactive import (
     classify_companion_reflection_delivery,
 )
 from tldw_Server_API.app.core.Personalization.companion_user_ids import (
-    resolve_companion_storage_user_id,
+    resolve_existing_companion_storage_user_id,
 )
 
 
@@ -402,7 +402,7 @@ def run_companion_reflection_job(
     if normalized_cadence is None:
         return {"status": "skipped", "reason": "invalid_cadence"}
     current_time = _coerce_now(_parse_iso_datetime(scheduled_for) or now)
-    storage_user_id = resolve_companion_storage_user_id(normalized_user_id)
+    storage_user_id = resolve_existing_companion_storage_user_id(normalized_user_id)
     db = personalization_db or PersonalizationDB.for_user(storage_user_id)
     cdb = collections_db or CollectionsDatabase.for_user(user_id=normalized_user_id)
     profile = db.get_or_create_profile(normalized_user_id)

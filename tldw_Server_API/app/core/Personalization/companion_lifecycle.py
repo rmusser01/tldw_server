@@ -10,7 +10,7 @@ from tldw_Server_API.app.core.DB_Management.Personalization_DB import Personaliz
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Personalization.companion_derivations import derive_companion_knowledge_cards
 from tldw_Server_API.app.core.Personalization.companion_user_ids import (
-    resolve_companion_storage_user_id,
+    resolve_existing_companion_storage_user_id,
 )
 
 
@@ -43,7 +43,7 @@ def _resolve_personalization_db(
     """Return the provided personalization DB or open the default DB for the user."""
     if personalization_db is not None:
         return personalization_db
-    storage_user_id = resolve_companion_storage_user_id(user_id)
+    storage_user_id = resolve_existing_companion_storage_user_id(user_id)
     return PersonalizationDB.for_user(storage_user_id)
 
 

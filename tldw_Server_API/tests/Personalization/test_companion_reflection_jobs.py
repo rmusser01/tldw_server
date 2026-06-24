@@ -10,7 +10,7 @@ from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDat
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Personalization.companion_user_ids import (
-    resolve_companion_storage_user_id,
+    resolve_legacy_companion_storage_user_ids,
 )
 from tldw_Server_API.app.core.Personalization.companion_reflection_jobs import (
     COMPANION_REBUILD_JOB_TYPE,
@@ -42,7 +42,7 @@ def companion_reflection_env(monkeypatch, tmp_path) -> Iterator[Path]:
 
 
 def _legacy_storage_user_id(user_id: str) -> str:
-    return resolve_companion_storage_user_id(user_id)
+    return resolve_legacy_companion_storage_user_ids(user_id)[0]
 
 
 def _seed_companion_context(user_id: str) -> tuple[PersonalizationDB, CollectionsDatabase]:

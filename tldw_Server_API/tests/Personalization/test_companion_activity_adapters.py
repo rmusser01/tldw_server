@@ -30,7 +30,10 @@ from tldw_Server_API.app.core.Personalization.companion_activity import (
     record_watchlist_source_restored,
     record_watchlist_source_updated,
 )
-from tldw_Server_API.app.core.Personalization.companion_user_ids import resolve_companion_storage_user_id
+from tldw_Server_API.app.core.Personalization.companion_user_ids import (
+    resolve_companion_storage_user_id,
+    resolve_legacy_companion_storage_user_ids,
+)
 from tldw_Server_API.app.core.config import settings
 
 
@@ -153,6 +156,34 @@ def test_record_companion_activity_uses_resolved_storage_user_id_for_text_users(
 
     assert result == "evt-1"
     assert opened_user_ids == [resolve_companion_storage_user_id("user-alpha")]
+
+
+def test_record_companion_activity_uses_existing_legacy_storage_db_for_text_users(
+    companion_db_env,
+    monkeypatch,
+):
+    user_id = "user-alpha"
+    preferred_storage_id = resolve_companion_storage_user_id(user_id)
+    legacy_storage_id = resolve_legacy_companion_storage_user_ids(user_id)[0]
+    legacy_db = PersonalizationDB(str(DatabasePaths.get_personalization_db_path(legacy_storage_id)))
+    legacy_db.update_profile(user_id, enabled=1)
+    monkeypatch.setattr(companion_activity_module, "is_personalization_enabled", lambda: True)
+
+    result = record_companion_activity(
+        user_id=user_id,
+        event_type="reading_item_saved",
+        source_type="reading_item",
+        source_id="123",
+        surface="api.reading",
+        dedupe_key="reading.save:123",
+        metadata={"title": "Legacy DB item"},
+    )
+
+    assert result
+    rows, total = legacy_db.list_companion_activity_events(user_id, limit=10)
+    assert total == 1
+    assert rows[0]["metadata"]["title"] == "Legacy DB item"
+    assert not (companion_db_env / preferred_storage_id).exists()
 
 
 def test_insert_companion_activity_events_bulk_skips_duplicate_dedupe_keys(companion_db_env):
@@ -414,6 +445,10 @@ def test_record_companion_activity_capture_skip_log_omits_exception_text(monkeyp
     log_text = "\n".join(messages)
     assert "companion activity capture skipped" in log_text
     assert "RuntimeError" in log_text
+    assert "operation=record_companion_activity" in log_text
+    assert "event_type=reading_item_saved" in log_text
+    assert "source_type=reading_item" in log_text
+    assert "trace=[" in log_text
     assert "companion backend exploded" not in log_text
     assert "/private/companion.db" not in log_text
 
@@ -450,6 +485,10 @@ def test_record_companion_activity_insert_skip_log_omits_exception_text(monkeypa
     log_text = "\n".join(messages)
     assert "companion activity insert skipped" in log_text
     assert "IntegrityError" in log_text
+    assert "operation=record_companion_activity.insert" in log_text
+    assert "event_type=reading_item_saved" in log_text
+    assert "source_type=reading_item" in log_text
+    assert "trace=[" in log_text
     assert "database disk image is malformed" not in log_text
     assert "/private/companion.db" not in log_text
 
@@ -485,6 +524,9 @@ def test_record_companion_activity_bulk_capture_skip_log_omits_exception_text(mo
     log_text = "\n".join(messages)
     assert "companion activity bulk capture skipped" in log_text
     assert "RuntimeError" in log_text
+    assert "operation=record_companion_activity_events_bulk" in log_text
+    assert "event_count=1" in log_text
+    assert "trace=[" in log_text
     assert "companion backend exploded" not in log_text
     assert "/private/companion.db" not in log_text
 

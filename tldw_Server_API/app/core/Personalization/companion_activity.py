@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import traceback
 from typing import Any
 
 from loguru import logger
@@ -12,7 +13,7 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.feature_flags import is_personalization_enabled
 from tldw_Server_API.app.core.Personalization.companion_user_ids import (
-    resolve_companion_storage_user_id,
+    resolve_existing_companion_storage_user_id,
 )
 
 
@@ -21,7 +22,7 @@ def _open_db_for_user(user_id: str | int) -> tuple[PersonalizationDB, str]:
     normalized_user_id = str(user_id or "").strip()
     if not normalized_user_id:
         raise ValueError("user_id is required")
-    storage_user_id = resolve_companion_storage_user_id(normalized_user_id)
+    storage_user_id = resolve_existing_companion_storage_user_id(normalized_user_id)
     return PersonalizationDB.for_user(storage_user_id), normalized_user_id
 
 
@@ -62,6 +63,65 @@ def _exception_reason(exc: BaseException) -> str:
     return type(exc).__name__
 
 
+def _log_ref(value: Any) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return "na"
+    return hashlib.sha1(normalized.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+
+
+def _traceback_summary(exc: BaseException) -> list[dict[str, Any]]:
+    frames = traceback.extract_tb(exc.__traceback__)
+    return [
+        {"function": frame.name, "line": frame.lineno}
+        for frame in frames[-4:]
+    ]
+
+
+def _log_activity_exception(
+    *,
+    level: str,
+    message: str,
+    exc: BaseException,
+    operation: str,
+    user_id: str | int | None,
+    event_type: str | None = None,
+    source_type: str | None = None,
+    source_id: str | int | None = None,
+    dedupe_key: str | None = None,
+    event_count: int | None = None,
+) -> None:
+    reason = _exception_reason(exc)
+    context = {
+        "operation": operation,
+        "reason": reason,
+        "user_ref": _log_ref(user_id),
+        "event_type": event_type or "na",
+        "source_type": source_type or "na",
+        "source_ref": _log_ref(source_id),
+        "dedupe_ref": _log_ref(dedupe_key),
+        "event_count": event_count,
+        "trace": _traceback_summary(exc),
+    }
+    logger.bind(**context).log(
+        level,
+        (
+            "{}: reason={} operation={} user_ref={} event_type={} "
+            "source_type={} source_ref={} dedupe_ref={} event_count={} trace={}"
+        ),
+        message,
+        reason,
+        context["operation"],
+        context["user_ref"],
+        context["event_type"],
+        context["source_type"],
+        context["source_ref"],
+        context["dedupe_ref"],
+        context["event_count"],
+        context["trace"],
+    )
+
+
 def record_companion_activity(
     *,
     user_id: str | int | None,
@@ -99,10 +159,30 @@ def record_companion_activity(
         if _unique_conflict(exc):
             logger.debug("companion activity duplicate skipped: {}", dedupe_key)
             return None
-        logger.debug("companion activity insert skipped: reason={}", _exception_reason(exc))
+        _log_activity_exception(
+            level="DEBUG",
+            message="companion activity insert skipped",
+            exc=exc,
+            operation="record_companion_activity.insert",
+            user_id=user_id,
+            event_type=event_type,
+            source_type=source_type,
+            source_id=source_id,
+            dedupe_key=dedupe_key,
+        )
         return None
     except Exception as exc:
-        logger.debug("companion activity capture skipped: reason={}", _exception_reason(exc))
+        _log_activity_exception(
+            level="DEBUG",
+            message="companion activity capture skipped",
+            exc=exc,
+            operation="record_companion_activity",
+            user_id=user_id,
+            event_type=event_type,
+            source_type=source_type,
+            source_id=source_id,
+            dedupe_key=dedupe_key,
+        )
         return None
 
 
@@ -136,7 +216,14 @@ def record_companion_activity_events_bulk(
             events=safe_events,
         )
     except Exception as exc:
-        logger.warning("companion activity bulk capture skipped: reason={}", _exception_reason(exc))
+        _log_activity_exception(
+            level="WARNING",
+            message="companion activity bulk capture skipped",
+            exc=exc,
+            operation="record_companion_activity_events_bulk",
+            user_id=normalized_user_id or user_id,
+            event_count=len(events),
+        )
         return []
 
 

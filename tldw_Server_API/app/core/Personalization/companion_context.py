@@ -12,7 +12,7 @@ from tldw_Server_API.app.core.DB_Management.Personalization_DB import Personaliz
 from tldw_Server_API.app.core.feature_flags import is_personalization_enabled
 from tldw_Server_API.app.core.Personalization.companion_relevance import rank_companion_candidates
 from tldw_Server_API.app.core.Personalization.companion_user_ids import (
-    resolve_companion_storage_user_id,
+    resolve_existing_companion_storage_user_id,
 )
 
 _MAX_COMPANION_CONTEXT_TOTAL_CHARS = 1_200
@@ -142,7 +142,7 @@ def _load_ranked_companion_candidates(
 ) -> dict[str, Any]:
     personalization_db = db
     if personalization_db is None:
-        personalization_db = PersonalizationDB.for_user(resolve_companion_storage_user_id(user_id))
+        personalization_db = PersonalizationDB.for_user(resolve_existing_companion_storage_user_id(user_id))
     profile = personalization_db.get_or_create_profile(user_id)
     if not bool(profile.get("enabled", 0)):
         return {
