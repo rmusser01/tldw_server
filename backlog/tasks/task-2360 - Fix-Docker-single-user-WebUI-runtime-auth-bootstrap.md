@@ -55,6 +55,8 @@ Docs/superpowers/plans/2026-06-24-docker-webui-runtime-auth-bootstrap-implementa
 2026-06-24 Task 2 blocker follow-up: Patched auth.mode.test.ts with a hoisted @web/lib/api mock so getAuthMode tests do not import real API base-url resolution. Required verification now passes without env workarounds: bunx vitest run __tests__/extension/runtime-bootstrap.test.ts __tests__/auth.mode.test.ts __tests__/auth.logout.test.ts. Bandit not run: test-only TypeScript harness change.
 
 2026-06-24 Task 2 code-quality follow-up: Fixed runtime auth ownership so a manual stored key equal to the current runtime key does not become runtime-owned without prior metadata, and aligned persisted placeholder replacement with the runtime-config endpoint invalid-key policy. Verification: bunx vitest run __tests__/extension/runtime-bootstrap.test.ts passed; bunx vitest run __tests__/extension/runtime-bootstrap.test.ts __tests__/auth.mode.test.ts __tests__/auth.logout.test.ts passed.
+
+2026-06-24 Task 2 runtime-auth preservation follow-up: Added regression coverage for manual multi-user tldwConfig with accessToken and updated runtime bootstrap persistence ownership so runtime API key still wins request precedence without overwriting stored multi-user credentials or writing runtime metadata. Red/green verification: bunx vitest run __tests__/extension/runtime-bootstrap.test.ts failed on the new regression before the fix and passed after the fix. Required verification passed: bunx vitest run __tests__/extension/runtime-bootstrap.test.ts __tests__/auth.mode.test.ts __tests__/auth.logout.test.ts (29 tests). Bandit not run: touched implementation is TypeScript frontend code only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

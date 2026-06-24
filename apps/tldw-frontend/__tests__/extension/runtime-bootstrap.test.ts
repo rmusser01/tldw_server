@@ -375,6 +375,31 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(readStoredValue("tldwRuntimeAuthMetadata")).toBeNull()
   })
 
+  it("preserves manual multi-user credentials while runtime auth wins request precedence", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "multi-user",
+        accessToken: "manual-token",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    )
+    stubRuntimeConfigFetch("runtime-key")
+
+    await importAndAwaitBootstrap()
+    const { getApiKey } = await import("@web/lib/authStorage")
+
+    const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
+    expect(getApiKey()).toBe("runtime-key")
+    expect(nextConfig.authMode).toBe("multi-user")
+    expect(nextConfig.accessToken).toBe("manual-token")
+    expect(nextConfig.apiKey).toBeUndefined()
+    expect(nextConfig.serverUrl).toBe(window.location.origin)
+    expect(readStoredValue("tldwServerUrl")).toBe(window.location.origin)
+    expect(readStoredValue("tldwRuntimeAuthMetadata")).toBeNull()
+  })
+
   it("does not mark a matching manual key as runtime-owned without prior metadata", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     localStorage.setItem(

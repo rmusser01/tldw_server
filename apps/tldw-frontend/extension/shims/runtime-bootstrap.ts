@@ -330,16 +330,21 @@ const shouldPersistRuntimeKey = async ({
   existingKey,
   runtimeKey,
   metadata,
-  buildTimeKey
+  buildTimeKey,
+  existingAuthMode,
+  existingAccessToken
 }: {
   existingKey: string | null
   runtimeKey: string
   metadata: RuntimeAuthMetadata | null
   buildTimeKey: string | null
+  existingAuthMode: string | null
+  existingAccessToken: string | null
 }): Promise<boolean> => {
+  if (await isStoredKeyRuntimeOwned(existingKey, metadata)) return true
+  if (existingAuthMode === "multi-user" && existingAccessToken) return false
   if (!existingKey) return true
   if (buildTimeKey && existingKey === buildTimeKey) return true
-  if (await isStoredKeyRuntimeOwned(existingKey, metadata)) return true
   return isPlaceholderApiKey(existingKey)
 }
 
@@ -369,13 +374,23 @@ const seedTldwConfigFromRuntime = async (): Promise<void> => {
     const existingKey = normalizeApiKey(
       typeof existing?.apiKey === "string" ? existing.apiKey : null
     )
+    const existingAuthMode =
+      typeof existing?.authMode === "string"
+        ? existing.authMode.trim() || null
+        : null
+    const existingAccessToken =
+      typeof existing?.accessToken === "string"
+        ? existing.accessToken.trim() || null
+        : null
     const buildTimeKey = normalizeApiKey(process.env.NEXT_PUBLIC_X_API_KEY)
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
     const shouldPersistKey = await shouldPersistRuntimeKey({
       existingKey,
       runtimeKey,
       metadata,
-      buildTimeKey
+      buildTimeKey,
+      existingAuthMode,
+      existingAccessToken
     })
     const next: TldwConfig = {
       ...(existing || {}),
