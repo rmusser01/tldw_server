@@ -4,9 +4,13 @@ import type { FlashcardsGenerateIntent } from "@/services/tldw/flashcards-genera
 import { getUtf8ByteLength } from "../../utils/field-byte-limit"
 
 export interface ImportResultSummary {
+  status: "success" | "partial" | "validation-error" | "error"
+  title: string
+  detail: string
   imported: number
   skipped: number
   errors: FlashcardsImportError[]
+  detailsAvailable: boolean
 }
 
 export interface ImportedCardReference {
@@ -82,6 +86,11 @@ export const IMPORT_HELP_ANCHORS = {
 
 const positiveNumberOrNull = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null
+
+const UNRESOLVED_TEMPLATE_TOKEN_PATTERN = /\{\{[^}]+\}\}/
+
+export const guardInterpolatedText = (value: string, fallback: string): string =>
+  UNRESOLVED_TEMPLATE_TOKEN_PATTERN.test(value) ? fallback : value
 
 export const normalizeImportLimits = (value: unknown): NormalizedImportLimits | null => {
   if (!value || typeof value !== "object") return null

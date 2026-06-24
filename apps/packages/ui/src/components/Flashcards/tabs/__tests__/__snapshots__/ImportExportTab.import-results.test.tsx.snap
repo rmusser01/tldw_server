@@ -46,6 +46,11 @@ exports[`ImportExportTab import result details > matches baseline snapshot for i
     <div
       class="text-sm text-warn mt-1"
     >
+      <span
+        class="ant-typography block text-xs css-dev-only-do-not-override-3uaqrl css-var-root"
+      >
+        Some rows were skipped. Review the details below, fix those rows, then import them again.
+      </span>
       <div
         class="mt-1 space-y-1 text-xs"
       >

@@ -14,6 +14,7 @@ import {
 import type { TextAreaRef } from "antd/es/input/TextArea"
 import { Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import {
   useDecksQuery,
@@ -141,6 +142,7 @@ export const FlashcardCreateDrawer: React.FC<
   // Inline deck creation state
   const [showInlineCreate, setShowInlineCreate] = React.useState(false)
   const [inlineDeckName, setInlineDeckName] = React.useState("")
+  const [createError, setCreateError] = React.useState<string | null>(null)
   const [templateValueModalOpen, setTemplateValueModalOpen] = React.useState(false)
   const [saveTemplateModalOpen, setSaveTemplateModalOpen] = React.useState(false)
   const [saveTemplateInitialValues, setSaveTemplateInitialValues] = React.useState<Partial<FlashcardTemplateCreate> | null>(null)
@@ -230,6 +232,7 @@ export const FlashcardCreateDrawer: React.FC<
       setSaveTemplateModalOpen(false)
       setSaveTemplateInitialValues(null)
       setInlineDeckName("")
+      setCreateError(null)
       inlineSchedulerDraft.resetToDefaults()
     }
   }, [form, initialDeckId, inlineSchedulerDraft.resetToDefaults, open])
@@ -267,6 +270,7 @@ export const FlashcardCreateDrawer: React.FC<
   // Create flashcard
   const handleCreate = async () => {
     try {
+      setCreateError(null)
       const values = await form.validateFields()
       await createMutation.mutateAsync(
         normalizeFlashcardTemplateFields({
@@ -281,6 +285,7 @@ export const FlashcardCreateDrawer: React.FC<
     } catch (e: unknown) {
       if (e && typeof e === "object" && "errorFields" in e) return // form validation
       const errorMessage = e instanceof Error ? e.message : "Create failed"
+      setCreateError(errorMessage)
       message.error(errorMessage)
     }
   }
@@ -288,6 +293,7 @@ export const FlashcardCreateDrawer: React.FC<
   // Create and add another
   const handleCreateAndAddAnother = async () => {
     try {
+      setCreateError(null)
       const values = await form.validateFields()
       await createMutation.mutateAsync(
         normalizeFlashcardTemplateFields({
@@ -301,6 +307,7 @@ export const FlashcardCreateDrawer: React.FC<
     } catch (e: unknown) {
       if (e && typeof e === "object" && "errorFields" in e) return
       const errorMessage = e instanceof Error ? e.message : "Create failed"
+      setCreateError(errorMessage)
       message.error(errorMessage)
     }
   }
@@ -436,6 +443,18 @@ export const FlashcardCreateDrawer: React.FC<
         </div>
       }
     >
+      {createError && (
+        <Alert
+          variant="error"
+          title={t("option:flashcards.createFailedTitle", {
+            defaultValue: "Could not create flashcard"
+          })}
+          data-testid="flashcards-create-error"
+          className="mb-4"
+        >
+          {createError}
+        </Alert>
+      )}
       <Form
         form={form}
         layout="vertical"
