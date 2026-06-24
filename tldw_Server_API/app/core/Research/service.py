@@ -41,6 +41,11 @@ _CHECKPOINT_PHASES = {
 }
 _TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 _CHECKPOINT_BLOCKED_CONTROL_STATES = {"paused", "pause_requested", "cancel_requested", "cancelled"}
+_CHECKPOINT_EXPECTED_PHASES = {
+    "plan_review": "awaiting_plan_review",
+    "sources_review": "awaiting_source_review",
+    "outline_review": "awaiting_outline_review",
+}
 
 
 class ResearchService:
@@ -91,6 +96,18 @@ class ResearchService:
         if self._job_manager is not None:
             return self._job_manager
         return jobs_manager_from_env()
+
+    @staticmethod
+    def _get_owned_session(
+        *,
+        db: ResearchSessionsDB,
+        owner_user_id: str,
+        session_id: str,
+    ) -> ResearchSessionRow:
+        session = db.get_session(session_id)
+        if session is None or session.owner_user_id != str(owner_user_id):
+            raise KeyError(session_id)
+        return session
 
     @staticmethod
     def _normalized_event_payload_json(payload: dict[str, Any]) -> str:
@@ -227,6 +244,24 @@ class ResearchService:
         if checkpoint_type == "outline_review":
             return "approved_outline.json"
         raise ValueError(f"unsupported checkpoint type: {checkpoint_type}")
+
+    @staticmethod
+    def _validate_checkpoint_approval_state(
+        *,
+        session: ResearchSessionRow,
+        checkpoint: ResearchCheckpointRow,
+    ) -> None:
+        expected_phase = _CHECKPOINT_EXPECTED_PHASES.get(checkpoint.checkpoint_type)
+        if expected_phase is None:
+            raise ValueError(f"unsupported checkpoint type: {checkpoint.checkpoint_type}")
+        if session.status != "waiting_human":
+            raise ValueError("checkpoint_approval_not_allowed")
+        if session.phase != expected_phase:
+            raise ValueError("checkpoint_approval_not_allowed")
+        if session.latest_checkpoint_id != checkpoint.id:
+            raise ValueError("checkpoint_approval_not_allowed")
+        if checkpoint.status != "pending":
+            raise ValueError("checkpoint_approval_not_allowed")
 
     @staticmethod
     def _checkpoint_event_payload(
@@ -372,15 +407,14 @@ class ResearchService:
     ) -> ResearchSessionRow:
         """Resolve a review checkpoint and advance the session to the next phase."""
         db = self._db_for_user(owner_user_id)
-        session = db.get_session(session_id)
-        if session is None:
-            raise KeyError(session_id)
+        session = self._get_owned_session(db=db, owner_user_id=owner_user_id, session_id=session_id)
         if session.control_state in _CHECKPOINT_BLOCKED_CONTROL_STATES:
             raise ValueError("checkpoint_approval_not_allowed")
 
         checkpoint = db.get_checkpoint(checkpoint_id)
         if checkpoint is None or checkpoint.session_id != session_id:
             raise KeyError(checkpoint_id)
+        self._validate_checkpoint_approval_state(session=session, checkpoint=checkpoint)
 
         patch_result = apply_checkpoint_patch(
             checkpoint_type=checkpoint.checkpoint_type,
@@ -475,9 +509,7 @@ class ResearchService:
     ) -> dict[str, Any]:
         """Build and persist the final deep research package."""
         db = self._db_for_user(owner_user_id)
-        session = db.get_session(session_id)
-        if session is None:
-            raise KeyError(session_id)
+        self._get_owned_session(db=db, owner_user_id=owner_user_id, session_id=session_id)
 
         package = build_final_package(
             brief=brief,
@@ -527,9 +559,7 @@ class ResearchService:
         session_id: str,
     ) -> ResearchRunSnapshotResponse:
         db = self._db_for_user(owner_user_id)
-        session = db.get_session(session_id)
-        if session is None:
-            raise KeyError(session_id)
+        session = self._get_owned_session(db=db, owner_user_id=owner_user_id, session_id=session_id)
 
         checkpoint_summary: ResearchCheckpointSummary | None = None
         if session.latest_checkpoint_id:
@@ -587,9 +617,7 @@ class ResearchService:
 
     def get_session(self, *, owner_user_id: str, session_id: str) -> ResearchSessionRow:
         db = self._db_for_user(owner_user_id)
-        session = db.get_session(session_id)
-        if session is None:
-            raise KeyError(session_id)
+        session = self._get_owned_session(db=db, owner_user_id=owner_user_id, session_id=session_id)
         handoff = db.get_chat_handoff(session_id)
         chat_id = None
         if handoff is not None:
@@ -652,9 +680,7 @@ class ResearchService:
 
     def pause_run(self, *, owner_user_id: str, session_id: str) -> ResearchSessionRow:
         db = self._db_for_user(owner_user_id)
-        session = db.get_session(session_id)
-        if session is None:
-            raise KeyError(session_id)
+        session = self._get_owned_session(db=db, owner_user_id=owner_user_id, session_id=session_id)
         if self._is_terminal(session):
             raise ValueError("pause_not_allowed")
         if session.control_state in {"paused", "pause_requested"}:
@@ -699,9 +725,7 @@ class ResearchService:
 
     def resume_run(self, *, owner_user_id: str, session_id: str) -> ResearchSessionRow:
         db = self._db_for_user(owner_user_id)
-        session = db.get_session(session_id)
-        if session is None:
-            raise KeyError(session_id)
+        session = self._get_owned_session(db=db, owner_user_id=owner_user_id, session_id=session_id)
         if session.control_state != "paused":
             raise ValueError("resume_not_allowed")
         if self._is_terminal(session):
@@ -781,9 +805,7 @@ class ResearchService:
 
     def cancel_run(self, *, owner_user_id: str, session_id: str) -> ResearchSessionRow:
         db = self._db_for_user(owner_user_id)
-        session = db.get_session(session_id)
-        if session is None:
-            raise KeyError(session_id)
+        session = self._get_owned_session(db=db, owner_user_id=owner_user_id, session_id=session_id)
         if self._is_terminal(session):
             raise ValueError("cancel_not_allowed")
         if session.control_state == "cancel_requested":
@@ -851,6 +873,7 @@ class ResearchService:
             raise ValueError("artifact_not_allowed")
 
         db = self._db_for_user(owner_user_id)
+        self._get_owned_session(db=db, owner_user_id=owner_user_id, session_id=session_id)
         artifact_row = self._get_latest_artifact_row(db=db, session_id=session_id, artifact_name=artifact_name)
         if artifact_row is None:
             raise KeyError(artifact_name)

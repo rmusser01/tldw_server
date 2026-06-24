@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,22 @@ class ResearchArtifactStore:
         artifact_dir = self.base_dir / "research" / session_id
         artifact_dir.mkdir(parents=True, exist_ok=True)
         return artifact_dir / safe_name
+
+    def _versioned_artifact_path(self, session_id: str, artifact_name: str, artifact_version: int) -> Path:
+        path = self._artifact_path(session_id, artifact_name)
+        unique_suffix = uuid.uuid4().hex
+        suffix = "".join(path.suffixes)
+        if suffix:
+            stem = path.name[: -len(suffix)]
+            return path.with_name(f"{stem}.v{artifact_version}.{unique_suffix}{suffix}")
+        return path.with_name(f"{path.name}.v{artifact_version}.{unique_suffix}")
+
+    @staticmethod
+    def _write_bytes_atomically(path: Path, encoded: bytes) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        tmp_path.write_bytes(encoded)
+        tmp_path.replace(path)
 
     def _next_version(self, session_id: str, artifact_name: str) -> int:
         existing = [
@@ -78,14 +95,16 @@ class ResearchArtifactStore:
         job_id: str | None,
     ) -> ResearchArtifactRow:
         owner_user_id = str(owner_user_id)
-        path = self._artifact_path(session_id, artifact_name)
+        safe_name = self._artifact_path(session_id, artifact_name).name
+        next_version = self._next_version(session_id, safe_name)
+        path = self._versioned_artifact_path(session_id, safe_name, next_version)
         encoded = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
-        path.write_bytes(encoded)
-        next_version = self._next_version(session_id, path.name)
+        self._write_bytes_atomically(path, encoded)
+        self._write_bytes_atomically(self._artifact_path(session_id, safe_name), encoded)
         artifact, _ = self.db.record_artifact_with_event(
             owner_user_id=owner_user_id,
             session_id=session_id,
-            artifact_name=path.name,
+            artifact_name=safe_name,
             artifact_version=next_version,
             storage_path=str(path),
             content_type="application/json",
@@ -95,7 +114,7 @@ class ResearchArtifactStore:
             job_id=job_id,
             event_type="artifact",
             event_payload=self._artifact_event_payload(
-                artifact_name=path.name,
+                artifact_name=safe_name,
                 artifact_version=next_version,
                 content_type="application/json",
                 phase=phase,
@@ -115,17 +134,19 @@ class ResearchArtifactStore:
         job_id: str | None,
     ) -> ResearchArtifactRow:
         owner_user_id = str(owner_user_id)
-        path = self._artifact_path(session_id, artifact_name)
+        safe_name = self._artifact_path(session_id, artifact_name).name
+        next_version = self._next_version(session_id, safe_name)
+        path = self._versioned_artifact_path(session_id, safe_name, next_version)
         encoded = "".join(
             f"{json.dumps(record, sort_keys=True)}\n"
             for record in records
         ).encode("utf-8")
-        path.write_bytes(encoded)
-        next_version = self._next_version(session_id, path.name)
+        self._write_bytes_atomically(path, encoded)
+        self._write_bytes_atomically(self._artifact_path(session_id, safe_name), encoded)
         artifact, _ = self.db.record_artifact_with_event(
             owner_user_id=owner_user_id,
             session_id=session_id,
-            artifact_name=path.name,
+            artifact_name=safe_name,
             artifact_version=next_version,
             storage_path=str(path),
             content_type="application/x-ndjson",
@@ -135,7 +156,7 @@ class ResearchArtifactStore:
             job_id=job_id,
             event_type="artifact",
             event_payload=self._artifact_event_payload(
-                artifact_name=path.name,
+                artifact_name=safe_name,
                 artifact_version=next_version,
                 content_type="application/x-ndjson",
                 phase=phase,
@@ -156,14 +177,16 @@ class ResearchArtifactStore:
         content_type: str = "text/plain",
     ) -> ResearchArtifactRow:
         owner_user_id = str(owner_user_id)
-        path = self._artifact_path(session_id, artifact_name)
+        safe_name = self._artifact_path(session_id, artifact_name).name
+        next_version = self._next_version(session_id, safe_name)
+        path = self._versioned_artifact_path(session_id, safe_name, next_version)
         encoded = content.encode("utf-8")
-        path.write_bytes(encoded)
-        next_version = self._next_version(session_id, path.name)
+        self._write_bytes_atomically(path, encoded)
+        self._write_bytes_atomically(self._artifact_path(session_id, safe_name), encoded)
         artifact, _ = self.db.record_artifact_with_event(
             owner_user_id=owner_user_id,
             session_id=session_id,
-            artifact_name=path.name,
+            artifact_name=safe_name,
             artifact_version=next_version,
             storage_path=str(path),
             content_type=content_type,
@@ -173,7 +196,7 @@ class ResearchArtifactStore:
             job_id=job_id,
             event_type="artifact",
             event_payload=self._artifact_event_payload(
-                artifact_name=path.name,
+                artifact_name=safe_name,
                 artifact_version=next_version,
                 content_type=content_type,
                 phase=phase,
