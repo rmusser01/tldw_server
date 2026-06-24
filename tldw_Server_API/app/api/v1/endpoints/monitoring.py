@@ -33,7 +33,7 @@ from tldw_Server_API.app.api.v1.schemas.monitoring_schemas import (
     WatchlistUpsertResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
+from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE, SYSTEM_LOGS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.admin_monitoring_repo import (
     AuthnzAdminMonitoringRepo,
@@ -524,6 +524,7 @@ async def get_notifications_settings() -> NotificationSettings:
     response_model=NotificationSettings,
     tags=["monitoring"],
     summary="Update notification settings (runtime only)",
+    dependencies=[Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def update_notifications_settings(
     payload: NotificationSettingsUpdate,
@@ -539,6 +540,11 @@ async def update_notifications_settings(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Notification file path must be non-empty",
             )
+        if not svc.is_file_path_allowed(str(file_val)):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Notification file path is outside allowed directories",
+            )
     updated = svc.update_settings(**data)
     return NotificationSettings(**updated)
 
@@ -548,6 +554,7 @@ async def update_notifications_settings(
     response_model=NotificationTestResponse,
     tags=["monitoring"],
     summary="Send a test notification (critical by default)",
+    dependencies=[Depends(RequirePermission(SYSTEM_CONFIGURE))],
 )
 async def send_test_notification(payload: NotificationTestRequest) -> NotificationTestResponse:
     """Send a synthetic test notification using the current settings."""

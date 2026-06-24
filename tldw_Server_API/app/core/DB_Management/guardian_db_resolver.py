@@ -46,3 +46,12 @@ def resolve_guardian_db_for_user_id(user_id: object) -> GuardianDB:
     storage_user_id = coerce_guardian_storage_user_id(user_id)
     db_path = DatabasePaths.get_guardian_db_path(storage_user_id)
     return GuardianDB(str(db_path))
+
+
+def resolve_existing_guardian_db_for_user_id(user_id: object) -> GuardianDB:
+    """Return an existing GuardianDB for ``user_id`` without creating storage."""
+    storage_user_id = coerce_guardian_storage_user_id(user_id)
+    db_path = DatabasePaths.resolve_guardian_db_path(storage_user_id)
+    if not db_path.parent.is_dir() or not db_path.is_file():
+        raise FileNotFoundError("Guardian DB does not exist")
+    return GuardianDB(str(db_path))
