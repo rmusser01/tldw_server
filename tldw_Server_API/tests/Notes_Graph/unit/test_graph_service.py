@@ -1,5 +1,7 @@
 """Tests for NoteGraphService."""
 
+import base64
+import json
 import uuid
 from unittest.mock import MagicMock, patch
 
@@ -26,7 +28,8 @@ def _uid():
 
 
 def _mock_db(notes=None, edges=None, tag_edges=None, tag_counts=None,
-             source_info=None, note_count=0, all_ids=None):
+             source_info=None, note_count=0, all_ids=None,
+             tag_seed_ids=None, source_seed_ids=None):
     """Build a MagicMock CharactersRAGDB with graph helpers."""
     db = MagicMock()
     _notes = notes or []
@@ -59,6 +62,37 @@ def _mock_db(notes=None, edges=None, tag_edges=None, tag_counts=None,
     def count_user_notes(include_deleted=True):
         return note_count
 
+    def get_note_ids_by_tag_for_graph(tag, include_deleted=True, limit=500):
+        if tag_seed_ids is not None:
+            return list(tag_seed_ids)[:limit]
+        if tag_edges is None:
+            return []
+        tagged = [
+            row["note_id"]
+            for row in tag_edges
+            if str(row.get("keyword", "")).lower() == str(tag).lower()
+        ]
+        return tagged[:limit]
+
+    def get_note_ids_by_source_for_graph(source, include_deleted=True, limit=500):
+        if source_seed_ids is not None:
+            return list(source_seed_ids)[:limit]
+        if source_info is None:
+            return []
+        source_text = str(source)
+        if source_text.startswith("source:"):
+            source_text = source_text[len("source:"):]
+        parts = source_text.split(":", 1)
+        wanted_source = parts[0]
+        wanted_ref = parts[1] if len(parts) == 2 else None
+        sourced = [
+            row["note_id"]
+            for row in source_info
+            if row.get("source") == wanted_source
+            and (wanted_ref is None or row.get("external_ref") == wanted_ref)
+        ]
+        return sourced[:limit]
+
     db.get_notes_batch = MagicMock(side_effect=get_notes_batch)
     db.get_manual_edges_for_notes = MagicMock(side_effect=get_manual_edges_for_notes)
     db.get_all_note_ids_for_graph = MagicMock(side_effect=get_all_note_ids_for_graph)
@@ -66,6 +100,8 @@ def _mock_db(notes=None, edges=None, tag_edges=None, tag_counts=None,
     db.count_notes_per_tag = MagicMock(side_effect=count_notes_per_tag)
     db.get_note_source_info = MagicMock(side_effect=get_note_source_info)
     db.count_user_notes = MagicMock(side_effect=count_user_notes)
+    db.get_note_ids_by_tag_for_graph = MagicMock(side_effect=get_note_ids_by_tag_for_graph)
+    db.get_note_ids_by_source_for_graph = MagicMock(side_effect=get_note_ids_by_source_for_graph)
     return db
 
 
@@ -158,6 +194,59 @@ class TestTagFilterSeeds:
         note_ids = {n.id for n in resp.nodes if n.type == "note"}
         assert n1 in note_ids
         assert n2 in note_ids
+
+    def test_uses_direct_tag_seed_lookup_beyond_recent_window(self):
+        matching = _uid()
+        recent_unrelated = [_uid(), _uid()]
+        notes = [_note(matching, title="Older tagged note")]
+        db = _mock_db(
+            notes=notes,
+            note_count=500,
+            all_ids=recent_unrelated,
+            tag_seed_ids=[matching],
+        )
+        svc = NoteGraphService(user_id="u1", db=db)
+        req = NoteGraphRequest(tag="ml", radius=1)
+
+        resp = svc.generate_graph(req)
+
+        note_ids = {n.id for n in resp.nodes if n.type == "note"}
+        assert matching in note_ids
+        db.get_note_ids_by_tag_for_graph.assert_called_once_with(
+            "ml", include_deleted=True, limit=300,
+        )
+
+
+class TestSourceFilterSeeds:
+    def test_uses_direct_source_seed_lookup_beyond_recent_window(self):
+        matching = _uid()
+        recent_unrelated = [_uid(), _uid()]
+        notes = [_note(matching, title="Older sourced note")]
+        source_info = [
+            {
+                "note_id": matching,
+                "conversation_id": _uid(),
+                "source": "youtube",
+                "external_ref": "abc123",
+            }
+        ]
+        db = _mock_db(
+            notes=notes,
+            source_info=source_info,
+            note_count=500,
+            all_ids=recent_unrelated,
+            source_seed_ids=[matching],
+        )
+        svc = NoteGraphService(user_id="u1", db=db)
+        req = NoteGraphRequest(source="source:youtube:abc123", radius=1)
+
+        resp = svc.generate_graph(req)
+
+        note_ids = {n.id for n in resp.nodes if n.type == "note"}
+        assert matching in note_ids
+        db.get_note_ids_by_source_for_graph.assert_called_once_with(
+            "source:youtube:abc123", include_deleted=True, limit=300,
+        )
 
 
 class TestWikilinkEdges:
@@ -281,6 +370,28 @@ class TestMaxDegreeEnforced:
         assert note_count <= 4
 
 
+class TestLimitHardCaps:
+    def test_non_heavy_request_limits_are_clamped_to_configured_caps(self, monkeypatch):
+        monkeypatch.setenv("NOTES_GRAPH_MAX_NODES", "3")
+        monkeypatch.setenv("NOTES_GRAPH_MAX_EDGES", "4")
+        monkeypatch.setenv("NOTES_GRAPH_MAX_DEGREE", "2")
+        n1 = _uid()
+        db = _mock_db(notes=[_note(n1)], note_count=1, all_ids=[n1])
+        svc = NoteGraphService(user_id="u1", db=db)
+        req = NoteGraphRequest(
+            radius=1,
+            max_nodes=999,
+            max_edges=999,
+            max_degree=999,
+        )
+
+        resp = svc.generate_graph(req)
+
+        assert resp.limits.max_nodes == 3
+        assert resp.limits.max_edges == 4
+        assert resp.limits.max_degree == 2
+
+
 class TestMaxNodesTruncation:
     def test_truncated_true(self):
         center = _uid()
@@ -307,6 +418,36 @@ class TestRadius2Caps:
         assert resp.limits.max_edges == 800
         assert resp.limits.max_degree == 20
         assert resp.radius_cap_applied is True
+
+
+class TestCursorPagination:
+    def test_cursor_advances_within_large_neighbor_list(self):
+        center = _uid()
+        neighbors = sorted(_uid() for _ in range(5))
+        notes = [_note(center)] + [_note(n) for n in neighbors]
+        edges = [_manual_edge(center, n) for n in neighbors]
+        db = _mock_db(notes=notes, edges=edges, note_count=6)
+        svc = NoteGraphService(user_id="u1", db=db)
+
+        first = svc.generate_graph(NoteGraphRequest(center_note_id=center, radius=1, max_nodes=3))
+        second = svc.generate_graph(
+            NoteGraphRequest(center_note_id=center, radius=1, max_nodes=3, cursor=first.cursor)
+        )
+
+        first_neighbors = {n.id for n in first.nodes if n.type == "note"} - {center}
+        second_neighbors = {n.id for n in second.nodes if n.type == "note"} - {center}
+        assert first.has_more is True
+        assert second_neighbors
+        assert first_neighbors.isdisjoint(second_neighbors)
+
+    def test_malformed_cursor_shape_raises_input_error(self):
+        raw = base64.urlsafe_b64encode(json.dumps({"layer": 0}).encode()).decode()
+        n1 = _uid()
+        db = _mock_db(notes=[_note(n1)], note_count=1, all_ids=[n1])
+        svc = NoteGraphService(user_id="u1", db=db)
+
+        with pytest.raises(InputError, match="Invalid graph cursor"):
+            svc.generate_graph(NoteGraphRequest(center_note_id=n1, radius=1, cursor=raw))
 
 
 class TestEdgeTypeFilter:
@@ -381,6 +522,67 @@ class TestDeterministicOrdering:
         r2 = svc.generate_graph(req)
         assert [n.id for n in r1.nodes] == [n.id for n in r2.nodes]
         assert [e.id for e in r1.edges] == [e.id for e in r2.edges]
+
+    def test_note_nodes_are_ordered_by_updated_at_desc_then_id(self):
+        ids = [_uid() for _ in range(5)]
+        notes = []
+        for index, nid in enumerate(ids):
+            notes.append({
+                "id": nid,
+                "title": f"N{index}",
+                "content": "body",
+                "created_at": "2025-01-01T00:00:00",
+                "last_modified": f"2025-06-0{index + 1}T00:00:00",
+                "deleted": 0,
+                "conversation_id": None,
+            })
+        expected = [n["id"] for n in sorted(
+            notes,
+            key=lambda row: (row["last_modified"], row["id"]),
+            reverse=True,
+        )]
+        db = _mock_db(notes=notes, note_count=len(notes), all_ids=ids)
+        svc = NoteGraphService(user_id="u1", db=db)
+
+        resp = svc.generate_graph(NoteGraphRequest(radius=1, edge_types=[EdgeType.manual]))
+
+        assert [n.id for n in resp.nodes if n.type == "note"] == expected
+
+    def test_tag_and_source_edge_order_does_not_depend_on_db_row_order(self):
+        n1, n2 = sorted([_uid(), _uid()])
+        notes = [_note(n1), _note(n2)]
+        tag_edges = [
+            {"note_id": n2, "keyword_id": 2, "keyword": "zeta"},
+            {"note_id": n1, "keyword_id": 1, "keyword": "alpha"},
+        ]
+        source_info = [
+            {"note_id": n2, "conversation_id": _uid(), "source": "youtube", "external_ref": "b"},
+            {"note_id": n1, "conversation_id": _uid(), "source": "article", "external_ref": "a"},
+        ]
+        db_unsorted = _mock_db(
+            notes=notes,
+            tag_edges=tag_edges,
+            source_info=source_info,
+            note_count=2,
+            all_ids=[n2, n1],
+        )
+        db_reversed = _mock_db(
+            notes=notes,
+            tag_edges=list(reversed(tag_edges)),
+            source_info=list(reversed(source_info)),
+            note_count=2,
+            all_ids=[n2, n1],
+        )
+        req = NoteGraphRequest(
+            radius=1,
+            edge_types=[EdgeType.tag_membership, EdgeType.source_membership],
+            max_edges=3,
+        )
+
+        first = NoteGraphService(user_id="u1", db=db_unsorted).generate_graph(req)
+        second = NoteGraphService(user_id="u1", db=db_reversed).generate_graph(req)
+
+        assert [edge.id for edge in first.edges] == [edge.id for edge in second.edges]
 
 
 class TestEmptyGraph:
@@ -516,14 +718,48 @@ class TestTimeRangeFilter:
         note_ids = {n.id for n in resp.nodes if n.type == "note"}
         assert n1 in note_ids
 
+    def test_timezone_aware_range_compares_by_instant(self):
+        n1 = _uid()
+        notes = [
+            {
+                "id": n1, "title": "Before absolute start", "content": "x",
+                "created_at": "2026-01-01T07:30:00+00:00",
+                "last_modified": "2026-01-01T07:30:00+00:00",
+                "deleted": 0, "conversation_id": None,
+            },
+        ]
+        db = _mock_db(notes=notes, note_count=1, all_ids=[n1])
+        svc = NoteGraphService(user_id="u1", db=db)
+        req = NoteGraphRequest(
+            radius=1,
+            time_range=TimeRange(start="2026-01-01T00:00:00-08:00"),
+            time_range_field="updated_at",
+        )
+
+        resp = svc.generate_graph(req)
+
+        note_ids = {n.id for n in resp.nodes if n.type == "note"}
+        assert n1 not in note_ids
+
 
 class TestAllowHeavy:
-    def test_allow_heavy_returns_graph(self):
-        """When allow_heavy=True and note count exceeds max_nodes, return capped graph."""
+    def test_allow_heavy_without_elevated_permission_still_rejects_large_seedless_graph(self):
+        """The endpoint grants allow_heavy_limits only after a permission check."""
         ids = [_uid() for _ in range(10)]
         notes = [_note(i) for i in ids]
         db = _mock_db(notes=notes, note_count=500, all_ids=ids)
         svc = NoteGraphService(user_id="u1", db=db)
+        req = NoteGraphRequest(radius=1, allow_heavy=True)
+
+        with pytest.raises(InputError):
+            svc.generate_graph(req)
+
+    def test_allow_heavy_returns_graph_when_elevated_limits_are_authorized(self):
+        """When allow_heavy is authorized and note count exceeds max_nodes, return capped graph."""
+        ids = [_uid() for _ in range(10)]
+        notes = [_note(i) for i in ids]
+        db = _mock_db(notes=notes, note_count=500, all_ids=ids)
+        svc = NoteGraphService(user_id="u1", db=db, allow_heavy_limits=True)
         req = NoteGraphRequest(radius=1, allow_heavy=True)
         resp = svc.generate_graph(req)
         # Should not raise; returns notes up to max_nodes
