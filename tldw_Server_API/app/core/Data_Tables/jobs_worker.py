@@ -204,13 +204,15 @@ def _resolve_worker_user_id(
     payload: dict[str, Any],
     table_row: dict[str, Any] | None,
 ) -> str:
+    """Resolve and validate the user id that owns the target table."""
     payload_owner = str(payload.get("user_id") or "").strip()
     job_owner = str(job.get("owner_user_id") or "").strip()
     table_owner = str((table_row or {}).get("client_id") or "").strip()
+    effective_owner = payload_owner or job_owner
 
+    if table_row is not None and table_owner and effective_owner and effective_owner != table_owner:
+        raise DataTablesJobError("owner_mismatch", retryable=False)
     if payload_owner:
-        if table_row is not None and table_owner and payload_owner != table_owner:
-            raise DataTablesJobError("owner_mismatch", retryable=False)
         if table_row is None and job_owner and payload_owner != job_owner:
             raise DataTablesJobError("owner_mismatch", retryable=False)
         return payload_owner
@@ -302,6 +304,7 @@ def _normalize_column_key(value: str) -> str:
 
 
 def _dedupe_column_names(names: Sequence[str]) -> list[str]:
+    """Return unique column names while preserving original labels where possible."""
     counts: dict[str, int] = {}
     used: set[str] = set()
     output: list[str] = []
@@ -852,6 +855,7 @@ def _mark_table_for_job_error(
     user_id: str,
     exc: Exception,
 ) -> None:
+    """Persist table state for worker errors, keeping retryable failures queued."""
     retryable = bool(getattr(exc, "retryable", False))
     db.update_data_table(
         table_id,
@@ -859,6 +863,18 @@ def _mark_table_for_job_error(
         last_error=str(exc),
         owner_user_id=user_id,
     )
+
+
+def _drain_late_llm_future(future: asyncio.Future[Any]) -> None:
+    """Consume late executor completion after timeout without blocking the worker."""
+    if future.cancelled():
+        return
+    try:
+        future.exception()
+    except asyncio.CancelledError:
+        return
+    except Exception as exc:
+        logger.debug("data_tables worker: late LLM future completed with error: {}", exc)
 
 
 def _is_job_cancelled(jm: JobManager, job_id: int) -> bool:
@@ -894,7 +910,15 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
         table_row = db.get_data_table(table_id, include_deleted=True, owner_user_id=user_id)
         if not table_row or int(table_row.get("deleted") or 0):
             raise DataTablesJobError("data_table_not_found", retryable=False)
-        user_id = _resolve_worker_user_id(job, payload, table_row)
+        resolved_user_id = _resolve_worker_user_id(job, payload, table_row)
+        if resolved_user_id != user_id:
+            user_id = resolved_user_id
+            db = _get_media_db(user_id)
+            table_row = db.get_data_table(table_id, include_deleted=True, owner_user_id=user_id)
+            if not table_row or int(table_row.get("deleted") or 0):
+                raise DataTablesJobError("data_table_not_found", retryable=False)
+        else:
+            user_id = resolved_user_id
 
         chacha_db: CharactersRAGDB | None = None
 
@@ -1048,6 +1072,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
 
         messages_payload = [{"role": "user", "content": llm_prompt}]
         response_format = {"type": "json_object"}
+        timeout = _LLM_TIMEOUT_SECONDS if _LLM_TIMEOUT_SECONDS > 0 else None
 
         def _call_llm():
             adapter = _get_adapter(provider)
@@ -1062,22 +1087,22 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
                     "model": model_to_use,
                     "temperature": _LLM_TEMPERATURE,
                     "max_tokens": _LLM_MAX_TOKENS,
-                    "timeout": _LLM_TIMEOUT_SECONDS if _LLM_TIMEOUT_SECONDS > 0 else None,
                     "response_format": response_format,
                     "app_config": app_config,
-                }
+                },
+                timeout=timeout,
             )
 
         start = time.time()
         loop = asyncio.get_running_loop()
         llm_future = loop.run_in_executor(None, _call_llm)
-        timeout = _LLM_TIMEOUT_SECONDS if _LLM_TIMEOUT_SECONDS > 0 else None
         try:
             if timeout is None:
                 raw_response = await llm_future
             else:
-                raw_response = await asyncio.wait_for(llm_future, timeout=timeout)
+                raw_response = await asyncio.wait_for(asyncio.shield(llm_future), timeout=timeout)
         except asyncio.TimeoutError as exc:
+            llm_future.add_done_callback(_drain_late_llm_future)
             llm_future.cancel()
             jm.update_job_progress(job_id, progress_percent=55.0, progress_message="llm_timeout")
             raise DataTablesJobError("llm_timeout", retryable=True) from exc

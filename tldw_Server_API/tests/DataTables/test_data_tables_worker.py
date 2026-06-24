@@ -1,5 +1,5 @@
+import asyncio
 import json
-import time
 
 import pytest
 
@@ -16,7 +16,7 @@ class _StubAdapter:
     def __init__(self, payload):
         self._payload = payload
 
-    def chat(self, _request):
+    def chat(self, _request, *, timeout=None):
         return {"choices": [{"message": {"content": json.dumps(self._payload)}}]}
 
 
@@ -318,7 +318,6 @@ def test_dedupe_column_names_handles_suffix_collisions():
     assert len({jobs_worker._normalize_column_key(name) for name in deduped}) == len(deduped)
 
 
-@pytest.mark.asyncio
 async def test_rag_query_source_clamps_retrieval_and_snapshot(monkeypatch, tmp_path):
     captured: dict[str, object] = {}
 
@@ -384,13 +383,23 @@ def test_resolve_worker_user_id_allows_table_owner_payload():
     assert user_id == "test_client"
 
 
-class _SlowAdapter:
-    def chat(self, _request):
-        time.sleep(0.2)
+def test_resolve_worker_user_id_rejects_job_owner_mismatch_without_payload():
+    with pytest.raises(DataTablesJobError) as exc:
+        jobs_worker._resolve_worker_user_id(
+            {"owner_user_id": "wrong-owner"},
+            {},
+            {"client_id": "test_client"},
+        )
+
+    assert "owner_mismatch" in str(exc.value)
+    assert exc.value.retryable is False
+
+
+class _TimeoutAdapter:
+    def chat(self, _request, *, timeout=None):
         return {"choices": [{"message": {"content": "{}"}}]}
 
 
-@pytest.mark.asyncio
 async def test_retryable_llm_timeout_keeps_table_retriable(monkeypatch, tmp_path):
     media_path = tmp_path / "media.db"
     chacha_path = tmp_path / "chacha.db"
@@ -409,7 +418,11 @@ async def test_retryable_llm_timeout_keeps_table_retriable(monkeypatch, tmp_path
     )
     table_id = int(table.get("id"))
 
-    monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: _SlowAdapter())
+    async def _raise_timeout(_future, timeout=None):
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr(jobs_worker.asyncio, "wait_for", _raise_timeout)
+    monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: _TimeoutAdapter())
     monkeypatch.setattr(jobs_worker, "_resolve_model", lambda *_args, **_kwargs: "test-model")
     monkeypatch.setattr(jobs_worker, "provider_requires_api_key", lambda _p: False)
     monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_a, **_k: ("", {}))
@@ -446,7 +459,6 @@ async def test_retryable_llm_timeout_keeps_table_retriable(monkeypatch, tmp_path
     assert refreshed["last_error"] == "llm_timeout"
 
 
-@pytest.mark.asyncio
 async def test_llm_request_includes_adapter_timeout(monkeypatch, tmp_path):
     media_path = tmp_path / "media.db"
     chacha_path = tmp_path / "chacha.db"
@@ -456,10 +468,12 @@ async def test_llm_request_includes_adapter_timeout(monkeypatch, tmp_path):
     monkeypatch.setattr(jobs_worker, "get_user_chacha_db_path", lambda _user_id: str(chacha_path))
 
     seen_request: dict[str, object] = {}
+    seen_timeout: dict[str, object] = {}
 
     class CapturingAdapter:
-        def chat(self, request):
+        def chat(self, request, *, timeout=None):
             seen_request.update(request)
+            seen_timeout["value"] = timeout
             return {
                 "choices": [
                     {
@@ -513,4 +527,5 @@ async def test_llm_request_includes_adapter_timeout(monkeypatch, tmp_path):
     result = await jobs_worker._handle_job(job, JobManager())
 
     assert result["row_count"] == 1
-    assert seen_request["timeout"] == 12
+    assert "timeout" not in seen_request
+    assert seen_timeout["value"] == 12
