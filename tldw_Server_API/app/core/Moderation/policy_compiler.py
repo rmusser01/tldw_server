@@ -108,6 +108,37 @@ class PolicyCompiler:
         )
         return PolicyCompilationResult(policy=policy, report=report)
 
+    def compile_user_policy(
+        self,
+        base_policy: ModerationPolicy,
+        override: dict[str, object] | None,
+    ) -> PolicyCompilationResult:
+        report = PolicyCompilationReport()
+        if not override:
+            return PolicyCompilationResult(policy=base_policy, report=report)
+        ModerationPolicy, _ = self.policy_types()
+        policy = ModerationPolicy(
+            enabled=self.coalesce_bool(override.get("enabled"), base_policy.enabled),
+            input_enabled=self.coalesce_bool(override.get("input_enabled"), base_policy.input_enabled),
+            output_enabled=self.coalesce_bool(override.get("output_enabled"), base_policy.output_enabled),
+            input_action=str(override.get("input_action", base_policy.input_action)).lower(),
+            output_action=str(override.get("output_action", base_policy.output_action)).lower(),
+            redact_replacement=str(override.get("redact_replacement", base_policy.redact_replacement)),
+            per_user_overrides=base_policy.per_user_overrides,
+            block_patterns=list(base_policy.block_patterns or []),
+            categories_enabled=self.resolve_categories_override(
+                override,
+                base_policy.categories_enabled,
+            ),
+        )
+        rules_raw = override.get("rules")
+        if isinstance(rules_raw, list):
+            for idx, raw_rule in enumerate(rules_raw):
+                compiled = self.compile_user_rule(raw_rule, report, idx)
+                if compiled is not None:
+                    policy.block_patterns.append(compiled)
+        return PolicyCompilationResult(policy=policy, report=report)
+
     def compile_blocklist_lines(
         self,
         lines: list[str],
@@ -310,6 +341,94 @@ class PolicyCompiler:
             action=action or None,
             replacement=replacement or None,
             categories=categories or None,
+            phase=phase,
+        )
+
+    @staticmethod
+    def coalesce_bool(value: object, default: bool) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return default
+        return str(value).strip().lower() in {"1", "true", "yes", "on", "y"}
+
+    @staticmethod
+    def parse_bool_value(value: object) -> bool | None:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            text = value.strip().lower()
+            if text in {"1", "true", "yes", "on", "y"}:
+                return True
+            if text in {"0", "false", "no", "n", "off"}:
+                return False
+        return None
+
+    def resolve_categories_override(
+        self,
+        override: dict[str, object],
+        default_categories: set[str] | None,
+    ) -> set[str] | None:
+        if "categories_enabled" not in override:
+            return default_categories
+        parsed = self.parse_categories_override(override.get("categories_enabled"))
+        return parsed if parsed is not None else default_categories
+
+    @staticmethod
+    def parse_categories_override(value: object | None) -> set[str] | None:
+        if value is None:
+            return None
+        if isinstance(value, list):
+            return {str(x).strip().lower() for x in value if str(x).strip()}
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return set()
+            return {c.strip().lower() for c in text.split(",") if c.strip()}
+        return None
+
+    def compile_user_rule(
+        self,
+        raw_rule: object,
+        report: PolicyCompilationReport,
+        index: int,
+    ) -> PatternRule | None:
+        if not isinstance(raw_rule, dict):
+            report.add("user_rule", "invalid_rule", index=index)
+            return None
+        pattern = str(raw_rule.get("pattern", "")).strip()
+        action = str(raw_rule.get("action", "")).strip().lower()
+        phase = str(raw_rule.get("phase", "both")).strip().lower()
+        is_regex = self.parse_bool_value(raw_rule.get("is_regex", False))
+        if is_regex is None:
+            report.add("user_rule", "invalid_is_regex", index=index)
+            return None
+        if not pattern or action not in {"block", "warn"}:
+            report.add("user_rule", "invalid_rule", index=index)
+            return None
+        if phase not in {"input", "output", "both"}:
+            phase = "both"
+        _, PatternRule = self.policy_types()
+        try:
+            if is_regex:
+                if self.is_regex_dangerous(pattern):
+                    report.add("user_rule", "dangerous_regex", index=index)
+                    return None
+                regex = re.compile(pattern, flags=re.IGNORECASE)
+            else:
+                regex = re.compile(re.escape(pattern), flags=re.IGNORECASE)
+        except re.error:
+            report.add("user_rule", "invalid_regex", index=index)
+            return None
+        return PatternRule(
+            regex=regex,
+            action=action,
+            replacement=None,
+            categories={"*"},
             phase=phase,
         )
 

@@ -327,7 +327,13 @@ class ModerationService:
     @staticmethod
     def _log_compilation_report(report: PolicyCompilationReport) -> None:
         for issue in report.issues:
-            if issue.reason == "invalid_action":
+            if issue.source == "user_rule" and issue.reason == "invalid_is_regex":
+                logger.warning("Skipped per-user rule with invalid is_regex")
+            elif issue.source == "user_rule" and issue.reason == "dangerous_regex":
+                logger.warning("Skipped dangerous per-user regex rule")
+            elif issue.source == "user_rule" and issue.reason == "invalid_regex":
+                logger.warning("Skipped invalid per-user regex rule")
+            elif issue.reason == "invalid_action":
                 logger.warning("Invalid moderation action in blocklist; skipping line")
             elif issue.reason == "dangerous_regex":
                 logger.warning("Skipped dangerous regex in blocklist")
@@ -596,60 +602,26 @@ class ModerationService:
 
     def get_effective_policy(self, user_id: str | None) -> ModerationPolicy:
         """Return policy after applying per-user overrides if enabled."""
-        p = self._global_policy
-        if not p.per_user_overrides or not user_id:
-            return p
-        u = self._user_overrides.get(str(user_id))
-        if not u:
-            return p
-        # Clone and override selected fields
-        policy = ModerationPolicy(
-            enabled=self._coalesce_bool(u.get("enabled"), p.enabled),
-            input_enabled=self._coalesce_bool(u.get("input_enabled"), p.input_enabled),
-            output_enabled=self._coalesce_bool(u.get("output_enabled"), p.output_enabled),
-            input_action=str(u.get("input_action", p.input_action)).lower(),
-            output_action=str(u.get("output_action", p.output_action)).lower(),
-            redact_replacement=str(u.get("redact_replacement", p.redact_replacement)),
-            per_user_overrides=p.per_user_overrides,
-            block_patterns=list(p.block_patterns or []),  # avoid mutating shared list
-            categories_enabled=self._resolve_categories_override(u, p.categories_enabled),
-        )
-        rules_raw = u.get("rules")
-        if isinstance(rules_raw, list):
-            compiled_rules: list[PatternRule] = []
-            for raw_rule in rules_raw:
-                compiled = self._compile_user_rule(raw_rule)
-                if compiled is not None:
-                    compiled_rules.append(compiled)
-            if compiled_rules:
-                policy.block_patterns.extend(compiled_rules)
-        return policy
+        policy = self._global_policy
+        if not policy.per_user_overrides or not user_id:
+            return policy
+        override = self._user_overrides.get(str(user_id))
+        if not override:
+            return policy
+        result = self._policy_compiler.compile_user_policy(policy, override)
+        self._log_compilation_report(result.report)
+        return result.policy
 
     def _resolve_categories_override(
         self,
         overrides: dict[str, object],
         default_categories: set[str] | None,
     ) -> set[str] | None:
-        if "categories_enabled" not in overrides:
-            return default_categories
-        parsed = self._parse_categories_override(overrides.get("categories_enabled"))
-        return parsed if parsed is not None else default_categories
+        return self._policy_compiler.resolve_categories_override(overrides, default_categories)
 
     @staticmethod
     def _parse_categories_override(v: object | None) -> set[str] | None:
-        if v is None:
-            return None
-        try:
-            if isinstance(v, list):
-                return {str(x).strip().lower() for x in v if str(x).strip()}
-            if isinstance(v, str):
-                txt = v.strip()
-                if not txt:
-                    return set()
-                return {c.strip().lower() for c in txt.split(',') if c.strip()}
-        except _MODERATION_NONCRITICAL_EXCEPTIONS:
-            return None
-        return None
+        return PolicyCompiler.parse_categories_override(v)
 
     @classmethod
     def _is_valid_action(cls, action: str) -> bool:
@@ -761,44 +733,10 @@ class ModerationService:
 
     def _compile_user_rule(self, raw_rule: object) -> PatternRule | None:
         """Compile a per-user override rule into a PatternRule."""
-        if not isinstance(raw_rule, dict):
-            return None
-        rule_id = str(raw_rule.get("id", "")).strip()
-        pattern = str(raw_rule.get("pattern", "")).strip()
-        action = str(raw_rule.get("action", "")).strip().lower()
-        phase = str(raw_rule.get("phase", "both")).strip().lower()
-        parsed_is_regex = self._parse_bool_value(raw_rule.get("is_regex", False))
-        if parsed_is_regex is None:
-            logger.warning("Skipped per-user rule with invalid is_regex")
-            return None
-        is_regex = parsed_is_regex
-
-        if not pattern or action not in {"block", "warn"}:
-            return None
-        if phase not in {"input", "output", "both"}:
-            phase = "both"
-
-        try:
-            if is_regex:
-                if self._is_regex_dangerous(pattern):
-                    logger.warning("Skipped dangerous per-user regex rule")
-                    return None
-                compiled = re.compile(pattern, flags=re.IGNORECASE)
-            else:
-                compiled = re.compile(re.escape(pattern), flags=re.IGNORECASE)
-        except re.error:
-            logger.warning("Skipped invalid per-user regex rule")
-            return None
-
-        return PatternRule(
-            regex=compiled,
-            action=action,
-            replacement=None,
-            # Per-user quick-list rules are category-agnostic and should still apply
-            # when category filtering is enabled.
-            categories={"*"},
-            phase=phase,
-        )
+        report = PolicyCompilationReport()
+        compiled = self._policy_compiler.compile_user_rule(raw_rule, report, 0)
+        self._log_compilation_report(report)
+        return compiled
 
     @classmethod
     def _effective_rule_categories(cls, rule: PatternRule) -> set[str]:
@@ -838,28 +776,11 @@ class ModerationService:
 
     @staticmethod
     def _coalesce_bool(v: str | bool | None, default: bool) -> bool:
-        if isinstance(v, bool):
-            return v
-        if v is None:
-            return default
-        return is_truthy(str(v).strip().lower())
+        return PolicyCompiler.coalesce_bool(v, default)
 
     @staticmethod
     def _parse_bool_value(v: object) -> bool | None:
-        if isinstance(v, bool):
-            return v
-        if v is None:
-            return None
-        if isinstance(v, (int, float)):
-            return bool(v)
-        if isinstance(v, str):
-            val = v.strip().lower()
-            if is_truthy(val):
-                return True
-            if val in {"0", "false", "no", "n", "off"}:
-                return False
-            return None
-        return None
+        return PolicyCompiler.parse_bool_value(v)
 
     # --------------- Checking and transformations ---------------
     def check_text(self, text: str, policy: ModerationPolicy, phase: str | None = None) -> tuple[bool, str | None]:

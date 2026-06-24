@@ -184,3 +184,86 @@ def test_service_resolved_config_falls_back_to_env_when_categories_are_none(monk
     resolved = svc._resolve_moderation_config({"categories_enabled": None})
 
     assert resolved.compiler_config.categories_enabled == {"pii", "confidential"}
+
+
+def test_compile_user_policy_preserves_empty_category_override():
+    base = ModerationPolicy(
+        enabled=True,
+        input_enabled=True,
+        output_enabled=True,
+        input_action="block",
+        output_action="redact",
+        redact_replacement="[REDACTED]",
+        per_user_overrides=True,
+        block_patterns=[],
+        categories_enabled={"pii"},
+    )
+
+    result = PolicyCompiler().compile_user_policy(
+        base,
+        {
+            "enabled": True,
+            "categories_enabled": "",
+            "rules": [],
+        },
+    )
+
+    assert result.policy.categories_enabled == set()
+
+
+def test_compile_user_policy_adds_wildcard_quick_rules():
+    base = ModerationPolicy(enabled=True, block_patterns=[], categories_enabled={"pii"})
+
+    result = PolicyCompiler().compile_user_policy(
+        base,
+        {
+            "rules": [
+                {
+                    "id": "r1",
+                    "pattern": "secret",
+                    "is_regex": False,
+                    "action": "warn",
+                    "phase": "input",
+                }
+            ]
+        },
+    )
+
+    assert len(result.policy.block_patterns) == 1
+    rule = result.policy.block_patterns[0]
+    assert rule.regex.search("secret")
+    assert rule.action == "warn"
+    assert rule.categories == {"*"}
+    assert rule.phase == "input"
+
+
+def test_compile_user_policy_accepts_legacy_bool_like_is_regex_values():
+    base = ModerationPolicy(enabled=True, block_patterns=[])
+
+    result = PolicyCompiler().compile_user_policy(
+        base,
+        {
+            "rules": [
+                {
+                    "id": "r1",
+                    "pattern": r"token-\d+",
+                    "is_regex": "yes",
+                    "action": "block",
+                    "phase": "input",
+                },
+                {
+                    "id": "r2",
+                    "pattern": "literal.*",
+                    "is_regex": "false",
+                    "action": "warn",
+                    "phase": "output",
+                },
+            ]
+        },
+    )
+
+    assert len(result.policy.block_patterns) == 2
+    assert result.policy.block_patterns[0].regex.search("token-42")
+    assert result.policy.block_patterns[1].regex.search("literal.*")
+    assert not result.policy.block_patterns[1].regex.search("literalabc")
+    assert result.report.issues == []
