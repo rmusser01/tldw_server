@@ -60,3 +60,49 @@ def test_compile_global_policy_copies_pii_rules_when_enabled():
     )
 
     assert result.policy.block_patterns == [pii_rule]
+
+
+def test_compile_global_policy_compiles_literal_and_regex_blocklist_rules():
+    result = PolicyCompiler().compile_global(
+        PolicyCompilationInput(
+            config=_config(),
+            runtime_override={},
+            blocklist_lines=[
+                "secret -> block #confidential",
+                r"/leak\\d+/i -> redact:[MASK] #pii",
+            ],
+            pii_rules=[],
+        )
+    )
+
+    rules = result.policy.block_patterns
+    assert len(rules) == 2
+    assert rules[0].regex.search("SECRET")
+    assert rules[0].action == "block"
+    assert rules[0].categories == {"confidential"}
+    assert rules[1].regex.search("leak123")
+    assert rules[1].action == "redact"
+    assert rules[1].replacement == "[MASK]"
+    assert rules[1].categories == {"pii"}
+
+
+def test_compile_global_policy_reports_invalid_lines_without_raw_regex():
+    result = PolicyCompiler().compile_global(
+        PolicyCompilationInput(
+            config=_config(),
+            runtime_override={},
+            blocklist_lines=[
+                "secret -> invalid_action",
+                "/(a+)+$/ -> block",
+                "/(unclosed/ -> block",
+            ],
+            pii_rules=[],
+        )
+    )
+
+    assert result.policy.block_patterns == []
+    reasons = [issue.reason for issue in result.report.issues]
+    assert reasons == ["invalid_action", "dangerous_regex", "invalid_regex"]
+    rendered = repr(result.report.issues)
+    assert "(a+)+$" not in rendered
+    assert "(unclosed" not in rendered

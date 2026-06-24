@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -69,6 +70,9 @@ class PolicyCompilationResult:
 
 
 class PolicyCompiler:
+    _ALLOWED_REGEX_FLAGS = {"i", "m", "s", "x"}
+    _ALLOWED_ACTIONS = {"block", "redact", "warn"}
+
     @staticmethod
     def policy_types() -> tuple[type[ModerationPolicy], type[PatternRule]]:
         from tldw_Server_API.app.core.Moderation.moderation_service import (
@@ -81,13 +85,13 @@ class PolicyCompiler:
     def compile_global(self, data: PolicyCompilationInput) -> PolicyCompilationResult:
         report = PolicyCompilationReport()
         config = data.config
-        ModerationPolicy, PatternRule = self.policy_types()
+        ModerationPolicy, _ = self.policy_types()
         categories_enabled = self.resolve_runtime_categories(
             data.runtime_override,
             config.categories_enabled,
         )
         pii_enabled = self.resolve_runtime_pii(data.runtime_override, config.pii_enabled)
-        block_patterns: list[PatternRule] = []
+        block_patterns = self.compile_blocklist_lines(data.blocklist_lines, report)
         if pii_enabled:
             block_patterns.extend(list(data.pii_rules or []))
 
@@ -103,6 +107,216 @@ class PolicyCompiler:
             categories_enabled=categories_enabled,
         )
         return PolicyCompilationResult(policy=policy, report=report)
+
+    def compile_blocklist_lines(
+        self,
+        lines: list[str],
+        report: PolicyCompilationReport | None = None,
+    ) -> list[PatternRule]:
+        compiled: list[PatternRule] = []
+        active_report = report or PolicyCompilationReport()
+        for idx, raw in enumerate(lines or []):
+            line = str(raw).strip()
+            if not line or line.startswith("#"):
+                continue
+            expr, action, replacement, categories = self.parse_rule_line(line)
+            if expr is None:
+                active_report.add("blocklist", "empty_pattern", index=idx)
+                continue
+            if action and not self.is_valid_action(action):
+                active_report.add("blocklist", "invalid_action", index=idx)
+                continue
+            rule = self.compile_rule_expression(
+                expr,
+                action=action,
+                replacement=replacement,
+                categories=categories,
+                phase="both",
+                report=active_report,
+                source="blocklist",
+                index=idx,
+            )
+            if rule is not None:
+                compiled.append(rule)
+        return compiled
+
+    @classmethod
+    def parse_rule_line(cls, text: str) -> tuple[str | None, str | None, str | None, set[str] | None]:
+        if not text:
+            return None, None, None, None
+        line = text
+        action = None
+        replacement = None
+        categories: set[str] | None = None
+        if "#" in line:
+            cut_index = cls._find_category_suffix(line)
+            if cut_index != -1:
+                after = line[cut_index + 1:]
+                cats = {c.strip().lower() for c in after.split(",") if c.strip()}
+                if cats:
+                    categories = cats
+                    line = line[:cut_index].strip()
+        if "->" in line:
+            lhs, rhs = cls.split_action_directive(line)
+            if rhs is not None:
+                line = lhs
+                if rhs:
+                    rhs_lower = rhs.lower()
+                    if rhs_lower.startswith("redact:"):
+                        action = "redact"
+                        replacement = rhs[len("redact:"):].strip()
+                    elif rhs_lower in cls._ALLOWED_ACTIONS:
+                        action = rhs_lower
+                    else:
+                        action = rhs
+        return line, action, replacement, categories
+
+    @staticmethod
+    def _find_category_suffix(text: str) -> int:
+        if "#" not in text:
+            return -1
+        for i in range(len(text) - 1, -1, -1):
+            if text[i] != "#":
+                continue
+            backslash_count = 0
+            j = i - 1
+            while j >= 0 and text[j] == "\\":
+                backslash_count += 1
+                j -= 1
+            escaped = backslash_count % 2 == 1
+            previous = text[i - 1] if i > 0 else ""
+            if not escaped and (i == 0 or previous.isspace()):
+                return i
+        return -1
+
+    @staticmethod
+    def split_action_directive(text: str) -> tuple[str, str | None]:
+        if "->" not in text:
+            return text, None
+        in_regex = False
+        escape = False
+        for i in range(len(text) - 1):
+            ch = text[i]
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == "/" and i == 0:
+                in_regex = True
+                continue
+            if ch == "/" and in_regex:
+                in_regex = False
+                continue
+            if not in_regex and text[i:i + 2] == "->":
+                backslash_count = 0
+                j = i - 1
+                while j >= 0 and text[j] == "\\":
+                    backslash_count += 1
+                    j -= 1
+                if backslash_count % 2 == 1:
+                    continue
+                return text[:i].strip(), text[i + 2:].strip()
+        return text, None
+
+    @classmethod
+    def parse_regex_expr(cls, expr: str) -> tuple[str, str] | None:
+        if not expr or not expr.startswith("/"):
+            return None
+        last_slash = expr.rfind("/")
+        if last_slash <= 0:
+            return None
+        flags = expr[last_slash + 1:]
+        if flags:
+            lowered = flags.lower()
+            if any(ch not in cls._ALLOWED_REGEX_FLAGS for ch in lowered):
+                return None
+        raw = expr[1:last_slash]
+        if raw == "":
+            return None
+        return raw, flags
+
+    @classmethod
+    def regex_flags(cls, flags: str | None) -> int:
+        value = re.IGNORECASE
+        lowered = (flags or "").lower()
+        if "i" in lowered:
+            value |= re.IGNORECASE
+        if "m" in lowered:
+            value |= re.MULTILINE
+        if "s" in lowered:
+            value |= re.DOTALL
+        if "x" in lowered:
+            value |= re.VERBOSE
+        return value
+
+    @staticmethod
+    def normalize_regex_escapes(expr: str) -> str:
+        return re.sub(r"\\\\([AbBdDsSwWZ])", r"\\\1", expr)
+
+    @classmethod
+    def is_valid_action(cls, action: str) -> bool:
+        return str(action).strip().lower() in cls._ALLOWED_ACTIONS
+
+    @staticmethod
+    def has_nested_quantifiers(expr: str) -> bool:
+        try:
+            return bool(re.search(r"\((?:[^)(]|\([^)(]*\))*[+*][^)]*\)\s*[+*]", expr))
+        except (TypeError, ValueError, re.error):
+            return False
+
+    @staticmethod
+    def too_many_groups(expr: str, limit: int = 100) -> bool:
+        try:
+            return expr.count("(") - expr.count("\\(") > limit
+        except (TypeError, ValueError):
+            return False
+
+    def is_regex_dangerous(self, expr: str) -> bool:
+        if not expr:
+            return True
+        if len(expr) > 2000:
+            return True
+        if self.has_nested_quantifiers(expr):
+            return True
+        return self.too_many_groups(expr)
+
+    def compile_rule_expression(
+        self,
+        expr: str,
+        *,
+        action: str | None,
+        replacement: str | None,
+        categories: set[str] | None,
+        phase: str,
+        report: PolicyCompilationReport,
+        source: str,
+        index: int | None,
+    ) -> PatternRule | None:
+        _, PatternRule = self.policy_types()
+        try:
+            regex_parts = self.parse_regex_expr(expr)
+            if regex_parts:
+                raw, flags_str = regex_parts
+                raw = self.normalize_regex_escapes(raw)
+                if self.is_regex_dangerous(raw):
+                    report.add(source, "dangerous_regex", index=index)
+                    return None
+                flags = self.regex_flags(flags_str)
+                regex = re.compile(raw, flags=flags)
+            else:
+                regex = re.compile(re.escape(expr.replace("\\#", "#")), flags=re.IGNORECASE)
+        except re.error:
+            report.add(source, "invalid_regex", index=index)
+            return None
+        return PatternRule(
+            regex=regex,
+            action=action or None,
+            replacement=replacement or None,
+            categories=categories or None,
+            phase=phase,
+        )
 
     @staticmethod
     def resolve_runtime_pii(runtime_override: dict[str, object], default: bool) -> bool:
