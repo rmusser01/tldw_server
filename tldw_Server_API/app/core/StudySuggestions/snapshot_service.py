@@ -274,6 +274,40 @@ def _parse_job_created_at(value: Any) -> datetime | None:
     return None
 
 
+def _snapshot_created_at(snapshot_row: Mapping[str, Any] | None) -> datetime | None:
+    if not snapshot_row:
+        return None
+    return _parse_job_created_at(snapshot_row.get("created_at"))
+
+
+def _job_activity_at(job: Mapping[str, Any]) -> datetime | None:
+    for field_name in ("completed_at", "cancelled_at", "updated_at", "acquired_at", "started_at", "created_at"):
+        parsed = _parse_job_created_at(job.get(field_name))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _job_is_newer_than_snapshot(
+    job: Mapping[str, Any] | None,
+    snapshot_row: Mapping[str, Any] | None,
+) -> bool:
+    if not job:
+        return False
+    if not snapshot_row:
+        return True
+    payload = job.get("payload") or {}
+    if isinstance(payload, Mapping):
+        with contextlib.suppress(TypeError, ValueError):
+            if int(payload.get("snapshot_id")) == int(snapshot_row["id"]):
+                return True
+    job_created_at = _job_activity_at(job)
+    snapshot_created_at = _snapshot_created_at(snapshot_row)
+    if job_created_at is None or snapshot_created_at is None:
+        return False
+    return job_created_at > snapshot_created_at
+
+
 def _find_matching_job(
     *,
     job_manager: JobManager,
@@ -323,6 +357,8 @@ def get_anchor_status(
     """Resolve the current suggestion status for a concrete anchor."""
 
     anchor_id = int(anchor_id)
+    snapshots = note_db.list_suggestion_snapshots_for_anchor(anchor_type, anchor_id)
+    active_snapshot = next((row for row in snapshots if str(row.get("status") or "").strip().lower() == "active"), None)
     pending_job = _find_matching_job(
         job_manager=job_manager,
         anchor_type=anchor_type,
@@ -330,7 +366,7 @@ def get_anchor_status(
         statuses=("processing", "queued"),
         owner_user_id=owner_user_id,
     )
-    if pending_job:
+    if pending_job and _job_is_newer_than_snapshot(pending_job, active_snapshot):
         return {
             "anchor_type": anchor_type,
             "anchor_id": anchor_id,
@@ -346,7 +382,7 @@ def get_anchor_status(
         statuses=("failed",),
         owner_user_id=owner_user_id,
     )
-    if failed_job:
+    if failed_job and _job_is_newer_than_snapshot(failed_job, active_snapshot):
         return {
             "anchor_type": anchor_type,
             "anchor_id": anchor_id,
@@ -355,8 +391,6 @@ def get_anchor_status(
             "snapshot_id": None,
         }
 
-    snapshots = note_db.list_suggestion_snapshots_for_anchor(anchor_type, anchor_id)
-    active_snapshot = next((row for row in snapshots if str(row.get("status") or "").strip().lower() == "active"), None)
     if active_snapshot:
         return {
             "anchor_type": anchor_type,
@@ -366,6 +400,24 @@ def get_anchor_status(
             "snapshot_id": int(active_snapshot["id"]),
         }
 
+    if pending_job:
+        return {
+            "anchor_type": anchor_type,
+            "anchor_id": anchor_id,
+            "status": "pending",
+            "job_id": int(pending_job["id"]),
+            "snapshot_id": None,
+        }
+
+    if failed_job:
+        return {
+            "anchor_type": anchor_type,
+            "anchor_id": anchor_id,
+            "status": "failed",
+            "job_id": int(failed_job["id"]),
+            "snapshot_id": None,
+        }
+
     return {
         "anchor_type": anchor_type,
         "anchor_id": anchor_id,
@@ -373,6 +425,47 @@ def get_anchor_status(
         "job_id": None,
         "snapshot_id": None,
     }
+
+
+def _source_available_from_note_db(
+    note_db: CharactersRAGDB,
+    *,
+    source_type: str | None,
+    source_id: str | None,
+) -> bool:
+    if not source_type or not source_id:
+        return False
+    normalized_source_type = source_type.strip().lower()
+    normalized_source_id = source_id.strip()
+    if not normalized_source_id:
+        return False
+
+    if normalized_source_type == "flashcard_deck":
+        with contextlib.suppress(TypeError, ValueError):
+            deck = note_db.get_deck(int(normalized_source_id))
+            return bool(deck) and not bool(deck.get("deleted"))
+        return False
+    if normalized_source_type == "flashcard_card":
+        card = note_db.get_flashcard(normalized_source_id)
+        if not card:
+            return False
+        deck_id = card.get("deck_id")
+        if deck_id is None:
+            return True
+        with contextlib.suppress(TypeError, ValueError):
+            deck = note_db.get_deck(int(deck_id))
+            return bool(deck) and not bool(deck.get("deleted"))
+        return False
+    if normalized_source_type == "quiz":
+        with contextlib.suppress(TypeError, ValueError):
+            return note_db.get_quiz(int(normalized_source_id)) is not None
+        return False
+    if normalized_source_type == "quiz_attempt":
+        with contextlib.suppress(TypeError, ValueError):
+            return note_db.get_attempt(int(normalized_source_id)) is not None
+        return False
+
+    return True
 
 
 def load_live_evidence_for_snapshot(
@@ -396,13 +489,20 @@ def load_live_evidence_for_snapshot(
         topic_id = _safe_text(topic.get("id")) or f"topic-{index}"
         source_type = _safe_text(topic.get("source_type"))
         source_id = _safe_text(topic.get("source_id"))
+        source_available = _source_available_from_note_db(
+            note_db,
+            source_type=source_type,
+            source_id=source_id,
+        )
         item: dict[str, Any] = {
-            "source_available": bool(source_type and source_id),
+            "source_available": source_available,
         }
         if source_type:
             item["source_type"] = source_type
         if source_id:
             item["source_id"] = source_id
+        if not source_available:
+            item["reason"] = "unavailable"
         live_evidence[topic_id] = item
     return live_evidence
 

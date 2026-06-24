@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Iterable, Mapping
 from typing import Any
@@ -11,6 +12,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 
 DEFAULT_GENERATOR_VERSION = "v1"
 LEGACY_NORMALIZATION_VERSION = "legacy"
+SELECTION_FINGERPRINT_VERSION = "study-suggestions:v2"
 PENDING_GENERATION_TARGET_PREFIX = "pending:"
 FOLLOW_UP_ACTION_CONTRACTS = {
     "follow_up_quiz": {
@@ -109,7 +111,40 @@ def build_selection_fingerprint(
     normalization_version: str | None = None,
     include_normalization_version: bool = True,
 ) -> str:
-    """Build a stable, human-readable fingerprint for one follow-up action selection."""
+    """Build a stable, bounded fingerprint for one follow-up action selection."""
+
+    normalized_topics = normalize_selected_topics(selected_topics)
+    resolved_generator_version = _normalize_text(generator_version or DEFAULT_GENERATOR_VERSION) or DEFAULT_GENERATOR_VERSION
+    resolved_normalization_version = _resolve_normalization_version_values(
+        [normalization_version] if normalization_version is not None else []
+    )
+    payload = {
+        "action_kind": _normalize_text(action_kind),
+        "generator_version": resolved_generator_version,
+        "selected_topics": normalized_topics,
+        "snapshot_id": int(snapshot_id),
+        "target_service": _normalize_text(target_service),
+        "target_type": _normalize_text(target_type),
+    }
+    if include_normalization_version:
+        payload["normalization_version"] = resolved_normalization_version
+    canonical_payload = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
+    return f"{SELECTION_FINGERPRINT_VERSION}:{digest}"
+
+
+def build_legacy_selection_fingerprint(
+    *,
+    snapshot_id: int,
+    target_service: str,
+    target_type: str,
+    selected_topics: Iterable[object],
+    action_kind: str,
+    generator_version: str | None = None,
+    normalization_version: str | None = None,
+    include_normalization_version: bool = True,
+) -> str:
+    """Build the pre-v2 readable fingerprint format for compatibility lookups."""
 
     normalized_topics = normalize_selected_topics(selected_topics)
     resolved_generator_version = _normalize_text(generator_version or DEFAULT_GENERATOR_VERSION) or DEFAULT_GENERATOR_VERSION
@@ -570,9 +605,11 @@ __all__ = [
     "FOLLOW_UP_ACTION_CONTRACTS",
     "LEGACY_NORMALIZATION_VERSION",
     "PENDING_GENERATION_TARGET_PREFIX",
+    "SELECTION_FINGERPRINT_VERSION",
     "build_flashcard_generation_payload",
     "build_follow_up_flashcard_deck_name",
     "build_follow_up_flashcard_source_text",
+    "build_legacy_selection_fingerprint",
     "build_pending_generation_target_id",
     "build_selection_fingerprint",
     "canonicalize_follow_up_action",

@@ -341,6 +341,41 @@ def test_live_evidence_permission_failures_degrade_to_source_unavailable(
     assert body["live_evidence"]["reason"] == "unavailable"  # nosec B101
 
 
+def test_snapshot_live_evidence_marks_deleted_deck_source_unavailable(
+    client: TestClient,
+    db: CharactersRAGDB,
+):
+    deck_id = db.add_deck("Deleted Evidence Deck", "desc")
+    snapshot_id = db.create_suggestion_snapshot(
+        service="flashcards",
+        activity_type="flashcard_review_session",
+        anchor_type="flashcard_review_session",
+        anchor_id=202,
+        suggestion_type="study_suggestions",
+        payload_json={
+            "topics": [
+                {
+                    "id": "topic-1",
+                    "display_label": "Renal basics",
+                    "source_type": "flashcard_deck",
+                    "source_id": str(deck_id),
+                    "selected": True,
+                }
+            ],
+        },
+    )
+    db.soft_delete_deck_by_id(deck_id)
+
+    response = client.get(f"/api/v1/study-suggestions/snapshots/{snapshot_id}")
+
+    assert response.status_code == 200  # nosec B101
+    evidence = response.json()["live_evidence"]["topic-1"]
+    assert evidence["source_type"] == "flashcard_deck"  # nosec B101
+    assert evidence["source_id"] == str(deck_id)  # nosec B101
+    assert evidence["source_available"] is False  # nosec B101
+    assert evidence["reason"] == "unavailable"  # nosec B101
+
+
 def test_submit_attempt_enqueues_study_suggestions_refresh_job(
     client: TestClient,
     db: CharactersRAGDB,
@@ -857,6 +892,53 @@ def test_flashcard_follow_up_force_regenerate_creates_real_deck_and_link(
         selection_fingerprint=fingerprint,
     )
     assert linked is not None  # nosec B101
+
+
+def test_flashcard_follow_up_finalization_failure_soft_deletes_generated_deck(
+    client: TestClient,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    endpoints_mod, _quizzes_mod, _flashcards_mod, _snapshot_service_mod, _jobs_mod, _actions_mod = _load_modules()
+    attempt_id = _create_quiz_attempt(db)
+    snapshot_id = db.create_suggestion_snapshot(
+        service="quiz",
+        activity_type="quiz_attempt",
+        anchor_type="quiz_attempt",
+        anchor_id=attempt_id,
+        suggestion_type="study_suggestions",
+        payload_json={"topics": [{"id": "topic-1", "display_label": "Renal Basics", "selected": True}]},
+    )
+
+    async def fake_generate_flashcards(payload, context):
+        return {"flashcards": [{"front": "What filters blood?", "back": "Kidney."}]}
+
+    def fail_finalize_generation_link(*args, **kwargs):
+        raise RuntimeError("link finalization failed")
+
+    monkeypatch.setattr(endpoints_mod, "run_flashcard_generate_adapter", fake_generate_flashcards)
+    monkeypatch.setattr(endpoints_mod, "finalize_generation_link", fail_finalize_generation_link)
+
+    with pytest.raises(RuntimeError, match="link finalization failed"):
+        client.post(
+            f"/api/v1/study-suggestions/snapshots/{snapshot_id}/actions",
+            json={
+                "target_service": "flashcards",
+                "target_type": "deck",
+                "action_kind": "follow_up_flashcards",
+                "selected_topic_ids": ["topic-1"],
+                "generator_version": "v1",
+                "force_regenerate": False,
+            },
+        )
+
+    generated_decks = [
+        deck
+        for deck in db.list_decks(include_deleted=True)
+        if str(deck.get("name") or "").startswith(f"Study Suggestions {snapshot_id}")
+    ]
+    assert len(generated_decks) == 1  # nosec B101
+    assert bool(generated_decks[0]["deleted"]) is True  # nosec B101
 
 
 def test_flashcard_session_snapshot_can_generate_follow_up_quiz(

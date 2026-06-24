@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +30,7 @@ from tldw_Server_API.app.core.StudySuggestions.actions import (
     build_flashcard_generation_payload,
     build_follow_up_flashcard_deck_name,
     build_follow_up_flashcard_source_text,
+    build_legacy_selection_fingerprint,
     build_selection_fingerprint,
     canonicalize_follow_up_action,
     finalize_generation_link,
@@ -194,7 +195,7 @@ def _build_selection_fingerprint_variants(
     action_kind: str,
     generator_version: str | None,
     normalization_version: str,
-) -> tuple[str, str | None]:
+) -> tuple[str, tuple[str, ...]]:
     """Build current and legacy-compatible selection fingerprints for one action."""
 
     selection_fingerprint = build_selection_fingerprint(
@@ -206,19 +207,44 @@ def _build_selection_fingerprint_variants(
         generator_version=generator_version,
         normalization_version=normalization_version,
     )
-    legacy_selection_fingerprint = build_selection_fingerprint(
-        snapshot_id=snapshot_id,
-        target_service=target_service,
-        target_type=target_type,
-        selected_topics=selected_topics,
-        action_kind=action_kind,
-        generator_version=generator_version,
-        normalization_version=normalization_version,
-        include_normalization_version=False,
+    legacy_candidates = (
+        build_selection_fingerprint(
+            snapshot_id=snapshot_id,
+            target_service=target_service,
+            target_type=target_type,
+            selected_topics=selected_topics,
+            action_kind=action_kind,
+            generator_version=generator_version,
+            normalization_version=normalization_version,
+            include_normalization_version=False,
+        ),
+        build_legacy_selection_fingerprint(
+            snapshot_id=snapshot_id,
+            target_service=target_service,
+            target_type=target_type,
+            selected_topics=selected_topics,
+            action_kind=action_kind,
+            generator_version=generator_version,
+            normalization_version=normalization_version,
+        ),
+        build_legacy_selection_fingerprint(
+            snapshot_id=snapshot_id,
+            target_service=target_service,
+            target_type=target_type,
+            selected_topics=selected_topics,
+            action_kind=action_kind,
+            generator_version=generator_version,
+            normalization_version=normalization_version,
+            include_normalization_version=False,
+        ),
     )
-    return selection_fingerprint, (
-        legacy_selection_fingerprint if legacy_selection_fingerprint != selection_fingerprint else None
-    )
+    seen = {selection_fingerprint}
+    legacy_fingerprints: list[str] = []
+    for fingerprint in legacy_candidates:
+        if fingerprint and fingerprint not in seen:
+            seen.add(fingerprint)
+            legacy_fingerprints.append(fingerprint)
+    return selection_fingerprint, tuple(legacy_fingerprints)
 
 
 def _list_generation_link_candidates(
@@ -228,13 +254,20 @@ def _list_generation_link_candidates(
     target_service: str,
     target_type: str,
     selection_fingerprint: str,
-    legacy_selection_fingerprint: str | None,
+    legacy_selection_fingerprint: str | Iterable[str] | None,
 ) -> list[tuple[dict[str, Any], str]]:
     """Return matching generation links for current and legacy fingerprints."""
 
     candidates: list[tuple[dict[str, Any], str]] = []
     seen_fingerprints: set[str] = set()
-    for fingerprint in (selection_fingerprint, legacy_selection_fingerprint):
+    legacy_fingerprints: Iterable[str]
+    if legacy_selection_fingerprint is None:
+        legacy_fingerprints = ()
+    elif isinstance(legacy_selection_fingerprint, str):
+        legacy_fingerprints = (legacy_selection_fingerprint,)
+    else:
+        legacy_fingerprints = legacy_selection_fingerprint
+    for fingerprint in (selection_fingerprint, *legacy_fingerprints):
         if not fingerprint or fingerprint in seen_fingerprints:
             continue
         seen_fingerprints.add(fingerprint)
@@ -787,6 +820,33 @@ def _finalize_action(
         )
 
 
+def _cleanup_generated_action_target(
+    db: CharactersRAGDB,
+    *,
+    generated: dict[str, str] | None,
+) -> None:
+    """Best-effort cleanup when a target was generated but its link could not be finalized."""
+
+    if not generated:
+        return
+    target_service = str(generated.get("target_service") or "").strip().lower()
+    target_type = str(generated.get("target_type") or "").strip().lower()
+    target_id = str(generated.get("target_id") or "").strip()
+    if not target_id:
+        return
+
+    try:
+        target_int = int(target_id)
+    except (TypeError, ValueError):
+        return
+
+    if target_service == "flashcards" and target_type == "deck":
+        soft_delete_deck(db, deck_id=target_int)
+        return
+    if target_service == "quiz" and target_type == "quiz":
+        db.delete_quiz(target_int)
+
+
 class _EarlyReturn(Exception):
     """Internal signal to return an existing-link response from the sync prepare phase."""
 
@@ -818,6 +878,7 @@ async def trigger_suggestion_action(
     action_payload = payload.model_dump(mode="json")
     action_payload.update(action_contract)
     action_payload["selected_topics"] = selected_topics
+    generated: dict[str, str] | None = None
     try:
         generated = await _dispatch_follow_up_action(
             note_db=db,
@@ -846,6 +907,8 @@ async def trigger_suggestion_action(
                     target_type=action_contract["target_type"],
                     selection_fingerprint=selection_fingerprint,
                 )
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(_cleanup_generated_action_target, db, generated=generated)
         raise
     except Exception:
         if pending_reservation_created:
@@ -858,6 +921,8 @@ async def trigger_suggestion_action(
                     target_type=action_contract["target_type"],
                     selection_fingerprint=selection_fingerprint,
                 )
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(_cleanup_generated_action_target, db, generated=generated)
         raise
     return SuggestionActionResponse.model_validate(
         {
