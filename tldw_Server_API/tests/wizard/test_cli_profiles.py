@@ -73,6 +73,25 @@ def test_single_user_defaults_generate_maskable_api_key() -> None:
     assert defaults["AUTH_MODE"] == "single_user"
     assert defaults["SINGLE_USER_API_KEY"].startswith("tldw_")
     assert "DATABASE_URL" in defaults
+    assert "TLDW_WEBUI_EXPOSE_RUNTIME_AUTH" not in defaults
+
+
+def test_docker_single_webui_profile_explicitly_enables_runtime_auth() -> None:
+    defaults = profiles.build_profile_env(
+        profile=profiles.normalize_profile("docker-single-webui"),
+        existing_env={},
+    )
+
+    assert defaults["TLDW_WEBUI_EXPOSE_RUNTIME_AUTH"] == "1"
+
+
+def test_docker_single_webui_profile_preserves_runtime_auth_override() -> None:
+    defaults = profiles.build_profile_env(
+        profile=profiles.normalize_profile("docker-single-webui"),
+        existing_env={"TLDW_WEBUI_EXPOSE_RUNTIME_AUTH": "0"},
+    )
+
+    assert defaults["TLDW_WEBUI_EXPOSE_RUNTIME_AUTH"] == "0"
 
 
 def test_single_user_profile_regenerates_legacy_api_key() -> None:
@@ -243,6 +262,7 @@ def test_init_profile_writes_repo_env_path_in_dry_run(tmp_path: Path, monkeypatc
     ensure_gitignore = next(action["ensure_gitignore"] for action in actions if "ensure_gitignore" in action)
     assert ".env.*.bak" in ensure_gitignore
     assert_action_field(actions, "set_env", "AUTH_MODE", "single_user")
+    assert_action_field(actions, "set_env", "TLDW_WEBUI_EXPOSE_RUNTIME_AUTH", "1")
     assert str(set_env["SINGLE_USER_API_KEY"]).startswith("*")
 
 
@@ -294,6 +314,7 @@ def test_init_profile_rewrites_legacy_single_user_api_key(tmp_path: Path, monkey
     written_env = profiles.env_utils.load_env(env_path)
     assert written_env["SINGLE_USER_API_KEY"] != "legacy-key-12345"
     assert parse_api_key(written_env["SINGLE_USER_API_KEY"]) is not None
+    assert written_env["TLDW_WEBUI_EXPOSE_RUNTIME_AUTH"] == "1"
 
 
 def test_init_multi_user_profile_masks_admin_password_in_dry_run(tmp_path: Path, monkeypatch) -> None:

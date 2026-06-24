@@ -8,6 +8,7 @@ import {
   resolveBrowserTransport,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
+import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 
 export type TldwRequestPayload = {
   path: PathOrUrl
@@ -389,7 +390,10 @@ export const tldwRequest = async (
       if (kl === "x-api-key" || kl === "authorization") delete h[k]
     }
     if (!hostedMode) {
-      if (cfg?.authMode === "single-user") {
+      const runtimeApiKey = getRuntimeSingleUserApiKeyOverride()
+      if (runtimeApiKey) {
+        h["X-API-KEY"] = runtimeApiKey
+      } else if (cfg?.authMode === "single-user") {
         const key = (cfg?.apiKey || "").trim()
         if (!key) {
           return {

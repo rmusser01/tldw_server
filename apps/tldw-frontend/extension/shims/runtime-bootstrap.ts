@@ -1,4 +1,5 @@
 import { browser } from "./wxt-browser"
+import { setRuntimeApiKey } from "@web/lib/authStorage"
 import { createSafeStorage } from "@/utils/safe-storage"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import { FEATURE_FLAGS } from "@/hooks/useFeatureFlags"
@@ -17,6 +18,7 @@ import {
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
+import { setRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null
@@ -197,6 +199,243 @@ const deriveCurrentHostRecoveryServerUrl = (
 }
 
 const DEFAULT_TLDW_SERVER_URL = "http://127.0.0.1:8000"
+const RUNTIME_CONFIG_ENDPOINT = "/api/_tldw-webui/runtime-config"
+const RUNTIME_AUTH_METADATA_KEY = "tldwRuntimeAuthMetadata"
+const RUNTIME_AUTH_METADATA_VERSION = 1
+const PLACEHOLDER_API_KEYS = new Set([
+  "change-me",
+  "changeme",
+  "change_me",
+  "default",
+  "test-key",
+  "your-api-key",
+  "your-api-key-here",
+  "your_api_key",
+  "your_api_key_here",
+  "placeholder",
+  "replace-me",
+  "replace_me"
+])
+
+type RuntimeConfigPayload = {
+  runtimeAuth?: {
+    available?: boolean
+    authMode?: "single-user" | string
+    apiKey?: string
+  }
+  networking?: {
+    deploymentMode?: string
+    serverUrl?: string
+  }
+}
+
+type RuntimeAuthMetadata = {
+  source: "webui-runtime"
+  version: 1
+  authMode: "single-user"
+  keyFingerprint: string
+}
+
+const normalizeApiKey = (value?: string | null): string | null => {
+  const normalized = String(value || "").trim()
+  if (!normalized || /\s/.test(normalized)) return null
+  return normalized
+}
+
+const fingerprintRuntimeKeyFallback = (apiKey: string): string => {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < apiKey.length; index += 1) {
+    hash ^= apiKey.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return `fnv1a:${apiKey.length}:${(hash >>> 0).toString(16).padStart(8, "0")}`
+}
+
+const fingerprintRuntimeKey = async (apiKey: string): Promise<string> => {
+  try {
+    const subtle = globalThis.crypto?.subtle
+    if (!subtle) return fingerprintRuntimeKeyFallback(apiKey)
+    const digest = await subtle.digest("SHA-256", new TextEncoder().encode(apiKey))
+    const fingerprint = Array.from(new Uint8Array(digest))
+      .slice(0, 12)
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("")
+    return `sha256:${apiKey.length}:${fingerprint}`
+  } catch {
+    return fingerprintRuntimeKeyFallback(apiKey)
+  }
+}
+
+const isRuntimeConfigFetchAllowed = (): boolean => {
+  if (typeof window === "undefined" || typeof fetch !== "function") {
+    return false
+  }
+
+  try {
+    const protocol = String(window.location?.protocol || "").toLowerCase()
+    return protocol === "http:" || protocol === "https:"
+  } catch {
+    return false
+  }
+}
+
+const fetchRuntimeConfig = async (): Promise<RuntimeConfigPayload | null> => {
+  if (!isRuntimeConfigFetchAllowed()) return null
+
+  try {
+    const response = await fetch(RUNTIME_CONFIG_ENDPOINT, {
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: {
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache"
+      }
+    })
+    if (!response.ok) return null
+    const payload = await response.json()
+    return isRecord(payload) ? (payload as RuntimeConfigPayload) : null
+  } catch {
+    return null
+  }
+}
+
+const isRuntimeAuthMetadata = (
+  value: unknown
+): value is RuntimeAuthMetadata => {
+  return (
+    isRecord(value) &&
+    value.source === "webui-runtime" &&
+    value.version === RUNTIME_AUTH_METADATA_VERSION &&
+    value.authMode === "single-user" &&
+    typeof value.keyFingerprint === "string" &&
+    value.keyFingerprint.length > 0
+  )
+}
+
+const isStoredKeyRuntimeOwned = async (
+  existingKey: string | null,
+  metadata: RuntimeAuthMetadata | null
+): Promise<boolean> => {
+  if (!existingKey || !metadata) return false
+  return metadata.keyFingerprint === (await fingerprintRuntimeKey(existingKey))
+}
+
+const isPlaceholderApiKey = (value: string): boolean => {
+  const normalized = value.trim().toLowerCase()
+  if (normalized.startsWith("change_me")) return true
+
+  return PLACEHOLDER_API_KEYS.has(normalized)
+}
+
+const shouldPersistRuntimeKey = async ({
+  existingKey,
+  runtimeKey,
+  metadata,
+  buildTimeKey,
+  existingAuthMode,
+  existingAccessToken
+}: {
+  existingKey: string | null
+  runtimeKey: string
+  metadata: RuntimeAuthMetadata | null
+  buildTimeKey: string | null
+  existingAuthMode: string | null
+  existingAccessToken: string | null
+}): Promise<boolean> => {
+  if (await isStoredKeyRuntimeOwned(existingKey, metadata)) return true
+  if (existingAuthMode === "multi-user" && existingAccessToken) return false
+  if (!existingKey) return true
+  if (buildTimeKey && existingKey === buildTimeKey) return true
+  return isPlaceholderApiKey(existingKey)
+}
+
+const seedTldwConfigFromRuntime = async (): Promise<void> => {
+  if (typeof window === "undefined") return
+
+  const payload = await fetchRuntimeConfig()
+  const runtimeKey = normalizeApiKey(payload?.runtimeAuth?.apiKey)
+  if (
+    payload?.runtimeAuth?.available !== true ||
+    payload.runtimeAuth.authMode !== "single-user" ||
+    !runtimeKey
+  ) {
+    return
+  }
+
+  setRuntimeApiKey(runtimeKey)
+  setRuntimeSingleUserApiKeyOverride(runtimeKey)
+
+  try {
+    const storage = createSafeStorage()
+    const existing =
+      (await storage.get<TldwConfig>("tldwConfig").catch(() => null)) || null
+    const rawMetadata =
+      (await storage.get<unknown>(RUNTIME_AUTH_METADATA_KEY).catch(() => null)) ||
+      null
+    const metadata = isRuntimeAuthMetadata(rawMetadata) ? rawMetadata : null
+    const existingKey = normalizeApiKey(
+      typeof existing?.apiKey === "string" ? existing.apiKey : null
+    )
+    const existingAuthMode =
+      typeof existing?.authMode === "string"
+        ? existing.authMode.trim() || null
+        : null
+    const existingAccessToken =
+      typeof existing?.accessToken === "string"
+        ? existing.accessToken.trim() || null
+        : null
+    const buildTimeKey = normalizeApiKey(process.env.NEXT_PUBLIC_X_API_KEY)
+    const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
+    const shouldPersistKey = await shouldPersistRuntimeKey({
+      existingKey,
+      runtimeKey,
+      metadata,
+      buildTimeKey,
+      existingAuthMode,
+      existingAccessToken
+    })
+    const next: TldwConfig = {
+      ...(existing || {}),
+      serverUrl: existing?.serverUrl || ""
+    }
+    let changed = false
+
+    if (quickstartWebUiServerUrl && next.serverUrl !== quickstartWebUiServerUrl) {
+      next.serverUrl = quickstartWebUiServerUrl
+      changed = true
+    }
+
+    if (shouldPersistKey) {
+      if (next.authMode !== "single-user") {
+        next.authMode = "single-user"
+        changed = true
+      }
+      if (next.apiKey !== runtimeKey) {
+        next.apiKey = runtimeKey
+        changed = true
+      }
+    }
+
+    if (changed || (next.serverUrl && !existing)) {
+      await storage.set("tldwConfig", next)
+    }
+    if (next.serverUrl) {
+      await storage.set("tldwServerUrl", next.serverUrl)
+    }
+
+    if (shouldPersistKey) {
+      const nextMetadata: RuntimeAuthMetadata = {
+        source: "webui-runtime",
+        version: RUNTIME_AUTH_METADATA_VERSION,
+        authMode: "single-user",
+        keyFingerprint: await fingerprintRuntimeKey(runtimeKey)
+      }
+      await storage.set(RUNTIME_AUTH_METADATA_KEY, nextMetadata)
+    }
+  } catch {
+    // Runtime auth still takes request precedence through setRuntimeApiKey().
+  }
+}
 
 const seedTldwConfigFromEnv = async (): Promise<void> => {
   if (typeof window === "undefined") return
@@ -301,7 +540,10 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
   }
 }
 
-void seedTldwConfigFromEnv()
+export const runtimeBootstrapReady = (async () => {
+  await seedTldwConfigFromRuntime().catch(() => undefined)
+  await seedTldwConfigFromEnv().catch(() => undefined)
+})()
 
 const WEB_DEFAULTS_MIRRORED_KEY = "tldw:web-defaults:mirrored"
 const WEB_HEADER_SHORTCUT_DOC_WORKSPACE_BACKFILL_KEY =

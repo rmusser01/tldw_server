@@ -441,9 +441,14 @@ The server auto-creates per-user subdirectories on first use.
 **Symptoms:** Frontend admin features do not work, or you get 401 errors only from the WebUI.
 
 **Fix:**
-1. `NEXT_PUBLIC_X_API_KEY` is for the frontend admin API and is **not** the same as `SINGLE_USER_API_KEY`.
-2. The Docker quickstart proxy handles this automatically. Only set this variable in advanced (non-proxy) deployments.
-3. If needed, set it in `.env` and rebuild the WebUI.
+Docker single-user WebUI quickstart uses runtime auth bootstrap. Check these when the WebUI returns `401`:
+
+- `make setup-docker-single` or the equivalent `tldw-setup init --profile docker-single-webui` command wrote `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1` to `tldw_Server_API/Config_Files/.env`; the shared WebUI compose overlay defaults that flag to `0` without this explicit local quickstart opt-in.
+- The WebUI is opened through the default loopback URL, `http://127.0.0.1:8080`.
+- `SINGLE_USER_API_KEY` is not `change-me`.
+- The backend `app` service has the same `SINGLE_USER_API_KEY`.
+
+Only advanced/static deployments should set `NEXT_PUBLIC_X_API_KEY` before building the WebUI.
 
 ---
 

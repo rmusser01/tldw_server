@@ -2,6 +2,7 @@ import { tldwClient } from "./TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
 import { emitSplashAfterLoginSuccess } from "@/services/splash-events"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
+import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 
 export interface LoginCredentials {
   username: string
@@ -427,12 +428,21 @@ export class TldwAuthService {
   async getAuthHeaders(): Promise<HeadersInit> {
     const config = await tldwClient.getConfig()
     const headers: HeadersInit = {}
+    const hostedMode = this.isHostedMode()
+
+    if (!hostedMode) {
+      const runtimeApiKey = getRuntimeSingleUserApiKeyOverride()
+      if (runtimeApiKey) {
+        headers['X-API-KEY'] = runtimeApiKey
+        return headers
+      }
+    }
 
     if (!config) {
       return headers
     }
 
-    if (this.isHostedMode()) {
+    if (hostedMode) {
       if (config.orgId) {
         headers['X-TLDW-Org-Id'] = String(config.orgId)
       }

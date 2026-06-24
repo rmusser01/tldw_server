@@ -46,6 +46,7 @@ import {
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
+import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import {
   type TldwProvidersResponse
 } from "@/services/tldw/model-provider-availability"
@@ -1449,7 +1450,10 @@ export class TldwApiClientBase {
   async ensureConfigForRequest(requireAuth: boolean): Promise<TldwConfig> {
     const cfg = (await this.getConfig()) || null
     const hostedMode = isHostedTldwDeployment()
-    if ((!cfg || !cfg.serverUrl) && !hostedMode) {
+    const runtimeApiKey = !hostedMode
+      ? getRuntimeSingleUserApiKeyOverride()
+      : null
+    if ((!cfg || !cfg.serverUrl) && !hostedMode && !runtimeApiKey) {
       const msg =
         "tldw server is not configured. Open Settings → tldw server in the extension and set the server URL and API key."
       // eslint-disable-next-line no-console
@@ -1470,6 +1474,17 @@ export class TldwApiClientBase {
 
     if (!requireAuth) {
       return cfg
+    }
+
+    if (runtimeApiKey) {
+      return {
+        ...(cfg || {}),
+        serverUrl: String(
+          cfg?.serverUrl || getQuickstartWebUiServerUrl() || DEFAULT_SERVER_URL
+        ),
+        authMode: "single-user",
+        apiKey: runtimeApiKey
+      }
     }
 
     if (cfg.authMode === "multi-user") {
@@ -1662,12 +1677,25 @@ export class TldwApiClientBase {
       "Content-Type": "application/json"
     }
 
-    if (!hostedMode && config?.authMode === "single-user" && config.apiKey) {
+    const runtimeApiKey = !hostedMode
+      ? getRuntimeSingleUserApiKeyOverride()
+      : null
+    if (runtimeApiKey) {
+      this.headers["X-API-KEY"] = runtimeApiKey
+    } else if (
+      !hostedMode &&
+      config?.authMode === "single-user" &&
+      config.apiKey
+    ) {
       const key = String(config.apiKey || "").trim()
       if (key) {
         this.headers["X-API-KEY"] = key
       }
-    } else if (!hostedMode && config?.authMode === "multi-user" && config.accessToken) {
+    } else if (
+      !hostedMode &&
+      config?.authMode === "multi-user" &&
+      config.accessToken
+    ) {
       this.headers["Authorization"] = `Bearer ${config.accessToken}`
     }
     if (config?.orgId) {
