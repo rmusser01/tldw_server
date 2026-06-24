@@ -11,10 +11,11 @@ Env:
 
 import base64
 import binascii
-import hashlib
 import json
 import os
 from typing import Any
+
+from loguru import logger
 
 try:
     from Cryptodome.Cipher import AES
@@ -33,40 +34,28 @@ _JSON_CRYPTO_DECRYPT_EXCEPTIONS = (
 _JSON_CRYPTO_WITH_B64_EXCEPTIONS = _B64_DECODE_EXCEPTIONS + _JSON_CRYPTO_DECRYPT_EXCEPTIONS
 
 
-def _get_key_from_env() -> bytes | None:
-    key_b64 = os.getenv("WORKFLOWS_ARTIFACT_ENC_KEY", "").strip()
+def _get_key_from_env_var(env_name: str) -> bytes | None:
+    key_b64 = os.getenv(env_name, "").strip()
     if not key_b64:
         return None
-    # Try strict base64 decode first
-    raw: bytes | None
     try:
-        raw = base64.b64decode(key_b64)
+        raw = base64.b64decode(key_b64, validate=True)
     except _B64_DECODE_EXCEPTIONS:
-        raw = None
-    # If base64 failed, derive from the literal string
-    if raw is None or len(raw) == 0:
-        # Treat provided env var as passphrase; derive a 32-byte key deterministically
-        return hashlib.sha256(key_b64.encode("utf-8")).digest()
-    # Accept standard AES key sizes directly; otherwise derive via SHA-256
-    if len(raw) in (16, 24, 32):
-        return raw
-    return hashlib.sha256(raw).digest()
+        logger.error(f"{env_name} is set but invalid; expected strict base64 encoding of a 32-byte AES-256 key")
+        return None
+    if len(raw) != 32:
+        logger.error(f"{env_name} is set but invalid; expected strict base64 encoding of a 32-byte AES-256 key")
+        return None
+    return raw
+
+
+def _get_key_from_env() -> bytes | None:
+    return _get_key_from_env_var("WORKFLOWS_ARTIFACT_ENC_KEY")
 
 
 def _get_secondary_key_from_env() -> bytes | None:
     """Optional fallback key for dual-read stage during key rotation."""
-    key_b64 = os.getenv("JOBS_CRYPTO_SECONDARY_KEY", "").strip()
-    if not key_b64:
-        return None
-    try:
-        raw = base64.b64decode(key_b64)
-    except _B64_DECODE_EXCEPTIONS:
-        raw = None
-    if raw is None or len(raw) == 0:
-        return hashlib.sha256(key_b64.encode("utf-8")).digest()
-    if len(raw) in (16, 24, 32):
-        return raw
-    return hashlib.sha256(raw).digest()
+    return _get_key_from_env_var("JOBS_CRYPTO_SECONDARY_KEY")
 
 
 def encrypt_json_blob(data: dict[str, Any]) -> dict[str, Any] | None:
@@ -122,16 +111,10 @@ def decrypt_json_blob(envelope: dict[str, Any]) -> dict[str, Any] | None:
 
 def _decode_key_b64(key_b64: str) -> bytes | None:
     try:
-        raw = base64.b64decode(key_b64)
+        raw = base64.b64decode(key_b64, validate=True)
     except _B64_DECODE_EXCEPTIONS:
-        raw = None
-    if raw is None or len(raw) == 0:
-        # Derive from literal if not valid base64
-        return hashlib.sha256(key_b64.encode("utf-8")).digest()
-    if len(raw) in (16, 24, 32):
-        return raw
-    # For non-standard lengths, derive a 32-byte AES key deterministically
-    return hashlib.sha256(raw).digest()
+        return None
+    return raw if len(raw) == 32 else None
 
 
 def encrypt_json_blob_with_key(data: dict[str, Any], key_b64: str) -> dict[str, Any] | None:

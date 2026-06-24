@@ -188,6 +188,30 @@ class SecretManager:
                 required=False,
                 min_length=20,
                 description="Groq API key for evaluations"
+            ),
+
+            "jwt_secret_key": SecretConfig(
+                name="jwt_secret_key",
+                secret_type=SecretType.JWT_SECRET,
+                env_var="JWT_SECRET_KEY",
+                config_section="AuthNZ",
+                config_key="jwt_secret_key",
+                required=False,
+                min_length=32,
+                rotation_days=365,
+                description="JWT signing secret for multi-user authentication mode"
+            ),
+
+            "webhook_master_secret": SecretConfig(
+                name="webhook_master_secret",
+                secret_type=SecretType.WEBHOOK_SECRET,
+                env_var="WEBHOOK_MASTER_SECRET",
+                config_section="Security",
+                config_key="webhook_master_secret",
+                required=False,
+                min_length=32,
+                rotation_days=365,
+                description="Master secret for webhook signing"
             )
         }
 

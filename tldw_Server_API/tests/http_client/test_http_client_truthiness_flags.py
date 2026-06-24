@@ -92,9 +92,9 @@ def test_validate_egress_reuses_dns_pin_cache_for_same_host(monkeypatch):
 
     calls: list[object] = []
 
-    def _fake_policy(url: str, *, block_private_override=None, resolved_ips_override=None):
-        calls.append(resolved_ips_override)
-        if resolved_ips_override is None:
+    def _fake_policy(url: str, *, block_private_override=None, resolved_ips_override=None, pinned_resolved_ips=None):
+        calls.append(pinned_resolved_ips)
+        if pinned_resolved_ips is None:
             return types.SimpleNamespace(
                 allowed=True,
                 reason=None,
@@ -103,7 +103,7 @@ def test_validate_egress_reuses_dns_pin_cache_for_same_host(monkeypatch):
         return types.SimpleNamespace(
             allowed=True,
             reason=None,
-            resolved_ips=tuple(resolved_ips_override),
+            resolved_ips=tuple(pinned_resolved_ips),
         )
 
     monkeypatch.setattr(egress_mod, "evaluate_url_policy", _fake_policy)
