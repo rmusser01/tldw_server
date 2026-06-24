@@ -39,6 +39,7 @@ from tldw_Server_API.app.core.Setup.audio_bundle_catalog import (
     get_audio_bundle_catalog,
 )
 from tldw_Server_API.app.core.Setup.install_schema import DEFAULT_WHISPER_MODELS, InstallPlan
+from tldw_Server_API.app.core.exceptions import SetupSubprocessError
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
 CONFIG_ROOT = setup_manager.CONFIG_RELATIVE_PATH.parent
@@ -315,10 +316,10 @@ def _is_vcs_requirement(package: str) -> bool:
 
 def _vcs_requirement_revision(package: str) -> str | None:
     spec = package.strip().split('#', 1)[0]
-    marker = '.git@'
-    if marker not in spec:
+    revision_marker = spec.rfind('@')
+    if revision_marker <= spec.rfind('/'):
         return None
-    revision = spec.rsplit(marker, 1)[1].strip()
+    revision = spec[revision_marker + 1:].strip()
     return revision or None
 
 
@@ -1648,33 +1649,37 @@ def _format_timeout(seconds: float | None) -> str:
 def _read_bounded_output(handle: Any) -> str:
     handle.seek(0)
     output = handle.read(SUBPROCESS_OUTPUT_SNIPPET_CHARS + 1)
+    truncated = len(output) > SUBPROCESS_OUTPUT_SNIPPET_CHARS
     if len(output) > SUBPROCESS_OUTPUT_SNIPPET_CHARS:
-        output = output[:SUBPROCESS_OUTPUT_SNIPPET_CHARS] + '\n[output truncated]'
-    return _redact_secret_text(output)
+        output = output[:SUBPROCESS_OUTPUT_SNIPPET_CHARS]
+    if isinstance(output, bytes):
+        text = output.decode('utf-8', errors='replace')
+    else:
+        text = str(output)
+    if truncated:
+        text += '\n[output truncated]'
+    return _redact_secret_text(text)
 
 
 def _run_subprocess(command: list[str], *, timeout_seconds: float | None = None) -> None:
     timeout = _subprocess_timeout_seconds() if timeout_seconds is None else timeout_seconds
     logger.info('Running command: {}', ' '.join(_redact_command(command)))
     try:
-        with tempfile.TemporaryFile('w+', encoding='utf-8') as stdout_handle, tempfile.TemporaryFile(
-            'w+',
-            encoding='utf-8',
-        ) as stderr_handle:
+        with tempfile.TemporaryFile('w+b') as stdout_handle, tempfile.TemporaryFile('w+b') as stderr_handle:
             result = subprocess.run(  # nosec B603 - command argv is assembled from trusted setup requirement mappings
                 command,
                 check=False,
                 stdout=stdout_handle,
                 stderr=stderr_handle,
-                text=True,
+                text=False,
                 timeout=timeout,
             )
             stderr_output = _read_bounded_output(stderr_handle)
             stdout_output = _read_bounded_output(stdout_handle)
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f'Command timed out after {_format_timeout(timeout)} seconds') from exc
+        raise SetupSubprocessError(f'Command timed out after {_format_timeout(timeout)} seconds') from exc
     if result.returncode != 0:
-        raise RuntimeError(stderr_output.strip() or f'Command failed with exit code {result.returncode}')
+        raise SetupSubprocessError(stderr_output.strip() or f'Command failed with exit code {result.returncode}')
     if stdout_output:
         logger.debug(stdout_output)
 

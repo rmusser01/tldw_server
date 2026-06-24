@@ -4,7 +4,7 @@ title: Harden Setup module review findings
 status: Done
 assignee: []
 created_date: '2026-06-23 21:16'
-updated_date: '2026-06-23 21:39'
+updated_date: '2026-06-24 13:02'
 labels:
   - setup
   - security
@@ -57,6 +57,12 @@ Verification:
 - Bandit on touched Setup production files completed with 0 findings in `/tmp/bandit_setup_module_review_hardening.json`.
 - Task-scoped `git diff --check -- ...touched files...` passed.
 - Repo-wide `git diff --check` was not clean because of an unrelated pre-existing whitespace issue in `tldw_Server_API/tests/FileArtifacts/test_file_artifacts_service_exports.py:317`.
+
+Review follow-up on 2026-06-24:
+- Rebased PR branch `codex/setup-review-hardening` onto latest `origin/dev`.
+- Addressed Qodo comments by adding setup-specific exception types, replacing setup subprocess and lock timeout generic exceptions, making subprocess output readback non-UTF-8 tolerant, and broadening pinned VCS revision extraction beyond `.git@`.
+- Added regression tests for non-UTF-8 subprocess output, custom subprocess errors, VCS pins without `.git`, SSH VCS pins with userinfo, and setup readiness lock timeout exceptions.
+- Verification after review follow-up: compileall passed; focused review nodeids passed: 7 passed; focused Setup suite passed: 58 passed; broader Setup API/audio suite passed: 47 passed; Bandit report `/tmp/bandit_setup_module_review_rebase.json` had 0 findings; `git diff --check` passed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

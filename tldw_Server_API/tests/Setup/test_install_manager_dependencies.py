@@ -10,6 +10,7 @@ import pytest
 
 from tldw_Server_API.app.core.Setup import install_manager
 from tldw_Server_API.app.core.Setup.install_schema import InstallPlan, TTSInstall
+from tldw_Server_API.app.core.exceptions import SetupSubprocessError
 
 
 class _CapturingLogger:
@@ -143,9 +144,9 @@ def test_run_subprocess_redacts_pip_index_credentials(monkeypatch):
 
     def fake_run(command, check=False, capture_output=True, text=True, timeout=None, **kwargs):  # noqa: ARG001
         if kwargs.get("stdout") is not None:
-            kwargs["stdout"].write("")
+            kwargs["stdout"].write(b"")
         if kwargs.get("stderr") is not None:
-            kwargs["stderr"].write("")
+            kwargs["stderr"].write(b"")
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(install_manager.subprocess, "run", fake_run)
@@ -180,7 +181,7 @@ def test_run_subprocess_uses_timeout_and_redacts_timeout_errors(monkeypatch):
 
     monkeypatch.setattr(install_manager.subprocess, "run", fake_run)
 
-    with pytest.raises(RuntimeError, match="timed out after 7"):
+    with pytest.raises(SetupSubprocessError, match="timed out after 7"):
         install_manager._run_subprocess(
             [
                 install_manager.sys.executable,
@@ -197,6 +198,40 @@ def test_run_subprocess_uses_timeout_and_redacts_timeout_errors(monkeypatch):
     joined = _joined_records(logger)
     assert "secret-token" not in joined
     assert "user:secret-token" not in joined
+
+
+def test_run_subprocess_decodes_non_utf8_output_safely(monkeypatch):
+    logger = _CapturingLogger()
+    monkeypatch.setattr(install_manager, "logger", logger)
+
+    def fake_run(command, check=False, capture_output=True, text=True, timeout=None, **kwargs):  # noqa: ARG001
+        kwargs["stdout"].write(b"ok: \xff https://user:secret-token@example.test/simple")
+        kwargs["stderr"].write(b"")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(install_manager.subprocess, "run", fake_run)
+
+    install_manager._run_subprocess(["demo-command"])
+
+    joined = _joined_records(logger)
+    assert "secret-token" not in joined
+    assert "[redacted]" in joined
+
+
+def test_run_subprocess_raises_custom_error_for_nonzero_exit(monkeypatch):
+    def fake_run(command, check=False, capture_output=True, text=True, timeout=None, **kwargs):  # noqa: ARG001
+        kwargs["stdout"].write(b"")
+        kwargs["stderr"].write(b"\xff failed https://user:secret-token@example.test/simple")
+        return types.SimpleNamespace(returncode=2, stdout="", stderr="")
+
+    monkeypatch.setattr(install_manager.subprocess, "run", fake_run)
+
+    with pytest.raises(SetupSubprocessError) as exc_info:
+        install_manager._run_subprocess(["demo-command"])
+
+    message = str(exc_info.value)
+    assert "secret-token" not in message
+    assert "[redacted]" in message
 
 
 def test_install_plan_rejects_custom_embeddings_without_trust_acknowledgement():
@@ -249,6 +284,41 @@ def test_unpinned_vcs_requirement_is_blocked_by_default(monkeypatch):
         )
 
     assert executed == []
+
+
+def test_vcs_requirement_revision_accepts_commit_after_repo_without_dot_git():
+    commit = "a" * 40
+
+    assert install_manager._is_unpinned_vcs_requirement(
+        f"git+https://github.com/org/repo@{commit}#egg=repo"
+    ) is False
+
+
+def test_vcs_requirement_revision_accepts_ssh_userinfo_and_dot_git_commit():
+    commit = "b" * 40
+
+    assert install_manager._is_unpinned_vcs_requirement(
+        f"git+ssh://git@github.com/org/repo.git@{commit}#egg=repo"
+    ) is False
+
+
+def test_pinned_vcs_requirement_without_dot_git_is_not_blocked(monkeypatch):
+    commit = "c" * 40
+    requirement = f"git+https://github.com/org/repo@{commit}#egg=repo"
+    executed: list[list[str]] = []
+    monkeypatch.delenv("TLDW_SETUP_ALLOW_UNPINNED_VCS", raising=False)
+    monkeypatch.setattr(install_manager, "_pip_allowed", lambda: True)
+    monkeypatch.setattr(
+        install_manager.subprocess,
+        "run",
+        lambda *_args, **_kwargs: types.SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(install_manager, "_run_subprocess", lambda cmd: executed.append(cmd))
+
+    install_manager._ensure_requirement(install_manager.PipRequirement(package=requirement))
+
+    assert executed
+    assert executed[0][-1] == requirement
 
 
 def test_install_plan_accepts_kitten_tts():

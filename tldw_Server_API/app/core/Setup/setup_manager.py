@@ -22,6 +22,7 @@ from typing import Any, Callable
 from loguru import logger
 
 from tldw_Server_API.app.core.config_paths import resolve_config_file, resolve_config_root
+from tldw_Server_API.app.core.exceptions import SetupLockTimeoutError
 from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.core.Utils.Utils import get_project_root
 
@@ -641,7 +642,7 @@ def _config_file_lock(config_path: Path):
                     lock_path.unlink()
                     continue
             if time.monotonic() >= deadline:
-                raise TimeoutError(f"Timed out waiting for setup config lock: {lock_path}")
+                raise SetupLockTimeoutError(f"Timed out waiting for setup config lock: {lock_path}")
             time.sleep(0.05)
     try:
         yield

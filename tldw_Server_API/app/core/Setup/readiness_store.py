@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.Setup.readiness_models import LANE_IDS, LANE_STATUSES, OVERLAY_IDS
+from tldw_Server_API.app.core.exceptions import SetupLockTimeoutError
 
 CONFIG_ROOT = setup_manager.CONFIG_RELATIVE_PATH.parent
 READINESS_FILENAME = "setup_readiness.json"
@@ -135,7 +136,7 @@ def _readiness_file_lock(path: Path | None):
                     lock_path.unlink()
                     continue
             if time.monotonic() >= deadline:
-                raise TimeoutError("Timed out waiting for setup readiness lock")
+                raise SetupLockTimeoutError("Timed out waiting for setup readiness lock")
             time.sleep(0.05)
     try:
         yield

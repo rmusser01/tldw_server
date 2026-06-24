@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.Setup.audio_bundle_catalog import (
     build_audio_selection_key,
     get_audio_bundle_catalog,
 )
+from tldw_Server_API.app.core.exceptions import SetupLockTimeoutError
 
 CONFIG_ROOT = setup_manager.CONFIG_RELATIVE_PATH.parent
 READINESS_FILENAME = "setup_audio_readiness.json"
@@ -180,7 +181,7 @@ def _readiness_file_lock(path: Path | None):
                     lock_path.unlink()
                     continue
             if time.monotonic() >= deadline:
-                raise TimeoutError("Timed out waiting for audio readiness lock")
+                raise SetupLockTimeoutError("Timed out waiting for audio readiness lock")
             time.sleep(0.05)
     try:
         yield

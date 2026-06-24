@@ -130,6 +130,18 @@ class ValidationError(BadRequestError):
     """Raised when validation of input parameters fails."""
 
 
+class SetupError(RuntimeError):
+    """Base class for first-run setup and installer failures."""
+
+
+class SetupSubprocessError(SetupError):
+    """Raised when a setup-managed subprocess fails or times out."""
+
+
+class SetupLockTimeoutError(SetupError):
+    """Raised when setup state persistence cannot acquire its lock."""
+
+
 class InvalidGovernanceCandidateError(ValueError):
     """Raised when a policy source returns a malformed governance candidate."""
 
