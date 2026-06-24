@@ -135,6 +135,7 @@ def save_chat_history_to_db_wrapper(
 
         current_conversation_id = conversation_id
         is_new_conversation = not current_conversation_id
+        existing_messages_for_replacement: list[dict[str, Any]] = []
 
         if is_new_conversation:
             conv_title_base = f"Chat with {final_character_name_for_title}"
@@ -167,44 +168,36 @@ def save_chat_history_to_db_wrapper(
                 final_character_name_for_title,
             )
             try:
-                with db.transaction():
-                    existing_conv_details = db.get_conversation_by_id(current_conversation_id)
-                    if not existing_conv_details:
-                        logging.error("Cannot resave: Conversation %s not found.", current_conversation_id)
-                        return (
-                            current_conversation_id,
-                            f"Error: Conversation {current_conversation_id} not found for resaving.",
-                        )
-
-                    if existing_conv_details.get("character_id") != associated_character_id:
-                        existing_char = db.get_character_card_by_id(existing_conv_details.get("character_id"))
-                        existing_char_name = (
-                            existing_char.get("name")
-                            if existing_char
-                            else f"ID {existing_conv_details.get('character_id')}"
-                        )
-                        logging.error(
-                            "Cannot resave: Conversation %s (for char '%s') does not match current character context '%s' (ID: %s).",
-                            current_conversation_id,
-                            existing_char_name,
-                            final_character_name_for_title,
-                            associated_character_id,
-                        )
-                        return (
-                            current_conversation_id,
-                            "Error: Mismatch in character association for resaving chat. The conversation belongs to a different character.",
-                        )
-
-                    existing_messages = db.get_messages_for_conversation(
-                        current_conversation_id, limit=10000, order_by_timestamp="ASC"
-                    )
-                    logging.info(
-                        "Found %s existing messages to soft-delete for conv %s.",
-                        len(existing_messages),
+                existing_conv_details = db.get_conversation_by_id(current_conversation_id)
+                if not existing_conv_details:
+                    logging.error("Cannot resave: Conversation %s not found.", current_conversation_id)
+                    return (
                         current_conversation_id,
+                        f"Error: Conversation {current_conversation_id} not found for resaving.",
                     )
-                    for msg in existing_messages:
-                        db.soft_delete_message(msg["id"], msg["version"])
+
+                if existing_conv_details.get("character_id") != associated_character_id:
+                    existing_char = db.get_character_card_by_id(existing_conv_details.get("character_id"))
+                    existing_char_name = (
+                        existing_char.get("name")
+                        if existing_char
+                        else f"ID {existing_conv_details.get('character_id')}"
+                    )
+                    logging.error(
+                        "Cannot resave: Conversation %s (for char '%s') does not match current character context '%s' (ID: %s).",
+                        current_conversation_id,
+                        existing_char_name,
+                        final_character_name_for_title,
+                        associated_character_id,
+                    )
+                    return (
+                        current_conversation_id,
+                        "Error: Mismatch in character association for resaving chat. The conversation belongs to a different character.",
+                    )
+
+                existing_messages_for_replacement = db.get_messages_for_conversation(
+                    current_conversation_id, limit=10000, order_by_timestamp="ASC"
+                )
             except (InputError, ConflictError, CharactersRAGDBError) as exc:
                 logging.error(
                     "Error preparing existing conversation %s for resave: %s",
@@ -230,6 +223,15 @@ def save_chat_history_to_db_wrapper(
                     conv_title_for_update = pre_fetch_conv.get("title")
 
             with db.transaction():
+                if existing_messages_for_replacement:
+                    logging.info(
+                        "Found %s existing messages to soft-delete for conv %s.",
+                        len(existing_messages_for_replacement),
+                        current_conversation_id,
+                    )
+                    for msg in existing_messages_for_replacement:
+                        db.soft_delete_message(msg["id"], msg["version"])
+
                 message_save_count = 0
                 for index, message_obj in enumerate(chatbot_history):
                     sender = message_obj.get("role")
