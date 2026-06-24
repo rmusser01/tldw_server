@@ -1,5 +1,4 @@
 import pytest
-from loguru import logger
 
 from tldw_Server_API.app.core.Notifications import email_delivery
 
@@ -14,8 +13,27 @@ def _clear_smtp_env(monkeypatch):
         "SMTP_FROM_ADDRESS",
         "EMAIL_FROM",
         "SMTP_USE_TLS",
+        "SMTP_TIMEOUT",
     ):
         monkeypatch.delenv(name, raising=False)
+
+
+class _FakeLogger:
+    def __init__(self):
+        self.bound_calls = []
+        self.opt_calls = []
+        self.error_calls = []
+
+    def bind(self, **kwargs):
+        self.bound_calls.append(kwargs)
+        return self
+
+    def opt(self, **kwargs):
+        self.opt_calls.append(kwargs)
+        return self
+
+    def error(self, message, *args, **kwargs):
+        self.error_calls.append((message, args, kwargs))
 
 
 def test_invalid_smtp_port_is_treated_as_unconfigured(monkeypatch):
@@ -41,6 +59,18 @@ def test_smtp_config_uses_canonical_email_service_env_names(monkeypatch):
     assert config["from_address"] == "alerts@example.test"
 
 
+def test_smtp_config_includes_explicit_timeout(monkeypatch):
+    _clear_smtp_env(monkeypatch)
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("SMTP_PORT", "2525")
+    monkeypatch.setenv("SMTP_TIMEOUT", "7.5")
+
+    config = email_delivery._get_smtp_config()
+
+    assert config is not None
+    assert config["timeout"] == 7.5
+
+
 def test_format_notification_email_escapes_html_and_drops_unsafe_links():
     _subject, body_text, body_html = email_delivery.format_notification_email(
         kind="watchlist",
@@ -59,101 +89,63 @@ def test_format_notification_email_escapes_html_and_drops_unsafe_links():
 
 
 @pytest.mark.asyncio
-async def test_send_notification_email_uses_safe_logs_and_canonical_sender(
+async def test_send_notification_email_delegates_to_authnz_email_service(
     monkeypatch,
 ):
     _clear_smtp_env(monkeypatch)
-    monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
-    monkeypatch.setenv("SMTP_PORT", "2525")
-    monkeypatch.setenv("SMTP_USERNAME", "smtp-user")
-    monkeypatch.setenv("SMTP_PASSWORD", "smtp-password")
-    monkeypatch.setenv("EMAIL_FROM", "alerts@example.test")
 
-    smtp_calls = []
+    calls = []
 
-    class FakeSMTP:
-        def __init__(self, host, port):
-            smtp_calls.append(("connect", host, port))
+    class FakeEmailService:
+        async def send_email(self, **kwargs):
+            calls.append(kwargs)
+            return True
 
-        def __enter__(self):
-            return self
+    monkeypatch.setattr(email_delivery, "get_email_service", lambda: FakeEmailService(), raising=False)
 
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def starttls(self, context):
-            smtp_calls.append(("starttls", context is not None))
-
-        def login(self, user, password):
-            smtp_calls.append(("login", user, password))
-
-        def sendmail(self, from_address, to_address, payload):
-            smtp_calls.append(("sendmail", from_address, to_address, payload))
-
-    monkeypatch.setattr(email_delivery.smtplib, "SMTP", FakeSMTP)
-
-    logs = []
-    sink_id = logger.add(lambda message: logs.append(str(message)), format="{message}")
-    try:
-        result = await email_delivery.send_notification_email(
-            to="person@example.test",
-            subject="Sensitive subject",
-            body_text="plain body",
-            body_html="<p>html body</p>",
-        )
-    finally:
-        logger.remove(sink_id)
+    result = await email_delivery.send_notification_email(
+        to="person@example.test",
+        subject="Sensitive subject",
+        body_text="plain body",
+        body_html="<p>html body</p>",
+    )
 
     assert result is True
-    assert ("login", "smtp-user", "smtp-password") in smtp_calls
-    assert any(call[:3] == ("sendmail", "alerts@example.test", "person@example.test") for call in smtp_calls)
-    rendered_logs = "\n".join(logs)
-    assert "person@example.test" not in rendered_logs
-    assert "Sensitive subject" not in rendered_logs
-    assert "p***@example.test" in rendered_logs
+    assert calls == [
+        {
+            "to_email": "person@example.test",
+            "subject": "Sensitive subject",
+            "html_body": "<p>html body</p>",
+            "text_body": "plain body",
+        }
+    ]
 
 
 @pytest.mark.asyncio
-async def test_send_notification_email_redacts_failure_logs(monkeypatch):
+async def test_send_notification_email_returns_false_when_authnz_delivery_fails(monkeypatch):
     _clear_smtp_env(monkeypatch)
-    monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
-    monkeypatch.setenv("SMTP_PORT", "2525")
-    monkeypatch.setenv("EMAIL_FROM", "alerts@example.test")
+    fake_logger = _FakeLogger()
 
-    class FailingSMTP:
-        def __init__(self, host, port):
-            pass
+    class FailingEmailService:
+        async def send_email(self, **kwargs):  # noqa: ARG002
+            raise RuntimeError("failed person@example.test while sending Sensitive subject")
 
-        def __enter__(self):
-            return self
+    monkeypatch.setattr(email_delivery, "get_email_service", lambda: FailingEmailService(), raising=False)
+    monkeypatch.setattr(email_delivery, "logger", fake_logger)
 
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def starttls(self, context):
-            pass
-
-        def sendmail(self, from_address, to_address, payload):
-            raise RuntimeError(
-                "failed person@example.test while sending Sensitive subject"
-            )
-
-    monkeypatch.setattr(email_delivery.smtplib, "SMTP", FailingSMTP)
-
-    logs = []
-    sink_id = logger.add(lambda message: logs.append(str(message)), format="{message}")
-    try:
-        result = await email_delivery.send_notification_email(
-            to="person@example.test",
-            subject="Sensitive subject",
-            body_text="plain body",
-        )
-    finally:
-        logger.remove(sink_id)
+    result = await email_delivery.send_notification_email(
+        to="person@example.test",
+        subject="Sensitive subject",
+        body_text="plain body",
+    )
 
     assert result is False
-    rendered_logs = "\n".join(logs)
-    assert "person@example.test" not in rendered_logs
-    assert "Sensitive subject" not in rendered_logs
-    assert "p***@example.test" in rendered_logs
-    assert "[redacted]" in rendered_logs
+    assert fake_logger.bound_calls[0] == {
+        "operation": "notifications.send_notification_email",
+        "recipient": "p***@example.test",
+        "exception_type": "RuntimeError",
+    }
+    redacted_exception = fake_logger.opt_calls[0]["exception"]
+    assert redacted_exception.__traceback__ is not None
+    assert "person@example.test" not in str(redacted_exception)
+    assert "Sensitive subject" not in str(redacted_exception)

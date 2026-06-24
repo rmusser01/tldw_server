@@ -270,6 +270,7 @@ async def test_retry_run_audio_does_not_mutate_state_when_queue_submit_fails(mon
 async def test_retry_run_delivery_redelivers_latest_output_and_updates_metadata(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints.watchlists import retry_run_delivery
 
+    unsafe_title = "Daily / Digest \\ Briefing " + ("x" * 300)
     run = SimpleNamespace(id=10, job_id=7, stats_json="{}", error_msg=None)
     db = MagicMock()
     db.get_run.return_value = run
@@ -293,13 +294,13 @@ async def test_retry_run_delivery_redelivers_latest_output_and_updates_metadata(
         id=55,
         run_id=10,
         job_id=7,
-        title="Daily Digest",
+        title=unsafe_title,
         format="md",
         metadata_json=json.dumps(
             {
                 "origin": "watchlists",
                 "delivery_plan": {
-                    "email": {"enabled": True, "recipients": ["digest@example.com"], "attach_file": False}
+                    "email": {"enabled": True, "recipients": ["digest@example.com"], "attach_file": True}
                 },
             }
         ),
@@ -339,7 +340,7 @@ async def test_retry_run_delivery_redelivers_latest_output_and_updates_metadata(
     row_to_output = AsyncMock(
         return_value=SimpleNamespace(
             id=55,
-            title="Daily Digest",
+            title=unsafe_title,
             format="md",
             content="# Digest",
             metadata=json.loads(output_row.metadata_json),
@@ -347,6 +348,7 @@ async def test_retry_run_delivery_redelivers_latest_output_and_updates_metadata(
         )
     )
     monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.watchlists._row_to_output", row_to_output)
+    email_kwargs: list[dict[str, Any]] = []
 
     class FakeNotificationsService:
         def __init__(self, *, user_id: int, user_email: str | None = None) -> None:
@@ -354,6 +356,7 @@ async def test_retry_run_delivery_redelivers_latest_output_and_updates_metadata(
             self.user_email = user_email
 
         async def deliver_email(self, **kwargs):
+            email_kwargs.append(kwargs)
             return SimpleNamespace(
                 channel="email",
                 status="sent",
@@ -399,6 +402,11 @@ async def test_retry_run_delivery_redelivers_latest_output_and_updates_metadata(
     assert metadata_update["delivery_retry_results"][0]["channel"] == "email"
     assert "provider" not in metadata_update["delivery_retry_results"][0]
     assert "subject" not in metadata_update["delivery_retry_results"][0]
+    attachment_filename = email_kwargs[0]["attachments"][0]["filename"]
+    assert attachment_filename.endswith(".md")
+    assert "/" not in attachment_filename
+    assert "\\" not in attachment_filename
+    assert len(attachment_filename) <= 255
 
 
 @pytest.mark.asyncio

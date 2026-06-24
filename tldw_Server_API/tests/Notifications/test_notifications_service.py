@@ -1,5 +1,8 @@
+from array import array
+
 import pytest
 
+from tldw_Server_API.app.core.Notifications import service as notifications_service
 from tldw_Server_API.app.core.Notifications.service import NotificationsService
 
 
@@ -18,6 +21,29 @@ class _FakeEmailService:
             }
         )
         return True
+
+
+class _FailingEmailService:
+    async def send_email(self, *, to_email, subject, html_body, text_body, attachments=None):  # noqa: ARG002
+        raise RuntimeError(f"failed to send to {to_email} with subject {subject}")
+
+
+class _FakeLogger:
+    def __init__(self):
+        self.bound_calls = []
+        self.opt_calls = []
+        self.error_calls = []
+
+    def bind(self, **kwargs):
+        self.bound_calls.append(kwargs)
+        return self
+
+    def opt(self, **kwargs):
+        self.opt_calls.append(kwargs)
+        return self
+
+    def error(self, message, *args, **kwargs):
+        self.error_calls.append((message, args, kwargs))
 
 
 class _FakeDocService:
@@ -97,6 +123,177 @@ async def test_notifications_email_skips_without_recipient(monkeypatch):
     assert result.status == "skipped"
     assert result.details["reason"] == "no_recipients"
     assert not fake_email.calls
+
+
+@pytest.mark.asyncio
+async def test_notifications_email_rejects_too_many_recipients(monkeypatch):
+    fake_email = _FakeEmailService()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Notifications.service.get_email_service",
+        lambda: fake_email,
+    )
+    monkeypatch.setattr(notifications_service, "MAX_EMAIL_RECIPIENTS", 2, raising=False)
+
+    svc = NotificationsService(user_id=1, user_email=None)
+    result = await svc.deliver_email(
+        subject="Bulk",
+        html_body="<p>Bulk</p>",
+        text_body="Bulk",
+        recipients=["a@example.com", "b@example.com", "c@example.com"],
+    )
+
+    assert result.status == "failed"
+    assert result.details["reason"] == "too_many_recipients"
+    assert result.details["recipient_count"] == 3
+    assert fake_email.calls == []
+
+
+@pytest.mark.asyncio
+async def test_notifications_email_rejects_oversized_attachments(monkeypatch):
+    fake_email = _FakeEmailService()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Notifications.service.get_email_service",
+        lambda: fake_email,
+    )
+    monkeypatch.setattr(notifications_service, "MAX_EMAIL_ATTACHMENT_BYTES", 4, raising=False)
+
+    svc = NotificationsService(user_id=1, user_email="user@example.com")
+    result = await svc.deliver_email(
+        subject="Large",
+        html_body="<p>Large</p>",
+        text_body="Large",
+        recipients=None,
+        attachments=[{"filename": "large.txt", "content": b"12345"}],
+    )
+
+    assert result.status == "failed"
+    assert result.details["reason"] == "attachment_limit_exceeded"
+    assert result.details["attachment_count"] == 1
+    assert fake_email.calls == []
+
+
+@pytest.mark.asyncio
+async def test_notifications_email_sizes_memoryview_attachments_by_bytes(monkeypatch):
+    fake_email = _FakeEmailService()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Notifications.service.get_email_service",
+        lambda: fake_email,
+    )
+    monkeypatch.setattr(notifications_service, "MAX_EMAIL_ATTACHMENT_BYTES", 3, raising=False)
+
+    svc = NotificationsService(user_id=1, user_email="user@example.com")
+    result = await svc.deliver_email(
+        subject="Wide memoryview",
+        html_body="<p>Large</p>",
+        text_body="Large",
+        recipients=None,
+        attachments=[
+            {
+                "filename": "wide.bin",
+                "content": memoryview(array("H", [1, 2])),
+            }
+        ],
+    )
+
+    assert result.status == "failed"
+    assert result.details["reason"] == "attachment_limit_exceeded"
+    assert fake_email.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("filename", ["null-\x00.txt", "unit-\x1f.txt", "delete-\x7f.txt"])
+async def test_notifications_email_rejects_control_char_attachment_filenames(
+    monkeypatch,
+    filename,
+):
+    fake_email = _FakeEmailService()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Notifications.service.get_email_service",
+        lambda: fake_email,
+    )
+
+    svc = NotificationsService(user_id=1, user_email="user@example.com")
+    result = await svc.deliver_email(
+        subject="Bad filename",
+        html_body="<p>Bad</p>",
+        text_body="Bad",
+        recipients=None,
+        attachments=[{"filename": filename, "content": b"ok"}],
+    )
+
+    assert result.status == "failed"
+    assert result.details["reason"] == "invalid_attachment_filename"
+    assert fake_email.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "attachment",
+    [
+        {"filename": "missing-content.txt"},
+        {"filename": "bad-content.txt", "content": object()},
+    ],
+)
+async def test_notifications_email_rejects_invalid_attachment_content(monkeypatch, attachment):
+    fake_email = _FakeEmailService()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Notifications.service.get_email_service",
+        lambda: fake_email,
+    )
+
+    svc = NotificationsService(user_id=1, user_email="user@example.com")
+    result = await svc.deliver_email(
+        subject="Invalid attachment",
+        html_body="<p>Invalid</p>",
+        text_body="Invalid",
+        recipients=None,
+        attachments=[attachment],
+    )
+
+    assert result.status == "failed"
+    assert result.details["reason"] == "invalid_attachment_content"
+    assert result.details["attachment_count"] == 1
+    assert fake_email.calls == []
+
+
+@pytest.mark.asyncio
+async def test_notifications_email_redacts_failure_details(monkeypatch):
+    fake_logger = _FakeLogger()
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Notifications.service.get_email_service",
+        lambda: _FailingEmailService(),
+    )
+    monkeypatch.setattr(notifications_service, "logger", fake_logger)
+
+    svc = NotificationsService(user_id=1, user_email=None)
+    result = await svc.deliver_email(
+        subject="Sensitive Subject",
+        html_body="<p>fail</p>",
+        text_body="fail",
+        recipients=["person@example.com"],
+    )
+
+    rendered_details = repr(result.details)
+    assert result.status == "failed"
+    assert "person@example.com" not in rendered_details
+    assert "Sensitive Subject" not in rendered_details
+    assert "RuntimeError" in rendered_details
+    assert "p***@example.com" in rendered_details
+    assert fake_logger.bound_calls[0] == {
+        "operation": "notifications.deliver_email",
+        "user_id": 1,
+        "recipient": "p***@example.com",
+        "exception_type": "RuntimeError",
+    }
+    redacted_exception = fake_logger.opt_calls[0]["exception"]
+    assert redacted_exception.__traceback__ is not None
+    assert "person@example.com" not in str(redacted_exception)
+    assert "Sensitive Subject" not in str(redacted_exception)
 
 
 def test_notifications_chatbook_delivery(monkeypatch):
