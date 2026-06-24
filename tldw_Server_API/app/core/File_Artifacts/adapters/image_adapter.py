@@ -165,7 +165,6 @@ class ImageAdapter:
             ValidationIssue(code=issue.code, message=issue.message, path=issue.path)
             for issue in validate_image_generation_request(structured, config=config)
         ]
-        self._validate_cfg_scale(structured.get("cfg_scale"), issues)
         return issues
 
     def export(self, structured: dict[str, Any], *, format: str) -> ExportResult:
@@ -301,27 +300,6 @@ class ImageAdapter:
         if not math.isfinite(candidate):
             raise FileArtifactsValidationError("image_params_invalid")
         return candidate
-
-    @staticmethod
-    def _validate_cfg_scale(value: Any, issues: list[ValidationIssue]) -> None:
-        if value is None:
-            return
-        if isinstance(value, bool):
-            issues.append(
-                ValidationIssue(code="image_params_invalid", message="cfg_scale must be finite", path="cfg_scale")
-            )
-            return
-        try:
-            candidate = float(value)
-        except (TypeError, ValueError):
-            issues.append(
-                ValidationIssue(code="image_params_invalid", message="cfg_scale must be finite", path="cfg_scale")
-            )
-            return
-        if not math.isfinite(candidate):
-            issues.append(
-                ValidationIssue(code="image_params_invalid", message="cfg_scale must be finite", path="cfg_scale")
-            )
 
     @staticmethod
     def _positive_int_or_none(value: Any) -> int | None:

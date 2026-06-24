@@ -738,6 +738,22 @@ class TestImageGenAdapter:
 
         assert result["error"] == "image_params_invalid"
 
+        invalid_cases = [
+            {"width": 0},
+            {"height": False},
+            {"cfg_scale": float("nan")},
+            {"cfg_scale": 0},
+        ]
+        for invalid_config in invalid_cases:
+            result = await run_image_gen_adapter(
+                {
+                    "prompt": "A clean test image",
+                    **invalid_config,
+                },
+                base_context,
+            )
+            assert result["error"] == "image_params_invalid"
+
 
 # =============================================================================
 # Test: run_image_describe_adapter

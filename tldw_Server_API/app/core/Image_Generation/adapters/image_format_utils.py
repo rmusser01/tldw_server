@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import base64
 import binascii
-import contextlib
 import io
 from pathlib import Path
 from typing import Any
 
-from tldw_Server_API.app.core.http_client import fetch
+from tldw_Server_API.app.core.http_client import (
+    DEFAULT_MAX_REDIRECTS,
+    _resolve_redirect_url,
+    _validate_egress_or_raise,
+    create_client,
+)
 from tldw_Server_API.app.core.Image_Generation.capabilities import ResolvedReferenceImage
 from tldw_Server_API.app.core.Image_Generation.exceptions import ImageGenerationError
 
@@ -28,9 +32,10 @@ def decode_data_url(data_url: str, *, max_bytes: int | None = None) -> tuple[byt
     content_type = meta.split(";", 1)[0] or content_type if ";" in meta else meta or content_type
     if ";base64" not in header:
         raise ImageGenerationError("unsupported data URL encoding")
-    _enforce_base64_encoded_limit(encoded, max_bytes)
+    encoded_clean = "".join(encoded.split())
+    _enforce_base64_encoded_limit(encoded_clean, max_bytes)
     try:
-        content = base64.b64decode(encoded, validate=True)
+        content = base64.b64decode(encoded_clean, validate=True)
     except (binascii.Error, TypeError, ValueError) as exc:
         raise ImageGenerationError("invalid base64 data") from exc
     _enforce_max_bytes(content, max_bytes)
@@ -194,49 +199,46 @@ def fetch_image_bytes(
     cookies: dict[str, Any] | None = None,
     max_bytes: int | None = None,
 ) -> tuple[bytes, str]:
+    current_url = url
     try:
-        response = fetch(
-            method="GET",
-            url=url,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-        )
+        with create_client(timeout=timeout) as client:
+            for _redirect_count in range(DEFAULT_MAX_REDIRECTS + 1):
+                _validate_egress_or_raise(current_url)
+                with client.stream(
+                    "GET",
+                    current_url,
+                    headers=headers,
+                    cookies=cookies,
+                    timeout=timeout,
+                    follow_redirects=False,
+                ) as response:
+                    status = int(getattr(response, "status_code", 0) or 0)
+                    if status in {301, 302, 303, 307, 308}:
+                        location = response.headers.get("location") or response.headers.get("Location")
+                        if not location:
+                            raise ImageGenerationError("image fetch failed: redirect without location")
+                        next_url = _resolve_redirect_url(str(getattr(response, "url", current_url)), str(location))
+                        if not next_url:
+                            raise ImageGenerationError("image fetch failed: invalid redirect")
+                        current_url = next_url
+                        continue
+                    if status >= 400:
+                        raise ImageGenerationError(f"image fetch failed with status {status}")
+
+                    headers_obj = getattr(response, "headers", {}) or {}
+                    _reject_declared_oversize(headers_obj, max_bytes)
+                    content = _read_stream_with_limit(response.iter_bytes(), max_bytes)
+                    content_type = (
+                        headers_obj.get("content-type")
+                        or headers_obj.get("Content-Type")
+                        or "application/octet-stream"
+                    )
+                    return content, content_type.split(";", 1)[0].strip().lower()
+            raise ImageGenerationError("image fetch failed: too many redirects")
+    except ImageGenerationError:
+        raise
     except Exception as exc:
         raise ImageGenerationError(f"image fetch failed: {exc}") from exc
-
-    try:
-        status = getattr(response, "status_code", None) or response.status_code
-    except Exception:
-        status = None
-    if status and int(status) >= 400:
-        with contextlib.suppress(Exception):
-            response.close()
-        raise ImageGenerationError(f"image fetch failed with status {status}")
-
-    headers_obj = getattr(response, "headers", {}) or {}
-    content_length = headers_obj.get("content-length") or headers_obj.get("Content-Length")
-    if max_bytes is not None and content_length is not None:
-        try:
-            if int(str(content_length).strip()) > max_bytes:
-                with contextlib.suppress(Exception):
-                    response.close()
-                raise ImageGenerationError("image content too large")
-        except ValueError:
-            pass
-
-    try:
-        content = response.content
-    except Exception as exc:
-        with contextlib.suppress(Exception):
-            response.close()
-        raise ImageGenerationError(f"image fetch failed: {exc}") from exc
-
-    _enforce_max_bytes(content, max_bytes)
-    content_type = headers_obj.get("content-type") or headers_obj.get("Content-Type") or "application/octet-stream"
-    with contextlib.suppress(Exception):
-        response.close()
-    return content, content_type.split(";", 1)[0].strip().lower()
 
 
 def _enforce_base64_encoded_limit(encoded: str, max_bytes: int | None) -> None:
@@ -253,12 +255,46 @@ def _enforce_base64_encoded_limit(encoded: str, max_bytes: int | None) -> None:
         raise ImageGenerationError("image content too large")
 
 
-def _enforce_max_bytes(content: bytes, max_bytes: int | None) -> None:
-    if max_bytes is None:
+def _reject_declared_oversize(headers: Any, max_bytes: int | None) -> None:
+    limit = _positive_byte_limit(max_bytes)
+    if limit is None:
         return
+    content_length = headers.get("content-length") or headers.get("Content-Length")
+    if content_length is None:
+        return
+    try:
+        declared_size = int(str(content_length).strip())
+    except ValueError:
+        return
+    if declared_size > limit:
+        raise ImageGenerationError("image content too large")
+
+
+def _read_stream_with_limit(chunks: Any, max_bytes: int | None) -> bytes:
+    limit = _positive_byte_limit(max_bytes)
+    total = 0
+    parts: list[bytes] = []
+    for chunk in chunks:
+        if not chunk:
+            continue
+        total += len(chunk)
+        if limit is not None and total > limit:
+            raise ImageGenerationError("image content too large")
+        parts.append(chunk)
+    return b"".join(parts)
+
+
+def _enforce_max_bytes(content: bytes, max_bytes: int | None) -> None:
+    limit = _positive_byte_limit(max_bytes)
+    if limit is not None and len(content) > limit:
+        raise ImageGenerationError("image content too large")
+
+
+def _positive_byte_limit(max_bytes: int | None) -> int | None:
+    if max_bytes is None:
+        return None
     try:
         limit = int(max_bytes)
     except (TypeError, ValueError):
-        return
-    if limit > 0 and len(content) > limit:
-        raise ImageGenerationError("image content too large")
+        return None
+    return limit if limit > 0 else None

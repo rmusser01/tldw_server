@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -87,6 +88,7 @@ def validate_image_generation_request(
     max_steps = _positive_int_attr(config, "max_steps", DEFAULT_MAX_STEPS)
     _validate_int_bound(issues, steps, path="steps", max_value=max_steps)
 
+    _validate_positive_finite_float(issues, structured.get("cfg_scale"), path="cfg_scale")
     _validate_extra_params(structured, config, issues)
     return issues
 
@@ -123,6 +125,26 @@ def _validate_int_bound(
         issues.append(_issue(f"{path} out of range", path))
         return False
     return True
+
+
+def _validate_positive_finite_float(
+    issues: list[ImageGenerationValidationIssue],
+    value: Any,
+    *,
+    path: str,
+) -> None:
+    if value is None:
+        return
+    if isinstance(value, bool):
+        issues.append(_issue(f"{path} must be a finite positive number", path))
+        return
+    try:
+        candidate = float(value)
+    except (TypeError, ValueError):
+        issues.append(_issue(f"{path} must be a finite positive number", path))
+        return
+    if not math.isfinite(candidate) or candidate <= 0:
+        issues.append(_issue(f"{path} must be a finite positive number", path))
 
 
 def _validate_extra_params(

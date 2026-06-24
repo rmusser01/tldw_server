@@ -130,12 +130,14 @@ async def run_image_gen_adapter(config: dict[str, Any], context: dict[str, Any])
     # Parameters
     try:
         backend = str(config.get("backend") or "stable_diffusion_cpp").strip().lower()
-        width = int(config.get("width") or 512)
-        height = int(config.get("height") or 512)
-        steps = int(config.get("steps") or 20)
-        cfg_scale = float(config.get("cfg_scale") or 7.0)
+        width = _coerce_int_param(config.get("width"), 512)
+        height = _coerce_int_param(config.get("height"), 512)
+        steps = _coerce_int_param(config.get("steps"), 20)
+        cfg_scale = _coerce_float_param(config.get("cfg_scale"), 7.0)
         seed = config.get("seed")
         if seed is not None:
+            if isinstance(seed, bool):
+                return {"error": "image_params_invalid"}
             seed = int(seed)
         sampler = config.get("sampler")
         model = config.get("model")
@@ -144,7 +146,8 @@ async def run_image_gen_adapter(config: dict[str, Any], context: dict[str, Any])
             img_format = "jpg"
         if img_format not in ("png", "jpg", "webp"):
             img_format = "png"
-        extra_params = config.get("extra_params") or {}
+        extra_params = config.get("extra_params")
+        extra_params = {} if extra_params is None else extra_params
         if not isinstance(extra_params, dict):
             return {"error": "image_params_invalid"}
         extra_params = dict(extra_params)
@@ -161,6 +164,7 @@ async def run_image_gen_adapter(config: dict[str, Any], context: dict[str, Any])
             "width": width,
             "height": height,
             "steps": steps,
+            "cfg_scale": cfg_scale,
             "extra_params": extra_params,
         },
         config=image_generation_cfg,
@@ -299,6 +303,22 @@ async def run_image_gen_adapter(config: dict[str, Any], context: dict[str, Any])
     except Exception:
         logger.exception("Image gen adapter error")
         return {"error": "image_gen_error"}
+
+
+def _coerce_int_param(value: Any, default: int) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        raise ValueError("boolean is not a valid integer parameter")
+    return int(value)
+
+
+def _coerce_float_param(value: Any, default: float) -> float:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        raise ValueError("boolean is not a valid float parameter")
+    return float(value)
 
 
 @registry.register(

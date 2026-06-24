@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-# The adapter intentionally invokes a configured local stable-diffusion.cpp binary.
-import subprocess  # nosec B404
+import subprocess  # nosec B404 # Required for configured local stable-diffusion.cpp binary invocation.
 import tempfile
 from pathlib import Path
 
@@ -91,8 +90,7 @@ class StableDiffusionCppAdapter:
                 sorted(str(key) for key in extra_params),
             )
             try:
-                # `cmd` is an argv list for the configured local binary; shell execution is not used.
-                result = subprocess.run(  # nosec B603
+                result = subprocess.run(  # nosec B603 # cmd is an argv list for a configured local binary; shell=False.
                     cmd,
                     cwd=str(binary_path.parent),
                     capture_output=True,

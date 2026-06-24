@@ -3,12 +3,12 @@ id: TASK-2414
 title: Harden Image Generation review findings
 status: Done
 assignee: []
-created_date: '2026-06-23 18:17'
-updated_date: '2026-06-23 21:57'
+created_date: 2026-06-23 18:17
+updated_date: 2026-06-24 03:52
 labels:
-  - backend
-  - image-generation
-  - security
+- backend
+- image-generation
+- security
 dependencies: []
 priority: high
 ---
@@ -66,3 +66,9 @@ Hardened Image Generation review findings end to end: unsafe SwarmUI authenticat
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+PR #2462 rebase/review update: rebased codex/image-generation-hardening-2414 onto latest origin/dev (46595e31c) and removed unrelated Claims Extraction docs commit from the PR branch. Addressed unresolved Gemini/Qodo review threads: data URL base64 whitespace handling, bounded streaming remote image fetch without relying on Content-Length, workflow falsy numeric parameter validation, shared cfg_scale finite/positive validation, and inline Bandit suppression justifications. Verification: focused regression tests 6 passed; Image Generation provider/reference suite 36 passed; workflow/FileArtifacts/files/config/reference suite 38 passed; git diff --check passed; Bandit touched source scope 0 findings.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
