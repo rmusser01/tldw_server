@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import pathlib
+import re
 import time
 import uuid
 from typing import Any
@@ -64,6 +65,7 @@ from tldw_Server_API.app.core.Embeddings.vector_store_meta_db import (
 from tldw_Server_API.app.core.Embeddings.vector_store_meta_db import (
     rename_store as meta_rename_store,
 )
+from tldw_Server_API.app.core.exceptions import InvalidMetadataOrderKeyError
 from tldw_Server_API.app.core.RAG.rag_service.vector_stores.base import (
     VectorStoreAdapter,
     VectorStoreConfig,
@@ -78,6 +80,7 @@ from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
 RBAC_VECTOR_ADMIN = rbac_rate_limit("vector.admin")
 _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_METADATA_ORDER_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 _VECTORSTORE_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -1178,6 +1181,19 @@ async def list_vectors(
             raise HTTPException(status_code=400, detail={"error":"invalid_filter","message":str(e)}) from e
     if order_by and (order_by != 'id' and not order_by.startswith('metadata.')):
         raise HTTPException(status_code=400, detail={"error":"invalid_order_by","message":"order_by must be 'id' or 'metadata.<key>'"})
+    if order_by and order_by.startswith('metadata.'):
+        metadata_order_key = order_by.split('.', 1)[1]
+        if not _METADATA_ORDER_KEY_RE.fullmatch(metadata_order_key):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "invalid_order_by",
+                    "message": (
+                        "metadata order key must be 1-128 characters of letters, "
+                        "numbers, underscore, or hyphen"
+                    ),
+                },
+            )
     # Prefer adapter-provided pagination helper when available (PG, future stores)
     list_fn = getattr(adapter, 'list_vectors_paginated', None)
     if callable(list_fn):
@@ -1193,6 +1209,11 @@ async def list_vectors(
                     metadata=row.get('metadata') or {},
                     content=row.get('content') or "",
                 ))
+        except InvalidMetadataOrderKeyError as e:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "invalid_order_by", "message": str(e)},
+            ) from e
         except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
             logger.warning("Adapter list_vectors_paginated failed; falling back to Chroma path")
     if not items and total == 0:

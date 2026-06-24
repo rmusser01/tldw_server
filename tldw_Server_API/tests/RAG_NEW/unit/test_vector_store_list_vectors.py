@@ -126,6 +126,20 @@ class _FakeAdapterPaginated:
         return {"items": items, "total": self._total}
 
 
+class _FakeAdapterInvalidMetadataOrder:
+    def __init__(self):
+        self._initialized = True
+
+    async def initialize(self):  # pragma: no cover
+        self._initialized = True
+
+    async def list_vectors_paginated(self, store_id: str, limit: int, offset: int, filter=None, order_by=None, order_dir=None):  # noqa: ANN001
+        from tldw_Server_API.app.core.RAG.rag_service.vector_stores import pgvector_adapter as pg_mod
+
+        exc_type = getattr(pg_mod, "InvalidMetadataOrderKeyError", ValueError)
+        raise exc_type("metadata.score;drop")
+
+
 @pytest.mark.unit
 def test_list_vectors_pagination_next_offset_chroma_fallback(monkeypatch, disable_heavy_startup, admin_user):
      # Fake adapter without list_vectors_paginated triggers Chroma fallback path
@@ -226,6 +240,42 @@ def test_list_vectors_invalid_order_by_returns_400(monkeypatch, disable_heavy_st
     r = client.get(
         "/api/v1/vector_stores/store-xyz/vectors",
         params={"order_by": "name", "order_dir": "asc"},
+    )
+    assert r.status_code == 400
+    assert "invalid_order_by" in r.text
+
+
+@pytest.mark.unit
+def test_list_vectors_invalid_metadata_order_key_returns_400(monkeypatch, disable_heavy_startup, admin_user):
+    from tldw_Server_API.app.api.v1.endpoints import vector_stores_openai as vs_mod
+
+    async def _fake_get_adapter_for_user(user, dim):  # noqa: ANN001
+        return _FakeAdapter()
+
+    monkeypatch.setattr(vs_mod, "_get_adapter_for_user", _fake_get_adapter_for_user, raising=True)
+
+    client = TestClient(app)
+    r = client.get(
+        "/api/v1/vector_stores/store-xyz/vectors",
+        params={"order_by": "metadata.score;drop", "order_dir": "asc"},
+    )
+    assert r.status_code == 400
+    assert "invalid_order_by" in r.text
+
+
+@pytest.mark.unit
+def test_list_vectors_adapter_invalid_metadata_order_key_returns_400(monkeypatch, disable_heavy_startup, admin_user):
+    from tldw_Server_API.app.api.v1.endpoints import vector_stores_openai as vs_mod
+
+    async def _fake_get_adapter_for_user(user, dim):  # noqa: ANN001
+        return _FakeAdapterInvalidMetadataOrder()
+
+    monkeypatch.setattr(vs_mod, "_get_adapter_for_user", _fake_get_adapter_for_user, raising=True)
+
+    client = TestClient(app)
+    r = client.get(
+        "/api/v1/vector_stores/store-xyz/vectors",
+        params={"order_by": "metadata.score", "order_dir": "asc"},
     )
     assert r.status_code == 400
     assert "invalid_order_by" in r.text
