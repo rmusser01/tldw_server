@@ -23,12 +23,16 @@ modified_files:
 - tldw_Server_API/app/core/Chat/response_processor.py
 - tldw_Server_API/app/core/Chat/moderation_pipeline.py
 - tldw_Server_API/app/core/Chat/tool_execution_service.py
+- tldw_Server_API/app/core/Chat/persistence_service.py
+- tldw_Server_API/app/core/Chat/chat_logging.py
 - tldw_Server_API/app/core/Chat/chat_service.py
+- tldw_Server_API/app/core/Chat/chat_orchestrator.py
 - tldw_Server_API/tests/Chat/unit/test_chat_service_content.py
 - tldw_Server_API/tests/Chat/unit/test_chat_service_tool_autoexec.py
 - tldw_Server_API/tests/Chat/unit/test_chat_service_streaming_tool_autoexec.py
 - tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py
-updated_date: 2026-06-24 21:23
+- tldw_Server_API/tests/Chat/unit/test_chat_service_system_messages.py
+updated_date: 2026-06-24 22:03
 ---
 
 ## Description
@@ -70,6 +74,8 @@ Spec review refinements applied: locked `ChatCompletionPipeline` as the orchestr
 Final spec clarification pass applied: non-streaming response processing order is safety/redaction before structured validation and persistence, user-facing command listings now use the same authorization decision by default, and logging hygiene explicitly excludes tool outputs and tool execution error details.
 Implementation plan saved at `Docs/superpowers/plans/2026-06-24-chat-completion-pipeline-refactor.md`. The plan implements the approved integrated refactor in TDD stages: lock multi-choice safety with failing tests, extract response processing, moderation, persistence, tool execution, streaming, command authorization, and safe logging services, repair document prompt versioning, make legacy history replacement atomic, update Chat docs, then run targeted Chat tests and Bandit.
 Progress update 2026-06-24: Tasks 1-4 of the Chat completion pipeline plan are complete. Implemented and reviewed multi-choice response processing, non-stream output moderation extraction, and local tool auto-exec multi-choice guards across non-stream/streaming direct, queued, and fallback paths. Latest Task 4 commits: `6f838f726` and `08fed328f`. Verification recorded locally: `test_chat_service_tool_autoexec.py` + `test_chat_service_streaming_tool_autoexec.py` = 40 passed; `test_chat_service_fallback.py` = 8 passed; Bandit on `chat_service.py` and `tool_execution_service.py` reported zero findings; `git diff --check` clean for the Task 4 scoped range.
+Task 6 safe logging work started: scoped to chat_logging.py, chat_service.py, chat_orchestrator.py, and Chat system-message tests. Following TDD for summary helpers and preserving public API behavior.
+Task 5 and Task 6 progress update 2026-06-24: First-choice persistence is extracted into `persistence_service.py` while preserving the existing persisted assistant/tool payload shape. Safe logging is extracted into `chat_logging.py` and wired through `chat_service.py` and `chat_orchestrator.py`; review follow-up removed raw exception metric labels, raw mapping-key summaries, and the `logging.exception` traceback leak. Verification recorded locally: `test_chat_service_system_messages.py` = 7 passed; focused Chat regression slice across system messages, content, tool autoexec, streaming tool autoexec, and fallback = 73 passed; Bandit on touched Chat logging/service/orchestrator scope reported zero findings. Task 6 spec and quality reviewers passed after follow-up commit `31dc9d163`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

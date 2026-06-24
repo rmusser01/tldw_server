@@ -1085,7 +1085,7 @@ Expected: commit succeeds with only the listed files.
 - Modify: `tldw_Server_API/app/core/Chat/chat_service.py`
 - Test: `tldw_Server_API/tests/Chat/unit/test_chat_service_content.py`
 
-- [ ] **Step 1: Add a test that only the first choice is persisted**
+- [x] **Step 1: Add a test that only the first choice is persisted**
 
 Append to `test_chat_service_content.py`:
 
@@ -1109,7 +1109,7 @@ async def test_execute_non_stream_call_persists_first_choice_only(monkeypatch):
     assert save_calls[0]["content"] == "persist me"
 ```
 
-- [ ] **Step 2: Create persistence service**
+- [x] **Step 2: Create persistence service**
 
 Create `persistence_service.py` with:
 
@@ -1165,7 +1165,7 @@ async def save_tool_messages(
         await save_message_fn(chat_db, conversation_id, tool_message, use_transaction=True)
 ```
 
-- [ ] **Step 3: Replace payload construction in `chat_service.py`**
+- [x] **Step 3: Replace payload construction in `chat_service.py`**
 
 Import:
 
@@ -1199,7 +1199,7 @@ def _build_assistant_message_payload(
 
 Replace direct `save_message_fn` calls for assistant payloads with `save_assistant_message(...)`, and replace loops over tool messages with `save_tool_messages(...)`.
 
-- [ ] **Step 4: Run persistence-related tests**
+- [x] **Step 4: Run persistence-related tests**
 
 Run:
 
@@ -1209,7 +1209,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/te
 
 Expected: both test files pass.
 
-- [ ] **Step 5: Commit persistence extraction**
+- [x] **Step 5: Commit persistence extraction**
 
 Run:
 
@@ -1230,7 +1230,7 @@ Expected: commit succeeds with only the listed files.
 - Modify: `tldw_Server_API/app/core/Chat/chat_orchestrator.py`
 - Test: `tldw_Server_API/tests/Chat/unit/test_chat_service_system_messages.py`
 
-- [ ] **Step 1: Create safe logging helpers**
+- [x] **Step 1: Create safe logging helpers**
 
 Create `chat_logging.py` with:
 
@@ -1267,7 +1267,7 @@ def exception_summary(exc: BaseException) -> dict[str, str]:
     return {"type": type(exc).__name__}
 ```
 
-- [ ] **Step 2: Add tests proving summaries do not include raw prompt text**
+- [x] **Step 2: Add tests proving summaries do not include raw prompt text**
 
 Append to `test_chat_service_system_messages.py`:
 
@@ -1287,7 +1287,7 @@ def test_prompt_template_summary_omits_raw_prompt_text():
     assert summary["character_name"] == "Tester"
 ```
 
-- [ ] **Step 3: Replace raw prompt logs in `apply_prompt_templating`**
+- [x] **Step 3: Replace raw prompt logs in `apply_prompt_templating`**
 
 In `chat_service.py`, import:
 
@@ -1336,7 +1336,7 @@ with:
 logger.debug("Final system message summary {}", text_summary(final_system_message))
 ```
 
-- [ ] **Step 4: Replace raw input/custom prompt logs in `chat_orchestrator.py`**
+- [x] **Step 4: Replace raw input/custom prompt logs in `chat_orchestrator.py`**
 
 Import:
 
@@ -1363,7 +1363,7 @@ logger.warning("Chat tool auto-execution skipped error={}", exception_summary(au
 logger.warning("Chat tool auto-continue skipped error={}", exception_summary(continue_err))
 ```
 
-- [ ] **Step 5: Run logging tests**
+- [x] **Step 5: Run logging tests**
 
 Run:
 
@@ -1373,7 +1373,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/te
 
 Expected: system message tests pass and the new summary test passes.
 
-- [ ] **Step 6: Commit safe logging**
+- [x] **Step 6: Commit safe logging**
 
 Run:
 
