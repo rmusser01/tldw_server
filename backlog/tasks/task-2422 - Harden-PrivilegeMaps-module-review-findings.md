@@ -1,20 +1,20 @@
 ---
 id: TASK-2422
 title: Harden PrivilegeMaps module review findings
-status: Done
+status: In Progress
 assignee: []
-created_date: '2026-06-23 18:26'
-updated_date: '2026-06-23 18:58'
+created_date: 2026-06-23 18:26
+updated_date: 2026-06-24 19:40
 labels:
-  - authnz
-  - privilege-maps
-  - review-fix
+- authnz
+- privilege-maps
+- review-fix
 dependencies: []
 references:
-  - tldw_Server_API/app/core/PrivilegeMaps/service.py
-  - tldw_Server_API/app/core/PrivilegeMaps/snapshots.py
-  - tldw_Server_API/app/core/PrivilegeMaps/trends.py
-  - tldw_Server_API/app/api/v1/endpoints/privileges.py
+- tldw_Server_API/app/core/PrivilegeMaps/service.py
+- tldw_Server_API/app/core/PrivilegeMaps/snapshots.py
+- tldw_Server_API/app/core/PrivilegeMaps/trends.py
+- tldw_Server_API/app/api/v1/endpoints/privileges.py
 priority: high
 ---
 
@@ -65,3 +65,9 @@ Known skips/blockers: none.
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Hardened PrivilegeMaps against the review findings: transaction writes now normalize placeholders for raw PostgreSQL transactions; effective permissions honor expiry and explicit denies; multi-user loading fails closed; sync snapshot IDs are UUID-based; org/team filters ignore inactive memberships/entities; detail generation caps materialization; org trends carry org_id; the unused role helper was removed. Added regression coverage across service, endpoint, snapshot, trend, and role-resolution tests.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Reopened to address PR #2461 review comments after initial push: rebase on latest dev, harden placeholder conversion around literal question marks, treat NULL active flags as inactive, clean up endpoint test formatting, and respond to the DB_Management boundary comment.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
