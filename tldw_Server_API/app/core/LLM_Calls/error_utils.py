@@ -106,6 +106,35 @@ def _redact_sensitive_text(text: str) -> str:
     return text
 
 
+def _safe_http_error_metadata(body_json: Any = None, body_text: str | None = None) -> dict[str, Any]:
+    """Build log-safe metadata for upstream error payloads without body content."""
+    metadata: dict[str, Any] = {}
+    if isinstance(body_json, dict):
+        metadata["body_shape"] = "object"
+        err_obj = body_json.get("error")
+        if isinstance(err_obj, dict):
+            for key in ("type", "code", "param", "status"):
+                value = err_obj.get(key)
+                if isinstance(value, (str, int, float, bool)):
+                    metadata[f"error_{key}"] = _redact_sensitive_text(str(value))[:160]
+            message = err_obj.get("message")
+            if isinstance(message, str):
+                metadata["error_message_chars"] = len(message)
+        elif isinstance(err_obj, str):
+            metadata["error_chars"] = len(err_obj)
+        for key in ("type", "code", "param", "status"):
+            value = body_json.get(key)
+            if isinstance(value, (str, int, float, bool)) and f"error_{key}" not in metadata:
+                metadata[f"error_{key}"] = _redact_sensitive_text(str(value))[:160]
+        metadata["top_level_key_count"] = len(body_json)
+    elif body_json is not None:
+        metadata["body_shape"] = type(body_json).__name__
+    elif body_text:
+        metadata["body_shape"] = "raw_text"
+        metadata["raw_body_chars"] = len(body_text)
+    return metadata
+
+
 def log_http_400_body(provider: str, exc: Exception, parsed_body: Any = None, max_chars: int = 2000) -> None:
     try:
         status = get_http_status_from_exception(exc)
@@ -134,12 +163,16 @@ def log_http_400_body(provider: str, exc: Exception, parsed_body: Any = None, ma
             body_text = get_http_error_text(exc)
         except _ERROR_UTILS_NONCRITICAL_EXCEPTIONS:
             body_text = None
-    if not body_text:
+    if body_json is None and not body_text:
         return
-    body_text = _redact_sensitive_text(str(body_text))
-    if max_chars is not None and len(body_text) > max_chars:
-        body_text = body_text[:max_chars] + "...(truncated)"
-    logger.warning(f"{provider or 'unknown'}: upstream 400 response body: {body_text}")
+    metadata = _safe_http_error_metadata(body_json, str(body_text) if body_text else None)
+    try:
+        metadata_text = json.dumps(metadata, ensure_ascii=True, sort_keys=True)
+    except _ERROR_UTILS_NONCRITICAL_EXCEPTIONS:
+        metadata_text = "{}"
+    if max_chars is not None and len(metadata_text) > max_chars:
+        metadata_text = metadata_text[:max_chars] + "...(truncated)"
+    logger.warning(f"{provider or 'unknown'}: upstream 400 response metadata: {metadata_text}")
 
 
 def raise_chat_error_from_http(
@@ -173,9 +206,12 @@ def raise_chat_error_from_http(
                 message = parsed_body.get("message") or ""
         if not message:
             message = get_http_error_text(exc)
-        safe_text = _redact_sensitive_text(str(message))
-        if safe_text:
-            logger.error(f"{provider or 'unknown'} HTTP error response (status {status_code}): {repr(safe_text)[:500]}")
+        metadata = _safe_http_error_metadata(parsed_body, str(message) if message else None)
+        try:
+            metadata_text = json.dumps(metadata, ensure_ascii=True, sort_keys=True)
+        except _ERROR_UTILS_NONCRITICAL_EXCEPTIONS:
+            metadata_text = "{}"
+        logger.error(f"{provider or 'unknown'} HTTP error response (status {status_code}) metadata: {metadata_text}")
     else:
         logger.error(f"{provider or 'unknown'} HTTP error with no response payload: {exc}")
         message = get_http_error_text(exc)

@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import threading
 import time
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
@@ -38,6 +37,7 @@ from tldw_Server_API.app.core.LLM_Calls.sse import (
     sse_data,
     sse_done,
 )
+from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 from .base import ChatProvider
@@ -488,38 +488,5 @@ class CohereAdapter(ChatProvider):
         return await asyncio.to_thread(self.chat, request, timeout=timeout)
 
     async def astream(self, request: dict[str, Any], *, timeout: float | None = None) -> AsyncIterator[str]:
-        gen = self.stream(request, timeout=timeout)
-        loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[Any] = asyncio.Queue()
-        sentinel = object()
-        stop_event = threading.Event()
-
-        def _worker() -> None:
-            try:
-                for item in gen:
-                    if stop_event.is_set():
-                        break
-                    loop.call_soon_threadsafe(queue.put_nowait, item)
-            except Exception as exc:
-                loop.call_soon_threadsafe(queue.put_nowait, exc)
-            finally:
-                try:
-                    if hasattr(gen, "close"):
-                        gen.close()
-                except Exception as stream_close_error:
-                    logger.debug("Cohere streaming generator close failed", exc_info=stream_close_error)
-                loop.call_soon_threadsafe(queue.put_nowait, sentinel)
-
-        thread = threading.Thread(target=_worker, daemon=True)
-        thread.start()
-
-        try:
-            while True:
-                item = await queue.get()
-                if item is sentinel:
-                    break
-                if isinstance(item, Exception):
-                    raise item
-                yield item
-        finally:
-            stop_event.set()
+        async for item in wrap_sync_stream(self.stream(request, timeout=timeout)):
+            yield item
