@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.Meetings.stream_adapter import to_sse_frame
 
@@ -8,7 +9,7 @@ from tldw_Server_API.app.core.Meetings.stream_adapter import to_sse_frame
 pytestmark = pytest.mark.unit
 
 
-def _create_session(meetings_api_client) -> str:
+def _create_session(meetings_api_client: TestClient) -> str:
     resp = meetings_api_client.post(
         "/api/v1/meetings/sessions",
         json={"title": "SSE Session", "meeting_type": "standup"},
@@ -17,7 +18,7 @@ def _create_session(meetings_api_client) -> str:
     return resp.json()["id"]
 
 
-def test_sse_events_streams_structured_frames(meetings_api_client):
+def test_sse_events_streams_structured_frames(meetings_api_client: TestClient) -> None:
     session_id = _create_session(meetings_api_client)
     resp = meetings_api_client.get(f"/api/v1/meetings/sessions/{session_id}/events")
     assert resp.status_code == 200
@@ -26,7 +27,7 @@ def test_sse_events_streams_structured_frames(meetings_api_client):
     assert "\"session_id\"" in resp.text
 
 
-def test_sse_frame_sanitizes_control_fields():
+def test_sse_frame_sanitizes_control_fields() -> None:
     frame = to_sse_frame(
         {
             "id": "evt-1\nretry: 0",

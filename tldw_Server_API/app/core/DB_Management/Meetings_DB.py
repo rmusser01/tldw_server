@@ -657,8 +657,20 @@ class MeetingsDatabase:
         *,
         session_id: str,
         artifacts: list[dict[str, Any]],
+        replace_kinds: list[str] | None = None,
+        replace_version: int = 1,
         user_id: int | str | None = None,
     ) -> list[str]:
+        """Atomically replace artifact rows for a session and return new IDs.
+
+        Each artifact must provide a valid kind, non-empty format, object
+        payload_json, and optional version. By default, only the `(kind,
+        version)` pairs present in `artifacts` are deleted before inserting the
+        new rows. `replace_kinds` widens the deletion scope to those validated
+        kinds at `replace_version`, which lets callers intentionally replace a
+        prior generated artifact set with an empty result in the same
+        transaction.
+        """
         resolved_user_id = self._resolve_user_id(user_id)
         prepared: list[tuple[str, str, str, str, int, str]] = []
 
@@ -682,6 +694,23 @@ class MeetingsDatabase:
                 )
             )
 
+        if replace_kinds is None:
+            delete_targets = [
+                (kind, version)
+                for _id, _session_id, kind, _format, version, _payload in prepared
+            ]
+        else:
+            scoped_version = max(1, int(replace_version))
+            delete_targets: list[tuple[str, int]] = []
+            seen_targets: set[tuple[str, int]] = set()
+            for kind in replace_kinds:
+                normalized_kind = self._validate_artifact_kind(str(kind or ""))
+                target = (normalized_kind, scoped_version)
+                if target in seen_targets:
+                    continue
+                seen_targets.add(target)
+                delete_targets.append(target)
+
         now = self._utcnow_iso()
         with self.transaction() as conn:
             session_row = conn.execute(
@@ -695,13 +724,13 @@ class MeetingsDatabase:
             if session_row is None:
                 raise KeyError(f"meeting session not found: {session_id}")
 
-            for _artifact_id, prepared_session_id, kind, _format, version, _payload in prepared:
+            for kind, version in delete_targets:
                 conn.execute(
                     """
                     DELETE FROM meeting_artifacts
                     WHERE user_id = ? AND session_id = ? AND kind = ? AND version = ?
                     """,
-                    (resolved_user_id, prepared_session_id, kind, version),
+                    (resolved_user_id, str(session_id), kind, version),
                 )
 
             for artifact_id, prepared_session_id, kind, format_, version, payload in prepared:

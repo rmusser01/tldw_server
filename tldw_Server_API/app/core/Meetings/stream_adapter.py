@@ -34,6 +34,7 @@ def build_meeting_event(
 
 
 def _sanitize_sse_control_field(value: Any, *, default: str) -> str:
+    """Normalize an SSE id/event field so it cannot inject new frame lines."""
     text = str(value or "").strip()
     if not text:
         return default

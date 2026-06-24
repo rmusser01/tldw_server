@@ -72,11 +72,25 @@ class MeetingArtifactService:
             }
             for kind in requested_kinds
         ]
-        artifact_ids = self._db.replace_artifacts(session_id=session_id, artifacts=artifact_specs)
+        replace_kinds = requested_kinds
+        if include is not None and not requested_kinds:
+            replace_kinds = list(_DEFAULT_FINAL_KINDS)
+        artifact_ids = self._db.replace_artifacts(
+            session_id=session_id,
+            artifacts=artifact_specs,
+            replace_kinds=replace_kinds,
+            replace_version=1,
+        )
         return [self.get_artifact(artifact_id=artifact_id) for artifact_id in artifact_ids]
 
     @staticmethod
     def _normalize_requested_kinds(*, include: list[str] | None) -> list[str]:
+        """Return ordered, lower-cased, de-duplicated final artifact kinds.
+
+        `None` requests the default final artifact set. An explicit list,
+        including an empty list, is preserved as the caller's requested scope
+        after trimming blank values and dropping duplicates.
+        """
         raw_kinds = list(_DEFAULT_FINAL_KINDS) if include is None else include
         requested_kinds: list[str] = []
         seen: set[str] = set()

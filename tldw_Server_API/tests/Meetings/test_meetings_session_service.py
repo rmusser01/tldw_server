@@ -40,17 +40,28 @@ def test_session_transition_raises_for_missing_session(session_service):
         session_service.transition(session_id="sess_missing", to_status="live")
 
 
-def test_session_transition_rejects_stale_current_status(session_service, monkeypatch):
+def test_session_transition_rejects_stale_current_status(
+    session_service: MeetingSessionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     created = session_service.create_session(title="Race Review", meeting_type="standup")
     real_update = session_service._db.update_session_status
 
-    def racing_update(*, session_id, status, user_id=None, expected_status=None):
+    def racing_update(
+        *,
+        session_id: str,
+        status: str,
+        user_id: int | str | None = None,
+        expected_status: str | None = None,
+    ) -> bool:
         if expected_status == "scheduled":
             assert real_update(session_id=session_id, status="processing", user_id=user_id) is True
-        kwargs = {"session_id": session_id, "status": status, "user_id": user_id}
-        if expected_status is not None:
-            kwargs["expected_status"] = expected_status
-        return real_update(**kwargs)
+        return real_update(
+            session_id=session_id,
+            status=status,
+            user_id=user_id,
+            expected_status=expected_status,
+        )
 
     monkeypatch.setattr(session_service._db, "update_session_status", racing_update)
 
