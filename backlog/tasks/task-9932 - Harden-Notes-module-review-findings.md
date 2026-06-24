@@ -4,7 +4,7 @@ title: Harden Notes module review findings
 status: Done
 assignee: []
 created_date: 2026-06-23 18:55
-updated_date: 2026-06-24 03:36
+updated_date: 2026-06-24 04:31
 labels:
 - notes
 - review
@@ -62,4 +62,5 @@ Hardened the Notes module review findings. Notes Studio regenerate now requires 
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PR: https://github.com/rmusser01/tldw_server/pull/2478
+Rebased PR #2478 onto origin/dev at 0ca69b4b4 and dropped unrelated Claims_Extraction planning commit from the PR diff. Addressed Qodo review feedback: replaced the dynamic f-string SQL WHERE construction in update_note_studio_diagram_manifest with a static parameterized predicate, and corrected the raw keyword-token error message to report the 100 raw-token cap. Final verification on rebased branch: Notes Studio service tests 14 passed; Notes keyword-token regression tests 2 passed; Notes Studio API tests 11 passed; workflow notes adapter cleanup test 1 passed; compileall on touched app files passed; Bandit report /tmp/bandit_notes_module_review_hardening_9932_final_rebase.json reported 0 results and 0 errors.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
