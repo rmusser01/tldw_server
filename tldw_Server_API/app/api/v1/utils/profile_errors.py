@@ -11,10 +11,15 @@ from fastapi import status
 from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
     UserProfileErrorDetail,
 )
+from tldw_Server_API.app.core.UserProfiles.error_mapping import (
+    ProfileErrorCode,
+    map_profile_error_code,
+)
 
 _FORBIDDEN_MESSAGES = {
     "forbidden",
     "forbidden_scope",
+    "forbidden_role_escalation",
     "owner_required",
     "org_membership_required",
 }
@@ -28,6 +33,15 @@ _UNKNOWN_MESSAGES = {
 _NOT_FOUND_MESSAGES = {
     "user_not_found",
 }
+
+
+def _first_matching_code(messages: set[str]) -> ProfileErrorCode | None:
+    for message in messages:
+        try:
+            return ProfileErrorCode(message)
+        except ValueError:
+            continue
+    return None
 
 
 def classify_profile_update_skips(
@@ -66,6 +80,16 @@ def classify_profile_update_skips(
             status.HTTP_400_BAD_REQUEST,
             "profile_update_unknown_key",
             "One or more keys are not recognized",
+            errors,
+        )
+
+    mapped_code = _first_matching_code(messages)
+    if mapped_code is not None:
+        mapped = map_profile_error_code(mapped_code)
+        return (
+            mapped.status_code,
+            mapped.error_code,
+            mapped.detail,
             errors,
         )
 
