@@ -27,6 +27,18 @@ def test_parse_line_with_categories_suffix_after_action():
 
 
 @pytest.mark.unit
+def test_service_parser_wrappers_delegate_to_policy_compiler():
+    svc = ModerationService()
+
+    expr, action, repl, cats = svc._parse_rule_line("/leak\\d+/ -> redact:[MASK] #pii")
+
+    assert expr == "/leak\\d+/"
+    assert action == "redact"
+    assert repl == "[MASK]"
+    assert cats == {"pii"}
+
+
+@pytest.mark.unit
 def test_parse_regex_with_arrow_inside_pattern():
     svc = ModerationService()
     expr, action, repl, cats = svc._parse_rule_line(r"/a->b/ -> block")
@@ -348,6 +360,26 @@ def test_lint_warns_on_invalid_regex_flags():
     assert item["ok"] is True
     assert item["pattern_type"] == "literal"
     assert "invalid regex flags" in (item.get("warning") or "")
+
+
+@pytest.mark.unit
+def test_lint_blocklist_lines_keeps_public_response_shape():
+    svc = ModerationService()
+
+    result = svc.lint_blocklist_lines(["/foo/z", "secret -> block #confidential"])
+
+    assert set(result) == {"items", "valid_count", "invalid_count"}
+    invalid = result["items"][0]
+    valid = result["items"][1]
+    assert invalid["line"] == "/foo/z"
+    assert invalid["ok"] is True
+    assert invalid["pattern_type"] == "literal"
+    assert invalid["warning"] == "invalid regex flags; treating as literal"
+    assert valid["line"] == "secret -> block #confidential"
+    assert valid["ok"] is True
+    assert valid["pattern_type"] == "literal"
+    assert valid["sample"] == "secret"
+    assert valid["categories"] == ["confidential"]
 
 
 @pytest.mark.unit

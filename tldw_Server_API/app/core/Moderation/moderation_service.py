@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from loguru import logger
 
 from tldw_Server_API.app.core.config import load_and_log_configs, load_comprehensive_config
+from tldw_Server_API.app.core.Moderation.policy_compiler import PolicyCompiler
 from tldw_Server_API.app.core.testing import is_truthy
 
 _MODERATION_NONCRITICAL_EXCEPTIONS = (
@@ -145,6 +146,7 @@ class ModerationService:
     def __init__(self) -> None:
         self._config = load_and_log_configs() or {}
         self._lock = threading.RLock()
+        self._policy_compiler = PolicyCompiler()
         def _read_int_env(name: str, default: int) -> int:
             raw = os.getenv(name)
             if raw is None:
@@ -284,114 +286,15 @@ class ModerationService:
         return policy
 
     def _parse_rule_line(self, s: str) -> tuple[str | None, str | None, str | None, set[str] | None]:
-        """Parse a single blocklist line into (pattern_expr, action, replacement).
-        Supported formats:
-          - literal
-          - /regex/
-          - literal -> block|warn
-          - literal -> redact:REPL
-          - /regex/ -> block|warn|redact:REPL
-        Returns (expr, action, repl). expr has slashes for regex, or literal text.
-        """
-        if not s:
-            return None, None, None, None
-        # Work on a copy we can mutate
-        text = s
-        action = None
-        repl = None
-        categories: set[str] | None = None
-        # Extract categories suffix if present (requires preceding whitespace; '\#' escapes a literal '#')
-        if '#' in text:
-            cut_index = -1
-            for i in range(len(text) - 1, -1, -1):
-                if text[i] == '#':
-                    # Determine if this '#' is escaped by an odd number of backslashes
-                    bs = 0
-                    j = i - 1
-                    while j >= 0 and text[j] == '\\':
-                        bs += 1
-                        j -= 1
-                    escaped = (bs % 2 == 1)
-                    prev_char = text[i - 1] if i > 0 else ''
-                    if (not escaped) and (i == 0 or prev_char.isspace()):
-                        cut_index = i
-                        break
-            if cut_index != -1:
-                before = text[:cut_index]
-                after = text[cut_index + 1:]
-                cats = {c.strip().lower() for c in after.split(',') if c.strip()}
-                if cats:
-                    categories = cats
-                    text = before.strip()
-        # Parse action/replacement from the (categories-trimmed) text
-        if '->' in text:
-            lhs, rhs = self._split_action_directive(text)
-            if rhs is not None:
-                text = lhs
-                if rhs:
-                    rhs_l = rhs.lower()
-                    if rhs_l.startswith('redact:'):
-                        action = 'redact'
-                        repl = rhs[len('redact:'):].strip()
-                    elif rhs_l in ('block', 'warn', 'redact'):
-                        action = rhs_l
-                    else:
-                        # Unknown directive; treat as literal action text
-                        action = rhs
-        return text, action, repl, categories
+        return self._policy_compiler.parse_rule_line(s)
 
     @staticmethod
     def _split_action_directive(text: str) -> tuple[str, str | None]:
-        """Split text into (pattern, rhs) on the first unescaped '->' outside /regex/."""
-        if '->' not in text:
-            return text, None
-        in_regex = False
-        escape = False
-        for i in range(len(text) - 1):
-            ch = text[i]
-            if escape:
-                escape = False
-                continue
-            if ch == '\\':
-                escape = True
-                continue
-            if ch == '/' and i == 0:
-                in_regex = True
-                continue
-            if ch == '/' and in_regex:
-                in_regex = False
-                continue
-            if not in_regex and text[i:i + 2] == '->':
-                # Skip escaped separators (e.g., \\->)
-                bs = 0
-                j = i - 1
-                while j >= 0 and text[j] == '\\':
-                    bs += 1
-                    j -= 1
-                if bs % 2 == 1:
-                    continue
-                lhs = text[:i].strip()
-                rhs = text[i + 2:].strip()
-                return lhs, rhs
-        return text, None
+        return PolicyCompiler.split_action_directive(text)
 
     @classmethod
     def _parse_regex_expr(cls, expr: str) -> tuple[str, str] | None:
-        """Return (pattern, flags) if expr is /pattern/flags with allowed flags; otherwise None."""
-        if not expr or not expr.startswith("/"):
-            return None
-        last_slash = expr.rfind("/")
-        if last_slash <= 0:
-            return None
-        flags_str = expr[last_slash + 1:]
-        if flags_str:
-            fs = flags_str.lower()
-            if any(ch not in cls._ALLOWED_REGEX_FLAGS for ch in fs):
-                return None
-        raw = expr[1:last_slash]
-        if raw == "":
-            return None
-        return raw, flags_str
+        return PolicyCompiler.parse_regex_expr(expr)
 
     def _load_block_patterns(self, path: str | None) -> list[PatternRule]:
         patterns: list[PatternRule] = []
@@ -495,13 +398,7 @@ class ModerationService:
             return False
 
     def _is_regex_dangerous(self, expr: str) -> bool:
-        if not expr:
-            return True
-        if len(expr) > 2000:
-            return True
-        if self._has_nested_quantifiers(expr):
-            return True
-        return bool(self._too_many_groups(expr))
+        return self._policy_compiler.is_regex_dangerous(expr)
 
     def _load_user_overrides(self) -> dict[str, dict[str, object]]:
         overrides: dict[str, dict[str, object]] = {}
