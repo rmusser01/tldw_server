@@ -2526,7 +2526,7 @@ class _EndpointEmbeddingExecutor:
             count: int | str = len(vectors) if isinstance(vectors, list) else "invalid"
             raise EmbeddingProviderError(
                 "provider_malformed_response",
-                f"Embedding provider returned {count} embeddings, expected {expected}",
+                f"Embedding provider returned {count} embeddings, expected {expected} for batch",
                 provider=provider,
                 model=model,
             )

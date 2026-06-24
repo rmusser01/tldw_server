@@ -26,7 +26,7 @@ modified_files:
 - tldw_Server_API/tests/Embeddings_isolated/test_provider_resolution.py
 - tldw_Server_API/tests/Embeddings_isolated/test_embedding_policy.py
 - tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py
-updated_date: 2026-06-24 22:13
+updated_date: 2026-06-24 22:28
 ---
 
 ## Description
@@ -123,6 +123,22 @@ Fresh verification:
 - /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py -> 31 passed, 470 warnings
 - /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m compileall -q touched endpoint/core/test files -> exit 0
 - /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r touched production files -f json -o /tmp/bandit_embeddings_task7_after_quality_fixes2.json -> 0 results, 0 errors
+Task 8 completed: extended `tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py` with a dual-path helper that runs each request once with `EMBEDDINGS_ORCHESTRATOR_ENABLED` unset and once with it enabled. The helper installs deterministic fakes for provider execution, cache get/set, BYOK credential resolution, metrics, token decoding/counting, fallback policy/model mapping, and ResourceGovernor reserve/commit for both runs. Added parity coverage for single string numeric embeddings, batch string index order, single token-array input, batch token-array base64 with dimensions, HuggingFace reduce/pad/ignore dimension policies, full cache hit provider skip, partial cache hit miss-only provider calls, OpenAI fallback to HuggingFace headers, explicit x-provider fallback suppression, and provider vector-count mismatch to 502. Parity assertions compare status, JSON, usage, provider/fallback/dimensions/rate-limit headers, and cache writes as float vectors.
+
+Task 8 red evidence: after adding the first helper-using test before implementing the helper, `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q --tb=short tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py::test_task8_parity_helper_red_seed` failed with `NameError: name '_run_dual_path_embedding_request' is not defined`.
+
+Validated production drifts fixed during Task 8:
+- `app/core/Embeddings/orchestrator.py`: orchestrator response metadata now always includes `X-Embeddings-Provider`, matching the legacy endpoint for non-fallback provider execution.
+- `app/api/v1/endpoints/embeddings_v5_production_enhanced.py`: endpoint executor provider vector-count mismatch detail now matches legacy batch-helper text (`... expected N for batch`) while preserving 502 mapping.
+
+Task 8 verification:
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q --tb=short tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py` -> 29 passed, 851 warnings in 37.99s.
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_characterization.py tldw_Server_API/tests/Embeddings/test_embeddings_dimensions_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_token_arrays.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback_model_map.py` -> 49 passed, 1434 warnings in 62.02s.
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m compileall -q tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py tldw_Server_API/app/core/Embeddings/orchestrator.py` -> passed with no output.
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py tldw_Server_API/app/core/Embeddings/orchestrator.py -f json -o /tmp/bandit_embeddings_task8.json` -> exit 0; JSON results count 0 and errors `[]`. Stdout included Bandit comment-parser warnings for existing comment words (`non`, `cryptographic`, `retry`, `jitter`).
+- `git diff --check` -> passed with no output.
+
+Task 8 touched tracked files: `tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py`, `tldw_Server_API/app/core/Embeddings/orchestrator.py`, `tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py`. The unrelated untracked watchlist template files were left untouched and unstaged.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

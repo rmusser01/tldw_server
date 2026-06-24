@@ -443,9 +443,8 @@ class EmbeddingRequestOrchestrator:
         dimensions: int | None,
         dimension_policy: str,
     ) -> dict[str, str]:
-        headers: dict[str, str] = {}
+        headers: dict[str, str] = {"X-Embeddings-Provider": actual_provider}
         if fallback_from and fallback_from != actual_provider:
-            headers["X-Embeddings-Provider"] = actual_provider
             headers["X-Embeddings-Fallback-From"] = fallback_from
         if dimensions is not None:
             headers["X-Embeddings-Dimensions-Policy"] = dimension_policy

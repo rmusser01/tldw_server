@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import uuid
+import base64
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import numpy as np
 import pytest
 from fastapi import HTTPException, status
 from fastapi.testclient import TestClient
@@ -123,6 +125,512 @@ class FakeCredentials:
         self.source = source
         self.auth_source = auth_source
         self.touch_last_used = AsyncMock()
+
+
+class _NoopMetric:
+    def labels(self, **_kwargs):
+        return self
+
+    def inc(self, *_args, **_kwargs):
+        return None
+
+    def dec(self, *_args, **_kwargs):
+        return None
+
+    def observe(self, *_args, **_kwargs):
+        return None
+
+
+class _ParityCache:
+    def __init__(self, cached_vectors):
+        self.cached_vectors = {
+            _friendly_cache_key(*key): [float(value) for value in vector]
+            for key, vector in (cached_vectors or {}).items()
+        }
+        self.gets: list[str] = []
+        self.sets: list[tuple[str, list[float]]] = []
+
+    async def get(self, key: str):
+        self.gets.append(key)
+        value = self.cached_vectors.get(key)
+        return list(value) if value is not None else None
+
+    async def set(self, key: str, value):
+        vector = [float(item) for item in value]
+        self.sets.append((key, vector))
+        self.cached_vectors[key] = vector
+
+
+class _ParityRGGovernor:
+    def __init__(self) -> None:
+        self.reserves = []
+        self.commits = []
+
+    async def reserve(self, rg_request, *, op_id=None):
+        self.reserves.append((rg_request, op_id))
+        return SimpleNamespace(allowed=True, retry_after=None), "parity-rg-handle"
+
+    async def commit(self, handle_id, *, actuals=None, op_id=None):
+        self.commits.append((handle_id, actuals, op_id))
+
+
+class _ParityRGPolicyLoader:
+    def get_policy(self, _policy_id):
+        return {}
+
+
+def _friendly_cache_key(text, provider, model, dimensions=None, backend_identity=None):
+    _ = backend_identity
+    return f"{provider}|{model}|{dimensions if dimensions is not None else ''}|{text}"
+
+
+def _decoded_token_text(token_array):
+    return "tokens:" + "-".join(str(token) for token in token_array)
+
+
+def _parity_tokens_to_texts(tokens_input, _model):
+    if tokens_input and isinstance(tokens_input[0], int):
+        lengths = [len(tokens_input)]
+        texts = [_decoded_token_text(tokens_input)]
+    else:
+        lengths = [len(item) for item in tokens_input]
+        texts = [_decoded_token_text(item) for item in tokens_input]
+    return texts, sum(lengths), lengths
+
+
+def _assert_cache_writes_are_float_vectors(cache_sets):
+    for key, vector in cache_sets:
+        assert isinstance(key, str)
+        assert isinstance(vector, list)
+        assert vector
+        assert all(isinstance(item, float) for item in vector)
+
+
+def _assert_response_parity(result):
+    compared_headers = [
+        "X-Embeddings-Provider",
+        "X-Embeddings-Fallback-From",
+        "X-Embeddings-Dimensions-Policy",
+        "Retry-After",
+        "X-RateLimit-Limit",
+        "X-RateLimit-Remaining",
+        "X-RateLimit-Reset",
+        "X-RateLimit-PerMinute-Limit",
+        "X-RateLimit-PerMinute-Remaining",
+        "X-RateLimit-Tokens-Remaining",
+    ]
+    legacy = result["legacy"]
+    orchestrator = result["orchestrator"]
+
+    assert legacy["status"] == orchestrator["status"]
+    assert legacy["json"] == orchestrator["json"]
+    assert legacy["usage"] == orchestrator["usage"]
+    for header in compared_headers:
+        assert legacy["headers"].get(header) == orchestrator["headers"].get(header)
+    _assert_cache_writes_are_float_vectors(legacy["cache_sets"])
+    _assert_cache_writes_are_float_vectors(orchestrator["cache_sets"])
+
+
+def _run_dual_path_embedding_request(
+    client,
+    monkeypatch,
+    *,
+    mod,
+    payload,
+    headers=None,
+    provider_vectors=None,
+    cached_vectors=None,
+    failing_providers=None,
+    mismatch_providers=None,
+    dimensions_policy="reduce",
+    allow_fallback_with_header=False,
+):
+    headers = headers or {}
+    provider_vectors = provider_vectors or {}
+    cached_vectors = cached_vectors or {}
+    failing_providers = set(failing_providers or set())
+    mismatch_providers = set(mismatch_providers or set())
+    fallback_chain = {"openai": ["openai", "huggingface"], "huggingface": ["huggingface"]}
+    fallback_model_map = {
+        "openai:text-embedding-3-small": {
+            "huggingface": "sentence-transformers/all-MiniLM-L6-v2",
+        },
+    }
+
+    async def fake_backpressure(*_args, **_kwargs):
+        return None
+
+    async def fake_log_usage(*_args, **_kwargs):
+        return None
+
+    async def fake_backfill(*_args, **_kwargs):
+        return None
+
+    async def fake_resolve(provider, *_args, **_kwargs):
+        provider = (provider or "").strip().lower()
+        return FakeCredentials(
+            api_key="test-provider-key" if provider in {"openai", "cohere", "google"} else None,
+            source="user" if provider in {"openai", "cohere", "google"} else "none",
+        )
+
+    def fake_policy_setting(name, default):
+        if name == "EMBEDDINGS_FALLBACK_CHAIN":
+            return fallback_chain
+        if name == "EMBEDDINGS_FALLBACK_MODEL_MAP":
+            return fallback_model_map
+        return default
+
+    def fake_map_model(src_provider, dst_provider, model_id):
+        return fallback_model_map.get(f"{src_provider}:{model_id}", {}).get(dst_provider, model_id)
+
+    def fake_count_tokens(text, _model):
+        return max(1, len(str(text).split()))
+
+    async def fake_provider(texts, provider, model, config, metadata=None, dimensions=None):
+        _ = (config, metadata, dimensions)
+        provider = provider.lower()
+        if provider in failing_providers:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"{provider} down")
+        vectors = []
+        for index, text in enumerate(texts):
+            key = (provider, model, text)
+            vector = provider_vectors.get(key)
+            if vector is None:
+                vector = [float(index + 1), float(len(text))]
+            vectors.append([float(item) for item in vector])
+        if provider in mismatch_providers:
+            return vectors[:-1]
+        return vectors
+
+    def fake_build_provider_config(provider_enum, model_id, api_key=None, api_url=None, dimensions=None):
+        return {
+            "provider": getattr(provider_enum, "value", str(provider_enum)),
+            "model": model_id,
+            "api_key": api_key,
+            "api_url": api_url,
+            "dimensions": dimensions,
+        }
+
+    for metric_name in (
+        "active_embedding_requests",
+        "embedding_request_duration",
+        "embedding_requests_total",
+        "embedding_cache_hits",
+        "embedding_cache_misses",
+        "embedding_fallbacks_total",
+        "embedding_provider_failures",
+        "embedding_provider_failures_total",
+        "embedding_dimension_adjustments_total",
+        "embedding_token_inputs_total",
+        "embedding_policy_denied_total",
+    ):
+        if hasattr(mod, metric_name):
+            monkeypatch.setattr(mod, metric_name, _NoopMetric(), raising=False)
+
+    monkeypatch.setattr(mod, "_check_backpressure_and_quotas", fake_backpressure)
+    monkeypatch.setattr(mod, "log_llm_usage", fake_log_usage)
+    monkeypatch.setattr(mod, "backfill_legacy_tokens_to_ledger", fake_backfill)
+    monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
+    monkeypatch.setattr(mod, "create_embeddings_with_circuit_breaker", fake_provider)
+    monkeypatch.setattr(mod, "get_cache_key", _friendly_cache_key)
+    monkeypatch.setattr(mod, "_orchestrator_backend_identity", lambda _provider, _model: None)
+    monkeypatch.setattr(mod, "build_provider_config", fake_build_provider_config)
+    monkeypatch.setattr(mod, "count_tokens", fake_count_tokens)
+    monkeypatch.setattr(mod, "tokens_to_texts", _parity_tokens_to_texts)
+    monkeypatch.setattr(mod, "_embedding_policy_setting", fake_policy_setting)
+    monkeypatch.setattr(mod, "map_model_for_provider", fake_map_model)
+    monkeypatch.setenv("USE_REAL_OPENAI_IN_TESTS", "true")
+    monkeypatch.setenv("EMBEDDINGS_DIMENSION_POLICY", dimensions_policy)
+    if allow_fallback_with_header:
+        monkeypatch.setenv("EMBEDDINGS_ALLOW_FALLBACK_WITH_HEADER", "true")
+    else:
+        monkeypatch.delenv("EMBEDDINGS_ALLOW_FALLBACK_WITH_HEADER", raising=False)
+
+    results = {}
+    for label, flag_enabled in (("legacy", False), ("orchestrator", True)):
+        if flag_enabled:
+            monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "true")
+        else:
+            monkeypatch.delenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", raising=False)
+
+        cache = _ParityCache(cached_vectors)
+        provider_call = AsyncMock(side_effect=fake_provider)
+        monkeypatch.setattr(mod.embedding_cache, "get", cache.get)
+        monkeypatch.setattr(mod.embedding_cache, "set", cache.set)
+        monkeypatch.setattr(mod, "create_embeddings_with_circuit_breaker", provider_call)
+
+        rg_governor = _ParityRGGovernor()
+        monkeypatch.setattr(app.state, "rg_governor", rg_governor, raising=False)
+        monkeypatch.setattr(app.state, "rg_policy_loader", _ParityRGPolicyLoader(), raising=False)
+
+        response = client.post(
+            "/api/v1/embeddings",
+            headers=headers,
+            json=payload,
+        )
+        body = response.json()
+        results[label] = {
+            "status": response.status_code,
+            "json": body,
+            "usage": body.get("usage") if isinstance(body, dict) else None,
+            "headers": response.headers,
+            "cache_gets": list(cache.gets),
+            "cache_sets": list(cache.sets),
+            "provider_calls": [call.args for call in provider_call.await_args_list],
+            "rg_reserves": list(rg_governor.reserves),
+            "rg_commits": list(rg_governor.commits),
+        }
+
+    _assert_response_parity(results)
+    return results
+
+
+def test_dual_path_single_string_numeric_embedding_response(client, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    result = _run_dual_path_embedding_request(
+        client,
+        monkeypatch,
+        mod=mod,
+        payload={
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "input": "red seed",
+        },
+        headers={"x-provider": "huggingface"},
+        provider_vectors={
+            ("huggingface", "sentence-transformers/all-MiniLM-L6-v2", "red seed"): [0.2, 0.4],
+        },
+    )
+
+    assert result["legacy"]["status"] == status.HTTP_200_OK
+    assert result["legacy"]["json"]["data"][0]["embedding"] == pytest.approx([0.4472136, 0.8944272])
+    assert result["legacy"]["json"]["usage"] == {"prompt_tokens": 2, "total_tokens": 2}
+
+
+def test_dual_path_batch_string_response_preserves_indexes(client, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    result = _run_dual_path_embedding_request(
+        client,
+        monkeypatch,
+        mod=mod,
+        payload={
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "input": ["first", "second"],
+        },
+        headers={"x-provider": "huggingface"},
+        provider_vectors={
+            ("huggingface", "sentence-transformers/all-MiniLM-L6-v2", "first"): [1.0, 0.0],
+            ("huggingface", "sentence-transformers/all-MiniLM-L6-v2", "second"): [0.0, 1.0],
+        },
+    )
+
+    assert [item["index"] for item in result["legacy"]["json"]["data"]] == [0, 1]
+    assert [item["embedding"] for item in result["legacy"]["json"]["data"]] == [[1.0, 0.0], [0.0, 1.0]]
+
+
+def test_dual_path_single_token_array_response(client, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    result = _run_dual_path_embedding_request(
+        client,
+        monkeypatch,
+        mod=mod,
+        payload={
+            "model": "text-embedding-3-small",
+            "input": [101, 102, 103],
+        },
+        provider_vectors={
+            ("openai", "text-embedding-3-small", "tokens:101-102-103"): [0.1, 0.3],
+        },
+    )
+
+    assert result["legacy"]["status"] == status.HTTP_200_OK
+    assert result["legacy"]["json"]["usage"] == {"prompt_tokens": 3, "total_tokens": 3}
+    assert result["legacy"]["json"]["data"][0]["embedding"] == pytest.approx([0.3162278, 0.9486833])
+
+
+def test_dual_path_batch_token_array_base64_with_dimensions(client, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    result = _run_dual_path_embedding_request(
+        client,
+        monkeypatch,
+        mod=mod,
+        payload={
+            "model": "text-embedding-3-small",
+            "input": [[101, 102], [103, 104, 105]],
+            "encoding_format": "base64",
+            "dimensions": 2,
+        },
+        provider_vectors={
+            ("openai", "text-embedding-3-small", "tokens:101-102"): [0.1, 0.2, 0.3],
+            ("openai", "text-embedding-3-small", "tokens:103-104-105"): [0.4, 0.5, 0.6],
+        },
+    )
+
+    assert result["legacy"]["headers"]["X-Embeddings-Dimensions-Policy"] == "reduce"
+    for item, expected in zip(result["legacy"]["json"]["data"], ([0.1, 0.2], [0.4, 0.5])):
+        raw = np.frombuffer(base64.b64decode(item["embedding"]), dtype=np.float32)
+        assert raw.tolist() == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    ("policy", "dimensions", "provider_vector", "expected_length"),
+    [
+        ("reduce", 2, [0.1, 0.2, 0.3, 0.4], 2),
+        ("pad", 4, [0.1, 0.2], 4),
+        ("ignore", 5, [0.1, 0.2, 0.3], 3),
+    ],
+)
+def test_dual_path_huggingface_dimensions_policies(
+    client,
+    monkeypatch,
+    policy,
+    dimensions,
+    provider_vector,
+    expected_length,
+):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    result = _run_dual_path_embedding_request(
+        client,
+        monkeypatch,
+        mod=mod,
+        payload={
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "input": "dimension policy",
+            "dimensions": dimensions,
+        },
+        headers={"x-provider": "huggingface"},
+        provider_vectors={
+            ("huggingface", "sentence-transformers/all-MiniLM-L6-v2", "dimension policy"): provider_vector,
+        },
+        dimensions_policy=policy,
+    )
+
+    assert result["legacy"]["headers"]["X-Embeddings-Dimensions-Policy"] == policy
+    assert len(result["legacy"]["json"]["data"][0]["embedding"]) == expected_length
+
+
+def test_dual_path_full_cache_hit_skips_provider_execution(client, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    result = _run_dual_path_embedding_request(
+        client,
+        monkeypatch,
+        mod=mod,
+        payload={
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "input": ["cached one", "cached two"],
+        },
+        headers={"x-provider": "huggingface"},
+        cached_vectors={
+            ("cached one", "huggingface", "sentence-transformers/all-MiniLM-L6-v2", None, None): [1.0, 0.0],
+            ("cached two", "huggingface", "sentence-transformers/all-MiniLM-L6-v2", None, None): [0.0, 1.0],
+        },
+    )
+
+    assert result["legacy"]["provider_calls"] == []
+    assert result["orchestrator"]["provider_calls"] == []
+    assert result["legacy"]["cache_sets"] == []
+    assert result["orchestrator"]["cache_sets"] == []
+    assert result["legacy"]["json"]["data"][0]["embedding"] == [1.0, 0.0]
+
+
+def test_dual_path_partial_cache_hit_calls_provider_for_misses_only(client, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    result = _run_dual_path_embedding_request(
+        client,
+        monkeypatch,
+        mod=mod,
+        payload={
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "input": ["hit", "miss"],
+        },
+        headers={"x-provider": "huggingface"},
+        cached_vectors={
+            ("hit", "huggingface", "sentence-transformers/all-MiniLM-L6-v2", None, None): [0.8, 0.2],
+        },
+        provider_vectors={
+            ("huggingface", "sentence-transformers/all-MiniLM-L6-v2", "miss"): [0.2, 0.8],
+        },
+    )
+
+    assert [call[0] for call in result["legacy"]["provider_calls"]] == [["miss"]]
+    assert [call[0] for call in result["orchestrator"]["provider_calls"]] == [["miss"]]
+    assert result["legacy"]["cache_sets"] == [
+        ("huggingface|sentence-transformers/all-MiniLM-L6-v2||miss", [0.2, 0.8])
+    ]
+    assert result["orchestrator"]["cache_sets"] == result["legacy"]["cache_sets"]
+
+
+def test_dual_path_openai_primary_falls_back_to_huggingface_with_headers(client, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    result = _run_dual_path_embedding_request(
+        client,
+        monkeypatch,
+        mod=mod,
+        payload={
+            "model": "text-embedding-3-small",
+            "input": "fallback me",
+        },
+        failing_providers={"openai"},
+        provider_vectors={
+            ("huggingface", "sentence-transformers/all-MiniLM-L6-v2", "fallback me"): [0.6, 0.4],
+        },
+    )
+
+    assert result["legacy"]["status"] == status.HTTP_200_OK
+    assert result["legacy"]["headers"]["X-Embeddings-Provider"] == "huggingface"
+    assert result["legacy"]["headers"]["X-Embeddings-Fallback-From"] == "openai"
+    assert result["legacy"]["json"]["model"] == "huggingface:sentence-transformers/all-MiniLM-L6-v2"
+
+
+def test_dual_path_explicit_provider_suppresses_fallback(client, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    result = _run_dual_path_embedding_request(
+        client,
+        monkeypatch,
+        mod=mod,
+        payload={
+            "model": "text-embedding-3-small",
+            "input": "no fallback",
+        },
+        headers={"x-provider": "openai"},
+        failing_providers={"openai"},
+        provider_vectors={
+            ("huggingface", "sentence-transformers/all-MiniLM-L6-v2", "no fallback"): [0.6, 0.4],
+        },
+    )
+
+    assert result["legacy"]["status"] == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert result["legacy"]["headers"].get("X-Embeddings-Fallback-From") is None
+
+
+def test_dual_path_provider_vector_count_mismatch_maps_to_502(client, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    result = _run_dual_path_embedding_request(
+        client,
+        monkeypatch,
+        mod=mod,
+        payload={
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "input": ["one", "two"],
+        },
+        headers={"x-provider": "huggingface"},
+        provider_vectors={
+            ("huggingface", "sentence-transformers/all-MiniLM-L6-v2", "one"): [1.0, 0.0],
+            ("huggingface", "sentence-transformers/all-MiniLM-L6-v2", "two"): [0.0, 1.0],
+        },
+        mismatch_providers={"huggingface"},
+    )
+
+    assert result["legacy"]["status"] == status.HTTP_502_BAD_GATEWAY
 
 
 def test_flag_unset_calls_legacy_path(client, monkeypatch):

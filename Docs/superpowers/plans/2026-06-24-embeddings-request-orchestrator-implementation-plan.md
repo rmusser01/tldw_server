@@ -509,11 +509,11 @@ Verification:
 
 ### Task 8: Add Dual-Path Parity Coverage
 
-- [ ] Extend `test_embeddings_orchestrator_endpoint_parity.py` with a helper that sends the same request twice:
+- [x] Extend `test_embeddings_orchestrator_endpoint_parity.py` with a helper that sends the same request twice:
   - Once with `EMBEDDINGS_ORCHESTRATOR_ENABLED` unset.
   - Once with `EMBEDDINGS_ORCHESTRATOR_ENABLED=true`.
   - Provider execution, cache, credentials, metrics, and RG are patched with deterministic fakes for both runs.
-- [ ] Add parity cases:
+- [x] Add parity cases:
   - Single string numeric embedding response.
   - Batch string response preserving indexes.
   - Single token-array response.
@@ -524,13 +524,13 @@ Verification:
   - OpenAI primary fallback to HuggingFace with `X-Embeddings-Provider` and `X-Embeddings-Fallback-From`.
   - Explicit `x-provider` suppresses fallback.
   - Provider vector-count mismatch maps to `502`.
-- [ ] Assert parity for:
+- [x] Assert parity for:
   - HTTP status.
   - Response JSON.
   - `X-Embeddings-Provider`, `X-Embeddings-Fallback-From`, `X-Embeddings-Dimensions-Policy`, and rate-limit headers when present.
   - Usage fields.
   - Cache write values as float vectors.
-- [ ] Run:
+- [x] Run:
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -544,6 +544,14 @@ python -m pytest -q \
 ```
 
 Expected result after implementation: old-path and orchestrator-path outputs match for all parity cases, with expected differences limited to internal call counts asserted by the tests.
+
+Task 8 completed and reviewed. Added a dual-path endpoint parity helper with deterministic fakes for provider execution, cache reads/writes, BYOK credentials, metrics, token decoding/counting, fallback policy/model mapping, and ResourceGovernor reserve/commit. Added parity coverage for single and batch string requests, token-array requests, base64 dimensions, HuggingFace dimension policies, full and partial cache hits, OpenAI-to-HuggingFace fallback headers, explicit-provider fallback suppression, and provider vector-count mismatch. Validated and fixed two small production parity drifts: orchestrator response metadata now includes `X-Embeddings-Provider` for normal provider execution, and endpoint executor mismatch details now match the legacy `expected N for batch` text. Spec and quality reviews approved.
+
+Verification:
+- `python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_characterization.py tldw_Server_API/tests/Embeddings/test_embeddings_dimensions_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_token_arrays.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback_model_map.py` -> 49 passed, 1434 warnings.
+- `python -m compileall -q tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py tldw_Server_API/app/core/Embeddings/orchestrator.py` -> passed.
+- `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py tldw_Server_API/app/core/Embeddings/orchestrator.py -f json -o /tmp/bandit_embeddings_task8_coord.json` -> 0 findings, no errors.
+- `git diff --check` -> passed.
 
 ### Task 9: Compatibility Shims, Notes, And Security Verification
 
@@ -631,7 +639,7 @@ Expected result: command exits `0` with no output.
 - [ ] After Task 1, review characterization results before extraction. Confirm each behavior is marked as contract or compatibility.
 - [ ] After Task 5, review pure module APIs for over-coupling to FastAPI or endpoint globals.
 - [x] After Task 7, review endpoint RG/billing ordering. No cache read or provider call should happen before the endpoint reservation decision.
-- [ ] After Task 8, review parity failures as design feedback, not only test failures. If parity requires behavior changes, split them into a separate design decision.
+- [x] After Task 8, review parity failures as design feedback, not only test failures. If parity requires behavior changes, split them into a separate design decision.
 
 ## Rollback And Rollout
 
