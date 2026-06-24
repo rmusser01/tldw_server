@@ -1144,7 +1144,7 @@ git commit -m "docs: document docker webui runtime auth"
 **Files:**
 - Modify: `backlog/tasks/task-2360 - Fix-Docker-single-user-WebUI-runtime-auth-bootstrap.md`
 
-- [ ] **Step 1: Run focused frontend tests**
+- [x] **Step 1: Run focused frontend tests**
 
 Run from `apps/tldw-frontend`:
 
@@ -1160,7 +1160,7 @@ bunx vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run focused backend smoke**
+- [x] **Step 2: Run focused backend smoke**
 
 Run from repo root:
 
@@ -1170,7 +1170,7 @@ Run from repo root:
 
 Expected: PASS.
 
-- [ ] **Step 3: Validate compose config**
+- [x] **Step 3: Validate compose config**
 
 Run from repo root:
 
@@ -1180,7 +1180,7 @@ docker compose -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/dock
 
 Expected: exit code 0.
 
-- [ ] **Step 4: Run Bandit for touched Python scope**
+- [x] **Step 4: Run Bandit for touched Python scope**
 
 Run from repo root:
 
@@ -1190,7 +1190,7 @@ Run from repo root:
 
 Expected: exit code 0 and no new findings for the touched Python test file.
 
-- [ ] **Step 5: Update Backlog task final notes**
+- [x] **Step 5: Update Backlog task final notes**
 
 Update `backlog/tasks/task-2360 - Fix-Docker-single-user-WebUI-runtime-auth-bootstrap.md`:
 
@@ -1222,7 +1222,7 @@ Mark each acceptance criterion complete after verification:
 - [x] #8 Focused tests or verification cover runtime endpoint guards, bootstrap precedence, compose wiring, and active MCP package/import shape.
 ```
 
-- [ ] **Step 6: Commit final task updates**
+- [x] **Step 6: Commit final task updates**
 
 ```bash
 git add "backlog/tasks/task-2360 - Fix-Docker-single-user-WebUI-runtime-auth-bootstrap.md"
