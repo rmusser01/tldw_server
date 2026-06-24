@@ -209,3 +209,54 @@ async def test_wrap_sync_stream_applies_backpressure_and_closes_on_cancel():
     assert source.closed is True
     await asyncio.sleep(0.1)
     assert source.yielded == yielded_after_close
+
+
+@pytest.mark.asyncio
+async def test_wrap_sync_stream_does_not_use_default_executor_for_delivery(monkeypatch):
+    from tldw_Server_API.app.core.LLM_Calls import streaming
+
+    async def fail_to_thread(*args, **kwargs):
+        raise AssertionError("wrap_sync_stream should not use the default executor for chunk delivery")
+
+    monkeypatch.setattr(streaming.asyncio, "to_thread", fail_to_thread)
+
+    chunks = []
+    async for chunk in streaming.wrap_sync_stream(iter(["chunk-1", "chunk-2"]), max_queue_size=1):
+        chunks.append(chunk)
+
+    assert chunks == ["chunk-1", "chunk-2"]
+
+
+@pytest.mark.asyncio
+async def test_wrap_sync_stream_logs_close_errors(monkeypatch):
+    from tldw_Server_API.app.core.LLM_Calls import streaming
+
+    class _ClosingIterator:
+        def __init__(self):
+            self._done = False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self._done:
+                raise StopIteration
+            self._done = True
+            return "chunk"
+
+        def close(self):
+            raise RuntimeError("close failed")
+
+    debug_messages = []
+
+    def fake_debug(message, *args, **kwargs):
+        debug_messages.append(str(message).format(*args))
+
+    monkeypatch.setattr(streaming.logger, "debug", fake_debug)
+
+    chunks = []
+    async for chunk in streaming.wrap_sync_stream(_ClosingIterator()):
+        chunks.append(chunk)
+
+    assert chunks == ["chunk"]
+    assert any("close failed" in message for message in debug_messages)

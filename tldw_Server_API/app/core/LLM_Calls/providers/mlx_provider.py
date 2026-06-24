@@ -267,10 +267,12 @@ class MLXSessionRegistry:
                     # On warmup failure, keep previous model and surface error
                     raise
 
+            applied = False
             with self._lock:
                 if load_generation == self._load_generation:
                     self._session = session
                     self._set_concurrency(settings.get("max_concurrent", 1))
+                    applied = True
             try:
                 duration = time.time() - start
                 observe_histogram(
@@ -278,10 +280,12 @@ class MLXSessionRegistry:
                     duration,
                     labels={"model": model_path},
                 )
-                increment_counter("mlx_load_total", labels={"model": model_path, "status": "success"})
-                set_gauge("mlx_active_sessions", 1.0)
-                set_gauge("mlx_requests_inflight", float(self._inflight))
-                set_gauge("mlx_queue_depth", 0.0)
+                status = "success" if applied else "superseded"
+                increment_counter("mlx_load_total", labels={"model": model_path, "status": status})
+                if applied:
+                    set_gauge("mlx_active_sessions", 1.0)
+                    set_gauge("mlx_requests_inflight", float(self._inflight))
+                    set_gauge("mlx_queue_depth", 0.0)
             except _MLX_NONCRITICAL_EXCEPTIONS:
                 pass
             return self.status()

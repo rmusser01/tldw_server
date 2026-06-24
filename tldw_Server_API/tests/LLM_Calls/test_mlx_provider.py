@@ -156,6 +156,56 @@ def test_failed_older_load_does_not_restore_over_newer_success(monkeypatch):
     assert reg.status()["model"] == "new"
 
 
+def test_superseded_older_load_records_superseded_metric(monkeypatch):
+    started = threading.Event()
+    release_slow_load = threading.Event()
+
+    class FakeTokenizer:
+        pass
+
+    def load(model_path, **kwargs):
+        if model_path == "slow-old":
+            started.set()
+            assert release_slow_load.wait(timeout=2)
+        return (f"model:{model_path}", FakeTokenizer())
+
+    fake = types.SimpleNamespace(
+        load=load,
+        generate=lambda *args, **kwargs: "ok",
+        generate_stream=lambda *args, **kwargs: iter(["ok"]),
+        embed=lambda *args, **kwargs: [1.0],
+    )
+    monkeypatch.setattr(mp.MLXSessionRegistry, "_import_mlx", lambda self: fake)
+
+    metric_statuses = []
+
+    def capture_counter(name, labels=None):
+        if name == "mlx_load_total":
+            metric_statuses.append((labels or {}).copy())
+
+    monkeypatch.setattr(mp, "increment_counter", capture_counter)
+    monkeypatch.setattr(mp, "observe_histogram", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mp, "set_gauge", lambda *args, **kwargs: None)
+
+    reg = mp.MLXSessionRegistry()
+    load_overrides = {"max_concurrent": 1, "warmup": False, "compile": False}
+
+    def load_slow_success():
+        reg.load(model_path="slow-old", overrides=load_overrides)
+
+    worker = threading.Thread(target=load_slow_success)
+    worker.start()
+    assert started.wait(timeout=2)
+
+    reg.load(model_path="new", overrides=load_overrides)
+    release_slow_load.set()
+    worker.join(timeout=2)
+
+    assert reg.status()["model"] == "new"
+    assert {"model": "slow-old", "status": "superseded"} in metric_statuses
+    assert {"model": "slow-old", "status": "success"} not in metric_statuses
+
+
 def test_embeddings_response_uses_active_session_model(monkeypatch):
     _patch_mlx(monkeypatch)
     reg = mp.get_mlx_registry()

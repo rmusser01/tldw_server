@@ -8,11 +8,13 @@ final sentinel using sse_done()/finalize_stream to avoid duplicates.
 """
 
 import asyncio
+import concurrent.futures
 import os
-import queue as thread_queue
 import threading
 from collections.abc import AsyncIterator, Iterable, Iterator
 from typing import Any, Callable, Optional
+
+from loguru import logger
 
 from tldw_Server_API.app.core.http_client import RetryPolicy, astream_sse
 from tldw_Server_API.app.core.LLM_Calls.error_utils import is_chunked_encoding_error
@@ -116,7 +118,8 @@ async def wrap_sync_stream(
 ) -> AsyncIterator[str]:
     """Bridge a sync generator into an async iterator without blocking the event loop."""
     max_queue_size = max(1, int(max_queue_size or _DEFAULT_SYNC_STREAM_QUEUE_SIZE))
-    queue: thread_queue.Queue[Any] = thread_queue.Queue(maxsize=max_queue_size)
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=max_queue_size)
     sentinel = object()
     stop_event = threading.Event()
     close_lock = threading.Lock()
@@ -133,28 +136,37 @@ async def wrap_sync_stream(
             if callable(close_fn):
                 close_fn()
         except Exception as close_error:
-            _ = close_error
+            logger.debug("Sync stream iterator close failed during cleanup: {}", close_error)
 
     def _put_item(item: Any) -> bool:
-        while not stop_event.is_set():
+        if stop_event.is_set():
+            return False
+        try:
+            put_future = asyncio.run_coroutine_threadsafe(queue.put(item), loop)
+        except RuntimeError as queue_error:
+            if not stop_event.is_set():
+                logger.debug("Sync stream queue put failed before scheduling: {}", queue_error)
+            return False
+
+        while True:
+            if stop_event.is_set():
+                put_future.cancel()
+                return False
             try:
-                queue.put(item, timeout=_SYNC_STREAM_QUEUE_TIMEOUT_SECONDS)
+                put_future.result(timeout=_SYNC_STREAM_QUEUE_TIMEOUT_SECONDS)
                 return True
-            except thread_queue.Full:
+            except concurrent.futures.TimeoutError:
                 continue
+            except concurrent.futures.CancelledError:
+                return False
+            except Exception as put_error:
+                if not stop_event.is_set():
+                    logger.debug("Sync stream queue put failed: {}", put_error)
+                return False
         return False
 
     def _put_sentinel() -> None:
-        while True:
-            try:
-                queue.put(sentinel, timeout=_SYNC_STREAM_QUEUE_TIMEOUT_SECONDS)
-                return
-            except thread_queue.Full:
-                if stop_event.is_set():
-                    try:
-                        queue.get_nowait()
-                    except thread_queue.Empty:
-                        pass
+        _put_item(sentinel)
 
     def _worker() -> None:
         try:
@@ -172,22 +184,9 @@ async def wrap_sync_stream(
     thread = threading.Thread(target=_worker, daemon=True)
     thread.start()
 
-    def _get_next_item() -> Any:
-        while True:
-            if stop_event.is_set():
-                try:
-                    return queue.get_nowait()
-                except thread_queue.Empty:
-                    return sentinel
-            try:
-                return queue.get(timeout=_SYNC_STREAM_QUEUE_TIMEOUT_SECONDS)
-            except thread_queue.Empty:
-                if not thread.is_alive():
-                    return sentinel
-
     try:
         while True:
-            item = await asyncio.to_thread(_get_next_item)
+            item = await queue.get()
             if item is sentinel:
                 break
             if isinstance(item, Exception):
