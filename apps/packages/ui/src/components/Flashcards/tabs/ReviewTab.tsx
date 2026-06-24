@@ -287,12 +287,17 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const learningQueueCount =
     reviewMode === "cram" ? undefined : dueCountsQuery.data?.learning
   const isCramMode = reviewMode === "cram"
+  const isCramCompletionRecoveryState =
+    isCramMode &&
+    !activeCard &&
+    !cramTagFilter &&
+    !isCramQueueLoading &&
+    cramQueue.length === 0
   const isCompletionRecoveryState =
     !activeCard &&
     hasCardsQuery.data === true &&
     !canShowAllDeckDashboard &&
-    !isReviewCardLoading &&
-    !isCramQueueLoading
+    (isDueModeCaughtUp || isCramCompletionRecoveryState)
   const showTopBarCreateCta =
     !activeCard && !canShowAllDeckDashboard && !isCompletionRecoveryState
   const handleDashboardReviewDeck = React.useCallback(

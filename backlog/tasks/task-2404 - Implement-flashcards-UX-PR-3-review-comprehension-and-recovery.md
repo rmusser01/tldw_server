@@ -51,18 +51,24 @@ Implementation notes:
 - Spec review fix: suppressed the top-bar create CTA and deck study dashboard during the completed-review recovery card so the recovery state exposes a single action surface.
 - Removed out-of-scope dependency artifact edits from interrupted worker attempts before committing.
 - Bandit N/A: frontend-only TypeScript/React changes, no Python touched.
+- Review follow-up 2026-06-23: rebased PR #2467 on latest origin/dev and narrowed completed-review recovery detection to actual completion states. Due mode now reuses `isDueModeCaughtUp`, while cram mode only uses the recovery card when the cram queue is exhausted without an active tag filter. Cram tag filters with no matching cards keep deck navigation and the top-bar create action available.
 
 Verification:
 - RED/PATCH: Focused Vitest initially failed the active-card snapshot after replacing the always-visible assistant panel with the explicit Need help toggle; updated the snapshot for the intended UI change.
 - SPEC-FIX PASS: `cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.assistant.test.tsx src/components/Flashcards/components/__tests__/ReviewProgress.test.tsx src/components/Flashcards/components/__tests__/KeyboardShortcutsModal.rating-scale.test.tsx` (4 files passed, 36 tests passed).
 - INITIAL PASS: `cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.assistant.test.tsx src/components/Flashcards/components/__tests__/ReviewProgress.test.tsx src/components/Flashcards/components/__tests__/KeyboardShortcutsModal.rating-scale.test.tsx` (4 files passed, 36 tests passed).
 - PASS: `git diff --check`.
+- REVIEW RED: `cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx -t "cram tag filter"` failed against the rebased branch because the cram tag-empty state hid `flashcards-review-create-cta`.
+- REVIEW PASS: `cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx -t "cram tag filter"` (1 test passed, 23 skipped).
+- REVIEW PASS: `cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.assistant.test.tsx src/components/Flashcards/components/__tests__/ReviewProgress.test.tsx src/components/Flashcards/components/__tests__/KeyboardShortcutsModal.rating-scale.test.tsx` (4 files passed, 38 tests passed).
+- REVIEW PASS: `git diff --check`.
+- REVIEW Bandit N/A: frontend-only TypeScript/React and Backlog markdown changes, no Python touched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the PR 3 review-comprehension slice. Review mode now stays recall-first by hiding the study assistant behind an explicit help toggle that resets on card changes. Completion recovery actions are pinned by tests, progress copy now separates queue buckets, and shortcut guidance now matches the visible Re-rate control availability. Focused review, assistant, progress, and shortcut tests pass.
+Implemented the PR 3 review-comprehension slice. Review mode now stays recall-first by hiding the study assistant behind an explicit help toggle that resets on card changes. Completion recovery actions are pinned by tests, progress copy now separates queue buckets, and shortcut guidance now matches the visible Re-rate control availability. Review follow-up narrowed completion recovery gating so non-completion empty states, including cram tag filters with no matches, keep deck navigation available. Focused review, assistant, progress, and shortcut tests pass.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
