@@ -52,6 +52,11 @@ from tldw_Server_API.app.core.Chat.chat_helpers import (
     get_or_create_character_context,
     get_or_create_conversation,
 )
+from tldw_Server_API.app.core.Chat.chat_logging import (
+    exception_summary,
+    prompt_template_summary,
+    text_summary,
+)
 from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_role
 from tldw_Server_API.app.core.Chat.prompt_template_manager import (
     DEFAULT_RAW_PASSTHROUGH_TEMPLATE,
@@ -1065,11 +1070,19 @@ def _load_models_with_case_cached(provider: str) -> list[str]:
                 return list(prov_block.keys())
     except (OSError, ValueError, KeyError, AttributeError) as _e:
         # Expected file/format issues: fall back to normalized catalog
-        logger.debug(f"Model catalog raw load fallback for provider '{provider}': {_e}")
+        logger.debug(
+            "Model catalog raw load fallback for provider '{}': {}",
+            provider,
+            exception_summary(_e),
+        )
     except _CHAT_NONCRITICAL_EXCEPTIONS as _ue:
         # Unexpected exceptions should be visible in production logs
         pass
-        logger.warning(f"Unexpected error loading model catalog for provider '{provider}': {_ue}")
+        logger.warning(
+            "Unexpected error loading model catalog for provider '{}': {}",
+            provider,
+            exception_summary(_ue),
+        )
 
     # Fallback: use the normalized list (lowercase keys)
     return list_provider_models(provider) or []
@@ -1096,11 +1109,11 @@ def _load_alias_overrides_cached() -> dict[str, dict[str, str]]:
                     if isinstance(v, dict)
                 }
     except (ValueError, TypeError) as _e:
-        logger.debug(f"CHAT_MODEL_ALIAS_OVERRIDES parse failed: {_e}")
+        logger.debug("CHAT_MODEL_ALIAS_OVERRIDES parse failed: {}", exception_summary(_e))
     except _CHAT_NONCRITICAL_EXCEPTIONS as _ue:
         # Unexpected exceptions should be visible in production logs
         pass
-        logger.warning(f"Unexpected error parsing CHAT_MODEL_ALIAS_OVERRIDES: {_ue}")
+        logger.warning("Unexpected error parsing CHAT_MODEL_ALIAS_OVERRIDES: {}", exception_summary(_ue))
 
     # 2) File keys in pricing catalog
     try:
@@ -1116,11 +1129,11 @@ def _load_alias_overrides_cached() -> dict[str, dict[str, str]]:
                         if isinstance(v, dict)
                     }
     except (OSError, ValueError, KeyError, AttributeError) as _e:
-        logger.debug(f"Alias overrides load fallback: {_e}")
+        logger.debug("Alias overrides load fallback: {}", exception_summary(_e))
     except _CHAT_NONCRITICAL_EXCEPTIONS as _ue:
         # Unexpected exceptions should be visible in production logs
         pass
-        logger.warning(f"Unexpected error loading alias overrides: {_ue}")
+        logger.warning("Unexpected error loading alias overrides: {}", exception_summary(_ue))
 
     # 3) Test-friendly defaults (preserve legacy behavior under pytest only)
     if os.getenv("PYTEST_CURRENT_TEST"):
@@ -1454,7 +1467,7 @@ def normalize_request_provider_and_model(
     except _CHAT_NONCRITICAL_EXCEPTIONS as _unexpected:
         # Unexpected exceptions should be visible in production logs
         pass
-        logger.warning(f"Unexpected error during model alias resolution: {_unexpected}")
+        logger.warning("Unexpected error during model alias resolution: {}", exception_summary(_unexpected))
     provider = (api_provider or default_provider).lower()
     if "/" in model_str:
         parts = model_str.split("/", 1)
@@ -1646,7 +1659,7 @@ def resolve_provider_api_key(
     except _CHAT_NONCRITICAL_EXCEPTIONS as _err:
         # API key loading errors should be visible in production
         pass
-        logger.warning(f"resolve_provider_api_key failed to load dynamic keys: {_err}")
+        logger.warning("resolve_provider_api_key failed to load dynamic keys: {}", exception_summary(_err))
         dynamic_keys = {}
 
     module_keys: dict[str, str | None] = {}
@@ -1657,7 +1670,10 @@ def resolve_provider_api_key(
                 module_keys.update(schema_keys)
                 debug_info["module_sources"].append("chat_request_schemas")
         except _CHAT_NONCRITICAL_EXCEPTIONS as _schema_err:
-            logger.warning(f"resolve_provider_api_key skipped schema module keys: {_schema_err}")
+            logger.warning(
+                "resolve_provider_api_key skipped schema module keys: {}",
+                exception_summary(_schema_err),
+            )
         try:
             from tldw_Server_API.app.api.v1.endpoints import chat as _chat_mod  # type: ignore
 
@@ -1667,7 +1683,10 @@ def resolve_provider_api_key(
                 module_keys.update(endpoint_keys)
                 debug_info["module_sources"].append("chat_endpoint")
         except _CHAT_NONCRITICAL_EXCEPTIONS as _chat_err:
-            logger.warning(f"resolve_provider_api_key skipped endpoint module keys: {_chat_err}")
+            logger.warning(
+                "resolve_provider_api_key skipped endpoint module keys: {}",
+                exception_summary(_chat_err),
+            )
 
     try:
         from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import get_llm_provider_override
@@ -2513,7 +2532,7 @@ def _capture_moderation_review_item_safely(
             session_id=session_id,
         )
     except _CHAT_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Moderation review capture failed in chat service: {}: {}", type(exc).__name__, str(exc))
+        logger.warning("Moderation review capture failed in chat service: {}", exception_summary(exc))
 
 
 async def _capture_moderation_review_item_safely_async(**kwargs: Any) -> None:
@@ -2564,7 +2583,7 @@ async def moderate_input_messages(
                 dependent_user_id, eff_policy, chat_type=chat_type,
             )
         except _CHAT_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Guardian policy overlay skipped: {e}")
+            logger.debug("Guardian policy overlay skipped: {}", exception_summary(e))
         # Guardian notification dispatch: check supervised policies directly
         # and send notification to guardian if a rule triggers.
         # Also stores transparent rule_name for enriched block messages.
@@ -2589,7 +2608,7 @@ async def moderate_input_messages(
                 if _sup_result.notify_guardian and _sup_result.action != "pass":
                     dispatch_guardian_notification(_sup_result, dependent_user_id)
         except _CHAT_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Guardian notification dispatch skipped: {e}")
+            logger.debug("Guardian notification dispatch skipped: {}", exception_summary(e))
     conv_id = None
     try:
         conv_id = getattr(request_data, "conversation_id", None)
@@ -2620,7 +2639,7 @@ async def moderate_input_messages(
                     source_id=str(conv_id) if conv_id is not None else None,
                 )
         except _CHAT_NONCRITICAL_EXCEPTIONS as _e:
-            logger.debug(f"Topic monitoring (input) skipped: {_e}")
+            logger.debug("Topic monitoring (input) skipped: {}", exception_summary(_e))
 
         # Self-monitoring check (awareness/notifications)
         if self_monitoring_service and text:
@@ -2646,7 +2665,7 @@ async def moderate_input_messages(
             except HTTPException:
                 raise
             except _CHAT_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Self-monitoring check skipped: {e}")
+                logger.debug("Self-monitoring check skipped: {}", exception_summary(e))
 
         if not eff_policy.enabled or not eff_policy.input_enabled:
             return text
@@ -2759,7 +2778,7 @@ async def moderate_input_messages(
     except MandatoryAuditWriteError:
         raise
     except _CHAT_NONCRITICAL_EXCEPTIONS as e:
-        logger.warning(f"Moderation input processing error: {e}")
+        logger.warning("Moderation input processing error: {}", exception_summary(e))
 
 
 def _extract_tldw_continuation_spec(request_data: Any) -> tuple[str, str, str | None] | None:
@@ -2899,12 +2918,11 @@ async def build_context_and_messages(
         conversation_id=final_conversation_id,
     )
     if character_card:
-        system_prompt_preview = character_card.get("system_prompt")
-        if system_prompt_preview:
-            system_prompt_preview = system_prompt_preview[:50] + "..." if len(system_prompt_preview) > 50 else system_prompt_preview
-        else:
-            system_prompt_preview = "None"
-        logger.debug(f"Loaded assistant context: {character_card.get('name')} with system_prompt: {system_prompt_preview}")
+        logger.debug(
+            "Loaded assistant context name={} system_prompt_summary={}",
+            character_card.get("name"),
+            text_summary(character_card.get("system_prompt")),
+        )
 
     if character_card and character_db_id is not None:
         with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
@@ -3079,7 +3097,11 @@ async def build_context_and_messages(
                         "image_url": {"url": f"data:{img_mime};base64,{b64_img.decode('utf-8')}"}
                     })
                 except _CHAT_NONCRITICAL_EXCEPTIONS as e:
-                    logger.warning(f"Error encoding DB image for history (msg_id {db_msg.get('id')}): {e}")
+                    logger.warning(
+                        "Error encoding DB image for history msg_id={} error={}",
+                        db_msg.get("id"),
+                        exception_summary(e),
+                    )
             if msg_parts:
                 hist_entry = {"role": role}
                 if role == "tool" and len(msg_parts) == 1 and msg_parts[0].get("type") == "text":
@@ -3341,28 +3363,32 @@ def apply_prompt_templating(
 
     final_system_message: str | None = None
     logger.debug(
-        f"sys_msg_from_req: {sys_msg_from_req}, active_template: {active_template}, character: {character_card.get('name') if character_card else None}"
+        "Prompt templating inputs {}",
+        prompt_template_summary(
+            template_name=getattr(active_template, "name", None),
+            system_message=sys_msg_from_req,
+            payload_system_messages=system_msgs_from_payload,
+            request_system_messages=system_msgs_from_request,
+            character_name=character_card.get("name") if character_card else None,
+        ),
     )
     if active_template and active_template.system_message_template:
         final_system_message = apply_template_to_string(active_template.system_message_template, template_data)
         if not final_system_message and payload_system_message:
             final_system_message = payload_system_message
-            system_prompt_preview = final_system_message[:50] if final_system_message else ""
-            logger.debug(f"Template empty, using payload system message: {repr(system_prompt_preview)}...")
+            logger.debug("Template empty, using payload system message summary {}", text_summary(final_system_message))
         if not final_system_message and character_card and character_card.get("system_prompt"):
             final_system_message = character_card.get("system_prompt")
-            system_prompt_preview = final_system_message[:50] if final_system_message else ""
-            logger.debug(f"Template empty, using character system prompt: {repr(system_prompt_preview)}...")
+            logger.debug("Template empty, using character system prompt summary {}", text_summary(final_system_message))
     elif sys_msg_from_req:
         final_system_message = sys_msg_from_req
     elif payload_system_message:
         final_system_message = payload_system_message
     elif character_card and character_card.get("system_prompt"):
         final_system_message = character_card.get("system_prompt")
-        system_prompt_preview = final_system_message[:50] if final_system_message else ""
-        logger.debug(f"Using character system prompt: {repr(system_prompt_preview)}...")
+        logger.debug("Using character system prompt summary {}", text_summary(final_system_message))
 
-    logger.debug(f"Final system message: {repr(final_system_message)}")
+    logger.debug("Final system message summary {}", text_summary(final_system_message))
 
     if final_system_message:
         llm_payload_messages = [m for m in llm_payload_messages if m.get("role") != "system"]
@@ -4104,7 +4130,7 @@ async def execute_streaming_call(
                 elif sm_result_s.action == "redact" and sm_result_s.redacted_text is not None:
                     full_reply_to_save = sm_result_s.redacted_text
             except _CHAT_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Self-monitoring output check (streaming) skipped: {e}")
+                logger.debug("Self-monitoring output check (streaming) skipped: {}", exception_summary(e))
 
         try:
             _get_mod = moderation_getter or get_moderation_service
@@ -4284,7 +4310,10 @@ async def execute_streaming_call(
                 if hasattr(maybe_result, "__await__"):
                     await maybe_result  # type: ignore[misc]
             except _CHAT_NONCRITICAL_EXCEPTIONS as stream_callback_err:
-                logger.debug("on_stream_full_reply callback skipped due to error: {}", stream_callback_err)
+                logger.debug(
+                    "on_stream_full_reply callback skipped due to error: {}",
+                    exception_summary(stream_callback_err),
+                )
 
         if not stream_metrics_recorded:
             try:
@@ -4359,7 +4388,10 @@ async def execute_streaming_call(
                         tool_messages=autoexec_result.tool_messages(),
                     )
             except _CHAT_NONCRITICAL_EXCEPTIONS as autoexec_err:
-                logger.warning("Streaming chat tool auto-execution skipped due to error: {}", autoexec_err)
+                logger.warning(
+                    "Streaming chat tool auto-execution skipped due to error: {}",
+                    exception_summary(autoexec_err),
+                )
         # Usage logging (estimated) after stream completes
         total_est = 0
         try:
@@ -4564,7 +4596,7 @@ async def execute_streaming_call(
                         logger.error(
                             "Mandatory moderation audit task failed for {}: {}",
                             final_conversation_id,
-                            failure,
+                            exception_summary(failure),
                             exc_info=True,
                         )
                     raise StopStreamWithError(
@@ -4609,7 +4641,7 @@ async def execute_streaming_call(
                             chunk_seq=chunk_seq,
                         )
                 except _CHAT_NONCRITICAL_EXCEPTIONS as _e:
-                    logger.debug(f"Topic monitoring (stream chunk) skipped: {_e}")
+                    logger.debug("Topic monitoring (stream chunk) skipped: {}", exception_summary(_e))
                 if not eff_policy.enabled or not eff_policy.output_enabled:
                     if stream_holdback:
                         out = f"{stream_holdback}{s}"
@@ -5514,11 +5546,17 @@ async def execute_non_stream_call(
                 except HTTPException:
                     raise
                 except _CHAT_NONCRITICAL_EXCEPTIONS as continue_err:
-                    logger.warning("Chat tool auto-continue skipped due to error: {}", continue_err)
+                    logger.warning(
+                        "Chat tool auto-continue skipped due to error: {}",
+                        exception_summary(continue_err),
+                    )
         except HTTPException:
             raise
         except _CHAT_NONCRITICAL_EXCEPTIONS as autoexec_err:
-            logger.warning("Chat tool auto-execution skipped due to error: {}", autoexec_err)
+            logger.warning(
+                "Chat tool auto-execution skipped due to error: {}",
+                exception_summary(autoexec_err),
+            )
 
     if structured_request_context is not None and structured_metadata is None:
         try:
