@@ -31,6 +31,11 @@ modified_files:
 - apps/tldw-frontend/__tests__/pr-916-review-followups.test.ts
 - apps/packages/ui/src/components/Option/Setup/__tests__/AudioInstallerPanel.test.tsx
 - tldw_Server_API/tests/MCP_unified/test_packaging_shape.py
+- README.md
+- Docs/Getting_Started/TROUBLESHOOTING.md
+- Docs/Getting_Started/Profile_Docker_Single_User.md
+- Docs/Published/Getting_Started/Profile_Docker_Single_User.md
+- Dockerfiles/README.md
 ---
 
 ## Description
@@ -77,6 +82,8 @@ Docs/superpowers/plans/2026-06-24-docker-webui-runtime-auth-bootstrap-implementa
 2026-06-24 Task 4 update: Docker WebUI compose now passes runtime AUTH_MODE, SINGLE_USER_API_KEY, and TLDW_WEBUI_EXPOSE_RUNTIME_AUTH into the WebUI container while preserving the 127.0.0.1:8080:3000 host binding and quickstart internal API origin. Docker single-user compose now sets TLDW_SETUP_ALLOW_REMOTE=${TLDW_SETUP_ALLOW_REMOTE:-1} on the app service. Added compose assertions and aligned the PR-916 Dockerfile expectation with the current build:prod command. Red verification failed on missing compose env as expected; docker compose -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml config >/tmp/tldw_single_webui_runtime_auth_compose.yml succeeded; bunx vitest run __tests__/frontend-quickstart-networking.test.ts __tests__/pr-916-review-followups.test.ts passed (13 tests). Bandit not run: touched implementation is Docker YAML and TypeScript tests only.
 
 2026-06-24 Task 5 update: Added setup onboarding regression coverage asserting /api/v1/setup/admin/ requests from the audio installer provision and verify flows are not sent with noAuth: true. Added MCP packaging smoke coverage for the active in-tree tldw_Server_API.app.core.MCP_unified package and absence of a root mcp_unified directory. Verification: bunx vitest run ../packages/ui/src/components/Option/Setup/__tests__/AudioInstallerPanel.test.tsx passed (8 tests). The worktree-local .venv command failed because .venv is only present in the main checkout; reran with source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/MCP_unified/test_packaging_shape.py -v and it passed (2 tests). Bandit not run yet; touched Python scope will be covered in final verification.
+
+2026-06-24 Task 6 update: Documentation now states Docker single-user WebUI quickstart reads AUTH_MODE and SINGLE_USER_API_KEY at container runtime via the local runtime bootstrap path, and that NEXT_PUBLIC_X_API_KEY is only for deliberate advanced/static WebUI builds. Updated README, troubleshooting, source and published Docker single-user profile docs, and Dockerfiles README. Added a PR follow-up doc guard to prevent regression to rebuild-only public-key guidance. Verification: bunx vitest run __tests__/pr-916-review-followups.test.ts passed (4 tests). Follow-up scan with rg confirmed remaining NEXT_PUBLIC_X_API_KEY references are local/advanced/static contexts, not normal Docker quickstart rebuild instructions. Bandit not run: documentation and TypeScript test changes only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

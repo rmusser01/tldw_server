@@ -1079,7 +1079,7 @@ git commit -m "test: cover setup auth and mcp packaging shape"
 - Modify: `Docs/Published/Getting_Started/Profile_Docker_Single_User.md`
 - Modify: `Dockerfiles/README.md`
 
-- [ ] **Step 1: Update README WebUI auth copy**
+- [x] **Step 1: Update README WebUI auth copy**
 
 Find the README section that says Docker/WebUI rebuilds require exporting `NEXT_PUBLIC_X_API_KEY`. Replace that wording with:
 
@@ -1089,7 +1089,7 @@ For the Docker single-user WebUI quickstart, the WebUI container reads `AUTH_MOD
 `NEXT_PUBLIC_X_API_KEY` remains available for advanced/static WebUI builds where the operator deliberately wants to bake a public browser credential into the client bundle. Do not use it for the normal Docker quickstart path.
 ```
 
-- [ ] **Step 2: Update troubleshooting auth section**
+- [x] **Step 2: Update troubleshooting auth section**
 
 In `Docs/Getting_Started/TROUBLESHOOTING.md`, update the `"NEXT_PUBLIC_X_API_KEY" confusion` section to include:
 
@@ -1104,7 +1104,7 @@ Docker single-user WebUI quickstart uses runtime auth bootstrap. Check these whe
 Only advanced/static deployments should set `NEXT_PUBLIC_X_API_KEY` before building the WebUI.
 ```
 
-- [ ] **Step 3: Update Docker single-user profile docs**
+- [x] **Step 3: Update Docker single-user profile docs**
 
 In both `Docs/Getting_Started/Profile_Docker_Single_User.md` and `Docs/Published/Getting_Started/Profile_Docker_Single_User.md`, add this note near the WebUI startup instructions:
 
@@ -1112,7 +1112,7 @@ In both `Docs/Getting_Started/Profile_Docker_Single_User.md` and `Docs/Published
 The WebUI image is not tied to a specific single-user API key. In the default local compose profile, the WebUI receives `SINGLE_USER_API_KEY` at container runtime and bootstraps browser auth from the local WebUI origin. Keep the default `127.0.0.1:8080:3000` binding unless you are intentionally configuring an advanced remote deployment.
 ```
 
-- [ ] **Step 4: Update Dockerfiles README**
+- [x] **Step 4: Update Dockerfiles README**
 
 In `Dockerfiles/README.md`, add:
 
@@ -1120,7 +1120,7 @@ In `Dockerfiles/README.md`, add:
 Single-user WebUI auth is runtime-configured. The `webui` service receives `AUTH_MODE`, `SINGLE_USER_API_KEY`, and `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH`; the browser does not require `NEXT_PUBLIC_X_API_KEY` for the default local quickstart.
 ```
 
-- [ ] **Step 5: Run doc guard tests**
+- [x] **Step 5: Run doc guard tests**
 
 Run from `apps/tldw-frontend`:
 
@@ -1130,7 +1130,7 @@ bunx vitest run __tests__/pr-916-review-followups.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 6**
+- [x] **Step 6: Commit Task 6**
 
 ```bash
 git add README.md Docs/Getting_Started/TROUBLESHOOTING.md Docs/Getting_Started/Profile_Docker_Single_User.md Docs/Published/Getting_Started/Profile_Docker_Single_User.md Dockerfiles/README.md apps/tldw-frontend/__tests__/pr-916-review-followups.test.ts

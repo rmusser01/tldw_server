@@ -562,6 +562,10 @@ No-`make` equivalent: use [No-Make Path (Windows-Friendly)](#no-make-path-window
 
 Default quickstart behavior keeps same-origin browser API requests through the WebUI proxy. When you intentionally move the browser onto an advanced/custom-host path for LAN, reverse-proxy, or custom-domain browser access, set both `NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=advanced` and `NEXT_PUBLIC_API_URL`.
 
+For the Docker single-user WebUI quickstart, the WebUI container reads `AUTH_MODE` and `SINGLE_USER_API_KEY` at runtime and exposes the key to the browser only through the local runtime bootstrap path. You do not need to rebuild the WebUI image when the single-user key changes.
+
+`NEXT_PUBLIC_X_API_KEY` remains available for advanced/static WebUI builds where the operator deliberately wants to bake a public browser credential into the client bundle. Do not use it for the normal Docker quickstart path.
+
 Local WebUI development (API should already be running, for example via `make quickstart`):
 
 If Bun is not installed yet, install it first:
@@ -681,8 +685,8 @@ docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.p
 Notes
 - Run compose commands from the repository root. The public profile compose files are `Dockerfiles/docker-compose.single-user.yml` and `Dockerfiles/docker-compose.multi-user-postgres.yml`.
 - For `Dockerfiles/docker-compose.webui.yml`, the default quickstart leaves `NEXT_PUBLIC_API_URL` empty so browsers stay on same-origin browser API requests through the WebUI proxy. Set `NEXT_PUBLIC_API_URL` only for the advanced/custom-host path for LAN, reverse-proxy, or custom-domain browser access.
-- `NEXT_PUBLIC_API_VERSION` and `NEXT_PUBLIC_X_API_KEY` are also build-time public values in the client bundle; set them explicitly for your target deployment/auth mode.
-- If you need per-environment API URLs without rebuilding the WebUI image, switch to a runtime env-substitution strategy instead of compile-time `NEXT_PUBLIC_*` build args.
+- Single-user WebUI auth is runtime-configured in the default Docker quickstart. The `webui` service receives `AUTH_MODE`, `SINGLE_USER_API_KEY`, and `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH`; browsers do not require `NEXT_PUBLIC_X_API_KEY`.
+- `NEXT_PUBLIC_API_VERSION` and `NEXT_PUBLIC_X_API_KEY` are build-time public values in the client bundle for advanced/static WebUI builds only.
 - The primary UI is the Next.js WebUI in `apps/tldw-frontend/`.
   - Run it separately for development, or use `Dockerfiles/docker-compose.webui.yml` for a containerized WebUI.
   - For unified streaming validation in non-prod, prefer the dev overlay above. You can also export `STREAMS_UNIFIED=1` directly in your environment.

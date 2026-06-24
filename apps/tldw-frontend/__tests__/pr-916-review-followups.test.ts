@@ -51,4 +51,36 @@ describe("PR 916 review follow-ups", () => {
     expect(cpuGuide).not.toContain("/Users/macbook-dev/Documents/GitHub/tldw_server2")
     expect(gpuGuide).not.toContain("/Users/macbook-dev/Documents/GitHub/tldw_server2")
   })
+
+  it("documents Docker WebUI runtime auth instead of rebuild-only public key auth", () => {
+    const readme = readRepoFile("README.md")
+    const troubleshooting = readRepoFile("Docs/Getting_Started/TROUBLESHOOTING.md")
+    const profile = readRepoFile("Docs/Getting_Started/Profile_Docker_Single_User.md")
+    const publishedProfile = readRepoFile(
+      "Docs/Published/Getting_Started/Profile_Docker_Single_User.md"
+    )
+    const dockerfilesReadme = readRepoFile("Dockerfiles/README.md")
+
+    expect(readme).toContain(
+      "reads `AUTH_MODE` and `SINGLE_USER_API_KEY` at runtime"
+    )
+    expect(readme).toContain(
+      "Do not use it for the normal Docker quickstart path."
+    )
+    expect(troubleshooting).toContain(
+      "Docker single-user WebUI quickstart uses runtime auth bootstrap"
+    )
+    expect(troubleshooting).not.toContain(
+      "set it in `.env` and rebuild the WebUI"
+    )
+    expect(profile).toContain(
+      "The WebUI image is not tied to a specific single-user API key."
+    )
+    expect(publishedProfile).toContain(
+      "The WebUI image is not tied to a specific single-user API key."
+    )
+    expect(dockerfilesReadme).toContain(
+      "Single-user WebUI auth is runtime-configured."
+    )
+  })
 })

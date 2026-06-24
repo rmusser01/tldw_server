@@ -46,6 +46,8 @@ docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docke
 
 The API starts at http://127.0.0.1:8000 and the WebUI starts at http://127.0.0.1:8080. The default browser path uses same-origin browser API requests through the WebUI proxy. Treat LAN/custom-host browser access as advanced configuration; if you intentionally need that path, set `NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=advanced` together with `NEXT_PUBLIC_API_URL`.
 
+The WebUI image is not tied to a specific single-user API key. In the default local compose profile, the WebUI receives `SINGLE_USER_API_KEY` at container runtime and bootstraps browser auth from the local WebUI origin. Keep the default `127.0.0.1:8080:3000` binding unless you are intentionally configuring an advanced remote deployment.
+
 Default persistence uses Docker named volumes:
 
 - `app-data` backs `/app/Databases`, including the default SQLite AuthNZ DB, per-user databases, uploads, first-run markers, and vector stores.
