@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -20,6 +21,8 @@ from tldw_Server_API.app.core.Setup.readiness_models import LANE_IDS, LANE_STATU
 CONFIG_ROOT = setup_manager.CONFIG_RELATIVE_PATH.parent
 READINESS_FILENAME = "setup_readiness.json"
 _STORE: SetupReadinessStore | None = None
+_READINESS_LOCK_TIMEOUT_SECONDS = 10.0
+_READINESS_LOCK_STALE_SECONDS = 300.0
 
 
 def _utc_now() -> str:
@@ -112,6 +115,38 @@ def _resolve_readiness_file() -> Path | None:
     return None
 
 
+@contextlib.contextmanager
+def _readiness_file_lock(path: Path | None):
+    if path is None:
+        yield
+        return
+
+    lock_path = path.with_name(f"{path.name}.lock")
+    deadline = time.monotonic() + _READINESS_LOCK_TIMEOUT_SECONDS
+    fd: int | None = None
+    while fd is None:
+        try:
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            os.write(fd, str(os.getpid()).encode("ascii", errors="ignore"))
+        except FileExistsError:
+            with contextlib.suppress(FileNotFoundError):
+                if time.time() - lock_path.stat().st_mtime > _READINESS_LOCK_STALE_SECONDS:
+                    lock_path.unlink()
+                    continue
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Timed out waiting for setup readiness lock")
+            time.sleep(0.05)
+    try:
+        yield
+    finally:
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        with contextlib.suppress(FileNotFoundError):
+            lock_path.unlink()
+
+
 class SetupReadinessStore:
     """Read and write the first-run setup readiness snapshot."""
 
@@ -133,42 +168,47 @@ class SetupReadinessStore:
 
     def save(self, readiness: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
-            payload = dict(readiness)
-            payload["updated_at"] = _utc_now()
-            record = SetupReadinessRecord.model_validate(payload)
-            data = record.model_dump()
+            with _readiness_file_lock(self.path):
+                return self._save_locked(readiness)
 
-            if not self.path:
-                return data
+    def _save_locked(self, readiness: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(readiness)
+        payload["updated_at"] = _utc_now()
+        record = SetupReadinessRecord.model_validate(payload)
+        data = record.model_dump()
 
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path: str | None = None
-            try:
-                with tempfile.NamedTemporaryFile(
-                    "w",
-                    encoding="utf-8",
-                    dir=self.path.parent,
-                    prefix=f"{self.path.name}.",
-                    suffix=".tmp",
-                    delete=False,
-                ) as handle:
-                    json.dump(data, handle, indent=2)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                    tmp_path = handle.name
-                os.replace(tmp_path, self.path)
-            except Exception:
-                if tmp_path:
-                    with contextlib.suppress(FileNotFoundError):
-                        Path(tmp_path).unlink()
-                raise
+        if not self.path:
             return data
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                dir=self.path.parent,
+                prefix=f"{self.path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                json.dump(data, handle, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+                tmp_path = handle.name
+            os.replace(tmp_path, self.path)
+        except Exception:
+            if tmp_path:
+                with contextlib.suppress(FileNotFoundError):
+                    Path(tmp_path).unlink()
+            raise
+        return data
 
     def update(self, **fields: Any) -> dict[str, Any]:
         with self._lock:
-            current = self.load()
-            current.update(fields)
-            return self.save(current)
+            with _readiness_file_lock(self.path):
+                current = self.load()
+                current.update(fields)
+                return self._save_locked(current)
 
     def reset(self) -> dict[str, Any]:
         return self.save(SetupReadinessRecord().model_dump())

@@ -186,6 +186,7 @@ def test_acknowledged_trusted_custom_hf_enters_custom_install_plan():
 
     assert preview["lanes"]["embeddings_rag"]["status"] == "previewed"
     assert "custom/allowed-with-ack" in preview["install_plan"]["embeddings"]["custom"]
+    assert preview["install_plan"]["embeddings"]["trusted_custom_model_acknowledged"] is True
 
 
 def test_local_chat_preview_only_emits_existing_config_keys():

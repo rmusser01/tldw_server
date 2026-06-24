@@ -16,6 +16,9 @@ class _CapturingLogger:
     def __init__(self):
         self.records = []
 
+    def info(self, message, *args, **kwargs):
+        self.records.append(("info", message, args, dict(kwargs)))
+
     def debug(self, message, *args, **kwargs):
         self.records.append(("debug", message, args, dict(kwargs)))
 
@@ -132,6 +135,120 @@ def test_dependencies_trigger_pip_install(monkeypatch):
         pip_cmd = commands[0]
         assert pip_cmd[:4] == [install_manager.sys.executable, '-m', 'pip', 'install']
         assert any('faster-whisper' in part for part in pip_cmd)
+
+
+def test_run_subprocess_redacts_pip_index_credentials(monkeypatch):
+    logger = _CapturingLogger()
+    monkeypatch.setattr(install_manager, "logger", logger)
+
+    def fake_run(command, check=False, capture_output=True, text=True, timeout=None, **kwargs):  # noqa: ARG001
+        if kwargs.get("stdout") is not None:
+            kwargs["stdout"].write("")
+        if kwargs.get("stderr") is not None:
+            kwargs["stderr"].write("")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(install_manager.subprocess, "run", fake_run)
+
+    install_manager._run_subprocess(
+        [
+            install_manager.sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--index-url",
+            "https://user:secret-token@example.test/simple",
+            "demo-package",
+        ]
+    )
+
+    joined = _joined_records(logger)
+    assert "secret-token" not in joined
+    assert "user:secret-token" not in joined
+    assert "[redacted]" in joined
+
+
+def test_run_subprocess_uses_timeout_and_redacts_timeout_errors(monkeypatch):
+    logger = _CapturingLogger()
+    observed_timeouts: list[float | None] = []
+    monkeypatch.setattr(install_manager, "logger", logger)
+    monkeypatch.setenv("TLDW_SETUP_SUBPROCESS_TIMEOUT_SECONDS", "7")
+
+    def fake_run(command, check=False, capture_output=True, text=True, timeout=None, **_kwargs):  # noqa: ARG001
+        observed_timeouts.append(timeout)
+        raise install_manager.subprocess.TimeoutExpired(cmd=command, timeout=timeout)
+
+    monkeypatch.setattr(install_manager.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="timed out after 7"):
+        install_manager._run_subprocess(
+            [
+                install_manager.sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--index-url",
+                "https://user:secret-token@example.test/simple",
+                "demo-package",
+            ]
+        )
+
+    assert observed_timeouts == [7.0]
+    joined = _joined_records(logger)
+    assert "secret-token" not in joined
+    assert "user:secret-token" not in joined
+
+
+def test_install_plan_rejects_custom_embeddings_without_trust_acknowledgement():
+    with pytest.raises(ValueError, match="trust acknowledgement"):
+        InstallPlan.model_validate(
+            {
+                "stt": [],
+                "tts": [],
+                "embeddings": {"huggingface": [], "custom": ["custom/requires-trust"], "onnx": []},
+            }
+        )
+
+
+def test_install_plan_accepts_custom_embeddings_with_trust_acknowledgement():
+    plan = InstallPlan.model_validate(
+        {
+            "stt": [],
+            "tts": [],
+            "embeddings": {
+                "huggingface": [],
+                "custom": ["custom/allowed-with-ack"],
+                "onnx": [],
+                "trusted_custom_model_acknowledged": True,
+            },
+        }
+    )
+
+    assert plan.embeddings.custom == ["custom/allowed-with-ack"]
+    assert plan.embeddings.trusted_custom_model_acknowledged is True
+
+
+def test_unpinned_vcs_requirement_is_blocked_by_default(monkeypatch):
+    monkeypatch.delenv("TLDW_SETUP_ALLOW_UNPINNED_VCS", raising=False)
+    monkeypatch.setattr(install_manager, "_pip_allowed", lambda: True)
+    monkeypatch.setattr(importlib.util, "find_spec", lambda _name: None)
+    monkeypatch.setattr(
+        install_manager.subprocess,
+        "run",
+        lambda *_args, **_kwargs: types.SimpleNamespace(returncode=0, stdout="", stderr=""),
+    )
+    executed: list[list[str]] = []
+    monkeypatch.setattr(install_manager, "_run_subprocess", lambda cmd: executed.append(cmd))
+
+    with pytest.raises(install_manager.PipInstallBlockedError, match="Unpinned VCS"):
+        install_manager._ensure_requirement(
+            install_manager.PipRequirement(
+                package="git+https://github.com/example/unpinned.git",
+                import_name="example_unpinned",
+            )
+        )
+
+    assert executed == []
 
 
 def test_install_plan_accepts_kitten_tts():
