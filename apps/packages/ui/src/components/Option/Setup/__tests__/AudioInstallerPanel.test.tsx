@@ -60,6 +60,19 @@ const createResponse = (data: unknown, status = 200) => ({
   text: async () => JSON.stringify(data ?? {})
 })
 
+const expectSetupAdminRequestsAuthenticated = (
+  calls: Array<[Record<string, unknown>]>
+) => {
+  const setupCalls = calls.filter(([init]) =>
+    String(init?.path || "").startsWith("/api/v1/setup/admin/")
+  )
+
+  expect(setupCalls.length).toBeGreaterThan(0)
+  for (const [init] of setupCalls) {
+    expect(init).not.toHaveProperty("noAuth", true)
+  }
+}
+
 const recommendationPayload = {
   machine_profile: {
     platform: "darwin",
@@ -334,6 +347,7 @@ describe("AudioInstallerPanel", () => {
         String(init?.path).includes("/api/v1/setup/admin/install-status")
       ).length
     ).toBeGreaterThanOrEqual(2)
+    expectSetupAdminRequestsAuthenticated(mocks.bgRequest.mock.calls)
 
     expect(screen.getByText("Install status")).toBeInTheDocument()
     expect(screen.getByText("completed")).toBeInTheDocument()
@@ -385,6 +399,7 @@ describe("AudioInstallerPanel", () => {
         })
       )
     })
+    expectSetupAdminRequestsAuthenticated(mocks.bgRequest.mock.calls)
 
     expect(await screen.findByText("Verification result")).toBeInTheDocument()
     expect(await screen.findByText("partial")).toBeInTheDocument()

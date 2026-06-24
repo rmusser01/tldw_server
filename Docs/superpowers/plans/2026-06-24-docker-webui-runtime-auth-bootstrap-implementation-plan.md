@@ -993,7 +993,7 @@ git commit -m "fix: pass docker webui auth at runtime"
 - Modify: `apps/packages/ui/src/components/Option/Setup/__tests__/AudioInstallerPanel.test.tsx`
 - Create: `tldw_Server_API/tests/MCP_unified/test_packaging_shape.py`
 
-- [ ] **Step 1: Add failing setup auth regression assertion**
+- [x] **Step 1: Add failing setup auth regression assertion**
 
 In `apps/packages/ui/src/components/Option/Setup/__tests__/AudioInstallerPanel.test.tsx`, add a helper near existing test helpers:
 
@@ -1021,7 +1021,7 @@ In the existing verification test after the `bgRequest` expectations, add:
     expectSetupAdminRequestsAuthenticated(mocks.bgRequest.mock.calls)
 ```
 
-- [ ] **Step 2: Add MCP packaging smoke**
+- [x] **Step 2: Add MCP packaging smoke**
 
 Create `tldw_Server_API/tests/MCP_unified/test_packaging_shape.py`:
 
@@ -1043,7 +1043,7 @@ def test_active_branch_does_not_depend_on_root_mcp_unified_package():
     assert not (repo_root / "mcp_unified").exists()
 ```
 
-- [ ] **Step 3: Run setup and MCP tests**
+- [x] **Step 3: Run setup and MCP tests**
 
 Run from `apps/tldw-frontend`:
 
@@ -1061,7 +1061,7 @@ Run from repo root:
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit Task 5**
+- [x] **Step 4: Commit Task 5**
 
 ```bash
 git add apps/packages/ui/src/components/Option/Setup/__tests__/AudioInstallerPanel.test.tsx tldw_Server_API/tests/MCP_unified/test_packaging_shape.py
