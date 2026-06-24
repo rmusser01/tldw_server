@@ -4,6 +4,7 @@ title: Harden Claims_Extraction review findings and refactor design
 status: In Progress
 assignee: []
 created_date: '2026-06-23 21:39'
+updated_date: '2026-06-24 00:52'
 labels:
   - claims
   - review-hardening
@@ -29,6 +30,12 @@ Verify and address validated Claims_Extraction review findings, then capture a f
 - [ ] #5 Runtime limits, HTML escaping, analytics scoping, FVA metrics, and notification dispatch reliability are hardened.
 - [ ] #6 A focused Claims_Extraction refactor design spec is written for follow-up modularization.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Spec follow-up review tightened implementation constraints for rebuild strictness, timeout worker bounds, analytics owner-scope SQL, and notification dispatcher saturation behavior.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
