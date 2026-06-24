@@ -8,6 +8,8 @@ interface ReviewProgressProps {
   deckName?: string
   availableNowCount?: number
   scheduledDueCount?: number
+  newCount?: number
+  learningCount?: number
 }
 
 export const ReviewProgress: React.FC<ReviewProgressProps> = ({
@@ -15,7 +17,9 @@ export const ReviewProgress: React.FC<ReviewProgressProps> = ({
   reviewedCount,
   deckName,
   availableNowCount,
-  scheduledDueCount
+  scheduledDueCount,
+  newCount,
+  learningCount
 }) => {
   const { t } = useTranslation(["option"])
   const remaining = Math.max(0, dueCount - reviewedCount)
@@ -36,10 +40,26 @@ export const ReviewProgress: React.FC<ReviewProgressProps> = ({
       })
     )
   }
+  if (typeof newCount === "number") {
+    statusMessageParts.push(
+      t("option:flashcards.newQueueCount", {
+        defaultValue: "new: {{count}}",
+        count: newCount
+      })
+    )
+  }
+  if (typeof learningCount === "number") {
+    statusMessageParts.push(
+      t("option:flashcards.learningQueueCount", {
+        defaultValue: "learning: {{count}}",
+        count: learningCount
+      })
+    )
+  }
   if (typeof scheduledDueCount === "number") {
     statusMessageParts.push(
-      t("option:flashcards.scheduledDueCount", {
-        defaultValue: "Scheduled due: {{count}}",
+      t("option:flashcards.dueQueueCount", {
+        defaultValue: "due: {{count}}",
         count: scheduledDueCount
       })
     )
@@ -60,6 +80,9 @@ export const ReviewProgress: React.FC<ReviewProgressProps> = ({
       <span className="sr-only">{statusMessage}</span>
 
       <div className="flex items-center gap-2">
+        <span className="text-sm font-medium text-text" aria-hidden="true">
+          {t("option:flashcards.studyQueue", { defaultValue: "Study queue" })}
+        </span>
         <span className="text-2xl font-bold text-primary" aria-hidden="true">{remaining}</span>
         <span className="text-sm text-text-muted" aria-hidden="true">
           {t("option:flashcards.cardsRemaining", { defaultValue: "cards remaining" })}
@@ -81,12 +104,34 @@ export const ReviewProgress: React.FC<ReviewProgressProps> = ({
           </div>
         </>
       )}
+      {typeof newCount === "number" && (
+        <>
+          <div className="h-8 w-px bg-border" aria-hidden="true" />
+          <div className="text-sm text-text-muted" aria-hidden="true">
+            {t("option:flashcards.newQueueCount", {
+              defaultValue: "new: {{count}}",
+              count: newCount
+            })}
+          </div>
+        </>
+      )}
+      {typeof learningCount === "number" && (
+        <>
+          <div className="h-8 w-px bg-border" aria-hidden="true" />
+          <div className="text-sm text-text-muted" aria-hidden="true">
+            {t("option:flashcards.learningQueueCount", {
+              defaultValue: "learning: {{count}}",
+              count: learningCount
+            })}
+          </div>
+        </>
+      )}
       {typeof scheduledDueCount === "number" && (
         <>
           <div className="h-8 w-px bg-border" aria-hidden="true" />
           <div className="text-sm text-text-muted" aria-hidden="true">
-            {t("option:flashcards.scheduledDueCount", {
-              defaultValue: "Scheduled due: {{count}}",
+            {t("option:flashcards.dueQueueCount", {
+              defaultValue: "due: {{count}}",
               count: scheduledDueCount
             })}
           </div>

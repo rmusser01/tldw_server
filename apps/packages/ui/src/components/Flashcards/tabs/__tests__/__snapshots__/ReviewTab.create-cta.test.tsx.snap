@@ -233,100 +233,48 @@ exports[`ReviewTab create CTA visibility > matches baseline snapshot for active 
         </div>
       </div>
       <div
-        class="relative"
+        class="relative flex flex-col gap-2"
       >
-        <div
-          class="ant-card ant-card-bordered ant-card-small css-dev-only-do-not-override-3uaqrl css-var-root"
-          data-testid="flashcards-review-study-assistant"
-        >
-          <div
-            class="ant-card-head"
+        <div>
+          <button
+            aria-expanded="false"
+            class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"
+            data-testid="flashcards-review-assistant-toggle"
+            type="button"
           >
-            <div
-              class="ant-card-head-wrapper"
+            <span
+              class="ant-btn-icon"
             >
-              <div
-                class="ant-card-head-title"
+              <svg
+                aria-hidden="true"
+                class="lucide lucide-circle-question-mark size-4"
+                fill="none"
+                height="24"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="24"
+                xmlns="http://www.w3.org/2000/svg"
               >
-                <div
-                  class="flex items-center gap-2"
-                >
-                  <svg
-                    aria-hidden="true"
-                    class="lucide lucide-sparkles size-4 text-primary"
-                    fill="none"
-                    height="24"
-                    stroke="currentColor"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    viewBox="0 0 24 24"
-                    width="24"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <path
-                      d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"
-                    />
-                    <path
-                      d="M20 2v4"
-                    />
-                    <path
-                      d="M22 4h-4"
-                    />
-                    <circle
-                      cx="4"
-                      cy="20"
-                      r="2"
-                    />
-                  </svg>
-                  <span>
-                    Study assistant
-                  </span>
-                </div>
-              </div>
-              <div
-                class="ant-card-extra"
-              >
-                <button
-                  aria-expanded="false"
-                  class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-primary ant-btn-color-primary ant-btn-variant-solid ant-btn-sm"
-                  data-testid="flashcards-study-assistant-toggle"
-                  type="button"
-                >
-                  <span>
-                    Open assistant
-                  </span>
-                </button>
-              </div>
-            </div>
-          </div>
-          <div
-            class="ant-card-body"
-          >
-            <div
-              class="ant-space css-dev-only-do-not-override-3uaqrl ant-space-vertical w-full css-var-root"
-              style="column-gap: 8px; row-gap: 8px;"
-            >
-              <div
-                class="ant-space-item"
-              >
-                <span
-                  class="ant-typography ant-typography-secondary css-dev-only-do-not-override-3uaqrl css-var-root"
-                >
-                  Need help understanding this card?
-                </span>
-              </div>
-              <div
-                class="ant-space-item"
-              >
-                <span
-                  class="ant-typography ant-typography-secondary text-xs css-dev-only-do-not-override-3uaqrl css-var-root"
-                >
-                  Open the assistant when you want an explanation, mnemonic, or fact-check without leaving review.
-                </span>
-              </div>
-            </div>
-          </div>
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                />
+                <path
+                  d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"
+                />
+                <path
+                  d="M12 17h.01"
+                />
+              </svg>
+            </span>
+            <span>
+              Need help?
+            </span>
+          </button>
         </div>
         <div
           aria-live="polite"
@@ -628,15 +576,6 @@ exports[`ReviewTab create CTA visibility > matches baseline snapshot for caught-
       </label>
     </div>
   </div>
-  <button
-    class="ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-primary ant-btn-color-primary ant-btn-variant-solid min-h-11"
-    data-testid="flashcards-review-create-cta"
-    type="button"
-  >
-    <span>
-      Create card
-    </span>
-  </button>
 </div>
 `;
 

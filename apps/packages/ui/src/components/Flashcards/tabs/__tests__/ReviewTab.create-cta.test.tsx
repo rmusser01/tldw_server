@@ -1053,7 +1053,9 @@ describe("ReviewTab create CTA visibility", () => {
     expect(screen.queryByRole("button", { name: /Practice again/i })).not.toBeInTheDocument()
   })
 
-  it("offers completion actions for practice again and selected-deck scheduling", () => {
+  it("offers completion actions for recovery, creation, management, and scheduling", () => {
+    const onNavigateToCreate = vi.fn()
+    const onNavigateToManageDeck = vi.fn()
     vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
     vi.mocked(useDueCountsQuery).mockReturnValue({
       data: { due: 0, new: 0, learning: 0, total: 0 }
@@ -1088,17 +1090,35 @@ describe("ReviewTab create CTA visibility", () => {
 
     render(
       <ReviewTab
-        onNavigateToCreate={() => {}}
+        onNavigateToCreate={onNavigateToCreate}
         onNavigateToImport={() => {}}
         reviewDeckId={11}
         onReviewDeckChange={() => {}}
         isActive
+        onNavigateToManageDeck={onNavigateToManageDeck}
       />
     )
 
     expect(vi.mocked(useCramQueueQuery).mock.calls.at(-1)?.[2]).toEqual(
       expect.objectContaining({ enabled: true, limit: 1 })
     )
+
+    const completionCard = screen.getByTestId("flashcards-review-empty-card")
+    expect(completionCard).toHaveTextContent("You're all caught up!")
+    expect(completionCard).toHaveTextContent("No cards are due for review. Great job!")
+    expect(within(completionCard).getByRole("button", { name: "Practice again" })).toBeInTheDocument()
+    expect(within(completionCard).getByRole("button", { name: "Create card" })).toBeInTheDocument()
+    expect(within(completionCard).getByRole("button", { name: "Manage deck/cards" })).toBeInTheDocument()
+    expect(within(completionCard).getByRole("button", { name: "Open scheduler" })).toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-review-create-cta")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-deck-study-dashboard")).not.toBeInTheDocument()
+    expect(screen.getAllByRole("button", { name: "Create card" })).toHaveLength(1)
+
+    fireEvent.click(within(completionCard).getByRole("button", { name: "Create card" }))
+    expect(onNavigateToCreate).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(within(completionCard).getByRole("button", { name: "Manage deck/cards" }))
+    expect(onNavigateToManageDeck).toHaveBeenCalledWith(11)
 
     fireEvent.click(screen.getByTestId("flashcards-review-open-scheduler"))
     const schedulerRoute = navigateMock.mock.calls.at(-1)?.[0]
@@ -1142,6 +1162,64 @@ describe("ReviewTab create CTA visibility", () => {
     )
   })
 
+  it("keeps deck navigation available when a cram tag filter has no matches", () => {
+    vi.mocked(useDecksQuery).mockReturnValue({
+      data: [{ id: 11, name: "Biology" }],
+      isLoading: false
+    } as any)
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
+    vi.mocked(useDueCountsQuery).mockReturnValue({
+      data: { due: 0, new: 0, learning: 0, total: 0 }
+    } as any)
+    vi.mocked(useCramQueueQuery).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isFetching: false
+    } as any)
+    vi.mocked(useReviewAnalyticsSummaryQuery).mockReturnValue({
+      data: {
+        reviewed_today: 0,
+        retention_rate_today: null,
+        lapse_rate_today: null,
+        avg_answer_time_ms_today: null,
+        study_streak_days: 0,
+        generated_at: "2026-02-18T12:00:00.000Z",
+        decks: [
+          {
+            deck_id: 11,
+            deck_name: "Biology",
+            total: 20,
+            new: 2,
+            learning: 1,
+            due: 0,
+            mature: 17
+          }
+        ]
+      },
+      isLoading: false
+    } as any)
+
+    render(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={11}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    fireEvent.click(screen.getByText("Cram"))
+    fireEvent.change(screen.getByTestId("flashcards-review-cram-tag"), {
+      target: { value: "biology" }
+    })
+
+    const emptyCard = screen.getByTestId("flashcards-review-empty-card")
+    expect(emptyCard).toHaveTextContent("No cards match this cram tag filter.")
+    expect(screen.getByTestId("flashcards-review-create-cta")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-deck-study-dashboard")).toBeInTheDocument()
+  })
+
   it("distinguishes scheduled due cards from the available study queue", () => {
     vi.mocked(useReviewQuery).mockReturnValue({
       data: {
@@ -1183,10 +1261,19 @@ describe("ReviewTab create CTA visibility", () => {
     )
 
     expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent(
+      "Study queue"
+    )
+    expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent(
       "Available now: 1"
     )
     expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent(
-      "Scheduled due: 0"
+      "new: 1"
+    )
+    expect(screen.getByTestId("flashcards-review-progress")).toHaveTextContent(
+      "due: 0"
+    )
+    expect(screen.getByTestId("flashcards-review-progress")).not.toHaveTextContent(
+      "Scheduled due"
     )
   })
 

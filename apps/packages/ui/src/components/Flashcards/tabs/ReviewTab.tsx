@@ -12,7 +12,7 @@ import {
   Tooltip,
   Typography
 } from "antd"
-import { X, Minus, Check, Star, Calendar, Undo2 } from "lucide-react"
+import { X, Minus, Check, Star, Calendar, Undo2, HelpCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { Alert } from "@/components/ui/primitives"
@@ -152,6 +152,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
 
   // State
   const [showAnswer, setShowAnswer] = React.useState(false)
+  const [assistantOpen, setAssistantOpen] = React.useState(false)
   const [reviewedCount, setReviewedCount] = React.useState(0)
   const [localOverrideCard, setLocalOverrideCard] = React.useState<Flashcard | null>(null)
   const [editDrawerOpen, setEditDrawerOpen] = React.useState(false)
@@ -281,13 +282,24 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   const availableNowCount =
     reviewMode === "cram"
       ? cramQueue.length
-      : dueCountsQuery.data
-        ? (dueCountsQuery.data.due ?? 0) +
-          (dueCountsQuery.data.new ?? 0) +
-          (dueCountsQuery.data.learning ?? 0)
-        : undefined
+      : dueCountsQuery.data?.total
+  const newQueueCount = reviewMode === "cram" ? undefined : dueCountsQuery.data?.new
+  const learningQueueCount =
+    reviewMode === "cram" ? undefined : dueCountsQuery.data?.learning
   const isCramMode = reviewMode === "cram"
-  const showTopBarCreateCta = !activeCard && !canShowAllDeckDashboard
+  const isCramCompletionRecoveryState =
+    isCramMode &&
+    !activeCard &&
+    !cramTagFilter &&
+    !isCramQueueLoading &&
+    cramQueue.length === 0
+  const isCompletionRecoveryState =
+    !activeCard &&
+    hasCardsQuery.data === true &&
+    !canShowAllDeckDashboard &&
+    (isDueModeCaughtUp || isCramCompletionRecoveryState)
+  const showTopBarCreateCta =
+    !activeCard && !canShowAllDeckDashboard && !isCompletionRecoveryState
   const handleDashboardReviewDeck = React.useCallback(
     (deckId: number) => {
       onReviewDeckChange(deckId)
@@ -901,6 +913,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
   }, [])
 
   React.useEffect(() => {
+    setAssistantOpen(false)
     if (autoRevealAnswerRef.current) {
       autoRevealAnswerRef.current = false
       setShowAnswer(true)
@@ -1247,7 +1260,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
         </div>
       )}
 
-      {!activeCard && (
+      {!activeCard && !isCompletionRecoveryState && (
         <DeckStudyDashboard
           decks={availableDecks}
           deckProgress={deckDashboardAnalyticsQuery.data?.decks}
@@ -1276,6 +1289,8 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
           deckName={currentDeckName}
           availableNowCount={availableNowCount}
           scheduledDueCount={scheduledDueCount}
+          newCount={newQueueCount}
+          learningCount={learningQueueCount}
         />
       )}
 
@@ -1374,22 +1389,41 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
               </div>
             )}
 
-            <div className="relative">
-              <FlashcardStudyAssistantPanel
-                key={activeCard.uuid}
-                cardUuid={activeCard.uuid}
-                threadVersion={assistantQuery.data?.thread.version ?? null}
-                messages={assistantQuery.data?.messages ?? []}
-                availableActions={assistantQuery.data?.available_actions ?? null}
-                assistantContext={assistantQuery.data}
-                isLoading={assistantQuery.isLoading}
-                isError={assistantQuery.isError}
-                queryError={assistantQuery.error}
-                isResponding={assistantRespondMutation.isPending}
-                onReloadContext={() => assistantQuery.refetch()}
-                onRespond={handleAssistantRespond}
-                defaultExpanded={showAnswer}
-              />
+            <div className="relative flex flex-col gap-2">
+              <div>
+                <Button
+                  type="default"
+                  icon={<HelpCircle className="size-4" />}
+                  onClick={() => setAssistantOpen((open) => !open)}
+                  aria-expanded={assistantOpen}
+                  data-testid="flashcards-review-assistant-toggle"
+                >
+                  {assistantOpen
+                    ? t("option:flashcards.hideReviewHelp", {
+                        defaultValue: "Hide help"
+                      })
+                    : t("option:flashcards.needReviewHelp", {
+                        defaultValue: "Need help?"
+                      })}
+                </Button>
+              </div>
+              {assistantOpen && (
+                <FlashcardStudyAssistantPanel
+                  key={activeCard.uuid}
+                  cardUuid={activeCard.uuid}
+                  threadVersion={assistantQuery.data?.thread.version ?? null}
+                  messages={assistantQuery.data?.messages ?? []}
+                  availableActions={assistantQuery.data?.available_actions ?? null}
+                  assistantContext={assistantQuery.data}
+                  isLoading={assistantQuery.isLoading}
+                  isError={assistantQuery.isError}
+                  queryError={assistantQuery.error}
+                  isResponding={assistantRespondMutation.isPending}
+                  onReloadContext={() => assistantQuery.refetch()}
+                  onRespond={handleAssistantRespond}
+                  defaultExpanded={showAnswer}
+                />
+              )}
               <FeatureHint
                 featureKey="flashcards_study_assistant_discovery"
                 title={t("option:flashcards.studyAssistantHintTitle", {
@@ -1897,6 +1931,16 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                         defaultValue: "Create card"
                       })}
                     </Button>
+                    {reviewDeckId != null && onNavigateToManageDeck && (
+                      <Button
+                        onClick={() => onNavigateToManageDeck(reviewDeckId)}
+                        data-testid="flashcards-review-manage-deck"
+                      >
+                        {t("option:flashcards.manageDeckCards", {
+                          defaultValue: "Manage deck/cards"
+                        })}
+                      </Button>
+                    )}
                     {reviewDeckId != null && (
                       <Button
                         onClick={() => {

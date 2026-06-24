@@ -77,6 +77,6 @@ describe("KeyboardShortcutsModal rating scale guidance", () => {
 
     expect(screen.getByText("Show answer")).toBeInTheDocument()
     expect(screen.getByText("Rate with Again, Hard, Good, or Easy")).toBeInTheDocument()
-    expect(screen.getByText("Re-rate last card while the undo button is visible")).toBeInTheDocument()
+    expect(screen.getByText("Re-rate last card when the Re-rate button is available")).toBeInTheDocument()
   })
 })
