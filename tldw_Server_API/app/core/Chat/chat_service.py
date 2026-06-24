@@ -5427,10 +5427,10 @@ async def execute_non_stream_call(
                                 "pattern": sample,
                             },
                         )
-                        await _capture_moderation_review_item_safely_async(
-                            phase="output",
-                            action="block",
-                            excerpt=sample,
+                    await _capture_moderation_review_item_safely_async(
+                        phase="output",
+                        action="block",
+                        excerpt=sample,
                         category=out_category2,
                         matched_pattern=matched_pattern,
                         effective_policy=eff_policy,
@@ -5466,10 +5466,10 @@ async def execute_non_stream_call(
                             )
                     except MandatoryAuditWriteError:
                         raise
-                        await _capture_moderation_review_item_safely_async(
-                            phase="output",
-                            action="redact",
-                            excerpt=sample,
+                    await _capture_moderation_review_item_safely_async(
+                        phase="output",
+                        action="redact",
+                        excerpt=sample,
                         category=out_category2,
                         matched_pattern=matched_pattern,
                         effective_policy=eff_policy,
@@ -5493,11 +5493,11 @@ async def execute_non_stream_call(
                                     msg["content"] = content_to_save
                     except _CHAT_NONCRITICAL_EXCEPTIONS:
                         pass
-                    if resolved_action == "warn":
-                        await _capture_moderation_review_item_safely_async(
-                            phase="output",
-                            action="warn",
-                            excerpt=sample,
+                if resolved_action == "warn":
+                    await _capture_moderation_review_item_safely_async(
+                        phase="output",
+                        action="warn",
+                        excerpt=sample,
                         category=out_category2,
                         matched_pattern=matched_pattern,
                         effective_policy=eff_policy,

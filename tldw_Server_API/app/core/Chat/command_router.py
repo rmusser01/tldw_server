@@ -18,6 +18,7 @@ Env flags:
 - CHAT_COMMANDS_MAX_CHARS: max chars in command output (default: 300)
 - CHAT_COMMAND_INJECTION_MODE: 'system', 'preface', or 'replace' (default: 'system')
 - DEFAULT_LOCATION: fallback location for /weather (default: '')
+- CHAT_COMMANDS_REQUIRE_PERMISSIONS: force command RBAC in every auth mode
 """
 
 from __future__ import annotations
@@ -62,7 +63,8 @@ try:
     from tldw_Server_API.app.core.AuthNZ.rbac import user_has_permission as _user_has_permission
 except ImportError:  # pragma: no cover - fallback if AuthNZ is trimmed in tests
     def _user_has_permission(user_id: int, permission: str) -> bool:  # type: ignore
-        return True
+        logger.warning("AuthNZ RBAC unavailable; denying chat command permission check for {}", permission)
+        return False
 
 
 SLASH_RE = re.compile(r"^/(\w+)(?:\s+(.*))?$")
@@ -184,9 +186,25 @@ def is_single_user_mode() -> bool:
     code should prefer env/config-driven enforcement.
     """
     try:
-        return str(os.getenv("AUTH_MODE", "")).strip().lower() == "single_user"
+        env_mode = str(os.getenv("AUTH_MODE", "")).strip().lower()
+        if env_mode:
+            return env_mode == "single_user"
+        cp = _cfg()
+        if cp and cp.has_section("AuthNZ"):
+            raw_mode = cp.get("AuthNZ", "auth_mode", fallback="multi_user")
+            return str(raw_mode).strip().lower() == "single_user"
     except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS:
         return False
+    return False
+
+
+def _should_enforce_command_rbac(spec: "CommandSpec") -> bool:
+    """Return whether a command's permission metadata must be enforced."""
+    if not spec.required_permission:
+        return False
+    if _cfg_bool("CHAT_COMMANDS_REQUIRE_PERMISSIONS", "require_permissions", False):
+        return True
+    return bool(spec.rbac_required and not is_single_user_mode())
 
 
 def get_injection_mode() -> str:
@@ -429,8 +447,9 @@ async def async_dispatch_command(ctx: CommandContext, command: str, args: str | 
             )
         )
 
-    # RBAC: optional enforcement via env flag
-    rbac_enforced = _cfg_bool("CHAT_COMMANDS_REQUIRE_PERMISSIONS", "require_permissions", False)
+    # RBAC: enforced for RBAC-marked commands in multi-user mode, with an
+    # explicit flag available to force the same checks in single-user mode.
+    rbac_enforced = _should_enforce_command_rbac(spec)
     if rbac_enforced and spec.required_permission:
         permitted = False
         details = {"checked": True, "required_permission": spec.required_permission}

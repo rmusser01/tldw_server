@@ -267,6 +267,39 @@ async def test_rbac_enforcement(monkeypatch):
     assert allowed.ok
 
 
+@pytest.mark.asyncio
+async def test_rbac_marked_commands_enforce_permissions_by_default_in_multi_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.delenv("CHAT_COMMANDS_REQUIRE_PERMISSIONS", raising=False)
+    monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_GLOBAL", "100")
+
+    ctx = command_router.CommandContext(user_id="anon", auth_user_id=None)
+    denied = await command_router.async_dispatch_command(ctx, "time", None)
+
+    assert not denied.ok
+    assert denied.metadata.get("error") == "permission_denied"
+    assert denied.metadata.get("required_permission") == "chat.commands.time"
+
+
+@pytest.mark.asyncio
+async def test_rbac_marked_commands_enforce_permissions_when_auth_mode_ambiguous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AUTH_MODE", raising=False)
+    monkeypatch.delenv("CHAT_COMMANDS_REQUIRE_PERMISSIONS", raising=False)
+    monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_GLOBAL", "100")
+    monkeypatch.setattr(command_router, "_cfg", lambda: None)
+
+    ctx = command_router.CommandContext(user_id="anon", auth_user_id=None)
+    denied = await command_router.async_dispatch_command(ctx, "time", None)
+
+    assert not denied.ok
+    assert denied.metadata.get("error") == "permission_denied"
+    assert denied.metadata.get("required_permission") == "chat.commands.time"
+
+
 def test_dispatch_command_removed_raises():
 
     ctx = command_router.CommandContext(user_id="legacy")

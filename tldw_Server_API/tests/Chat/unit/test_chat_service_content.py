@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
@@ -47,6 +48,117 @@ class _RedactingModeration:
 
     def redact_text(self, text, *_args, **_kwargs):
         return f"REDACTED:{text}"
+
+
+class _ActionModeration:
+    class _Policy:
+        enabled = True
+        output_enabled = True
+        output_action = "block"
+
+        def to_dict(self) -> dict[str, object]:
+            return {"enabled": True, "output_enabled": True, "output_action": self.output_action}
+
+    def __init__(self, action: str) -> None:
+        self.action = action
+        self._policy = self._Policy()
+        self._policy.output_action = action
+
+    def get_effective_policy(self, *_args: Any, **_kwargs: Any) -> "_ActionModeration._Policy":
+        return self._policy
+
+    def evaluate_action_with_match(
+        self,
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> tuple[str, str | None, str, str, tuple[int, int]]:
+        redacted = "redacted assistant output" if self.action == "redact" else None
+        return (self.action, redacted, "secret", "pii", (0, 6))
+
+    def build_sanitized_snippet(self, *_args: Any, **_kwargs: Any) -> str:
+        return "sanitized secret"
+
+    def check_text(self, *_args: Any, **_kwargs: Any) -> tuple[bool, str]:
+        return (True, "sanitized secret")
+
+    def redact_text(self, *_args: Any, **_kwargs: Any) -> str:
+        return "redacted assistant output"
+
+
+async def _run_non_stream_moderation_capture_case(
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+    captured: list[dict[str, Any]] | None = None,
+) -> tuple[Any, list[dict[str, Any]]]:
+    if captured is None:
+        captured = []
+
+    async def fake_log_llm_usage(**_kwargs: Any) -> None:
+        return None
+
+    async def fake_capture(**kwargs: Any) -> None:
+        captured.append(kwargs)
+
+    monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
+    monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
+    monkeypatch.setattr(chat_service, "is_moderation_review_capture_enabled", lambda: True)
+    monkeypatch.setattr(chat_service, "_capture_moderation_review_item_safely_async", fake_capture)
+
+    def llm_call_func() -> dict[str, Any]:
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "secret assistant output",
+                    },
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+
+    async def save_message_fn(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    request = SimpleNamespace(
+        method="POST",
+        url=SimpleNamespace(path="/api/v1/chat/completions"),
+        headers={},
+        state=SimpleNamespace(user_id="user-1", api_key_id=None),
+    )
+
+    response = await execute_non_stream_call(
+        current_loop=asyncio.get_running_loop(),
+        cleaned_args={
+            "api_endpoint": "openai",
+            "api_key": "test-key",
+            "messages_payload": [{"role": "user", "content": "hi"}],
+            "model": "gpt-4o-mini",
+            "streaming": False,
+        },
+        selected_provider="openai",
+        provider="openai",
+        model="gpt-4o-mini",
+        request_json="{}",
+        request=request,
+        metrics=_DummyMetrics(),
+        provider_manager=None,
+        templated_llm_payload=[{"role": "user", "content": "hi"}],
+        should_persist=False,
+        final_conversation_id="conv-123",
+        character_card_for_context={"name": "Test"},
+        chat_db=None,
+        save_message_fn=save_message_fn,
+        audit_service=None,
+        audit_context=None,
+        client_id="client",
+        queue_execution_enabled=False,
+        enable_provider_fallback=False,
+        llm_call_func=llm_call_func,
+        refresh_provider_params=lambda *_args, **_kwargs: None,
+        moderation_getter=lambda: _ActionModeration(action),
+    )
+    return response, captured
 
 
 @pytest.mark.asyncio
@@ -122,6 +234,39 @@ async def test_execute_non_stream_call_redacts_list_content(monkeypatch):
     assert isinstance(content, list)
     assert content[0]["text"].startswith("REDACTED:")
     assert content[1]["type"] == "image_url"
+
+
+@pytest.mark.asyncio
+async def test_execute_non_stream_call_captures_redact_review_item(monkeypatch):
+    response, captured = await _run_non_stream_moderation_capture_case(monkeypatch, "redact")
+
+    assert response["choices"][0]["message"]["content"] == "redacted assistant output"
+    assert captured
+    assert captured[0]["action"] == "redact"
+    assert captured[0]["excerpt"] == "sanitized secret"
+    assert captured[0]["category"] == "pii"
+
+
+@pytest.mark.asyncio
+async def test_execute_non_stream_call_captures_warn_review_item(monkeypatch):
+    response, captured = await _run_non_stream_moderation_capture_case(monkeypatch, "warn")
+
+    assert response["choices"][0]["message"]["content"] == "secret assistant output"
+    assert captured
+    assert captured[0]["action"] == "warn"
+    assert captured[0]["matched_pattern"] == "secret"
+
+
+@pytest.mark.asyncio
+async def test_execute_non_stream_call_captures_block_review_item_without_audit_service(monkeypatch):
+    captured = []
+
+    with pytest.raises(HTTPException):
+        await _run_non_stream_moderation_capture_case(monkeypatch, "block", captured=captured)
+
+    assert captured
+    assert captured[0]["action"] == "block"
+    assert captured[0]["source_id"] == "conv-123"
 
 
 @pytest.mark.asyncio
