@@ -77,15 +77,23 @@ def _get_public_web_base_url() -> str | None:
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
         value = getattr(get_settings(), "PUBLIC_WEB_BASE_URL", None)
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Unable to resolve PUBLIC_WEB_BASE_URL from settings; error_type={}",
+            _safe_exception_label(exc),
+        )
         return None
     return str(value).strip() if value else None
 
 
 def _url_origin_tuple(url: str) -> tuple[str, str, int | None]:
     parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
     hostname = (parsed.hostname or "").strip().lower()
-    return parsed.scheme.lower(), hostname, parsed.port
+    port = parsed.port
+    if (scheme == "https" and port == 443) or (scheme == "http" and port == 80):
+        port = None
+    return scheme, hostname, port
 
 
 def _validate_checkout_redirect_url(url: str, label: str) -> str:

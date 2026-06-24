@@ -4,7 +4,7 @@ title: Harden Billing module review findings
 status: Done
 assignee: []
 created_date: '2026-06-23 18:12'
-updated_date: '2026-06-23 21:38'
+updated_date: '2026-06-24 01:40'
 labels:
   - billing
   - security
@@ -46,6 +46,8 @@ Implemented Billing hardening fixes: fail-closed usage source failures now propa
 Verification recorded: focused touched Billing tests passed with 83 passed, 174 warnings; Bandit on touched Billing core files reported 0 findings; git diff --check on touched paths passed; stale active Billing audit-helper reference search returned no matches. Broader tldw_Server_API/tests/Billing run remains blocked outside this Billing change by app import issues: test_billing_public_api_removed.py imports tldw_Server_API.app.main and hits missing save_and_register_file_export from Storage.generated_file_helpers, and the filtered suite timed out during broad app import/teardown paths.
 
 Moved fixes into worktree .worktrees/billing-module-hardening on branch codex/billing-module-hardening from dev. Worktree verification: focused touched Billing tests passed with 83 passed, 179 warnings; Bandit JSON scan for touched Billing core files wrote /tmp/bandit_billing_worktree_2410.json; git diff --check on touched paths passed; stale active Billing audit-helper reference search returned no matches.
+
+PR review follow-up: rebased codex/billing-module-hardening-origin-dev onto latest origin/dev and addressed review comments by rejecting non-finite overage percentages, normalizing default HTTP/HTTPS ports during redirect origin comparison, and logging settings lookup failures with sanitized exception labels. Added regressions for all three cases.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

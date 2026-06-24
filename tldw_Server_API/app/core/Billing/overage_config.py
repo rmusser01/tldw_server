@@ -8,6 +8,7 @@ Configures behavior when usage exceeds plan limits:
 """
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -30,8 +31,8 @@ def _safe_float_from_env(env_name: str, default: float) -> float:
     except (TypeError, ValueError):
         logger.warning("Invalid {} configured; using default", env_name)
         return default
-    if value < 0:
-        logger.warning("Negative {} configured; using default", env_name)
+    if not math.isfinite(value) or value < 0:
+        logger.warning("Invalid or negative {} configured; using default", env_name)
         return default
     return value
 

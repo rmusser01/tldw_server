@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 
 import pytest
 
+from tldw_Server_API.app.core.Billing import subscription_service as subscription_service_module
 from tldw_Server_API.app.core.Billing.subscription_service import SubscriptionService
 
 
@@ -475,6 +476,62 @@ async def test_create_checkout_session_rejects_disallowed_redirect_before_stripe
 
     assert stripe_client.created_customers == []
     assert stripe_client.created_sessions == []
+
+
+@pytest.mark.asyncio
+async def test_create_checkout_session_allows_equivalent_default_port_redirects(monkeypatch) -> None:
+    """Explicit default HTTPS ports should match an allowlist origin without a port."""
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Billing.subscription_service.is_billing_enabled",
+        lambda: True,
+    )
+    monkeypatch.setenv("PUBLIC_WEB_BASE_URL", "https://app.example.test")
+
+    repo = _FakeBillingRepo()
+    stripe_client = _FakeStripeClient()
+    service = SubscriptionService(billing_repo=repo, stripe_client=stripe_client)
+
+    await service.create_checkout_session(
+        org_id=42,
+        plan_name="pro",
+        billing_cycle="monthly",
+        success_url="https://app.example.test:443/success",
+        cancel_url="https://app.example.test/cancel",
+        org_email="owner@example.com",
+        org_name="Example Org",
+    )
+
+    assert len(stripe_client.created_customers) == 1
+    assert len(stripe_client.created_sessions) == 1
+
+
+def test_public_web_base_url_settings_failure_is_logged_without_raw_details(monkeypatch) -> None:
+    """Settings lookup failures should be visible without leaking raw exception text."""
+
+    monkeypatch.delenv("PUBLIC_WEB_BASE_URL", raising=False)
+
+    def _raise_settings_error():
+        raise RuntimeError("/private/secret-config-path")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.AuthNZ.settings.get_settings",
+        _raise_settings_error,
+    )
+    messages: list[str] = []
+    handler_id = subscription_service_module.logger.add(
+        lambda message: messages.append(str(message)),
+        format="{message}",
+    )
+    try:
+        assert subscription_service_module._get_public_web_base_url() is None
+    finally:
+        subscription_service_module.logger.remove(handler_id)
+
+    rendered_logs = "\n".join(messages)
+    assert "Unable to resolve PUBLIC_WEB_BASE_URL" in rendered_logs
+    assert "RuntimeError" in rendered_logs
+    assert "/private/secret-config-path" not in rendered_logs
 
 
 class _RepoForSubscriptionRead:
