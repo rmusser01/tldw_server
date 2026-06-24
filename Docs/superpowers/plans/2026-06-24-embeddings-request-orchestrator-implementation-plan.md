@@ -336,20 +336,20 @@ Expected result after implementation: new resolver tests and existing shim tests
 
 ### Task 5: Extract Embedding Policy Decisions
 
-- [ ] Add `embedding_policy.py`.
-- [ ] Move `_supports_openai_dimensions`, `_validate_dimensions_request`, `_dimension_policy`, `adjust_dimensions`, `decide_and_apply_l2`, `resolve_fallback_chain`, `_fallback_model_map`, and `map_model_for_provider` into the policy module.
-- [ ] Add `enforce_embedding_policy(intent, context, *, allowed_providers, allowed_models, implemented_providers, enforce_policy, allow_fallback_with_header, settings_fallback_chain, settings_fallback_model_map) -> EmbeddingPolicyDecision`.
-- [ ] Preserve policy behavior:
+- [x] Add `embedding_policy.py`.
+- [x] Move `_supports_openai_dimensions`, `_validate_dimensions_request`, `_dimension_policy`, `adjust_dimensions`, `decide_and_apply_l2`, `resolve_fallback_chain`, `_fallback_model_map`, and `map_model_for_provider` into the policy module.
+- [x] Add `enforce_embedding_policy(intent, context, *, allowed_providers, allowed_models, implemented_providers, enforce_policy, allow_fallback_with_header, settings_fallback_chain, settings_fallback_model_map) -> EmbeddingPolicyDecision`.
+- [x] Preserve policy behavior:
   - OpenAI dimensions are allowed only for `text-embedding-3-small` and `text-embedding-3-large`.
   - Non-OpenAI dimensions must be positive and no greater than 4096.
   - Explicit provider header suppresses fallback unless `EMBEDDINGS_ALLOW_FALLBACK_WITH_HEADER` is truthy.
   - Allowlist failures raise `EmbeddingPolicyError` with provider/model denial codes.
   - Recognized but unimplemented providers raise `EmbeddingPolicyError("provider_unsupported", "Provider 'voyage' not implemented")`.
   - Admin bypass remains claim-first through endpoint-provided `enforce_policy` value; the policy module receives the final boolean and does not import AuthNZ.
-- [ ] Add `tldw_Server_API/tests/Embeddings_isolated/test_embedding_policy.py`.
-- [ ] Cover dimensions, fallback chain defaults, configured fallback chain, fallback model mapping, explicit-header suppression, allowlist deny, wildcard model allowlist, unsupported provider, and L2 normalization/base64 behavior.
-- [ ] Modify endpoint shims to delegate and map `EmbeddingPolicyError` to existing `HTTPException` status codes.
-- [ ] Run:
+- [x] Add `tldw_Server_API/tests/Embeddings_isolated/test_embedding_policy.py`.
+- [x] Cover dimensions, fallback chain defaults, configured fallback chain, fallback model mapping, explicit-header suppression, allowlist deny, wildcard model allowlist, unsupported provider, and L2 normalization/base64 behavior.
+- [x] Modify endpoint shims to delegate and map `EmbeddingPolicyError` to existing `HTTPException` status codes.
+- [x] Run:
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -361,6 +361,15 @@ python -m pytest -q \
 ```
 
 Expected result after implementation: new policy tests pass and existing dimensions/fallback tests still pass through endpoint shims.
+
+Task 5 completed and reviewed. Additional endpoint regressions cover unknown and unsupported providers with invalid dimensions for both create and batch endpoints. Spec review approved after adding unknown-provider classification. Quality review approved after moving endpoint provider/dimension classification into the centralized policy wrapper.
+
+Verification:
+- Red endpoint check before the final fix: `test_embeddings_unsupported_provider.py` failed with 3 failures exposing the ordering bug.
+- `python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py` -> 5 passed, 195 warnings.
+- `python -m pytest -q tldw_Server_API/tests/Embeddings_isolated/test_embedding_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_dimensions_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback_model_map.py tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_batch_dimensions.py tldw_Server_API/tests/Embeddings/test_embeddings_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_policy_toggle.py tldw_Server_API/tests/Embeddings/test_embeddings_policy_strict_mode.py tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py` -> 45 passed, 754 warnings.
+- `python -m compileall -q` on touched policy, endpoint, and test files -> passed.
+- `python -m bandit -r tldw_Server_API/app/core/Embeddings/embedding_policy.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py -f json -o /tmp/bandit_embeddings_policy_coord.json` -> 0 findings, no errors.
 
 ### Task 6: Add Orchestrator Prepare And Execute Phases
 

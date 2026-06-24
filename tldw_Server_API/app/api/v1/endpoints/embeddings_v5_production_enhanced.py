@@ -75,11 +75,17 @@ from tldw_Server_API.app.core.config import settings
 
 # Audit logging: unify later via unified audit DI; legacy import removed (unused here)
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
+from tldw_Server_API.app.core.Embeddings import embedding_policy as embedding_policy_core
 from tldw_Server_API.app.core.Embeddings.provider_resolution import (
     resolve_provider_model,
     split_provider_model,
 )
-from tldw_Server_API.app.core.Embeddings.request_types import EmbeddingPolicyError
+from tldw_Server_API.app.core.Embeddings.request_types import (
+    EmbeddingPolicyDecision,
+    EmbeddingPolicyError,
+    EmbeddingRequestContext,
+    ProviderModelIntent,
+)
 
 # Circuit Breaker
 from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreaker
@@ -1423,61 +1429,19 @@ def tokens_to_texts(
     raise ValueError("Invalid token array input")
 
 def _dimension_policy() -> str:
-    # reduce (slice), pad, or ignore
-    try:
-        val = os.getenv("EMBEDDINGS_DIMENSION_POLICY", "reduce").lower()
-        if val in ("reduce", "pad", "ignore"):
-            return val
-    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-        pass
-    return "reduce"
+    return embedding_policy_core.dimension_policy(os.getenv, default="reduce")
 
 
 def _supports_openai_dimensions(model: str) -> bool:
     """Return True when OpenAI model supports dimensions parameter."""
-    model_key = (model or "").split(":", 1)[-1]
-    return model_key.startswith("text-embedding-3")
+    return embedding_policy_core.supports_openai_dimensions(model)
 
 def _validate_dimensions_request(provider: str, model: str, dimensions: int | None) -> int | None:
     """Validate requested dimensions for the provider/model pair."""
-    if dimensions is None:
-        return None
     try:
-        dim = int(dimensions)
-    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="dimensions must be an integer",
-        ) from exc
-    if dim <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"dimensions must be positive, got {dim}",
-        )
-
-    provider_key = (provider or "").lower()
-    model_key = (model or "").split(":", 1)[-1]
-    if provider_key == "openai":
-        if not _supports_openai_dimensions(model):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="dimensions is only supported for OpenAI text-embedding-3 models",
-            )
-        max_dims = {"text-embedding-3-small": 1536, "text-embedding-3-large": 3072}
-        max_dim = max_dims.get(model_key)
-        if max_dim is not None and dim > max_dim:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"dimensions {dim} exceeds maximum {max_dim} for model {model_key}",
-            )
-    else:
-        if dim > 4096:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="dimensions must be <= 4096 for non-OpenAI providers",
-            )
-
-    return dim
+        return embedding_policy_core.validate_dimensions_request(provider, model, dimensions)
+    except EmbeddingPolicyError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message) from exc
 
 def adjust_dimensions(
     vectors: list[list[float]],
@@ -1485,35 +1449,21 @@ def adjust_dimensions(
     provider: str,
     model: str
 ) -> list[list[float]]:
-    if not target_dim or target_dim <= 0:
-        return vectors
-    policy = _dimension_policy()
-    adjusted: list[list[float]] = []
-    for v in vectors:
-        if not isinstance(v, (list, tuple)):
-            adjusted.append(v)
-            continue
-        arr = np.asarray(v, dtype=np.float32)
-        cur = arr.shape[0]
-        if cur == target_dim or policy == "ignore":
-            adjusted.append(arr.tolist())
-            continue
-        if cur > target_dim:
-            # reduce by slicing first-N
-            out = arr[:target_dim]
-            adjusted.append(out.tolist())
-            embedding_dimension_adjustments_total.labels(provider=provider, model=model, method="reduce").inc()
-        else:
-            if policy == "pad":
-                # zero-pad
-                pad = np.zeros((target_dim - cur,), dtype=np.float32)
-                out = np.concatenate([arr, pad], axis=0)
-                adjusted.append(out.tolist())
-                embedding_dimension_adjustments_total.labels(provider=provider, model=model, method="pad").inc()
-            else:
-                # reduce policy cannot expand; return as-is
-                adjusted.append(arr.tolist())
-    return adjusted
+    def _record_adjustment(metric_provider: str, metric_model: str, method: str) -> None:
+        embedding_dimension_adjustments_total.labels(
+            provider=metric_provider,
+            model=metric_model,
+            method=method,
+        ).inc()
+
+    return embedding_policy_core.adjust_dimensions(
+        vectors,
+        target_dim,
+        provider,
+        model,
+        dimension_policy=_dimension_policy(),
+        record_adjustment=_record_adjustment,
+    )
 
 def decide_and_apply_l2(
     embedding: list[float] | np.ndarray,
@@ -1532,9 +1482,6 @@ def decide_and_apply_l2(
     and preserves default behavior (numeric outputs normalized; adapter vectors preserved
     unless normalization is explicitly requested via env flag).
     """
-    # Default: normalize for numeric outputs; never for base64
-    do_l2 = encoding_format != "base64"
-
     normalize_requested: bool | None = None
     try:
         env_val = os.getenv("LLM_EMBEDDINGS_L2_NORMALIZE", "")
@@ -1547,30 +1494,12 @@ def decide_and_apply_l2(
         )
         normalize_requested = None
 
-    # Adapter vectors: preserve as-is unless normalization explicitly requested
-    if embeddings_from_adapter:
-        do_l2 = encoding_format != "base64" if normalize_requested is True else False
-
-    try:
-        arr = np.asarray(embedding, dtype=np.float32)
-        if do_l2:
-            norm = np.linalg.norm(arr)
-            if norm > 0:
-                arr = arr / norm
-        return arr, do_l2
-    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as e:
-        # Log error and return original values (converted to float32 if possible)
-        logger.error(
-            "Error applying L2 policy in decide_and_apply_l2 "
-            f"(LLM_EMBEDDINGS_L2_NORMALIZE, encoding_format={encoding_format}, "
-            f"embeddings_from_adapter={embeddings_from_adapter}): {e}"
-        )
-        try:
-            arr = np.asarray(embedding, dtype=np.float32)
-        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-            # Last resort: best-effort array without dtype guarantee
-            arr = np.array(embedding)
-        return arr, False
+    return embedding_policy_core.decide_and_apply_l2(
+        embedding,
+        encoding_format,
+        embeddings_from_adapter,
+        normalize_requested=normalize_requested,
+    )
 
 def _resolve_auth_principal_from_request(request: Request | None) -> AuthPrincipal | None:
     """Best-effort extraction of AuthPrincipal from request state."""
@@ -1654,69 +1583,38 @@ def _should_enforce_policy_for_request(
         return _should_enforce_policy(user)
 
 def resolve_fallback_chain(primary_provider: str) -> list[str]:
-    # Configurable chain; else default
+    mapping = None
     try:
         mapping = settings.get("EMBEDDINGS_FALLBACK_CHAIN", {}) or {}
-        if isinstance(mapping, dict):
-            chain = mapping.get(primary_provider, None)
-            if isinstance(chain, list) and chain:
-                return [primary_provider] + [p for p in chain if isinstance(p, str)]
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
         pass
-    defaults = {
-        "openai": ["openai", "huggingface", "onnx", "local_api"],
-        "huggingface": ["huggingface", "onnx", "local_api"],
-        "onnx": ["onnx", "huggingface", "local_api"],
-        "local_api": ["local_api", "huggingface"],
-    }
-    return defaults.get(primary_provider, [primary_provider])
+    return embedding_policy_core.resolve_fallback_chain(
+        primary_provider,
+        settings_fallback_chain=mapping if isinstance(mapping, dict) else None,
+    )
 
 def _fallback_model_map() -> dict[str, dict[str, str]]:
     """Return mapping for provider-specific model fallbacks.
 
     Shape: {"<src_provider>:<src_model>": {"<dst_provider>": "<dst_model>"}}
     """
+    configured_map = None
     try:
-        m = settings.get("EMBEDDINGS_FALLBACK_MODEL_MAP", None)
-        if isinstance(m, dict) and m:
-            return m
+        configured_map = settings.get("EMBEDDINGS_FALLBACK_MODEL_MAP", None)
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
         pass
-    # Sensible defaults for common OpenAI → HF mapping
-    return {
-        "openai:text-embedding-3-small": {
-            "huggingface": "sentence-transformers/all-MiniLM-L6-v2",
-            "onnx": "sentence-transformers/all-MiniLM-L6-v2",
-            "local_api": "sentence-transformers/all-MiniLM-L6-v2",
-        },
-        "openai:text-embedding-3-large": {
-            "huggingface": "sentence-transformers/all-mpnet-base-v2",
-            "onnx": "sentence-transformers/all-mpnet-base-v2",
-            "local_api": "sentence-transformers/all-mpnet-base-v2",
-        },
-        "openai:text-embedding-ada-002": {
-            "huggingface": "sentence-transformers/all-mpnet-base-v2",
-            "onnx": "sentence-transformers/all-mpnet-base-v2",
-            "local_api": "sentence-transformers/all-mpnet-base-v2",
-        },
-    }
+    return embedding_policy_core.fallback_model_map(
+        configured_map if isinstance(configured_map, dict) else None,
+    )
 
 def map_model_for_provider(src_provider: str, dst_provider: str, model_id: str) -> str:
     """Map a model id to the destination provider if a mapping exists."""
-    if not src_provider or not dst_provider:
-        return model_id
-    if src_provider == dst_provider:
-        return model_id
-    key = f"{src_provider}:{model_id}"
-    mapping = _fallback_model_map()
-    try:
-        dst_map = mapping.get(key, {})
-        mapped = dst_map.get(dst_provider)
-        if isinstance(mapped, str) and mapped:
-            return mapped
-    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-        pass
-    return model_id
+    return embedding_policy_core.map_model_for_provider(
+        src_provider,
+        dst_provider,
+        model_id,
+        settings_fallback_model_map=_fallback_model_map(),
+    )
 
 # Models that require trust_remote_code=True for HuggingFace loading
 def _hf_trusts_remote_code(model_name: str) -> bool:
@@ -1769,18 +1667,85 @@ async def get_embeddings_providers_config(current_user: User = Depends(get_reque
 # ============================================================================
 
 def is_model_allowed(provider: str, model: str) -> bool:
-    providers = _get_allowed_providers()
-    models = _get_allowed_models()
-    if providers is not None and provider.lower() not in providers:
+    return embedding_policy_core.is_model_allowed(
+        provider,
+        model,
+        allowed_providers=_get_allowed_providers(),
+        allowed_models=_get_allowed_models(),
+    )
+
+
+def _allow_fallback_with_header() -> bool:
+    try:
+        return is_truthy(os.getenv("EMBEDDINGS_ALLOW_FALLBACK_WITH_HEADER"))
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
         return False
-    if models is not None:
-        for pat in models:
-            if pat.endswith("*") and model.startswith(pat[:-1]):
-                return True
-            if model == pat:
-                return True
-        return False
-    return True
+
+
+def _policy_error_to_http(exc: EmbeddingPolicyError) -> HTTPException:
+    if exc.code in {"provider_denied", "model_denied"}:
+        policy_type = "provider" if exc.code == "provider_denied" else "model"
+        try:
+            embedding_policy_denied_total.labels(
+                provider=exc.provider or "unknown",
+                model=exc.model or "unknown",
+                policy_type=policy_type,
+            ).inc()
+        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+            pass
+        return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=exc.message)
+    if exc.code == "provider_unsupported":
+        return HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=exc.message)
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message)
+
+
+def _embedding_policy_setting(name: str, default: Any) -> Any:
+    try:
+        return settings.get(name, default)
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+        return default
+
+
+def _enforce_embedding_policy_decision(
+    *,
+    provider: str,
+    model: str,
+    provider_header: str | None,
+    dimensions: int | None,
+    encoding_format: str | None,
+    enforce_policy: bool,
+    allowed_providers: list[str] | None,
+    allowed_models: list[str] | None,
+) -> EmbeddingPolicyDecision:
+    intent = ProviderModelIntent(
+        provider=provider,
+        model=model,
+        requested_provider=provider_header,
+        requested_model=model,
+        provider_was_explicit=provider_header is not None,
+        model_was_provider_qualified=False,
+    )
+    context = EmbeddingRequestContext(
+        user_id=None,
+        model_field=model,
+        provider_header=provider_header,
+        dimensions=dimensions,
+        encoding_format=encoding_format,
+    )
+    try:
+        return embedding_policy_core.enforce_embedding_policy(
+            intent,
+            context,
+            allowed_providers=allowed_providers,
+            allowed_models=allowed_models,
+            implemented_providers=IMPLEMENTED_PROVIDERS,
+            enforce_policy=enforce_policy,
+            allow_fallback_with_header=_allow_fallback_with_header(),
+            settings_fallback_chain=_embedding_policy_setting("EMBEDDINGS_FALLBACK_CHAIN", {}) or {},
+            settings_fallback_model_map=_embedding_policy_setting("EMBEDDINGS_FALLBACK_MODEL_MAP", None),
+        )
+    except EmbeddingPolicyError as exc:
+        raise _policy_error_to_http(exc) from exc
 
 def guess_provider_for_model(model: str, explicit_provider: str | None = None) -> str:
     if explicit_provider:
@@ -2330,16 +2295,6 @@ async def create_embedding_endpoint(
 
         provider = (provider or "").lower()
 
-        try:
-            EmbeddingProvider(provider)
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unknown provider: {provider}"
-            ) from None
-
-        _validate_dimensions_request(provider, model, embedding_request.dimensions)
-
         # Parse and validate input FIRST (before policy checks)
         texts_to_embed: list[str] = []
         provided_token_arrays = False
@@ -2413,36 +2368,21 @@ async def create_embedding_endpoint(
                 }
             )
 
-        # Provider/model allowlist enforcement (after input validation)
-        # Enforce allowlists based on config/env; admin may bypass unless STRICT is set
+        # Provider/model policy enforcement (after input validation)
+        # Enforce allowlists based on config/env; admin may bypass unless STRICT is set.
         enforce_policy = _should_enforce_policy_for_request(request, current_user)
         allowed_providers = _get_allowed_providers()
-        if enforce_policy and allowed_providers is not None and provider.lower() not in allowed_providers:
-            embedding_policy_denied_total.labels(provider=provider, model=model, policy_type="provider").inc()
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Provider '{provider}' is not allowed")
-
         allowed_models = _get_allowed_models()
-        if enforce_policy and allowed_models is not None:
-            def _model_allowed(m: str) -> bool:
-                for pat in allowed_models:
-                    if pat.endswith("*") and m.startswith(pat[:-1]):
-                        return True
-                    if m == pat:
-                        return True
-                return False
-            if not _model_allowed(model):
-                embedding_policy_denied_total.labels(provider=provider, model=model, policy_type="model").inc()
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Model '{model}' is not allowed")
-
-        # Guard: return 501 for unsupported/unstyled providers (prevents silent fallback)
-        try:
-            EmbeddingProvider(provider)
-        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-            # Unknown provider is handled as 400 elsewhere, keep behavior consistent
-            pass
-        else:
-            if provider.lower() not in IMPLEMENTED_PROVIDERS:
-                raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=f"Provider '{provider}' not implemented")
+        policy_decision = _enforce_embedding_policy_decision(
+            provider=provider,
+            model=model,
+            provider_header=x_provider,
+            dimensions=embedding_request.dimensions,
+            encoding_format=embedding_request.encoding_format,
+            enforce_policy=enforce_policy,
+            allowed_providers=allowed_providers,
+            allowed_models=allowed_models,
+        )
 
         byok_cache: dict[str, ResolvedByokCredentials] = {}
 
@@ -2650,17 +2590,7 @@ async def create_embedding_endpoint(
         elif not embeddings:
             # Try provider with fallback chain on failure
             last_error: Exception | None = None
-            # Fallback policy when explicit provider header is present:
-            # Strict by default: do NOT fallback when `x-provider` header is set.
-            # To allow fallback even with header, set EMBEDDINGS_ALLOW_FALLBACK_WITH_HEADER=true
-            try:
-                allow_hdr = is_truthy(os.getenv("EMBEDDINGS_ALLOW_FALLBACK_WITH_HEADER"))
-            except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-                allow_hdr = False
-            fallback_disabled = (x_provider is not None and not allow_hdr)
-            chain = [provider] if fallback_disabled else resolve_fallback_chain(provider)
-            if enforce_policy and allowed_providers is not None:
-                chain = [p for p in chain if p.lower() in allowed_providers or p == provider]
+            chain = policy_decision.fallback_chain
             fallback_from: str | None = None
             for p in chain:
                 try:
@@ -2957,17 +2887,19 @@ async def create_embeddings_batch_endpoint(
 
     model, provider = _resolve_model_and_provider(payload.model, payload.provider)
 
-    _validate_dimensions_request(provider, model, payload.dimensions)
-
     enforce_policy = _should_enforce_policy_for_request(request, current_user)
     allowed_providers = _get_allowed_providers()
-    if enforce_policy and allowed_providers is not None and provider.lower() not in allowed_providers:
-        embedding_policy_denied_total.labels(provider=provider, model=model, policy_type="provider").inc()
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Provider '{provider}' is not allowed")
-
-    if enforce_policy and not is_model_allowed(provider, model):
-        embedding_policy_denied_total.labels(provider=provider, model=model, policy_type="model").inc()
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Model '{model}' is not allowed")
+    allowed_models = _get_allowed_models()
+    _enforce_embedding_policy_decision(
+        provider=provider,
+        model=model,
+        provider_header=payload.provider,
+        dimensions=payload.dimensions,
+        encoding_format=None,
+        enforce_policy=enforce_policy,
+        allowed_providers=allowed_providers,
+        allowed_models=allowed_models,
+    )
 
     max_tokens = _get_model_max_tokens(provider, model)
     too_long = []

@@ -9,15 +9,21 @@ labels:
 - refactor
 priority: High
 modified_files:
+- Docs/superpowers/plans/2026-06-24-embeddings-request-orchestrator-implementation-plan.md
 - tldw_Server_API/app/core/Embeddings/request_types.py
 - tldw_Server_API/app/core/Embeddings/input_normalizer.py
 - tldw_Server_API/app/core/Embeddings/provider_resolution.py
+- tldw_Server_API/app/core/Embeddings/embedding_policy.py
 - tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py
 - tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_characterization.py
+- tldw_Server_API/tests/Embeddings/test_embeddings_dimensions_policy.py
+- tldw_Server_API/tests/Embeddings/test_embeddings_policy.py
+- tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py
 - tldw_Server_API/tests/Embeddings_isolated/test_request_types.py
 - tldw_Server_API/tests/Embeddings_isolated/test_input_normalizer.py
 - tldw_Server_API/tests/Embeddings_isolated/test_provider_resolution.py
-updated_date: 2026-06-24 20:13
+- tldw_Server_API/tests/Embeddings_isolated/test_embedding_policy.py
+updated_date: 2026-06-24 20:56
 ---
 
 ## Description
@@ -55,6 +61,14 @@ Task 4 verification:
 - `python -m pytest -q tldw_Server_API/tests/Embeddings_isolated/test_provider_resolution.py tldw_Server_API/tests/Embeddings/test_embeddings_v5_unit.py::test_resolve_model_and_provider_strips_prefix tldw_Server_API/tests/Embeddings/test_embeddings_v5_unit.py::test_resolve_model_and_provider_rejects_mismatch` -> 34 passed, 77 warnings.
 - `python -m compileall -q tldw_Server_API/app/core/Embeddings/provider_resolution.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py tldw_Server_API/tests/Embeddings_isolated/test_provider_resolution.py` -> passed.
 - `python -m bandit -r tldw_Server_API/app/core/Embeddings/provider_resolution.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py -f json -o /tmp/bandit_embeddings_provider_resolution_coord.json` -> 0 findings.
+Task 5 completed: extracted embedding policy decisions into `app/core/Embeddings/embedding_policy.py`; endpoint compatibility shims now delegate dimension policy, dimensions validation, L2 normalization, fallback chains/model mapping, allowlist checks, unsupported-provider handling, and fallback-chain decisions to the policy module. Added centralized `_enforce_embedding_policy_decision(...)` wrapper in the endpoint and endpoint regression tests for unknown/unsupported providers with invalid dimensions in both create and batch paths. Spec review approved after unknown-provider classification was added; quality review approved after endpoint pre-policy provider/dimension checks were removed.
+
+Task 5 verification:
+- Red check before final fix: `python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py` failed with 3 failures exposing provider/dimensions ordering.
+- Focused endpoint check after fix: `python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py` -> 5 passed, 195 warnings.
+- Policy suite: `python -m pytest -q tldw_Server_API/tests/Embeddings_isolated/test_embedding_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_dimensions_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback_model_map.py tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_batch_dimensions.py tldw_Server_API/tests/Embeddings/test_embeddings_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_policy_toggle.py tldw_Server_API/tests/Embeddings/test_embeddings_policy_strict_mode.py tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py` -> 45 passed, 754 warnings.
+- Compile: touched policy, endpoint, and test files -> exit 0.
+- Bandit: `python -m bandit -r tldw_Server_API/app/core/Embeddings/embedding_policy.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py -f json -o /tmp/bandit_embeddings_policy_coord.json` -> 0 findings, no errors.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
