@@ -267,3 +267,64 @@ def test_compile_user_policy_accepts_legacy_bool_like_is_regex_values():
     assert result.policy.block_patterns[1].regex.search("literal.*")
     assert not result.policy.block_patterns[1].regex.search("literalabc")
     assert result.report.issues == []
+
+
+def test_compile_user_policy_without_override_returns_base_policy_without_issues():
+    base = ModerationPolicy(enabled=True, categories_enabled={"pii"})
+
+    result = PolicyCompiler().compile_user_policy(base, None)
+
+    assert result.policy is base
+    assert result.report.issues == []
+
+
+def test_compile_user_policy_ignores_non_list_rules_without_issues():
+    base = ModerationPolicy(enabled=True, block_patterns=[])
+
+    result = PolicyCompiler().compile_user_policy(base, {"rules": {"pattern": "secret"}})
+
+    assert result.policy.block_patterns == []
+    assert result.report.issues == []
+
+
+def test_compile_user_policy_invalid_categories_type_falls_back_to_default_categories():
+    base = ModerationPolicy(enabled=True, categories_enabled={"pii"})
+
+    result = PolicyCompiler().compile_user_policy(base, {"categories_enabled": 123})
+
+    assert result.policy.categories_enabled == {"pii"}
+    assert result.report.issues == []
+
+
+def test_compile_user_policy_invalid_rule_phase_defaults_to_both():
+    base = ModerationPolicy(enabled=True, block_patterns=[])
+
+    result = PolicyCompiler().compile_user_policy(
+        base,
+        {
+            "rules": [
+                {
+                    "id": "r1",
+                    "pattern": "secret",
+                    "is_regex": False,
+                    "action": "warn",
+                    "phase": "sideways",
+                }
+            ]
+        },
+    )
+
+    assert len(result.policy.block_patterns) == 1
+    assert result.policy.block_patterns[0].phase == "both"
+    assert result.report.issues == []
+
+
+def test_compile_user_policy_copies_default_categories_when_override_omits_categories():
+    base = ModerationPolicy(enabled=True, categories_enabled={"pii"})
+
+    result = PolicyCompiler().compile_user_policy(base, {"enabled": True})
+
+    assert result.policy.categories_enabled == {"pii"}
+    assert result.policy.categories_enabled is not None
+    result.policy.categories_enabled.add("confidential")
+    assert base.categories_enabled == {"pii"}

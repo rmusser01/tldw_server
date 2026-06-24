@@ -374,9 +374,11 @@ class PolicyCompiler:
         default_categories: set[str] | None,
     ) -> set[str] | None:
         if "categories_enabled" not in override:
-            return default_categories
+            return set(default_categories) if default_categories is not None else None
         parsed = self.parse_categories_override(override.get("categories_enabled"))
-        return parsed if parsed is not None else default_categories
+        if parsed is not None:
+            return parsed
+        return set(default_categories) if default_categories is not None else None
 
     @staticmethod
     def parse_categories_override(value: object | None) -> set[str] | None:
