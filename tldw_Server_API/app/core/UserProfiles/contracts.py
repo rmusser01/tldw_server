@@ -4,10 +4,20 @@ Typed internal contracts for UserProfiles read/update orchestration.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from types import MappingProxyType
 from typing import Any
+
+
+def _freeze_contract_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze_contract_value(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_contract_value(item) for item in value)
+    return value
 
 
 class ProfileContractMode(str, Enum):
@@ -53,7 +63,10 @@ class ProfileUpdateCommand:
 class UpdateMutation:
     key: str
     operation: str
-    payload: dict[str, Any] = field(default_factory=dict)
+    payload: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "payload", _freeze_contract_value(self.payload))
 
 
 @dataclass(frozen=True)
@@ -61,7 +74,10 @@ class EffectDescriptor:
     name: str
     timing: EffectTiming
     policy: EffectPolicy
-    payload: dict[str, Any] = field(default_factory=dict)
+    payload: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "payload", _freeze_contract_value(self.payload))
 
 
 @dataclass(frozen=True)
@@ -83,4 +99,7 @@ class UpdatePlan:
 class PlannedUpdateResult:
     profile_version: datetime
     applied: tuple[str, ...] = ()
-    rejected: tuple[dict[str, str], ...] = ()
+    rejected: tuple[Mapping[str, str], ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "rejected", _freeze_contract_value(self.rejected))
