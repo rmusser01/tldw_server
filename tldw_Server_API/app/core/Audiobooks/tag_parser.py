@@ -162,12 +162,14 @@ def build_chapters_from_markers(
     *,
     warnings: list[str] | None = None,
 ) -> list[ChapterPreview]:
+    """Build chapter previews from tag markers while resolving ID collisions."""
     if not markers:
         return []
     length = len(text)
     ordered = sorted(markers, key=lambda m: m.offset)
     chapters: list[ChapterPreview] = []
     seen_ids: set[str] = set()
+    explicit_ids: set[str] = {marker.chapter_id for marker in ordered if marker.chapter_id}
     for idx, marker in enumerate(ordered):
         start = max(0, min(marker.offset, length))
         next_offset = length
@@ -179,7 +181,7 @@ def build_chapters_from_markers(
         if marker.chapter_id:
             chapter_id = _deduplicate_explicit_chapter_id(marker.chapter_id, seen_ids, warnings)
         else:
-            chapter_id = _next_generated_chapter_id(len(chapters) + 1, seen_ids, warnings)
+            chapter_id = _next_generated_chapter_id(len(chapters) + 1, seen_ids, explicit_ids, warnings)
         chapters.append(
             ChapterPreview(
                 chapter_id=chapter_id,
@@ -197,6 +199,7 @@ def _deduplicate_explicit_chapter_id(
     seen_ids: set[str],
     warnings: list[str] | None,
 ) -> str:
+    """Return a unique explicit chapter ID and warn when suffixing duplicates."""
     if chapter_id not in seen_ids:
         seen_ids.add(chapter_id)
         return chapter_id
@@ -213,13 +216,15 @@ def _deduplicate_explicit_chapter_id(
 def _next_generated_chapter_id(
     start_number: int,
     seen_ids: set[str],
+    explicit_ids: set[str],
     warnings: list[str] | None,
 ) -> str:
+    """Return the next generated chapter ID and warn only for explicit-ID skips."""
     number = max(1, start_number)
     candidate = f"ch_{number:03d}"
-    if candidate in seen_ids and warnings is not None:
-        warnings.append(f"generated_chapter_id_collision:{candidate}")
     while candidate in seen_ids:
+        if candidate in explicit_ids and warnings is not None:
+            warnings.append(f"generated_chapter_id_collision:{candidate}")
         number += 1
         candidate = f"ch_{number:03d}"
     seen_ids.add(candidate)

@@ -302,6 +302,7 @@ def _render_text(
     line_sep: str,
     format: SubtitleFormat,
 ) -> str:
+    """Render sanitized alignment words into wrapped subtitle cue text."""
     tokens = [_sanitize_word_for_format(word.word, format) for word in words]
     if max_lines is not None and max_lines <= 0:
         raise ValueError("max_lines must be positive")
@@ -340,6 +341,7 @@ def _render_text(
 
 
 def _sanitize_word_for_format(text: str, format: SubtitleFormat) -> str:
+    """Sanitize a subtitle token for the target subtitle container format."""
     clean = _normalize_word_text(text)
     if format == "vtt":
         return html.escape(clean, quote=False)
@@ -353,6 +355,7 @@ def _sanitize_word_for_format(text: str, format: SubtitleFormat) -> str:
 
 
 def _normalize_word_text(text: str) -> str:
+    """Collapse control characters and line separators inside subtitle word text."""
     clean = str(text)
     clean = clean.replace("\r\n", "\n").replace("\r", "\n")
     clean = clean.replace("\u2028", "\n").replace("\u2029", "\n")

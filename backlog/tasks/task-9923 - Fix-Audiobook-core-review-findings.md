@@ -3,11 +3,11 @@ id: TASK-9923
 title: Fix Audiobook core review findings
 status: Done
 assignee: []
-created_date: '2026-06-23 18:31'
-updated_date: '2026-06-23 18:31'
+created_date: 2026-06-23 18:31
+updated_date: 2026-06-24 01:39
 labels:
-  - audiobooks
-  - code-review
+- audiobooks
+- code-review
 dependencies: []
 priority: high
 ---
@@ -42,7 +42,7 @@ Implementation completed inline after red tests confirmed the reviewed failures.
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed audiobook core review findings: chapter IDs are de-duplicated with warnings, speed/timestamp tags reject invalid values, alignment anchors cannot move later cues before adjusted prior cues, generated subtitle text is sanitized per SRT/VTT/ASS, and subtitle parsing only strips real timing lines.
+Fixed audiobook core review findings and PR #2443 review feedback: chapter IDs are de-duplicated with non-cascading warnings, speed/timestamp tags reject invalid values, alignment anchors cannot move later cues before adjusted prior cues, generated subtitle text is sanitized per SRT/VTT/ASS, subtitle parsing only strips real timing lines, worker metadata preserves chapter-planning warnings, and modified helpers include docstrings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -54,3 +54,10 @@ Fixed audiobook core review findings: chapter IDs are de-duplicated with warning
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-06-24: Reopened to address PR #2443 review feedback after rebasing onto latest origin/dev. Action items: refine generated chapter collision warnings, add required docstrings, refresh worker tag marker metadata after warning mutation, and strip next-line timing candidates defensively.
+2026-06-24 PR #2443 review pass: rebased branch onto latest origin/dev and addressed review feedback. Generated chapter ID warnings now only report explicit-ID collisions instead of cascading from prior generated IDs. Added required docstrings to modified audiobook helpers, refreshed worker tag marker metadata after chapter planning mutates warnings, and stripped next-line timing candidates defensively. Verification: targeted Audiobooks unit subset passed (45 passed); compileall passed; Bandit on touched runtime scope reported 0 findings; git diff --check passed.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

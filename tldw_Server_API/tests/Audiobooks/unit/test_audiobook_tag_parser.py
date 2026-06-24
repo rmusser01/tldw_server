@@ -78,6 +78,22 @@ def test_build_chapters_from_markers_deduplicates_ids_with_warnings():
     assert "duplicate_chapter_id:ch_002" in warnings
 
 
+def test_generated_chapter_collision_warnings_do_not_cascade_from_generated_ids():
+    text = "One.\nTwo.\nThree.\nFour."
+    markers = [
+        ChapterMarker(offset=0, chapter_id="ch_002", title="One"),
+        ChapterMarker(offset=text.index("Two."), chapter_id=None, title="Two"),
+        ChapterMarker(offset=text.index("Three."), chapter_id=None, title="Three"),
+        ChapterMarker(offset=text.index("Four."), chapter_id=None, title="Four"),
+    ]
+    warnings: list[str] = []
+
+    chapters = build_chapters_from_markers(text, markers, warnings=warnings)
+
+    assert [chapter.chapter_id for chapter in chapters] == ["ch_002", "ch_003", "ch_004", "ch_005"]
+    assert warnings == ["generated_chapter_id_collision:ch_002"]
+
+
 def test_parse_tagged_text_rejects_invalid_speed_markers():
     raw = (
         "[[speed=nan]]\n"

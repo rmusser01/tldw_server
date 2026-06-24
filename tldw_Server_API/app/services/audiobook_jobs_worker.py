@@ -702,6 +702,7 @@ def _build_chapter_plan(
     tag_result: TagParseResult | None = None,
     voice_profile: VoiceProfileConfig | None = None,
 ) -> list[ChapterPlanItem]:
+    """Build chapter work items from explicit specs, tags, or detected headings."""
     detected: list[ChapterPreview]
     if tag_result and tag_result.chapter_markers:
         detected = build_chapters_from_markers(
@@ -823,6 +824,12 @@ def _build_chapter_plan(
         for i, item in enumerate(plan)
     ]
     return plan
+
+
+def _refresh_tag_marker_metadata(metadata: dict[str, Any], tag_result: TagParseResult) -> None:
+    """Refresh copied tag metadata after chapter planning mutates warnings."""
+    if "tag_markers" in metadata:
+        metadata["tag_markers"] = tag_result.as_metadata()
 
 
 def _sanitize_source_ref(source: dict[str, Any]) -> dict[str, Any]:
@@ -1246,6 +1253,7 @@ async def process_audiobook_job(
                 tag_result=tag_result,
                 voice_profile=voice_profile,
             )
+            _refresh_tag_marker_metadata(source_metadata, tag_result)
 
             item_title = _resolve_item_title(item_metadata, source_metadata)
             item_tag = _build_item_tag(item_index, item_title)

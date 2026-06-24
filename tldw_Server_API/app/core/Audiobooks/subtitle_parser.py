@@ -61,7 +61,7 @@ def _parse_srt_vtt(text: str, *, kind: str) -> str:
             continue
         if not current:
             next_line = _peek_next_non_empty_line(idx + 1)
-            if next_line and _SRT_VTT_TIMING_RE.match(next_line):
+            if next_line and _SRT_VTT_TIMING_RE.match(next_line.strip()):
                 if kind == "vtt":
                     # Cue identifier line for VTT.
                     continue
