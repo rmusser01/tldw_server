@@ -48,6 +48,14 @@ def _normalize_choice(value: Any, *, field_name: str, allowed: frozenset[str], d
     return raw
 
 
+def _normalize_bool(value: Any, *, field_name: str, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    raise IngestionSourceValidationError(f"{field_name} must be a boolean")
+
+
 def validate_source_sink_pair(*, source_type: str, sink_type: str) -> None:
     if source_type == "git_repository" and sink_type != "notes":
         raise IngestionSourceValidationError(
@@ -73,11 +81,13 @@ def normalize_source_payload(data: dict[str, Any]) -> dict[str, Any]:
         default="canonical",
     )
     validate_source_sink_pair(source_type=source_type, sink_type=sink_type)
-    enabled_raw = data.get("enabled")
-    enabled = True if enabled_raw is None else bool(enabled_raw)
+    enabled = _normalize_bool(data.get("enabled"), field_name="enabled", default=True)
     schedule_config = data.get("schedule") or data.get("schedule_config") or {}
-    schedule_enabled_raw = data.get("schedule_enabled")
-    schedule_enabled = bool(schedule_config) if schedule_enabled_raw is None else bool(schedule_enabled_raw)
+    schedule_enabled = _normalize_bool(
+        data.get("schedule_enabled"),
+        field_name="schedule_enabled",
+        default=bool(schedule_config),
+    )
     return {
         "source_type": source_type,
         "sink_type": sink_type,
@@ -162,6 +172,24 @@ async def ensure_ingestion_sources_schema(db) -> None:
             FOREIGN KEY(source_id) REFERENCES ingestion_sources(id) ON DELETE CASCADE,
             FOREIGN KEY(snapshot_id) REFERENCES ingestion_source_snapshots(id) ON DELETE SET NULL
         );
+
+        CREATE INDEX IF NOT EXISTS idx_ingestion_sources_user_id
+            ON ingestion_sources(user_id, id);
+
+        CREATE INDEX IF NOT EXISTS idx_ingestion_sources_scheduler
+            ON ingestion_sources(enabled, schedule_enabled, id);
+
+        CREATE INDEX IF NOT EXISTS idx_ingestion_source_state_active_job
+            ON ingestion_source_state(active_job_id, source_id);
+
+        CREATE INDEX IF NOT EXISTS idx_ingestion_source_snapshots_source_status_id
+            ON ingestion_source_snapshots(source_id, status, id DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_ingestion_source_artifacts_source_kind_status
+            ON ingestion_source_artifacts(source_id, artifact_kind, status, id DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_ingestion_item_events_source_item
+            ON ingestion_item_events(source_id, item_path, id DESC);
         """
     )
     await _ensure_sqlite_column(
@@ -429,10 +457,18 @@ async def update_source(
         )
     enabled_value = existing.get("enabled")
     if "enabled" in patch and patch.get("enabled") is not None:
-        enabled_value = bool(patch.get("enabled"))
+        enabled_value = _normalize_bool(
+            patch.get("enabled"),
+            field_name="enabled",
+            default=bool(enabled_value),
+        )
     schedule_enabled_value = existing.get("schedule_enabled")
     if "schedule_enabled" in patch and patch.get("schedule_enabled") is not None:
-        schedule_enabled_value = bool(patch.get("schedule_enabled"))
+        schedule_enabled_value = _normalize_bool(
+            patch.get("schedule_enabled"),
+            field_name="schedule_enabled",
+            default=bool(schedule_enabled_value),
+        )
     schedule_config_value = existing.get("schedule_config") or {}
     if "schedule" in patch and patch.get("schedule") is not None:
         schedule_config = patch.get("schedule")
@@ -1175,7 +1211,7 @@ async def finish_source_sync_job(
     snapshot_id: int | None = None,
 ) -> dict[str, Any]:
     now = _utc_now_text()
-    await db.execute(
+    cursor = await db.execute(
         """
         UPDATE ingestion_source_state
         SET active_job_id = NULL,
@@ -1200,6 +1236,10 @@ async def finish_source_sync_job(
             str(job_id),
         ),
     )
+    if getattr(cursor, "rowcount", -1) == 0:
+        raise RuntimeError(
+            f"Could not finish source {int(source_id)}: active sync job does not match {job_id}"
+        )
     cursor = await db.execute(
         """
         SELECT
