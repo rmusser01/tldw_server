@@ -14,13 +14,15 @@
 
 Design: `Docs/superpowers/specs/2026-06-24-moderation-policy-compiler-refactor-design.md`
 
-Backlog: `TASK-2431`
+Plan Backlog: `TASK-2431`
+Implementation Backlog: `TASK-2432`
 
 ## File Structure
 
 - Create: `tldw_Server_API/app/core/Moderation/policy_compiler.py`
   - Owns `ResolvedModerationConfig`, `PolicyCompilationInput`, `PolicyCompilationIssue`, `PolicyCompilationReport`, `PolicyCompilationResult`, and `PolicyCompiler`.
   - Owns shared parsing, regex flag, dangerous-regex, category, boolean, and rule compilation helpers.
+  - Must not import `ModerationPolicy` or `PatternRule` from `moderation_service.py` at module import time. Use `TYPE_CHECKING` plus a local runtime import helper to avoid a circular import when `ModerationService` imports `PolicyCompiler`.
 - Modify: `tldw_Server_API/app/core/Moderation/moderation_service.py`
   - Keeps all I/O, path resolution, persistence, locks, logging, and public methods.
   - Builds `ResolvedModerationConfig`.
@@ -35,7 +37,7 @@ Backlog: `TASK-2431`
   - Add/adjust settings and PII effective-policy compatibility tests.
 - Modify: `tldw_Server_API/tests/Guardian/test_supervised_policy.py`
   - Add/adjust overlay regression coverage only if compiler integration affects policy construction tests.
-- Modify: `backlog/tasks/task-2431 - Plan-Moderation-PolicyCompiler-refactor-implementation.md`
+- Modify: `backlog/tasks/task-2432 - Implement-Moderation-PolicyCompiler-refactor.md`
   - Track implementation progress, modified files, and verification evidence.
 
 ## Conventions
@@ -144,12 +146,13 @@ Create `tldw_Server_API/app/core/Moderation/policy_compiler.py`:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING
 
-from tldw_Server_API.app.core.Moderation.moderation_service import (
-    ModerationPolicy,
-    PatternRule,
-)
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Moderation.moderation_service import (
+        ModerationPolicy,
+        PatternRule,
+    )
 
 
 @dataclass(frozen=True)
@@ -197,14 +200,24 @@ class PolicyCompilationResult:
 
 
 class PolicyCompiler:
+    @staticmethod
+    def policy_types() -> tuple[type[ModerationPolicy], type[PatternRule]]:
+        from tldw_Server_API.app.core.Moderation.moderation_service import (
+            ModerationPolicy,
+            PatternRule,
+        )
+
+        return ModerationPolicy, PatternRule
+
     def compile_global(self, data: PolicyCompilationInput) -> PolicyCompilationResult:
         report = PolicyCompilationReport()
         config = data.config
-        categories_enabled = self._resolve_runtime_categories(
+        ModerationPolicy, PatternRule = self.policy_types()
+        categories_enabled = self.resolve_runtime_categories(
             data.runtime_override,
             config.categories_enabled,
         )
-        pii_enabled = self._resolve_runtime_pii(data.runtime_override, config.pii_enabled)
+        pii_enabled = self.resolve_runtime_pii(data.runtime_override, config.pii_enabled)
         block_patterns: list[PatternRule] = []
         if pii_enabled:
             block_patterns.extend(list(data.pii_rules or []))
@@ -223,13 +236,13 @@ class PolicyCompiler:
         return PolicyCompilationResult(policy=policy, report=report)
 
     @staticmethod
-    def _resolve_runtime_pii(runtime_override: dict[str, object], default: bool) -> bool:
+    def resolve_runtime_pii(runtime_override: dict[str, object], default: bool) -> bool:
         if "pii_enabled" in runtime_override:
             return bool(runtime_override.get("pii_enabled"))
         return bool(default)
 
     @staticmethod
-    def _resolve_runtime_categories(
+    def resolve_runtime_categories(
         runtime_override: dict[str, object],
         default: set[str] | None,
     ) -> set[str] | None:
@@ -350,8 +363,9 @@ class PolicyCompiler:
     def compile_global(self, data: PolicyCompilationInput) -> PolicyCompilationResult:
         report = PolicyCompilationReport()
         config = data.config
-        categories_enabled = self._resolve_runtime_categories(data.runtime_override, config.categories_enabled)
-        pii_enabled = self._resolve_runtime_pii(data.runtime_override, config.pii_enabled)
+        ModerationPolicy, _ = self.policy_types()
+        categories_enabled = self.resolve_runtime_categories(data.runtime_override, config.categories_enabled)
+        pii_enabled = self.resolve_runtime_pii(data.runtime_override, config.pii_enabled)
         block_patterns = self.compile_blocklist_lines(data.blocklist_lines, report)
         if pii_enabled:
             block_patterns.extend(list(data.pii_rules or []))
@@ -558,6 +572,7 @@ Use this rule compilation body:
         source: str,
         index: int | None,
     ) -> PatternRule | None:
+        _, PatternRule = self.policy_types()
         try:
             regex_parts = self.parse_regex_expr(expr)
             if regex_parts:
@@ -661,6 +676,7 @@ In `moderation_service.py`, import the compiler:
 
 ```python
 from tldw_Server_API.app.core.Moderation.policy_compiler import (
+    PolicyCompilationInput,
     PolicyCompilationReport,
     PolicyCompiler,
     ResolvedModerationConfig,
@@ -793,22 +809,98 @@ class _ResolvedModerationServiceState:
     runtime_overrides_path: str | None
 ```
 
-Have `_resolve_moderation_config()` return `_ResolvedModerationServiceState`. Do not put paths in `ResolvedModerationConfig`.
+Have `_resolve_moderation_config()` return `_ResolvedModerationServiceState`. Do not put paths in `ResolvedModerationConfig`. Keep runtime overrides out of `_resolve_moderation_config()`; the compiler applies runtime category and PII overrides so the service can load explicit PII rules from the effective PII state.
 
-Implement `ResolvedModerationConfig` construction with existing defaults and env fallback semantics:
+Implement config loading and resolution with existing defaults and env fallback semantics:
 
 ```python
-compiler_config = ResolvedModerationConfig(
-    enabled=_b("enabled", False),
-    input_enabled=_b("input_enabled", True),
-    output_enabled=_b("output_enabled", True),
-    input_action=str(mod_cfg.get("input_action", "block")).lower(),
-    output_action=str(mod_cfg.get("output_action", "redact")).lower(),
-    redact_replacement=str(mod_cfg.get("redact_replacement", "[REDACTED]")),
-    per_user_overrides=_b("per_user_overrides", True),
-    categories_enabled=categories_enabled or None,
-    pii_enabled=bool(pii_enabled),
-)
+def _load_moderation_config_section(self) -> dict[str, object]:
+    mod_cfg = (self._config.get("moderation") or {}) if isinstance(self._config, dict) else {}
+    if mod_cfg:
+        return dict(mod_cfg)
+    try:
+        parser = load_comprehensive_config()
+        if parser and parser.has_section("Moderation"):
+            return dict(parser.items("Moderation"))
+    except _MODERATION_NONCRITICAL_EXCEPTIONS:
+        return {}
+    return {}
+
+
+def _resolve_moderation_config(self, mod_cfg: dict[str, object]) -> _ResolvedModerationServiceState:
+    def _b(key: str, default: bool) -> bool:
+        val = str(mod_cfg.get(key, default)).strip().lower()
+        return is_truthy(val)
+
+    def _anchor(path_value: str) -> str:
+        try:
+            from pathlib import Path as _Path
+            path = _Path(str(path_value))
+            if path.is_absolute():
+                return str(path)
+            from tldw_Server_API.app.core.Utils.Utils import get_project_root
+            return str((_Path(get_project_root()) / path).resolve())
+        except _MODERATION_NONCRITICAL_EXCEPTIONS:
+            return str(path_value)
+
+    blocklist_path = (
+        mod_cfg.get("blocklist_file")
+        or os.getenv("MODERATION_BLOCKLIST_FILE")
+        or "tldw_Server_API/Config_Files/moderation_blocklist.txt"
+    )
+    user_overrides_path = (
+        mod_cfg.get("user_overrides_file")
+        or os.getenv("MODERATION_USER_OVERRIDES_FILE")
+        or "tldw_Server_API/Config_Files/moderation_user_overrides.json"
+    )
+    runtime_overrides_path = (
+        mod_cfg.get("runtime_overrides_file")
+        or os.getenv("MODERATION_RUNTIME_OVERRIDES_FILE")
+        or "tldw_Server_API/Config_Files/moderation_runtime_overrides.json"
+    )
+
+    with contextlib.suppress(_MODERATION_NONCRITICAL_EXCEPTIONS):
+        self._max_scan_chars = int(mod_cfg.get("max_scan_chars", self._max_scan_chars))
+    with contextlib.suppress(_MODERATION_NONCRITICAL_EXCEPTIONS):
+        self._max_replacements_per_pattern = int(
+            mod_cfg.get("max_replacements_per_pattern", self._max_replacements_per_pattern)
+        )
+    with contextlib.suppress(_MODERATION_NONCRITICAL_EXCEPTIONS):
+        self._match_window_chars = int(mod_cfg.get("match_window_chars", self._match_window_chars))
+    with contextlib.suppress(_MODERATION_NONCRITICAL_EXCEPTIONS):
+        if "blocklist_write_debounce_ms" in mod_cfg:
+            self._write_debounce_ms = int(mod_cfg.get("blocklist_write_debounce_ms", self._write_debounce_ms) or 0)
+
+    cats_val = mod_cfg.get("categories_enabled") if "categories_enabled" in mod_cfg else os.getenv("MODERATION_CATEGORIES_ENABLED", "")
+    categories_enabled: set[str] = set()
+    if isinstance(cats_val, (list, set, tuple)):
+        categories_enabled = {str(c).strip().lower() for c in cats_val if str(c).strip()}
+    elif isinstance(cats_val, str) and cats_val.strip():
+        categories_enabled = {c.strip().lower() for c in cats_val.split(",") if c.strip()}
+    elif cats_val:
+        logger.warning("Invalid moderation categories_enabled type")
+
+    pii_enabled = is_truthy(
+        str(mod_cfg.get("pii_enabled", os.getenv("MODERATION_PII_ENABLED", "false"))).strip().lower()
+    )
+
+    compiler_config = ResolvedModerationConfig(
+        enabled=_b("enabled", False),
+        input_enabled=_b("input_enabled", True),
+        output_enabled=_b("output_enabled", True),
+        input_action=str(mod_cfg.get("input_action", "block")).lower(),
+        output_action=str(mod_cfg.get("output_action", "redact")).lower(),
+        redact_replacement=str(mod_cfg.get("redact_replacement", "[REDACTED]")),
+        per_user_overrides=_b("per_user_overrides", True),
+        categories_enabled=categories_enabled or None,
+        pii_enabled=bool(pii_enabled),
+    )
+    return _ResolvedModerationServiceState(
+        compiler_config=compiler_config,
+        blocklist_path=_anchor(blocklist_path) if blocklist_path else None,
+        user_overrides_path=_anchor(user_overrides_path) if user_overrides_path else None,
+        runtime_overrides_path=_anchor(runtime_overrides_path) if runtime_overrides_path else None,
+    )
 ```
 
 - [ ] **Step 4: Read blocklist lines and pass explicit PII rules**
@@ -833,8 +925,12 @@ Compile globally with explicit PII rules:
 
 ```python
 def _compile_global_policy_from_resolved_config(self, config: ResolvedModerationConfig) -> ModerationPolicy:
-    self._pii_enabled = bool(config.pii_enabled)
-    pii_rules = self._load_builtin_pii_rules() if config.pii_enabled else []
+    effective_pii_enabled = self._policy_compiler.resolve_runtime_pii(
+        self._runtime_override,
+        config.pii_enabled,
+    )
+    self._pii_enabled = bool(effective_pii_enabled)
+    pii_rules = self._load_builtin_pii_rules() if effective_pii_enabled else []
     lines = self._read_blocklist_lines_for_compile(getattr(self, "_blocklist_path", None))
     result = self._policy_compiler.compile_global(
         PolicyCompilationInput(
@@ -967,6 +1063,38 @@ def test_compile_user_policy_adds_wildcard_quick_rules():
     assert rule.action == "warn"
     assert rule.categories == {"*"}
     assert rule.phase == "input"
+
+
+def test_compile_user_policy_accepts_legacy_bool_like_is_regex_values():
+    base = ModerationPolicy(enabled=True, block_patterns=[])
+
+    result = PolicyCompiler().compile_user_policy(
+        base,
+        {
+            "rules": [
+                {
+                    "id": "r1",
+                    "pattern": r"token-\d+",
+                    "is_regex": "yes",
+                    "action": "block",
+                    "phase": "input",
+                },
+                {
+                    "id": "r2",
+                    "pattern": "literal.*",
+                    "is_regex": "false",
+                    "action": "warn",
+                    "phase": "output",
+                },
+            ]
+        },
+    )
+
+    assert len(result.policy.block_patterns) == 2
+    assert result.policy.block_patterns[0].regex.search("token-42")
+    assert result.policy.block_patterns[1].regex.search("literal.*")
+    assert not result.policy.block_patterns[1].regex.search("literalabc")
+    assert result.report.issues == []
 ```
 
 - [ ] **Step 2: Run user tests to verify they fail**
@@ -975,7 +1103,11 @@ Run:
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
-python -m pytest tldw_Server_API/tests/unit/test_moderation_policy_compiler.py::test_compile_user_policy_preserves_empty_category_override tldw_Server_API/tests/unit/test_moderation_policy_compiler.py::test_compile_user_policy_adds_wildcard_quick_rules -q
+python -m pytest \
+  tldw_Server_API/tests/unit/test_moderation_policy_compiler.py::test_compile_user_policy_preserves_empty_category_override \
+  tldw_Server_API/tests/unit/test_moderation_policy_compiler.py::test_compile_user_policy_adds_wildcard_quick_rules \
+  tldw_Server_API/tests/unit/test_moderation_policy_compiler.py::test_compile_user_policy_accepts_legacy_bool_like_is_regex_values \
+  -q
 ```
 
 Expected: FAIL because `compile_user_policy()` does not exist.
@@ -1027,6 +1159,22 @@ Add helper implementations using current service semantics:
             return default
         return str(value).strip().lower() in {"1", "true", "yes", "on", "y"}
 
+    @staticmethod
+    def parse_bool_value(value: object) -> bool | None:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            text = value.strip().lower()
+            if text in {"1", "true", "yes", "on", "y"}:
+                return True
+            if text in {"0", "false", "no", "n", "off"}:
+                return False
+        return None
+
     def resolve_categories_override(
         self,
         override: dict[str, object],
@@ -1066,8 +1214,8 @@ Compile quick rules with existing wildcard categories:
         pattern = str(raw_rule.get("pattern", "")).strip()
         action = str(raw_rule.get("action", "")).strip().lower()
         phase = str(raw_rule.get("phase", "both")).strip().lower()
-        is_regex = raw_rule.get("is_regex", False)
-        if not isinstance(is_regex, bool):
+        is_regex = self.parse_bool_value(raw_rule.get("is_regex", False))
+        if is_regex is None:
             report.add("user_rule", "invalid_is_regex", index=index)
             return None
         if not pattern or action not in {"block", "warn"}:
@@ -1140,25 +1288,48 @@ git commit -m "Move moderation user policy assembly into compiler"
 
 - [ ] **Step 1: Add regression tests for recompile triggers**
 
-Add tests that exercise public behavior:
+Add the settings regression to `test_moderation_effective_settings.py` and the blocklist write regression to `test_moderation_blocklist_parse.py`. If both files need `_tmp_moderation_config()`, define the helper locally in each file or reuse an equivalent helper that already exists in that same file; do not import test helpers across test modules.
 
 ```python
-def test_update_settings_recompiles_global_policy_with_runtime_categories(monkeypatch):
+def _tmp_moderation_config(tmp_path, blocklist_path):
+    return {
+        "moderation": {
+            "enabled": "true",
+            "blocklist_file": str(blocklist_path),
+            "user_overrides_file": str(tmp_path / "moderation_user_overrides.json"),
+            "runtime_overrides_file": str(tmp_path / "moderation_runtime_overrides.json"),
+            "categories_enabled": "pii",
+        }
+    }
+
+
+def test_update_settings_recompiles_global_policy_with_runtime_categories(monkeypatch, tmp_path):
+    blocklist = tmp_path / "moderation_blocklist.txt"
+    blocklist.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        moderation_service_module,
+        "load_and_log_configs",
+        lambda: _tmp_moderation_config(tmp_path, blocklist),
+    )
+
     svc = ModerationService()
-    svc._global_policy = ModerationPolicy(enabled=True, categories_enabled={"pii"})
     svc._runtime_override = {}
 
-    result = svc.update_settings(categories_enabled=["confidential"])
+    result = svc.update_settings(categories_enabled=["confidential"], persist=False)
 
     assert result["categories_enabled"] == ["confidential"]
     assert svc._global_policy.categories_enabled == {"confidential"}
 
 
-def test_set_blocklist_lines_recompiles_policy_from_file(tmp_path):
+def test_set_blocklist_lines_recompiles_policy_from_file(monkeypatch, tmp_path):
     blocklist = tmp_path / "moderation_blocklist.txt"
+    monkeypatch.setattr(
+        moderation_service_module,
+        "load_and_log_configs",
+        lambda: _tmp_moderation_config(tmp_path, blocklist),
+    )
+
     svc = ModerationService()
-    svc._blocklist_path = str(blocklist)
-    svc._global_policy = ModerationPolicy(enabled=True, block_patterns=[])
 
     assert svc.set_blocklist_lines(["secret -> block #confidential"]) is True
 
@@ -1166,7 +1337,7 @@ def test_set_blocklist_lines_recompiles_policy_from_file(tmp_path):
     assert any(rule.regex.search("secret") for rule in policy.block_patterns)
 ```
 
-Adjust fixture setup to match existing test helpers in `test_moderation_blocklist_parse.py`.
+Add `import tldw_Server_API.app.core.Moderation.moderation_service as moderation_service_module` to `test_moderation_effective_settings.py` if it is not already present. `test_moderation_blocklist_parse.py` already has this import. Keep `persist=False` in the settings test so it does not write runtime override files unless the test is explicitly asserting persistence.
 
 - [ ] **Step 2: Add supervised overlay regression if not already covered**
 
@@ -1345,9 +1516,9 @@ If no task file changed after verification, skip this commit and record the evid
 
 ## Self-Review Checklist
 
-- [ ] Spec coverage: every design requirement maps to one or more tasks.
-- [ ] Placeholder scan: plan contains no unfinished markers.
-- [ ] Type consistency: names match across tasks: `ResolvedModerationConfig`, `PolicyCompilationInput`, `PolicyCompilationIssue`, `PolicyCompilationReport`, `PolicyCompilationResult`, `PolicyCompiler`.
-- [ ] Scope check: no `PolicyEvaluator` implementation appears in this plan.
-- [ ] Boundary check: no file I/O is assigned to `PolicyCompiler`.
-- [ ] Compatibility check: public service methods and existing policy types remain intact.
+- [x] Spec coverage: every design requirement maps to one or more tasks.
+- [x] Placeholder scan: plan contains no unfinished markers.
+- [x] Type consistency: names match across tasks: `ResolvedModerationConfig`, `PolicyCompilationInput`, `PolicyCompilationIssue`, `PolicyCompilationReport`, `PolicyCompilationResult`, `PolicyCompiler`.
+- [x] Scope check: no `PolicyEvaluator` implementation appears in this plan.
+- [x] Boundary check: no file I/O is assigned to `PolicyCompiler`.
+- [x] Compatibility check: public service methods and existing policy types remain intact.

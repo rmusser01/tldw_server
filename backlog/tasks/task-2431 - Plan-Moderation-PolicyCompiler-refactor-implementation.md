@@ -15,7 +15,7 @@ modified_files:
 - Docs/superpowers/plans/2026-06-24-moderation-policy-compiler-refactor-implementation-plan.md
 - backlog/tasks/task-2431 - Plan-Moderation-PolicyCompiler-refactor-implementation.md
 - backlog/tasks/task-2432 - Implement-Moderation-PolicyCompiler-refactor.md
-updated_date: 2026-06-24 20:28
+updated_date: 2026-06-24 20:42
 ---
 
 ## Description
@@ -36,6 +36,8 @@ Write an implementation plan for the approved compiler-first Moderation refactor
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Wrote the implementation plan for the approved Moderation PolicyCompiler refactor. Self-review confirmed the plan covers the design spec, uses exact file paths and commands, keeps PolicyEvaluator out of scope, keeps file I/O out of PolicyCompiler, preserves compatibility boundaries, and includes TDD slices plus commit checkpoints. Verification for this plan-only branch: targeted draft-marker scan found no matches; git diff --check passed for the plan/task files. Bandit is not applicable because no code is touched in this planning step.
+Post-plan review tightened the implementation plan for subagent execution: corrected implementation tracking to TASK-2432, added missing PolicyCompilationInput service import, made service config resolution explicit, preserved legacy bool-like quick-rule parsing, and marked the plan self-review checklist complete after the review pass.
+Follow-up plan review also made Task 6 regression tests deterministic by using temporary moderation config paths and persist=False for update_settings coverage.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
