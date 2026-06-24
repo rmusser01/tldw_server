@@ -22,7 +22,7 @@ modified_files:
 - tldw_Server_API/app/core/Chunking/process_text/options.py
 - tldw_Server_API/tests/Chunking/test_process_text_components.py
 - backlog/tasks/task-9937 - Implement-Chunker-process-text-refactor.md
-updated_date: 2026-06-24 22:59
+updated_date: 2026-06-24 23:09
 ---
 
 ## Description
@@ -55,6 +55,7 @@ Task 3 preparation extraction: added `process_text/preparation.py` with `prepare
 Task 3 review fix: split frontmatter preparation into option/control setup and JSON parsing so `chunker_frontmatter_duration_seconds` starts after tokenizer fallback and frontmatter option popping, matching the pre-extraction timing boundary. Added direct `process_text.preparation` import-boundary coverage and a regression test that setup latency is excluded from the frontmatter metric. Red check: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chunking/test_process_text_components.py::test_process_text_frontmatter_metric_excludes_option_setup -q` failed with `AttributeError: module 'tldw_Server_API.app.core.Chunking.chunker' has no attribute '_prepare_frontmatter_options'`. Verification: requested focused suite passed (41 passed, 94 warnings); compileall touched files exit 0; Bandit touched production files exit 0 with 0 results in `/tmp/bandit_chunker_process_text_task3_review_fix.json`.
 Task 4 started: extracting Chunker.process_text option resolution into process_text/options.py and adding direct component coverage before production wiring.
 Task 4 option resolution extraction: added `process_text/options.py` with `resolve_process_options` and `METHOD_OPTION_EXCLUDES`, wired `Chunker.process_text` to consume `ResolvedProcessOptions`, exported the helper from `process_text.__init__`, and added direct component coverage for max_size validation, negative overlap clamping, language autodetection, method option filtering with tokenizer override preservation, code mode defaults, hierarchy/template multi-level exclusion, and the no-Chunker import boundary. Red check: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chunking/test_process_text_components.py -q` failed during collection because `tldw_Server_API.app.core.Chunking.process_text.options` did not exist; direct import confirmed `ModuleNotFoundError: No module named 'tldw_Server_API.app.core.Chunking.process_text.options'`. Verification: requested focused suite passed (53 passed, 118 warnings); compileall touched files exit 0; Bandit touched production files exit 0 with 0 results in `/tmp/bandit_chunker_process_text_task4.json`; `git diff --check` exit 0.
+Controller Task 4 review gate: independently reran focused pytest (53 passed, 118 warnings), compileall (exit 0), and Bandit on touched production files (0 results, 0 errors). Spec reviewer reported no deviations for commit range 81b6ad8f2..421d02c9850bf507dc34f1c625035249aee0e67b. Code-quality reviewer reported no blocking findings; noted only a non-blocking residual gap for direct adaptive=True helper coverage.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -582,7 +582,7 @@ passed
 - Modify `tldw_Server_API/app/core/Chunking/chunker.py`
 - Modify `tldw_Server_API/tests/Chunking/test_process_text_components.py`
 
-- [ ] **Step 1: Add `resolve_process_options(...)`**
+- [x] **Step 1: Add `resolve_process_options(...)`**
 
 Create:
 
@@ -616,7 +616,7 @@ Keep the negative overlap warning message:
 logger.warning(f"Negative overlap ({overlap}) adjusted to 0 in process_text")
 ```
 
-- [ ] **Step 2: Wire option resolution into the active method**
+- [x] **Step 2: Wire option resolution into the active method**
 
 Replace local option resolution in `Chunker.process_text` with:
 
@@ -637,7 +637,7 @@ method_options_for_chunk = resolved.method_options_for_chunk
 
 Do not move dispatch in this task.
 
-- [ ] **Step 3: Add option-resolution tests**
+- [x] **Step 3: Add option-resolution tests**
 
 Use a real `Chunker` as context and assert:
 
@@ -648,7 +648,7 @@ Use a real `Chunker` as context and assert:
 - `method_options_for_chunk` excludes only the contract set and keeps tokenizer override keys;
 - `code_mode` resolves to `ast` for `code_ast` and `auto` for `code`.
 
-- [ ] **Step 4: Run focused checks**
+- [x] **Step 4: Run focused checks**
 
 Command:
 
@@ -671,7 +671,7 @@ passed
 - Modify `tldw_Server_API/tests/Chunking/test_process_text_components.py`
 - Modify `tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py`
 
-- [ ] **Step 1: Add dispatch helpers**
+- [ ] **Step 1: Add dispatch helpers** _(in progress)_
 
 Create:
 
