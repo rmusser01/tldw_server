@@ -869,7 +869,7 @@ git commit -m "fix: wait for webui runtime auth bootstrap"
 - Modify: `apps/tldw-frontend/__tests__/frontend-quickstart-networking.test.ts`
 - Modify: `apps/tldw-frontend/__tests__/pr-916-review-followups.test.ts`
 
-- [ ] **Step 1: Add failing compose assertions**
+- [x] **Step 1: Add failing compose assertions**
 
 In `apps/tldw-frontend/__tests__/frontend-quickstart-networking.test.ts`, add:
 
@@ -908,7 +908,7 @@ In `apps/tldw-frontend/__tests__/pr-916-review-followups.test.ts`, extend the fi
     expect(compose).toContain("- TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-1}")
 ```
 
-- [ ] **Step 2: Run compose assertions to verify they fail**
+- [x] **Step 2: Run compose assertions to verify they fail**
 
 Run from `apps/tldw-frontend`:
 
@@ -918,7 +918,7 @@ bunx vitest run __tests__/frontend-quickstart-networking.test.ts __tests__/pr-91
 
 Expected: FAIL because the compose env entries do not exist yet.
 
-- [ ] **Step 3: Update Docker compose files**
+- [x] **Step 3: Update Docker compose files**
 
 Modify `Dockerfiles/docker-compose.webui.yml` service `webui.environment` to include:
 
@@ -958,7 +958,7 @@ Place it after `SINGLE_USER_API_KEY`:
       - tldw_production=${tldw_production:-false}
 ```
 
-- [ ] **Step 4: Validate compose syntax**
+- [x] **Step 4: Validate compose syntax**
 
 Run from repo root:
 
@@ -968,7 +968,7 @@ docker compose -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/dock
 
 Expected: exit code 0. Inspect `/tmp/tldw_single_webui_runtime_auth_compose.yml` only if the command fails.
 
-- [ ] **Step 5: Run compose assertions to verify they pass**
+- [x] **Step 5: Run compose assertions to verify they pass**
 
 Run from `apps/tldw-frontend`:
 
@@ -978,7 +978,7 @@ bunx vitest run __tests__/frontend-quickstart-networking.test.ts __tests__/pr-91
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 4**
+- [x] **Step 6: Commit Task 4**
 
 ```bash
 git add Dockerfiles/docker-compose.webui.yml Dockerfiles/docker-compose.single-user.yml apps/tldw-frontend/__tests__/frontend-quickstart-networking.test.ts apps/tldw-frontend/__tests__/pr-916-review-followups.test.ts

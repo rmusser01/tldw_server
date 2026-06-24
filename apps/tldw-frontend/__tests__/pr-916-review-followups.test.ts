@@ -26,6 +26,13 @@ describe("PR 916 review follow-ups", () => {
     expect(dockerfile).toContain("TLDW_INTERNAL_API_ORIGIN=http://app:8000")
     expect(compose).toContain("NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-}")
     expect(compose).toContain("- NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-}")
+    expect(compose).toContain("- AUTH_MODE=${AUTH_MODE:-single_user}")
+    expect(compose).toContain(
+      "- SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}"
+    )
+    expect(compose).toContain(
+      "- TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-1}"
+    )
   })
 
   it("waits for healthy backing services in the host-storage compose stack", () => {

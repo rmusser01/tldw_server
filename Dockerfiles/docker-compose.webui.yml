@@ -32,6 +32,9 @@ services:
       - NODE_ENV=production
       - HOSTNAME=0.0.0.0
       - PORT=3000
+      - AUTH_MODE=${AUTH_MODE:-single_user}
+      - SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}
+      - TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-1}
       - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-}
       # Browser-visible credentials must be explicitly supplied with a public
       # scoped value; never fall back to the server-side SINGLE_USER_API_KEY.

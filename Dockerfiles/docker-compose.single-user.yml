@@ -15,6 +15,7 @@ services:
     environment:
       - AUTH_MODE=${AUTH_MODE:-single_user}
       - SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}
+      - TLDW_SETUP_ALLOW_REMOTE=${TLDW_SETUP_ALLOW_REMOTE:-1}
       - tldw_production=${tldw_production:-false}
       - DATABASE_URL=${DATABASE_URL:-sqlite:///./Databases/users.db}
       - JOBS_DB_URL=${JOBS_DB_URL:-}

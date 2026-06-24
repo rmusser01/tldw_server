@@ -25,6 +25,10 @@ modified_files:
 - apps/packages/ui/src/services/tldw/TldwAuth.ts
 - apps/tldw-frontend/pages/_app.tsx
 - apps/tldw-frontend/__tests__/app/app-layout.test.tsx
+- Dockerfiles/docker-compose.webui.yml
+- Dockerfiles/docker-compose.single-user.yml
+- apps/tldw-frontend/__tests__/frontend-quickstart-networking.test.ts
+- apps/tldw-frontend/__tests__/pr-916-review-followups.test.ts
 ---
 
 ## Description
@@ -67,6 +71,8 @@ Docs/superpowers/plans/2026-06-24-docker-webui-runtime-auth-bootstrap-implementa
 2026-06-24 Task 2 shared-client follow-up: added a non-persistent shared runtime single-user auth override consumed by runtime-bootstrap, request-core, TldwApiClient, and TldwAuth so runtime auth takes request precedence even when persisted manual single-user or multi-user credentials are preserved. Added runtime-bootstrap regressions for shared tldwRequest headers over manual single-user and multi-user configs. Verification: bunx vitest run __tests__/extension/runtime-bootstrap.test.ts __tests__/auth.mode.test.ts __tests__/auth.logout.test.ts ../packages/ui/src/services/tldw/__tests__/request-core.quickstart.test.ts ../packages/ui/src/services/tldw/__tests__/request-core.hosted.test.ts passed (34 tests); git diff --check clean.
 
 2026-06-24 Task 3 update: `_app.tsx` now imports and awaits runtimeBootstrapReady before reading build-time env auth or persisted configured auth state, preventing the first-load app shell from resolving unauthenticated before runtime auth bootstrap completes. Added a delayed-bootstrap app-layout regression that failed before the production change and passed after it. Verification: bunx vitest run __tests__/app/app-layout.test.tsx passed (10 tests); bunx vitest run __tests__/app/app-layout.test.tsx __tests__/extension/runtime-bootstrap.test.ts __tests__/auth.mode.test.ts __tests__/auth.logout.test.ts ../packages/ui/src/services/tldw/__tests__/request-core.quickstart.test.ts ../packages/ui/src/services/tldw/__tests__/request-core.hosted.test.ts passed (44 tests). Bandit not run: touched implementation is TypeScript frontend code only.
+
+2026-06-24 Task 4 update: Docker WebUI compose now passes runtime AUTH_MODE, SINGLE_USER_API_KEY, and TLDW_WEBUI_EXPOSE_RUNTIME_AUTH into the WebUI container while preserving the 127.0.0.1:8080:3000 host binding and quickstart internal API origin. Docker single-user compose now sets TLDW_SETUP_ALLOW_REMOTE=${TLDW_SETUP_ALLOW_REMOTE:-1} on the app service. Added compose assertions and aligned the PR-916 Dockerfile expectation with the current build:prod command. Red verification failed on missing compose env as expected; docker compose -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml config >/tmp/tldw_single_webui_runtime_auth_compose.yml succeeded; bunx vitest run __tests__/frontend-quickstart-networking.test.ts __tests__/pr-916-review-followups.test.ts passed (13 tests). Bandit not run: touched implementation is Docker YAML and TypeScript tests only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
