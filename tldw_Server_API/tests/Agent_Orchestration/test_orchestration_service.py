@@ -1,4 +1,5 @@
 """Tests for Agent Orchestration service (Phase 4)."""
+
 from __future__ import annotations
 
 import pytest
@@ -25,6 +26,7 @@ def svc():
 
 # ---- State machine tests ----
 
+
 def test_valid_transitions():
     assert is_valid_transition(TaskStatus.TODO, TaskStatus.IN_PROGRESS)
     assert is_valid_transition(TaskStatus.IN_PROGRESS, TaskStatus.REVIEW)
@@ -45,6 +47,7 @@ def test_invalid_transitions():
 
 
 # ---- Project CRUD tests ----
+
 
 @pytest.mark.asyncio
 async def test_create_project(svc):
@@ -77,12 +80,15 @@ async def test_delete_project_cascades(svc):
 
 # ---- Task CRUD tests ----
 
+
 @pytest.mark.asyncio
 async def test_create_task(svc):
     project = await svc.create_project(name="P1", user_id=1)
     task = await svc.create_task(
-        project.id, title="Task 1",
-        description="Do something", agent_type="claude_code",
+        project.id,
+        title="Task 1",
+        description="Do something",
+        agent_type="claude_code",
         user_id=1,
     )
     assert task.id == 1
@@ -112,6 +118,7 @@ async def test_list_tasks_with_status_filter(svc):
 
 
 # ---- Dependency tests ----
+
 
 @pytest.mark.asyncio
 async def test_dependency_gating(svc):
@@ -152,6 +159,7 @@ async def test_no_dependency_always_ready(svc):
 
 # ---- State transition tests ----
 
+
 @pytest.mark.asyncio
 async def test_transition_todo_to_inprogress(svc):
     project = await svc.create_project(name="P1", user_id=1)
@@ -171,6 +179,7 @@ async def test_invalid_transition_raises(svc):
 
 
 # ---- Run tests ----
+
 
 @pytest.mark.asyncio
 async def test_create_and_complete_run(svc):
@@ -199,10 +208,12 @@ async def test_fail_run(svc):
 
 
 def test_legacy_sqlite_factory_reexports_dedicated_factory():
+    """Legacy service imports should continue to expose the durable DB factory."""
     assert get_orchestration_db is db_factory.get_orchestration_db
 
 
 def test_sqlite_factory_is_available_from_dedicated_module(monkeypatch, tmp_path):
+    """The dedicated factory should construct per-user OrchestrationDB instances."""
     sentinel = object()
 
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
@@ -233,6 +244,7 @@ async def test_list_runs(svc):
 
 
 # ---- Reviewer gate tests ----
+
 
 @pytest.mark.asyncio
 async def test_review_approved(svc):
@@ -285,6 +297,7 @@ async def test_review_on_non_review_task_raises(svc):
 
 
 # ---- Summary test ----
+
 
 @pytest.mark.asyncio
 async def test_project_summary(svc):

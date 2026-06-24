@@ -101,6 +101,7 @@ def _coerce_payload(candidate: Any) -> dict[str, Any]:
 
 
 def _json_payload_size(candidate: Any) -> int:
+    """Return the serialized payload size, or over-limit for unserializable values."""
     try:
         return len(json.dumps(candidate, separators=(",", ":"), ensure_ascii=False))
     except (TypeError, ValueError):

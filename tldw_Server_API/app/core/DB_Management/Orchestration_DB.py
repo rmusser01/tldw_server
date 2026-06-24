@@ -1229,6 +1229,7 @@ class OrchestrationDB:
         conn: sqlite3.Connection,
         run_id: int,
     ) -> sqlite3.Row | None:
+        """Return a run row only when its parent task belongs to this DB user."""
         return conn.execute(
             "SELECT r.* FROM runs r " "JOIN tasks t ON t.id = r.task_id " "WHERE r.id = ? AND t.user_id = ?",
             (run_id, self._user_id),
@@ -1236,6 +1237,7 @@ class OrchestrationDB:
 
     @staticmethod
     def _validate_run_transition(current: RunStatus, target: RunStatus) -> None:
+        """Raise when a run transition would rewrite a terminal or invalid state."""
         if not is_valid_run_transition(current, target):
             raise InvalidTransitionError(f"Invalid run transition from {current.value} to {target.value}")
 
@@ -1298,6 +1300,7 @@ class OrchestrationDB:
         )
 
     def update_run_session_id(self, run_id: int, session_id: str | None) -> AgentRun:
+        """Attach an ACP session id to an owned run with an atomic ownership check."""
         self._ensure_schema()
         conn = self._get_conn()
         with conn:

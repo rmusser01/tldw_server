@@ -149,6 +149,7 @@ class TestRunCRUD:
         assert len(runs) == 2
 
     def test_create_run_rejects_duplicate_running_run(self, db):
+        """The DB facade should reject duplicate running runs for one task."""
         p = db.create_project(name="P1")
         t = db.create_task(p.id, title="T1")
         db.create_run(t.id)
@@ -157,6 +158,7 @@ class TestRunCRUD:
             db.create_run(t.id)
 
     def test_running_run_uniqueness_is_enforced_by_database(self, db):
+        """The SQLite partial index should enforce the active-run invariant."""
         p = db.create_project(name="P1")
         t = db.create_task(p.id, title="T1")
         db.create_run(t.id, agent_type="codex", session_id="session-1")
@@ -174,6 +176,7 @@ class TestRunCRUD:
             )
 
     def test_has_running_run_tracks_active_status(self, db):
+        """has_running_run should only be true while the run is active."""
         p = db.create_project(name="P1")
         t = db.create_task(p.id, title="T1")
 
@@ -184,6 +187,7 @@ class TestRunCRUD:
         assert db.has_running_run(t.id) is False
 
     def test_terminal_run_cannot_be_rewritten(self, db):
+        """Terminal completed runs should not be rewritten as failed."""
         p = db.create_project(name="P1")
         t = db.create_task(p.id, title="T1")
         run = db.create_run(t.id)
@@ -193,10 +197,12 @@ class TestRunCRUD:
             db.fail_run(run.id, error="late failure")
 
     def test_missing_run_update_raises_not_found(self, db):
+        """Completing a missing run should raise a deterministic not-found error."""
         with pytest.raises(OrchestrationNotFoundError, match="Run 999 not found"):
             db.complete_run(999)
 
     def test_missing_run_session_update_raises_not_found(self, db):
+        """Attaching a session to a missing run should raise not-found."""
         with pytest.raises(OrchestrationNotFoundError, match="Run 999 not found"):
             db.update_run_session_id(999, "session-999")
 
@@ -250,7 +256,10 @@ class TestProjectSummary:
 
 
 class TestUserScoping:
+    """Regression tests for shared-database user ownership scoping."""
+
     def test_shared_db_project_task_run_and_review_methods_are_user_scoped(self):
+        """Project, task, run, and review operations should not cross user ids."""
         with tempfile.TemporaryDirectory() as tmp:
             db1 = OrchestrationDB(user_id=1, db_dir=tmp)
             db2 = OrchestrationDB(user_id=2, db_dir=tmp)

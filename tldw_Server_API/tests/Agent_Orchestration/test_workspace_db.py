@@ -544,6 +544,7 @@ class TestWorkspaceMCPServers:
         assert len(servers) == 2
 
     def test_list_mcp_servers_wrong_user_returns_empty(self):
+        """Workspace MCP server reads should be scoped to the workspace owner."""
         with tempfile.TemporaryDirectory() as tmp:
             db1 = OrchestrationDB(user_id=1, db_dir=tmp)
             db2 = OrchestrationDB(user_id=2, db_dir=tmp)

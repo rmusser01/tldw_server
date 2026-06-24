@@ -551,6 +551,7 @@ class _RejectedCompletionClient:
 
 class _PromptFailingClient:
     def __init__(self) -> None:
+        """Record best-effort cleanup calls for prompt failure tests."""
         self.closed_sessions: list[str] = []
 
     async def create_session(self, *_args, **_kwargs):
@@ -560,6 +561,7 @@ class _PromptFailingClient:
         raise RuntimeError("acp prompt backend exploded")
 
     async def close_session(self, session_id: str):
+        """Capture session cleanup calls without contacting a runner."""
         self.closed_sessions.append(session_id)
 
 
@@ -1369,6 +1371,7 @@ async def test_dispatch_run_reviewer_agent_rejection_retries_with_history(monkey
 
 
 async def test_dispatch_run_allows_retry_after_rejected_review(monkeypatch, tmp_path):
+    """Rejected reviewer feedback should allow a later dispatch after runs are terminal."""
     from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
 
     db = OrchestrationDB(user_id=1, db_dir=tmp_path)
@@ -1384,9 +1387,11 @@ async def test_dispatch_run_allows_retry_after_rejected_review(monkeypatch, tmp_
     client_holder = {"client": _ReviewerDecisionClient({"approved": False, "feedback": "Needs another pass"})}
 
     async def fake_store():
+        """Return a store that accepts quota and session registration."""
         return _NoopSessionStore()
 
     async def fake_client():
+        """Return the mutable fake client for each dispatch attempt."""
         return client_holder["client"]
 
     monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
@@ -1424,6 +1429,7 @@ async def test_dispatch_run_allows_retry_after_rejected_review(monkeypatch, tmp_
 
 
 async def test_dispatch_run_rejects_duplicate_active_run(monkeypatch, tmp_path):
+    """A task with an existing running run should reject duplicate dispatch."""
     from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
 
     db, task = await _build_dispatch_task(tmp_path)

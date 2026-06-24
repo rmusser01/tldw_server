@@ -66,6 +66,7 @@ def _brief_payload(**overrides):
 
 
 def test_validate_artifact_payload_rejects_non_mapping(tmp_path):
+    """Malformed artifact objects should fail validation without attribute errors."""
     note_db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
     note_db.upsert_workspace("workspace-alpha", "Alpha Workspace")
 
@@ -380,6 +381,7 @@ def test_malformed_promotion_payload_is_not_promoted(tmp_path):
 
 
 def test_oversized_promoted_artifact_is_not_written(tmp_path):
+    """Oversized promoted artifact content should not be persisted."""
     orch_db, note_db, project, workspace, task, run, review_run = _build_context(tmp_path)
     signal = TaskCompletionSignal(
         status="completed",
