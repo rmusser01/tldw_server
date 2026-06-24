@@ -317,6 +317,14 @@ class UnifiedEvaluationService:
                     description=f"Dataset for {name}",
                     created_by=created_by
                 )
+            elif dataset_id:
+                existing_dataset = self.db.get_dataset(
+                    dataset_id,
+                    created_by=created_by,
+                    include_samples=False,
+                )
+                if not existing_dataset:
+                    raise ValueError(f"Dataset {dataset_id} not found")
 
             # Create evaluation
             eval_id = self.db.create_evaluation(
@@ -1505,7 +1513,7 @@ class UnifiedEvaluationService:
 
         except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to store evaluation result: {e}")
-            return f"temp_{int(time.time())}"
+            raise
 
     async def get_metrics_summary(self) -> dict[str, Any]:
         """Get evaluation metrics summary"""

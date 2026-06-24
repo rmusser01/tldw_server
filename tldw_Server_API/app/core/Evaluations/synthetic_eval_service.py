@@ -280,6 +280,11 @@ class SyntheticEvalWorkflowService:
             repository=self.repository
         )
 
+    def _owner_scope(self) -> str:
+        if not self.user_id:
+            raise ValueError("user_id is required for owner-scoped synthetic eval workflow operations.")
+        return self.user_id
+
     def generate_draft_batch(self, **kwargs: Any) -> SyntheticEvalGenerationResult:
         """Proxy through to the shared generation service."""
 
@@ -299,11 +304,13 @@ class SyntheticEvalWorkflowService:
     ) -> dict[str, Any]:
         """Return a filtered synthetic review queue."""
 
+        owner_scope = self._owner_scope()
         rows = self.repository.list_draft_samples(
             recipe_kind=recipe_kind,
             review_state=review_state,
             source_kind=source_kind,
             generation_batch_id=generation_batch_id,
+            created_by=owner_scope,
             limit=limit,
             offset=offset,
         )
@@ -312,6 +319,7 @@ class SyntheticEvalWorkflowService:
             review_state=review_state,
             source_kind=source_kind,
             generation_batch_id=generation_batch_id,
+            created_by=owner_scope,
         )
         return {
             "data": rows,
@@ -330,13 +338,15 @@ class SyntheticEvalWorkflowService:
     ) -> dict[str, Any]:
         """Apply a review action to a draft sample."""
 
+        owner_scope = self._owner_scope()
         return self.repository.record_review_action(
             sample_id=sample_id,
             action=action,
-            reviewer_id=reviewer_id or self.user_id or None,
+            reviewer_id=reviewer_id or owner_scope,
             notes=notes,
             action_payload=action_payload,
             resulting_review_state=resulting_review_state,
+            created_by=owner_scope,
         )
 
     def promote_samples(
@@ -354,7 +364,8 @@ class SyntheticEvalWorkflowService:
         if not sample_ids:
             raise ValueError("sample_ids must contain at least one sample.")
 
-        samples = self.repository.get_draft_samples(sample_ids)
+        owner_scope = self._owner_scope()
+        samples = self.repository.get_draft_samples(sample_ids, created_by=owner_scope)
         recipe_kinds = {str(sample.get("recipe_kind") or "").strip() for sample in samples}
         if "" in recipe_kinds:
             raise ValueError("all promoted samples must include a recipe_kind")
@@ -372,7 +383,7 @@ class SyntheticEvalWorkflowService:
             },
         )
 
-        owner = promoted_by or self.user_id or None
+        owner = promoted_by or owner_scope
         dataset_id = self.db.create_dataset(
             name=dataset_name,
             description=dataset_description,
@@ -395,6 +406,7 @@ class SyntheticEvalWorkflowService:
                 promoted_by=owner,
                 promotion_reason=promotion_reason,
                 promotion_metadata={"dataset_name": dataset_name},
+                created_by=owner_scope,
             )
             promotion_ids.append(str(promotion.get("promotion_id") or ""))
 

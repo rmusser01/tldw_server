@@ -321,50 +321,59 @@ class UserRateLimiter:
                         "rate_limit_source": "resource_governor",
                     }
 
-                # Enforce cost caps locally (RG does not handle cost limits).
-                cost_ok, cost_meta = await self._check_cost_limits(user_id, estimated_cost, config)
-                if not cost_ok:
-                    return False, cost_meta
-
-                # Record the request (usage + ledger shadow writes).
-                try:
-                    await self._record_request(user_id, endpoint, tokens_requested, estimated_cost)
-                except _USER_RATE_LIMIT_NONCRITICAL_EXCEPTIONS:
-                    # Best-effort only; never block allow path.
-                    pass
+                # Enforce cost caps locally (RG does not handle cost limits)
+                # and reserve the estimated request usage atomically.
+                usage_ok, usage_meta = await self._reserve_request_usage(
+                    user_id,
+                    endpoint,
+                    tokens_requested,
+                    estimated_cost,
+                    config,
+                )
+                if not usage_ok:
+                    return False, usage_meta
 
                 metadata: dict[str, Any] = {
                     "policy_id": rg_decision.get("policy_id", policy_id),
                     "rate_limit_source": "resource_governor",
                 }
+                metadata.update(usage_meta)
                 return True, metadata
 
             _log_rg_evals_fallback("rg_decision_unavailable")
             _emit_evals_legacy_deprecation("rg_decision_unavailable")
             # Fail-open for eval/token caps; still enforce cost.
-            cost_ok, cost_meta = await self._check_cost_limits(user_id, estimated_cost, config)
-            if not cost_ok:
-                return False, cost_meta
-            try:
-                await self._record_request(user_id, endpoint, tokens_requested, estimated_cost)
-            except _USER_RATE_LIMIT_NONCRITICAL_EXCEPTIONS:
-                pass
+            usage_ok, usage_meta = await self._reserve_request_usage(
+                user_id,
+                endpoint,
+                tokens_requested,
+                estimated_cost,
+                config,
+            )
+            if not usage_ok:
+                return False, usage_meta
             return True, {
                 "policy_id": policy_id,
                 "rate_limit_source": "resource_governor",
+                **usage_meta,
             }
 
         # RG disabled or CUSTOM tier → skip minute/daily checks (Phase 2),
         # enforce cost caps only.
         _emit_evals_legacy_deprecation("rg_disabled_or_custom_tier")
-        cost_ok, cost_meta = await self._check_cost_limits(user_id, estimated_cost, config)
-        if not cost_ok:
-            return False, cost_meta
-
-        await self._record_request(user_id, endpoint, tokens_requested, estimated_cost)
+        usage_ok, usage_meta = await self._reserve_request_usage(
+            user_id,
+            endpoint,
+            tokens_requested,
+            estimated_cost,
+            config,
+        )
+        if not usage_ok:
+            return False, usage_meta
         return True, {
             "rate_limit_source": "legacy_cost_only",
             "tier": config.tier.value,
+            **usage_meta,
         }
 
     async def _get_user_config(self, user_id: str) -> RateLimitConfig:
@@ -564,7 +573,11 @@ class UserRateLimiter:
             total_cost = float(row[0] or 0.0) if row else 0.0
 
         if total_cost + cost > float(config.max_cost_per_day):
-            reset_at = datetime.combine(today + timedelta(days=1), datetime.min.time())
+            reset_at = datetime.combine(
+                today + timedelta(days=1),
+                datetime.min.time(),
+                tzinfo=timezone.utc,
+            )
             retry_after = max(1, int((reset_at - datetime.now(timezone.utc)).total_seconds()))
             return False, {
                 "error": "Daily cost limit exceeded",
@@ -579,6 +592,102 @@ class UserRateLimiter:
             "cost_remaining": float(config.max_cost_per_day) - total_cost - cost,
         }
 
+    async def _reserve_request_usage(
+        self,
+        user_id: str,
+        endpoint: str,
+        tokens_used: int,
+        cost: float,
+        config: RateLimitConfig,
+    ) -> tuple[bool, dict[str, Any]]:
+        """Atomically enforce cost caps and record estimated request usage."""
+        allowed, metadata, now, normalized_tokens = await asyncio.to_thread(
+            self._reserve_request_usage_sync,
+            user_id,
+            endpoint,
+            tokens_used,
+            cost,
+            config,
+        )
+        if not allowed:
+            return False, metadata
+
+        await self._shadow_write_daily_usage(
+            user_id=user_id,
+            endpoint=endpoint,
+            now=now,
+            tokens_used=normalized_tokens,
+        )
+        return True, metadata
+
+    def _reserve_request_usage_sync(
+        self,
+        user_id: str,
+        endpoint: str,
+        tokens_used: int,
+        cost: float,
+        config: RateLimitConfig,
+    ) -> tuple[bool, dict[str, Any], datetime, int]:
+        now = datetime.now(timezone.utc)
+        today = now.date()
+        try:
+            normalized_cost = float(cost or 0.0)
+        except _USER_RATE_LIMIT_NONCRITICAL_EXCEPTIONS:
+            normalized_cost = 0.0
+        normalized_tokens = max(0, int(tokens_used or 0))
+        cost_remaining: Optional[float] = None
+
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                if normalized_cost > 0:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT total_cost FROM daily_usage WHERE user_id = ? AND date = ?",
+                        (user_id, str(today)),
+                    )
+                    row = cursor.fetchone()
+                    total_cost = float(row[0] or 0.0) if row else 0.0
+                    daily_limit = float(config.max_cost_per_day)
+                    if total_cost + normalized_cost > daily_limit:
+                        conn.rollback()
+                        reset_at = datetime.combine(
+                            today + timedelta(days=1),
+                            datetime.min.time(),
+                            tzinfo=timezone.utc,
+                        )
+                        retry_after = max(1, int((reset_at - datetime.now(timezone.utc)).total_seconds()))
+                        return False, {
+                            "error": "Daily cost limit exceeded",
+                            "limit": config.max_cost_per_day,
+                            "used": total_cost,
+                            "requested": normalized_cost,
+                            "retry_after": retry_after,
+                            "resets_at": reset_at.isoformat(),
+                        }, now, normalized_tokens
+                    cost_remaining = daily_limit - total_cost - normalized_cost
+
+                self._write_request_usage(
+                    conn,
+                    user_id=user_id,
+                    endpoint=endpoint,
+                    now=now,
+                    today=today,
+                    tokens_used=normalized_tokens,
+                    cost=normalized_cost,
+                )
+                conn.commit()
+            except _USER_RATE_LIMIT_NONCRITICAL_EXCEPTIONS:
+                conn.rollback()
+                raise
+        finally:
+            conn.close()
+
+        if cost_remaining is None:
+            return True, {}, now, normalized_tokens
+        return True, {"cost_remaining": cost_remaining}, now, normalized_tokens
+
     async def _record_request(
         self,
         user_id: str,
@@ -587,28 +696,83 @@ class UserRateLimiter:
         cost: float
     ):
         """Record a request for tracking."""
+        now, normalized_tokens = await asyncio.to_thread(
+            self._record_request_sync,
+            user_id,
+            endpoint,
+            tokens_used,
+            cost,
+        )
+        await self._shadow_write_daily_usage(
+            user_id=user_id,
+            endpoint=endpoint,
+            now=now,
+            tokens_used=normalized_tokens,
+        )
+
+    def _record_request_sync(
+        self,
+        user_id: str,
+        endpoint: str,
+        tokens_used: int,
+        cost: float,
+    ) -> tuple[datetime, int]:
         now = datetime.now(timezone.utc)
         today = now.date()
+        normalized_tokens = max(0, int(tokens_used or 0))
+        normalized_cost = float(cost or 0.0)
 
-        with sqlite3.connect(self.db_path) as conn:
-            # Record in tracking table
-            conn.execute(
-                "INSERT INTO rate_limit_tracking (user_id, endpoint, timestamp, tokens_used, cost) VALUES (?, ?, ?, ?, ?)",
-                (user_id, endpoint, now.isoformat(), tokens_used, cost)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            self._write_request_usage(
+                conn,
+                user_id=user_id,
+                endpoint=endpoint,
+                now=now,
+                today=today,
+                tokens_used=normalized_tokens,
+                cost=normalized_cost,
             )
-
-            # Update daily usage
-            conn.execute("""
-                INSERT INTO daily_usage (user_id, date, total_evaluations, total_tokens, total_cost)
-                VALUES (?, ?, 1, ?, ?)
-                ON CONFLICT(user_id, date) DO UPDATE SET
-                    total_evaluations = total_evaluations + 1,
-                    total_tokens = total_tokens + ?,
-                    total_cost = total_cost + ?
-            """, (user_id, str(today), tokens_used, cost, tokens_used, cost))
-
             conn.commit()
+        finally:
+            conn.close()
+        return now, normalized_tokens
 
+    @staticmethod
+    def _write_request_usage(
+        conn: sqlite3.Connection,
+        *,
+        user_id: str,
+        endpoint: str,
+        now: datetime,
+        today: Any,
+        tokens_used: int,
+        cost: float,
+    ) -> None:
+        # Record in tracking table
+        conn.execute(
+            "INSERT INTO rate_limit_tracking (user_id, endpoint, timestamp, tokens_used, cost) VALUES (?, ?, ?, ?, ?)",
+            (user_id, endpoint, now.isoformat(), tokens_used, cost)
+        )
+
+        # Update daily usage
+        conn.execute("""
+            INSERT INTO daily_usage (user_id, date, total_evaluations, total_tokens, total_cost)
+            VALUES (?, ?, 1, ?, ?)
+            ON CONFLICT(user_id, date) DO UPDATE SET
+                total_evaluations = total_evaluations + 1,
+                total_tokens = total_tokens + ?,
+                total_cost = total_cost + ?
+        """, (user_id, str(today), tokens_used, cost, tokens_used, cost))
+
+    async def _shadow_write_daily_usage(
+        self,
+        *,
+        user_id: str,
+        endpoint: str,
+        now: datetime,
+        tokens_used: int,
+    ) -> None:
         # Shadow-write daily usage into the shared ResourceDailyLedger so RG can
         # enforce tokens/evaluations caps cross-module in v1.1.
         try:

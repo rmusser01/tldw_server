@@ -13,7 +13,7 @@ import ssl
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, urlunparse
 
 from loguru import logger
 
@@ -94,8 +94,16 @@ class WebhookSecurityValidator:
         self.max_url_length = get_config("webhooks.security.max_url_length", 2048)
 
         # Domain filtering
-        self.allowed_domains = set(get_config("webhooks.security.allowed_domains", []))
-        self.blocked_domains = set(get_config("webhooks.security.blocked_domains", []))
+        self.allowed_domains = {
+            self._normalize_domain(domain)
+            for domain in get_config("webhooks.security.allowed_domains", [])
+            if domain
+        }
+        self.blocked_domains = {
+            self._normalize_domain(domain)
+            for domain in get_config("webhooks.security.blocked_domains", [])
+            if domain
+        }
 
         # Rate limiting
         self.max_webhooks_per_user = get_config("webhooks.registration_limits.per_user_max", 10)
@@ -130,6 +138,82 @@ class WebhookSecurityValidator:
             11211, # Memcached
             27017, # MongoDB
         }
+
+    def resolve_safe_delivery_target(self, url: str) -> tuple[str, dict[str, str]]:
+        """Resolve a webhook URL to a delivery target.
+
+        HTTP delivery uses the resolved IP address and preserves the original
+        host in a Host header. HTTPS keeps the original URL after validating
+        resolved addresses so TLS SNI and certificate validation still use the
+        hostname.
+        """
+
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            raise ValueError("Webhook URL scheme must be http or https")
+        if not parsed.hostname:
+            raise ValueError("Webhook URL must include a hostname")
+        if parsed.username or parsed.password:
+            raise ValueError("Webhook URL credentials are not allowed")
+
+        hostname = parsed.hostname
+        try:
+            ip_addr = ipaddress.ip_address(hostname)
+            self._raise_if_private_ip(ip_addr)
+            safe_ip = str(ip_addr)
+        except ValueError as direct_ip_error:
+            safe_ips: list[str] = []
+            try:
+                resolved_ips = socket.getaddrinfo(hostname, parsed.port)
+            except socket.gaierror as e:
+                raise ValueError(f"DNS resolution failed: {str(e)}") from e
+
+            for addr_info in resolved_ips:
+                ip_str = addr_info[4][0]
+                try:
+                    ip_addr = ipaddress.ip_address(ip_str)
+                except ValueError:
+                    continue
+                try:
+                    self._raise_if_private_ip(ip_addr)
+                except ValueError as private_error:
+                    raise private_error from direct_ip_error
+                safe_ips.append(str(ip_addr))
+
+            if not safe_ips:
+                raise ValueError("No valid IPs found for hostname")
+            safe_ip = safe_ips[0]
+
+        if parsed.scheme == "https":
+            return url, {}
+
+        if parsed.port:
+            netloc = f"[{safe_ip}]:{parsed.port}" if ":" in safe_ip else f"{safe_ip}:{parsed.port}"
+        else:
+            netloc = f"[{safe_ip}]" if ":" in safe_ip else safe_ip
+
+        delivery_url = urlunparse((
+            parsed.scheme,
+            netloc,
+            parsed.path,
+            parsed.params,
+            parsed.query,
+            parsed.fragment,
+        ))
+        host_header = hostname
+        if parsed.port:
+            host_header = f"{hostname}:{parsed.port}"
+        return delivery_url, {"Host": host_header}
+
+    async def resolve_safe_delivery_target_async(self, url: str) -> tuple[str, dict[str, str]]:
+        """Resolve a webhook delivery target without blocking the event loop."""
+
+        return await asyncio.to_thread(self.resolve_safe_delivery_target, url)
+
+    def _raise_if_private_ip(self, ip_addr: ipaddress._BaseAddress) -> None:
+        for network in self.private_networks:
+            if ip_addr.version == network.version and ip_addr in network:
+                raise ValueError(f"Hostname resolves to private IP: {ip_addr}")
 
     async def validate_webhook_url(
         self,
@@ -359,11 +443,13 @@ class WebhookSecurityValidator:
         errors = []
         warnings = []
         metadata = {"domain_status": "unknown"}
+        normalized_hostname = self._normalize_domain(hostname)
 
         # Check blocked domains
         if self.blocked_domains:
             for blocked_domain in self.blocked_domains:
-                if hostname.endswith(blocked_domain) or hostname == blocked_domain:
+                normalized_domain = self._normalize_domain(blocked_domain)
+                if normalized_domain and self._domain_matches(normalized_hostname, normalized_domain):
                     errors.append(WebhookValidationError(
                         code="BLOCKED_DOMAIN",
                         message=f"Domain is blocked: {hostname}",
@@ -377,7 +463,8 @@ class WebhookSecurityValidator:
         if self.allowed_domains and metadata["domain_status"] != "blocked":
             domain_allowed = False
             for allowed_domain in self.allowed_domains:
-                if hostname.endswith(allowed_domain) or hostname == allowed_domain:
+                normalized_domain = self._normalize_domain(allowed_domain)
+                if normalized_domain and self._domain_matches(normalized_hostname, normalized_domain):
                     domain_allowed = True
                     metadata["domain_status"] = "allowed"
                     break
@@ -399,6 +486,14 @@ class WebhookSecurityValidator:
             "warnings": warnings,
             "metadata": metadata
         }
+
+    @staticmethod
+    def _normalize_domain(domain: str) -> str:
+        return str(domain).strip().lower().strip(".")
+
+    @staticmethod
+    def _domain_matches(hostname: str, domain: str) -> bool:
+        return hostname == domain or hostname.endswith(f".{domain}")
 
     def _validate_path(self, path: str, warnings: list[WebhookValidationError]):
         """Validate URL path for potential issues."""

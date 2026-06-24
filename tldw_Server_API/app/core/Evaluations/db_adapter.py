@@ -406,7 +406,6 @@ class DatabaseAdapterFactory:
 
     _adapters = {
         DatabaseType.SQLITE: SQLiteAdapter,
-        DatabaseType.POSTGRESQL: PostgreSQLAdapter,
     }
 
     @classmethod
