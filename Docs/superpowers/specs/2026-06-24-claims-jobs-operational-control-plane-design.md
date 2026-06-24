@@ -26,7 +26,7 @@ Stage 1 migrates the smallest production background surface:
 - Review notification delivery.
 - Alert delivery.
 
-`claims_service.py` remains the API-facing facade. When Jobs mode is enabled, service code enqueues Jobs and does not start local daemon execution. When Jobs mode is disabled, the existing bounded local dispatch path remains available as a temporary compatibility path.
+`claims_service.py` remains the API-facing facade. When Jobs mode is enabled, service code enqueues Jobs and does not start local daemon execution. When Jobs mode is disabled, the existing bounded local rebuild, review-notification, and alert-delivery compatibility paths remain available temporarily.
 
 Stage 1 adds:
 
@@ -68,7 +68,7 @@ Scheduler is used only for recurring orchestration decisions. It does not replac
 - Payload version constants.
 - Payload validators.
 - Result shape helpers.
-- Claims job error types, including retryability.
+- Claims job error types that expose the attributes consumed by `WorkerSDK`: `retryable`, `failure_code`, and optional `backoff_seconds`.
 
 `claims_jobs.py` defines:
 
@@ -125,7 +125,7 @@ Handler behavior:
 - Resolve the user media DB path from `owner_user_id`.
 - Validate that the media row belongs to the owner.
 - Run the existing strict rebuild logic.
-- Complete with a small result such as `{ "status": "completed", "media_id": 123, "deleted": 2, "inserted": 3 }`.
+- Complete with a small result such as `{ "outcome": "ok", "media_id": 123, "deleted": 2, "inserted": 3 }`.
 - Complete as skipped when the media row is missing or no longer eligible.
 - Fail retryably for transient DB locks or provider/network failures.
 - Fail non-retryably for invalid payloads or owner-scope violations.
@@ -191,7 +191,7 @@ Handler behavior:
 - Fail retryably for transient delivery errors.
 - Fail non-retryably for invalid payloads, unsupported channels, missing owner scope, or unsafe state.
 
-If the current Claims DB cannot persist alert delivery attempts keyed by `{event_id, alert_id, channel}`, Stage 1 must add a minimal delivery-attempt table or equivalent Media DB helper before migrating alert delivery.
+Alert delivery must not move to Jobs until the Claims DB can persist delivery attempts keyed by `{event_id, alert_id, channel}`. If the current schema cannot do this, Stage 1 must first add a minimal delivery-attempt table or equivalent Media DB helper, then migrate alert delivery onto Jobs.
 
 ## Payload And Data Safety
 
@@ -205,9 +205,13 @@ Jobs payloads must not include:
 - Alert event payloads.
 - Secrets or provider keys.
 
-Workers derive DB paths from `owner_user_id` using existing user database helpers. A transitional `db_path` field is allowed only for a temporary compatibility step, and only if the worker validates that the path is under the expected user database root and matches the owner.
+Workers derive DB paths from `owner_user_id` using existing user database helpers. Jobs must use the real media/settings owner. If a call site cannot resolve a real owner, enqueue should fail before job creation or the handler should fail non-retryably; Claims Jobs must not use `0`, blank, or synthetic owner IDs as a fallback.
 
-Jobs results must be small, JSON-serializable, and non-sensitive. Results may include IDs, counts, status strings, and reason codes.
+A transitional `db_path` field is allowed only for a temporary compatibility step, and only if the worker validates that the path is under the expected user database root and matches the owner.
+
+Jobs results must be small, JSON-serializable, and non-sensitive. Results may include IDs, counts, domain outcome strings such as `ok`, `skipped`, or `partial`, and reason codes. Avoid duplicating the Jobs lifecycle status inside the result payload unless the existing Jobs convention requires it.
+
+Jobs idempotency is scoped by the existing Jobs uniqueness boundary: `(domain, queue, job_type, idempotency_key)`. Claims idempotency keys must be stable within that boundary. Changing `CLAIMS_JOBS_QUEUE` can create a separate dedupe scope, so rollout and retry documentation should call that out.
 
 ## Configuration
 
@@ -233,15 +237,21 @@ Each background action has one routing point:
 
 There is no local fallback after a successful enqueue. Worker-disabled or worker-unavailable states surface as queued Jobs, not hidden local execution.
 
-If enqueue fails before a job is created, the service should return/log the existing operation outcome according to the current API contract, and the failure should be observable through logs/metrics. The implementation plan should decide whether enqueue failure is request-fatal for each call site.
+If enqueue fails before a job is created, behavior must be explicit per call site:
+
+- Explicit admin/user-triggered background actions, such as a manual Claims rebuild, should fail visibly according to the current API error pattern because the requested work was not accepted.
+- Best-effort side effects, such as review notification delivery after a successful review state change, should not roll back the primary user action, but must record/log the enqueue failure and expose it through metrics or an existing operational surface.
+- Worker-disabled or worker-unavailable states are not enqueue failures; they create queued Jobs that remain visible through Jobs/admin status.
 
 ## Failure And Retry Taxonomy
 
-Claims handlers should raise a small Claims job error type with retryability:
+Claims handlers should raise a small Claims job error type that matches the attributes consumed by `WorkerSDK`:
 
 ```text
-ClaimsJobError(message, retryable=True|False, reason_code="...")
+ClaimsJobError(message, retryable=True|False, failure_code="...", backoff_seconds=None)
 ```
+
+`failure_code` is the value Jobs stores for handler failures. Use result `reason` values for completed-domain outcomes such as skipped work.
 
 Retryable examples:
 
@@ -259,7 +269,7 @@ Non-retryable examples:
 - Owner-scope violation.
 - Unsafe or mismatched transitional DB path.
 
-Skipped outcomes complete the Jobs record with a result such as `{ "status": "skipped", "reason": "already_delivered" }`. Skipped is a domain result, not a separate Jobs lifecycle status.
+Skipped outcomes complete the Jobs record with a result such as `{ "outcome": "skipped", "reason": "already_delivered" }`. Skipped is a domain result, not a separate Jobs lifecycle status.
 
 ## Dashboard And Admin Behavior
 
@@ -279,6 +289,7 @@ Claims should not add duplicate queue-control APIs.
 - Resolve worker ID and queue.
 - Build `WorkerConfig`.
 - Run `WorkerSDK` with a stop-event bridge.
+- For the normal global Claims worker, do not pass an `owner_user_id` acquisition filter. The worker should acquire all jobs in the Claims domain/queue, while ownership is enforced by the Jobs row owner and the handler's payload/domain validation. Per-owner workers are a separate deployment choice and must be documented if introduced.
 - Let cancellation propagate.
 - Avoid broad exception tuples that swallow cancellation.
 
@@ -310,12 +321,12 @@ Stage 1 tests:
 
 - Payload validation for valid payloads, missing owner, invalid IDs, unsupported channel, unsupported version, and unsupported job type.
 - Enqueue contract tests proving `JobManager.create_job(...)` receives `domain="claims"`, expected `job_type`, queue, owner, idempotency key, max retries, and ID-only payload.
-- Routing tests for Jobs disabled mode, Jobs enabled mode, worker disabled mode, enqueue failure, and no duplicate local execution after enqueue.
+- Routing tests for Jobs disabled mode, Jobs enabled mode, worker disabled mode, enqueue failure defaults for explicit versus best-effort call sites, and no duplicate local execution after enqueue.
 - Rebuild handler tests for success, missing media skip, owner mismatch non-retryable failure, duplicate rebuild idempotency, and strict replacement failure retry behavior.
 - Review notification handler tests for already-delivered skip, disabled settings skip, partial undelivered delivery, successful delivery marking, and retryable delivery failure.
 - Alert delivery handler tests for reloading event/settings from DB, persisted attempt creation, successful attempt dedupe across retry, invalid channel non-retryable failure, and transient delivery retry.
-- Worker dispatch smoke tests for supported Claims job types and unsupported type handling.
-- Multi-user scope tests proving workers derive DB paths from `owner_user_id` and cannot process another owner data set.
+- Worker dispatch smoke tests for supported Claims job types, unsupported type handling, `failure_code` propagation, retryable failure behavior, and non-retryable failure behavior.
+- Multi-user scope tests proving workers derive DB paths from `owner_user_id` and cannot process another owner data set. If the existing Jobs test harness supports PostgreSQL/RLS coverage, include at least one owner-scope test against that path.
 - Dashboard summary tests proving Claims dashboards read Jobs summaries without exposing queue controls outside Jobs RBAC.
 
 Stage 2 and Stage 3 add tests for analytics export jobs, review metrics aggregation jobs, cluster rebuild jobs, recurring enqueue decisions, and removal of local daemon paths.
@@ -343,4 +354,4 @@ It does not move all Claims work in Stage 1. Analytics exports, review metrics a
 - Placeholder scan: no placeholders remain.
 - Consistency check: Jobs owns queue lifecycle throughout; Claims owns domain contracts and handlers only.
 - Scope check: Stage 1 is implementation-sized; Stage 2 and Stage 3 are explicitly follow-up stages.
-- Ambiguity check: toggles, payload contents, idempotency, retry/skipped semantics, owner DB resolution, and dashboard/admin boundaries are explicit.
+- Ambiguity check: toggles, payload contents, idempotency scope, retry/skipped semantics, WorkerSDK failure attributes, owner DB resolution, worker acquisition scope, enqueue failure defaults, and dashboard/admin boundaries are explicit.
