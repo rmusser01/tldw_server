@@ -64,10 +64,9 @@ const isLoopbackHost = (hostHeader?: string | string[]): boolean => {
 }
 
 const hasForwardingHeaders = (req: NextApiRequest): boolean =>
-  FORWARDED_HEADER_NAMES.some((name) => {
-    const value = req.headers[name]
-    return Array.isArray(value) ? value.length > 0 : Boolean(value)
-  })
+  FORWARDED_HEADER_NAMES.some((name) =>
+    Object.prototype.hasOwnProperty.call(req.headers, name)
+  )
 
 const unavailable = (reason: string): RuntimeConfigResponse => ({
   runtimeAuth: {

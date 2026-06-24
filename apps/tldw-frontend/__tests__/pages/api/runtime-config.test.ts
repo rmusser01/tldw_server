@@ -111,11 +111,12 @@ describe("WebUI runtime config API", () => {
   })
 
   it.each([
-    ["forwarded", "for=203.0.113.10;host=localhost:8080"],
-    ["x-forwarded-for", "203.0.113.10"],
-    ["x-forwarded-host", "localhost:8080"],
-    ["x-real-ip", "203.0.113.10"]
-  ])("returns unavailable when %s is present", async (header, value) => {
+    ["forwarded", "forwarded", "for=203.0.113.10;host=localhost:8080"],
+    ["x-forwarded-for", "x-forwarded-for", "203.0.113.10"],
+    ["empty x-forwarded-for", "x-forwarded-for", ""],
+    ["x-forwarded-host", "x-forwarded-host", "localhost:8080"],
+    ["x-real-ip", "x-real-ip", "203.0.113.10"]
+  ])("returns unavailable when %s is present", async (_name, header, value) => {
     const res = await callRuntimeConfig({ [header]: value })
 
     expect(res.statusCode).toBe(200)
