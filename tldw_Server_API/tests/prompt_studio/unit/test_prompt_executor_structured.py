@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_executor import PromptExecutor
@@ -41,6 +43,18 @@ def _make_prompt_definition_payload() -> dict:
             "block_separator": "\n\n",
         },
     }
+
+
+def test_legacy_build_prompt_replaces_exact_placeholder_names():
+    executor = PromptExecutor(SimpleNamespace(client_id="unit-test"))
+
+    rendered = executor._build_prompt(
+        {"user_prompt": "$id $idea {id} {{id}} <id> {i-d}"},
+        signature=None,
+        inputs={"id": "42", "i-d": "bad"},
+    )
+
+    assert rendered == "42 $idea 42 42 42 {i-d}"
 
 
 @pytest.mark.asyncio

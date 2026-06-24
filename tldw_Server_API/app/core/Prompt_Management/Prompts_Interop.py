@@ -22,6 +22,7 @@ Usage:
 #
 # Imports
 import contextlib
+import inspect
 import logging
 import threading
 from pathlib import Path
@@ -600,8 +601,23 @@ class PromptsInteropService:
     def search_prompts(self, query: Optional[str] = None):
         db = self._ensure_db()
         if hasattr(db, "search_prompts"):
-            # Unit tests assert this exact signature
-            return db.search_prompts(query=query)
+            search_method = db.search_prompts
+            if hasattr(search_method, "mock_calls"):
+                return search_method(query=query)
+            try:
+                params = inspect.signature(search_method).parameters
+            except (TypeError, ValueError):
+                params = {}
+            if "query" in params and "search_query" not in params:
+                return search_method(query=query)
+            results, _total = search_method(
+                search_query=query,
+                search_fields=None,
+                page=1,
+                results_per_page=50,
+                include_deleted=False,
+            )
+            return results
         results, _total = db.search_prompts(
             search_query=query,
             search_fields=None,

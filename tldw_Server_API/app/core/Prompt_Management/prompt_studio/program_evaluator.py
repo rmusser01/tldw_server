@@ -13,7 +13,8 @@ Notes:
 import json
 import os
 import re
-import subprocess
+# The subprocess evaluator is gated by PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL.
+import subprocess  # nosec B404
 import sys
 import tempfile
 import textwrap
@@ -50,7 +51,8 @@ class ProgramEvaluator:
     """Sandboxed evaluator for python code in Prompt Studio (Phase 2).
 
     Usage:
-      - feature toggle via env PROMPT_STUDIO_ENABLE_CODE_EVAL or project metadata
+      - feature toggle via env PROMPT_STUDIO_ENABLE_CODE_EVAL
+      - execution requires explicit PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL acknowledgement
       - extract code from LLM output (``` fences preferred)
       - execute under resource limits and isolated mode
       - evaluate objective/constraints from test case spec or stdout JSON
@@ -61,15 +63,28 @@ class ProgramEvaluator:
     WALL_TIME_SEC = 8
     MEMORY_MB = 256
     MAX_OUTPUT_CHARS = 4000
+    _TRUE_VALUES = {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _env_truthy(name: str, default: str = "false") -> bool:
+        return str(os.getenv(name, default)).strip().lower() in ProgramEvaluator._TRUE_VALUES
 
     @staticmethod
     def is_enabled_globally() -> bool:
-        return str(os.getenv("PROMPT_STUDIO_ENABLE_CODE_EVAL", "false")).strip().lower() in {"1", "true", "yes"}
+        return ProgramEvaluator._env_truthy("PROMPT_STUDIO_ENABLE_CODE_EVAL")
 
     @staticmethod
-    def is_enabled_for_project(db, project_id: Optional[int]) -> bool:
+    def is_unsafe_execution_acknowledged() -> bool:
+        return ProgramEvaluator._env_truthy("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL")
+
+    @staticmethod
+    def is_project_metadata_enablement_allowed() -> bool:
+        return ProgramEvaluator._env_truthy("PROMPT_STUDIO_ALLOW_PROJECT_CODE_EVAL")
+
+    @staticmethod
+    def _project_metadata_flag(db, project_id: Optional[int]) -> Optional[bool]:
         if project_id is None:
-            return ProgramEvaluator.is_enabled_globally()
+            return None
         try:
             proj = db.get_project(project_id)
             md = proj.get("metadata") if isinstance(proj, dict) else None
@@ -84,7 +99,31 @@ class ProgramEvaluator:
                     return flag
         except Exception as metadata_error:
             logger.debug("Program evaluator failed to resolve project metadata flag", exc_info=metadata_error)
-        return ProgramEvaluator.is_enabled_globally()
+        return None
+
+    @staticmethod
+    def _resolve_enablement(db, project_id: Optional[int]) -> tuple[bool, str]:
+        project_flag = ProgramEvaluator._project_metadata_flag(db, project_id)
+        globally_enabled = ProgramEvaluator.is_enabled_globally()
+        project_metadata_allowed = ProgramEvaluator.is_project_metadata_enablement_allowed()
+
+        if project_flag is False:
+            requested = False
+        elif project_flag is True:
+            requested = globally_enabled or project_metadata_allowed
+        else:
+            requested = globally_enabled
+
+        if not requested:
+            return False, "code_eval_disabled"
+        if not ProgramEvaluator.is_unsafe_execution_acknowledged():
+            return False, "unsafe_code_eval_not_enabled"
+        return True, ""
+
+    @staticmethod
+    def is_enabled_for_project(db, project_id: Optional[int]) -> bool:
+        enabled, _reason = ProgramEvaluator._resolve_enablement(db, project_id)
+        return enabled
 
     # --------------------------------------------------------------------------------------------
     # Public API
@@ -123,12 +162,16 @@ class ProgramEvaluator:
         memory_mb = self._resolve_memory_mb()
         import_whitelist = self._resolve_import_whitelist()
 
-        if not self.is_enabled_for_project(db, project_id):
+        enabled, disabled_reason = self._resolve_enablement(db, project_id)
+        if not enabled:
             # Feature disabled → fallback heuristic
             return EvalResult(
                 success=True,
                 reward=self.evaluate_text_output(llm_output),
-                metrics={"mode": "heuristic"},
+                metrics={
+                    "mode": "heuristic",
+                    "code_eval_disabled_reason": disabled_reason,
+                },
                 return_code=0,
             )
 
@@ -374,7 +417,8 @@ class ProgramEvaluator:
             # Run isolated Python: -I ignores env vars/user site; -B no pyc; no cwd files
             env = {"PYTHONHASHSEED": "0"}
             try:
-                proc = subprocess.run(
+                # The code under test is untrusted, but this path is explicitly unsafe opt-in.
+                proc = subprocess.run(  # nosec B603
                     [sys.executable, "-I", "-B", script_path],
                     cwd=td,
                     env=env,

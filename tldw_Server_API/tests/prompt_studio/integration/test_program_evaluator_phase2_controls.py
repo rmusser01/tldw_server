@@ -57,6 +57,11 @@ async def test_program_evaluator_flag_precedence_via_test_runner(
     expected_mode,
 ):
     monkeypatch.setenv("PROMPT_STUDIO_ENABLE_CODE_EVAL", "true" if global_enabled else "false")
+    monkeypatch.setenv("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL", "true")
+    if project_enabled is True:
+        monkeypatch.setenv("PROMPT_STUDIO_ALLOW_PROJECT_CODE_EVAL", "true")
+    else:
+        monkeypatch.delenv("PROMPT_STUDIO_ALLOW_PROJECT_CODE_EVAL", raising=False)
     metadata = {} if project_enabled is None else {"enable_code_eval": bool(project_enabled)}
     prompt_id, test_case_id = _seed_python_runner_case(temp_ps_db, project_metadata=metadata)
 
@@ -103,6 +108,7 @@ async def test_program_evaluator_flag_precedence_via_test_runner(
 @pytest.mark.asyncio
 async def test_program_evaluator_timeout_maps_to_zero_score(temp_ps_db, monkeypatch):
     monkeypatch.setenv("PROMPT_STUDIO_ENABLE_CODE_EVAL", "true")
+    monkeypatch.setenv("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL", "true")
     monkeypatch.setenv("PROMPT_STUDIO_CODE_EVAL_TIMEOUT_MS", "100")
     prompt_id, test_case_id = _seed_python_runner_case(
         temp_ps_db,

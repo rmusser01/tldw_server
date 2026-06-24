@@ -3,7 +3,7 @@
 
 import json
 import random
-from datetime import datetime
+import uuid
 from enum import Enum
 from typing import Any, Optional
 
@@ -36,6 +36,20 @@ class OptimizationStrategy(str, Enum):
     BAYESIAN = "bayesian"  # Bayesian optimization
     GRID_SEARCH = "grid_search"  # Grid search
     RANDOM_SEARCH = "random_search"  # Random search
+
+
+def _next_variant_version(cursor, project_id: int, variant_name: str, base_version: Any) -> int:
+    cursor.execute(
+        """
+            SELECT COALESCE(MAX(version_number), 0)
+            FROM prompt_studio_prompts
+            WHERE project_id = ? AND name = ?
+        """,
+        (project_id, variant_name),
+    )
+    row = cursor.fetchone()
+    existing_max = int(row[0] or 0) if row else 0
+    return max(existing_max, int(base_version or 0)) + 1
 
 ########################################################################################################################
 # MIPRO Optimizer
@@ -342,6 +356,13 @@ Follow these examples for consistency."""
         # Create new prompt variant: update system_prompt (instructions), preserve user_prompt
         with self.db.transaction() as conn:
             cursor = conn.cursor()
+            variant_name = f"{prompt['name']} (Optimized)"
+            version_number = _next_variant_version(
+                cursor,
+                int(prompt["project_id"]),
+                variant_name,
+                prompt.get("version_number"),
+            )
 
             cursor.execute("""
                 INSERT INTO prompt_studio_prompts (
@@ -349,13 +370,13 @@ Follow these examples for consistency."""
                     user_prompt, version_number, parent_version_id, client_id
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                f"opt-{datetime.utcnow().timestamp()}",
+                f"opt-{uuid.uuid4()}",
                 prompt["project_id"],
                 prompt.get("signature_id"),
-                f"{prompt['name']} (Optimized)",
+                variant_name,
                 new_instruction,
                 prompt.get("user_prompt"),
-                (prompt.get("version_number") or 0) + 1,
+                version_number,
                 base_prompt_id,
                 self.db.client_id
             ))
@@ -500,7 +521,9 @@ class BootstrapOptimizer:
             while len(selected) < num_examples and remaining:
                 # Pick one at random
                 if not selected:
-                    selected.append(remaining.pop(random.randint(0, len(remaining)-1)))
+                    # Non-security sampling for diverse few-shot example selection.
+                    idx = random.randint(0, len(remaining) - 1)  # nosec B311
+                    selected.append(remaining.pop(idx))
                 else:
                     # Pick most different from selected
                     max_diff = -1
@@ -566,19 +589,26 @@ class BootstrapOptimizer:
             new_user_prompt = f"{examples_text}{base_user_prompt}"
 
             # Create new prompt
+            variant_name = f"{prompt['name']} (Bootstrap)"
+            version_number = _next_variant_version(
+                cursor,
+                int(prompt["project_id"]),
+                variant_name,
+                prompt.get("version_number"),
+            )
             cursor.execute("""
                 INSERT INTO prompt_studio_prompts (
                     uuid, project_id, signature_id, name, system_prompt,
                     user_prompt, version_number, parent_version_id, client_id
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                f"bootstrap-{datetime.utcnow().timestamp()}",
+                f"bootstrap-{uuid.uuid4()}",
                 prompt["project_id"],
                 prompt.get("signature_id"),
-                f"{prompt['name']} (Bootstrap)",
+                variant_name,
                 prompt.get("system_prompt"),
                 new_user_prompt,
-                (prompt.get("version_number") or 0) + 1,
+                version_number,
                 base_prompt_id,
                 self.db.client_id
             ))
