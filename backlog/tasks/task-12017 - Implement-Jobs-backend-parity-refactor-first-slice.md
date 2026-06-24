@@ -20,12 +20,14 @@ modified_files:
 - Docs/Design/JOBS_BACKEND_PARITY_INVENTORY_2026_06_24.md
 - tldw_Server_API/tests/Jobs/parity/__init__.py
 - tldw_Server_API/tests/Jobs/parity/scenarios.py
+- tldw_Server_API/tests/Jobs/parity/test_sqlite_parity.py
+- tldw_Server_API/tests/Jobs/parity/test_postgres_parity.py
 - tldw_Server_API/tests/Jobs/test_jobs_idempotency_scope_sqlite.py
 - tldw_Server_API/tests/Jobs/test_jobs_idempotency_scope_postgres.py
 - tldw_Server_API/tests/Jobs/test_jobs_completion_idempotent_sqlite.py
 - tldw_Server_API/tests/Jobs/test_jobs_completion_idempotent_postgres.py
 - backlog/tasks/task-12017 - Implement-Jobs-backend-parity-refactor-first-slice.md
-updated_date: 2026-06-24 22:24
+updated_date: 2026-06-24 22:39
 ---
 
 ## Description
@@ -46,6 +48,8 @@ Follow-up inventory update added the public admin stale-processing read-model bo
 Follow-up inventory update made the stale-processing boundary explicit as GET /jobs/stale at jobs_admin.py:1513.
 Task 2 started: adding shared Jobs backend parity scenario helpers and refactoring the owned SQLite/Postgres idempotency tests to call them. Applying the plan correction to update TASK-12017, not TASK-12016.
 Task 2 completed: added shared Jobs backend parity scenario helpers under tldw_Server_API/tests/Jobs/parity and refactored the owned SQLite/Postgres idempotency tests to call shared scenarios. Verification: py_compile for scenarios.py exited 0; SQLite selected tests passed (3 passed, 19 warnings); Postgres selected tests exited 0 with 3 skips because Postgres was not reachable ("Postgres not reachable; skipping Postgres-backed tests"); git diff --check exited 0; Bandit full touched-scope report contained only low-severity B101 pytest assert findings, and the follow-up run with B101 excluded exited 0 with 0 findings.
+Task 3 started: adding first SQLite and Postgres parity wrapper tests around the existing shared Jobs parity scenarios. Applying the plan correction to update TASK-12017 only.
+Task 3 completed: added SQLite and Postgres parity wrapper tests around the shared Jobs parity scenarios. Verification: `RUN_JOBS=1 python -m pytest tldw_Server_API/tests/Jobs/parity/test_sqlite_parity.py -q` exited 0 with 6 passed and 26 warnings; `RUN_JOBS=1 python -m pytest tldw_Server_API/tests/Jobs/parity/test_postgres_parity.py -q` exited 0 with 6 skipped and 14 warnings because Postgres was unavailable; follow-up `-q -rs` confirmed the skip reason: "Postgres not reachable; skipping Postgres-backed tests". `git diff --check` exited 0. Bandit on the touched wrapper test files exited 0, and the B101-excluded follow-up reported no issues. No production code was changed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
