@@ -99,10 +99,10 @@ def test_process_text_hierarchical_template_path_uses_instance_flat_chunker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     chunker = Chunker()
-    calls: list[dict] = []
+    calls: list[tuple[tuple, dict]] = []
 
     def fake_chunk_text_hierarchical_flat(*args, **kwargs):
-        calls.append(kwargs)
+        calls.append((args, kwargs))
         return [{"text": "Title", "metadata": {"start_offset": 0, "end_offset": 5}}]
 
     def forbidden_normal_path(*args, **kwargs):
@@ -118,17 +118,16 @@ def test_process_text_hierarchical_template_path_uses_instance_flat_chunker(
     )
 
     assert rows[0]["text"] == "Title"
-    assert calls == [
-        {
-            "text": "# Title\n\nBody text.",
-            "method": "words",
-            "max_size": 20,
-            "overlap": 0,
-            "language": "en",
-            "template": template,
-            "method_options": {},
-        }
-    ]
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    forwarded_text = args[0] if args else kwargs.get("text")
+    assert forwarded_text == "# Title\n\nBody text."
+    assert kwargs.get("method") == "words"
+    assert kwargs.get("max_size") == 20
+    assert kwargs.get("overlap") == 0
+    assert kwargs.get("language") == "en"
+    assert kwargs.get("template") == template
+    assert kwargs.get("method_options") == {}
 
 
 def test_process_text_frontmatter_offsets_and_timecode_map_are_original_coordinates() -> None:
