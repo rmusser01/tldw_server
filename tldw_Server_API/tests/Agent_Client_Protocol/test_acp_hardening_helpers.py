@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import socket
+
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -50,4 +52,33 @@ def test_sse_post_url_validation_requires_same_origin() -> None:
         validate_sse_post_url(
             "https://mcp.example.com/sse",
             "https://evil.example.com/messages",
+            allow_private_network=True,
+        )
+
+
+def test_mcp_http_url_validation_rejects_hostname_resolving_to_loopback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.Agent_Client_Protocol import hardening
+
+    def fake_getaddrinfo(*args: object, **kwargs: object) -> list[tuple[object, ...]]:
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))]
+
+    hardening._DNS_RESOLUTION_CACHE.clear()
+    monkeypatch.setattr(hardening.socket, "getaddrinfo", fake_getaddrinfo)
+
+    with pytest.raises(ValueError, match="unsafe host"):
+        hardening.validate_mcp_http_url("https://safe-looking.example/mcp")
+
+
+def test_session_launch_validation_rejects_missing_cwd_roots() -> None:
+    from tldw_Server_API.app.core.Agent_Client_Protocol.hardening import (
+        validate_acp_session_launch_inputs,
+    )
+
+    with pytest.raises(ValueError, match="cwd roots"):
+        validate_acp_session_launch_inputs(
+            cwd="/repo",
+            allowed_cwd_roots=[],
+            runner_cwd=None,
         )

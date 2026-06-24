@@ -34,13 +34,20 @@ def determine_permission_tier(tool_name: str) -> str:
     tokens = set(re.findall(r"[a-z0-9]+", tool_lower))
 
     individual_tokens = {
+        "alter",
         "bash",
+        "create",
         "delete",
+        "destroy",
         "drop",
         "exec",
         "execute",
         "force",
         "kill",
+        "modify",
+        "patch",
+        "post",
+        "put",
         "push",
         "remove",
         "reset",
@@ -48,6 +55,8 @@ def determine_permission_tier(tool_name: str) -> str:
         "run",
         "shell",
         "terminal",
+        "update",
+        "write",
     }
     if tokens & individual_tokens:
         return "individual"

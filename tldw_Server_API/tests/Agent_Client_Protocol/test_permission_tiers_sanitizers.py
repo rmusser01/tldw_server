@@ -42,6 +42,10 @@ def test_policy_permission_tier_failure_log_is_sanitized(monkeypatch: pytest.Mon
         "get_shell_history",
         "list_terminal_sessions",
         "Bash(git:push --force)",
+        "read_and_write_file",
+        "get_and_update_profile",
+        "list_and_destroy_instances",
+        "find_and_patch_record",
     ],
 )
 def test_permission_tier_checks_destructive_tokens_before_auto_tokens(

@@ -158,8 +158,7 @@ class MCPSSETransport(MCPTransport):
                     event_type, data = event
                     if event_type == "endpoint":
                         # Resolve relative URL against sse_url base
-                        base = self._sse_url.rsplit("/", 1)[0] + "/"
-                        post_url = urljoin(base, data)
+                        post_url = urljoin(self._sse_url, data)
                         return validate_sse_post_url(
                             self._sse_url,
                             post_url,
@@ -281,12 +280,6 @@ class MCPSSETransport(MCPTransport):
             raise RuntimeError("HTTP client not initialized")
         if self._post_url is None:
             raise RuntimeError("post_url must be set before making calls")
-        validate_sse_post_url(
-            self._sse_url,
-            self._post_url,
-            allow_private_network=self._allow_private_network,
-            allow_cross_origin=self._allow_cross_origin_post_url,
-        )
 
         try:
             response = await self._http_client.post(
@@ -314,12 +307,6 @@ class MCPSSETransport(MCPTransport):
             raise RuntimeError("HTTP client not initialized")
         if self._post_url is None:
             raise RuntimeError("post_url must be set before making calls")
-        validate_sse_post_url(
-            self._sse_url,
-            self._post_url,
-            allow_private_network=self._allow_private_network,
-            allow_cross_origin=self._allow_cross_origin_post_url,
-        )
 
         response = await self._http_client.post(
             self._post_url,

@@ -27,3 +27,9 @@
 **Success Criteria**: Targeted pytest suite passes and Bandit reports no new actionable findings in the touched scope.
 **Tests**: Focused pytest plus Bandit JSON output.
 **Status**: Complete
+
+## Stage 6: PR Review Follow-Up
+**Goal**: Rebase on current `dev` and address PR review comments from Qodo and Gemini.
+**Success Criteria**: DNS-resolving SSRF checks, fail-closed cwd roots, stricter destructive permission tokens, redact-before-regex behavior, SSE URL cleanup, direct config field access, docstrings, and type hints are covered by focused tests.
+**Tests**: Focused ACP pytest slice including config cwd tests plus Bandit on touched ACP code.
+**Status**: Complete

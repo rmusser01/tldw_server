@@ -395,7 +395,7 @@ async def test_sse_transport_rejects_loopback_endpoint_before_client_creation():
 
 @pytest.mark.asyncio
 async def test_sse_transport_rejects_cross_origin_discovered_post_url():
-    t = MCPSSETransport(sse_url="https://mcp.example.com/sse")
+    t = MCPSSETransport(sse_url="https://mcp.example.com/sse", allow_private_network=True)
 
     async def mock_stream_lines():
         yield "event: endpoint"

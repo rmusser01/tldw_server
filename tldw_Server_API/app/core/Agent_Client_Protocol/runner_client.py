@@ -600,21 +600,16 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
         user_id: int | None = None,
         session_env: dict[str, str] | None = None,
     ) -> str:
-        allowed_roots_raw = getattr(self.config, "allowed_session_cwd_roots", [])
-        allowed_roots = allowed_roots_raw if isinstance(allowed_roots_raw, list) else []
-        allow_session_env = getattr(self.config, "allow_session_env", False)
-        allow_stdio_mcp = getattr(self.config, "allow_inline_stdio_mcp_servers", False)
-        allow_private_mcp_http = getattr(self.config, "allow_private_mcp_http", False)
         try:
             validate_acp_session_launch_inputs(
                 cwd=cwd,
-                allowed_cwd_roots=list(allowed_roots),
-                runner_cwd=getattr(self.config, "cwd", None),
+                allowed_cwd_roots=list(self.config.allowed_session_cwd_roots),
+                runner_cwd=self.config.cwd,
                 mcp_servers=mcp_servers,
                 session_env=session_env,
-                allow_session_env=allow_session_env if isinstance(allow_session_env, bool) else False,
-                allow_inline_stdio_mcp_servers=allow_stdio_mcp if isinstance(allow_stdio_mcp, bool) else False,
-                allow_private_mcp_http=allow_private_mcp_http if isinstance(allow_private_mcp_http, bool) else False,
+                allow_session_env=self.config.allow_session_env,
+                allow_inline_stdio_mcp_servers=self.config.allow_inline_stdio_mcp_servers,
+                allow_private_mcp_http=self.config.allow_private_mcp_http,
             )
         except ValueError as exc:
             raise ACPResponseError(str(exc)) from exc

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+from typing import Any
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -26,8 +27,8 @@ from tldw_Server_API.app.services.acp_runtime_policy_service import (
 )
 
 
-def _standard_runner_config(**overrides) -> ACPRunnerConfig:
-    config = {
+def _standard_runner_config(**overrides: Any) -> ACPRunnerConfig:
+    config: dict[str, Any] = {
         "command": "echo",
         "allowed_session_cwd_roots": ["/repo"],
     }
