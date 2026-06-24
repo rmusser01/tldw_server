@@ -456,7 +456,7 @@ def chat_api_call(
             and _shared_is_truthy(_os_keys.getenv("ALLOW_MASKED_KEY_LOG", ""))
         ):
             logging.debug(
-                "Chat API Call - API Key (masked): %s...%s",
+                "Chat API Call - API Key (masked): {}...{}",
                 _key_val[:4],
                 _key_val[-4:]
             )
@@ -554,7 +554,7 @@ def chat_api_call(
                 exc_info=False,
             )
             raise ChatProviderError(provider=endpoint_lower, message="Network error. Please check your connection.", status_code=504) from e
-        logging.exception(
+        logging.error(
             "Unexpected internal error in chat_api_call for {}: {}",
             endpoint_lower,
             exception_summary(e),
@@ -1083,7 +1083,7 @@ def _chat_sync_impl(
         # Avoid logging secrets unless explicitly enabled
         try:
             if api_key and _shared_is_truthy(os.getenv("ALLOW_MASKED_KEY_LOG", "")):
-                logging.debug("Debug - Chat Function - API Key (masked): %s...%s", api_key[:4], api_key[-4:])
+                logging.debug("Debug - Chat Function - API Key (masked): {}...{}", api_key[:4], api_key[-4:])
         except _CHAT_ORCHESTRATOR_NONCRITICAL_EXCEPTIONS as key_log_err:
             logging.debug("Could not log masked API key: {}", exception_summary(key_log_err))
         logging.debug("Custom prompt received summary={}", text_summary(custom_prompt))
@@ -1157,7 +1157,7 @@ def _chat_sync_impl(
         # Re-raise ChatAPIError subclasses as-is for proper upstream handling
         raise
     except _CHAT_ORCHESTRATOR_PROVIDER_EXCEPTIONS as e:
-        log_counter("chat_error_multimodal", labels={"api_endpoint": api_endpoint, "error": str(e)})
+        log_counter("chat_error_multimodal", labels={"api_endpoint": api_endpoint, "error_type": type(e).__name__})
         logging.error("Error in multimodal chat function: {}", exception_summary(e), exc_info=True)
         # Raise a proper exception instead of returning an error string
         raise ChatProviderError(
@@ -1641,7 +1641,7 @@ async def achat(
         # Re-raise ChatAPIError subclasses as-is for proper upstream handling
         raise
     except _CHAT_ORCHESTRATOR_PROVIDER_EXCEPTIONS as e:
-        log_counter("chat_error_multimodal", labels={"api_endpoint": api_endpoint, "error": str(e)})
+        log_counter("chat_error_multimodal", labels={"api_endpoint": api_endpoint, "error_type": type(e).__name__})
         logging.error("Error in async multimodal chat function: {}", exception_summary(e), exc_info=True)
         # Raise a proper exception instead of returning an error string
         raise ChatProviderError(

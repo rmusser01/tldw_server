@@ -9,6 +9,9 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+_ALLOWED_MESSAGE_ROLES = {"assistant", "developer", "function", "system", "tool", "user"}
+_ALLOWED_CONTENT_PART_TYPES = {"file", "image_url", "input_audio", "refusal", "text"}
+
 
 def text_summary(value: Any) -> dict[str, Any]:
     """Return a text presence/type/length summary without exposing content."""
@@ -27,6 +30,15 @@ def _text_list_summary(values: Any) -> dict[str, Any]:
         values = [values]
     items = [text_summary(value) for value in values]
     return {"count": len(items), "items": items}
+
+
+def _safe_bucket(value: Any, allowed_values: set[str], *, fallback: str = "unknown") -> str:
+    if value is None:
+        return fallback
+    text = str(value)
+    if text in allowed_values:
+        return text
+    return "other"
 
 
 def prompt_template_summary(
@@ -56,7 +68,7 @@ def _content_summary(content: Any) -> dict[str, Any]:
         image_count = 0
         for part in content:
             if isinstance(part, Mapping):
-                part_type = str(part.get("type", "unknown"))
+                part_type = _safe_bucket(part.get("type", "unknown"), _ALLOWED_CONTENT_PART_TYPES)
                 part_kinds[part_type] += 1
                 if part_type == "text":
                     text_value = part.get("text")
@@ -89,7 +101,8 @@ def message_payload_summary(messages: Any) -> dict[str, Any]:
     summaries: list[dict[str, Any]] = []
     for message in messages:
         if isinstance(message, Mapping):
-            role = str(message.get("role", "unknown"))
+            role = _safe_bucket(message.get("role", "unknown"), _ALLOWED_MESSAGE_ROLES)
+            metadata = message.get("metadata")
             roles[role] += 1
             summaries.append(
                 {
@@ -97,9 +110,8 @@ def message_payload_summary(messages: Any) -> dict[str, Any]:
                     "content": _content_summary(message.get("content")),
                     "has_tool_calls": bool(message.get("tool_calls")),
                     "has_function_call": bool(message.get("function_call")),
-                    "metadata_keys": sorted(str(key) for key in (message.get("metadata") or {}).keys())
-                    if isinstance(message.get("metadata"), Mapping)
-                    else [],
+                    "has_metadata": isinstance(metadata, Mapping) and bool(metadata),
+                    "metadata_key_count": len(metadata) if isinstance(metadata, Mapping) else 0,
                 }
             )
         else:
@@ -115,7 +127,13 @@ def tool_payload_summary(value: Any) -> dict[str, Any]:
         item_kinds = Counter(type(item).__name__ for item in value)
         return {"kind": "list", "count": len(value), "item_kinds": dict(sorted(item_kinds.items()))}
     if isinstance(value, Mapping):
-        return {"kind": "dict", "keys": sorted(str(key) for key in value.keys())}
+        return {
+            "kind": "dict",
+            "key_count": len(value),
+            "has_arguments": "arguments" in value,
+            "has_output": "output" in value or "result" in value,
+            "has_error": "error" in value,
+        }
     if value is None:
         return {"kind": "none"}
     return {"kind": type(value).__name__}
@@ -145,13 +163,19 @@ def response_summary(response: Any) -> dict[str, Any]:
     if isinstance(response, bytes):
         return {"kind": "bytes", "chars": len(response)}
     if isinstance(response, Mapping):
-        summary: dict[str, Any] = {"kind": "dict", "keys": sorted(str(key) for key in response.keys())}
+        summary: dict[str, Any] = {
+            "kind": "dict",
+            "key_count": len(response),
+            "has_choices": "choices" in response,
+            "has_usage": "usage" in response,
+            "has_error": "error" in response,
+        }
         choices = response.get("choices")
         if isinstance(choices, list):
             summary["choices"] = {"count": len(choices)}
         usage = response.get("usage")
         if isinstance(usage, Mapping):
-            summary["usage_keys"] = sorted(str(key) for key in usage.keys())
+            summary["usage_key_count"] = len(usage)
         return summary
     if hasattr(response, "__aiter__"):
         return {"kind": "async_iterator", "type": type(response).__name__}
