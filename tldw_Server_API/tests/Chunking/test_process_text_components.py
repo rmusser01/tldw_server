@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import time
 from typing import Any
 
@@ -8,6 +9,7 @@ import pytest
 
 from tldw_Server_API.app.core.Chunking import Chunker
 from tldw_Server_API.app.core.Chunking import chunker as chunker_module
+from tldw_Server_API.app.core.Chunking.base import ChunkMetadata, ChunkResult
 from tldw_Server_API.app.core.Chunking.constants import FRONTMATTER_SENTINEL_KEY
 from tldw_Server_API.app.core.Chunking.error_policy import CHUNKER_NONCRITICAL_EXCEPTIONS
 from tldw_Server_API.app.core.Chunking.exceptions import (
@@ -27,6 +29,8 @@ from tldw_Server_API.app.core.Chunking.process_text.preparation import (
     extract_header,
     prepare_frontmatter,
 )
+from tldw_Server_API.app.core.Chunking.process_text import dispatch as process_dispatch
+from tldw_Server_API.app.core.Chunking.process_text.dispatch import dispatch_chunks
 from tldw_Server_API.app.core.Chunking.process_text import models
 from tldw_Server_API.app.core.Chunking.process_text.models import (
     NormalizedChunk,
@@ -35,6 +39,24 @@ from tldw_Server_API.app.core.Chunking.process_text.models import (
     ResolvedProcessOptions,
     TelemetryHooks,
 )
+
+
+def _resolved_for_dispatch(**overrides: Any) -> ResolvedProcessOptions:
+    values: dict[str, Any] = {
+        "method": "words",
+        "method_lower": "words",
+        "max_size": 100,
+        "overlap": 0,
+        "language": "en",
+        "adaptive": False,
+        "hierarchical": False,
+        "hier_template": None,
+        "multi_level": False,
+        "code_mode_for_method": None,
+        "method_options_for_chunk": {},
+    }
+    values.update(overrides)
+    return ResolvedProcessOptions(**values)
 
 
 def test_llm_override_scope_restores_missing_attribute_after_exception() -> None:
@@ -178,6 +200,14 @@ def test_process_text_options_module_does_not_import_chunker() -> None:
     assert "Chunking.chunker" not in source
 
 
+def test_process_text_dispatch_module_does_not_import_chunker() -> None:
+    source = inspect.getsource(process_dispatch)
+
+    assert not hasattr(process_dispatch, "Chunker")
+    assert ".chunker" not in source
+    assert "Chunking.chunker" not in source
+
+
 def test_resolve_process_options_rejects_invalid_max_size() -> None:
     with pytest.raises(InvalidInputError, match="Invalid max_size value: bad"):
         resolve_process_options(Chunker(), "Body text", {"max_size": "bad"})
@@ -294,6 +324,28 @@ def test_resolve_process_options_defaults_code_mode_for_code_methods(
 
     assert resolved.code_mode_for_method == expected_code_mode
     assert resolved.method_options_for_chunk["code_mode"] == expected_code_mode
+
+
+def test_resolve_process_options_adaptive_size_and_overlap() -> None:
+    resolved = resolve_process_options(
+        Chunker(),
+        "x" * 20_000,
+        {
+            "method": "words",
+            "max_size": 80,
+            "overlap": 5,
+            "adaptive": True,
+            "base_adaptive_chunk_size": 100,
+            "min_adaptive_chunk_size": 50,
+            "max_adaptive_chunk_size": 200,
+            "adaptive_overlap": True,
+            "base_overlap": 10,
+            "max_adaptive_overlap": 25,
+        },
+    )
+
+    assert resolved.max_size == 140
+    assert resolved.overlap == 25
 
 
 def test_resolve_process_options_hierarchical_false_and_multi_level_exclusion() -> None:
@@ -451,3 +503,168 @@ def test_process_text_frontmatter_metric_excludes_option_setup(monkeypatch: pyte
 
     assert rows[0]["text"] == "Body text"
     assert observed["chunker_frontmatter_duration_seconds"] < 0.03
+
+
+def test_dispatch_chunks_normal_path_stringifies_custom_objects(monkeypatch: pytest.MonkeyPatch) -> None:
+    chunker = Chunker()
+
+    class CustomChunk:
+        text = "attribute text"
+        metadata = {"copied": True}
+
+        def __str__(self) -> str:
+            return "custom object text"
+
+    def fake_chunk_text(*args: Any, **kwargs: Any) -> list[Any]:
+        return [CustomChunk()]
+
+    monkeypatch.setattr(chunker, "chunk_text", fake_chunk_text)
+
+    chunks = dispatch_chunks(chunker, "alpha beta", _resolved_for_dispatch())
+
+    assert chunks == [NormalizedChunk(text="custom object text", metadata={})]
+
+
+def test_dispatch_chunks_normal_path_converts_json_metadata_dict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunker = Chunker()
+    metadata = {"start_offset": 0, "end_offset": 7}
+
+    def fake_chunk_text(*args: Any, **kwargs: Any) -> list[Any]:
+        return [{"json": {"value": "β"}, "metadata": metadata}]
+
+    monkeypatch.setattr(chunker, "chunk_text", fake_chunk_text)
+
+    chunks = dispatch_chunks(chunker, "ignored", _resolved_for_dispatch())
+    metadata["start_offset"] = 99
+
+    assert chunks == [
+        NormalizedChunk(
+            text=json.dumps({"value": "β"}, ensure_ascii=False),
+            metadata={"start_offset": 0, "end_offset": 7},
+        )
+    ]
+
+
+def test_dispatch_chunks_normal_path_converts_text_metadata_dict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunker = Chunker()
+    metadata = {"start_offset": 2, "end_offset": 6}
+
+    def fake_chunk_text(*args: Any, **kwargs: Any) -> list[Any]:
+        return [{"text": "beta", "metadata": metadata}]
+
+    monkeypatch.setattr(chunker, "chunk_text", fake_chunk_text)
+
+    chunks = dispatch_chunks(chunker, "alpha beta", _resolved_for_dispatch())
+    metadata["end_offset"] = 99
+
+    assert chunks == [NormalizedChunk(text="beta", metadata={"start_offset": 2, "end_offset": 6})]
+
+
+def test_dispatch_chunks_hierarchical_path_uses_context_method(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunker = Chunker()
+    calls: list[dict[str, Any]] = []
+    template = {"levels": [{"name": "heading"}]}
+
+    def fake_chunk_text_hierarchical_flat(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        calls.append(dict(kwargs))
+        return [{"text": "Heading", "metadata": {"start_offset": 0, "end_offset": 7}}]
+
+    def forbidden_chunk_text(*args: Any, **kwargs: Any) -> list[Any]:
+        raise AssertionError("hierarchical dispatch must not call chunk_text")
+
+    monkeypatch.setattr(chunker, "chunk_text_hierarchical_flat", fake_chunk_text_hierarchical_flat)
+    monkeypatch.setattr(chunker, "chunk_text", forbidden_chunk_text)
+
+    chunks = dispatch_chunks(
+        chunker,
+        "# Heading",
+        _resolved_for_dispatch(
+            hierarchical=True,
+            hier_template=template,
+            max_size=50,
+            overlap=5,
+            method_options_for_chunk={"strip": True},
+        ),
+    )
+
+    assert chunks == [NormalizedChunk(text="Heading", metadata={"start_offset": 0, "end_offset": 7})]
+    assert calls == [
+        {
+            "text": "# Heading",
+            "method": "words",
+            "max_size": 50,
+            "overlap": 5,
+            "language": "en",
+            "template": template,
+            "method_options": {"strip": True},
+        }
+    ]
+
+
+def test_dispatch_chunks_multi_level_metadata_result_becomes_dict_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunker = Chunker()
+    text = "prefix Alpha beta suffix"
+
+    def fake_spans(*args: Any, **kwargs: Any) -> list[tuple[int, int, str]]:
+        return [(7, 17, "paragraph")]
+
+    def fake_chunk_text_with_metadata(*args: Any, **kwargs: Any) -> list[ChunkResult]:
+        return [
+            ChunkResult(
+                text="lpha",
+                metadata=ChunkMetadata(index=3, start_char=1, end_char=5, word_count=1),
+            )
+        ]
+
+    monkeypatch.setattr(chunker, "_compute_paragraph_spans", fake_spans)
+    monkeypatch.setattr(chunker, "chunk_text_with_metadata", fake_chunk_text_with_metadata)
+
+    chunks = dispatch_chunks(chunker, text, _resolved_for_dispatch(multi_level=True))
+
+    assert chunks[0].text == "lpha"
+    assert chunks[0].metadata["index"] == 3
+    assert chunks[0].metadata["start_char"] == 8
+    assert chunks[0].metadata["end_char"] == 12
+    assert chunks[0].metadata["start_offset"] == 8
+    assert chunks[0].metadata["end_offset"] == 12
+    assert chunks[0].metadata["paragraph_index"] == 0
+    assert chunks[0].metadata["paragraph_kind"] == "paragraph"
+    assert chunks[0].metadata["multi_level"] is True
+
+
+def test_dispatch_chunks_multi_level_fallback_clamps_offsets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunker = Chunker()
+    calls: list[str] = []
+
+    def fake_spans(*args: Any, **kwargs: Any) -> list[tuple[int, int, str]]:
+        return [(0, 5, "paragraph")]
+
+    def fake_chunk_text_with_metadata(*args: Any, **kwargs: Any) -> list[Any]:
+        calls.append("metadata")
+        raise ChunkingError("force fallback")
+
+    def fake_chunk_text(*args: Any, **kwargs: Any) -> list[str]:
+        calls.append("normal")
+        return ["First text that extends beyond the paragraph"]
+
+    monkeypatch.setattr(chunker, "_compute_paragraph_spans", fake_spans)
+    monkeypatch.setattr(chunker, "chunk_text_with_metadata", fake_chunk_text_with_metadata)
+    monkeypatch.setattr(chunker, "chunk_text", fake_chunk_text)
+
+    chunks = dispatch_chunks(chunker, "First paragraph", _resolved_for_dispatch(multi_level=True))
+
+    assert calls == ["metadata", "normal"]
+    assert chunks[0].text == "First text that extends beyond the paragraph"
+    assert chunks[0].metadata["start_offset"] == 0
+    assert chunks[0].metadata["end_offset"] == 5
+    assert chunks[0].metadata["paragraph_index"] == 0

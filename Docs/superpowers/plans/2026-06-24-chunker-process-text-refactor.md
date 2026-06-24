@@ -671,7 +671,7 @@ passed
 - Modify `tldw_Server_API/tests/Chunking/test_process_text_components.py`
 - Modify `tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py`
 
-- [ ] **Step 1: Add dispatch helpers** _(in progress)_
+- [x] **Step 1: Add dispatch helpers**
 
 Create:
 
@@ -705,7 +705,7 @@ else:
     md = {}
 ```
 
-- [ ] **Step 2: Wire dispatch into the active method with LLM override scope**
+- [x] **Step 2: Wire dispatch into the active method with LLM override scope**
 
 Replace the current local dispatch block with:
 
@@ -716,7 +716,7 @@ with llm_override_scope(self, llm_call_func, llm_config):
 
 Keep `observe_histogram("chunker_chunking_duration_seconds", ...)` around the call.
 
-- [ ] **Step 3: Add dispatch helper tests**
+- [x] **Step 3: Add dispatch helper tests**
 
 Cover:
 
@@ -728,7 +728,7 @@ Cover:
 - multi-level fallback clamps offsets;
 - `llm_override_scope` restores previous override tuple when one already exists.
 
-- [ ] **Step 4: Run focused checks**
+- [x] **Step 4: Run focused checks**
 
 Command:
 
