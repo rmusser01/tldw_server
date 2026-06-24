@@ -4,7 +4,7 @@ title: Harden Ingestion Sources review findings
 status: Done
 assignee: []
 created_date: '2026-06-23 14:41'
-updated_date: '2026-06-23 17:46'
+updated_date: '2026-06-23 20:43'
 labels:
   - ingestion-sources
   - hardening
@@ -48,6 +48,20 @@ GREEN verification after implementation:
 - `git diff --check` -> exit 0.
 
 Note: the default pytest run with all auto-loaded plugins was interrupted after stalling in broader plugin/app import cleanup. The same focused tests passed with plugin autoload disabled and `pytest_asyncio` explicitly enabled.
+
+PR review response on 2026-06-23:
+- Rebasing onto latest `origin/dev` completed cleanly.
+- Dropped an unrelated Claims_Extraction design commit from the PR branch so the PR diff only contains Ingestion Sources changes and this task record.
+- Addressed Gemini comments by validating archive total uncompressed limits against actual bytes read, while keeping conservative header prechecks, and by using a defensive archive member path lookup.
+- Verified the `os` import comment was stale; `archive_snapshot.py` imports `os`.
+- Addressed Qodo SLF001 feedback by removing the unqualified `# noqa: SLF001` from the git timeout test.
+- Added ZIP and TAR tests that simulate under-reported member sizes and assert actual bytes over the total limit are rejected.
+
+Review-response verification:
+- `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=$PWD python -m pytest -p pytest_asyncio.plugin tldw_Server_API/tests/Ingestion_Sources/test_archive_snapshot_adapter.py tldw_Server_API/tests/Ingestion_Sources/test_local_directory_adapter.py tldw_Server_API/tests/Ingestion_Sources/test_git_repository_adapter.py tldw_Server_API/tests/Ingestion_Sources/test_service_sqlite_state.py tldw_Server_API/tests/Ingestion_Sources/test_models_and_service_contract.py -v` -> 33 passed, 80 warnings in 32.29s.
+- `python -m py_compile` on touched Ingestion Sources implementation files -> exit 0.
+- `python -m bandit -r tldw_Server_API/app/core/Ingestion_Sources -f json -o /tmp/bandit_ingestion_sources_review.json` -> exit 0; JSON summary had 0 issues.
+- `git diff --check` -> exit 0.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

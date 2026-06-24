@@ -195,6 +195,98 @@ def test_validate_archive_members_rejects_tar_total_uncompressed_limit(monkeypat
 
 
 @pytest.mark.unit
+def test_validate_archive_members_rejects_zip_actual_bytes_over_total_limit(monkeypatch):
+    import tldw_Server_API.app.core.Ingestion_Sources.archive_snapshot as archive_snapshot
+
+    class _FakeZipInfo:
+        filename = "export/spoofed.md"
+        file_size = 1
+        flag_bits = 0
+        external_attr = 0
+
+        def is_dir(self):
+            return False
+
+    class _FakeZipFile:
+        def __init__(self, *args, **kwargs):
+            del args, kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            del args
+            return False
+
+        def infolist(self):
+            return [_FakeZipInfo()]
+
+        def open(self, member, mode):
+            del member, mode
+            return io.BytesIO(b"12345")
+
+    monkeypatch.setenv("INGESTION_SOURCES_ARCHIVE_TOTAL_MAX_BYTES", "4")
+    monkeypatch.setenv("INGESTION_SOURCES_ARCHIVE_MEMBER_MAX_BYTES", "10")
+    monkeypatch.setattr(archive_snapshot.zipfile, "ZipFile", _FakeZipFile)
+
+    with pytest.raises(ValueError, match="exceeds archive total uncompressed size limit"):
+        archive_snapshot.validate_archive_members(
+            b"fake-zip",
+            filename="notes.zip",
+        )
+
+
+@pytest.mark.unit
+def test_validate_archive_members_rejects_tar_actual_bytes_over_total_limit(monkeypatch):
+    import tldw_Server_API.app.core.Ingestion_Sources.archive_snapshot as archive_snapshot
+
+    class _FakeTarInfo:
+        name = "export/spoofed.md"
+        size = 1
+
+        def isdir(self):
+            return False
+
+        def issym(self):
+            return False
+
+        def islnk(self):
+            return False
+
+        def isfile(self):
+            return True
+
+    class _FakeTarFile:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            del args
+            return False
+
+        def __iter__(self):
+            yield _FakeTarInfo()
+
+        def extractfile(self, member):
+            del member
+            return io.BytesIO(b"12345")
+
+    def _fake_tar_open(*args, **kwargs):
+        del args, kwargs
+        return _FakeTarFile()
+
+    monkeypatch.setenv("INGESTION_SOURCES_ARCHIVE_TOTAL_MAX_BYTES", "4")
+    monkeypatch.setenv("INGESTION_SOURCES_ARCHIVE_MEMBER_MAX_BYTES", "10")
+    monkeypatch.setattr(archive_snapshot.tarfile, "open", _fake_tar_open)
+
+    with pytest.raises(ValueError, match="exceeds archive total uncompressed size limit"):
+        archive_snapshot.validate_archive_members(
+            b"fake-tar",
+            filename="notes.tar.gz",
+        )
+
+
+@pytest.mark.unit
 def test_validate_archive_members_rejects_excessive_member_count(monkeypatch):
     from tldw_Server_API.app.core.Ingestion_Sources.archive_snapshot import (
         validate_archive_members,

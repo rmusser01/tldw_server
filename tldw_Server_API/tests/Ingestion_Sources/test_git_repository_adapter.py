@@ -314,9 +314,10 @@ def test_git_ls_files_timeout_is_reported_as_value_error(tmp_path, monkeypatch):
 
     monkeypatch.setenv("INGESTION_SOURCES_GIT_LS_FILES_TIMEOUT_SECONDS", "1")
     monkeypatch.setattr(git_repository.subprocess, "run", _timeout_run)
+    git_ls_files = getattr(git_repository, "_git_ls_files")
 
     with pytest.raises(ValueError, match="Timed out enumerating git repository files"):
-        git_repository._git_ls_files(  # noqa: SLF001
+        git_ls_files(
             repo_root=repo_dir,
             root_subpath=None,
             respect_gitignore=True,

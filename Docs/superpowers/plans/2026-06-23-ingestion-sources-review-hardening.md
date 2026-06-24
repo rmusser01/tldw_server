@@ -131,3 +131,14 @@
 - Security: Bandit over `tldw_Server_API/app/core/Ingestion_Sources` exited 0 with 0 JSON findings.
 - Whitespace: `git diff --check` exited 0.
 - Caveat: the default pytest command with all auto-loaded plugins was interrupted after stalling in broader import/cleanup work; the focused suite passed with plugin autoload disabled and `pytest_asyncio` explicitly enabled.
+
+### PR Review Response Results
+
+- Rebased the PR branch onto latest `origin/dev`.
+- Dropped an unrelated Claims_Extraction design commit from the PR branch.
+- Addressed review feedback for actual archive byte accounting, defensive archive member path lookup, and the unqualified SLF001 suppression in the git timeout test.
+- Added ZIP/TAR regression tests for actual bytes exceeding total archive limits.
+- GREEN: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=$PWD python -m pytest -p pytest_asyncio.plugin ... -v` passed 33 tests with 80 warnings in 32.29s.
+- Compile: `python -m py_compile` on touched Ingestion Sources implementation files exited 0.
+- Security: Bandit over `tldw_Server_API/app/core/Ingestion_Sources` exited 0 with 0 JSON findings.
+- Whitespace: `git diff --check` exited 0.
