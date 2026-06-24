@@ -16,9 +16,11 @@ references:
 - tldw_Server_API/app/core/Chat/REFACTORING_PLAN.md
 documentation:
 - Docs/Design/2026-06-24-chat-completion-pipeline-refactor-design.md
+- Docs/superpowers/plans/2026-06-24-chat-completion-pipeline-refactor.md
 modified_files:
 - Docs/Design/2026-06-24-chat-completion-pipeline-refactor-design.md
-updated_date: 2026-06-24 17:52
+- Docs/superpowers/plans/2026-06-24-chat-completion-pipeline-refactor.md
+updated_date: 2026-06-24 18:08
 ---
 
 ## Description
@@ -29,7 +31,7 @@ Design and implement a broad, compatibility-preserving refactor of the Chat comp
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Design spec is written, reviewed, and linked from this task before implementation planning begins.
+- [x] #1 Design spec is written, reviewed, and linked from this task before implementation planning begins.
 - [ ] #2 Validated findings have failing tests before production-code fixes.
 - [ ] #3 Non-streaming responses process moderation/redaction/structured validation across all returned choices or reject unsupported modes before provider calls.
 - [ ] #4 Chat logs no longer include raw user messages, system prompts, custom prompts, tool arguments, API keys, or assistant content.
@@ -58,6 +60,7 @@ Design and implement a broad, compatibility-preserving refactor of the Chat comp
 Design spec drafted at `Docs/Design/2026-06-24-chat-completion-pipeline-refactor-design.md`. It captures the approved broad integrated refactor approach, public API compatibility constraint, validated findings, module boundaries, data flow, error handling, rollout stages, and test-first requirements.
 Spec review refinements applied: locked `ChatCompletionPipeline` as the orchestration name, added a normalized command authorization context contract, clarified document prompt migration ownership as an idempotent local prompt-store repair unless implementation planning finds an existing owner, made missing-usage multi-choice accounting an intentional correction, and sharpened legacy history replacement transaction expectations.
 Final spec clarification pass applied: non-streaming response processing order is safety/redaction before structured validation and persistence, user-facing command listings now use the same authorization decision by default, and logging hygiene explicitly excludes tool outputs and tool execution error details.
+Implementation plan saved at `Docs/superpowers/plans/2026-06-24-chat-completion-pipeline-refactor.md`. The plan implements the approved integrated refactor in TDD stages: lock multi-choice safety with failing tests, extract response processing, moderation, persistence, tool execution, streaming, command authorization, and safe logging services, repair document prompt versioning, make legacy history replacement atomic, update Chat docs, then run targeted Chat tests and Bandit.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
