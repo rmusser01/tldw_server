@@ -8,11 +8,14 @@ Notes:
 """
 import asyncio
 import contextlib
+import fnmatch
 import re
 from typing import Any, Optional, cast
 
 from loguru import logger
 from prometheus_client import Counter, Histogram
+
+from tldw_Server_API.app.core.exceptions import InvalidMetadataOrderKeyError
 
 from .base import VectorSearchResult, VectorStoreAdapter, VectorStoreConfig
 
@@ -173,6 +176,36 @@ class PGVectorAdapter(VectorStoreAdapter):
         # Allow only alphanum and underscores; replace others with underscore
         safe = re.sub(r"[^A-Za-z0-9_]+", "_", name)
         return f"vs_{safe}"
+
+    def _metadata_order_expression(self, order_by: Optional[str]) -> tuple[str, list[Any]]:
+        """Return a safe ORDER BY expression and any bound expression params."""
+        if not order_by or not isinstance(order_by, str):
+            return "id", []
+        if order_by == "id":
+            return "id", []
+        if not order_by.startswith("metadata."):
+            return "id", []
+
+        key = order_by.split(".", 1)[1]
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", key):
+            raise InvalidMetadataOrderKeyError(
+                "metadata order key must be 1-128 characters of letters, numbers, "
+                "underscore, or hyphen"
+            )
+        return "(metadata->>%s)", [key]
+
+    @staticmethod
+    def _normalize_collection_pattern(pattern: str) -> str:
+        """Normalize a collection glob into sanitized collection-name space."""
+        return re.sub(r"[^A-Za-z0-9_*]+", "_", pattern)
+
+    @staticmethod
+    def _matches_collection_pattern(pattern: str, collection_name: str) -> bool:
+        """Match collection globs while treating non-glob metacharacters literally."""
+        if not isinstance(pattern, str) or not pattern or len(pattern) > 128:
+            return False
+        normalized_pattern = PGVectorAdapter._normalize_collection_pattern(pattern)
+        return fnmatch.fnmatchcase(collection_name, normalized_pattern)
 
     def _borrow_conn(self):
         if self._pool is not None:
@@ -508,17 +541,11 @@ class PGVectorAdapter(VectorStoreAdapter):
             where_sql, params = self._build_where_from_filter(filter)
         else:
             where_sql, params = '', []
-        ob = 'id'
-        if order_by and isinstance(order_by, str):
-            if order_by.startswith('metadata.'):
-                key = order_by.split('.', 1)[1]
-                ob = f"(metadata->>'{key}')"
-            elif order_by == 'id':
-                ob = 'id'
+        ob, order_params = self._metadata_order_expression(order_by)
         odir = 'ASC' if str(order_dir).lower() == 'asc' else 'DESC'
         rows = await self._query(
             f"SELECT id, content, metadata FROM {tbl}{where_sql} ORDER BY {ob} {odir} LIMIT %s OFFSET %s",  # nosec B608
-            tuple(params + [int(limit), int(offset)]),
+            tuple(params + order_params + [int(limit), int(offset)]),
         )
         items = []
         for rid, content, metadata in rows:
@@ -541,17 +568,11 @@ class PGVectorAdapter(VectorStoreAdapter):
             where_sql, params = self._build_where_from_filter(filter)
         else:
             where_sql, params = '', []
-        ob = 'id'
-        if order_by and isinstance(order_by, str):
-            if order_by.startswith('metadata.'):
-                key = order_by.split('.', 1)[1]
-                ob = f"(metadata->>'{key}')"
-            elif order_by == 'id':
-                ob = 'id'
+        ob, order_params = self._metadata_order_expression(order_by)
         odir = 'ASC' if str(order_dir).lower() == 'asc' else 'DESC'
         rows = await self._query(
             f"SELECT id, content, metadata, embedding FROM {tbl}{where_sql} ORDER BY {ob} {odir} LIMIT %s OFFSET %s",  # nosec B608
-            tuple(params + [int(limit), int(offset)]),
+            tuple(params + order_params + [int(limit), int(offset)]),
         )
         items = []
         for rid, content, metadata, embedding in rows:
@@ -721,9 +742,8 @@ class PGVectorAdapter(VectorStoreAdapter):
         all_tables = await self.list_collections()
         results: list[VectorSearchResult] = []
         for pattern in collection_patterns:
-            regex = re.compile('^' + pattern.replace('*', '.*') + '$')
             for tbl in all_tables:
-                if regex.match(tbl):
+                if self._matches_collection_pattern(pattern, tbl):
                     results.extend(await self.search(tbl, query_vector, k=k, filter=filter))
         # Sort by score desc and trim
         results.sort(key=lambda r: r.score, reverse=True)
