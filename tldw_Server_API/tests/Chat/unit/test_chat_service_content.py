@@ -432,6 +432,27 @@ async def test_execute_non_stream_call_redacts_all_returned_choices(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_execute_non_stream_call_redacts_dict_content_text(monkeypatch):
+    original_content = {"type": "text", "text": "secret"}
+    response, _save_calls, _logged_usage = await _run_non_stream_content_test(
+        monkeypatch,
+        llm_response={
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": original_content},
+                    "finish_reason": "stop",
+                },
+            ]
+        },
+        moderation=_RedactingModeration(),
+    )
+
+    content = response["choices"][0]["message"]["content"]
+    assert content == {"type": "text", "text": "REDACTED:secret"}
+    assert original_content == {"type": "text", "text": "secret"}
+
+
+@pytest.mark.asyncio
 async def test_execute_non_stream_call_blocks_when_later_choice_violates(monkeypatch):
     save_calls: list[dict[str, object]] = []
 

@@ -74,6 +74,12 @@ def set_choice_content(choice: NonStreamChoice, content: Any | None) -> None:
 def apply_redaction_to_content(content: Any | None, redact_text: Callable[[str], str]) -> Any | None:
     if isinstance(content, str):
         return redact_text(content)
+    if isinstance(content, dict):
+        if isinstance(content.get("text"), str):
+            redacted_content = dict(content)
+            redacted_content["text"] = redact_text(redacted_content["text"])
+            return redacted_content
+        return content
     if isinstance(content, list):
         redacted_items: list[Any] = []
         for item in content:
