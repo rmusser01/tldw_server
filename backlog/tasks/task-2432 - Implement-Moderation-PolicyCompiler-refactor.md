@@ -1,7 +1,7 @@
 ---
 id: TASK-2432
 title: Implement Moderation PolicyCompiler refactor
-status: In Progress
+status: Done
 created_date: 2026-06-24 20:27
 dependencies:
 - TASK-2430
@@ -15,10 +15,18 @@ documentation:
 - Docs/superpowers/specs/2026-06-24-moderation-policy-compiler-refactor-design.md
 - Docs/superpowers/plans/2026-06-24-moderation-policy-compiler-refactor-implementation-plan.md
 modified_files:
+- Docs/superpowers/specs/2026-06-24-moderation-policy-compiler-refactor-design.md
+- Docs/superpowers/plans/2026-06-24-moderation-policy-compiler-refactor-implementation-plan.md
 - tldw_Server_API/app/core/Moderation/moderation_service.py
+- tldw_Server_API/app/core/Moderation/policy_compiler.py
+- tldw_Server_API/tests/unit/test_moderation_policy_compiler.py
 - tldw_Server_API/tests/unit/test_moderation_blocklist_parse.py
+- tldw_Server_API/tests/unit/test_moderation_effective_settings.py
+- tldw_Server_API/tests/Guardian/test_supervised_policy.py
+- backlog/tasks/task-2430 - Design-Moderation-PolicyCompiler-refactor.md
+- backlog/tasks/task-2431 - Plan-Moderation-PolicyCompiler-refactor-implementation.md
 - backlog/tasks/task-2432 - Implement-Moderation-PolicyCompiler-refactor.md
-updated_date: 2026-06-24 22:22
+updated_date: 2026-06-24 22:35
 ---
 
 ## Description
@@ -29,10 +37,10 @@ Implement the approved compiler-first Moderation refactor using the plan in Docs
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 PolicyCompiler and related dataclasses are implemented with deterministic policy assembly and sanitized reports.
-- [ ] #2 ModerationService integrates the compiler while preserving public methods, file I/O boundaries, lint output behavior, helper wrapper compatibility, and existing policy types.
-- [ ] #3 Compiler, service compatibility, blocklist/lint, PII, per-user override, and supervised overlay regression tests are added or updated.
-- [ ] #4 Focused pytest, py_compile, git diff --check, and Bandit verification are recorded.
+- [x] #1 PolicyCompiler and related dataclasses are implemented with deterministic policy assembly and sanitized reports.
+- [x] #2 ModerationService integrates the compiler while preserving public methods, file I/O boundaries, lint output behavior, helper wrapper compatibility, and existing policy types.
+- [x] #3 Compiler, service compatibility, blocklist/lint, PII, per-user override, and supervised overlay regression tests are added or updated.
+- [x] #4 Focused pytest, py_compile, git diff --check, and Bandit verification are recorded.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -95,20 +103,32 @@ Verification:
 - `python -m py_compile tldw_Server_API/app/core/Moderation/moderation_service.py tldw_Server_API/tests/unit/test_moderation_blocklist_parse.py tldw_Server_API/tests/unit/test_moderation_effective_settings.py tldw_Server_API/tests/Guardian/test_supervised_policy.py` -> passed
 - `git diff --check` after follow-up -> passed
 - No production code changed in Task 6; Bandit not rerun for Task 6 specifically.
+Final verification completed.
+
+Final reviewer: APPROVE. No blocking findings across the merge-base branch diff. Reviewer confirmed `PolicyCompiler` owns deterministic parsing/rule compilation/policy assembly/sanitized reports, `ModerationService` keeps config/env fallback, path resolution, I/O, persistence, locking, logging, reload/settings/mutation paths, behavior-sensitive moderation paths remain covered, and scope stays within the moderation compiler slice.
+
+Mergeability: `git merge-tree --write-tree origin/dev HEAD` completed successfully and produced merge tree `24b097219f7437b2cc994fc8a221bea48e52bab2`, indicating the branch merges cleanly with current `origin/dev`.
+
+Final verification:
+- `python -m py_compile tldw_Server_API/app/core/Moderation/policy_compiler.py tldw_Server_API/app/core/Moderation/moderation_service.py tldw_Server_API/app/core/Moderation/supervised_policy.py tldw_Server_API/tests/unit/test_moderation_policy_compiler.py tldw_Server_API/tests/unit/test_moderation_blocklist_parse.py tldw_Server_API/tests/unit/test_moderation_effective_settings.py tldw_Server_API/tests/Guardian/test_supervised_policy.py` -> passed
+- `python -m pytest tldw_Server_API/tests/unit/test_moderation_policy_compiler.py tldw_Server_API/tests/unit/test_moderation_blocklist_parse.py tldw_Server_API/tests/unit/test_moderation_effective_settings.py tldw_Server_API/tests/unit/test_moderation_check_text_snippet.py tldw_Server_API/tests/unit/test_moderation_redact_categories.py tldw_Server_API/tests/Guardian/test_supervised_policy.py -q` -> 151 passed, 314 warnings
+- `git diff --check` -> passed
+- `python -m bandit -r tldw_Server_API/app/core/Moderation -f json -o /tmp/bandit_moderation_policy_compiler.json` -> 0 findings
+- `git diff --stat $(git merge-base HEAD origin/dev)..HEAD` -> 11 files changed, scoped to moderation design/plan/tasks, moderation service/compiler, and focused tests.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented the compiler-first Moderation refactor. Added `PolicyCompiler` and supporting dataclasses for deterministic global and per-user policy assembly, blocklist parsing, regex safety checks, category/runtime override handling, quick-rule compilation, and sanitized compilation reports. Kept `ModerationService` as the public facade and I/O/logging/persistence boundary, preserving compatibility wrappers, lint output behavior, reload/settings/blocklist mutation paths, PII inclusion, and supervised overlay composition. Added focused compiler, service compatibility, recompile-trigger, and supervised overlay regression coverage. Final verification passed: compile checks, targeted pytest suite, diff whitespace check, Bandit on Moderation, mergeability check against `origin/dev`, and final independent review.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
