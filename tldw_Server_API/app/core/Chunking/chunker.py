@@ -20,10 +20,13 @@ from typing import Any, Optional, Union
 
 from loguru import logger
 
-from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
+from tldw_Server_API.app.core.testing import is_test_mode
 from .base import ChunkerConfig, ChunkingMethod, ChunkMetadata, ChunkResult
 from .constants import FRONTMATTER_SENTINEL_KEY
+from .error_policy import CHUNKER_NONCRITICAL_EXCEPTIONS as _CHUNKER_NONCRITICAL_EXCEPTIONS
 from .exceptions import ChunkingError, InvalidChunkingMethodError, InvalidInputError
+from .llm_context import _LLM_UNSET
+from .option_utils import _coerce_bool_option
 from .security_logger import get_security_logger
 from .strategies.fixed_size import FixedSizeChunkingStrategy
 from .strategies.rolling_summarize import RollingSummarizeStrategy
@@ -31,28 +34,6 @@ from .strategies.sentences import SentenceChunkingStrategy
 from .strategies.structure_aware import StructureAwareChunkingStrategy
 from .strategies.tokens import TokenChunkingStrategy
 from .strategies.words import WordChunkingStrategy
-
-_CHUNKER_NONCRITICAL_EXCEPTIONS = (
-    AssertionError,
-    AttributeError,
-    ConnectionError,
-    FileNotFoundError,
-    ImportError,
-    IndexError,
-    KeyError,
-    LookupError,
-    OSError,
-    PermissionError,
-    RuntimeError,
-    TimeoutError,
-    TypeError,
-    ValueError,
-    UnicodeDecodeError,
-    json.JSONDecodeError,
-    ChunkingError,
-    InvalidChunkingMethodError,
-    InvalidInputError,
-)
 
 # Metrics / Telemetry (graceful on import failures)
 try:
@@ -94,20 +75,6 @@ except _CHUNKER_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - safety fallback
     MetricDefinition = None  # type: ignore
     MetricType = None  # type: ignore
     _METRICS_AVAILABLE = False
-
-
-_LLM_UNSET = object()
-
-
-def _coerce_bool_option(value: Any, default: bool = False) -> bool:
-    """Normalize loose option values into stable booleans."""
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return is_truthy(value.strip().lower())
-    return bool(value)
 
 def _ensure_chunker_metrics_registered() -> None:
     """Register chunker-specific cache metrics once."""
