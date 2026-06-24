@@ -505,28 +505,26 @@ class NoteStore:
             required=False,
         )
         now = self._db._get_current_utc_timestamp_iso()
-        where_clauses = ["note_id = ?"]
-        params: list[Any] = [diagram_manifest_json_str, now, normalized_note_id]
-
-        if expected_companion_content_hash is None:
-            where_clauses.append("companion_content_hash IS NULL")
-        else:
-            where_clauses.append("companion_content_hash = ?")
-            params.append(expected_companion_content_hash)
-
-        if expected_render_version is not None:
-            where_clauses.append("render_version = ?")
-            params.append(expected_render_version)
-
-        if expected_last_modified is not None:
-            where_clauses.append("last_modified = ?")
-            params.append(expected_last_modified)
 
         query = (
             "UPDATE note_studio_documents "
             "SET diagram_manifest_json = ?, last_modified = ? "
-            f"WHERE {' AND '.join(where_clauses)}"  # nosec B608
+            "WHERE note_id = ? "
+            "AND ((? IS NULL AND companion_content_hash IS NULL) OR companion_content_hash = ?) "
+            "AND (? IS NULL OR render_version = ?) "
+            "AND (? IS NULL OR last_modified = ?)"
         )
+        params: list[Any] = [
+            diagram_manifest_json_str,
+            now,
+            normalized_note_id,
+            expected_companion_content_hash,
+            expected_companion_content_hash,
+            expected_render_version,
+            expected_render_version,
+            expected_last_modified,
+            expected_last_modified,
+        ]
 
         def _execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> dict[str, Any]:
             prepared_query, prepared_params = self._db._prepare_backend_statement(query, tuple(params))

@@ -1029,7 +1029,7 @@ def _normalize_keyword_tokens(tokens: Optional[list[str]]) -> list[str]:
     if len(tokens) > _NOTES_KEYWORD_TOKEN_MAX_RAW_COUNT:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Too many keyword tokens; maximum is {_NOTES_KEYWORD_TOKEN_MAX_COUNT}.",
+            detail=f"Too many keyword tokens; maximum raw tokens is {_NOTES_KEYWORD_TOKEN_MAX_RAW_COUNT}.",
         )
     seen: set[str] = set()
     out: list[str] = []

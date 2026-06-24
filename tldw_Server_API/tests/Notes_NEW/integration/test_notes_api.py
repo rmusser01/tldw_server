@@ -365,6 +365,18 @@ def test_search_notes_rejects_excessive_keyword_tokens(client_with_notes_db: Tes
     assert "Too many keyword tokens" in response.json()["detail"]
 
 
+def test_search_notes_rejects_excessive_raw_keyword_tokens(client_with_notes_db: TestClient):
+    client = client_with_notes_db
+
+    response = client.get(
+        "/api/v1/notes/search/",
+        params=[("tokens", "topic") for _ in range(101)],
+    )
+
+    assert response.status_code == 400
+    assert "maximum raw tokens is 100" in response.json()["detail"]
+
+
 def test_search_notes_falls_back_to_integer_total_when_count_fails(
     client_with_notes_db: TestClient,
     monkeypatch: pytest.MonkeyPatch,
