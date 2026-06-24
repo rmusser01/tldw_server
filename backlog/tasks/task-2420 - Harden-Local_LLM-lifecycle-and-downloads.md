@@ -3,15 +3,15 @@ id: TASK-2420
 title: Harden Local_LLM lifecycle and downloads
 status: Done
 assignee: []
-created_date: '2026-06-23 18:25'
-updated_date: '2026-06-23 19:01'
+created_date: 2026-06-23 18:25
+updated_date: 2026-06-24 03:46
 labels:
-  - local-llm
-  - llamacpp
-  - security
+- local-llm
+- llamacpp
+- security
 dependencies: []
 references:
-  - tldw_Server_API/app/core/Local_LLM
+- tldw_Server_API/app/core/Local_LLM
 priority: high
 ---
 
@@ -43,6 +43,7 @@ Implemented shared llama.cpp server argument formatting, hardened acquisition re
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Verified and remediated the validated Local_LLM findings. Focused touched-file suite passed: python -m pytest -p no:unraisableexception tldw_Server_API/tests/LLM_Local/test_llamacpp_acquisition_service.py tldw_Server_API/tests/LLM_Local/test_llamacpp_process_runner.py tldw_Server_API/tests/Local_LLM/test_http_utils.py tldw_Server_API/tests/Local_LLM/test_llamacpp_handler.py tldw_Server_API/tests/Local_LLM/test_llamafile_handler.py tldw_Server_API/tests/Local_LLM/test_ollama_handler.py tldw_Server_API/tests/Local_LLM/test_huggingface_handler_hardening.py -q (100 passed). Py_compile passed for touched Local_LLM modules. Bandit passed on tldw_Server_API/app/core/Local_LLM with 0 findings in /tmp/bandit_local_llm_2420.json; only unrelated handler_utils nosec warnings were emitted.
+PR follow-up verification after rebase: `python -m py_compile tldw_Server_API/app/core/Local_LLM/llamacpp_acquisition_service.py tldw_Server_API/app/core/Local_LLM/Ollama_Handler.py` passed. Focused suite passed: `python -m pytest -p no:unraisableexception tldw_Server_API/tests/LLM_Local/test_llamacpp_acquisition_service.py tldw_Server_API/tests/LLM_Local/test_llamacpp_process_runner.py tldw_Server_API/tests/Local_LLM/test_http_utils.py tldw_Server_API/tests/Local_LLM/test_llamacpp_handler.py tldw_Server_API/tests/Local_LLM/test_llamafile_handler.py tldw_Server_API/tests/Local_LLM/test_ollama_handler.py tldw_Server_API/tests/Local_LLM/test_huggingface_handler_hardening.py -q` (102 passed). Bandit passed on `tldw_Server_API/app/core/Local_LLM` with 0 findings in `/tmp/bandit_local_llm_2420_rebase.json`.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -57,3 +58,10 @@ Verified and remediated the validated Local_LLM findings. Focused touched-file s
 - [x] #8 Bandit runs on touched Python files.
 - [x] #9 Backlog task records verification and final summary.
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Reopened for PR follow-up: rebase `codex/local-llm-hardening-2420` on latest `dev`, inspect PR comments/checks, address validated issues, re-run focused verification, and update PR branch.
+PR follow-up completed: rebased `codex/local-llm-hardening-2420` onto latest `origin/dev`, removed the unrelated Claims_Extraction design/task commit from the PR branch, and addressed the Qodo review findings. `_HttpxDownloadStream.__aenter__()` now offloads config loading and per-hop URL/DNS validation with `asyncio.to_thread`; `OllamaHandler.stop_server()` now terminates the handler-owned `asyncio.subprocess.Process` directly for managed PID/port stops instead of routing through the optional psutil PID helper.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

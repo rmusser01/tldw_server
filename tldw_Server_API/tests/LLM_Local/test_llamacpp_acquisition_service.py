@@ -187,6 +187,58 @@ async def test_download_to_partial_rejects_redirect_to_private_target(monkeypatc
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+async def test_download_to_partial_offloads_config_and_url_validation(monkeypatch, tmp_path: Path) -> None:
+    import threading
+
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_acquisition_service
+    from tldw_Server_API.app.core import http_client
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    partial_path = models_dir / "model.gguf.partial"
+    validated = llamacpp_acquisition_service.LlamaCppValidatedDownload(
+        source_url="https://example.com/model.gguf",
+        source_label="example.com/model.gguf",
+        destination_path=models_dir / "model.gguf",
+    )
+    event_loop_thread = threading.get_ident()
+    calls: list[str] = []
+
+    def fake_read_saved_config() -> dict[str, object]:
+        assert threading.get_ident() != event_loop_thread
+        calls.append("config")
+        return _saved_config(models_dir)
+
+    def fake_validate_source_url(url: str, config: dict[str, object], warnings: list[str]) -> str:
+        assert threading.get_ident() != event_loop_thread
+        calls.append("validate")
+        return url
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"model-bytes", request=request)
+
+    transport = httpx.MockTransport(handler)
+
+    def fake_async_client(**kwargs):
+        return httpx.AsyncClient(
+            transport=transport,
+            timeout=kwargs.get("timeout"),
+            follow_redirects=False,
+        )
+
+    monkeypatch.setattr(llamacpp_acquisition_service, "_read_saved_config", fake_read_saved_config)
+    monkeypatch.setattr(llamacpp_acquisition_service, "_validate_source_url", fake_validate_source_url)
+    monkeypatch.setattr(http_client, "create_async_client", fake_async_client)
+
+    bytes_written = await llamacpp_acquisition_service.download_to_partial(validated, partial_path)
+
+    assert bytes_written == len(b"model-bytes")
+    assert partial_path.read_bytes() == b"model-bytes"
+    assert calls == ["config", "validate"]
+
+
+@pytest.mark.unit
 def test_validate_download_request_rejects_malformed_port(monkeypatch, tmp_path: Path) -> None:
     from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
     from tldw_Server_API.app.core.Local_LLM import llamacpp_acquisition_service

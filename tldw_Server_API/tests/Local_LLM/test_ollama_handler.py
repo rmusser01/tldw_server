@@ -124,10 +124,10 @@ async def test_ollama_stop_server_pid_failure_is_sanitized(monkeypatch):
     monkeypatch.setattr(handler, "is_ollama_installed", lambda: asyncio.sleep(0, result=True))
     handler._serve_process = SimpleNamespace(pid=123)
 
-    def fail_terminate(_pid):
+    async def fail_terminate(_process):
         raise RuntimeError("termination failed at /private/ollama.pid")
 
-    monkeypatch.setattr(handler, "_terminate_process", fail_terminate)
+    monkeypatch.setattr(handler, "_terminate_managed_process", fail_terminate)
 
     result = await handler.stop_server(pid=123)
 
@@ -143,10 +143,10 @@ async def test_ollama_stop_server_rejects_unmanaged_pid(monkeypatch):
 
     monkeypatch.setattr(handler, "is_ollama_installed", lambda: asyncio.sleep(0, result=True))
 
-    def fail_terminate(_pid):
+    async def fail_terminate(_process):
         raise AssertionError("unmanaged PID termination must not be attempted")
 
-    monkeypatch.setattr(handler, "_terminate_process", fail_terminate)
+    monkeypatch.setattr(handler, "_terminate_managed_process", fail_terminate)
 
     result = await handler.stop_server(pid=424242)
 
@@ -162,10 +162,10 @@ async def test_ollama_stop_server_port_failure_is_sanitized(monkeypatch):
     handler._serve_process = SimpleNamespace(pid=456)
     handler._serve_port = 11434
 
-    def fail_terminate(_pid):
+    async def fail_terminate(_process):
         raise RuntimeError("port stop failed at /private/ollama.sock")
 
-    monkeypatch.setattr(handler, "_terminate_process", fail_terminate)
+    monkeypatch.setattr(handler, "_terminate_managed_process", fail_terminate)
 
     result = await handler.stop_server(port=11434)
 
@@ -181,11 +181,50 @@ async def test_ollama_stop_server_rejects_unmanaged_port(monkeypatch):
 
     monkeypatch.setattr(handler, "is_ollama_installed", lambda: asyncio.sleep(0, result=True))
 
-    def fail_terminate(_pid):
+    async def fail_terminate(_process):
         raise AssertionError("unmanaged port termination must not be attempted")
 
-    monkeypatch.setattr(handler, "_terminate_process", fail_terminate)
+    monkeypatch.setattr(handler, "_terminate_managed_process", fail_terminate)
 
     result = await handler.stop_server(port=11434)
 
     assert "no managed" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_ollama_stop_server_uses_managed_process_without_psutil(monkeypatch):
+    cfg = OllamaConfig()
+    handler = OllamaHandler(cfg, global_app_config={})
+
+    monkeypatch.setattr(handler, "is_ollama_installed", lambda: asyncio.sleep(0, result=True))
+
+    import tldw_Server_API.app.core.Local_LLM.Ollama_Handler as ol_mod
+
+    monkeypatch.setattr(ol_mod, "PSUTIL_AVAILABLE", False)
+
+    class DummyManagedProcess:
+        pid = 123
+        returncode = None
+        terminated = False
+        killed = False
+
+        def terminate(self):
+            self.terminated = True
+
+        def kill(self):
+            self.killed = True
+            self.returncode = -9
+
+        async def wait(self):
+            self.returncode = 0
+            return 0
+
+    process = DummyManagedProcess()
+    handler._serve_process = process
+
+    result = await handler.stop_server(pid=123)
+
+    assert result == "Attempted to stop Ollama server with PID 123"
+    assert process.terminated is True
+    assert process.killed is False
+    assert handler._serve_process is None

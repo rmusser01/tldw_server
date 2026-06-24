@@ -328,12 +328,14 @@ class OllamaHandler(BaseLLMHandler):
             self.logger.info(f"Attempting to stop Ollama server with PID {pid}")
             if not self._serve_process or self._serve_process.pid != pid:
                 return f"No managed Ollama server found with PID {pid}"
+            process = self._serve_process
             try:
-                await asyncio.to_thread(self._terminate_process, pid)
+                await self._terminate_managed_process(process)
                 self._clear_serve_process(pid)
                 return f"Attempted to stop Ollama server with PID {pid}"
             except ProcessLookupError:
                 self.logger.warning(f"No process found with PID {pid}")
+                self._clear_serve_process(pid)
                 return f"No process found with PID {pid}"
             except _OLLAMA_NONCRITICAL_EXCEPTIONS as e:
                 self.logger.error(f"Error stopping Ollama server PID {pid}")
@@ -346,9 +348,10 @@ class OllamaHandler(BaseLLMHandler):
                 or int(port) != int(self._serve_port)
             ):
                 return f"No managed Ollama server found on port {port}"
-            managed_pid = self._serve_process.pid
+            process = self._serve_process
+            managed_pid = process.pid
             try:
-                await asyncio.to_thread(self._terminate_process, managed_pid)
+                await self._terminate_managed_process(process)
                 self._clear_serve_process(managed_pid)
                 return f"Attempted to stop Ollama server (PID {managed_pid}) on port {port}"
             except ProcessLookupError:
@@ -369,26 +372,21 @@ class OllamaHandler(BaseLLMHandler):
             # self.logger.info(f"Ollama stop command output: {stdout}")
             return "General 'ollama stop' for a server is not a standard command. Please provide PID or manage via system services."
 
-    def _terminate_process(self, pid: int):
-        """Helper to terminate a process by PID. Requires psutil."""
-        if not PSUTIL_AVAILABLE:
-            raise ServerError("psutil not available; cannot terminate process by PID")
+    async def _terminate_managed_process(self, process: asyncio.subprocess.Process) -> None:
+        """Terminate only the subprocess object owned by this handler."""
+        if process.returncode is not None:
+            return
         try:
-            proc = psutil.Process(pid)
-            proc.terminate()  # Send SIGTERM
-            self.logger.info(f"Sent SIGTERM to process {pid}")
-            try:
-                proc.wait(timeout=5)  # Wait for termination
-                self.logger.info(f"Process {pid} terminated gracefully.")
-            except psutil.TimeoutExpired:
-                self.logger.warning(f"Process {pid} did not terminate after SIGTERM, sending SIGKILL.")
-                proc.kill()  # Send SIGKILL
-                proc.wait(timeout=5)
-                self.logger.info(f"Process {pid} killed.")
-        except psutil.NoSuchProcess:
-            raise ProcessLookupError(f"No process found with PID {pid}") from None
-        except _OLLAMA_PSUTIL_EXCEPTIONS as e:
-            raise ServerError(f"Failed to terminate process {pid}: {e}") from e
+            process.terminate()
+            self.logger.info(f"Sent SIGTERM to managed Ollama process {process.pid}")
+            await asyncio.wait_for(process.wait(), timeout=5)
+            self.logger.info(f"Managed Ollama process {process.pid} terminated gracefully.")
+        except asyncio.TimeoutError:
+            self.logger.warning(
+                f"Managed Ollama process {process.pid} did not terminate after SIGTERM, sending SIGKILL."
+            )
+            process.kill()
+            await asyncio.wait_for(process.wait(), timeout=5)
 
     async def inference(self, model_name: str, prompt: str, system_message: Optional[str] = None,
                         port: Optional[int] = None, host: str = "127.0.0.1",

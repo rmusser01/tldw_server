@@ -611,11 +611,11 @@ class _HttpxDownloadStream:
 
     async def __aenter__(self) -> _HttpxDownloadStream:
         self._client = http_client.create_async_client(timeout=self._timeout_seconds)
-        config = _read_saved_config()
+        config = await asyncio.to_thread(_read_saved_config)
         warnings: list[str] = []
         next_url = self._url
         for _redirect_count in range(_MAX_DOWNLOAD_REDIRECTS + 1):
-            next_url = _validate_source_url(next_url, config, warnings)
+            next_url = await asyncio.to_thread(_validate_source_url, next_url, config, warnings)
             self._response_cm = self._client.stream("GET", next_url)
             self._response = await self._response_cm.__aenter__()
             if self._is_redirect(self._response):
