@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from time import monotonic
 from typing import Callable
 
@@ -9,6 +10,14 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
+
+_AUDIO_STUDIO_MEDIA_TICKET_PATH = re.compile(
+    r"(/api/v1/audio-studio/media-tickets/)[^/?#]+(?:[?#].*)?"
+)
+
+
+def redact_access_log_path(path: str) -> str:
+    return _AUDIO_STUDIO_MEDIA_TICKET_PATH.sub(r"\1[REDACTED]", path)
 
 
 class AccessLogMiddleware(BaseHTTPMiddleware):
@@ -35,7 +44,7 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
             host = request.headers.get("host") or request.url.hostname or ""
         except Exception:
             host = ""
-        path = request.url.path
+        path = redact_access_log_path(request.url.path)
 
         status = 500
         try:
