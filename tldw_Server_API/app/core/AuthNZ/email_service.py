@@ -688,13 +688,18 @@ class EmailService:
     def _redact_mock_email_body(body: str) -> str:
         """Redact token-bearing content before mock transport persists it."""
         redacted = re.sub(
-            r"([?&]token=)([^&\"'\\s<]+)",
+            r"([?&]token=)([^&\"'\s<]+)",
             r"\1[REDACTED]",
             body,
         )
         redacted = re.sub(
-            r"(?im)(manual token:\s*)(\S+)",
+            r"(?im)((?:manual token|copy this token(?: into the extension)?):\s*)(\S+)",
             r"\1[REDACTED]",
+            redacted,
+        )
+        redacted = re.sub(
+            r"(?is)(<div\s+class=[\"']code-box[\"'][^>]*>)(.*?)(</div>)",
+            r"\1[REDACTED]\3",
             redacted,
         )
         return redacted
@@ -798,7 +803,14 @@ class EmailService:
         text_body = text_template.render(**template_data)
         subject = Template(EMAIL_TEMPLATES["password_reset"]["subject"]).render(**template_data)
 
-        return await self.send_email(to_email, subject, html_body, text_body, _template="password_reset")
+        return await self.send_email(
+            to_email,
+            subject,
+            html_body,
+            text_body,
+            redact_mock_tokens=True,
+            _template="password_reset",
+        )
 
     async def send_verification_email(
         self,
@@ -831,7 +843,14 @@ class EmailService:
         text_body = text_template.render(**template_data)
         subject = Template(EMAIL_TEMPLATES["email_verification"]["subject"]).render(**template_data)
 
-        return await self.send_email(to_email, subject, html_body, text_body, _template="email_verification")
+        return await self.send_email(
+            to_email,
+            subject,
+            html_body,
+            text_body,
+            redact_mock_tokens=True,
+            _template="email_verification",
+        )
 
     async def send_magic_link_email(
         self,
@@ -868,7 +887,14 @@ class EmailService:
         text_body = text_template.render(**template_data)
         subject = Template(EMAIL_TEMPLATES["magic_link"]["subject"]).render(**template_data)
 
-        return await self.send_email(to_email, subject, html_body, text_body, _template="magic_link")
+        return await self.send_email(
+            to_email,
+            subject,
+            html_body,
+            text_body,
+            redact_mock_tokens=True,
+            _template="magic_link",
+        )
 
     async def send_admin_reauth_email(
         self,
@@ -940,7 +966,14 @@ class EmailService:
         text_body = text_template.render(**template_data)
         subject = Template(EMAIL_TEMPLATES["user_invitation"]["subject"]).render(**template_data)
 
-        return await self.send_email(to_email, subject, html_body, text_body, _template="user_invitation")
+        return await self.send_email(
+            to_email,
+            subject,
+            html_body,
+            text_body,
+            redact_mock_tokens=True,
+            _template="user_invitation",
+        )
 
     async def send_mfa_enabled_email(
         self,

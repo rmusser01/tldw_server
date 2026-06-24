@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -15,9 +16,9 @@ pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
 def _install_fetch_json_stub(
     monkeypatch: pytest.MonkeyPatch,
-    responses: dict[tuple[str, str], dict],
+    responses: dict[tuple[str, str], dict[str, Any]],
 ) -> None:
-    async def _fake_afetch_json(*, method: str, url: str, **kwargs) -> dict:  # noqa: ANN003
+    async def _fake_afetch_json(*, method: str, url: str, **kwargs: Any) -> dict[str, Any]:
         return dict(responses[(method.upper(), url)])
 
     monkeypatch.setattr(oidc_module, "afetch_json", _fake_afetch_json, raising=False)
@@ -112,6 +113,151 @@ async def test_build_authorization_request_uses_discovery_authorization_endpoint
     assert query["client_id"] == ["client-123"]
     assert query["redirect_uri"] == ["http://testserver/callback"]
     assert query["response_type"] == ["code"]
+
+
+@pytest.mark.parametrize(
+    "authorization_url",
+    [
+        "http://issuer.example.com/oauth2/authorize",
+        "javascript:alert(1)",
+        "https://",
+        "https://issuer.example.com/oauth2/authorize#fragment",
+    ],
+)
+@pytest.mark.asyncio
+async def test_build_authorization_request_rejects_unsafe_authorization_url(
+    authorization_url: str,
+) -> None:
+    with pytest.raises(ValueError, match="authorization_url"):
+        await OIDCFederationService().build_authorization_request(
+            provider={
+                "issuer": "https://issuer.example.com",
+                "authorization_url": authorization_url,
+                "token_url": "https://issuer.example.com/oauth2/token",
+                "jwks_url": "https://issuer.example.com/.well-known/jwks.json",
+                "client_id": "client-123",
+            },
+            redirect_uri="http://testserver/callback",
+        )
+
+
+@pytest.mark.asyncio
+async def test_build_authorization_request_rejects_unsafe_discovered_authorization_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    discovery_url = "https://issuer.example.com/.well-known/openid-configuration"
+    _install_fetch_json_stub(
+        monkeypatch,
+        {
+            ("GET", discovery_url): {
+                "issuer": "https://issuer.example.com",
+                "authorization_endpoint": "http://issuer.example.com/oauth2/authorize",
+                "token_endpoint": "https://issuer.example.com/oauth2/token",
+                "jwks_uri": "https://issuer.example.com/.well-known/jwks.json",
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="authorization_url"):
+        await OIDCFederationService().build_authorization_request(
+            provider={
+                "issuer": "https://issuer.example.com",
+                "discovery_url": discovery_url,
+                "client_id": "client-123",
+            },
+            redirect_uri="http://testserver/callback",
+        )
+
+
+@pytest.mark.asyncio
+async def test_build_authorization_request_replaces_conflicting_authorization_query_params() -> None:
+    auth_request = await OIDCFederationService().build_authorization_request(
+        provider={
+            "issuer": "https://issuer.example.com",
+            "authorization_url": (
+                "https://issuer.example.com/oauth2/authorize?"
+                "prompt=login&client_id=stale-client&redirect_uri=https%3A%2F%2Fstale.example%2Fcallback&state=stale"
+            ),
+            "token_url": "https://issuer.example.com/oauth2/token",
+            "jwks_url": "https://issuer.example.com/.well-known/jwks.json",
+            "client_id": "client-123",
+        },
+        redirect_uri="http://testserver/callback",
+    )
+
+    query = parse_qs(urlparse(auth_request["auth_url"]).query)
+
+    assert query["prompt"] == ["login"]
+    assert query["client_id"] == ["client-123"]
+    assert query["redirect_uri"] == ["http://testserver/callback"]
+    assert query["state"] == [auth_request["state"]]
+    assert all(len(query[key]) == 1 for key in ("client_id", "redirect_uri", "state"))
+
+
+@pytest.mark.asyncio
+async def test_oidc_json_fetches_use_response_size_caps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_pem, jwk = _rsa_signing_material()
+    discovery_url = "https://issuer.example.com/.well-known/openid-configuration"
+    token_url = "https://issuer.example.com/oauth2/token"
+    jwks_url = "https://issuer.example.com/.well-known/jwks.json"
+    id_token = jwt.encode(
+        {
+            "sub": "external-user-capped",
+            "email": "capped@example.com",
+            "iss": "https://issuer.example.com",
+            "aud": "client-123",
+            "nonce": "nonce-capped",
+        },
+        private_pem,
+        algorithm="RS256",
+        headers={"kid": "oidc-key-1"},
+    )
+    seen_max_bytes: dict[tuple[str, str], int | None] = {}
+
+    async def _fake_afetch_json(*, method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+        key = (method.upper(), url)
+        seen_max_bytes[key] = kwargs.get("max_bytes")
+        if key == ("GET", discovery_url):
+            return {
+                "issuer": "https://issuer.example.com",
+                "authorization_endpoint": "https://issuer.example.com/oauth2/authorize",
+                "token_endpoint": token_url,
+                "jwks_uri": jwks_url,
+            }
+        if key == ("POST", token_url):
+            return {"id_token": id_token}
+        if key == ("GET", jwks_url):
+            return {"keys": [jwk]}
+        raise AssertionError(f"Unexpected OIDC fetch: {method} {url}")
+
+    monkeypatch.setattr(oidc_module, "afetch_json", _fake_afetch_json, raising=False)
+
+    await OIDCFederationService().build_authorization_request(
+        provider={
+            "issuer": "https://issuer.example.com",
+            "discovery_url": discovery_url,
+            "client_id": "client-123",
+        },
+        redirect_uri="http://testserver/callback",
+    )
+    await OIDCFederationService().exchange_authorization_code(
+        provider={
+            "issuer": "https://issuer.example.com",
+            "token_url": token_url,
+            "jwks_url": jwks_url,
+            "client_id": "client-123",
+        },
+        code="code-capped",
+        redirect_uri="http://testserver/callback",
+        code_verifier="verifier-capped",
+        nonce="nonce-capped",
+    )
+
+    assert seen_max_bytes[("GET", discovery_url)] == oidc_module.OIDC_DISCOVERY_MAX_BYTES
+    assert seen_max_bytes[("POST", token_url)] == oidc_module.OIDC_TOKEN_RESPONSE_MAX_BYTES
+    assert seen_max_bytes[("GET", jwks_url)] == oidc_module.OIDC_JWKS_MAX_BYTES
 
 
 @pytest.mark.asyncio
