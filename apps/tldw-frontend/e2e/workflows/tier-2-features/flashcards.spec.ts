@@ -9,7 +9,7 @@
  *
  * Run: npx playwright test e2e/workflows/tier-2-features/flashcards.spec.ts
  */
-import { type APIRequestContext } from '@playwright/test';
+import { type APIRequestContext, type TestInfo } from '@playwright/test';
 import {
   test,
   expect,
@@ -23,6 +23,7 @@ import {
   assertFlashcardsBackendReady,
   buildFlashcardsSeedRecord,
   cleanupFlashcardsRunRecords,
+  makeFlashcardsRunId,
 } from '../../utils/page-objects/FlashcardsPage';
 import {
   dispatchKeyboardShortcut,
@@ -115,17 +116,37 @@ async function cleanupFlashcardDeck(deck: SeededDeck): Promise<void> {
       }
     );
 
-    expect(
-      response.ok,
-      `Failed to cleanup flashcard deck ${deck.id} at version ${expectedVersion}: ${response.status} ${response.statusText}`
-    ).toBeTruthy();
+    if (!response.ok && response.status !== 404 && response.status !== 409) {
+      console.warn(
+        `Failed to cleanup flashcard deck ${deck.id} at version ${expectedVersion}: ${response.status} ${response.statusText}`
+      );
+    }
   } catch (error) {
     console.error(
       `Failed to cleanup flashcard deck ${deck.id} at version ${expectedVersion} from ${TEST_CONFIG.serverUrl}`,
       error
     );
-    throw error;
   }
+}
+
+function flashcardsRunIdForTest(testInfo: TestInfo): string {
+  const maybeTitlePath = (
+    testInfo as TestInfo & { titlePath?: string[] | (() => string[]) }
+  ).titlePath;
+  const titlePath = Array.isArray(maybeTitlePath)
+    ? maybeTitlePath
+    : typeof maybeTitlePath === 'function'
+      ? maybeTitlePath()
+      : [testInfo.title];
+
+  return makeFlashcardsRunId(
+    [
+      testInfo.project.name,
+      ...titlePath,
+      `repeat-${testInfo.repeatEachIndex}`,
+      `retry-${testInfo.retry}`,
+    ].join('-')
+  );
 }
 
 async function skipIfFlashcardsBackendUnavailable(
@@ -148,7 +169,17 @@ test.describe('Flashcards', () => {
   });
 
   test.afterEach(async ({ request }, testInfo) => {
-    await cleanupFlashcardsRunRecords(request, testInfo.title);
+    const runId = flashcardsRunIdForTest(testInfo);
+    try {
+      await cleanupFlashcardsRunRecords(request, runId);
+    } catch (error) {
+      const message = error instanceof Error ? error.stack ?? error.message : String(error);
+      console.warn(`[flashcards:e2e:cleanup] Cleanup failed for ${runId}`, error);
+      await testInfo.attach('flashcards-cleanup-warning.txt', {
+        body: message,
+        contentType: 'text/plain',
+      });
+    }
   });
 
   // =========================================================================
@@ -323,12 +354,12 @@ test.describe('Flashcards', () => {
       request,
       serverInfo,
       diagnostics,
-    }) => {
+    }, testInfo) => {
       test.setTimeout(120_000);
       skipIfServerUnavailable(serverInfo);
       await skipIfFlashcardsBackendUnavailable(request);
 
-      const seed = buildFlashcardsSeedRecord();
+      const seed = buildFlashcardsSeedRecord(flashcardsRunIdForTest(testInfo));
       const deck = await createFlashcardDeck(seed.deckName);
       const front = seed.cardFront;
       const back = seed.cardBack;
@@ -391,11 +422,11 @@ test.describe('Flashcards', () => {
       request,
       serverInfo,
       diagnostics,
-    }) => {
+    }, testInfo) => {
       skipIfServerUnavailable(serverInfo);
       await skipIfFlashcardsBackendUnavailable(request);
 
-      const seed = buildFlashcardsSeedRecord();
+      const seed = buildFlashcardsSeedRecord(flashcardsRunIdForTest(testInfo));
       const deck = await createFlashcardDeck(seed.deckName);
       const front = seed.cardFront;
       const back = seed.cardBack;
@@ -448,11 +479,11 @@ test.describe('Flashcards', () => {
       request,
       serverInfo,
       diagnostics,
-    }) => {
+    }, testInfo) => {
       skipIfServerUnavailable(serverInfo);
       await skipIfFlashcardsBackendUnavailable(request);
 
-      const seed = buildFlashcardsSeedRecord();
+      const seed = buildFlashcardsSeedRecord(flashcardsRunIdForTest(testInfo));
       const deck = await createFlashcardDeck(seed.deckName);
       const front = seed.cardFront;
       const back = seed.cardBack;
@@ -653,11 +684,11 @@ test.describe('Flashcards', () => {
       request,
       serverInfo,
       diagnostics,
-    }) => {
+    }, testInfo) => {
       skipIfServerUnavailable(serverInfo);
       await skipIfFlashcardsBackendUnavailable(request);
 
-      const seed = buildFlashcardsSeedRecord();
+      const seed = buildFlashcardsSeedRecord(flashcardsRunIdForTest(testInfo));
       const front = seed.cardFront;
       const back = seed.cardBack;
 
@@ -702,12 +733,12 @@ test.describe('Flashcards', () => {
       request,
       serverInfo,
       diagnostics,
-    }) => {
+    }, testInfo) => {
       test.setTimeout(120_000);
       skipIfServerUnavailable(serverInfo);
       await skipIfFlashcardsBackendUnavailable(request);
 
-      const seed = buildFlashcardsSeedRecord();
+      const seed = buildFlashcardsSeedRecord(flashcardsRunIdForTest(testInfo));
       const deck = await createFlashcardDeck(seed.deckName);
       const createSuggestionTag = `${seed.runId}-bio-create`;
       const editSuggestionTag = `${seed.runId}-bio-edit`;
@@ -993,12 +1024,12 @@ test.describe('Flashcards', () => {
       request,
       serverInfo,
       diagnostics,
-    }) => {
+    }, testInfo) => {
       test.setTimeout(90_000);
       skipIfServerUnavailable(serverInfo);
       await skipIfFlashcardsBackendUnavailable(request);
 
-      const seed = buildFlashcardsSeedRecord();
+      const seed = buildFlashcardsSeedRecord(flashcardsRunIdForTest(testInfo));
       const deck = await createFlashcardDeck(seed.deckName);
 
       try {

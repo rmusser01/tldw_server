@@ -15,9 +15,7 @@ dependencies: []
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-<!-- SECTION:DESCRIPTION:BEGIN -->
-<!-- SECTION:DESCRIPTION:END -->
-
+Refresh the Flashcards UX evidence and test harness before behavior remediation work.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -62,6 +60,20 @@ Bandit: not applicable; this PR slice touched frontend/E2E TypeScript and Backlo
 Notes:
 - The clean PR worktree already had an unrelated TASK-2354 from origin/dev, so TASK-2401 is the non-conflicting worktree Backlog record committed with this slice.
 - The worktree dependency layout has a broken tracked antd symlink target; verification temporarily repointed it to an installed cache target and restored it before staging.
+
+Review follow-up:
+- Rebased PR #2464 onto latest `origin/dev`.
+- Removed the skipped future invalid-import inline alert test from PR0 instead of carrying disabled coverage.
+- Replaced random/time-based E2E run IDs with deterministic IDs derived from Playwright test metadata plus a stable hash suffix.
+- Scoped cleanup to the exact per-test run ID and made teardown cleanup best-effort with warnings instead of thrown failures.
+- Fixed duplicate DESCRIPTION section markers in this Backlog task.
+
+Review follow-up verification:
+- Targeted grep for skipped tests, random/time IDs, no-arg seed calls, and old cleanup helpers: no matches.
+- git diff --check: passed.
+- Focused Vitest flashcards suite: 4 files passed, 91 tests passed.
+- Playwright flashcards workflow: 9 passed, 11 backend-dependent cases skipped because the local backend preflight was unavailable; cleanup warnings did not fail teardown.
+- Bandit: not applicable; review follow-up touched frontend/E2E TypeScript and Backlog metadata only.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
