@@ -22,6 +22,7 @@ def _tmp_moderation_config(tmp_path, blocklist_path):
             "per_user_overrides": "true",
             "categories_enabled": "confidential",
             "pii_enabled": "false",
+            "blocklist_write_debounce_ms": "0",
             "blocklist_file": str(blocklist_path),
             "user_overrides_file": str(tmp_path / "moderation_user_overrides.json"),
             "runtime_overrides_file": str(tmp_path / "moderation_runtime_overrides.json"),
