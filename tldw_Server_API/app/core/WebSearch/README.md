@@ -1,17 +1,28 @@
 # WebSearch
 
-## 1. Descriptive of Current Feature Set
+## 1. Legacy Status
 
-- Purpose: Unified web search and aggregation across multiple providers with optional LLM-powered subquery generation, relevance scoring, and final-answer synthesis.
-- Providers: Google CSE, DuckDuckGo, Brave (AI/web), Kagi, Searx, Tavily. Bing is present in legacy code but not exposed as a supported engine in the public schema.
+This package is a legacy/parallel WebSearch implementation kept for compatibility
+tests and consolidation history. The production API endpoint currently delegates
+to `tldw_Server_API/app/core/Web_Scraping/WebSearch_APIs.py`, not to
+`Web_Search.py`.
+
+Do not add new providers or endpoint behavior here. New work should target the
+live `Web_Scraping.WebSearch_APIs` path unless a migration plan explicitly
+switches production callers to this package.
+
+## 2. Descriptive of Current Feature Set
+
+- Purpose: Legacy web search and aggregation helpers with optional LLM-powered subquery generation, relevance scoring, and final-answer synthesis.
+- Providers: Google CSE, DuckDuckGo, Brave (AI/web), Kagi, and Bing have partial legacy adapters. Searx, Serper, Tavily parser integration, Baidu, and Yandex are explicit non-production stubs in this package.
 - Pipeline (optional stages):
   - Subquery generation via LLM to broaden coverage.
   - Provider search, normalization, and result shaping.
   - Optional user review/selection step.
   - Relevance evaluation via LLM and article scraping for evidence.
   - Aggregation into a concise final answer with citations and a confidence estimate.
-- Cancellation-aware: Aggregate stage observes client disconnect and aborts in-flight work.
-- Security and egress: Outbound requests respect centralized egress/SSRF policy; provider calls use browser-like headers.
+- Cancellation-aware: Relevance evaluation accepts a cancellation event, but this package is not wired to the production endpoint.
+- Security and egress: Network calls route through the centralized HTTP client; live endpoint egress behavior is owned by `Web_Scraping.WebSearch_APIs`.
 - Inputs/Outputs:
   - Request model: `tldw_Server_API/app/api/v1/schemas/websearch_schemas.py:14` (engine, query, options, aggregation flags)
   - Raw response: `tldw_Server_API/app/api/v1/schemas/websearch_schemas.py:62`
@@ -22,7 +33,7 @@
 Notes
 - The API endpoint today delegates to the Web_Scraping implementation for providers and orchestration. This module hosts the parallel pipeline (and helpers) as part of an ongoing consolidation effort.
 
-## 2. Technical Details of Features
+## 3. Technical Details of Features
 
 - Architecture & Flow
   - Phase 1 (Generate + Search): `generate_and_search` builds sub-queries (optional), executes provider calls, and normalizes results.
@@ -59,12 +70,13 @@ Notes
   - Provider adapters return structured dicts with `processing_error` when normalization fails; endpoint traps exceptions and returns 500 with error detail.
   - Aggregate stage guards against malformed LLM outputs; returns a safe fallback when summarization is unavailable.
 
-## 3. Developer-Related/Relevant Information for Contributors
+## 4. Developer-Related/Relevant Information for Contributors
 
 - Folder Structure
   - This module (`core/WebSearch`) contains the parallel pipeline and helpers. The API endpoint currently delegates to `core/Web_Scraping/WebSearch_APIs.py`, which also holds provider adapters, UA profiles, and the article scraper.
 - Adding/Updating a Provider
-  - Implement `search_web_<provider>` and a matching `parse_<provider>_results` that appends standardized items into `web_search_results_dict`.
+  - Prefer implementing providers in `core/Web_Scraping/WebSearch_APIs.py`, the live endpoint path.
+  - Only implement `search_web_<provider>` and matching `parse_<provider>_results` here if a migration plan explicitly revives this package.
   - Enforce egress policy at the start of any network call using `evaluate_url_policy`.
   - Use `_websearch_browser_headers` for realistic headers where appropriate.
   - Update supported engines if the provider becomes publicly exposed: `tldw_Server_API/app/api/v1/schemas/websearch_schemas.py:9`–`tldw_Server_API/app/api/v1/schemas/websearch_schemas.py:19`.
