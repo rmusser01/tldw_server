@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 
 import pytest
@@ -57,6 +58,26 @@ async def test_requests_sliding_window_with_stub_redis():
 
 
 @pytest.mark.asyncio
+async def test_commit_with_same_op_id_does_not_corrupt_redis_reserve_replay():
+    class _Loader:
+        def get_policy(self, pid):
+            return {"requests": {"rpm": 5}, "scopes": ["user"]}
+
+    ft = FakeTime(0.0)
+    rg = RedisResourceGovernor(policy_loader=_Loader(), time_source=ft, ns="rg_t_idempotency")
+    req = RGRequest(entity="user:idem", categories={"requests": {"units": 1}}, tags={"policy_id": "pidem"})
+
+    decision, handle_id = await rg.reserve(req, op_id="shared-op")
+    assert decision.allowed and handle_id
+
+    await rg.commit(handle_id, op_id="shared-op")
+
+    replay_decision, replay_handle = await rg.reserve(req, op_id="shared-op")
+    assert replay_decision.allowed is True
+    assert replay_handle == handle_id
+
+
+@pytest.mark.asyncio
 async def test_tokens_lua_script_retry_after():
     class _Loader:
         def get_policy(self, pid):
@@ -94,6 +115,23 @@ async def test_tokens_lua_script_retry_after():
     ft.advance(31.0)
     d5, _ = await rg.reserve(req)
     assert d5.allowed
+
+
+@pytest.mark.asyncio
+async def test_tokens_oversized_single_reservation_is_denied():
+    class _Loader:
+        def get_policy(self, pid):
+            return {"tokens": {"per_min": 2, "burst": 1.0}, "scopes": ["global", "user"]}
+
+    ft = FakeTime(0.0)
+    rg = RedisResourceGovernor(policy_loader=_Loader(), time_source=ft, ns="rg_t_tokens_oversized")
+    req = RGRequest(entity="user:oversized", categories={"tokens": {"units": 3}}, tags={"policy_id": "ptok_big"})
+
+    decision, handle_id = await rg.reserve(req, op_id="oversized-1")
+
+    assert decision.allowed is False
+    assert handle_id is None
+    assert decision.details["categories"]["tokens"]["limit"] == 2
 
 
 @pytest.mark.asyncio
@@ -199,6 +237,41 @@ async def test_concurrency_leases_with_zrem_capability():
 
 
 @pytest.mark.asyncio
+async def test_concurrency_parallel_reserve_does_not_overbook_after_separate_checks():
+    class _Loader:
+        def get_policy(self, pid):
+            return {"streams": {"max_concurrent": 1, "ttl_sec": 60}, "scopes": ["user"]}
+
+    class _BarrierRedisGovernor(RedisResourceGovernor):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self._barrier_seen = 0
+            self._barrier = asyncio.Event()
+
+        async def check(self, req: RGRequest):
+            decision = await super().check(req)
+            if decision.allowed and "streams" in req.categories:
+                self._barrier_seen += 1
+                if self._barrier_seen == 2:
+                    self._barrier.set()
+                await asyncio.wait_for(self._barrier.wait(), timeout=2)
+            return decision
+
+    ft = FakeTime(0.0)
+    rg = _BarrierRedisGovernor(policy_loader=_Loader(), time_source=ft, ns="rg_t_conc_race")
+    req = RGRequest(entity="user:race", categories={"streams": {"units": 1}}, tags={"policy_id": "pcon_race"})
+
+    results = await asyncio.gather(
+        rg.reserve(req, op_id="race-1"),
+        rg.reserve(req, op_id="race-2"),
+    )
+
+    allowed = [decision.allowed for decision, _handle in results]
+    assert allowed.count(True) == 1
+    assert allowed.count(False) == 1
+
+
+@pytest.mark.asyncio
 async def test_concurrency_streams_units_enforced():
     class _Loader:
         def get_policy(self, pid):
@@ -234,6 +307,33 @@ async def test_concurrency_streams_units_enforced():
 
     d4, h4 = await rg.reserve(req_two)
     assert d4.allowed and h4
+
+
+@pytest.mark.asyncio
+async def test_concurrency_retry_after_waits_for_deficit_expiry():
+    class _Loader:
+        def get_policy(self, pid):
+            return {"streams": {"max_concurrent": 2, "ttl_sec": 60}, "scopes": ["user"]}
+
+    ft = FakeTime(10.0)
+    ns = "rg_t_conc_retry_deficit"
+    rg = RedisResourceGovernor(policy_loader=_Loader(), time_source=ft, ns=ns)
+    client = await rg._client_get()
+    key = rg._keys.lease("pdeficit", "streams", "user", "deficit")
+    try:
+        await client.delete(key)
+    except Exception:
+        _ = None
+    rg._stub_leases.pop(key, None)
+    rg._stub_leases[key] = {"old": 20.0, "late": 90.0}
+    await client.zadd(key, {"old": 20.0, "late": 90.0})
+
+    req_two = RGRequest(entity="user:deficit", categories={"streams": {"units": 2}}, tags={"policy_id": "pdeficit"})
+
+    decision = await rg.check(req_two)
+
+    assert decision.allowed is False
+    assert decision.details["categories"]["streams"]["retry_after"] == 80
 
 
 @pytest.mark.asyncio

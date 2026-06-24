@@ -81,3 +81,36 @@ async def test_daily_ledger_insert_and_idempotency(tmp_path, monkeypatch):
     days = {d["day_utc"]: d["units"] for d in peek.get("days", [])}
     assert days.get(start_day) == 3
     assert days.get(end_day) == 12
+
+
+@pytest.mark.asyncio
+async def test_daily_ledger_consume_if_within_cap_serializes_concurrent_writers(tmp_path, monkeypatch):
+    db_path = tmp_path / "users_daily_cap_atomic.db"
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+
+    await reset_db_pool()
+    pool = await get_db_pool()
+
+    ledger = ResourceDailyLedger(db_pool=pool)
+    await ledger.initialize()
+    now = datetime.now(timezone.utc)
+
+    async def consume(op_id: str):
+        return await ledger.consume_if_within_cap(
+            LedgerEntry(
+                entity_scope="user",
+                entity_value="u-atomic",
+                category="tokens",
+                units=1,
+                op_id=op_id,
+                occurred_at=now,
+            ),
+            daily_cap=1,
+        )
+
+    first, second = await asyncio.gather(consume("atomic-1"), consume("atomic-2"))
+
+    assert [first.allowed, second.allowed].count(True) == 1
+    assert [first.allowed, second.allowed].count(False) == 1
+    assert await ledger.total_for_day("user", "u-atomic", "tokens") == 1

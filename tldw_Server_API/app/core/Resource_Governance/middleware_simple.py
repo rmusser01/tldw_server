@@ -20,6 +20,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .deps import derive_client_ip, derive_entity_key
 from .governor import RGRequest
+from .tenant import TenantScopeConfig, parse_tenant_config
 
 _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
@@ -156,8 +157,18 @@ class RGSimpleMiddleware:
             pass
         return None
 
-    @staticmethod
-    def _derive_entity(request: Request) -> str:
+    def _derive_tenant_config(self, request: Request) -> TenantScopeConfig | None:
+        try:
+            loader = getattr(request.app.state, "rg_policy_loader", None)
+            snap = loader.get_snapshot() if loader else None
+            tenant_data = getattr(snap, "tenant", None) or {}
+            if isinstance(tenant_data, dict) and tenant_data:
+                return parse_tenant_config(tenant_data)
+        except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
+            return None
+        return None
+
+    def _derive_entity(self, request: Request) -> str:
         """Derive the RG entity key for this request.
 
         Enforcement details:
@@ -174,7 +185,38 @@ class RGSimpleMiddleware:
         except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
             # best-effort only
             pass
-        return derive_entity_key(request)
+        return derive_entity_key(request, tenant_config=self._derive_tenant_config(request))
+
+    def _effective_fail_mode(self, request: Request, policy_id: str | None) -> str:
+        try:
+            if policy_id:
+                loader = getattr(request.app.state, "rg_policy_loader", None)
+                pol = loader.get_policy(policy_id) if loader else {}
+                req_cfg = dict((pol.get("requests") or {}) if isinstance(pol, dict) else {})
+                mode = str(req_cfg.get("fail_mode") or (pol or {}).get("fail_mode") or "").strip().lower()
+                if mode in {"fail_closed", "fail_open", "fallback_memory"}:
+                    return mode
+        except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
+            pass
+        try:
+            if (os.getenv("RG_BACKEND", "memory").strip().lower() or "memory") == "redis":
+                mode = str(os.getenv("RG_REDIS_FAIL_MODE") or "fallback_memory").strip().lower()
+                if mode in {"fail_closed", "fail_open", "fallback_memory"}:
+                    return mode
+        except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
+            pass
+        return "fail_open"
+
+    async def _enforcement_unavailable(self, scope: Scope, receive: Receive, send: Send, *, policy_id: str | None, reason: str) -> None:
+        resp = JSONResponse(
+            {
+                "error": "resource_governance_unavailable",
+                "policy_id": policy_id,
+                "reason": reason,
+            },
+            status_code=503,
+        )
+        await resp(scope, receive, send)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -187,6 +229,10 @@ class RGSimpleMiddleware:
         # Compile route map for fast path matches (best-effort)
         with contextlib.suppress(_RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS):
             self._init_route_map(request)
+        policy_id = self._derive_policy_id(request)
+        if not policy_id:
+            await self.app(scope, receive, send)
+            return
         # If governor not initialized, lazily create one using loader + backend env
         gov = getattr(request.app.state, "rg_governor", None)
         if gov is None:
@@ -204,13 +250,12 @@ class RGSimpleMiddleware:
             except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
                 gov = None
         if gov is None:
+            if self._effective_fail_mode(request, policy_id) == "fail_closed":
+                await self._enforcement_unavailable(scope, receive, send, policy_id=policy_id, reason="governor_missing")
+                return
             await self.app(scope, receive, send)
             return
 
-        policy_id = self._derive_policy_id(request)
-        if not policy_id:
-            await self.app(scope, receive, send)
-            return
         # Attach policy_id to request.state so downstream dependencies can
         # detect RG-governed routes and avoid double-enforcement.
         with contextlib.suppress(_RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS):
@@ -229,6 +274,9 @@ class RGSimpleMiddleware:
             decision, handle_id = await gov.reserve(rg_req, op_id=op_id)
         except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(f"RGSimpleMiddleware reserve error: {e}")
+            if self._effective_fail_mode(request, policy_id) == "fail_closed":
+                await self._enforcement_unavailable(scope, receive, send, policy_id=policy_id, reason="reserve_error")
+                return
             await self.app(scope, receive, send)
             return
 

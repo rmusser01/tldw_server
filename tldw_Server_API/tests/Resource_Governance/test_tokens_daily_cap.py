@@ -14,6 +14,7 @@ pytestmark = pytest.mark.rate_limit
 async def _init_authnz_sqlite(db_path, monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.setenv("JWT_SECRET_KEY", "test-jwt-secret-for-rg-daily-cap")
     # Ensure usage logging is on; some suites toggle this off globally and
     # the tokens/day ledger tests require log_llm_usage to write entries.
     monkeypatch.setenv("LLM_USAGE_ENABLED", "1")
@@ -102,6 +103,69 @@ route_map: {}
     )
     dec2, _ = await gov.reserve(req_ok, op_id="op2")
     assert dec2.allowed is True
+
+
+@pytest.mark.asyncio
+async def test_daily_cap_reserve_consumes_headroom_idempotently(tmp_path, monkeypatch):
+    db_path = tmp_path / "authnz_tokens_reserve.db"
+    await _init_authnz_sqlite(db_path, monkeypatch)
+
+    policy_yaml = tmp_path / "rg_tokens_reserve_daily.yaml"
+    policy_yaml.write_text(
+        """
+schema_version: 1
+policies:
+  chat.reserve:
+    tokens: { per_min: 1000000, burst: 1.0, daily_cap: 1 }
+    scopes: [user]
+route_map: {}
+""".lstrip()
+    )
+
+    loader = PolicyLoader(str(policy_yaml), PolicyReloadConfig(enabled=False, interval_sec=0))
+    await loader.load_once()
+    gov = MemoryResourceGovernor(policy_loader=loader)
+    req = RGRequest(
+        entity="user:1",
+        categories={"tokens": {"units": 1}},
+        tags={"policy_id": "chat.reserve"},
+    )
+
+    first_decision, first_handle = await gov.reserve(req, op_id="reserve-daily-1")
+    repeat_decision, repeat_handle = await gov.reserve(req, op_id="reserve-daily-1")
+    second_decision, second_handle = await gov.reserve(req, op_id="reserve-daily-2")
+
+    assert first_decision.allowed is True
+    assert first_handle is not None
+    assert repeat_decision.allowed is True
+    assert repeat_handle == first_handle
+    assert second_decision.allowed is False
+    assert second_handle is None
+
+
+@pytest.mark.asyncio
+async def test_daily_cap_consume_fails_open_on_authnz_database_error(monkeypatch):
+    import tldw_Server_API.app.core.Resource_Governance.daily_caps as _dc
+    from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
+
+    class _FailingLedger:
+        async def consume_if_within_cap(self, *_args, **_kwargs):
+            raise TransactionError("daily cap consume", "database unavailable")
+
+    monkeypatch.setattr(_dc, "_daily_ledger", _FailingLedger(), raising=False)
+
+    allowed, retry_after, details = await _dc.consume_daily_cap(
+        entity_scope="user",
+        entity_value="1",
+        category="tokens",
+        daily_cap=1,
+        units=1,
+        op_id="db-down",
+    )
+
+    assert allowed is True
+    assert retry_after == 0
+    assert details == {}
 
 
 @pytest.mark.asyncio

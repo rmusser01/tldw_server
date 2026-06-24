@@ -15,8 +15,9 @@ import ipaddress
 import os
 
 from fastapi import Request
+from loguru import logger
 
-from .tenant import hash_entity
+from .tenant import TenantScopeConfig, get_tenant_id, hash_entity, parse_tenant_config
 
 _RG_DEPS_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
@@ -114,7 +115,59 @@ def derive_client_ip(request: Request) -> str:
     return "unknown"
 
 
-def derive_entity_key(request: Request) -> str:
+def _tenant_claims_from_state(request: Request) -> dict[str, object]:
+    """Extract tenant-related claims from trusted request state/auth context."""
+    claims: dict[str, object] = {}
+    for attr in ("tenant_id", "active_org_id", "org_id"):
+        try:
+            value = getattr(request.state, attr, None)
+        except _RG_DEPS_NONCRITICAL_EXCEPTIONS:
+            value = None
+        if value is not None:
+            claims[attr] = value
+    try:
+        auth = getattr(request.state, "auth", None)
+        principal = getattr(auth, "principal", None)
+        for attr in ("tenant_id", "active_org_id", "org_id"):
+            value = getattr(principal, attr, None)
+            if value is not None:
+                claims.setdefault(attr, value)
+    except _RG_DEPS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("RG tenant claims: auth principal lookup failed; continuing with request.state claims: {}", exc)
+    if "tenant_id" not in claims:
+        for fallback in ("active_org_id", "org_id"):
+            if fallback in claims:
+                claims["tenant_id"] = claims[fallback]
+                break
+    return claims
+
+
+def _tenant_config_from_request(request: Request) -> TenantScopeConfig | None:
+    """Read tenant-scope config from the app's current RG policy snapshot."""
+    try:
+        app_state = getattr(getattr(request, "app", None), "state", None)
+        loader = getattr(app_state, "rg_policy_loader", None)
+        snapshot = loader.get_snapshot() if loader is not None else None
+        tenant = getattr(snapshot, "tenant", None) or {}
+        if isinstance(tenant, dict):
+            return parse_tenant_config(tenant)
+    except _RG_DEPS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("RG tenant config lookup failed; falling back to non-tenant entity derivation: {}", exc)
+    return None
+
+
+def derive_entity_key(request: Request, tenant_config: TenantScopeConfig | None = None) -> str:
+    """Derive the Resource Governor entity key for a request."""
+    if tenant_config is None:
+        tenant_config = _tenant_config_from_request(request)
+    if tenant_config and tenant_config.enabled:
+        try:
+            tenant_id = get_tenant_id(request.headers, claims=_tenant_claims_from_state(request), config=tenant_config)
+            if tenant_id:
+                return f"tenant:{tenant_id}"
+        except _RG_DEPS_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug("RG tenant entity derivation failed; falling back to user/api_key/ip scope: {}", exc)
+
     # Prefer authenticated user scope
     try:
         uid = getattr(request.state, "user_id", None)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+import hashlib
 from typing import Any
 
 from loguru import logger
@@ -17,6 +18,15 @@ class LedgerEntry:
     units: int
     op_id: str
     occurred_at: datetime
+
+
+@dataclass(frozen=True)
+class DailyCapConsumeResult:
+    """Result of an atomic daily-cap consume attempt."""
+
+    allowed: bool
+    used: int
+    inserted: bool
 
 
 class ResourceDailyLedger:
@@ -105,6 +115,135 @@ class ResourceDailyLedger:
     def _to_day_utc(dt: datetime | None = None) -> str:
         d = (dt or datetime.now(timezone.utc)).astimezone(timezone.utc)
         return d.strftime("%Y-%m-%d")
+
+    @staticmethod
+    def _advisory_lock_key(*parts: str) -> int:
+        """Return a stable signed 64-bit key for Postgres advisory locks."""
+        material = "\x1f".join(str(part) for part in parts).encode("utf-8", errors="surrogatepass")
+        digest = hashlib.blake2b(material, digest_size=8).digest()
+        return int.from_bytes(digest, byteorder="big", signed=True)
+
+    @staticmethod
+    def _affected_rows(result: Any) -> int | None:
+        """Best-effort affected row count across asyncpg and aiosqlite results."""
+        rowcount = getattr(result, "rowcount", None)
+        if isinstance(rowcount, int):
+            return rowcount
+        text = str(result or "")
+        try:
+            tail = text.rsplit(" ", 1)[-1]
+            if tail.isdigit():
+                return int(tail)
+        except (IndexError, TypeError, ValueError):
+            return None
+        return None
+
+    @staticmethod
+    async def _fetchval_from_conn(conn: Any, query: str, *args: Any, is_pg: bool) -> Any:
+        """Fetch one scalar using either asyncpg or the SQLite transaction shim."""
+        if is_pg:
+            return await conn.fetchval(query, *args)
+        cursor = await conn.execute(query, *args)
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+    async def consume_if_within_cap(
+        self,
+        entry: LedgerEntry,
+        *,
+        daily_cap: int,
+        day_utc: str | None = None,
+    ) -> DailyCapConsumeResult:
+        """
+        Idempotently insert ``entry`` only when the daily cap has headroom.
+
+        The check and insert are serialized per (day, scope, value, category):
+        Postgres uses an advisory transaction lock, while SQLite uses the
+        AuthNZ transaction wrapper's ``BEGIN IMMEDIATE`` write transaction.
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        cap = int(daily_cap)
+        units = max(0, int(entry.units))
+        day = str(day_utc or self._to_day_utc(entry.occurred_at))
+        is_pg = await self._using_postgres_backend()
+
+        async with self.db_pool.transaction() as conn:
+            if is_pg:
+                day_param: date = date.fromisoformat(day)
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock($1)",
+                    self._advisory_lock_key(day, entry.entity_scope, entry.entity_value, entry.category),
+                )
+                existing_q = (
+                    "SELECT units FROM resource_daily_ledger "
+                    "WHERE day_utc = $1 AND entity_scope = $2 AND entity_value = $3 AND category = $4 AND op_id = $5"
+                )
+                total_q = (
+                    "SELECT COALESCE(SUM(units), 0) FROM resource_daily_ledger "
+                    "WHERE day_utc = $1 AND entity_scope = $2 AND entity_value = $3 AND category = $4"
+                )
+                insert_q = (
+                    "INSERT INTO resource_daily_ledger "
+                    "(day_utc, entity_scope, entity_value, category, units, op_id, occurred_at, created_at) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, $7, NOW()) "
+                    "ON CONFLICT (day_utc, entity_scope, entity_value, category, op_id) DO NOTHING"
+                )
+                params = (day_param, entry.entity_scope, entry.entity_value, entry.category)
+                existing = await conn.fetchval(existing_q, *params, entry.op_id)
+                used = int(await conn.fetchval(total_q, *params) or 0)
+                if existing is not None:
+                    return DailyCapConsumeResult(allowed=True, used=used, inserted=False)
+                if max(0, cap - used) < units:
+                    return DailyCapConsumeResult(allowed=False, used=used, inserted=False)
+                result = await conn.execute(
+                    insert_q,
+                    day_param,
+                    entry.entity_scope,
+                    entry.entity_value,
+                    entry.category,
+                    units,
+                    entry.op_id,
+                    entry.occurred_at,
+                )
+                inserted = (self._affected_rows(result) or 0) > 0
+                used_after = used + units if inserted else int(await conn.fetchval(total_q, *params) or used)
+                return DailyCapConsumeResult(allowed=True, used=used_after, inserted=inserted)
+
+            existing_q = (
+                "SELECT units FROM resource_daily_ledger "
+                "WHERE day_utc = ? AND entity_scope = ? AND entity_value = ? AND category = ? AND op_id = ?"
+            )
+            total_q = (
+                "SELECT COALESCE(SUM(units), 0) FROM resource_daily_ledger "
+                "WHERE day_utc = ? AND entity_scope = ? AND entity_value = ? AND category = ?"
+            )
+            insert_q = (
+                "INSERT OR IGNORE INTO resource_daily_ledger "
+                "(day_utc, entity_scope, entity_value, category, units, op_id, occurred_at, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))"
+            )
+            params = (day, entry.entity_scope, entry.entity_value, entry.category)
+            existing = await self._fetchval_from_conn(conn, existing_q, *params, entry.op_id, is_pg=False)
+            used = int(await self._fetchval_from_conn(conn, total_q, *params, is_pg=False) or 0)
+            if existing is not None:
+                return DailyCapConsumeResult(allowed=True, used=used, inserted=False)
+            if max(0, cap - used) < units:
+                return DailyCapConsumeResult(allowed=False, used=used, inserted=False)
+            result = await conn.execute(
+                insert_q,
+                day,
+                entry.entity_scope,
+                entry.entity_value,
+                entry.category,
+                units,
+                entry.op_id,
+                entry.occurred_at.isoformat(),
+            )
+            inserted = (self._affected_rows(result) or 0) > 0
+            used_after = used + units if inserted else int(await self._fetchval_from_conn(conn, total_q, *params, is_pg=False) or used)
+            return DailyCapConsumeResult(allowed=True, used=used_after, inserted=inserted)
 
     async def add(self, entry: LedgerEntry) -> bool:
         """
