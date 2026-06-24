@@ -5,7 +5,6 @@ from tldw_Server_API.app.core.Governance.store import GovernanceStore
 pytestmark = pytest.mark.unit
 
 
-@pytest.mark.asyncio
 async def test_open_gap_upsert_deduplicates_same_fingerprint(tmp_path):
     db_path = tmp_path / "gov_gaps.db"
     store = GovernanceStore(sqlite_path=str(db_path))
@@ -29,7 +28,6 @@ async def test_open_gap_upsert_deduplicates_same_fingerprint(tmp_path):
     assert first.status == "open"
 
 
-@pytest.mark.asyncio
 async def test_open_gap_upsert_distinct_scope_creates_new_gap(tmp_path):
     db_path = tmp_path / "gov_gaps_scope.db"
     store = GovernanceStore(sqlite_path=str(db_path))
@@ -51,7 +49,6 @@ async def test_open_gap_upsert_distinct_scope_creates_new_gap(tmp_path):
     assert team_a.id != team_b.id
 
 
-@pytest.mark.asyncio
 async def test_open_gap_rejects_negative_numeric_scope_ids(tmp_path):
     db_path = tmp_path / "gov_gaps_negative_scope.db"
     store = GovernanceStore(sqlite_path=str(db_path))
@@ -65,7 +62,6 @@ async def test_open_gap_rejects_negative_numeric_scope_ids(tmp_path):
         )
 
 
-@pytest.mark.asyncio
 async def test_open_gap_rejects_boolean_numeric_scope_ids(tmp_path):
     db_path = tmp_path / "gov_gaps_boolean_scope.db"
     store = GovernanceStore(sqlite_path=str(db_path))
@@ -79,7 +75,6 @@ async def test_open_gap_rejects_boolean_numeric_scope_ids(tmp_path):
         )
 
 
-@pytest.mark.asyncio
 async def test_open_gap_normalizes_blank_text_scope_to_null(tmp_path):
     db_path = tmp_path / "gov_gaps_blank_scope.db"
     store = GovernanceStore(sqlite_path=str(db_path))

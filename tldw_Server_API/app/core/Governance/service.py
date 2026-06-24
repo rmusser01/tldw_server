@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Literal, Mapping, Protocol, cast
+from typing import Any, Literal, Protocol, cast
+
+from loguru import logger
+
+from tldw_Server_API.app.core.exceptions import InvalidGovernanceCandidateError
 
 from .resolver import resolve_effective_action
 from .types import CandidateAction, GovernanceAction, utc_now
@@ -32,10 +37,6 @@ _CATEGORY_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 _VALID_ACTIONS = frozenset({"allow", "warn", "require_approval", "deny"})
-
-
-class InvalidGovernanceCandidateError(ValueError):
-    """Raised when a policy source returns a malformed governance candidate."""
 
 
 class _GapStoreProtocol(Protocol):
@@ -80,6 +81,7 @@ class GovernanceService:
 
     @staticmethod
     def _normalize_text(value: Any) -> str:
+        """Normalize arbitrary text-like values for matching and storage."""
         return " ".join(str(value or "").strip().split())
 
     def _resolve_category(
@@ -107,6 +109,7 @@ class GovernanceService:
 
     @staticmethod
     def _coerce_action(value: Any) -> GovernanceAction:
+        """Normalize a raw policy action and reject unknown action names."""
         normalized = GovernanceService._normalize_text(value).lower()
         action = _FALLBACK_ACTIONS.get(normalized, normalized)
         if action not in _VALID_ACTIONS:
@@ -115,19 +118,26 @@ class GovernanceService:
 
     @staticmethod
     def _coerce_int(value: Any, *, field: str) -> int:
+        """Convert a candidate integer field while rejecting malformed values."""
+        if isinstance(value, bool):
+            raise InvalidGovernanceCandidateError(f"invalid_candidate_{field}")
         try:
             return int(value)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise InvalidGovernanceCandidateError(f"invalid_candidate_{field}") from exc
 
     @staticmethod
     def _coerce_updated_at(value: Any) -> datetime:
+        """Normalize a candidate timestamp to timezone-aware UTC."""
         if value is None:
             return utc_now()
         if isinstance(value, datetime):
             parsed = value
         elif isinstance(value, (int, float)) and not isinstance(value, bool):
-            parsed = datetime.fromtimestamp(float(value), tz=timezone.utc)
+            try:
+                parsed = datetime.fromtimestamp(float(value), tz=timezone.utc)
+            except (OverflowError, OSError, ValueError) as exc:
+                raise InvalidGovernanceCandidateError("invalid_candidate_updated_at") from exc
         else:
             rendered = GovernanceService._normalize_text(value)
             if not rendered:
@@ -144,6 +154,7 @@ class GovernanceService:
 
     @staticmethod
     def _coerce_candidate(raw: CandidateAction | Mapping[str, Any]) -> CandidateAction:
+        """Convert a loader result into a resolver-ready candidate object."""
         if isinstance(raw, CandidateAction):
             GovernanceService._coerce_action(raw.action)
             return raw
@@ -157,6 +168,7 @@ class GovernanceService:
         )
 
     async def _load_candidates(self, **kwargs: Any) -> list[CandidateAction]:
+        """Load policy candidates from the configured loader and validate them."""
         if self._policy_loader is None:
             return []
 
@@ -202,7 +214,15 @@ class GovernanceService:
                 }
                 for candidate in candidates
             )
-        except (AttributeError, InvalidGovernanceCandidateError, RuntimeError, TypeError, ValueError):
+        except (AttributeError, InvalidGovernanceCandidateError, RuntimeError, TypeError, ValueError) as exc:
+            logger.warning(
+                "Governance knowledge candidate loading failed for category={} source={} "
+                "query_length={} error_type={}",
+                resolved_category,
+                category_source,
+                len(self._normalize_text(query)),
+                type(exc).__name__,
+            )
             rules = ()
 
         return GovernanceKnowledgeResult(

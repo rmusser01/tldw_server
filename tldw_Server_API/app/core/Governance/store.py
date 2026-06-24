@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional
+from typing import Any
 
 import aiosqlite
 
@@ -20,17 +21,17 @@ class GapRecord:
     question_fingerprint: str
     category: str
     status: str
-    org_id: Optional[int]
-    team_id: Optional[int]
-    persona_id: Optional[str]
-    workspace_id: Optional[str]
-    resolution_mode: Optional[str]
-    resolution_text: Optional[str]
+    org_id: int | None
+    team_id: int | None
+    persona_id: str | None
+    workspace_id: str | None
+    resolution_mode: str | None
+    resolution_text: str | None
     created_at: str
     updated_at: str
 
     @classmethod
-    def from_row(cls, row: aiosqlite.Row) -> "GapRecord":
+    def from_row(cls, row: aiosqlite.Row) -> GapRecord:
         return cls(
             id=int(row["id"]),
             question=str(row["question"]),
@@ -122,7 +123,7 @@ class GovernanceStore:
     async def _ensure_schema_columns(self, db: aiosqlite.Connection) -> None:
         """Apply lightweight additive migrations for existing governance DBs."""
         cursor = await db.execute("PRAGMA table_info(governance_rules)")
-        columns = {str(row[1]) for row in await cursor.fetchall()}
+        columns = {str(row["name"]) for row in await cursor.fetchall()}
         if "action" not in columns:
             await db.execute(
                 "ALTER TABLE governance_rules ADD COLUMN action TEXT NOT NULL DEFAULT 'warn'"
@@ -141,39 +142,47 @@ class GovernanceStore:
 
     @staticmethod
     def _normalize_text(text: Any) -> str:
+        """Normalize arbitrary text-like values by trimming repeated whitespace."""
         return " ".join(str(text or "").strip().split())
 
     @classmethod
     def _normalize_optional_scope_text(cls, text: str | None) -> str | None:
+        """Normalize optional text scope values and collapse blanks to None."""
         normalized = cls._normalize_text(text)
         return normalized or None
 
     @staticmethod
     def _validate_optional_scope_id(field: str, value: int | None) -> int | None:
+        """Validate optional numeric scope identifiers for persisted gap writes."""
         if value is None:
             return None
         if isinstance(value, bool):
             raise ValueError(f"{field} must be an integer")
-        normalized = int(value)
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{field} must be an integer") from exc
         if normalized < 0:
             raise ValueError(f"{field} must be non-negative")
         return normalized
 
     @classmethod
     def _coerce_metadata_scope_id(cls, field: str, metadata: Mapping[str, Any]) -> int | None:
+        """Extract optional candidate scope IDs, treating malformed caller metadata as global."""
         value = metadata.get(field)
         if value is None or value == "":
             return None
         if isinstance(value, bool):
-            raise ValueError(f"{field} must be an integer")
+            return None
         try:
             normalized = int(str(value))
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"{field} must be an integer") from exc
-        return cls._validate_optional_scope_id(field, normalized)
+            return cls._validate_optional_scope_id(field, normalized)
+        except (TypeError, ValueError, OverflowError):
+            return None
 
     @classmethod
     def _normalize_category(cls, category: str | None) -> str:
+        """Normalize candidate lookup category values with a general fallback."""
         return cls._normalize_text(category).lower() or "general"
 
     @classmethod
@@ -183,6 +192,7 @@ class GovernanceStore:
 
     @staticmethod
     def _scope_level(row: aiosqlite.Row) -> int:
+        """Resolve a deterministic specificity level for a governance rule row."""
         if row["workspace_id"] is not None:
             return 4
         if row["persona_id"] is not None:

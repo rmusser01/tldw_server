@@ -3,12 +3,12 @@ id: TASK-2415
 title: Harden Governance core review findings
 status: Done
 assignee: []
-created_date: '2026-06-23 14:39'
-updated_date: '2026-06-23 14:57'
+created_date: 2026-06-23 14:39
+updated_date: 2026-06-24 03:46
 labels:
-  - governance
-  - review
-  - bugfix
+- governance
+- review
+- bugfix
 dependencies: []
 priority: high
 ---
@@ -42,7 +42,7 @@ Address validated current-code review findings in tldw_Server_API/app/core/Gover
 <!-- SECTION:NOTES:BEGIN -->
 Manual Backlog task created because the Backlog MCP workflow was unavailable and the CLI create/list commands hung in this environment; user approved this temporary exception.
 
-Verification:
+Verification before initial PR creation:
 - Red run before implementation: `python -m pytest tldw_Server_API/tests/Governance/test_governance_service.py tldw_Server_API/tests/Governance/test_governance_gap_dedupe.py -q` failed on the expected 6 reviewed defects.
 - Focused isolated unit run after fixes: `python -m pytest --confcutdir=tldw_Server_API/tests/Governance tldw_Server_API/tests/Governance/test_governance_service.py tldw_Server_API/tests/Governance/test_governance_gap_dedupe.py -q` passed, 12 passed.
 - Full isolated Governance unit run: `python -m pytest --confcutdir=tldw_Server_API/tests/Governance tldw_Server_API/tests/Governance -q` passed, 26 passed.
@@ -51,13 +51,23 @@ Verification:
 - Whitespace check passed with `git diff --check` on touched files.
 - Bandit completed on `tldw_Server_API/app/core/Governance` with 0 findings; report: `/tmp/bandit_governance_2415.json`.
 
-Known verification note: one repository-global pytest invocation and one single-test invocation were interrupted after pytest cleanup/import hooks stalled; the same behaviors were verified using the isolated `--confcutdir` unit invocation.
+PR #2456 review follow-up after rebase onto latest origin/dev:
+- Addressed review comments by centralizing `InvalidGovernanceCandidateError`, catching integer/timestamp conversion edge cases, adding helper docstrings, using name-based PRAGMA column access, logging knowledge-query candidate load failures, treating malformed metadata scope IDs as global candidate lookups, and removing duplicate async test markers.
+- Focused review regression run passed: `python -m pytest --confcutdir=tldw_Server_API/tests/Governance tldw_Server_API/tests/Governance/test_governance_service.py tldw_Server_API/tests/Governance/test_governance_gap_dedupe.py -q` passed, 15 passed.
+- Full isolated Governance unit run passed: `python -m pytest --confcutdir=tldw_Server_API/tests/Governance tldw_Server_API/tests/Governance -q` passed, 29 passed.
+- Direct MCP governance regression run passed: `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_governance_module.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_governance_preflight.py -q` passed, 15 passed.
+- Ruff check passed on touched Python files with `python -m ruff check`.
+- Compile check passed for touched Governance source/tests and `exceptions.py` with `python -m py_compile`.
+- Whitespace check passed with `git diff --check`.
+- Bandit completed on `tldw_Server_API/app/core/Governance` plus `tldw_Server_API/app/core/exceptions.py` with 0 findings; report: `/tmp/bandit_governance_pr2456_rebase.json`.
+
+Known verification note: one repository-global pytest invocation and one single-test invocation were interrupted during the initial fix pass after pytest cleanup/import hooks stalled; the same behaviors were verified using isolated `--confcutdir` unit invocations.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented store-backed governance rule candidates by default, added an additive `action` schema migration for existing governance databases, preserved rule timestamps for resolver tie-breaking, made malformed loaded candidate actions deny instead of propagating unknown actions, normalized blank text scopes and rejected invalid numeric scope sentinels, and fixed metadata category handling so null/non-string values do not become real categories. Added focused regression tests for each reviewed finding.
+Implemented store-backed governance rule candidates by default, added an additive `action` schema migration for existing governance databases, preserved rule timestamps for resolver tie-breaking, made malformed loaded candidate actions deny instead of propagating unknown actions, normalized blank text scopes and rejected invalid numeric scope sentinels, and fixed metadata category handling so null/non-string values do not become real categories. PR #2456 follow-up also centralized the candidate exception, hardened bool/overflow timestamp and integer coercion, made malformed caller metadata fail closed to global rule matching instead of warn fallback, added diagnostic logging for knowledge-query candidate load failures, removed duplicate async test markers, and added regression tests for the new review comments.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
