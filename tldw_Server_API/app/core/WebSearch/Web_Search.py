@@ -13,6 +13,7 @@ from urllib.parse import unquote, urlencode, urlparse
 
 #
 # 3rd-Party Imports
+from loguru import logger
 from lxml.etree import _Element
 from lxml.html import document_fromstring
 
@@ -80,6 +81,7 @@ def _set_processing_error(output_dict: dict[str, Any], message: str) -> None:
 
 
 def _redact_sensitive_mapping(mapping: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of a mapping with known secret-bearing fields redacted."""
     redacted: dict[str, Any] = {}
     for key, value in mapping.items():
         normalized_key = key.lower().replace("-", "_")
@@ -93,6 +95,7 @@ def _redact_sensitive_mapping(mapping: dict[str, Any]) -> dict[str, Any]:
 
 
 def _legacy_provider_not_implemented(provider: str) -> dict[str, Any]:
+    """Build a structured legacy-provider response for unsupported adapters."""
     message = f"Legacy WebSearch provider '{provider}' is not implemented"
     return {
         "search_engine": provider,
@@ -102,6 +105,24 @@ def _legacy_provider_not_implemented(provider: str) -> dict[str, Any]:
         "error": None,
         "processing_error": message,
     }
+
+
+def _sanitize_relevant_results_for_response(
+        relevant_results: dict[str, dict[str, Any]],
+        *,
+        include_original_content: bool = False,
+) -> dict[str, dict[str, Any]]:
+    """Project relevance results into a bounded response payload."""
+    sanitized_results: dict[str, dict[str, Any]] = {}
+    for result_id, result in relevant_results.items():
+        sanitized_result = dict(result)
+        original_content = sanitized_result.pop("original_content", None)
+        if include_original_content and original_content is not None:
+            sanitized_result["original_content"] = original_content
+        elif original_content is not None:
+            sanitized_result["original_content_chars"] = len(str(original_content))
+        sanitized_results[result_id] = sanitized_result
+    return sanitized_results
 
 
 def _websearch_browser_headers(
@@ -372,7 +393,7 @@ async def analyze_and_aggregate(
         cancel_event=cancel_event,
     )
     logging.debug("Relevant results returned by search_result_relevance:")
-    logging.debug(json.dumps(relevant_results, indent=2))
+    logging.debug(json.dumps(_sanitize_relevant_results_for_response(relevant_results), indent=2))
 
     # 5. Allow user to review and select relevant results (if enabled)
     logging.info("Reviewing and selecting relevant results")
@@ -390,11 +411,16 @@ async def analyze_and_aggregate(
     if not isinstance(final_answer.get("text"), str):
         raise ValueError("Aggregation produced an invalid final_answer payload")
 
+    response_relevant_results = _sanitize_relevant_results_for_response(
+        relevant_results,
+        include_original_content=bool(search_params.get("include_original_content", False)),
+    )
+
     # 7. Return the final data
     logging.info("Returning final websearch results")
     return {
         "final_answer": final_answer,
-        "relevant_results": relevant_results,
+        "relevant_results": response_relevant_results,
         "web_search_results_dict": web_search_results_dict
     }
 
@@ -1810,7 +1836,7 @@ def search_web_google(
         if sort_results_by:
             params["sort"] = sort_results_by
 
-        logging.info(f"Prepared parameters for Google Search: {_redact_sensitive_mapping(params)}")
+        logger.info(f"Prepared parameters for Google Search: {_redact_sensitive_mapping(params)}")
 
         # Make the API call
         response = fetch(method="GET", url=search_url, params=params)
