@@ -88,7 +88,8 @@ async def test_reading_save_and_list(reading_env):
 
 
 @pytest.mark.asyncio
-async def test_reading_save_bounds_metadata_text(reading_env, monkeypatch):
+async def test_reading_save_bounds_metadata_text(reading_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Saving long reading content stores bounded metadata text with diagnostics."""
     monkeypatch.setattr(reading_service_module, "READING_CONTENT_METADATA_MAX_CHARS", 24)
     service = ReadingService(TEST_USER_ID + 20)
     content = "A" * 100
@@ -130,7 +131,8 @@ async def test_reading_save_merges_tags_on_duplicate(reading_env):
 
 
 @pytest.mark.asyncio
-async def test_reading_status_is_normalized_on_save_and_update(reading_env):
+async def test_reading_status_is_normalized_on_save_and_update(reading_env: Path) -> None:
+    """Invalid save/update reading statuses normalize to the default status."""
     service = ReadingService(TEST_USER_ID + 21)
     saved = await service.save_url(
         url="https://example.org/status-normalized",
@@ -173,7 +175,8 @@ async def test_reading_update_status_and_filters(reading_env):
     assert any(row.id == save_result.item.id for row in rows)
 
 
-def test_reading_service_uses_focused_helpers(reading_env):
+def test_reading_service_uses_focused_helpers(reading_env: Path) -> None:
+    """ReadingService wires focused archive and import helper services."""
     service = ReadingService(TEST_USER_ID + 22)
 
     assert type(service._archive_service).__name__ == "ReadingArchiveService"
@@ -208,7 +211,8 @@ def test_reading_import_items_normalize_domain_and_read_at(reading_env):
     assert row.read_at is not None
 
 
-def test_reading_import_skips_non_http_urls(reading_env):
+def test_reading_import_skips_non_http_urls(reading_env: Path) -> None:
+    """Reading imports skip unsupported URL schemes while preserving valid rows."""
     service = ReadingService(TEST_USER_ID + 23)
     result = service.import_items(
         items=[

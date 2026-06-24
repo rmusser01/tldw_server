@@ -68,7 +68,8 @@ def test_parse_instapaper_export():
     assert item.notes == "Note A"
 
 
-def test_reading_import_max_bytes_invalid_env_uses_default(monkeypatch):
+def test_reading_import_max_bytes_invalid_env_uses_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Invalid READING_IMPORT_MAX_BYTES falls back without import-time failure."""
     monkeypatch.setenv("READING_IMPORT_MAX_BYTES", "not-an-int")
     reloaded = importlib.reload(reading_import_jobs_module)
     try:

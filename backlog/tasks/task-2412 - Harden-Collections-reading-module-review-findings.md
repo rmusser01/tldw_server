@@ -3,19 +3,19 @@ id: TASK-2412
 title: Harden Collections reading module review findings
 status: Done
 assignee: []
-created_date: '2026-06-23 18:13'
-updated_date: '2026-06-23 18:42'
+created_date: 2026-06-23 18:13
+updated_date: 2026-06-24 03:48
 labels:
-  - collections
-  - security
-  - reliability
+- collections
+- security
+- reliability
 dependencies: []
 references:
-  - tldw_Server_API/app/core/Collections/reading_service.py
-  - tldw_Server_API/app/core/Collections/reading_importers.py
-  - tldw_Server_API/app/core/Collections/reading_import_jobs.py
-  - tldw_Server_API/app/core/Collections/reading_digest_jobs.py
-  - tldw_Server_API/app/core/Collections/embedding_queue.py
+- tldw_Server_API/app/core/Collections/reading_service.py
+- tldw_Server_API/app/core/Collections/reading_importers.py
+- tldw_Server_API/app/core/Collections/reading_import_jobs.py
+- tldw_Server_API/app/core/Collections/reading_digest_jobs.py
+- tldw_Server_API/app/core/Collections/embedding_queue.py
 priority: high
 ---
 
@@ -61,3 +61,9 @@ Hardened the Collections reading module against the review findings: content is 
 - [ ] #7 Focused pytest coverage passes for Collections reading service/import/digest/embedding queue behavior.
 - [x] #8 Bandit runs clean on touched Collections files.
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Review follow-up: addressed PR comments by adding docstrings to new helpers, adding type hints/docstrings to new tests, hardening default markdown digest rendering against link/summary injection, and verifying skipped import counts still count unsupported raw URLs once. Verification before commit: git diff --check passed; compileall on touched files passed; Bandit on touched Collections core files reported 0 findings; direct behavior checks passed for markdown escaping, embedding content bounding, unsupported URL skip count, and invalid import-size env fallback.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

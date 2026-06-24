@@ -26,6 +26,7 @@ READING_IMPORT_JOB_TYPE = "reading_import"
 
 
 def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
+    """Read an integer environment variable with fallback validation."""
     raw = os.getenv(name)
     if raw is None or str(raw).strip() == "":
         return default

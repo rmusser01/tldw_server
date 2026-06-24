@@ -166,14 +166,23 @@ def test_reading_digest_suggestions_flags_accept_y():
     assert "archived" in cfg["status"]
 
 
-def test_default_digest_renderers_do_not_link_unsafe_urls():
-    items = [{"title": "Unsafe", "url": "javascript:alert(1)", "summary": "Summary"}]
+def test_default_digest_renderers_do_not_link_unsafe_urls() -> None:
+    """Default digest renderers keep unsafe URLs and markdown injection inert."""
+    items = [
+        {
+            "title": "Unsafe](javascript:alert(1))",
+            "url": "javascript:alert(1)",
+            "summary": "Summary [bad](javascript:alert(2))",
+        }
+    ]
 
     html = _render_default_html("Digest", items)
     markdown = _render_default_markdown("Digest", items)
 
     assert 'href="javascript:alert(1)"' not in html
-    assert "[Unsafe](javascript:alert(1))" not in markdown
+    assert "](javascript:alert(1))" not in markdown
+    assert "[bad](javascript:alert(2))" not in markdown
+    assert "javascript:" not in markdown
     assert "Unsafe" in html
     assert "Unsafe" in markdown
 

@@ -147,6 +147,7 @@ def _safe_filename_fragment(raw: str, max_len: int = 64) -> str:
 
 
 def _add_bounded_metadata_text(metadata: dict[str, object], key: str, value: str | None, limit: int) -> None:
+    """Store bounded metadata text plus truncation diagnostics."""
     bounded, truncated, original_len = truncate_text_hard(value, limit)
     if bounded:
         metadata[key] = bounded

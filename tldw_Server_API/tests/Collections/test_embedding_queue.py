@@ -1,4 +1,6 @@
 import asyncio
+from typing import Any
+
 import pytest
 
 from tldw_Server_API.app.core.Collections import embedding_queue
@@ -46,12 +48,13 @@ async def test_enqueue_embeddings_job_uses_manager(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_enqueue_embeddings_job_bounds_payload_content(monkeypatch):
-    captured = {}
-    enqueue = {}
+async def test_enqueue_embeddings_job_bounds_payload_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Embedding jobs cap payload content and include truncation metadata."""
+    captured: dict[str, Any] = {}
+    enqueue: dict[str, Any] = {}
 
     class FakeManager:
-        def create_job(self, **kwargs):
+        def create_job(self, **kwargs: Any) -> dict[str, object]:
             captured["job_kwargs"] = kwargs
             return {"id": 123, "uuid": "root-123"}
 

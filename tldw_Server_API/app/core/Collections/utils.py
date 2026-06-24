@@ -31,6 +31,7 @@ def truncate_text_hard(value: str | None, limit: int) -> tuple[str | None, bool,
 
 
 def normalize_reading_status(value: str | None, default: str = "saved") -> str:
+    """Normalize untrusted reading status values to the allowed set."""
     text = str(value or default).strip().lower()
     if text in READING_ALLOWED_STATUSES:
         return text
@@ -39,6 +40,7 @@ def normalize_reading_status(value: str | None, default: str = "saved") -> str:
 
 
 def is_supported_reading_url(value: str | None) -> bool:
+    """Return True when value is an absolute http(s) reading URL."""
     if not value:
         return False
     parsed = urlparse(str(value).strip())

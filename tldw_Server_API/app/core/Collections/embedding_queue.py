@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.Collections.utils import truncate_text_hard
 
 
 def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
+    """Read an integer environment variable with fallback validation."""
     raw = os.getenv(name)
     if raw is None or str(raw).strip() == "":
         return default
