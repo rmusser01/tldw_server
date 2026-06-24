@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import re
+from urllib.parse import urlparse
+
+
+READING_ALLOWED_STATUSES = frozenset({"saved", "reading", "read", "archived"})
 
 
 def truncate_text(value: str | None, limit: int = 400) -> str | None:
@@ -11,6 +15,34 @@ def truncate_text(value: str | None, limit: int = 400) -> str | None:
     if len(stripped) <= limit:
         return stripped
     return stripped[: max(0, limit - 3)].rstrip() + "..."
+
+
+def truncate_text_hard(value: str | None, limit: int) -> tuple[str | None, bool, int]:
+    """Return text capped to limit without exceeding the requested length."""
+    if value is None:
+        return None, False, 0
+    text = str(value)
+    original_len = len(text)
+    if limit <= 0:
+        return None, bool(text), original_len
+    if original_len <= limit:
+        return text, False, original_len
+    return text[:limit], True, original_len
+
+
+def normalize_reading_status(value: str | None, default: str = "saved") -> str:
+    text = str(value or default).strip().lower()
+    if text in READING_ALLOWED_STATUSES:
+        return text
+    fallback = str(default or "saved").strip().lower()
+    return fallback if fallback in READING_ALLOWED_STATUSES else "saved"
+
+
+def is_supported_reading_url(value: str | None) -> bool:
+    if not value:
+        return False
+    parsed = urlparse(str(value).strip())
+    return parsed.scheme.lower() in {"http", "https"} and bool(parsed.netloc)
 
 
 def hash_text_sha256(value: str | None) -> str | None:

@@ -88,6 +88,24 @@ async def test_reading_save_and_list(reading_env):
 
 
 @pytest.mark.asyncio
+async def test_reading_save_bounds_metadata_text(reading_env, monkeypatch):
+    monkeypatch.setattr(reading_service_module, "READING_CONTENT_METADATA_MAX_CHARS", 24)
+    service = ReadingService(TEST_USER_ID + 20)
+    content = "A" * 100
+
+    result = await service.save_url(
+        url="https://example.org/large-metadata",
+        title_override="Large Metadata",
+        content_override=content,
+    )
+
+    metadata = json.loads(result.item.metadata_json or "{}")
+    assert len(metadata["text"]) <= 24
+    assert metadata["text_truncated"] is True
+    assert metadata["text_char_count"] == len(content)
+
+
+@pytest.mark.asyncio
 async def test_reading_save_merges_tags_on_duplicate(reading_env):
     service = ReadingService(TEST_USER_ID + 10)
     first = await service.save_url(
@@ -109,6 +127,21 @@ async def test_reading_save_merges_tags_on_duplicate(reading_env):
         content_override="Dupe content body.",
     )
     assert set(second.item.tags) == {"alpha", "beta"}
+
+
+@pytest.mark.asyncio
+async def test_reading_status_is_normalized_on_save_and_update(reading_env):
+    service = ReadingService(TEST_USER_ID + 21)
+    saved = await service.save_url(
+        url="https://example.org/status-normalized",
+        status="not-a-status",
+        title_override="Status Normalized",
+        content_override="Status body.",
+    )
+    assert saved.item.status == "saved"
+
+    updated = service.update_item(saved.item.id, status="also-invalid")
+    assert updated.status == "saved"
 
 
 @pytest.mark.asyncio
@@ -140,6 +173,13 @@ async def test_reading_update_status_and_filters(reading_env):
     assert any(row.id == save_result.item.id for row in rows)
 
 
+def test_reading_service_uses_focused_helpers(reading_env):
+    service = ReadingService(TEST_USER_ID + 22)
+
+    assert type(service._archive_service).__name__ == "ReadingArchiveService"
+    assert type(service._import_service).__name__ == "ReadingImportService"
+
+
 def test_reading_import_items_normalize_domain_and_read_at(reading_env):
     service = ReadingService(TEST_USER_ID + 11)
     result = service.import_items(
@@ -166,6 +206,39 @@ def test_reading_import_items_normalize_domain_and_read_at(reading_env):
     assert row.domain == "example.org"
     assert row.status == "read"
     assert row.read_at is not None
+
+
+def test_reading_import_skips_non_http_urls(reading_env):
+    service = ReadingService(TEST_USER_ID + 23)
+    result = service.import_items(
+        items=[
+            ReadingImportItem(
+                url="javascript:alert(1)",
+                title="Bad link",
+                tags=[],
+                status="saved",
+                favorite=False,
+                notes=None,
+                read_at=None,
+                metadata={},
+            ),
+            ReadingImportItem(
+                url="https://example.org/good",
+                title="Good link",
+                tags=[],
+                status="saved",
+                favorite=False,
+                notes=None,
+                read_at=None,
+                metadata={},
+            ),
+        ]
+    )
+
+    rows, total = service.list_items(page=1, size=10)
+    assert result.skipped == 1
+    assert total == 1
+    assert rows[0].url == "https://example.org/good"
 
 
 @pytest.mark.asyncio

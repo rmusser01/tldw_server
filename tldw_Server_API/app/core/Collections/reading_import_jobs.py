@@ -23,7 +23,24 @@ from tldw_Server_API.app.core.testing import is_truthy
 
 READING_IMPORT_DOMAIN = "reading"
 READING_IMPORT_JOB_TYPE = "reading_import"
-MAX_READING_IMPORT_BYTES = int(os.getenv("READING_IMPORT_MAX_BYTES", str(10 * 1024 * 1024)))
+
+
+def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        logger.warning("Invalid integer for {}: {!r}; using default={}", name, raw, default)
+        return default
+    if minimum is not None and value < minimum:
+        logger.warning("Out-of-range integer for {}: {}; minimum={}; using default={}", name, value, minimum, default)
+        return default
+    return value
+
+
+MAX_READING_IMPORT_BYTES = _env_int("READING_IMPORT_MAX_BYTES", 10 * 1024 * 1024, minimum=1)
 
 
 class ReadingImportJobError(RuntimeError):
