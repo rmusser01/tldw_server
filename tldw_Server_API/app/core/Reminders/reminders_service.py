@@ -4,7 +4,6 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.Collections_DB import (
     CollectionsDatabase,
@@ -41,9 +40,7 @@ def _notification_snooze_signature(notification: UserNotificationRow) -> tuple[s
 def _task_snooze_signature(task: ReminderTaskRow) -> tuple[str, str, str, str, str] | None:
     title = str(task.title or "")
     if (
-        task.schedule_kind != "one_time"
-        or not task.enabled
-        or not task.run_at
+        not _is_active_one_time_task(task)
         or not title.startswith(SNOOZE_TASK_TITLE_PREFIX)
     ):
         return None
@@ -54,6 +51,11 @@ def _task_snooze_signature(task: ReminderTaskRow) -> tuple[str, str, str, str, s
         str(task.link_id or ""),
         str(task.link_url or ""),
     )
+
+
+def _is_active_one_time_task(task: ReminderTaskRow) -> bool:
+    """Return whether a task is an enabled one-time reminder with a fire time."""
+    return task.schedule_kind == "one_time" and bool(task.enabled) and bool(task.run_at)
 
 
 def _parse_iso_datetime(value: str | None) -> datetime | None:
@@ -127,7 +129,7 @@ def _match_legacy_notification_snoozes(
 
 
 class RemindersService:
-    """Domain service for user reminder task lifecycle operations."""
+    """Domain service for notification snooze reminder behavior."""
 
     def __init__(
         self,
@@ -138,27 +140,11 @@ class RemindersService:
         self.user_id = int(user_id)
         self.collections = collections_db or CollectionsDatabase.for_user(self.user_id)
 
-    def create_task(self, **kwargs: Any) -> ReminderTaskRow:
-        task_id = self.collections.create_reminder_task(**kwargs)
-        return self.collections.get_reminder_task(task_id)
-
-    def list_tasks(self, *, include_disabled: bool = True) -> list[ReminderTaskRow]:
-        return self.collections.list_reminder_tasks(include_disabled=include_disabled)
-
-    def get_task(self, task_id: str) -> ReminderTaskRow:
-        return self.collections.get_reminder_task(task_id)
-
-    def update_task(self, task_id: str, patch: dict[str, Any]) -> ReminderTaskRow:
-        return self.collections.update_reminder_task(task_id, patch)
-
-    def delete_task(self, task_id: str) -> bool:
-        return self.collections.delete_reminder_task(task_id)
-
     def _list_active_snooze_tasks(self) -> dict[str, ReminderTaskRow]:
         return {
             task.id: task
             for task in self.collections.list_reminder_tasks(include_disabled=False)
-            if _task_snooze_signature(task) is not None
+            if _is_active_one_time_task(task)
         }
 
     def _match_notification_snoozes(
@@ -177,7 +163,7 @@ class RemindersService:
             if notification.snooze_task_id is not None:
                 if notification.snooze_task_id:
                     task = active_tasks.get(notification.snooze_task_id)
-                    if task is not None and _task_snooze_signature(task) == _notification_snooze_signature(notification):
+                    if task is not None and _is_active_one_time_task(task):
                         matches[notification.id] = NotificationSnoozeMatch(
                             task_ids=(task.id,),
                             run_at=task.run_at,
@@ -218,13 +204,42 @@ class RemindersService:
         if not active_tasks:
             return [], {}, 0
 
-        rows: list[UserNotificationRow] = []
-        matches_for_rows: dict[int, NotificationSnoozeMatch] = {}
-        total = 0
+        matched_rows: dict[int, UserNotificationRow] = {}
+        all_matches: dict[int, NotificationSnoozeMatch] = {}
+
+        linked_task_ids = set(self.collections.list_user_notification_snooze_task_ids()).intersection(active_tasks)
+        linked_rows = self.collections.list_user_notifications_by_snooze_task_ids(linked_task_ids)
+        linked_matches = self._match_notification_snoozes(
+            notifications=linked_rows,
+            active_tasks=active_tasks,
+        )
+        for row in linked_rows:
+            match = linked_matches.get(row.id)
+            if match is None:
+                continue
+            matched_rows[row.id] = row
+            all_matches[row.id] = match
+
+        legacy_active_tasks = {
+            task_id: task
+            for task_id, task in active_tasks.items()
+            if task_id not in linked_task_ids and _task_snooze_signature(task) is not None
+        }
+        if not legacy_active_tasks:
+            sorted_rows = sorted(
+                matched_rows.values(),
+                key=lambda row: (str(row.created_at or ""), row.id),
+                reverse=True,
+            )
+            total = len(sorted_rows)
+            rows = sorted_rows[bounded_offset : bounded_offset + bounded_limit]
+            matches_for_rows = {row.id: all_matches[row.id] for row in rows if row.id in all_matches}
+            return rows, matches_for_rows, total
+
         scan_offset = 0
 
         while True:
-            dismissed_rows = self.collections.list_user_dismissed_notifications(
+            dismissed_rows = self.collections.list_user_legacy_snooze_candidate_notifications(
                 limit=batch_size,
                 offset=scan_offset,
             )
@@ -233,21 +248,27 @@ class RemindersService:
 
             dismissed_matches = self._match_notification_snoozes(
                 notifications=dismissed_rows,
-                active_tasks=active_tasks,
+                active_tasks=legacy_active_tasks,
             )
             for row in dismissed_rows:
                 match = dismissed_matches.get(row.id)
                 if match is None:
                     continue
-                if total >= bounded_offset and len(rows) < bounded_limit:
-                    rows.append(row)
-                    matches_for_rows[row.id] = match
-                total += 1
+                matched_rows.setdefault(row.id, row)
+                all_matches.setdefault(row.id, match)
 
             scan_offset += len(dismissed_rows)
             if len(dismissed_rows) < batch_size:
                 break
 
+        sorted_rows = sorted(
+            matched_rows.values(),
+            key=lambda row: (str(row.created_at or ""), row.id),
+            reverse=True,
+        )
+        total = len(sorted_rows)
+        rows = sorted_rows[bounded_offset : bounded_offset + bounded_limit]
+        matches_for_rows = {row.id: all_matches[row.id] for row in rows if row.id in all_matches}
         return rows, matches_for_rows, total
 
     def cancel_notification_snooze(self, *, notification_id: int) -> list[str]:
@@ -271,6 +292,11 @@ class RemindersService:
             )
 
         source = self.collections.get_user_notification(notification_id)
+        previous_match = self.list_notification_snoozes(notifications=[source]).get(source.id)
+        if previous_match is not None:
+            for previous_task_id in previous_match.task_ids:
+                self.collections.delete_reminder_task(previous_task_id)
+
         run_at = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat()
         task_id = self.collections.create_reminder_task(
             title=_build_snooze_task_title(source.title),

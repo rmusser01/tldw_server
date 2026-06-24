@@ -10,6 +10,7 @@ pytest_plugins = ["tldw_Server_API.tests._plugins.http_client_patch_guard"]
 from collections.abc import Callable
 import os
 from pathlib import Path
+import sys
 try:
     # Ensure tests see provider keys from the canonical location
     # Load once at collection time, without overriding explicit env
@@ -397,19 +398,20 @@ def _restore_user_db_env_and_chacha_cache():
 @pytest.fixture(autouse=True)
 def _reset_character_chat_complete_windows():
     """Ensure legacy /complete throttle cache is rebound per test loop."""
-    try:
-        from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as _chat_sessions
-
-        _chat_sessions.reset_complete_windows()
-    except Exception:
-        _ = None
+    module_name = "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions"
+    _chat_sessions = sys.modules.get(module_name)
+    if _chat_sessions is not None:
+        try:
+            _chat_sessions.reset_complete_windows()
+        except Exception:
+            _ = None
     yield
-    try:
-        from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as _chat_sessions
-
-        _chat_sessions.reset_complete_windows()
-    except Exception:
-        _ = None
+    _chat_sessions = sys.modules.get(module_name)
+    if _chat_sessions is not None:
+        try:
+            _chat_sessions.reset_complete_windows()
+        except Exception:
+            _ = None
 
 
 def _log_lingering_threads():
