@@ -221,6 +221,22 @@ def test_slides_db_search_rejects_malformed_fts_query(tmp_path):
     db.close_connection()
 
 
+def test_slides_db_search_does_not_map_non_fts_operational_errors(tmp_path, monkeypatch):
+    db_path = tmp_path / "Slides.db"
+    db = SlidesDatabase(db_path=db_path, client_id="tester")
+
+    class LockedConnection:
+        def execute(self, *args, **kwargs):
+            raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(db, "get_connection", lambda: LockedConnection())
+
+    with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+        db.search_presentations(query="alpha", limit=10, offset=0, include_deleted=False)
+
+    db.close_connection()
+
+
 def test_create_presentation_rolls_back_when_sync_log_fails(tmp_path, monkeypatch):
     db_path = tmp_path / "Slides.db"
     db = SlidesDatabase(db_path=db_path, client_id="tester")

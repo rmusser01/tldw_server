@@ -4,8 +4,10 @@ import pytest
 
 from tldw_Server_API.app.core.Slides.slides_generator import (
     SlidesGenerator,
+    SlidesGenerationInputError,
     SlidesGenerationOutputError,
     SlidesSourceTooLargeError,
+    _positive_int_setting,
 )
 
 
@@ -81,6 +83,96 @@ def test_generate_rejects_excessive_chunk_fanout(monkeypatch):
             chunk_size_tokens=3,
             summary_tokens=None,
         )
+
+
+def test_generate_rejects_non_positive_chunk_size_before_llm(monkeypatch):
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Slides.slides_generator.is_test_mode",
+        lambda: False,
+    )
+
+    def _unexpected_llm_call(*args, **kwargs):
+        raise AssertionError("LLM should not be called for invalid chunk size")
+
+    generator = SlidesGenerator(llm_call=_unexpected_llm_call)
+
+    with pytest.raises(SlidesGenerationInputError, match="chunk_size_invalid"):
+        generator.generate_from_text(
+            source_text=" ".join(f"word{i}" for i in range(20)),
+            title_hint=None,
+            provider="openai",
+            model=None,
+            api_key=None,
+            temperature=None,
+            max_tokens=None,
+            max_source_tokens=None,
+            max_source_chars=None,
+            enable_chunking=True,
+            chunk_size_tokens=-1,
+            summary_tokens=None,
+        )
+
+
+def test_positive_int_setting_logs_invalid_config_and_reraises_unexpected_errors(monkeypatch):
+    import tldw_Server_API.app.core.Slides.slides_generator as slides_generator
+
+    logged: list[tuple[str, tuple[object, ...]]] = []
+    monkeypatch.setattr(
+        slides_generator,
+        "settings",
+        {"SLIDES_MAX_SOURCE_CHUNKS": "not-an-int"},
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Slides.slides_generator.logger.warning",
+        lambda message, *args: logged.append((message, args)),
+    )
+
+    assert _positive_int_setting("SLIDES_MAX_SOURCE_CHUNKS", 20) == 20
+    assert logged
+    assert logged[0][1][0] == "SLIDES_MAX_SOURCE_CHUNKS"
+
+    class BrokenSettings:
+        def get(self, name, default=None):
+            raise RuntimeError("settings backend failed")
+
+    monkeypatch.setattr(slides_generator, "settings", BrokenSettings())
+
+    with pytest.raises(RuntimeError, match="settings backend failed"):
+        _positive_int_setting("SLIDES_MAX_SOURCE_CHUNKS", 20)
+
+
+def test_chunk_char_approx_logs_invalid_divisor_setting(monkeypatch):
+    import tldw_Server_API.app.core.Slides.slides_generator as slides_generator
+
+    logged: list[tuple[str, tuple[object, ...]]] = []
+    monkeypatch.setattr(
+        slides_generator,
+        "settings",
+        {
+            "TOKEN_ESTIMATOR_MODE": "char_approx",
+            "TOKEN_CHAR_APPROX_DIVISOR": "bad",
+            "SLIDES_MAX_SOURCE_CHUNKS": 10,
+        },
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Slides.slides_generator.logger.warning",
+        lambda message, *args: logged.append((message, args)),
+    )
+    generator = SlidesGenerator(llm_call=_stub_llm_call)
+
+    summary = generator._chunk_and_summarize(
+        source_text="abcdef",
+        provider="openai",
+        model=None,
+        api_key=None,
+        temperature=None,
+        chunk_size_tokens=3,
+        summary_tokens=None,
+    )
+
+    assert summary == "Summary chunk"
+    assert logged
+    assert logged[0][1][0] == "TOKEN_CHAR_APPROX_DIVISOR"
 
 
 def test_generate_parses_json_response(monkeypatch):

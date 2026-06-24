@@ -356,6 +356,20 @@ class SlidesDatabase:
         return PresentationRow(**dict(row))
 
     @staticmethod
+    def _is_fts_query_error(exc: sqlite3.OperationalError) -> bool:
+        message = str(exc).lower()
+        return any(
+            marker in message
+            for marker in (
+                "fts5: syntax error",
+                "fts5 syntax error",
+                "malformed match",
+                "unterminated string",
+                "syntax error near",
+            )
+        )
+
+    @staticmethod
     def _build_version_payload(row: PresentationRow) -> dict[str, Any]:
         return {
             "id": row.id,
@@ -705,6 +719,8 @@ class SlidesDatabase:
             rows = conn.execute(sql, (query, limit, offset)).fetchall()
             count_row = conn.execute(count_sql, (query,)).fetchone()
         except sqlite3.OperationalError as exc:
+            if not self._is_fts_query_error(exc):
+                raise
             raise InputError("search query is invalid") from exc
         total = int(count_row["cnt"]) if count_row else 0
         return [PresentationRow(**dict(row)) for row in rows], total

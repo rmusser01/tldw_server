@@ -19,12 +19,12 @@ from loguru import logger
 
 try:
     import bleach  # type: ignore
-except Exception:  # pragma: no cover - bleach is a declared dependency
+except ImportError:  # pragma: no cover - bleach is a declared dependency
     bleach = None
 
 try:
     from bleach.css_sanitizer import CSSSanitizer  # type: ignore
-except Exception:  # pragma: no cover - CSS sanitizer depends on optional tinycss2
+except ImportError:  # pragma: no cover - CSS sanitizer depends on optional tinycss2
     CSSSanitizer = None  # type: ignore
 
 try:

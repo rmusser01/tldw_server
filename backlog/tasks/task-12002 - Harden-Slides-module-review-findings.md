@@ -33,12 +33,14 @@ Implemented script-safe inline settings JSON for Reveal exports, independent ble
 GREEN verification: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Slides -q` passed with 171 passed and 369 warnings.
 
 Security verification: Bandit on touched production files wrote /tmp/bandit_slides_review_fixes.json and reported 0 results, 0 errors, and zero high/medium/low severity findings. `git diff --check` on touched files exited 0.
+PR follow-up 2026-06-24: rebased branch onto origin/dev at 2618c4b70. Qodo review reported four actionable issues: broad/silent optional import catches, silent generator setting fallback, negative chunk size bypass, and overbroad FTS OperationalError mapping. Reopening task for review-comment remediation.
+PR follow-up completed 2026-06-24: addressed Qodo review comments after rebase onto origin/dev 2618c4b70. Fixed optional bleach/CSSSanitizer imports to only catch ImportError, made invalid generator integer settings visible via warnings while propagating unexpected settings backend failures, rejected non-positive chunk_size_tokens before LLM calls, and narrowed FTS OperationalError mapping so non-query database errors propagate. Added regression tests for each behavior and stabilized the Slides ordering property test health check.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Hardened the validated Slides review findings. Exports now serialize settings safely for inline scripts and keep bleach sanitization active without optional CSS sanitizer support. Asset resolution, slide generation chunking, and video rendering now enforce default resource ceilings. Presentation create/update sync logs are written in the same transaction as the mutation, malformed FTS searches return controlled validation errors, and schema initialization is serialized for concurrent first use. API export/search paths now pass the hardened caps and validation through to callers.
+Slides hardening PR rebased onto latest dev and review comments remediated. Verification: python -m pytest tldw_Server_API/tests/Slides -q -> 176 passed; python -m bandit -r touched Slides production files -f json -> 0 findings; git diff --check -> clean.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

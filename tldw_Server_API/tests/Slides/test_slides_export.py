@@ -1,3 +1,6 @@
+import builtins
+import importlib
+import importlib.util
 import io
 import zipfile
 
@@ -117,6 +120,29 @@ def test_sanitize_markdown_uses_bleach_without_css_sanitizer():
     assert "<ul>" in html
     assert "<li>one</li>" in html
     assert "&lt;ul" not in html
+
+
+def test_slides_export_reraises_unexpected_css_sanitizer_import_errors(monkeypatch):
+    import tldw_Server_API.app.core.Slides.slides_export as slides_export_module
+
+    original_import = builtins.__import__
+    spec = importlib.util.spec_from_file_location(
+        "tldw_Server_API.app.core.Slides._slides_export_import_probe",
+        slides_export_module.__file__,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    probe_module = importlib.util.module_from_spec(spec)
+
+    def _raise_for_css_sanitizer(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "bleach.css_sanitizer":
+            raise RuntimeError("unexpected import failure")
+        return original_import(name, globals, locals, fromlist, level)
+
+    with monkeypatch.context() as patch_context:
+        patch_context.setattr(builtins, "__import__", _raise_for_css_sanitizer)
+        with pytest.raises(RuntimeError, match="unexpected import failure"):
+            spec.loader.exec_module(probe_module)
 
 
 @pytest.mark.unit

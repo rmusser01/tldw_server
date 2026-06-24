@@ -76,11 +76,16 @@ MAX_CHUNK_SIZE_TOKENS = 4_000
 
 
 def _positive_int_setting(name: str, default: int) -> int:
+    raw_value = settings.get(name, default)
     try:
-        value = int(settings.get(name, default))
-    except Exception:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        logger.warning("slides generation: invalid integer setting {}; using default {}", name, default)
         return default
-    return value if value > 0 else default
+    if value <= 0:
+        logger.warning("slides generation: non-positive integer setting {}; using default {}", name, default)
+        return default
+    return value
 
 
 def _normalize_provider(provider: str | None) -> str:
@@ -307,14 +312,27 @@ class SlidesGenerator:
         actual_chars: int | None = None,
     ) -> str:
         """Reduce oversized source text into a prompt-sized summary before slide generation."""
-        chunk_size = chunk_size_tokens or 1000
+        if chunk_size_tokens is None:
+            chunk_size = 1000
+        else:
+            try:
+                chunk_size = int(chunk_size_tokens)
+            except (TypeError, ValueError) as exc:
+                raise SlidesGenerationInputError("chunk_size_invalid") from exc
+        if chunk_size < 1:
+            raise SlidesGenerationInputError("chunk_size_invalid")
         if chunk_size > MAX_CHUNK_SIZE_TOKENS:
             raise SlidesGenerationInputError("chunk_size_too_large")
         mode = str(settings.get("TOKEN_ESTIMATOR_MODE") or "whitespace").lower()
         if mode == "char_approx":
             try:
                 chars_per_token = max(1, int(settings.get("TOKEN_CHAR_APPROX_DIVISOR", 4)))
-            except Exception:
+            except (TypeError, ValueError):
+                logger.warning(
+                    "slides generation: invalid integer setting {}; using default {}",
+                    "TOKEN_CHAR_APPROX_DIVISOR",
+                    4,
+                )
                 chars_per_token = 4
             size_chars = chunk_size * chars_per_token
             chunks = _chunk_by_chars(source_text, size_chars)
