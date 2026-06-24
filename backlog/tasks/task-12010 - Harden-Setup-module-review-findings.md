@@ -12,6 +12,7 @@ labels:
 dependencies: []
 references:
   - tldw_Server_API/app/core/Setup
+  - https://github.com/rmusser01/tldw_server/pull/2499
 priority: high
 ---
 
@@ -37,6 +38,8 @@ Fix the validated Setup module review findings: redact installer command secrets
 Manual task record created because the Backlog MCP resources were unavailable and the official Backlog CLI hung on search/list/create in this checkout. The user approved a manual Backlog task-file exception before repository edits.
 
 Plan: Docs/superpowers/plans/2026-06-23-setup-module-review-hardening.md
+
+Pull request: https://github.com/rmusser01/tldw_server/pull/2499
 
 Implemented:
 - Added secret-aware redaction and bounded subprocess output handling for setup installer commands.
