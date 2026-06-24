@@ -348,6 +348,11 @@ describe("ReviewTab create CTA visibility", () => {
       "href",
       FLASHCARDS_HELP_LINKS.ratings
     )
+    expect(screen.getByTestId("flashcards-review-empty-actions")).toHaveClass(
+      "flex",
+      "flex-wrap",
+      "justify-center"
+    )
 
     fireEvent.click(screen.getByTestId("flashcards-review-empty-create-cta"))
     fireEvent.click(screen.getByTestId("flashcards-review-empty-import-cta"))
