@@ -25,8 +25,8 @@ class CommandAuthorizationDecision:
 def _normalized_strings(values: Any) -> frozenset[str]:
     if values is None:
         return frozenset()
-    if isinstance(values, str):
-        values = [values]
+    if not isinstance(values, (list, tuple, set, frozenset)):
+        return frozenset()
     try:
         return frozenset(str(value).strip() for value in values if str(value).strip())
     except TypeError:
@@ -62,7 +62,7 @@ def _permission_in_claims(permission: str, permissions: frozenset[str]) -> bool:
     if permission in permissions or "*" in permissions:
         return True
     parts = permission.split(".")
-    for end in range(len(parts), 0, -1):
+    for end in range(len(parts) - 1, 0, -1):
         wildcard = ".".join(parts[:end]) + ".*"
         if wildcard in permissions:
             return True

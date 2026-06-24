@@ -296,6 +296,39 @@ async def test_command_permission_allows_claim_without_db_lookup(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_command_permission_does_not_allow_child_wildcard_claim(monkeypatch):
+    monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+
+    denied = await command_router.async_dispatch_command(
+        _authorized_ctx("claim-user", "chat.commands.time.*"),
+        "time",
+        None,
+    )
+
+    assert not denied.ok
+    assert denied.metadata["error"] == "permission_denied"
+    assert denied.metadata["required_permission"] == "chat.commands.time"
+
+
+@pytest.mark.asyncio
+async def test_command_permission_ignores_mapping_claim_keys(monkeypatch):
+    monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+
+    denied = await command_router.async_dispatch_command(
+        command_router.CommandContext(
+            user_id="mapping-user",
+            auth_user_id=None,
+            request_meta={"permissions": {"chat.commands.time": True}},
+        ),
+        "time",
+        None,
+    )
+
+    assert not denied.ok
+    assert denied.metadata["error"] == "permission_denied"
+
+
+@pytest.mark.asyncio
 async def test_command_permission_allows_single_user_owner(monkeypatch):
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
 
