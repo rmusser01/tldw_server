@@ -4,6 +4,7 @@ import json
 import queue
 import threading
 import time
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
@@ -12,7 +13,7 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 from tldw_Server_API.app.core.Persona import live_control as live_control_module
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import PersonaExemplarPromptAssembly
 from tldw_Server_API.app.core.Persona.exemplar_runtime import PersonaExemplarRuntimeContext
@@ -292,6 +293,56 @@ def test_live_session_create_new_honors_idempotency_key(monkeypatch, persona_db:
     assert first.json()["session"]["session_id"] == second.json()["session"]["session_id"]
 
 
+def test_live_session_create_idempotency_serializes_concurrent_requests(
+    monkeypatch: pytest.MonkeyPatch,
+    persona_db: CharactersRAGDB,
+) -> None:
+    _create_profile(persona_db, user_id="1", persona_id="persona_a")
+    original_materialize = live_control_module.materialize_persona_session
+    materialize_calls = 0
+    materialize_call_lock = threading.Lock()
+
+    def slow_materialize(*args: Any, **kwargs: Any) -> Any:
+        nonlocal materialize_calls
+        if not kwargs.get("resume_session_id"):
+            with materialize_call_lock:
+                materialize_calls += 1
+            time.sleep(0.2)
+        return original_materialize(*args, **kwargs)
+
+    monkeypatch.setattr(live_control_module, "materialize_persona_session", slow_materialize)
+    results: queue.Queue[dict[str, Any]] = queue.Queue()
+    errors: queue.Queue[BaseException] = queue.Queue()
+
+    def create_live_session() -> None:
+        try:
+            results.put(
+                live_control_module.create_or_resume_live_session(
+                    persona_db,
+                    session_manager=SessionManager(),
+                    user_id="1",
+                    persona_id="persona_a",
+                    reuse_policy="create_new",
+                    idempotency_key="same-create-key",
+                )
+            )
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            errors.put(exc)
+
+    threads = [threading.Thread(target=create_live_session) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert not any(thread.is_alive() for thread in threads)
+    assert errors.empty(), list(errors.queue)
+    created = [results.get_nowait()["session_id"] for _ in range(results.qsize())]
+    assert len(created) == 2
+    assert len(set(created)) == 1
+    assert materialize_calls == 1
+
+
 def test_live_session_idempotency_key_ignores_stopped_session(monkeypatch, persona_db: CharactersRAGDB):
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
 
@@ -450,6 +501,94 @@ def test_live_session_focus_a_then_b_only_marks_b_focused(monkeypatch, persona_d
     payload = listed.json()
     focused = [item for item in payload["sessions"] if item["is_focused"]]
     assert [item["session_id"] for item in focused] == ["sess-b"]
+
+
+def test_live_session_focus_reconciles_stale_focused_rows_after_missed_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    persona_db: CharactersRAGDB,
+) -> None:
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    _create_profile(persona_db, user_id="1", persona_id="persona_a")
+    _create_session(
+        persona_db,
+        user_id="1",
+        persona_id="persona_a",
+        session_id="sess-stale",
+        preferences={
+            "persona_live_control": {
+                "focus": {
+                    "focused": True,
+                    "focused_at": "2026-05-20T00:00:00+00:00",
+                    "focus_generation": 12,
+                }
+            }
+        },
+    )
+    _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-target")
+    original_focused_rows = live_control_module._focused_session_rows
+    call_count = 0
+
+    def stale_first_focus_snapshot(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return []
+        return original_focused_rows(*args, **kwargs)
+
+    monkeypatch.setattr(live_control_module, "_focused_session_rows", stale_first_focus_snapshot)
+
+    with _client_for_user(1, persona_db) as client:
+        response = client.post("/api/v1/persona/live/sessions/sess-target/focus")
+
+    assert response.status_code == 200, response.text
+    focused_rows = persona_db.list_focused_persona_sessions(user_id="1")
+    assert [row["id"] for row in focused_rows] == ["sess-target"]  # nosec B101
+
+
+def test_live_session_focus_retries_conflicted_clear_updates(
+    monkeypatch: pytest.MonkeyPatch,
+    persona_db: CharactersRAGDB,
+) -> None:
+    _create_profile(persona_db, user_id="1", persona_id="persona_a")
+    _create_session(
+        persona_db,
+        user_id="1",
+        persona_id="persona_a",
+        session_id="sess-old",
+        preferences={
+            "persona_live_control": {
+                "focus": {
+                    "focused": True,
+                    "focused_at": "2026-05-20T00:00:00+00:00",
+                    "focus_generation": 12,
+                }
+            }
+        },
+    )
+    _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-target")
+    original_update = persona_db.update_persona_session
+    conflict_seen = False
+
+    def conflict_once(*args: Any, **kwargs: Any) -> Any:
+        nonlocal conflict_seen
+        session_id = str(kwargs.get("session_id") or (args[0] if args else ""))
+        update_data = kwargs.get("update_data")
+        preferences = update_data.get("preferences_json") if isinstance(update_data, dict) else None
+        live = preferences.get("persona_live_control") if isinstance(preferences, dict) else None
+        focus = live.get("focus") if isinstance(live, dict) else None
+        if session_id == "sess-old" and isinstance(focus, dict) and focus.get("focused") is False and not conflict_seen:
+            conflict_seen = True
+            raise ConflictError("simulated stale focus row", entity="persona_sessions", entity_id=session_id)
+        return original_update(*args, **kwargs)
+
+    monkeypatch.setattr(persona_db, "update_persona_session", conflict_once)
+
+    summary = live_control_module.focus_live_session(persona_db, user_id="1", session_id="sess-target")
+
+    assert summary["is_focused"] is True
+    assert conflict_seen is True
+    focused_rows = persona_db.list_focused_persona_sessions(user_id="1")
+    assert [row["id"] for row in focused_rows] == ["sess-target"]  # nosec B101
 
 
 def test_live_session_focus_uses_utc_iso_focus_timestamp(monkeypatch, persona_db: CharactersRAGDB):

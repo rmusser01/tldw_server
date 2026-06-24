@@ -3490,20 +3490,39 @@ class PersonaStateStore:
         user_id: str,
         status: str,
         failure_reason: str | None = None,
+        expected_statuses: set[str] | None = None,
     ) -> dict[str, Any] | None:
         status_value = self._normalize_persona_visual_enum(
             status,
             allowed=self._ALLOWED_PERSONA_VISUAL_CANDIDATE_STATUSES,
             field_name="candidate status",
         )
+        expected_status_values: list[str] = []
+        if expected_statuses is not None:
+            for expected_status in sorted(expected_statuses):
+                expected_status_values.append(
+                    self._normalize_persona_visual_enum(
+                        expected_status,
+                        allowed=self._ALLOWED_PERSONA_VISUAL_CANDIDATE_STATUSES,
+                        field_name="candidate status",
+                    )
+                )
+            if not expected_status_values:
+                raise InputError("expected_statuses must not be empty when provided.")  # noqa: TRY003
         now = self._get_current_utc_timestamp_iso()
         bool_cast = bool if self.backend_type == BackendType.POSTGRESQL else int
+        status_predicate = ""
+        if expected_status_values:
+            placeholders = ", ".join("?" for _ in expected_status_values)
+            status_predicate = f" AND status IN ({placeholders})"
         query = (
             "UPDATE persona_visual_candidates "
             "SET status = ?, failure_reason = ?, last_modified = ?, version = version + 1 "
             "WHERE id = ? AND pack_id = ? AND persona_id = ? AND user_id = ? AND deleted = ?"
         )
-        params = (
+        # status_predicate contains only generated placeholder tokens.
+        query = f"{query}{status_predicate}"  # nosec B608
+        params = [
             status_value,
             self._normalize_nullable_text(failure_reason),
             now,
@@ -3512,7 +3531,9 @@ class PersonaStateStore:
             persona_id,
             user_id,
             bool_cast(False),
-        )
+        ]
+        params.extend(expected_status_values)
+        updated = False
         with self.transaction() as conn:
             self._require_active_persona_profile_owner(conn, persona_id=persona_id, user_id=user_id)
             self._require_persona_visual_pack_owner(
@@ -3521,8 +3542,12 @@ class PersonaStateStore:
                 persona_id=persona_id,
                 user_id=user_id,
             )
-            prepared_query, prepared_params = self._prepare_backend_statement(query, params)
-            conn.execute(prepared_query, prepared_params or ())
+            prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
+            cursor = conn.execute(prepared_query, prepared_params or ())
+            updated = cursor.rowcount > 0
+
+        if expected_status_values and not updated:
+            return None
 
         return self.get_persona_visual_candidate(
             candidate_id=candidate_id,

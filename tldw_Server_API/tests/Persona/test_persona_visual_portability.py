@@ -11,6 +11,7 @@ from PIL import Image
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Persona.visual_portability.archive import (
+    DEFAULT_MAX_MEMBER_SIZE_BYTES,
     validate_archive_members,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.constants import (
@@ -22,6 +23,7 @@ from tldw_Server_API.app.core.Persona.visual_portability.constants import (
     REQUIRED_MEMBERS,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.exporter import (
+    PersonaVisualPackExportError,
     PersonaVisualPackExporter,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.fingerprints import (
@@ -35,7 +37,6 @@ from tldw_Server_API.app.core.Persona.visual_portability.preview import (
     PersonaVisualPackImportPreviewer,
 )
 from tldw_Server_API.app.core.Persona.visual_service import PersonaVisualService
-
 
 pytestmark = pytest.mark.unit
 
@@ -310,9 +311,7 @@ def _renderer_preview_archive(
         "counts": {
             "assets": len(assets),
             "assets_with_bytes": sum(
-                1
-                for asset in assets
-                if asset.get("asset_bytes_status") == ASSET_BYTES_STATUS_PRESENT
+                1 for asset in assets if asset.get("asset_bytes_status") == ASSET_BYTES_STATUS_PRESENT
             ),
         },
     }
@@ -330,10 +329,7 @@ def _renderer_preview_archive(
         "metadata/assets.json": _json_bytes({"assets": assets}),
         **asset_files,
     }
-    checksums = {
-        member_path: sha256_bytes(member_bytes)
-        for member_path, member_bytes in entries.items()
-    }
+    checksums = {member_path: sha256_bytes(member_bytes) for member_path, member_bytes in entries.items()}
     entries[CHECKSUMS_PATH] = _json_bytes(dict(sorted(checksums.items())))
 
     with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -567,7 +563,9 @@ def test_export_pack_writes_manifest_metadata_checksums_and_asset_bytes(
 
         pack_payload = json.loads(archive.read("metadata/pack.json"))["pack"]
         assert pack_payload["title"] == "Portable Visuals"  # nosec B101
-        assert pack_payload["visual_manifest"]["animations"]["idle"]["frames"][0]["asset_id"] == asset["id"]  # nosec B101
+        assert (
+            pack_payload["visual_manifest"]["animations"]["idle"]["frames"][0]["asset_id"] == asset["id"]
+        )  # nosec B101
 
         assets = json.loads(archive.read("metadata/assets.json"))["assets"]
         assert len(assets) == 1  # nosec B101
@@ -606,6 +604,41 @@ def test_export_pack_strict_mode_rejects_missing_asset_bytes(
             pack_id=str(pack["id"]),
             options=PersonaVisualPackExportOptions(strict=True),
         )
+
+
+def test_export_pack_rejects_oversized_asset_before_archive_validation(
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    persona_id, pack, asset = _create_pack_with_asset(
+        db_instance,
+        visuals_root=tmp_path / "visuals",
+        monkeypatch=monkeypatch,
+    )
+    asset_path = Path(str(asset["storage_path"]))
+    with asset_path.open("wb") as handle:
+        handle.seek(DEFAULT_MAX_MEMBER_SIZE_BYTES)
+        handle.write(b"x")
+    db_instance.execute_query(
+        "UPDATE persona_visual_assets SET checksum_sha256 = '' WHERE id = ?",
+        (asset["id"],),
+    )
+    staging_root = tmp_path / "exports"
+    exporter = PersonaVisualPackExporter(
+        db=db_instance,
+        user_id="user-1",
+        staging_root=staging_root,
+    )
+
+    with pytest.raises(PersonaVisualPackExportError, match="asset_too_large"):
+        exporter.export_pack(
+            persona_id=persona_id,
+            pack_id=str(pack["id"]),
+            options=PersonaVisualPackExportOptions(),
+        )
+
+    assert list(staging_root.glob("*.tldw-persona-vpack")) == []  # nosec B101
 
 
 def test_import_preview_validates_archive_without_mutating_packs(
@@ -660,9 +693,7 @@ def test_import_preview_reports_target_pack_conflicts_and_choices(
         visuals_root=tmp_path / "visuals",
         monkeypatch=monkeypatch,
     )
-    target_persona_id = db_instance.create_persona_profile(
-        {"user_id": "user-1", "name": "Target Persona"}
-    )
+    target_persona_id = db_instance.create_persona_profile({"user_id": "user-1", "name": "Target Persona"})
     active_pack = db_instance.create_persona_visual_pack(
         persona_id=target_persona_id,
         user_id="user-1",
@@ -703,12 +734,8 @@ def test_import_preview_reports_target_pack_conflicts_and_choices(
         f"target_pack_title_match:{active_pack['id']}",
         f"target_pack_title_match:{draft_pack['id']}",
     }
-    active_conflict = next(
-        conflict for conflict in preview["conflicts"] if conflict["pack_id"] == active_pack["id"]
-    )
-    draft_conflict = next(
-        conflict for conflict in preview["conflicts"] if conflict["pack_id"] == draft_pack["id"]
-    )
+    active_conflict = next(conflict for conflict in preview["conflicts"] if conflict["pack_id"] == active_pack["id"])
+    draft_conflict = next(conflict for conflict in preview["conflicts"] if conflict["pack_id"] == draft_pack["id"])
     assert active_conflict["pack_status"] == "active"  # nosec B101
     assert active_conflict["allowed_choices"] == ["create_new"]  # nosec B101
     assert draft_conflict["pack_status"] == "draft"  # nosec B101
@@ -755,9 +782,7 @@ def test_import_preview_reports_missing_asset_bytes_as_warning(
     )
 
     assert preview["bundle_summary"]["missing_asset_items"] == 1  # nosec B101
-    assert preview["validation_warnings"] == [  # nosec B101
-        f"missing_asset_bytes:frame:{asset['id']}"
-    ]
+    assert preview["validation_warnings"] == [f"missing_asset_bytes:frame:{asset['id']}"]  # nosec B101
     exported_assets = preview["bundle_summary"]["assets"]
     assert exported_assets[0]["asset_bytes_status"] == ASSET_BYTES_STATUS_MISSING  # nosec B101
 
@@ -781,10 +806,7 @@ def test_import_preview_accepts_buddy_pipeline_packet_with_source_sheet_diagnost
     )
 
     summary = preview["bundle_summary"]
-    assets_by_id = {
-        asset["source_asset_id"]: asset
-        for asset in summary["assets"]
-    }
+    assets_by_id = {asset["source_asset_id"]: asset for asset in summary["assets"]}
     assert preview["status"] == "completed"  # nosec B101
     assert summary["renderer_type"] == "sprite_frames"  # nosec B101
     assert summary["asset_count"] == 5  # nosec B101
@@ -896,9 +918,7 @@ def test_import_commit_accepts_codex_pet_archive_as_inactive_draft(
     )
 
     _patch_visuals_dir(monkeypatch, tmp_path / "visuals")
-    persona_id = db_instance.create_persona_profile(
-        {"user_id": "user-1", "name": "Codex Pet Target"}
-    )
+    persona_id = db_instance.create_persona_profile({"user_id": "user-1", "name": "Codex Pet Target"})
     archive_path = _codex_pet_archive(tmp_path)
     preview_result = PersonaVisualPackImportPreviewer().create_preview(
         archive_path=archive_path,
@@ -972,9 +992,7 @@ def test_import_commit_codex_pet_cleans_up_failed_manifest_update(
     )
 
     _patch_visuals_dir(monkeypatch, tmp_path / "visuals")
-    persona_id = db_instance.create_persona_profile(
-        {"user_id": "user-1", "name": "Codex Pet Target"}
-    )
+    persona_id = db_instance.create_persona_profile({"user_id": "user-1", "name": "Codex Pet Target"})
     archive_path = _codex_pet_archive(tmp_path)
     preview_result = PersonaVisualPackImportPreviewer().create_preview(
         archive_path=archive_path,
@@ -1041,6 +1059,100 @@ def test_import_commit_codex_pet_cleans_up_failed_manifest_update(
     assert bool(asset_rows[0]["deleted"]) is True  # nosec B101
 
 
+def test_import_commit_native_archive_cleans_up_failed_manifest_update(
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
+        PersonaVisualPortabilityRepository,
+    )
+    from tldw_Server_API.app.core.Persona.visual_portability.importer import (
+        PersonaVisualPackImporter,
+    )
+
+    _patch_visuals_dir(monkeypatch, tmp_path / "visuals")
+    source_persona_id, source_pack, _source_asset = _create_pack_with_asset(
+        db_instance,
+        visuals_root=tmp_path / "source-visuals",
+        monkeypatch=monkeypatch,
+    )
+    exporter = PersonaVisualPackExporter(
+        db=db_instance,
+        user_id="user-1",
+        staging_root=tmp_path / "exports",
+    )
+    export_result = exporter.export_pack(
+        persona_id=source_persona_id,
+        pack_id=str(source_pack["id"]),
+        options=PersonaVisualPackExportOptions(),
+    )
+    target_persona_id = db_instance.create_persona_profile({"user_id": "user-1", "name": "Native Import Target"})
+    preview_result = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=export_result.archive_path,
+        owner_user_id="user-1",
+        target_persona_id=target_persona_id,
+    )
+    repo = PersonaVisualPortabilityRepository.initialized(db_instance)
+    preview = repo.create_import_preview(
+        owner_user_id="user-1",
+        job_id="job-preview-native-cleanup",
+        status="completed",
+        stage="completed",
+        archive_path=str(export_result.archive_path),
+        archive_sha256=preview_result["archive_sha256"],
+        canonical_payload_fingerprint=preview_result["canonical_payload_fingerprint"],
+        schema_version=preview_result["schema_version"],
+        target_persona_id=target_persona_id,
+        bundle_summary=preview_result["bundle_summary"],
+        proposed_plan=preview_result["proposed_plan"],
+        required_choices=preview_result["required_choices"],
+    )
+    original_update = db_instance.update_persona_visual_pack_manifest
+
+    def fail_manifest_update(*args: object, **kwargs: object) -> object:
+        if kwargs.get("persona_id") == target_persona_id:
+            raise RuntimeError("injected native manifest failure")
+        return original_update(*args, **kwargs)
+
+    monkeypatch.setattr(db_instance, "update_persona_visual_pack_manifest", fail_manifest_update)
+
+    with pytest.raises(RuntimeError, match="injected native manifest failure"):
+        PersonaVisualPackImporter(
+            db=db_instance,
+            repo=repo,
+            user_id="user-1",
+        ).import_preview(
+            preview_id=str(preview["id"]),
+            target_persona_id=target_persona_id,
+            trust_mode="untrusted_import",
+        )
+
+    active_packs = db_instance.list_persona_visual_packs(
+        persona_id=target_persona_id,
+        user_id="user-1",
+    )
+    deleted_packs = db_instance.list_persona_visual_packs(
+        persona_id=target_persona_id,
+        user_id="user-1",
+        include_deleted=True,
+    )
+    asset_rows = db_instance.execute_query(
+        """
+        SELECT deleted
+          FROM persona_visual_assets
+         WHERE persona_id = ?
+           AND user_id = ?
+        """,
+        (target_persona_id, "user-1"),
+    ).fetchall()
+    assert active_packs == []  # nosec B101
+    assert len(deleted_packs) == 1  # nosec B101
+    assert deleted_packs[0]["deleted"] is True  # nosec B101
+    assert len(asset_rows) == 1  # nosec B101
+    assert bool(asset_rows[0]["deleted"]) is True  # nosec B101
+
+
 def test_import_preview_reports_v2_live2d_renderer_diagnostics_without_activation(
     tmp_path: Path,
 ) -> None:
@@ -1069,12 +1181,8 @@ def test_import_preview_reports_v2_live2d_renderer_diagnostics_without_activatio
     assert renderer_preview["can_commit"] is False  # nosec B101
     assert renderer_preview["activation_eligible"] is False  # nosec B101
     assert "runtime_adapter_not_implemented" in renderer_preview["blockers"]  # nosec B101
-    assert renderer_preview["normalized_role_categories"]["fallback_preview"] == [  # nosec B101
-        "asset-fallback"
-    ]
-    assert renderer_preview["normalized_role_categories"]["source_manifest"] == [  # nosec B101
-        "asset-model"
-    ]
+    assert renderer_preview["normalized_role_categories"]["fallback_preview"] == ["asset-fallback"]  # nosec B101
+    assert renderer_preview["normalized_role_categories"]["source_manifest"] == ["asset-model"]  # nosec B101
 
 
 @pytest.mark.parametrize("manifest_version", [2.0, "+2"])
@@ -1127,9 +1235,7 @@ def test_import_preview_reports_v2_missing_required_role_category(
     assert preview["status"] == "blocked"  # nosec B101
     assert "missing_required_role_category:fallback_preview" in renderer_preview["blockers"]  # nosec B101
     assert renderer_preview["normalized_role_categories"]["fallback_preview"] == []  # nosec B101
-    assert renderer_preview["normalized_role_categories"]["source_manifest"] == [  # nosec B101
-        "asset-model"
-    ]
+    assert renderer_preview["normalized_role_categories"]["source_manifest"] == ["asset-model"]  # nosec B101
 
 
 def test_import_preview_reports_v2_unknown_renderer_safely(
@@ -1159,9 +1265,7 @@ def test_import_preview_reports_v2_unknown_renderer_safely(
     assert preview["status"] == "blocked"  # nosec B101
     assert preview["proposed_plan"]["commit_eligible"] is False  # nosec B101
     assert renderer_preview["status"] == "unsupported_renderer"  # nosec B101
-    assert renderer_preview["blockers"] == [  # nosec B101
-        "unknown_renderer:unknown\\nrenderer\\\\token"
-    ]
+    assert renderer_preview["blockers"] == ["unknown_renderer:unknown\\nrenderer\\\\token"]  # nosec B101
     assert "\n" not in renderer_preview["blockers"][0]  # nosec B101
 
 

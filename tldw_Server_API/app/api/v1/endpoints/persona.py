@@ -2397,7 +2397,7 @@ def _persona_visual_service_error_to_http(exc: PersonaVisualServiceError) -> HTT
         status_code = status.HTTP_403_FORBIDDEN
     elif exc.code in {"upload_too_large"}:
         status_code = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
-    elif exc.code in {"source_asset_missing", "source_asset_checksum_mismatch"}:
+    elif exc.code in {"source_asset_missing", "source_asset_checksum_mismatch", "candidate_status_conflict"}:
         status_code = status.HTTP_409_CONFLICT
     return HTTPException(
         status_code=status_code,

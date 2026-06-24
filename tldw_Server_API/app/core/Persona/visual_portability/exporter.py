@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 import zipfile
 from collections.abc import Callable, Mapping
@@ -12,7 +13,11 @@ from typing import TYPE_CHECKING, Any
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Persona.visual_service import VISUAL_STORAGE_PREFIX
 
-from .archive import validate_archive_members
+from .archive import (
+    DEFAULT_MAX_ARCHIVE_SIZE_BYTES,
+    DEFAULT_MAX_MEMBER_SIZE_BYTES,
+    validate_archive_members,
+)
 from .constants import (
     ASSET_BYTES_STATUS_MISSING,
     ASSET_BYTES_STATUS_PRESENT,
@@ -31,6 +36,10 @@ from .models import PersonaVisualPackExportOptions, PersonaVisualPackExportResul
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+
+class PersonaVisualPackExportError(ValueError):
+    """Raised when Persona visual pack export cannot produce a valid archive."""
 
 
 class PersonaVisualPackExporter:
@@ -89,14 +98,8 @@ class PersonaVisualPackExporter:
                     "assets": asset_fingerprints,
                 }
                 payload_fingerprint = canonical_payload_fingerprint(fingerprint_payload)
-                metadata_payloads = {
-                    path: canonical_json_bytes(payload)
-                    for path, payload in sorted(sections.items())
-                }
-                checksums = {
-                    path: sha256_bytes(content)
-                    for path, content in metadata_payloads.items()
-                }
+                metadata_payloads = {path: canonical_json_bytes(payload) for path, payload in sorted(sections.items())}
+                checksums = {path: sha256_bytes(content) for path, content in metadata_payloads.items()}
                 checksums.update(asset_checksums)
                 manifest = self._archive_manifest(
                     pack=pack,
@@ -119,11 +122,11 @@ class PersonaVisualPackExporter:
                     "signatures/README.md": b"Signatures are reserved for future persona visual pack versions.\n",
                 }
                 _write_payloads_to_archive(archive, archive_payloads)
+            validate_archive_members(archive_path)
         except Exception:
             archive_path.unlink(missing_ok=True)
             raise
 
-        validate_archive_members(archive_path)
         archive_hash = sha256_file(archive_path)
         file_size_bytes = archive_path.stat().st_size
         self._progress(
@@ -150,23 +153,32 @@ class PersonaVisualPackExporter:
         exported_assets: list[dict[str, Any]] = []
         asset_checksums: dict[str, str] = {}
         asset_fingerprints: list[dict[str, Any]] = []
+        total_asset_bytes = 0
 
         for asset in assets:
             exported = self._export_asset_row(asset)
             asset_id = str(asset["id"])
             asset_path = self._asset_storage_path(asset)
             if asset_path.is_file():
-                asset_bytes = asset_path.read_bytes()
-                asset_sha256 = sha256_bytes(asset_bytes)
+                asset_size_bytes = asset_path.stat().st_size
+                if asset_size_bytes > DEFAULT_MAX_MEMBER_SIZE_BYTES:
+                    raise PersonaVisualPackExportError(f"asset_too_large:asset:{asset_id}")
+                total_asset_bytes += asset_size_bytes
+                if total_asset_bytes > DEFAULT_MAX_ARCHIVE_SIZE_BYTES:
+                    raise PersonaVisualPackExportError("archive_too_large")
                 expected_sha256 = str(asset.get("checksum_sha256") or "")
+                archive_path = self._asset_archive_path(asset)
+                asset_sha256 = _write_file_to_archive_with_sha256(
+                    archive,
+                    archive_path=archive_path,
+                    source_path=asset_path,
+                )
                 if expected_sha256 and asset_sha256 != expected_sha256:
                     raise ValueError(f"asset_checksum_mismatch:asset:{asset_id}")
-                archive_path = self._asset_archive_path(asset)
                 exported["asset_bytes_status"] = ASSET_BYTES_STATUS_PRESENT
                 exported["asset_path"] = archive_path
                 exported["asset_sha256"] = asset_sha256
-                exported["asset_size_bytes"] = len(asset_bytes)
-                archive.writestr(archive_path, asset_bytes)
+                exported["asset_size_bytes"] = asset_size_bytes
                 asset_checksums[archive_path] = asset_sha256
                 asset_fingerprints.append(
                     {
@@ -207,9 +219,7 @@ class PersonaVisualPackExporter:
             for path, checksum in sorted(checksums.items())
             if path.startswith("metadata/") or path.startswith("assets/")
         ]
-        assets_with_bytes = sum(
-            1 for asset in assets if asset.get("asset_bytes_status") == ASSET_BYTES_STATUS_PRESENT
-        )
+        assets_with_bytes = sum(1 for asset in assets if asset.get("asset_bytes_status") == ASSET_BYTES_STATUS_PRESENT)
         return {
             "schema_version": PERSONA_VISUAL_PACK_SCHEMA_VERSION,
             "exported_by": {"app": "tldw_server"},
@@ -227,9 +237,7 @@ class PersonaVisualPackExporter:
                 "missing_assets": len(assets) - assets_with_bytes,
             },
             "include_images": True,
-            "provenance_mode": (
-                "full" if options.include_full_provenance else "redacted"
-            ),
+            "provenance_mode": ("full" if options.include_full_provenance else "redacted"),
             "trust_hints": {
                 "source_owner_user_id": self.user_id,
                 "source_persona_id": pack["persona_id"],
@@ -243,7 +251,7 @@ class PersonaVisualPackExporter:
     def _asset_storage_path(self, asset: Mapping[str, Any]) -> Path:
         storage_key = str(asset.get("storage_key") or "")
         prefix = f"{VISUAL_STORAGE_PREFIX}/"
-        relative_key = storage_key[len(prefix):] if storage_key.startswith(prefix) else storage_key
+        relative_key = storage_key[len(prefix) :] if storage_key.startswith(prefix) else storage_key
         relative_path = _safe_relative_storage_path(relative_key)
         base = DatabasePaths.get_user_persona_visuals_dir(self.user_id).resolve(strict=False)
         target_path = (base / Path(*relative_path.parts)).resolve(strict=False)
@@ -258,14 +266,9 @@ class PersonaVisualPackExporter:
 
     def _archive_path(self, pack: Mapping[str, Any]) -> Path:
         self.staging_root.mkdir(parents=True, exist_ok=True)
-        safe_title = "".join(
-            char.lower() if char.isalnum() else "-"
-            for char in str(pack["title"]).strip()
-        ).strip("-")
+        safe_title = "".join(char.lower() if char.isalnum() else "-" for char in str(pack["title"]).strip()).strip("-")
         safe_title = safe_title[:64] or "persona-visual-pack"
-        return self.staging_root / (
-            f"{safe_title}-{uuid.uuid4().hex[:12]}{PERSONA_VISUAL_PACK_EXTENSION}"
-        )
+        return self.staging_root / (f"{safe_title}-{uuid.uuid4().hex[:12]}{PERSONA_VISUAL_PACK_EXTENSION}")
 
     def _export_pack_row(self, row: Mapping[str, Any]) -> dict[str, Any]:
         return {
@@ -307,10 +310,7 @@ class PersonaVisualPackExporter:
 
     def _readme_payload(self, pack: Mapping[str, Any]) -> bytes:
         title = str(pack.get("title") or "Persona Visual Pack")
-        return (
-            f"# {title}\n\n"
-            "This archive contains a tldw persona visual pack export.\n"
-        ).encode("utf-8")
+        return (f"# {title}\n\n" "This archive contains a tldw persona visual pack export.\n").encode("utf-8")
 
     def _progress(
         self,
@@ -328,6 +328,20 @@ def _write_payloads_to_archive(
 ) -> None:
     for path, payload in sorted(payloads.items()):
         archive.writestr(path, payload)
+
+
+def _write_file_to_archive_with_sha256(
+    archive: zipfile.ZipFile,
+    *,
+    archive_path: str,
+    source_path: Path,
+) -> str:
+    digest = hashlib.sha256()
+    with source_path.open("rb") as source, archive.open(archive_path, "w") as target:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+            target.write(chunk)
+    return digest.hexdigest()
 
 
 def _safe_relative_storage_path(relative_key: str) -> PurePosixPath:

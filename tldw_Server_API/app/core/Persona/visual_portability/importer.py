@@ -120,77 +120,86 @@ class PersonaVisualPackImporter:
                 progress=progress,
             )
 
-        with zipfile.ZipFile(archive_path, "r") as archive:
-            members = _archive_members_by_normalized_name(archive)
-            pack_payload = _read_required_json(archive, members, "metadata/pack.json")
-            assets_payload = _read_required_json(archive, members, "metadata/assets.json")
-            pack = _section_record(pack_payload, key="pack", path="metadata/pack.json")
-            assets = _section_list(assets_payload, key="assets", path="metadata/assets.json")
+        created_pack: dict[str, Any] | None = None
+        id_maps: dict[str, Any] = {"assets": {}, "packs": {}}
+        imported_assets: list[dict[str, Any]] = []
+        try:
+            with zipfile.ZipFile(archive_path, "r") as archive:
+                members = _archive_members_by_normalized_name(archive)
+                pack_payload = _read_required_json(archive, members, "metadata/pack.json")
+                assets_payload = _read_required_json(archive, members, "metadata/assets.json")
+                pack = _section_record(pack_payload, key="pack", path="metadata/pack.json")
+                assets = _section_list(assets_payload, key="assets", path="metadata/assets.json")
 
-            self._progress(progress, "creating_pack", {"target_persona_id": target_persona_id})
-            pack_title = _import_pack_title(title=title, pack=pack)
-            created_pack = self.db.create_persona_visual_pack(
-                persona_id=target_persona_id,
-                user_id=self.user_id,
-                title=pack_title,
-                renderer_type=str(pack.get("renderer_type") or "sprite_frames"),
-                manifest={
-                    "manifest_version": 1,
-                    "renderer_type": str(pack.get("renderer_type") or "sprite_frames"),
-                    "states": {},
-                    "animations": {},
-                },
-                provenance="imported",
-            )
-
-            id_maps: dict[str, Any] = {"assets": {}, "packs": {}}
-            if pack.get("source_pack_id") not in (None, ""):
-                id_maps["packs"][str(pack["source_pack_id"])] = str(created_pack["id"])
-
-            imported_assets = []
-            for asset in assets:
-                if asset.get("asset_bytes_status") != ASSET_BYTES_STATUS_PRESENT:
-                    continue
-                asset_path = normalize_member_name(str(asset.get("asset_path") or ""))
-                if asset_path not in members:
-                    raise ValueError(f"missing_asset_file: {asset_path}")
-                content = archive.read(members[asset_path])
-                imported = self.service.create_asset_from_upload(
+                self._progress(progress, "creating_pack", {"target_persona_id": target_persona_id})
+                pack_title = _import_pack_title(title=title, pack=pack)
+                created_pack = self.db.create_persona_visual_pack(
                     persona_id=target_persona_id,
                     user_id=self.user_id,
-                    pack_id=str(created_pack["id"]),
-                    content=content,
-                    mime_type=str(asset.get("mime_type") or "application/octet-stream"),
-                    original_filename=asset.get("original_filename"),
-                    asset_role=str(asset.get("asset_role") or "frame"),
+                    title=pack_title,
+                    renderer_type=str(pack.get("renderer_type") or "sprite_frames"),
+                    manifest={
+                        "manifest_version": 1,
+                        "renderer_type": str(pack.get("renderer_type") or "sprite_frames"),
+                        "states": {},
+                        "animations": {},
+                    },
                     provenance="imported",
                 )
-                source_asset_id = str(asset.get("source_asset_id") or "")
-                if source_asset_id:
-                    id_maps["assets"][source_asset_id] = str(imported["id"])
-                imported_assets.append(imported)
 
-        visual_manifest = pack.get("visual_manifest") if isinstance(pack.get("visual_manifest"), dict) else {}
-        remapped_manifest = remap_visual_manifest_assets(visual_manifest, id_maps["assets"])
-        asset_ids = {str(asset["id"]) for asset in imported_assets}
-        asset_dimensions = {
-            str(asset["id"]): (int(asset["width"]), int(asset["height"]))
-            for asset in imported_assets
-            if asset.get("width") is not None and asset.get("height") is not None
-        }
-        validation = validate_visual_manifest(
-            remapped_manifest,
-            available_asset_ids=asset_ids,
-            available_asset_dimensions=asset_dimensions,
-            require_activatable=False,
-        )
-        updated_pack = self.db.update_persona_visual_pack_manifest(
-            pack_id=str(created_pack["id"]),
-            persona_id=target_persona_id,
-            user_id=self.user_id,
-            manifest=validation.manifest,
-            expected_version=int(created_pack["version"]),
-        )
+                if pack.get("source_pack_id") not in (None, ""):
+                    id_maps["packs"][str(pack["source_pack_id"])] = str(created_pack["id"])
+
+                for asset in assets:
+                    if asset.get("asset_bytes_status") != ASSET_BYTES_STATUS_PRESENT:
+                        continue
+                    asset_path = normalize_member_name(str(asset.get("asset_path") or ""))
+                    if asset_path not in members:
+                        raise ValueError(f"missing_asset_file: {asset_path}")
+                    content = archive.read(members[asset_path])
+                    imported = self.service.create_asset_from_upload(
+                        persona_id=target_persona_id,
+                        user_id=self.user_id,
+                        pack_id=str(created_pack["id"]),
+                        content=content,
+                        mime_type=str(asset.get("mime_type") or "application/octet-stream"),
+                        original_filename=asset.get("original_filename"),
+                        asset_role=str(asset.get("asset_role") or "frame"),
+                        provenance="imported",
+                    )
+                    source_asset_id = str(asset.get("source_asset_id") or "")
+                    if source_asset_id:
+                        id_maps["assets"][source_asset_id] = str(imported["id"])
+                    imported_assets.append(imported)
+
+            visual_manifest = pack.get("visual_manifest") if isinstance(pack.get("visual_manifest"), dict) else {}
+            remapped_manifest = remap_visual_manifest_assets(visual_manifest, id_maps["assets"])
+            asset_ids = {str(asset["id"]) for asset in imported_assets}
+            asset_dimensions = {
+                str(asset["id"]): (int(asset["width"]), int(asset["height"]))
+                for asset in imported_assets
+                if asset.get("width") is not None and asset.get("height") is not None
+            }
+            validation = validate_visual_manifest(
+                remapped_manifest,
+                available_asset_ids=asset_ids,
+                available_asset_dimensions=asset_dimensions,
+                require_activatable=False,
+            )
+            updated_pack = self.db.update_persona_visual_pack_manifest(
+                pack_id=str(created_pack["id"]),
+                persona_id=target_persona_id,
+                user_id=self.user_id,
+                manifest=validation.manifest,
+                expected_version=int(created_pack["version"]),
+            )
+        except Exception:
+            if created_pack is not None:
+                self._cleanup_created_pack(
+                    pack_id=str(created_pack["id"]),
+                    target_persona_id=target_persona_id,
+                )
+            raise
         replaced_pack_id = None
         if replacement_pack is not None:
             replaced_pack_id = str(replacement_pack["id"])
