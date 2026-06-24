@@ -17,7 +17,9 @@ documentation:
 - Docs/superpowers/specs/2026-06-24-jobs-backend-parity-refactor-design.md
 - Docs/superpowers/plans/2026-06-24-jobs-backend-parity-refactor-implementation-plan.md
 modified_files:
+- Docs/Design/JOBS_BACKEND_PARITY_INVENTORY_2026_06_24.md
 - backlog/tasks/task-12017 - Implement-Jobs-backend-parity-refactor-first-slice.md
+updated_date: 2026-06-24 21:47
 ---
 
 ## Description
@@ -33,7 +35,7 @@ Execute the first safety-net PR from the Jobs backend parity implementation plan
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Task 1 inventory created at Docs/Design/JOBS_BACKEND_PARITY_INVENTORY_2026_06_24.md. It classifies admin direct SQL, read-model SQL, service/worker operational SQL, and first-slice domain mapping coverage.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
