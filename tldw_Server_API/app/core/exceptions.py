@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from .exception_types import PromptCatalogError
+from .exception_types import PromptCatalogError  # noqa: F401 - re-exported for compatibility.
 
 if hasattr(status, "HTTP_422_UNPROCESSABLE_CONTENT"):
     DEFAULT_VALIDATION_STATUS = status.HTTP_422_UNPROCESSABLE_CONTENT
@@ -124,6 +124,10 @@ class AuditLogError(RuntimeError):
 
 class ValidationError(BadRequestError):
     """Raised when validation of input parameters fails."""
+
+
+class InvalidGovernanceCandidateError(ValueError):
+    """Raised when a policy source returns a malformed governance candidate."""
 
 
 class ResearchDiscoveryError(Exception):
