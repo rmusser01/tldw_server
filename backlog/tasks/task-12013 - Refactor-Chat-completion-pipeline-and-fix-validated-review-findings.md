@@ -20,7 +20,15 @@ documentation:
 modified_files:
 - Docs/Design/2026-06-24-chat-completion-pipeline-refactor-design.md
 - Docs/superpowers/plans/2026-06-24-chat-completion-pipeline-refactor.md
-updated_date: 2026-06-24 18:08
+- tldw_Server_API/app/core/Chat/response_processor.py
+- tldw_Server_API/app/core/Chat/moderation_pipeline.py
+- tldw_Server_API/app/core/Chat/tool_execution_service.py
+- tldw_Server_API/app/core/Chat/chat_service.py
+- tldw_Server_API/tests/Chat/unit/test_chat_service_content.py
+- tldw_Server_API/tests/Chat/unit/test_chat_service_tool_autoexec.py
+- tldw_Server_API/tests/Chat/unit/test_chat_service_streaming_tool_autoexec.py
+- tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py
+updated_date: 2026-06-24 21:23
 ---
 
 ## Description
@@ -61,6 +69,7 @@ Design spec drafted at `Docs/Design/2026-06-24-chat-completion-pipeline-refactor
 Spec review refinements applied: locked `ChatCompletionPipeline` as the orchestration name, added a normalized command authorization context contract, clarified document prompt migration ownership as an idempotent local prompt-store repair unless implementation planning finds an existing owner, made missing-usage multi-choice accounting an intentional correction, and sharpened legacy history replacement transaction expectations.
 Final spec clarification pass applied: non-streaming response processing order is safety/redaction before structured validation and persistence, user-facing command listings now use the same authorization decision by default, and logging hygiene explicitly excludes tool outputs and tool execution error details.
 Implementation plan saved at `Docs/superpowers/plans/2026-06-24-chat-completion-pipeline-refactor.md`. The plan implements the approved integrated refactor in TDD stages: lock multi-choice safety with failing tests, extract response processing, moderation, persistence, tool execution, streaming, command authorization, and safe logging services, repair document prompt versioning, make legacy history replacement atomic, update Chat docs, then run targeted Chat tests and Bandit.
+Progress update 2026-06-24: Tasks 1-4 of the Chat completion pipeline plan are complete. Implemented and reviewed multi-choice response processing, non-stream output moderation extraction, and local tool auto-exec multi-choice guards across non-stream/streaming direct, queued, and fallback paths. Latest Task 4 commits: `6f838f726` and `08fed328f`. Verification recorded locally: `test_chat_service_tool_autoexec.py` + `test_chat_service_streaming_tool_autoexec.py` = 40 passed; `test_chat_service_fallback.py` = 8 passed; Bandit on `chat_service.py` and `tool_execution_service.py` reported zero findings; `git diff --check` clean for the Task 4 scoped range.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

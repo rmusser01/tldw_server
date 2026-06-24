@@ -71,7 +71,7 @@ The working tree may contain unrelated staged and unstaged files. Every commit i
 **Files:**
 - Modify: `tldw_Server_API/tests/Chat/unit/test_chat_service_content.py`
 
-- [ ] **Step 1: Add shared helpers to the content test file**
+- [x] **Step 1: Add shared helpers to the content test file**
 
 Add these helpers after `_RedactingModeration`:
 
@@ -191,7 +191,7 @@ async def _run_non_stream_content_test(
     return response, save_calls, logged_usage
 ```
 
-- [ ] **Step 2: Add redaction and block tests for all choices**
+- [x] **Step 2: Add redaction and block tests for all choices**
 
 Append these tests:
 
@@ -277,7 +277,7 @@ async def test_execute_non_stream_call_blocks_when_later_choice_violates(monkeyp
     assert save_calls == []
 ```
 
-- [ ] **Step 3: Add structured validation and usage-estimate tests for all choices**
+- [x] **Step 3: Add structured validation and usage-estimate tests for all choices**
 
 Append these tests:
 
@@ -338,7 +338,7 @@ async def test_execute_non_stream_call_missing_usage_estimates_all_returned_choi
     assert logged_usage["estimate_source"] == "missing_usage"
 ```
 
-- [ ] **Step 4: Verify the new tests fail for the current implementation**
+- [x] **Step 4: Verify the new tests fail for the current implementation**
 
 Run:
 
@@ -348,7 +348,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/te
 
 Expected: the new tests fail because only the first returned choice is processed.
 
-- [ ] **Step 5: Commit only the failing tests**
+- [x] **Step 5: Commit only the failing tests**
 
 Run:
 
@@ -368,7 +368,7 @@ Expected: commit succeeds and does not include unrelated files.
 - Modify: `tldw_Server_API/app/core/Chat/chat_service.py`
 - Test: `tldw_Server_API/tests/Chat/unit/test_chat_service_content.py`
 
-- [ ] **Step 1: Create response processor types and helpers**
+- [x] **Step 1: Create response processor types and helpers**
 
 Create `response_processor.py` with:
 
@@ -500,7 +500,7 @@ def validate_structured_choices(
     return {"choices": metadata_by_choice}
 ```
 
-- [ ] **Step 2: Import processor helpers in `chat_service.py` and preserve compatibility names**
+- [x] **Step 2: Import processor helpers in `chat_service.py` and preserve compatibility names**
 
 Add near the other Chat imports:
 
@@ -532,7 +532,7 @@ def _apply_redaction_to_content(content: Any | None, moderation: Any, eff_policy
     )
 ```
 
-- [ ] **Step 3: Replace first-choice extraction with collected choices**
+- [x] **Step 3: Replace first-choice extraction with collected choices**
 
 In `execute_non_stream_call`, replace the variables initialized after string normalization with:
 
@@ -548,7 +548,7 @@ first_turn_function_call: Any | None = function_call_to_save
 
 Keep the existing `llm_response is None` branch. For dict responses, use `processed_choices` for all later response processing and keep first-choice values for persistence/tool execution.
 
-- [ ] **Step 4: Estimate missing usage from all choices**
+- [x] **Step 4: Estimate missing usage from all choices**
 
 Replace the missing-usage completion estimate block with:
 
@@ -558,7 +558,7 @@ ct_est = estimate_completion_tokens_from_choices(processed_choices)
 
 Keep prompt-token estimation and `log_llm_usage` arguments unchanged.
 
-- [ ] **Step 5: Validate structured output across every choice**
+- [x] **Step 5: Validate structured output across every choice**
 
 Replace each non-continuation call to `validate_structured_response(raw_text=content_to_save, ...)` with:
 
@@ -580,7 +580,7 @@ tool_calls_to_save = first_choice.tool_calls if first_choice else None
 function_call_to_save = first_choice.function_call if first_choice else None
 ```
 
-- [ ] **Step 6: Inject assistant names into all choices**
+- [x] **Step 6: Inject assistant names into all choices**
 
 Replace both first-choice assistant-name injection blocks with:
 
@@ -593,7 +593,7 @@ inject_assistant_name_into_choices(collect_non_stream_choices(llm_response), ass
 
 Run the same operation on `encoded_payload` after encoding so large and small responses match.
 
-- [ ] **Step 7: Run the content tests**
+- [x] **Step 7: Run the content tests**
 
 Run:
 
@@ -603,7 +603,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/te
 
 Expected: the multi-choice tests from Task 1 pass or only fail on moderation code that Task 3 moves.
 
-- [ ] **Step 8: Commit the response processor**
+- [x] **Step 8: Commit the response processor**
 
 Run:
 
@@ -623,7 +623,7 @@ Expected: commit succeeds and the content test file is included with the process
 - Modify: `tldw_Server_API/app/core/Chat/chat_service.py`
 - Test: `tldw_Server_API/tests/Chat/unit/test_chat_service_content.py`
 
-- [ ] **Step 1: Create moderation runtime dataclass**
+- [x] **Step 1: Create moderation runtime dataclass**
 
 Create `moderation_pipeline.py` with:
 
@@ -679,7 +679,7 @@ class OutputModerationRuntime:
     emit_completion_metric: Callable[[str], None]
 ```
 
-- [ ] **Step 2: Add user and topic helpers**
+- [x] **Step 2: Add user and topic helpers**
 
 Add below the dataclass:
 
@@ -698,7 +698,7 @@ def _moderation_user_id(runtime: OutputModerationRuntime) -> str:
     return str(req_user_id) if req_user_id is not None else str(runtime.client_id)
 ```
 
-- [ ] **Step 3: Add self-monitoring across choices**
+- [x] **Step 3: Add self-monitoring across choices**
 
 Add:
 
@@ -738,7 +738,7 @@ async def apply_self_monitoring_to_choices(
             set_choice_content(choice, result.redacted_text)
 ```
 
-- [ ] **Step 4: Add output moderation across choices**
+- [x] **Step 4: Add output moderation across choices**
 
 Add:
 
@@ -825,7 +825,7 @@ async def apply_output_moderation_to_choices(
             )
 ```
 
-- [ ] **Step 5: Add audit and topic helper functions**
+- [x] **Step 5: Add audit and topic helper functions**
 
 Add:
 
@@ -884,7 +884,7 @@ async def _schedule_topic_monitoring(choice: NonStreamChoice, runtime: OutputMod
         logger.debug("Topic monitoring skipped type={}", type(exc).__name__)
 ```
 
-- [ ] **Step 6: Replace moderation code in `execute_non_stream_call`**
+- [x] **Step 6: Replace moderation code in `execute_non_stream_call`**
 
 In `chat_service.py`, import:
 
@@ -924,7 +924,7 @@ tool_calls_to_save = first_choice.tool_calls if first_choice else None
 function_call_to_save = first_choice.function_call if first_choice else None
 ```
 
-- [ ] **Step 7: Run content tests**
+- [x] **Step 7: Run content tests**
 
 Run:
 
@@ -934,7 +934,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/te
 
 Expected: all tests in the file pass.
 
-- [ ] **Step 8: Commit moderation extraction**
+- [x] **Step 8: Commit moderation extraction**
 
 Run:
 
@@ -954,7 +954,7 @@ Expected: commit succeeds with only the three listed files.
 - Modify: `tldw_Server_API/app/core/Chat/chat_service.py`
 - Test: `tldw_Server_API/tests/Chat/unit/test_chat_service_tool_autoexec.py`
 
-- [ ] **Step 1: Add the failing guard test**
+- [x] **Step 1: Add the failing guard test**
 
 Append to `test_chat_service_tool_autoexec.py`:
 
@@ -991,7 +991,7 @@ async def test_tool_autoexec_rejects_multi_choice_before_provider_call(monkeypat
     }
 ```
 
-- [ ] **Step 2: Verify the guard test fails**
+- [x] **Step 2: Verify the guard test fails**
 
 Run:
 
@@ -1001,7 +1001,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/te
 
 Expected: test fails because the provider callable is invoked.
 
-- [ ] **Step 3: Create tool execution service guard**
+- [x] **Step 3: Create tool execution service guard**
 
 Create `tool_execution_service.py` with:
 
@@ -1038,7 +1038,7 @@ def ensure_tool_autoexec_supports_request(
         )
 ```
 
-- [ ] **Step 4: Call the guard before queue/fallback/provider execution**
+- [x] **Step 4: Call the guard before queue/fallback/provider execution**
 
 In `execute_non_stream_call`, after structured request preparation and before `_evaluate_chat_prompt_cost_guardrails`, add:
 
@@ -1055,7 +1055,7 @@ Import the guard:
 from tldw_Server_API.app.core.Chat.tool_execution_service import ensure_tool_autoexec_supports_request
 ```
 
-- [ ] **Step 5: Run tool autoexec tests**
+- [x] **Step 5: Run tool autoexec tests**
 
 Run:
 
@@ -1065,7 +1065,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/te
 
 Expected: all tests in the file pass.
 
-- [ ] **Step 6: Commit tool guard**
+- [x] **Step 6: Commit tool guard**
 
 Run:
 
