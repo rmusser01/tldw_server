@@ -6,6 +6,10 @@ from fastapi import HTTPException
 
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.chat_service import execute_non_stream_call
+from tldw_Server_API.app.core.Chat.persistence_service import (
+    build_assistant_message_payload,
+    save_tool_messages,
+)
 from tldw_Server_API.app.core.Chat.response_processor import collect_non_stream_choices
 
 
@@ -38,6 +42,49 @@ def test_collect_non_stream_choices_skips_unsupported_choices_without_mutation()
 
     assert choices == []
     assert payload == {"choices": [{"text": "legacy"}]}
+
+
+def test_build_assistant_message_payload_preserves_persisted_shape():
+    payload = build_assistant_message_payload(
+        character_card_for_context={"name": "Test Bot"},
+        assistant_parent_message_id="parent-1",
+        content="hello",
+        tool_calls=[{"id": "call-1"}],
+        function_call={"name": "lookup", "arguments": "{}"},
+    )
+
+    assert payload == {
+        "role": "assistant",
+        "name": "Test_Bot",
+        "parent_message_id": "parent-1",
+        "content": "hello",
+        "tool_calls": [{"id": "call-1"}],
+        "function_call": {"name": "lookup", "arguments": "{}"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_save_tool_messages_preserves_order_and_transaction_flag():
+    calls: list[tuple[str, str, dict[str, object], bool]] = []
+
+    async def save_message_fn(chat_db, conversation_id, payload, use_transaction=True):
+        calls.append((chat_db, conversation_id, payload, use_transaction))
+        return f"message-{len(calls)}"
+
+    first = {"role": "tool", "tool_call_id": "call-1", "content": "first"}
+    second = {"role": "tool", "tool_call_id": "call-2", "content": "second"}
+
+    await save_tool_messages(
+        chat_db="db",
+        conversation_id="conv-1",
+        save_message_fn=save_message_fn,
+        tool_messages=[first, second],
+    )
+
+    assert calls == [
+        ("db", "conv-1", first, True),
+        ("db", "conv-1", second, True),
+    ]
 
 
 @pytest.mark.asyncio
@@ -610,6 +657,37 @@ async def test_execute_non_stream_call_persists_first_choice_only(monkeypatch):
     assert len(response["choices"]) == 2
     assert len(save_calls) == 1
     assert save_calls[0]["content"] == "persist me"
+
+
+@pytest.mark.asyncio
+async def test_execute_non_stream_call_persists_first_choice_function_call_only(monkeypatch):
+    response, save_calls, _logged_usage = await _run_non_stream_content_test(
+        monkeypatch,
+        llm_response={
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "function_call": {"name": "first_lookup", "arguments": "{}"},
+                    },
+                    "finish_reason": "function_call",
+                },
+                {
+                    "message": {
+                        "role": "assistant",
+                        "function_call": {"name": "second_lookup", "arguments": "{}"},
+                    },
+                    "finish_reason": "function_call",
+                },
+            ]
+        },
+        moderation=_NoModeration(),
+        should_persist=True,
+    )
+
+    assert len(response["choices"]) == 2
+    assert len(save_calls) == 1
+    assert save_calls[0]["function_call"] == {"name": "first_lookup", "arguments": "{}"}
 
 
 @pytest.mark.asyncio
