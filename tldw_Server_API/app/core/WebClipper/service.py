@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from tldw_Server_API.app.api.v1.schemas.web_clipper_schemas import (
+from tldw_Server_API.app.core.WebClipper.schemas import (
     WebClipperAttachmentRecord,
     WebClipperEnrichmentPayload,
     WebClipperEnrichmentResponse,
@@ -22,8 +22,10 @@ from tldw_Server_API.app.api.v1.schemas.web_clipper_schemas import (
     WebClipperSavedNote,
     WebClipperStatusResponse,
     WebClipperWorkspacePlacement,
+    validate_capture_metadata_json_size,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    BackendType,
     CharactersRAGDB,
     CharactersRAGDBError,
     ConflictError,
@@ -45,25 +47,30 @@ _MAX_OCR_INLINE = 1_500
 _MAX_VLM_INLINE = 1_000
 _MAX_MACHINE_INLINE = 2_500
 _MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
-_ALLOWED_ATTACHMENT_MEDIA_TYPES: frozenset[str] = frozenset({
-    "image/png",
-    "image/jpeg",
-    "image/gif",
-    "image/webp",
-    "image/svg+xml",
-    "text/plain",
-    "text/html",
-    "text/markdown",
-    "text/csv",
-    "application/pdf",
-    "application/json",
-})
+_ALLOWED_ATTACHMENT_MEDIA_TYPES: frozenset[str] = frozenset(
+    {
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "text/plain",
+        "text/markdown",
+        "text/csv",
+        "application/pdf",
+        "application/json",
+    }
+)
+_BLOCKED_ATTACHMENT_SUFFIXES: frozenset[str] = frozenset({".htm", ".html", ".svg"})
 _FULL_EXTRACT_SPILLOVER_THRESHOLD = 20_000
 _TRUNCATION_MARKER = "Truncated. Full extract preserved in clip metadata."
 _ENRICHMENT_SECTION_START = "<!-- web-clipper-enrichment:start -->"
 _ENRICHMENT_SECTION_END = "<!-- web-clipper-enrichment:end -->"
 _WEB_CLIPPER_SOURCE_PREFIX = "web-clipper"
 WorkspaceSourceJobEnqueuer = Callable[[str, dict[str, Any]], None]
+
+
+class _ClipIdCollisionError(ConflictError):
+    """Raised when a WebClipper request attempts to claim a non-clipper note."""
 
 
 @dataclass(slots=True)
@@ -79,8 +86,6 @@ class WebClipperService:
     def save_clip(self, request: WebClipperSaveRequest) -> WebClipperSaveResponse:
         """Create or update the canonical note and optional workspace placement."""
         warnings: list[str] = []
-        existing_document = self.db.get_note_clipper_document_by_clip_id(request.clip_id)
-        capture_metadata = self._merge_capture_metadata(existing_document, request)
         analysis_state = self._current_analysis_state(request.clip_id)
         self._record_requested_enhancements(analysis_state, request)
 
@@ -90,15 +95,27 @@ class WebClipperService:
             fallback_full_extract=request.content.full_extract,
         )
         note_title = self._resolve_note_title(request)
-        note_content = self._render_note_content(
-            request=request,
-            visible_body=visible_body,
-            analysis=analysis_state,
-            capture_metadata=capture_metadata,
-        )
         try:
             with self.db.transaction() as conn:
                 existing_note = self._fetch_note_row(request.clip_id, conn=conn)
+                existing_document = self.db._fetch_note_clipper_document_row(
+                    column="clip_id",
+                    value=request.clip_id,
+                    conn=conn,
+                )
+                capture_metadata = self._merge_capture_metadata(existing_document, request)
+                note_content = self._render_note_content(
+                    request=request,
+                    visible_body=visible_body,
+                    analysis=analysis_state,
+                    capture_metadata=capture_metadata,
+                )
+                if existing_note is not None and existing_document is None:
+                    raise _ClipIdCollisionError(
+                        "A non-clipper note already exists with this clip_id.",
+                        entity="notes",
+                        entity_id=request.clip_id,
+                    )
                 if existing_note is None:
                     note_id = self.db.add_note(
                         title=note_title,
@@ -140,6 +157,8 @@ class WebClipperService:
                     source_note_version=int(persisted_note["version"]),
                     conn=conn,
                 )
+        except _ClipIdCollisionError:
+            raise
         except (CharactersRAGDBError, ConflictError) as exc:
             return WebClipperSaveResponse(
                 clip_id=request.clip_id,
@@ -233,8 +252,7 @@ class WebClipperService:
         clip_document = self._require_clip_document(clip_id)
         note = self._require_note(clip_id)
         placements = [
-            self._placement_response_from_row(row)
-            for row in self.db.list_note_clipper_workspace_placements(clip_id)
+            self._placement_response_from_row(row) for row in self.db.list_note_clipper_workspace_placements(clip_id)
         ]
         attachments = self._list_attachments(note_id=clip_id)
         analysis = self._normalize_json_dict(clip_document.get("analysis_json"))
@@ -368,10 +386,15 @@ class WebClipperService:
         existing_document: dict[str, Any] | None,
         request: WebClipperSaveRequest,
     ) -> dict[str, Any]:
-        merged = self._normalize_json_dict(existing_document.get("capture_metadata_json") if existing_document else None)
+        merged = self._normalize_json_dict(
+            existing_document.get("capture_metadata_json") if existing_document else None
+        )
         merged.update(request.capture_metadata)
         merged.setdefault("captured_at", datetime.now(timezone.utc).isoformat())
-        return merged
+        try:
+            return validate_capture_metadata_json_size(merged)
+        except ValueError as exc:
+            raise InputError(str(exc)) from exc  # noqa: TRY003
 
     def _current_analysis_state(self, clip_id: str) -> dict[str, Any]:
         current_document = self.db.get_note_clipper_document_by_clip_id(clip_id)
@@ -503,7 +526,7 @@ class WebClipperService:
             None,
         )
         if source_index is not None:
-            body_parts = parts[source_index + 1:]
+            body_parts = parts[source_index + 1 :]
             if body_parts:
                 return "\n\n".join(body_parts).strip()
             return ""
@@ -538,6 +561,9 @@ class WebClipperService:
             capture_metadata=capture_metadata,
         )
 
+    def _active_deleted_value(self) -> bool | int:
+        return False if self.db.backend_type == BackendType.POSTGRESQL else 0
+
     def _extract_comment_from_note(self, note: dict[str, Any]) -> str | None:
         content = self._strip_machine_section(str(note.get("content") or ""))
         blocks = [block.strip() for block in content.split("\n\n") if block.strip()]
@@ -560,10 +586,7 @@ class WebClipperService:
             normalized_keywords.append(text)
 
         existing_keywords = self.db.get_keywords_for_note(note_id)
-        existing_ids_by_text = {
-            str(row["keyword"]): int(row["id"])
-            for row in existing_keywords
-        }
+        existing_ids_by_text = {str(row["keyword"]): int(row["id"]) for row in existing_keywords}
         desired_keyword_ids: set[int] = set()
 
         for text in normalized_keywords:
@@ -598,7 +621,7 @@ class WebClipperService:
     def _sync_note_folder(self, note_id: str, folder_id: int | None, warnings: list[str]) -> None:
         if folder_id is None:
             return
-        deleted_value = False if self.db.backend_type.name == "POSTGRESQL" else 0
+        deleted_value = self._active_deleted_value()
         with self.db.transaction() as conn:
             folder_row = conn.execute(
                 "SELECT id FROM note_folders WHERE id = ? AND deleted = ?",
@@ -655,6 +678,9 @@ class WebClipperService:
             raise InputError("Invalid attachment path.") from exc  # noqa: TRY003
 
         resolved_media_type = attachment.media_type or mimetypes.guess_type(safe_file_name)[0]
+        if any(suffix.lower() in _BLOCKED_ATTACHMENT_SUFFIXES for suffix in Path(safe_file_name).suffixes):
+            raise InputError("Attachment file type is not allowed.")  # noqa: TRY003
+        resolved_media_type = str(resolved_media_type or "").split(";", maxsplit=1)[0].strip().lower() or None
         if resolved_media_type is None or resolved_media_type not in _ALLOWED_ATTACHMENT_MEDIA_TYPES:
             raise InputError(  # noqa: TRY003
                 f"Attachment media type '{resolved_media_type}' is not allowed. "
@@ -690,7 +716,9 @@ class WebClipperService:
                 encoding="utf-8",
             )
         except OSError as exc:
-            raise CharactersRAGDBError(f"Attachment persistence failed for slot '{attachment.slot}'.") from exc  # noqa: TRY003
+            raise CharactersRAGDBError(
+                f"Attachment persistence failed for slot '{attachment.slot}'."
+            ) from exc  # noqa: TRY003
         return self._attachment_response(note_id=note_id, file_path=target_path)
 
     def _ensure_workspace_placement(
@@ -864,8 +892,8 @@ class WebClipperService:
         keywords: list[str],
     ) -> None:
         workspace_note = self.db.execute_query(
-            "SELECT * FROM workspace_notes WHERE workspace_id = ? AND id = ? AND deleted = 0",
-            (workspace_id, workspace_note_id),
+            "SELECT * FROM workspace_notes WHERE workspace_id = ? AND id = ? AND deleted = ?",
+            (workspace_id, workspace_note_id, self._active_deleted_value()),
         ).fetchone()
         if workspace_note is None:
             raise ConflictError(
@@ -929,11 +957,16 @@ class WebClipperService:
     def _require_clip_document(self, clip_id: str) -> dict[str, Any]:
         document = self.db.get_note_clipper_document_by_clip_id(clip_id)
         if document is None:
-            raise ConflictError("Clip document not found.", entity="note_clipper_documents", entity_id=clip_id)  # noqa: TRY003
+            raise ConflictError(
+                "Clip document not found.", entity="note_clipper_documents", entity_id=clip_id
+            )  # noqa: TRY003
         return document
 
     def _fetch_note_row(self, note_id: str, *, conn: Any) -> dict[str, Any] | None:
-        row = conn.execute("SELECT * FROM notes WHERE id = ? AND deleted = 0", (note_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM notes WHERE id = ? AND deleted = ?",
+            (note_id, self._active_deleted_value()),
+        ).fetchone()
         return dict(row) if row else None
 
     def _truncate_inline_summary(self, enrichment_type: str, inline_summary: str | None) -> str | None:
@@ -949,7 +982,7 @@ class WebClipperService:
         if start == -1 or end == -1 or end < start:
             return content.strip()
         prefix = content[:start].rstrip()
-        suffix = content[end + len(_ENRICHMENT_SECTION_END):].strip()
+        suffix = content[end + len(_ENRICHMENT_SECTION_END) :].strip()
         if prefix and suffix:
             return f"{prefix}\n\n{suffix}".strip()
         return (prefix or suffix).strip()
@@ -995,7 +1028,9 @@ class WebClipperService:
         suffix = "".join(Path(basename).suffixes)
         if not suffix:
             suffix = mimetypes.guess_extension(mimetypes.guess_type(basename)[0] or "") or ".bin"
-        safe_slot = sanitize_filename(str(slot or ""), max_total_length=max(1, 180 - len(suffix))).replace(" ", "_").strip("._")
+        safe_slot = (
+            sanitize_filename(str(slot or ""), max_total_length=max(1, 180 - len(suffix))).replace(" ", "_").strip("._")
+        )
         if not safe_slot:
             safe_slot = "attachment"
         return f"{safe_slot}{suffix.lower()}"
