@@ -1,6 +1,10 @@
 import re
 
-from tldw_Server_API.app.core.Moderation.moderation_service import ModerationPolicy, PatternRule
+from tldw_Server_API.app.core.Moderation.moderation_service import (
+    ModerationPolicy,
+    ModerationService,
+    PatternRule,
+)
 from tldw_Server_API.app.core.Moderation.policy_compiler import (
     PolicyCompilationInput,
     PolicyCompiler,
@@ -142,3 +146,31 @@ def test_compile_global_policy_preserves_raw_regex_backslashes():
     assert not rules[0].regex.search(r"leak\d")
     assert not rules[1].regex.search("leak123")
     assert rules[1].regex.search(r"leak\d")
+
+
+def test_service_global_policy_uses_compiler_without_leaking_paths(tmp_path, monkeypatch):
+    blocklist = tmp_path / "blocklist.txt"
+    blocklist.write_text("secret -> block #confidential\n", encoding="utf-8")
+
+    svc = ModerationService()
+    svc._blocklist_path = str(blocklist)
+    svc._runtime_override = {}
+    svc._policy_compiler = PolicyCompiler()
+
+    policy = svc._compile_global_policy_from_resolved_config(
+        ResolvedModerationConfig(
+            enabled=True,
+            input_enabled=True,
+            output_enabled=True,
+            input_action="block",
+            output_action="redact",
+            redact_replacement="[REDACTED]",
+            per_user_overrides=True,
+            categories_enabled=None,
+            pii_enabled=False,
+        )
+    )
+
+    assert policy.enabled is True
+    assert len(policy.block_patterns) == 1
+    assert policy.block_patterns[0].categories == {"confidential"}

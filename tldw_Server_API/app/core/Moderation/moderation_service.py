@@ -29,7 +29,12 @@ from dataclasses import dataclass, field
 from loguru import logger
 
 from tldw_Server_API.app.core.config import load_and_log_configs, load_comprehensive_config
-from tldw_Server_API.app.core.Moderation.policy_compiler import PolicyCompiler
+from tldw_Server_API.app.core.Moderation.policy_compiler import (
+    PolicyCompilationInput,
+    PolicyCompilationReport,
+    PolicyCompiler,
+    ResolvedModerationConfig,
+)
 from tldw_Server_API.app.core.testing import is_truthy
 
 _MODERATION_NONCRITICAL_EXCEPTIONS = (
@@ -137,6 +142,14 @@ class ModerationEvaluationResult:
     sample: str | None = None
 
 
+@dataclass(frozen=True)
+class _ResolvedModerationServiceState:
+    compiler_config: ResolvedModerationConfig
+    blocklist_path: str | None
+    user_overrides_path: str | None
+    runtime_overrides_path: str | None
+
+
 class ModerationService:
     """Loads moderation configuration and evaluates content against policies."""
     _UNCATEGORIZED_CATEGORY = "uncategorized"
@@ -179,35 +192,41 @@ class ModerationService:
         self._user_overrides: dict[str, dict[str, object]] = self._load_user_overrides()
 
     def _load_global_policy(self) -> ModerationPolicy:
-        # Try modern dict config first
-        mod_cfg = (self._config.get("moderation") or {}) if isinstance(self._config, dict) else {}
-        # If not present, fall back to ConfigParser direct section
-        if not mod_cfg:
-            try:
-                parser = load_comprehensive_config()
-                if parser and parser.has_section('Moderation'):
-                    # Convert to plain dict
-                    mod_cfg = dict(parser.items('Moderation'))
-            except _MODERATION_NONCRITICAL_EXCEPTIONS:
-                mod_cfg = {}
+        mod_cfg = self._load_moderation_config_section()
+        resolved = self._resolve_moderation_config(mod_cfg)
+        self._user_overrides_path = resolved.user_overrides_path
+        self._blocklist_path = resolved.blocklist_path
+        self._runtime_overrides_path = resolved.runtime_overrides_path
+        return self._compile_global_policy_from_resolved_config(resolved.compiler_config)
 
-        # Boolean helpers
+    def _load_moderation_config_section(self) -> dict[str, object]:
+        mod_cfg = (self._config.get("moderation") or {}) if isinstance(self._config, dict) else {}
+        if mod_cfg:
+            return dict(mod_cfg)
+        try:
+            parser = load_comprehensive_config()
+            if parser and parser.has_section("Moderation"):
+                return dict(parser.items("Moderation"))
+        except _MODERATION_NONCRITICAL_EXCEPTIONS:
+            return {}
+        return {}
+
+    def _resolve_moderation_config(self, mod_cfg: dict[str, object]) -> _ResolvedModerationServiceState:
         def _b(key: str, default: bool) -> bool:
             val = str(mod_cfg.get(key, default)).strip().lower()
             return is_truthy(val)
 
-        def _anchor(p: str) -> str:
+        def _anchor(path_value: str) -> str:
             try:
                 from pathlib import Path as _Path
-                pp = _Path(str(p))
-                if pp.is_absolute():
-                    return str(pp)
-                from tldw_Server_API.app.core.Utils.Utils import get_project_root as _gpr
-                return str((_Path(_gpr()) / pp).resolve())
+                path = _Path(str(path_value))
+                if path.is_absolute():
+                    return str(path)
+                from tldw_Server_API.app.core.Utils.Utils import get_project_root
+                return str((_Path(get_project_root()) / path).resolve())
             except _MODERATION_NONCRITICAL_EXCEPTIONS:
-                return str(p)
+                return str(path_value)
 
-        # Paths (defaults set when unset)
         blocklist_path = (
             mod_cfg.get("blocklist_file")
             or os.getenv("MODERATION_BLOCKLIST_FILE")
@@ -218,55 +237,42 @@ class ModerationService:
             or os.getenv("MODERATION_USER_OVERRIDES_FILE")
             or "tldw_Server_API/Config_Files/moderation_user_overrides.json"
         )
-        runtime_overrides_path = mod_cfg.get("runtime_overrides_file") or os.getenv("MODERATION_RUNTIME_OVERRIDES_FILE")
-        blocklist_path = _anchor(blocklist_path) if blocklist_path else blocklist_path
-        user_overrides_path = _anchor(user_overrides_path) if user_overrides_path else user_overrides_path
-        if runtime_overrides_path:
-            runtime_overrides_path = _anchor(runtime_overrides_path)
-        else:
-            runtime_overrides_path = _anchor("tldw_Server_API/Config_Files/moderation_runtime_overrides.json")
-        # Optional safety/perf overrides
+        runtime_overrides_path = (
+            mod_cfg.get("runtime_overrides_file")
+            or os.getenv("MODERATION_RUNTIME_OVERRIDES_FILE")
+            or "tldw_Server_API/Config_Files/moderation_runtime_overrides.json"
+        )
+
         with contextlib.suppress(_MODERATION_NONCRITICAL_EXCEPTIONS):
             self._max_scan_chars = int(mod_cfg.get("max_scan_chars", self._max_scan_chars))
         with contextlib.suppress(_MODERATION_NONCRITICAL_EXCEPTIONS):
-            self._max_replacements_per_pattern = int(mod_cfg.get("max_replacements_per_pattern", self._max_replacements_per_pattern))
+            self._max_replacements_per_pattern = int(
+                mod_cfg.get("max_replacements_per_pattern", self._max_replacements_per_pattern)
+            )
         with contextlib.suppress(_MODERATION_NONCRITICAL_EXCEPTIONS):
             self._match_window_chars = int(mod_cfg.get("match_window_chars", self._match_window_chars))
-        # Optional debounce for blocklist writes (ms)
-        try:
+        with contextlib.suppress(_MODERATION_NONCRITICAL_EXCEPTIONS):
             if "blocklist_write_debounce_ms" in mod_cfg:
                 self._write_debounce_ms = int(mod_cfg.get("blocklist_write_debounce_ms", self._write_debounce_ms) or 0)
-        except _MODERATION_NONCRITICAL_EXCEPTIONS:
-            pass
-        # Categories (list- and string-safe)
-        cats_val = None
-        if isinstance(mod_cfg, dict) and "categories_enabled" in mod_cfg:
-            cats_val = mod_cfg.get("categories_enabled")
-        if cats_val is None:
-            cats_val = os.getenv("MODERATION_CATEGORIES_ENABLED", "")
+
+        cats_val = (
+            mod_cfg.get("categories_enabled")
+            if "categories_enabled" in mod_cfg
+            else os.getenv("MODERATION_CATEGORIES_ENABLED", "")
+        )
         categories_enabled: set[str] = set()
         if isinstance(cats_val, (list, set, tuple)):
             categories_enabled = {str(c).strip().lower() for c in cats_val if str(c).strip()}
-        elif isinstance(cats_val, str):
-            if cats_val.strip():
-                categories_enabled = {c.strip().lower() for c in cats_val.split(',') if c.strip()}
-        else:
-            if cats_val:
-                logger.warning("Invalid moderation categories_enabled type")
-        pii_enabled = is_truthy(str(mod_cfg.get("pii_enabled", os.getenv("MODERATION_PII_ENABLED", "false"))).strip().lower())
-        # Apply runtime overrides if present
-        try:
-            if isinstance(self._runtime_override.get("categories_enabled"), (set, list)):
-                categories_enabled = set(self._runtime_override.get("categories_enabled") or [])
-            if "pii_enabled" in self._runtime_override:
-                pii_enabled = bool(self._runtime_override.get("pii_enabled"))
-        except _MODERATION_NONCRITICAL_EXCEPTIONS:
-            pass
-        # Track effective PII enablement for reuse elsewhere
-        self._pii_enabled = bool(pii_enabled)
+        elif isinstance(cats_val, str) and cats_val.strip():
+            categories_enabled = {c.strip().lower() for c in cats_val.split(",") if c.strip()}
+        elif cats_val:
+            logger.warning("Invalid moderation categories_enabled type")
 
-        # Build policy
-        policy = ModerationPolicy(
+        pii_enabled = is_truthy(
+            str(mod_cfg.get("pii_enabled", os.getenv("MODERATION_PII_ENABLED", "false"))).strip().lower()
+        )
+
+        compiler_config = ResolvedModerationConfig(
             enabled=_b("enabled", False),
             input_enabled=_b("input_enabled", True),
             output_enabled=_b("output_enabled", True),
@@ -274,16 +280,61 @@ class ModerationService:
             output_action=str(mod_cfg.get("output_action", "redact")).lower(),
             redact_replacement=str(mod_cfg.get("redact_replacement", "[REDACTED]")),
             per_user_overrides=_b("per_user_overrides", True),
-            block_patterns=self._build_block_patterns(blocklist_path),
             categories_enabled=categories_enabled or None,
+            pii_enabled=bool(pii_enabled),
+        )
+        return _ResolvedModerationServiceState(
+            compiler_config=compiler_config,
+            blocklist_path=_anchor(str(blocklist_path)) if blocklist_path else None,
+            user_overrides_path=_anchor(str(user_overrides_path)) if user_overrides_path else None,
+            runtime_overrides_path=_anchor(str(runtime_overrides_path)) if runtime_overrides_path else None,
         )
 
-        # Store paths for overrides
-        self._user_overrides_path = user_overrides_path
-        self._blocklist_path = blocklist_path
-        self._runtime_overrides_path = runtime_overrides_path
+    @staticmethod
+    def _read_blocklist_lines_from_path(path: str) -> list[str]:
+        with open(path, encoding="utf-8") as f:
+            return [ln.rstrip("\r\n") for ln in f.readlines()]
 
-        return policy
+    def _read_blocklist_lines_for_compile(self, path: str | None) -> list[str]:
+        if not path:
+            return []
+        if not os.path.exists(path):
+            logger.warning("Moderation blocklist file not found")
+            return []
+        try:
+            return self._read_blocklist_lines_from_path(path)
+        except _MODERATION_NONCRITICAL_EXCEPTIONS:
+            logger.error("Failed to load moderation blocklist")
+            return []
+
+    def _compile_global_policy_from_resolved_config(self, config: ResolvedModerationConfig) -> ModerationPolicy:
+        effective_pii_enabled = self._policy_compiler.resolve_runtime_pii(
+            self._runtime_override,
+            config.pii_enabled,
+        )
+        self._pii_enabled = bool(effective_pii_enabled)
+        pii_rules = self._load_builtin_pii_rules() if effective_pii_enabled else []
+        lines = self._read_blocklist_lines_for_compile(getattr(self, "_blocklist_path", None))
+        result = self._policy_compiler.compile_global(
+            PolicyCompilationInput(
+                config=config,
+                runtime_override=self._runtime_override,
+                blocklist_lines=lines,
+                pii_rules=pii_rules,
+            )
+        )
+        self._log_compilation_report(result.report)
+        return result.policy
+
+    @staticmethod
+    def _log_compilation_report(report: PolicyCompilationReport) -> None:
+        for issue in report.issues:
+            if issue.reason == "invalid_action":
+                logger.warning("Invalid moderation action in blocklist; skipping line")
+            elif issue.reason == "dangerous_regex":
+                logger.warning("Skipped dangerous regex in blocklist")
+            elif issue.reason == "invalid_regex":
+                logger.warning("Invalid blocklist pattern; skipping line")
 
     def _parse_rule_line(self, s: str) -> tuple[str | None, str | None, str | None, set[str] | None]:
         return self._policy_compiler.parse_rule_line(s)
@@ -297,53 +348,11 @@ class ModerationService:
         return PolicyCompiler.parse_regex_expr(expr)
 
     def _load_block_patterns(self, path: str | None) -> list[PatternRule]:
-        patterns: list[PatternRule] = []
-        if not path:
-            return patterns
-        try:
-            if not os.path.exists(path):
-                logger.warning("Moderation blocklist file not found")
-                return patterns
-            with open(path, encoding="utf-8") as f:
-                for line in f:
-                    s = line.strip()
-                    if not s or s.startswith("#"):
-                        continue
-                    try:
-                        expr, action, repl, cats = self._parse_rule_line(s)
-                        if expr is None:
-                            continue
-                        if action and not self._is_valid_action(action):
-                            logger.warning("Invalid moderation action in blocklist; skipping line")
-                            continue
-                        # Treat lines starting and ending with '/' (optional flags) as regex
-                        regex_parts = self._parse_regex_expr(expr)
-                        if regex_parts:
-                            raw, flags_str = regex_parts
-                            if self._is_regex_dangerous(raw):
-                                logger.warning("Skipped dangerous regex in blocklist")
-                                continue
-                            flags = re.IGNORECASE  # default remains case-insensitive
-                            fs = (flags_str or "").lower()
-                            if 'i' in fs:
-                                flags |= re.IGNORECASE
-                            if 'm' in fs:
-                                flags |= re.MULTILINE
-                            if 's' in fs:
-                                flags |= re.DOTALL
-                            if 'x' in fs:
-                                flags |= re.VERBOSE
-                            pat = re.compile(raw, flags=flags)
-                        else:
-                            # Literal pattern: allow escaped '#'
-                            literal = expr.replace("\\#", "#")
-                            pat = re.compile(re.escape(literal), flags=re.IGNORECASE)
-                        patterns.append(PatternRule(regex=pat, action=(action or None), replacement=(repl or None), categories=(cats or None)))
-                    except re.error:
-                        logger.warning("Invalid blocklist pattern; skipping line")
-        except _MODERATION_NONCRITICAL_EXCEPTIONS:
-            logger.error("Failed to load moderation blocklist")
-        return patterns
+        report = PolicyCompilationReport()
+        lines = self._read_blocklist_lines_for_compile(path)
+        rules = self._policy_compiler.compile_blocklist_lines(lines, report)
+        self._log_compilation_report(report)
+        return rules
 
     def _build_block_patterns(self, path: str | None) -> list[PatternRule]:
         """Load blocklist patterns and optionally append built-in PII rules."""
