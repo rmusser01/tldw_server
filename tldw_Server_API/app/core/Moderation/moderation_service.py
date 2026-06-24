@@ -255,11 +255,9 @@ class ModerationService:
             if "blocklist_write_debounce_ms" in mod_cfg:
                 self._write_debounce_ms = int(mod_cfg.get("blocklist_write_debounce_ms", self._write_debounce_ms) or 0)
 
-        cats_val = (
-            mod_cfg.get("categories_enabled")
-            if "categories_enabled" in mod_cfg
-            else os.getenv("MODERATION_CATEGORIES_ENABLED", "")
-        )
+        cats_val = mod_cfg.get("categories_enabled") if "categories_enabled" in mod_cfg else None
+        if cats_val is None:
+            cats_val = os.getenv("MODERATION_CATEGORIES_ENABLED", "")
         categories_enabled: set[str] = set()
         if isinstance(cats_val, (list, set, tuple)):
             categories_enabled = {str(c).strip().lower() for c in cats_val if str(c).strip()}

@@ -174,3 +174,13 @@ def test_service_global_policy_uses_compiler_without_leaking_paths(tmp_path, mon
     assert policy.enabled is True
     assert len(policy.block_patterns) == 1
     assert policy.block_patterns[0].categories == {"confidential"}
+
+
+def test_service_resolved_config_falls_back_to_env_when_categories_are_none(monkeypatch):
+    monkeypatch.setenv("MODERATION_CATEGORIES_ENABLED", "pii, confidential")
+    svc = ModerationService()
+    svc._runtime_override = {"categories_enabled": {"runtime"}}
+
+    resolved = svc._resolve_moderation_config({"categories_enabled": None})
+
+    assert resolved.compiler_config.categories_enabled == {"pii", "confidential"}
