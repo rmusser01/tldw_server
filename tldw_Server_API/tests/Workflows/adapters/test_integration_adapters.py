@@ -1621,6 +1621,292 @@ async def test_character_chat_adapter_message_test_mode_y(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_character_chat_adapter_message_uses_current_core_writer(monkeypatch):
+    """Non-test mode message action should use the current low-level message writer contract."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.is_test_mode",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.DatabasePaths.get_chacha_db_path",
+        lambda _user_id: Path(":memory:"),
+    )
+
+    offloaded: list[Any] = []
+
+    async def fake_to_thread(func: Any, /, *args: Any, **kwargs: Any) -> Any:
+        offloaded.append(func)
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.asyncio.to_thread",
+        fake_to_thread,
+    )
+
+    fake_db = MagicMock()
+    fake_db.count_messages_for_conversation.return_value = 2
+    posts: list[dict[str, Any]] = []
+
+    def fake_load_chat_and_character(db: object, conversation_id_str: str, user_name: str):
+        assert db is fake_db
+        assert conversation_id_str == "conv-123"
+        assert user_name == "Dana"
+        return (
+            {"name": "Luna", "system_prompt": "Stay in character."},
+            [("Earlier user message", "Earlier assistant reply")],
+            None,
+        )
+
+    def fake_post_message_to_conversation(
+        db: object,
+        conversation_id: str,
+        character_name: str,
+        message_content: str,
+        is_user_message: bool,
+        **_kwargs: Any,
+    ) -> str:
+        assert db is fake_db
+        posts.append(
+            {
+                "conversation_id": conversation_id,
+                "character_name": character_name,
+                "message_content": message_content,
+                "is_user_message": is_user_message,
+            }
+        )
+        return f"msg-{len(posts)}"
+
+    async def fake_perform_chat_api_call_async(**kwargs: Any):
+        assert kwargs["api_endpoint"] == "openai"
+        assert kwargs["model"] == "gpt-test"
+        assert kwargs["temp"] == 0.4
+        assert kwargs["max_tokens"] == 256
+        assert kwargs["system_message"] == "Stay in character."
+        assert kwargs["messages_payload"] == [
+            {"role": "user", "content": "Earlier user message"},
+            {"role": "assistant", "content": "Earlier assistant reply"},
+            {"role": "user", "content": "Hello!"},
+        ]
+        return {"choices": [{"message": {"content": "Hello from Luna"}}]}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDB",
+        lambda *_args, **_kwargs: fake_db,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Character_Chat.modules.character_chat.load_chat_and_character",
+        fake_load_chat_and_character,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Character_Chat.modules.character_chat.post_message_to_conversation",
+        fake_post_message_to_conversation,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+        fake_perform_chat_api_call_async,
+    )
+
+    from tldw_Server_API.app.core.Workflows.adapters.integration import run_character_chat_adapter
+
+    result = await run_character_chat_adapter(
+        {
+            "action": "message",
+            "conversation_id": "conv-123",
+            "message": "Hello!",
+            "api_name": "openai",
+            "model": "gpt-test",
+            "max_tokens": "256",
+            "temperature": 0.4,
+            "user_name": "Dana",
+        },
+        {"user_id": "1"},
+    )
+
+    assert result == {
+        "response": "Hello from Luna",
+        "text": "Hello from Luna",
+        "conversation_id": "conv-123",
+        "character_name": "Luna",
+        "turn_count": 4,
+    }
+    assert posts == [
+        {
+            "conversation_id": "conv-123",
+            "character_name": "Luna",
+            "message_content": "Hello!",
+            "is_user_message": True,
+        },
+        {
+            "conversation_id": "conv-123",
+            "character_name": "Luna",
+            "message_content": "Hello from Luna",
+            "is_user_message": False,
+        },
+    ]
+    fake_db.count_messages_for_conversation.assert_called_once_with("conv-123")
+    assert fake_load_chat_and_character in offloaded
+    assert offloaded.count(fake_post_message_to_conversation) == 2
+
+
+@pytest.mark.asyncio
+async def test_character_chat_adapter_message_preflights_limit_before_llm(monkeypatch):
+    """Message action should fail fast on message limit before spending an LLM call."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+    monkeypatch.setenv("MAX_MESSAGES_PER_CHAT", "1")
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.is_test_mode",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.DatabasePaths.get_chacha_db_path",
+        lambda _user_id: Path(":memory:"),
+    )
+
+    from tldw_Server_API.app.core.Character_Chat import character_limits as limits
+
+    monkeypatch.setattr(limits, "_limits", None)
+    fake_db = MagicMock()
+    fake_db.count_messages_for_conversation.return_value = 1
+    llm_called = False
+    post_called = False
+
+    def fake_load_chat_and_character(db: object, conversation_id_str: str, user_name: str):
+        return ({"name": "Luna"}, [], None)
+
+    async def fake_perform_chat_api_call_async(**_kwargs: Any):
+        nonlocal llm_called
+        llm_called = True
+        return {"choices": [{"message": {"content": "Hello"}}]}
+
+    def fake_post_message_to_conversation(**_kwargs: Any):
+        nonlocal post_called
+        post_called = True
+        return "msg-1"
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDB",
+        lambda *_args, **_kwargs: fake_db,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Character_Chat.modules.character_chat.load_chat_and_character",
+        fake_load_chat_and_character,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Character_Chat.modules.character_chat.post_message_to_conversation",
+        fake_post_message_to_conversation,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+        fake_perform_chat_api_call_async,
+    )
+
+    from tldw_Server_API.app.core.Workflows.adapters.integration import run_character_chat_adapter
+
+    result = await run_character_chat_adapter(
+        {"action": "message", "conversation_id": "conv-123", "message": "Hello!"},
+        {"user_id": "1"},
+    )
+
+    assert result["error"] == "message_limit_exceeded"
+    assert result["conversation_id"] == "conv-123"
+    assert llm_called is False
+    assert post_called is False
+
+
+@pytest.mark.asyncio
+async def test_character_chat_adapter_invalid_max_tokens_is_sanitized(monkeypatch):
+    """Invalid max_tokens should be rejected before it reaches provider payloads."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.is_test_mode",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.DatabasePaths.get_chacha_db_path",
+        lambda _user_id: Path(":memory:"),
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDB",
+        lambda *_args, **_kwargs: MagicMock(),
+    )
+
+    from tldw_Server_API.app.core.Workflows.adapters.integration import run_character_chat_adapter
+
+    result = await run_character_chat_adapter(
+        {
+            "action": "message",
+            "conversation_id": "conv-123",
+            "message": "Hello!",
+            "max_tokens": "many",
+        },
+        {"user_id": "1"},
+    )
+
+    assert result == {"error": "invalid_max_tokens"}
+
+
+@pytest.mark.asyncio
+async def test_character_chat_adapter_post_failure_includes_context(monkeypatch):
+    """Write failures should identify the conversation and message role."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.is_test_mode",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.DatabasePaths.get_chacha_db_path",
+        lambda _user_id: Path(":memory:"),
+    )
+
+    fake_db = MagicMock()
+    fake_db.count_messages_for_conversation.return_value = 0
+
+    def fake_load_chat_and_character(db: object, conversation_id_str: str, user_name: str):
+        return ({"name": "Luna"}, [], None)
+
+    async def fake_perform_chat_api_call_async(**_kwargs: Any):
+        return {"choices": [{"message": {"content": "Hello from Luna"}}]}
+
+    def fake_post_message_to_conversation(**_kwargs: Any):
+        return None
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB.CharactersRAGDB",
+        lambda *_args, **_kwargs: fake_db,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Character_Chat.modules.character_chat.load_chat_and_character",
+        fake_load_chat_and_character,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Character_Chat.modules.character_chat.post_message_to_conversation",
+        fake_post_message_to_conversation,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+        fake_perform_chat_api_call_async,
+    )
+
+    from tldw_Server_API.app.core.Workflows.adapters.integration import run_character_chat_adapter
+
+    result = await run_character_chat_adapter(
+        {"action": "message", "conversation_id": "conv-123", "message": "Hello!"},
+        {"user_id": "1"},
+    )
+
+    assert result == {
+        "error": "failed_to_post_message",
+        "conversation_id": "conv-123",
+        "message_role": "user",
+    }
+
+
+@pytest.mark.asyncio
 async def test_character_chat_adapter_load_test_mode(monkeypatch):
     """Test Character chat adapter load in test mode."""
     monkeypatch.setenv("TEST_MODE", "1")

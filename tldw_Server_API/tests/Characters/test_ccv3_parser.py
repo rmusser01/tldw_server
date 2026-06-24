@@ -4,6 +4,7 @@ import pytest
 
 from tldw_Server_API.app.core.Character_Chat.ccv3_parser import validate_v3_card, parse_v3_card
 from tldw_Server_API.app.core.Character_Chat.modules.character_io import import_character_card_from_json_string
+from tldw_Server_API.app.core.Character_Chat.modules.character_validation import MAX_V2_TEXT_FIELD_LENGTHS
 
 
 def test_ccv3_validate_and_parse_happy_path():
@@ -46,6 +47,40 @@ def test_ccv3_missing_required_fields_returns_none():
     parsed = import_character_card_from_json_string(json.dumps(card))
     # Validation fails; importer should fall through and not produce a usable card
     assert parsed is None
+
+
+def test_ccv3_rejects_overlong_name():
+    card = {
+        "spec": "chara_card_v3",
+        "spec_version": "3.0",
+        "data": {
+            "name": "A" * (MAX_V2_TEXT_FIELD_LENGTHS["name"] + 1),
+            "description": "Too much name",
+            "first_mes": "Hello",
+        },
+    }
+
+    ok, errs = validate_v3_card(card)
+    assert not ok
+    assert any("name" in err for err in errs)
+    assert import_character_card_from_json_string(json.dumps(card)) is None
+
+
+def test_ccv3_rejects_wrong_field_type():
+    card = {
+        "spec": "chara_card_v3",
+        "spec_version": "3.0",
+        "data": {
+            "name": "Bad Type",
+            "description": ["not", "text"],
+            "first_mes": "Hello",
+        },
+    }
+
+    ok, errs = validate_v3_card(card)
+    assert not ok
+    assert any("description" in err for err in errs)
+    assert import_character_card_from_json_string(json.dumps(card)) is None
 
 
 @pytest.mark.parametrize("image_key", ["char_image", "image"])

@@ -105,6 +105,8 @@ class TestBuildExtractionPrompt:
         ]
         system_msg, _ = build_extraction_prompt([], "Luna", "Alex", existing)
         assert "[fact] User is an engineer" in system_msg
+        assert "JSON object" in system_msg
+        assert '"memories"' in system_msg
 
 
 class TestParseExtractionResponse:
@@ -121,6 +123,19 @@ class TestParseExtractionResponse:
         assert result[0]["category"] == "fact"
         assert result[0]["content"] == "User is 30"
         assert result[0]["salience"] == 0.8
+
+    def test_json_object_with_memories_array(self):
+        from tldw_Server_API.app.core.Character_Chat.modules.character_memory_extraction import (
+            parse_extraction_response,
+        )
+        raw = json.dumps({
+            "memories": [
+                {"category": "fact", "content": "User is 30", "salience": 0.8},
+            ],
+        })
+        result = parse_extraction_response(raw)
+        assert len(result) == 1
+        assert result[0]["content"] == "User is 30"
 
     def test_markdown_fenced(self):
         from tldw_Server_API.app.core.Character_Chat.modules.character_memory_extraction import (
@@ -151,6 +166,25 @@ class TestParseExtractionResponse:
         result = parse_extraction_response(raw)
         assert len(result) == 1
         assert result[0]["content"] == "Likes tea"
+
+    def test_embedded_json_object_with_memories_array(self):
+        from tldw_Server_API.app.core.Character_Chat.modules.character_memory_extraction import (
+            parse_extraction_response,
+        )
+        raw = (
+            'Here are the memories: {"memories": '
+            '[{"category": "preference", "content": "Likes green tea"}]} done.'
+        )
+        result = parse_extraction_response(raw)
+        assert len(result) == 1
+        assert result[0]["content"] == "Likes green tea"
+
+    def test_json_object_without_memories_returns_empty_list(self):
+        from tldw_Server_API.app.core.Character_Chat.modules.character_memory_extraction import (
+            parse_extraction_response,
+        )
+
+        assert parse_extraction_response('{"items": []}') == []
 
     def test_invalid_category_normalized(self):
         from tldw_Server_API.app.core.Character_Chat.modules.character_memory_extraction import (
