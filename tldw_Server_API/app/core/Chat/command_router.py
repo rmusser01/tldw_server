@@ -33,6 +33,10 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Chat.command_authorization import (
+    authorize_command,
+    build_command_authorization_context,
+)
 from tldw_Server_API.app.core.Chat.rate_limiter import TokenBucket
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.Integrations import weather_providers
@@ -429,34 +433,26 @@ async def async_dispatch_command(ctx: CommandContext, command: str, args: str | 
             )
         )
 
-    # RBAC: optional enforcement via env flag
-    rbac_enforced = _cfg_bool("CHAT_COMMANDS_REQUIRE_PERMISSIONS", "require_permissions", False)
-    if rbac_enforced and spec.required_permission:
-        permitted = False
-        details = {"checked": True, "required_permission": spec.required_permission}
+    decision = authorize_command(
+        spec=spec,
+        context=build_command_authorization_context(ctx),
+        permission_checker=_user_has_permission,
+    )
+    if not decision.allowed:
+        log_counter("chat_command_error", labels={"command": cmd, "reason": "permission_denied"})
         try:
-            if ctx.auth_user_id is not None:
-                permitted = bool(_user_has_permission(int(ctx.auth_user_id), spec.required_permission))
-            else:
-                permitted = False
+            increment_counter("chat_command_errors_total", labels={"command": cmd, "reason": "permission_denied"})
+            increment_counter("chat_command_invoked_total", labels={"command": cmd, "status": "denied"})
         except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS:
-            permitted = False
-        if not permitted:
-            log_counter("chat_command_error", labels={"command": cmd, "reason": "permission_denied"})
-            try:
-                increment_counter("chat_command_errors_total", labels={"command": cmd, "reason": "permission_denied"})
-                increment_counter("chat_command_invoked_total", labels={"command": cmd, "status": "denied"})
-            except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS:
-                pass
-            details.update({"permitted": False})
-            return _finalize_result(
-                CommandResult(
-                    ok=False,
-                    command=cmd,
-                    content=f"Permission denied for /{cmd}",
-                    metadata={"error": "permission_denied", **details},
-                )
+            pass
+        return _finalize_result(
+            CommandResult(
+                ok=False,
+                command=cmd,
+                content=f"Permission denied for /{cmd}",
+                metadata={"error": "permission_denied", **decision.metadata},
             )
+        )
 
     # Global per-command and per-user per-command rate limiting (safe, lock-respecting)
     global_bucket = _acquire_global_bucket(cmd)
@@ -504,13 +500,12 @@ async def async_dispatch_command(ctx: CommandContext, command: str, args: str | 
         if not isinstance(res, CommandResult):
             raise TypeError(f"Command handler for /{cmd} returned {type(res)}")
         # annotate result metadata with RBAC info when applicable
-        if rbac_enforced and spec.required_permission:
+        if decision.metadata.get("checked"):
             with contextlib.suppress(_COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS):
                 res.metadata = {
                     **(res.metadata or {}),
                     "rbac": {
-                        "checked": True,
-                        "required_permission": spec.required_permission,
+                        **decision.metadata,
                         "permitted": True,
                     },
                 }

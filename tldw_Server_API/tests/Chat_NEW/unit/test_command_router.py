@@ -15,6 +15,18 @@ def _reset_command_router_buckets():
     command_router._global_buckets.clear()
 
 
+def _authorized_ctx(user_id: str = "u1", *permissions: str) -> command_router.CommandContext:
+    return command_router.CommandContext(
+        user_id=user_id,
+        auth_user_id=1,
+        request_meta={
+            "permissions": list(permissions or ("chat.commands.*",)),
+            "roles": [],
+            "is_admin": False,
+        },
+    )
+
+
 @pytest.mark.unit
 def test_commands_enabled_accepts_single_letter_y(monkeypatch):
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "y")
@@ -28,7 +40,7 @@ async def test_parse_and_dispatch_time(monkeypatch):
     assert parsed is not None
     name, args = parsed
     assert name == "time"
-    ctx = command_router.CommandContext(user_id="u1")
+    ctx = _authorized_ctx("u1", "chat.commands.time")
     res = await command_router.async_dispatch_command(ctx, name, args)
     assert res.ok
     assert "Current time" in res.content
@@ -40,7 +52,7 @@ async def test_rate_limit_per_user_per_command(monkeypatch):
     monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT", "1")
     monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_GLOBAL", "100")
     # Ensure a fresh process bucket by using a unique user id
-    ctx = command_router.CommandContext(user_id="rl_user")
+    ctx = _authorized_ctx("rl_user", "chat.commands.time")
     # First call allowed
     res1 = await command_router.async_dispatch_command(ctx, "time", None)
     assert res1.ok
@@ -68,7 +80,7 @@ async def test_weather_stub(monkeypatch):
 
     monkeypatch.setattr(weather_providers, "get_weather_client", lambda: OkClient())
 
-    ctx = command_router.CommandContext(user_id="u2")
+    ctx = _authorized_ctx("u2", "chat.commands.weather")
     res = await command_router.async_dispatch_command(ctx, "weather", "Boston")
     assert res.ok
     assert "Sunny" in res.content
@@ -140,7 +152,7 @@ async def test_skills_command_lists_only_invocable_skills(monkeypatch):
         ]
 
     monkeypatch.setattr(command_router, "_list_invocable_skills", fake_list)
-    ctx = command_router.CommandContext(user_id="u1", auth_user_id=1)
+    ctx = _authorized_ctx("u1", "chat.commands.skills")
 
     res = await command_router.async_dispatch_command(ctx, "skills", None)
     assert res.ok
@@ -156,7 +168,7 @@ async def test_skills_command_applies_filter(monkeypatch):
         return [{"name": "summarize", "description": "Summarize docs", "argument_hint": None}]
 
     monkeypatch.setattr(command_router, "_list_invocable_skills", fake_list)
-    ctx = command_router.CommandContext(user_id="u1", auth_user_id=1)
+    ctx = _authorized_ctx("u1", "chat.commands.skills")
 
     res = await command_router.async_dispatch_command(ctx, "skills", "sum")
     assert res.ok
@@ -166,7 +178,7 @@ async def test_skills_command_applies_filter(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_skill_command_requires_name():
-    ctx = command_router.CommandContext(user_id="u1", auth_user_id=1)
+    ctx = _authorized_ctx("u1", "chat.commands.skill")
     res = await command_router.async_dispatch_command(ctx, "skill", None)
     assert not res.ok
     assert "Usage" in res.content
@@ -185,7 +197,7 @@ async def test_skill_command_executes_inline(monkeypatch):
         }
 
     monkeypatch.setattr(command_router, "_execute_skill", fake_exec)
-    ctx = command_router.CommandContext(user_id="u1", auth_user_id=1)
+    ctx = _authorized_ctx("u1", "chat.commands.skill")
     res = await command_router.async_dispatch_command(ctx, "skill", "summarize release notes")
     assert res.ok
     assert "Summarized" in res.content
@@ -203,7 +215,7 @@ async def test_skill_command_executes_fork(monkeypatch):
         }
 
     monkeypatch.setattr(command_router, "_execute_skill", fake_exec)
-    ctx = command_router.CommandContext(user_id="u1", auth_user_id=1)
+    ctx = _authorized_ctx("u1", "chat.commands.skill")
     res = await command_router.async_dispatch_command(ctx, "skill", "research-plan q1")
     assert res.ok
     assert "Fork result" in res.content
@@ -216,7 +228,7 @@ async def test_skill_command_rejects_non_invocable_skill(monkeypatch):
         return {"success": False, "error": "skill_not_invocable"}
 
     monkeypatch.setattr(command_router, "_execute_skill", fake_exec)
-    ctx = command_router.CommandContext(user_id="u1", auth_user_id=1)
+    ctx = _authorized_ctx("u1", "chat.commands.skill")
     res = await command_router.async_dispatch_command(ctx, "skill", "hidden-skill x")
     assert not res.ok
     assert "not invocable" in res.content.lower()
@@ -228,7 +240,7 @@ async def test_skill_command_reports_not_found(monkeypatch):
         return {"success": False, "error": "skill_not_found"}
 
     monkeypatch.setattr(command_router, "_execute_skill", fake_exec)
-    ctx = command_router.CommandContext(user_id="u1", auth_user_id=1)
+    ctx = _authorized_ctx("u1", "chat.commands.skill")
     res = await command_router.async_dispatch_command(ctx, "skill", "missing-skill x")
     assert not res.ok
     assert "not found" in res.content.lower()
@@ -240,12 +252,65 @@ async def test_skill_command_handles_runtime_resolution_exception(monkeypatch):
         raise Exception("resolver exploded")
 
     monkeypatch.setattr(command_router, "_resolve_skills_runtime", fake_resolve)
-    ctx = command_router.CommandContext(user_id="u1", auth_user_id=1)
+    ctx = _authorized_ctx("u1", "chat.commands.skill")
 
     res = await command_router.async_dispatch_command(ctx, "skill", "summarize release notes")
     assert not res.ok
     assert res.metadata.get("error") == "runtime_error"
     assert "execution failed" in res.content.lower()
+
+
+@pytest.mark.asyncio
+async def test_required_command_permission_is_enforced_without_legacy_flag(monkeypatch):
+    monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+    monkeypatch.delenv("CHAT_COMMANDS_REQUIRE_PERMISSIONS", raising=False)
+
+    denied = await command_router.async_dispatch_command(
+        command_router.CommandContext(user_id="anon", auth_user_id=None),
+        "time",
+        None,
+    )
+
+    assert not denied.ok
+    assert denied.metadata["error"] == "permission_denied"
+    assert denied.metadata["required_permission"] == "chat.commands.time"
+
+
+@pytest.mark.asyncio
+async def test_command_permission_allows_claim_without_db_lookup(monkeypatch):
+    monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+
+    def fail_if_called(_user_id, _permission):
+        raise AssertionError("permission DB should not be called for claim hit")
+
+    monkeypatch.setattr(command_router, "_user_has_permission", fail_if_called)
+
+    allowed = await command_router.async_dispatch_command(
+        _authorized_ctx("claim-user", "chat.commands.time"),
+        "time",
+        None,
+    )
+
+    assert allowed.ok
+    assert allowed.metadata["rbac"]["source"] == "claims"
+
+
+@pytest.mark.asyncio
+async def test_command_permission_allows_single_user_owner(monkeypatch):
+    monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+
+    allowed = await command_router.async_dispatch_command(
+        command_router.CommandContext(
+            user_id="owner",
+            auth_user_id=None,
+            request_meta={"auth_mode": "single_user", "is_single_user_owner": True},
+        ),
+        "time",
+        None,
+    )
+
+    assert allowed.ok
+    assert allowed.metadata["rbac"]["source"] == "single_user_owner"
 
 
 @pytest.mark.asyncio
@@ -280,7 +345,7 @@ async def test_rate_limit_parses_user_rpm_suffix(monkeypatch):
     monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_USER", "2/min")
     monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_GLOBAL", "100/min")
 
-    ctx = command_router.CommandContext(user_id="rpm_suffix_user")
+    ctx = _authorized_ctx("rpm_suffix_user", "chat.commands.time")
     assert (await command_router.async_dispatch_command(ctx, "time", None)).ok
     assert (await command_router.async_dispatch_command(ctx, "time", None)).ok
 
@@ -295,8 +360,8 @@ async def test_rate_limit_global_per_command(monkeypatch):
     monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_USER", "100/min")
     monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_GLOBAL", "1/min")
 
-    first = await command_router.async_dispatch_command(command_router.CommandContext(user_id="u1"), "time", None)
-    second = await command_router.async_dispatch_command(command_router.CommandContext(user_id="u2"), "time", None)
+    first = await command_router.async_dispatch_command(_authorized_ctx("u1", "chat.commands.time"), "time", None)
+    second = await command_router.async_dispatch_command(_authorized_ctx("u2", "chat.commands.time"), "time", None)
 
     assert first.ok
     assert not second.ok
@@ -324,7 +389,7 @@ async def test_command_output_truncation(monkeypatch):
     monkeypatch.setattr(weather_providers, "get_weather_client", lambda: LongClient())
 
     res = await command_router.async_dispatch_command(
-        command_router.CommandContext(user_id="truncate-user"),
+        _authorized_ctx("truncate-user", "chat.commands.weather"),
         "weather",
         "Boston",
     )
@@ -341,7 +406,7 @@ async def test_async_dispatch_command_concurrent_respects_rate_limit(monkeypatch
     monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT", "5")
     monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_GLOBAL", "100")
 
-    ctx = command_router.CommandContext(user_id="async_rl_user")
+    ctx = _authorized_ctx("async_rl_user", "chat.commands.time")
 
     async def call():
         return await command_router.async_dispatch_command(ctx, "time", None)

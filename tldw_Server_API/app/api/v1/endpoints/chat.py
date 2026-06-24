@@ -242,6 +242,10 @@ from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.core.AuthNZ.rbac import user_has_permission
 from tldw_Server_API.app.core.Chat import command_router
+from tldw_Server_API.app.core.Chat.command_authorization import (
+    authorize_command,
+    build_command_authorization_context,
+)
 from tldw_Server_API.app.core.Chat.validate_dictionary import validate_dictionary as _validate_dictionary
 from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
@@ -1617,64 +1621,46 @@ async def list_chat_commands(
             ),
         )
 
-    def _as_chat_command_from_dict(entry: dict[str, Any]) -> ChatCommandInfo:
-        return ChatCommandInfo(
-            name=str(entry.get("name", "")),
-            description=str(entry.get("description", "")),
-            required_permission=entry.get("required_permission"),
-            usage=entry.get("usage"),
-            args=list(entry.get("args", []) or []),
-            requires_api_key=entry.get("requires_api_key"),
-            rate_limit=entry.get("rate_limit"),
-            rbac_required=entry.get("rbac_required"),
-        )
+    def _current_auth_user_id(user: User) -> int | None:
+        raw_user_id = getattr(user, "id", None)
+        if raw_user_id is None:
+            return None
+        try:
+            return int(raw_user_id)
+        except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+            return None
 
     # If commands are globally disabled, return empty list for discoverability
     if not command_router.commands_enabled():
         return ChatCommandsListResponse(commands=[])
 
-    # Determine if RBAC filtering is enforced
-    require_perms = _cfg_bool_cmds("CHAT_COMMANDS_REQUIRE_PERMISSIONS", "require_permissions", False)
-
-    if not require_perms:
-        # Include metadata from registry even if not filtering.
-        reg = getattr(command_router, "_registry", {})
-        items = []
-        if isinstance(reg, dict) and reg:
-            for name, spec in reg.items():  # type: ignore
-                items.append(_as_chat_command_from_spec(name, spec))
-        else:
-            for c in command_router.list_commands():
-                items.append(_as_chat_command_from_dict(c))
-        return ChatCommandsListResponse(commands=items)
-
-    # Permission-filtered list using registry metadata
     items: list[ChatCommandInfo] = []
     try:
-        # Access registry for permission metadata (conventionally private, stable enough for internal use)
         reg = getattr(command_router, "_registry", {})
-        # Prefer claim-first checks when current_user exposes permissions to avoid DB hits.
-        perms_claim = set(getattr(current_user, "permissions", []) or [])
+        if not isinstance(reg, dict) or not reg:
+            return ChatCommandsListResponse(commands=[])
+        command_ctx = command_router.CommandContext(
+            user_id=str(getattr(current_user, "id", "anonymous")),
+            auth_user_id=_current_auth_user_id(current_user),
+            request_meta={
+                "permissions": list(getattr(current_user, "permissions", []) or []),
+                "roles": list(getattr(current_user, "roles", []) or []),
+                "is_admin": bool(getattr(current_user, "is_admin", False)),
+                "auth_mode": os.getenv("AUTH_MODE"),
+                "is_single_user_owner": bool(getattr(current_user, "is_single_user_owner", False)),
+            },
+        )
+        auth_context = build_command_authorization_context(command_ctx)
         for name, spec in reg.items():  # type: ignore
-            perm = getattr(spec, "required_permission", None)
-            if not perm:
-                items.append(_as_chat_command_from_spec(name, spec))
-                continue
-
-            has_perm_claim = perm in perms_claim
-            has_perm_db = False
-            if not has_perm_claim:
-                try:
-                    has_perm_db = user_has_permission(int(getattr(current_user, "id", 0) or 0), perm)
-                except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-                    has_perm_db = False
-
-            if has_perm_claim or has_perm_db:
+            decision = authorize_command(
+                spec=spec,
+                context=auth_context,
+                permission_checker=user_has_permission,
+            )
+            if decision.allowed:
                 items.append(_as_chat_command_from_spec(name, spec))
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-        # Fallback: unfiltered list if registry not accessible
-        for c in command_router.list_commands():
-            items.append(_as_chat_command_from_dict(c))
+        return ChatCommandsListResponse(commands=[])
 
     return ChatCommandsListResponse(commands=items)
 
@@ -2593,6 +2579,11 @@ async def create_chat_completion(
                             request_meta={
                                 'endpoint': '/chat/completions',
                                 'auth_user_id': int(getattr(current_user, 'id', 0)) if getattr(current_user, 'id', None) is not None else None,
+                                'permissions': list(getattr(current_user, 'permissions', []) or []),
+                                'roles': list(getattr(current_user, 'roles', []) or []),
+                                'is_admin': bool(getattr(current_user, 'is_admin', False)),
+                                'auth_mode': os.getenv('AUTH_MODE'),
+                                'is_single_user_owner': bool(getattr(current_user, 'is_single_user_owner', False)),
                                 'conversation_id': request_data.conversation_id,
                                 'character_id': request_data.character_id,
                                 'chat_db': chat_db,
