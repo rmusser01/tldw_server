@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import sqlite3
+from pathlib import Path
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
@@ -69,12 +71,33 @@ def resolve_companion_storage_user_id_candidates(user_id: str | int) -> list[str
     return list(dict.fromkeys(candidates))
 
 
-def _personalization_db_exists(storage_user_id: str) -> bool:
-    db_path = (
+def _personalization_db_path(storage_user_id: str) -> Path:
+    return (
         DatabasePaths.resolve_user_base_directory(storage_user_id)
         / DatabasePaths.PERSONALIZATION_DB_NAME
     )
-    return db_path.is_file()
+
+
+def _personalization_db_exists(storage_user_id: str) -> bool:
+    return _personalization_db_path(storage_user_id).is_file()
+
+
+def _personalization_db_has_profile(storage_user_id: str, logical_user_id: str) -> bool:
+    db_path = _personalization_db_path(storage_user_id)
+    if not db_path.is_file():
+        return False
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM profiles WHERE user_id = ? LIMIT 1",
+                (logical_user_id,),
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return False
 
 
 def resolve_existing_companion_storage_user_id(user_id: str | int) -> str:
@@ -84,12 +107,13 @@ def resolve_existing_companion_storage_user_id(user_id: str | int) -> str:
     creating user directories, so checking legacy locations cannot create
     partial storage trees as a side effect.
     """
-    candidates = resolve_companion_storage_user_id_candidates(user_id)
+    raw = _normalized_raw_user_id(user_id)
+    candidates = resolve_companion_storage_user_id_candidates(raw)
     preferred = candidates[0]
     if _personalization_db_exists(preferred):
         return preferred
     for candidate in candidates[1:]:
-        if _personalization_db_exists(candidate):
+        if _personalization_db_has_profile(candidate, raw):
             return candidate
     return preferred
 

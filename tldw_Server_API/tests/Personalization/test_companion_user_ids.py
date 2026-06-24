@@ -61,6 +61,36 @@ def test_resolve_existing_companion_storage_user_id_finds_legacy_db_without_crea
                 pass
 
 
+def test_resolve_existing_companion_storage_user_id_ignores_legacy_db_for_other_user(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    base_dir = tmp_path / "user_dbs"
+    base_dir.mkdir()
+    prev_base_dir = settings.get("USER_DB_BASE_DIR")
+    settings.USER_DB_BASE_DIR = str(base_dir)
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
+    try:
+        user_id = "user@example.com"
+        preferred = resolve_companion_storage_user_id(user_id)
+        legacy = resolve_legacy_companion_storage_user_ids(user_id)[0]
+        legacy_db = PersonalizationDB(str(DatabasePaths.get_personalization_db_path(legacy)))
+        legacy_db.update_profile("other-user@example.com", enabled=1)
+
+        resolved = resolve_existing_companion_storage_user_id(user_id)
+
+        assert resolved == preferred
+        assert not (base_dir / preferred).exists()
+    finally:
+        if prev_base_dir is not None:
+            settings.USER_DB_BASE_DIR = prev_base_dir
+        else:
+            try:
+                del settings.USER_DB_BASE_DIR
+            except AttributeError:
+                pass
+
+
 def test_resolve_existing_companion_storage_user_id_prefers_existing_new_db(
     monkeypatch,
     tmp_path,

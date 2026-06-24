@@ -404,7 +404,7 @@ def run_companion_reflection_job(
     current_time = _coerce_now(_parse_iso_datetime(scheduled_for) or now)
     storage_user_id = resolve_existing_companion_storage_user_id(normalized_user_id)
     db = personalization_db or PersonalizationDB.for_user(storage_user_id)
-    cdb = collections_db or CollectionsDatabase.for_user(user_id=normalized_user_id)
+    cdb = collections_db or CollectionsDatabase.for_user(user_id=storage_user_id)
     profile = db.get_or_create_profile(normalized_user_id)
 
     enabled, reason = companion_reflection_enabled_for_profile(profile, normalized_cadence)
