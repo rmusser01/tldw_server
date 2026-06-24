@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -41,6 +42,7 @@ _UNAVAILABLE_STATUSES = {
     "disabled",
     "not_ready",
 }
+_REASON_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,95}$")
 
 
 HealthCollector = Callable[[], Mapping[str, Any] | Awaitable[Mapping[str, Any]]]
@@ -141,6 +143,7 @@ async def collect_research_workspace_capabilities(
             "slides",
             active_collectors.slides_health,
             timeout_seconds=probe_timeout_seconds,
+            timeout_status="unavailable",
             user_id=user_id,
         ),
         _run_health_probe(
@@ -213,13 +216,19 @@ def _dependency_capability(
     degraded_reason: str | None = None,
 ) -> ResearchWorkspaceCapability:
     status = _status(health)
+    reason_code = _reason_code(health)
     if status == "ready":
         return _cap("ready", "allow", [dependency])
     if status == "degraded":
-        return _cap("degraded", "warn", [dependency], degraded_reason or f"{dependency}_degraded")
+        return _cap("degraded", "warn", [dependency], reason_code or degraded_reason or f"{dependency}_degraded")
     if status == "unavailable":
-        return _cap("unavailable", "block", [dependency], unavailable_reason or f"{dependency}_unavailable")
-    return _cap("unknown", "warn", [dependency], f"{dependency}_unknown")
+        return _cap(
+            "unavailable",
+            "block",
+            [dependency],
+            reason_code or unavailable_reason or f"{dependency}_unavailable",
+        )
+    return _cap("unknown", "warn", [dependency], reason_code or f"{dependency}_unknown")
 
 
 def _compose_capability(
@@ -286,6 +295,17 @@ def _status(payload: Mapping[str, Any] | None) -> ResearchWorkspaceCapabilitySta
     return "unknown"
 
 
+def _reason_code(payload: Mapping[str, Any] | None) -> str | None:
+    """Return a sanitized reason code from a subsystem health payload."""
+    if not isinstance(payload, Mapping):
+        return None
+    value = payload.get("reason_code")
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized if _REASON_CODE_PATTERN.fullmatch(normalized) else None
+
+
 def _mapping_value(payload: Mapping[str, Any] | None, key: str) -> Mapping[str, Any] | None:
     if not isinstance(payload, Mapping):
         return None
@@ -294,6 +314,7 @@ def _mapping_value(payload: Mapping[str, Any] | None, key: str) -> Mapping[str, 
 
 
 def _default_health_collectors() -> ResearchWorkspaceHealthCollectors:
+    """Return the production health collectors used by the capabilities endpoint."""
     return ResearchWorkspaceHealthCollectors(
         aggregate_health=_collect_aggregate_health,
         rag_health=_collect_rag_health,
@@ -308,8 +329,10 @@ async def _run_health_probe(
     collector: Callable[..., Mapping[str, Any] | Awaitable[Mapping[str, Any]]],
     *,
     timeout_seconds: float,
+    timeout_status: ResearchWorkspaceCapabilityStatus = "unknown",
     **kwargs: Any,
 ) -> Mapping[str, Any]:
+    """Run one health collector with a bounded timeout and sanitized fallback payload."""
     timeout = max(0.001, float(timeout_seconds or _DEFAULT_PROBE_TIMEOUT_SECONDS))
     try:
         result = await asyncio.wait_for(
@@ -317,7 +340,7 @@ async def _run_health_probe(
             timeout=timeout,
         )
     except (asyncio.TimeoutError, TimeoutError):
-        return {"status": "unknown", "reason_code": f"{probe_name}_health_timeout"}
+        return {"status": timeout_status, "reason_code": f"{probe_name}_health_timeout"}
     except Exception:
         logger.exception("Unexpected error running Research Workspace health probe: {}", probe_name)
         return {"status": "unknown", "reason_code": f"{probe_name}_health_unknown"}
@@ -328,6 +351,7 @@ async def _invoke_health_collector(
     collector: Callable[..., Mapping[str, Any] | Awaitable[Mapping[str, Any]]],
     **kwargs: Any,
 ) -> Mapping[str, Any]:
+    """Invoke sync, async, and async-callable health collectors consistently."""
     if _is_async_callable(collector):
         return await collector(**kwargs)
     result = await asyncio.to_thread(collector, **kwargs)
@@ -337,6 +361,7 @@ async def _invoke_health_collector(
 
 
 def _is_async_callable(collector: Callable[..., Any]) -> bool:
+    """Return whether a callable or callable instance should run on the event loop."""
     return inspect.iscoroutinefunction(collector) or inspect.iscoroutinefunction(
         getattr(collector, "__call__", None)
     )

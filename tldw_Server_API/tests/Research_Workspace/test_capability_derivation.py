@@ -20,6 +20,8 @@ from tldw_Server_API.app.core.Research_Workspace.capabilities import (
     collect_research_workspace_capabilities,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _health_inputs(**overrides):
     inputs = {
@@ -186,6 +188,30 @@ def test_rag_unavailable_blocks_chat_as_dependency_failure():
     assert response.capabilities["artifact_text_generation"].mode == "allow"
 
 
+def test_unknown_dependency_health_preserves_probe_reason_code():
+    response = build_research_workspace_capabilities(
+        **_health_inputs(
+            rag_health={"status": "unknown", "reason_code": "rag_health_timeout"}
+        )
+    )
+
+    assert response.capabilities["chat"].status == "unknown"
+    assert response.capabilities["chat"].mode == "warn"
+    assert response.capabilities["chat"].reason_code == "rag_health_timeout"
+    assert response.capabilities["artifact_text_generation"].mode == "allow"
+
+
+def test_dependency_health_rejects_unsafe_reason_code_values():
+    response = build_research_workspace_capabilities(
+        **_health_inputs(
+            rag_health={"status": "unknown", "reason_code": "/tmp/secret"}
+        )
+    )
+
+    assert response.capabilities["chat"].reason_code == "rag_unknown"
+    assert "/tmp/secret" not in response.model_dump_json()
+
+
 def test_slides_and_tts_health_only_gate_their_artifact_types():
     response = build_research_workspace_capabilities(
         **_health_inputs(
@@ -204,7 +230,12 @@ def test_slides_and_tts_health_only_gate_their_artifact_types():
 
 def test_slides_db_lookup_failure_blocks_slides_generation(monkeypatch):
     fake_slides_deps = ModuleType("tldw_Server_API.app.api.v1.API_Deps.Slides_DB_Deps")
-    fake_slides_deps.try_get_slides_db_for_user = lambda current_user: None
+
+    def fake_try_get_slides_db_for_user(current_user: object) -> None:
+        assert current_user is not None
+        return None
+
+    fake_slides_deps.try_get_slides_db_for_user = fake_try_get_slides_db_for_user
     monkeypatch.setitem(
         sys.modules,
         "tldw_Server_API.app.api.v1.API_Deps.Slides_DB_Deps",
@@ -353,6 +384,54 @@ async def test_capability_collection_runs_bounded_independent_probes_concurrentl
     assert set(started) == {"aggregate", "rag", "llm", "slides:42", "tts"}
     assert response.capabilities["source_browse"].status == "unknown"
     assert response.capabilities["chat"].mode == "warn"
+
+
+@pytest.mark.asyncio
+async def test_slides_probe_timeout_blocks_slides_generation():
+    async def ready_aggregate_health():
+        return {
+            "status": "ok",
+            "checks": {
+                "database": {"status": "healthy"},
+                "chacha_notes": {"status": "healthy"},
+            },
+        }
+
+    async def ready_rag_health():
+        return {"status": "healthy"}
+
+    async def ready_llm_health():
+        return {
+            "status": "healthy",
+            "components": {"providers": {"initialized": True, "count": 1}},
+        }
+
+    async def slow_slides_health(*, user_id: int | str | None = None):
+        assert user_id == 42
+        await asyncio.sleep(0.2)
+        return {"status": "ok"}
+
+    async def ready_tts_health():
+        return {"status": "healthy", "providers": {"available": 1}}
+
+    collectors = ResearchWorkspaceHealthCollectors(
+        aggregate_health=ready_aggregate_health,
+        rag_health=ready_rag_health,
+        llm_health=ready_llm_health,
+        slides_health=slow_slides_health,
+        tts_health=ready_tts_health,
+    )
+
+    response = await collect_research_workspace_capabilities(
+        user_id=42,
+        collectors=collectors,
+        probe_timeout_seconds=0.01,
+    )
+
+    assert response.capabilities["slides_generation"].status == "unavailable"
+    assert response.capabilities["slides_generation"].mode == "block"
+    assert response.capabilities["slides_generation"].reason_code == "slides_health_timeout"
+    assert response.capabilities["artifact_text_generation"].mode == "allow"
 
 
 @pytest.mark.asyncio

@@ -10,6 +10,8 @@ from tldw_Server_API.app.api.v1.router_groups.content import API_V1_PREFIX, iter
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
 from tldw_Server_API.app.core.Research_Workspace.capabilities import build_research_workspace_capabilities
 
+pytestmark = pytest.mark.unit
+
 
 def _closure_values(callable_obj: Any) -> list[Any]:
     closure = getattr(callable_obj, "__closure__", None) or ()

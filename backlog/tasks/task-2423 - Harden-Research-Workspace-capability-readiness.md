@@ -2,6 +2,7 @@
 id: TASK-2423
 title: Harden Research Workspace capability readiness
 status: Done
+updated_date: 2026-06-24 20:07
 ---
 
 ## Description
@@ -42,6 +43,8 @@ Follow-up verification:
 - AUTH_MODE=single_user SINGLE_USER_TEST_API_KEY=test-api-key-12345 SINGLE_USER_API_KEY=test-api-key-12345 python -m pytest --confcutdir=tldw_Server_API/tests/Research_Workspace tldw_Server_API/tests/Research_Workspace -q => 22 passed, 2 warnings in 14.38s.
 - python -m bandit -r tldw_Server_API/app/core/Research_Workspace tldw_Server_API/app/api/v1/schemas/research_workspace_capabilities.py -f json -o /tmp/bandit_research_workspace_capability_readiness_review_followup.json => 0 findings.
 - git diff --check => passed.
+2026-06-24 Qodo follow-up pass: rebased onto latest origin/dev, added helper docstrings, preserved subsystem reason_code values through dependency capability mapping, made slides probe timeouts fail closed as unavailable/blocking for slides generation, replaced untyped lambda test double, added pytest unit markers for Research Workspace tests, and added regressions for slides timeout handling plus unknown dependency reason-code preservation. Verification: Research Workspace focused pytest suite passed (24 passed, 2 warnings); Bandit on touched Research Workspace scope reported 0 findings; git diff --check passed.
+Final Qodo follow-up verification after reason-code sanitization: AUTH_MODE=single_user SINGLE_USER_TEST_API_KEY=test-api-key-12345 SINGLE_USER_API_KEY=test-api-key-12345 python -m pytest --confcutdir=tldw_Server_API/tests/Research_Workspace tldw_Server_API/tests/Research_Workspace -q => 25 passed, 2 warnings in 29.87s. Bandit touched scope => 0 findings. git diff --check => passed. Branch comparison against origin/dev before commit => 0 behind / 2 ahead.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
