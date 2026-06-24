@@ -1,4 +1,5 @@
 """Tests for ACPWorkspace DB CRUD and schema migration."""
+
 import tempfile
 
 import pytest
@@ -28,22 +29,17 @@ class TestSchemaMigration:
         """A fresh DB should have all current workspace tables and columns."""
         db._ensure_schema()
         conn = db._get_conn()
-        tables = {
-            r[0]
-            for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-        }
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         assert "acp_workspaces" in tables
         assert "acp_workspace_mcp_servers" in tables
         assert "projects" in tables
-        workspace_cols = {
-            r[1] for r in conn.execute("PRAGMA table_info(acp_workspaces)").fetchall()
-        }
+        workspace_cols = {r[1] for r in conn.execute("PRAGMA table_info(acp_workspaces)").fetchall()}
         assert "canonical_workspace_id" in workspace_cols
         # Check user_version
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 3
+        assert version == 4
+        indexes = {r[1] for r in conn.execute("PRAGMA index_list(runs)").fetchall()}
+        assert "idx_runs_one_running_per_task" in indexes
 
     def test_projects_has_workspace_id_column(self, db):
         """The projects table should have a workspace_id column after migration."""
@@ -86,12 +82,7 @@ class TestSchemaMigration:
             c = db._get_conn()
 
             # Check v2 tables exist
-            tables = {
-                r[0]
-                for r in c.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
-            }
+            tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
             assert "acp_workspaces" in tables
             assert "acp_workspace_mcp_servers" in tables
 
@@ -104,13 +95,11 @@ class TestSchemaMigration:
             assert row is not None
             assert row[1] == "test"  # name
 
-            workspace_cols = {
-                r[1] for r in c.execute("PRAGMA table_info(acp_workspaces)").fetchall()
-            }
+            workspace_cols = {r[1] for r in c.execute("PRAGMA table_info(acp_workspaces)").fetchall()}
             assert "canonical_workspace_id" in workspace_cols
 
             version = c.execute("PRAGMA user_version").fetchone()[0]
-            assert version == 3
+            assert version == 4
             db.close()
 
     def test_v2_to_v3_migration_backfills_canonical_workspace_id(self):
@@ -444,9 +433,7 @@ class TestWorkspaceCRUD:
                 canonical_workspace_source="research_workspace",
             )
 
-        assert (
-            db.get_workspace_by_canonical_workspace_id("workspace-alpha").id == ws.id
-        )
+        assert db.get_workspace_by_canonical_workspace_id("workspace-alpha").id == ws.id
         assert db.get_workspace_by_canonical_workspace_id("workspace-beta") is None
 
     def test_workspace_with_git_info(self, db):
@@ -555,6 +542,20 @@ class TestWorkspaceMCPServers:
         db.create_workspace_mcp_server(ws.id, "server-b", command="cmd-b")
         servers = db.list_workspace_mcp_servers(ws.id)
         assert len(servers) == 2
+
+    def test_list_mcp_servers_wrong_user_returns_empty(self):
+        """Workspace MCP server reads should be scoped to the workspace owner."""
+        with tempfile.TemporaryDirectory() as tmp:
+            db1 = OrchestrationDB(user_id=1, db_dir=tmp)
+            db2 = OrchestrationDB(user_id=2, db_dir=tmp)
+            try:
+                ws = db1.create_workspace(name="WS1", root_path="/tmp/ws1")
+                db1.create_workspace_mcp_server(ws.id, "server-a", command="cmd-a")
+
+                assert db2.list_workspace_mcp_servers(ws.id) == []
+            finally:
+                db1.close()
+                db2.close()
 
     def test_delete_mcp_server(self, db):
         ws = db.create_workspace(name="WS1", root_path="/tmp/ws1")

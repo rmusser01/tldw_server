@@ -1,4 +1,5 @@
 """Tests for Agent Orchestration API endpoints (Phase 4.2)."""
+
 from __future__ import annotations
 
 import json
@@ -87,9 +88,7 @@ async def test_list_tasks_all_statuses(svc):
 async def test_run_inherits_agent_type(svc):
     """Run should inherit agent_type from its parent task."""
     project = await svc.create_project(name="P1", user_id=1)
-    task = await svc.create_task(
-        project.id, title="T1", agent_type="codex", user_id=1
-    )
+    task = await svc.create_task(project.id, title="T1", agent_type="codex", user_id=1)
     run = await svc.create_run(task.id, session_id="sess-1")
     assert run.agent_type == "codex"
 
@@ -161,11 +160,7 @@ async def test_get_task_run_history_includes_acp_session_drillthrough(monkeypatc
 
     def fake_audit_events(*, session_id: str):
         with acp_mod._ACP_AUDIT_LOCK:
-            return [
-                dict(event)
-                for event in acp_mod._ACP_AUDIT_EVENTS
-                if event.get("session_id") == session_id
-            ]
+            return [dict(event) for event in acp_mod._ACP_AUDIT_EVENTS if event.get("session_id") == session_id]
 
     monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(acp_mod, "_acp_list_audit_events", fake_audit_events)
@@ -190,9 +185,7 @@ async def test_get_task_run_history_includes_acp_session_drillthrough(monkeypatc
         assert enriched_run["history"]["stop_reason"] == "end"
         assert enriched_run["history"]["prompt"]["preview"] == "Task prompt text"
         assert enriched_run["history"]["result"]["preview"] == "Done"
-        assert enriched_run["history"]["artifacts"] == [
-            {"artifact_count": 1, "session_id": "session-success"}
-        ]
+        assert enriched_run["history"]["artifacts"] == [{"artifact_count": 1, "session_id": "session-success"}]
         assert enriched_run["failure_context"] is None
     finally:
         _clear_acp_audit_events()
@@ -270,11 +263,7 @@ async def test_get_task_run_history_redacted_mode_omits_support_unsafe_text(monk
 
     def fake_audit_events(*, session_id: str):
         with acp_mod._ACP_AUDIT_LOCK:
-            return [
-                dict(event)
-                for event in acp_mod._ACP_AUDIT_EVENTS
-                if event.get("session_id") == session_id
-            ]
+            return [dict(event) for event in acp_mod._ACP_AUDIT_EVENTS if event.get("session_id") == session_id]
 
     monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(acp_mod, "_acp_list_audit_events", fake_audit_events)
@@ -351,9 +340,7 @@ async def test_redact_task_review_payloads_preserves_model_like_reviews():
         reviewer="goose",
     )
 
-    payloads = orch_mod._redact_task_review_payloads(
-        [ModelLikeReview(), namespace_review]
-    )
+    payloads = orch_mod._redact_task_review_payloads([ModelLikeReview(), namespace_review])
 
     assert payloads[0]["id"] == 1
     assert payloads[0]["feedback"] == "[redacted]"
@@ -563,11 +550,19 @@ class _RejectedCompletionClient:
 
 
 class _PromptFailingClient:
+    def __init__(self) -> None:
+        """Record best-effort cleanup calls for prompt failure tests."""
+        self.closed_sessions: list[str] = []
+
     async def create_session(self, *_args, **_kwargs):
         return "session-1"
 
     async def prompt(self, *_args, **_kwargs):
         raise RuntimeError("acp prompt backend exploded")
+
+    async def close_session(self, session_id: str):
+        """Capture session cleanup calls without contacting a runner."""
+        self.closed_sessions.append(session_id)
 
 
 class _ReviewerDecisionClient:
@@ -623,9 +618,7 @@ async def test_canonical_workspace_bridge_creates_linked_execution_workspace(mon
     db = OrchestrationDB(user_id=1, db_dir=tmp_path)
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
-    canonical_db = _CanonicalWorkspaceDB(
-        {"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}}
-    )
+    canonical_db = _CanonicalWorkspaceDB({"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}})
 
     monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
@@ -668,9 +661,7 @@ async def test_canonical_workspace_bridge_reuses_existing_link(monkeypatch, tmp_
             "link_status": "linked",
         },
     )
-    canonical_db = _CanonicalWorkspaceDB(
-        {"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}}
-    )
+    canonical_db = _CanonicalWorkspaceDB({"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}})
 
     monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
@@ -702,9 +693,7 @@ async def test_canonical_workspace_bridge_links_existing_unlinked_root(monkeypat
         root_path=str(workspace_root),
         metadata={"owner": "research"},
     )
-    canonical_db = _CanonicalWorkspaceDB(
-        {"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}}
-    )
+    canonical_db = _CanonicalWorkspaceDB({"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}})
 
     monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
@@ -760,9 +749,7 @@ async def test_canonical_workspace_bridge_requires_allowed_root(monkeypatch, tmp
     db = OrchestrationDB(user_id=1, db_dir=tmp_path)
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
-    canonical_db = _CanonicalWorkspaceDB(
-        {"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}}
-    )
+    canonical_db = _CanonicalWorkspaceDB({"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}})
 
     monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: ())
@@ -802,9 +789,7 @@ async def test_canonical_workspace_bridge_rejects_root_linked_to_other_workspace
             "link_status": "linked",
         },
     )
-    canonical_db = _CanonicalWorkspaceDB(
-        {"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}}
-    )
+    canonical_db = _CanonicalWorkspaceDB({"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}})
 
     monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
@@ -958,10 +943,7 @@ async def test_list_projects_canonical_filter_normalizes_legacy_source(
         )
 
         assert [item.id for item in results] == [project.id]
-        assert (
-            results[0].canonical_workspace.canonical_workspace_source
-            == "research_workspace"
-        )
+        assert results[0].canonical_workspace.canonical_workspace_source == "research_workspace"
     finally:
         db.close()
 
@@ -1041,9 +1023,7 @@ def _acp_audit_events_for_task(task_id: int) -> list[dict]:
 
     with acp_mod._ACP_AUDIT_LOCK:
         return [
-            dict(event)
-            for event in acp_mod._ACP_AUDIT_EVENTS
-            if event.get("metadata", {}).get("task_id") == task_id
+            dict(event) for event in acp_mod._ACP_AUDIT_EVENTS if event.get("metadata", {}).get("task_id") == task_id
         ]
 
 
@@ -1074,6 +1054,69 @@ async def test_task_completion_signal_rejects_multiple_markers():
     assert exc_info.value.reason == "multiple"
 
 
+async def test_task_completion_signal_rejects_too_many_artifacts():
+    """Completion validation should bound agent-provided artifact fanout."""
+    from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
+        CompletionSignalValidationError,
+        validate_task_completion_signal,
+    )
+
+    with pytest.raises(CompletionSignalValidationError) as exc_info:
+        validate_task_completion_signal(
+            {
+                "taskCompletion": {
+                    "status": "completed",
+                    "summary": "too many artifacts",
+                    "artifacts": [{} for _ in range(21)],
+                }
+            }
+        )
+
+    assert exc_info.value.reason == "too_many_artifacts"
+
+
+async def test_task_completion_signal_rejects_oversized_direct_dict_payload():
+    """Direct dict signals should be size bounded like marker JSON strings."""
+    from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
+        CompletionSignalValidationError,
+        MAX_COMPLETION_SIGNAL_JSON_CHARS,
+        validate_task_completion_signal,
+    )
+
+    with pytest.raises(CompletionSignalValidationError) as exc_info:
+        validate_task_completion_signal(
+            {
+                "taskCompletion": {
+                    "status": "completed",
+                    "summary": "x" * (MAX_COMPLETION_SIGNAL_JSON_CHARS + 1),
+                }
+            }
+        )
+
+    assert exc_info.value.reason == "too_large"
+
+
+async def test_task_completion_signal_rejects_oversized_summary():
+    """Completion summaries should have an explicit bound below full JSON size."""
+    from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
+        CompletionSignalValidationError,
+        MAX_COMPLETION_SUMMARY_CHARS,
+        validate_task_completion_signal,
+    )
+
+    with pytest.raises(CompletionSignalValidationError) as exc_info:
+        validate_task_completion_signal(
+            {
+                "taskCompletion": {
+                    "status": "completed",
+                    "summary": "x" * (MAX_COMPLETION_SUMMARY_CHARS + 1),
+                }
+            }
+        )
+
+    assert exc_info.value.reason == "summary_too_large"
+
+
 async def test_review_decision_signal_rejects_multiple_markers():
     """Reviewer validation should require exactly one structured marker."""
     from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
@@ -1092,6 +1135,27 @@ async def test_review_decision_signal_rejects_multiple_markers():
         )
 
     assert exc_info.value.reason == "multiple"
+
+
+async def test_review_decision_signal_rejects_oversized_feedback():
+    """Reviewer feedback should have an explicit bound."""
+    from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
+        MAX_REVIEW_FEEDBACK_CHARS,
+        ReviewDecisionValidationError,
+        validate_review_decision_signal,
+    )
+
+    with pytest.raises(ReviewDecisionValidationError) as exc_info:
+        validate_review_decision_signal(
+            {
+                "reviewDecision": {
+                    "approved": False,
+                    "feedback": "x" * (MAX_REVIEW_FEEDBACK_CHARS + 1),
+                }
+            }
+        )
+
+    assert exc_info.value.reason == "feedback_too_large"
 
 
 async def test_dispatch_run_sanitizes_create_session_failure(monkeypatch, tmp_path):
@@ -1127,6 +1191,8 @@ async def test_dispatch_run_sanitizes_create_session_failure(monkeypatch, tmp_pa
 
         assert exc_info.value.status_code == 502
         assert exc_info.value.detail == "Failed to create ACP session"
+        assert db.list_runs(task.id) == []
+        assert db.get_task(task.id).status == TaskStatus.TRIAGE
         fake_logger.exception.assert_called_once_with("Failed to create ACP session")
     finally:
         db.close()
@@ -1191,9 +1257,7 @@ async def test_dispatch_run_reviewer_agent_approval_completes_and_records_review
         agent_type="codex",
         reviewer_agent_type="reviewer",
     )
-    client = _ReviewerDecisionClient(
-        {"approved": True, "feedback": "Meets the success criteria"}
-    )
+    client = _ReviewerDecisionClient({"approved": True, "feedback": "Meets the success criteria"})
     _clear_acp_audit_events()
 
     async def fake_store():
@@ -1263,9 +1327,7 @@ async def test_dispatch_run_reviewer_agent_rejection_retries_with_history(monkey
         reviewer_agent_type="reviewer",
         max_review_attempts=2,
     )
-    client = _ReviewerDecisionClient(
-        {"approved": False, "feedback": "Missing required tests"}
-    )
+    client = _ReviewerDecisionClient({"approved": False, "feedback": "Missing required tests"})
     _clear_acp_audit_events()
 
     async def fake_store():
@@ -1308,6 +1370,87 @@ async def test_dispatch_run_reviewer_agent_rejection_retries_with_history(monkey
         db.close()
 
 
+async def test_dispatch_run_allows_retry_after_rejected_review(monkeypatch, tmp_path):
+    """Rejected reviewer feedback should allow a later dispatch after runs are terminal."""
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    project = db.create_project(name="P1")
+    task = db.create_task(
+        project.id,
+        title="T1",
+        description="Dispatch me",
+        agent_type="codex",
+        reviewer_agent_type="reviewer",
+        max_review_attempts=3,
+    )
+    client_holder = {"client": _ReviewerDecisionClient({"approved": False, "feedback": "Needs another pass"})}
+
+    async def fake_store():
+        """Return a store that accepts quota and session registration."""
+        return _NoopSessionStore()
+
+    async def fake_client():
+        """Return the mutable fake client for each dispatch attempt."""
+        return client_holder["client"]
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
+        fake_store,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client",
+        fake_client,
+    )
+
+    try:
+        first = await orch_mod.dispatch_run(
+            task.id,
+            orch_mod.RunDispatchRequest(),
+            user=_TestUser(),
+        )
+        assert first["status"] == TaskStatus.IN_PROGRESS
+
+        client_holder["client"] = _ReviewerDecisionClient({"approved": True, "feedback": "Ready now"})
+        second = await orch_mod.dispatch_run(
+            task.id,
+            orch_mod.RunDispatchRequest(),
+            user=_TestUser(),
+        )
+
+        assert second["status"] == TaskStatus.COMPLETE
+        runs = db.list_runs(task.id)
+        assert len(runs) == 4
+        assert all(run.status.value == "completed" for run in runs)
+        assert [review["approved"] for review in db.list_reviews(task.id)] == [False, True]
+    finally:
+        db.close()
+
+
+async def test_dispatch_run_rejects_duplicate_active_run(monkeypatch, tmp_path):
+    """A task with an existing running run should reject duplicate dispatch."""
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db, task = await _build_dispatch_task(tmp_path)
+    db.transition_task(task.id, TaskStatus.IN_PROGRESS)
+    db.create_run(task.id, agent_type="codex", session_id="active-session")
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await orch_mod.dispatch_run(
+                task.id,
+                orch_mod.RunDispatchRequest(),
+                user=_TestUser(),
+            )
+
+        assert exc_info.value.status_code == 409
+        assert exc_info.value.detail == "Task already has a running run"
+    finally:
+        db.close()
+
+
 async def test_dispatch_run_reviewer_agent_rejection_max_attempts_triages(monkeypatch, tmp_path):
     from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
 
@@ -1321,9 +1464,7 @@ async def test_dispatch_run_reviewer_agent_rejection_max_attempts_triages(monkey
         reviewer_agent_type="reviewer",
         max_review_attempts=1,
     )
-    client = _ReviewerDecisionClient(
-        {"approved": False, "feedback": "Still fails review"}
-    )
+    client = _ReviewerDecisionClient({"approved": False, "feedback": "Still fails review"})
     _clear_acp_audit_events()
 
     async def fake_store():
@@ -1726,12 +1867,13 @@ async def test_dispatch_run_sanitizes_prompt_failure(monkeypatch, tmp_path):
 
     db, task = await _build_dispatch_task(tmp_path)
     fake_logger = MagicMock()
+    client = _PromptFailingClient()
 
     async def fake_store():
         return _NoopSessionStore()
 
     async def fake_client():
-        return _PromptFailingClient()
+        return client
 
     monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(orch_mod, "logger", fake_logger)
@@ -1754,6 +1896,7 @@ async def test_dispatch_run_sanitizes_prompt_failure(monkeypatch, tmp_path):
 
         assert exc_info.value.status_code == 502
         assert exc_info.value.detail == "ACP prompt failed"
+        assert client.closed_sessions == ["session-1"]
         fake_logger.exception.assert_called_once_with("ACP prompt failed")
     finally:
         db.close()
@@ -1765,9 +1908,7 @@ async def test_dispatch_run_sanitizes_prompt_failure(monkeypatch, tmp_path):
 async def test_review_approval_after_rejection(svc):
     """Approve should work after a previous rejection."""
     project = await svc.create_project(name="P1", user_id=1)
-    task = await svc.create_task(
-        project.id, title="T1", max_review_attempts=5, user_id=1
-    )
+    task = await svc.create_task(project.id, title="T1", max_review_attempts=5, user_id=1)
 
     # First cycle: reject
     await svc.transition_task(task.id, TaskStatus.IN_PROGRESS)
@@ -1789,12 +1930,8 @@ async def test_three_level_dependency_chain(svc):
     """Three-level dependency chain: T3 → T2 → T1."""
     project = await svc.create_project(name="P1", user_id=1)
     t1 = await svc.create_task(project.id, title="T1", user_id=1)
-    t2 = await svc.create_task(
-        project.id, title="T2", dependency_id=t1.id, user_id=1
-    )
-    t3 = await svc.create_task(
-        project.id, title="T3", dependency_id=t2.id, user_id=1
-    )
+    t2 = await svc.create_task(project.id, title="T2", dependency_id=t1.id, user_id=1)
+    t3 = await svc.create_task(project.id, title="T3", dependency_id=t2.id, user_id=1)
 
     # T3 not ready because T2 not complete
     assert await svc.check_dependency_ready(t3.id) is False

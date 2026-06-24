@@ -1,11 +1,11 @@
 """Structured completion signal parsing for ACP orchestration runs."""
+
 from __future__ import annotations
 
 import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
-
 
 _COMPLETION_MARKER_RE = re.compile(
     r"<acp-task-completion>\s*(?P<payload>.*?)\s*</acp-task-completion>",
@@ -30,6 +30,10 @@ _DIRECT_REVIEW_KEYS = (
 
 _ACCEPTED_STATUSES = {"completed", "complete", "succeeded", "success", "accepted"}
 _REJECTED_STATUSES = {"rejected", "failed", "failure", "incomplete"}
+MAX_COMPLETION_ARTIFACTS = 20
+MAX_COMPLETION_SIGNAL_JSON_CHARS = 1_000_000
+MAX_COMPLETION_SUMMARY_CHARS = 20_000
+MAX_REVIEW_FEEDBACK_CHARS = 20_000
 
 
 class CompletionSignalValidationError(ValueError):
@@ -69,8 +73,18 @@ class TaskReviewDecision:
 
 def _coerce_payload(candidate: Any) -> dict[str, Any]:
     if isinstance(candidate, dict):
+        if _json_payload_size(candidate) > MAX_COMPLETION_SIGNAL_JSON_CHARS:
+            raise CompletionSignalValidationError(
+                "too_large",
+                "ACP completion signal JSON exceeds maximum size",
+            )
         return dict(candidate)
     if isinstance(candidate, str):
+        if len(candidate) > MAX_COMPLETION_SIGNAL_JSON_CHARS:
+            raise CompletionSignalValidationError(
+                "too_large",
+                "ACP completion signal JSON exceeds maximum size",
+            )
         try:
             loaded = json.loads(candidate)
         except json.JSONDecodeError as exc:
@@ -84,6 +98,14 @@ def _coerce_payload(candidate: Any) -> dict[str, Any]:
         "malformed",
         "malformed ACP completion signal: payload must be a JSON object",
     )
+
+
+def _json_payload_size(candidate: Any) -> int:
+    """Return the serialized payload size, or over-limit for unserializable values."""
+    try:
+        return len(json.dumps(candidate, separators=(",", ":"), ensure_ascii=False))
+    except (TypeError, ValueError):
+        return MAX_COMPLETION_SIGNAL_JSON_CHARS + 1
 
 
 def _raise_review_error(reason: str, message: str) -> None:
@@ -204,10 +226,20 @@ def validate_task_completion_signal(acp_result: dict[str, Any]) -> TaskCompletio
             "malformed",
             "malformed ACP completion signal: status must be completed",
         )
+    if len(summary) > MAX_COMPLETION_SUMMARY_CHARS:
+        raise CompletionSignalValidationError(
+            "summary_too_large",
+            f"ACP completion summary exceeds limit of {MAX_COMPLETION_SUMMARY_CHARS} characters",
+        )
     if not isinstance(artifacts, list):
         raise CompletionSignalValidationError(
             "malformed",
             "malformed ACP completion signal: artifacts must be a list",
+        )
+    if len(artifacts) > MAX_COMPLETION_ARTIFACTS:
+        raise CompletionSignalValidationError(
+            "too_many_artifacts",
+            f"ACP completion signal artifacts exceed limit of {MAX_COMPLETION_ARTIFACTS}",
         )
 
     return TaskCompletionSignal(
@@ -243,6 +275,11 @@ def validate_review_decision_signal(acp_result: dict[str, Any]) -> TaskReviewDec
         )
 
     feedback = str(payload.get("feedback") or payload.get("summary") or "").strip()
+    if len(feedback) > MAX_REVIEW_FEEDBACK_CHARS:
+        _raise_review_error(
+            "feedback_too_large",
+            f"ACP review feedback exceeds limit of {MAX_REVIEW_FEEDBACK_CHARS} characters",
+        )
     if not feedback:
         feedback = "Reviewer approved task" if approved else "Reviewer rejected task"
 
