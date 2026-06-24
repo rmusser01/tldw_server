@@ -1,7 +1,7 @@
 ---
 id: TASK-2358
 title: Add Audio Studio large-artifact WebUI transport
-status: In Progress
+status: Done
 documentation:
 - Docs/superpowers/plans/2026-06-24-audio-studio-artifact-playback-implementation-plan.md
 - Docs/superpowers/specs/2026-06-24-audio-studio-large-artifact-media-tickets-design.md
@@ -37,11 +37,15 @@ Candidate approaches to compare: short-lived signed URLs, service-worker/header-
 - Added playback tickets for native audio `Range` streaming and single-use download tickets for large and non-audio artifacts.
 - Kept small known-size audio Blob preview/download behavior unchanged.
 - Added access-log redaction for media ticket token paths.
+- Extended redaction to intercepted stdlib/uvicorn access log messages so raw ticket tokens are not forwarded into Loguru.
+- Added ticket redemption content-hash revalidation to reject same-size backing-file replacement after ticket mint.
+- Added playback-ticket hash verification reuse for repeated range requests while the resolved path and stat identity are unchanged.
+- Added generic safe download filenames for non-audio ticket downloads instead of forcing audio suffixes.
 - Updated the WebUI to use playback tickets for oversized or unknown-size audio, click-only download tickets for ticket-backed audio and non-audio artifacts, and stale async guards for preview/download state.
 - Documented proxy log-redaction responsibility in `Docs/Audio_Studio.md`.
-- Backend verification: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Audio_Studio/unit/test_audio_studio_media_ticket_store.py tldw_Server_API/tests/Audio_Studio/unit/test_audio_studio_schemas.py tldw_Server_API/tests/Audio_Studio/integration/test_audio_studio_media_tickets_api.py tldw_Server_API/tests/Audio_Studio/integration/test_audio_studio_artifact_media_api.py tldw_Server_API/tests/Logging/test_access_log_redaction.py -v` -> 90 passed, 12 warnings.
+- Backend verification: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Audio_Studio/unit/test_audio_studio_media_ticket_store.py tldw_Server_API/tests/Audio_Studio/unit/test_audio_studio_schemas.py tldw_Server_API/tests/Audio_Studio/integration/test_audio_studio_media_tickets_api.py tldw_Server_API/tests/Audio_Studio/integration/test_audio_studio_artifact_media_api.py tldw_Server_API/tests/Logging/test_access_log_redaction.py -v` -> 95 passed, 12 warnings.
 - Frontend verification: `cd apps/packages/ui && bunx vitest run src/services/__tests__/audio-studio.test.ts src/components/Option/AudioStudio/__tests__/AudioStudioPage.test.tsx --maxWorkers=1` -> 47 passed.
-- Bandit verification: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Audio_Studio/media_tickets.py tldw_Server_API/app/api/v1/endpoints/audio/audio_studio.py tldw_Server_API/app/core/Logging/access_log_middleware.py -f json -o /tmp/bandit_audio_studio_media_tickets.json` -> passed, JSON report written.
+- Bandit verification: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Audio_Studio/media_tickets.py tldw_Server_API/app/api/v1/endpoints/audio/audio_studio.py tldw_Server_API/app/core/Logging/access_log_middleware.py tldw_Server_API/app/main.py -f json -o /tmp/bandit_audio_studio_media_tickets.json` -> passed, JSON report written.
 - Whitespace verification: `git diff --check` -> passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 

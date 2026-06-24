@@ -11,6 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.api.v1.endpoints.audio import audio_studio as audio_studio_endpoint
 from tldw_Server_API.app.api.v1.endpoints.audio.audio_studio import router as audio_studio_router
 from tldw_Server_API.app.core.Audio_Studio.media_tickets import hash_media_ticket_token
 from tldw_Server_API.app.core.AuthNZ.db_config import AuthDatabaseConfig
@@ -180,6 +181,7 @@ def test_download_ticket_for_non_audio_is_single_use_and_ignores_range(client_au
     assert first.status_code == 200  # nosec B101
     assert first.content == data  # nosec B101
     assert first.headers["content-disposition"].startswith("attachment;")  # nosec B101
+    assert 'filename="artifact_manifest.json"' in first.headers["content-disposition"]  # nosec B101
     assert "accept-ranges" not in {key.lower(): value for key, value in first.headers.items()}  # nosec B101
     assert second.status_code == 410  # nosec B101
     assert second.json()["detail"] == "audio_studio_media_ticket_consumed"  # nosec B101
@@ -262,6 +264,63 @@ def test_ticket_redemption_revalidates_size_mismatch(client_audio_studio_tickets
 
     assert response.status_code == 409  # nosec B101
     assert response.json()["detail"] == "audio_studio_artifact_size_mismatch"  # nosec B101
+
+
+def test_ticket_redemption_revalidates_content_hash_mismatch(client_audio_studio_tickets) -> None:
+    client, _tmp_path = client_audio_studio_tickets
+    project = _create_project(client)
+    path = _write_user_output("clip.wav")
+    artifact = _create_artifact(project, size_bytes=len(MEDIA_BYTES))
+    mint = client.post(_mint_url(project["project_id"], artifact["artifact_id"]), json={"purpose": "download"})
+    assert mint.status_code == 200  # nosec B101
+    path.write_bytes(b"x" * len(MEDIA_BYTES))
+
+    response = client.get(mint.json()["ticket_path"])
+
+    assert response.status_code == 409  # nosec B101
+    assert response.json()["detail"] == "audio_studio_artifact_hash_mismatch"  # nosec B101
+
+
+def test_playback_ticket_reuses_hash_verification_for_unchanged_file(
+    client_audio_studio_tickets,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _tmp_path = client_audio_studio_tickets
+    project = _create_project(client)
+    _write_user_output("clip.wav")
+    artifact = _create_artifact(project, size_bytes=len(MEDIA_BYTES))
+    calls = 0
+    original_sha256_file = audio_studio_endpoint._sha256_file
+
+    def counted_sha256_file(path: Path) -> str:
+        nonlocal calls
+        calls += 1
+        return original_sha256_file(path)
+
+    monkeypatch.setattr(audio_studio_endpoint, "_sha256_file", counted_sha256_file)
+    mint = client.post(_mint_url(project["project_id"], artifact["artifact_id"]), json={"purpose": "playback"})
+    assert mint.status_code == 200  # nosec B101
+
+    first = client.get(mint.json()["ticket_path"], headers={"Range": "bytes=0-4"})
+    second = client.get(mint.json()["ticket_path"], headers={"Range": "bytes=5-9"})
+
+    assert first.status_code == 206  # nosec B101
+    assert second.status_code == 206  # nosec B101
+    assert calls == 1  # nosec B101
+
+
+def test_ticket_redemption_rejects_invalid_content_hash(client_audio_studio_tickets) -> None:
+    client, _tmp_path = client_audio_studio_tickets
+    project = _create_project(client)
+    _write_user_output("clip.wav")
+    artifact = _create_artifact(project, size_bytes=len(MEDIA_BYTES), content_hash="not-a-sha256")
+    mint = client.post(_mint_url(project["project_id"], artifact["artifact_id"]), json={"purpose": "playback"})
+    assert mint.status_code == 200  # nosec B101
+
+    response = client.get(mint.json()["ticket_path"])
+
+    assert response.status_code == 409  # nosec B101
+    assert response.json()["detail"] == "audio_studio_artifact_hash_unavailable"  # nosec B101
 
 
 def test_ticket_redemption_rejects_symlink_escape_after_mint(client_audio_studio_tickets) -> None:

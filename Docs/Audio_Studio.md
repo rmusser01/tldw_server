@@ -73,16 +73,18 @@ Audio Studio supports short-lived media tickets for native browser playback and 
 - Redeem endpoint: `GET /api/v1/audio-studio/media-tickets/{token}`
 - Playback tickets are audio-only, reusable for 30 minutes, support `Range`, and use `Content-Disposition: inline`.
 - Download tickets are single-use, expire after 10 minutes, ignore browser `Range` headers, and force `Content-Disposition: attachment`.
+- Download ticket filenames preserve the artifact id plus a safe, non-dangerous file suffix such as `.json` or `.zip`.
 - The server stores only the SHA-256 hash of the ticket token.
-- Redemption repeats ownership, artifact existence, safe-root containment, symlink, file size, MIME, and extension checks.
+- Redemption repeats ownership, artifact existence, safe-root containment, symlink, file size, content hash, MIME, and extension checks.
+- Playback ticket content-hash verification is reused only while the resolved file path and stat identity remain unchanged, avoiding repeated full-file hashes for browser range requests.
 - Responses use `Cache-Control: private, no-store`, `Referrer-Policy: no-referrer`, and `X-Content-Type-Options: nosniff`.
 - `Cross-Origin-Resource-Policy: same-origin` is intentionally not set for ticket media responses until WebUI and extension/shared UI playback compatibility is verified.
 
-Application access logs redact media ticket tokens. Operators running a reverse proxy should also redact or suppress `/api/v1/audio-studio/media-tickets/{token}` in proxy access logs because the token is a short-lived bearer credential.
+Application access logs and intercepted stdlib/uvicorn access log messages redact media ticket tokens. Operators running a reverse proxy should also redact or suppress `/api/v1/audio-studio/media-tickets/{token}` in proxy access logs because the token is a short-lived bearer credential.
 
 The WebUI uses Blob transport for small known-size audio artifacts, playback tickets for oversized or unknown-size audio artifacts, and click-only download tickets for ticket-backed audio and non-audio artifacts. Download ticket URLs are held only long enough to click a temporary hidden anchor.
 
-The current regression coverage includes single-user API key access, per-user isolation, traversal and symlink rejection, duplicate relative-path disambiguation, range handling, download headers, WebUI Blob URL download/preview, media-ticket playback and download flows, no-artifact and missing-metadata states, fetch failures, stale async UI guards, and oversized or unknown-size ticket playback.
+The current regression coverage includes single-user API key access, per-user isolation, traversal and symlink rejection, duplicate relative-path disambiguation, range handling, download headers, WebUI Blob URL download/preview, media-ticket playback and download flows, hash-verification reuse for repeated range playback, no-artifact and missing-metadata states, fetch failures, stale async UI guards, and oversized or unknown-size ticket playback.
 
 ## Provider Adapters
 

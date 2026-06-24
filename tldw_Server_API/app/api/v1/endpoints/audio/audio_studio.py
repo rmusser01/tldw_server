@@ -127,6 +127,10 @@ _HASH_HEX_CHARS = set("0123456789abcdefABCDEF")
 _MEDIA_TICKET_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,256}$")
 _PLAYBACK_TICKET_TTL = timedelta(minutes=30)
 _DOWNLOAD_TICKET_TTL = timedelta(minutes=10)
+_MEDIA_TICKET_HASH_CACHE_MAX_ENTRIES = 4096
+_MediaTicketHashCacheKey = tuple[str, str]
+_MediaTicketHashCacheIdentity = tuple[str, int | None, int | None, int, int, int]
+_MEDIA_TICKET_HASH_VERIFICATION_CACHE: dict[_MediaTicketHashCacheKey, _MediaTicketHashCacheIdentity] = {}
 
 
 def _new_project_id() -> str:
@@ -537,6 +541,54 @@ def _sha256_file(path: FileSystemPath) -> str:
     return digest.hexdigest()
 
 
+def _file_hash_cache_identity(path: FileSystemPath) -> _MediaTicketHashCacheIdentity:
+    stat_result = path.stat()
+    return (
+        str(path),
+        getattr(stat_result, "st_dev", None),
+        getattr(stat_result, "st_ino", None),
+        stat_result.st_size,
+        stat_result.st_mtime_ns,
+        stat_result.st_ctime_ns,
+    )
+
+
+def _remember_ticket_hash_verification(
+    cache_key: _MediaTicketHashCacheKey,
+    identity: _MediaTicketHashCacheIdentity,
+) -> None:
+    if len(_MEDIA_TICKET_HASH_VERIFICATION_CACHE) >= _MEDIA_TICKET_HASH_CACHE_MAX_ENTRIES:
+        _MEDIA_TICKET_HASH_VERIFICATION_CACHE.clear()
+    _MEDIA_TICKET_HASH_VERIFICATION_CACHE[cache_key] = identity
+
+
+def _validate_artifact_content_hash(
+    artifact: AudioStudioArtifactRow,
+    media_path: FileSystemPath,
+    *,
+    ticket_token_hash: str | None = None,
+) -> None:
+    if not _is_sha256_hex(artifact.content_hash):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="audio_studio_artifact_hash_unavailable",
+        )
+    expected_hash = artifact.content_hash.lower()
+    cache_key = (ticket_token_hash, expected_hash) if ticket_token_hash is not None else None
+    identity = _file_hash_cache_identity(media_path) if cache_key is not None else None
+    if cache_key is not None and _MEDIA_TICKET_HASH_VERIFICATION_CACHE.get(cache_key) == identity:
+        return
+
+    if _sha256_file(media_path) != expected_hash:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="audio_studio_artifact_hash_mismatch",
+        )
+    if cache_key is not None and identity is not None:
+        refreshed_identity = _file_hash_cache_identity(media_path)
+        _remember_ticket_hash_verification(cache_key, refreshed_identity)
+
+
 def _resolve_audio_studio_artifact_path(
     *,
     collections_db: CollectionsDatabase,
@@ -628,23 +680,48 @@ def _normalize_download_mime(mime_type: str | None, path: FileSystemPath) -> str
     return normalized
 
 
-def _safe_audio_artifact_filename(
-    *,
-    artifact: AudioStudioArtifactRow,
-    media_path: FileSystemPath,
-    mime_type: str,
-) -> str:
+def _safe_artifact_filename_base(artifact: AudioStudioArtifactRow, *, fallback: str) -> str:
     safe_base = "".join(
         char
         for char in artifact.artifact_id
         if char.isascii() and (char.isalnum() or char in "._-") and char not in {'"', "'", "\r", "\n", "/", "\\"}
     ).strip("._-")
     if not safe_base:
-        safe_base = "audio-artifact"
+        return fallback
+    return safe_base
+
+
+def _safe_audio_artifact_filename(
+    *,
+    artifact: AudioStudioArtifactRow,
+    media_path: FileSystemPath,
+    mime_type: str,
+) -> str:
+    safe_base = _safe_artifact_filename_base(artifact, fallback="audio-artifact")
     suffix = media_path.suffix.lower()
     allowed_suffixes = _AUDIO_MIME_SUFFIXES.get(mime_type, set())
     if suffix not in allowed_suffixes:
         suffix = sorted(allowed_suffixes)[0] if allowed_suffixes else ".audio"
+    return f"{safe_base}{suffix}"
+
+
+def _safe_download_artifact_filename(
+    *,
+    artifact: AudioStudioArtifactRow,
+    media_path: FileSystemPath,
+    mime_type: str,
+) -> str:
+    safe_base = _safe_artifact_filename_base(artifact, fallback="artifact-download")
+    suffix = media_path.suffix.lower()
+    if (
+        not suffix
+        or suffix in _DANGEROUS_DOWNLOAD_SUFFIXES
+        or not suffix.startswith(".")
+        or not all(char.isascii() and (char.isalnum() or char in "._-") for char in suffix)
+    ):
+        suffix = str(mimetypes.guess_extension(mime_type) or ".bin").lower()
+    if suffix in _DANGEROUS_DOWNLOAD_SUFFIXES:
+        suffix = ".bin"
     return f"{safe_base}{suffix}"
 
 
@@ -656,7 +733,11 @@ def _content_disposition(
     download: bool,
 ) -> str:
     disposition = "attachment" if download else "inline"
-    filename = _safe_audio_artifact_filename(artifact=artifact, media_path=media_path, mime_type=mime_type)
+    filename = (
+        _safe_download_artifact_filename(artifact=artifact, media_path=media_path, mime_type=mime_type)
+        if download
+        else _safe_audio_artifact_filename(artifact=artifact, media_path=media_path, mime_type=mime_type)
+    )
     return f'{disposition}; filename="{filename}"'
 
 
@@ -1503,6 +1584,11 @@ async def redeem_audio_studio_media_ticket(
     actual_size = media_path.stat().st_size
     if artifact.size_bytes is not None and artifact.size_bytes != actual_size:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="audio_studio_artifact_size_mismatch")
+    _validate_artifact_content_hash(
+        artifact,
+        media_path,
+        ticket_token_hash=ticket.token_hash if ticket.purpose == AudioStudioMediaTicketPurpose.PLAYBACK.value else None,
+    )
 
     if ticket.purpose == AudioStudioMediaTicketPurpose.PLAYBACK.value:
         mime_type = _normalize_audio_mime(artifact.mime_type, media_path)

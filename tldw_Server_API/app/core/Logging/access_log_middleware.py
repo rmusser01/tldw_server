@@ -12,12 +12,16 @@ from starlette.responses import Response
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 
 _AUDIO_STUDIO_MEDIA_TICKET_PATH = re.compile(
-    r"(/api/v1/audio-studio/media-tickets/)[^/?#]+(?:[?#].*)?"
+    r"(/api/v1/audio-studio/media-tickets/)[^/?#\s\"']+"
 )
 
 
 def redact_access_log_path(path: str) -> str:
     return _AUDIO_STUDIO_MEDIA_TICKET_PATH.sub(r"\1[REDACTED]", path)
+
+
+def redact_access_log_message(message: str) -> str:
+    return redact_access_log_path(message)
 
 
 class AccessLogMiddleware(BaseHTTPMiddleware):
