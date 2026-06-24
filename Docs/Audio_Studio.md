@@ -1,15 +1,17 @@
 # Audio Studio
 
-Audio Studio is the server-backed workspace for narration, podcast, briefing, and music workflows. It replaces the Audiobook-first studio surface with `/audio-studio` while keeping `/audiobook-studio` as a compatibility route into Narration until migration is stable.
+Audio Studio is the server-backed workspace for Narration, Podcast, and Briefing workflows. It replaces the Audiobook-first studio surface with `/audio-studio` while keeping `/audiobook-studio` as a compatibility interstitial/fallback route into Narration until migration is stable.
+
+Music and SFX generation remain planned Audio Studio expansion areas. The remaining roadmap defers standalone music composition and full ACE-Step workflow work until the spoken-audio creator MVP and shared platform contracts are stable.
 
 ## Workflows
 
 - Narration: long-form chapter narration, voice settings, subtitle-oriented output, and legacy Audiobook migration.
 - Podcast: multi-speaker scripts with speaker-specific sections and speech generation.
 - Briefing: source-driven sections for summaries, updates, and analyst notes.
-- Music: prompt-based music cues and beds through provider adapters such as ACE-Step.
+- Music/SFX: planned prompt-based cues, beds, stingers, loops, and ambience through provider adapters such as ACE-Step.
 
-The API treats these as first-class workflows. Clients should pass one of `narration`, `podcast`, `briefing`, or `music` instead of inferring behavior from route names.
+The stabilization priority treats `narration`, `podcast`, and `briefing` as first-class spoken-audio workflows. Clients should pass workflow ids instead of inferring behavior from route names. `music` may appear in compatibility or experimental surfaces, but implementation planning treats ACE-Step and standalone music composition as later roadmap slices.
 
 ## Routes
 
@@ -17,8 +19,8 @@ The API treats these as first-class workflows. Clients should pass one of `narra
 - `/audio-studio?workflow=narration`: opens the Narration workflow.
 - `/audio-studio?workflow=podcast`: opens the Podcast workflow.
 - `/audio-studio?workflow=briefing`: opens the Briefing workflow.
-- `/audio-studio?workflow=music`: opens the Music workflow.
-- `/audiobook-studio`: compatibility route that checks for local Audiobook projects and routes users into Narration.
+- `/audio-studio?workflow=music`: planned/follow-up Music workflow; deployments may hide or disable it until the music adapter slice lands.
+- `/audiobook-studio`: compatibility interstitial/fallback route that checks for local Audiobook projects and routes users into Narration without requiring a hard redirect during stabilization.
 
 ## API Overview
 
@@ -48,9 +50,15 @@ Mutating project, section, track, clip, generation, render, and export calls use
 
 Generation, render, and export requests require a caller-provided `idempotency_key` between 16 and 200 characters. Reusing the same key for the same project, target resource, and target revision returns the existing job instead of enqueuing duplicate work.
 
+## Roadmap Alignment
+
+The accepted remaining-work roadmap is `Docs/superpowers/specs/2026-06-24-audio-studio-remaining-roadmap-design.md`. It supersedes the earlier MVP timing for first-class music generation and ACE-Step while preserving the adapter-pattern, external HTTP provider, allowlisting, and secret-handling requirements.
+
+The next implementation slice is artifact playback/download. Provider capability metadata is a separate follow-up by default unless code inspection proves it is genuinely tiny and safe to include without blurring the artifact-access review boundary.
+
 ## Provider Adapters
 
-Audio Studio providers use an adapter registry. The MVP prefers external HTTP services for generation work and does not execute ACE-Step locally.
+Audio Studio providers use an adapter registry. External HTTP services remain the preferred shape for generation work, and Audio Studio should not execute ACE-Step locally inside the WebUI. Full ACE-Step/music workflow integration is deferred behind artifact playback, minimum provider capabilities, migration compatibility, render/export UI, spoken-workflow stabilization, and platform hardening.
 
 Provider requests are normalized before they are persisted in Jobs:
 
@@ -62,7 +70,7 @@ Provider requests are normalized before they are persisted in Jobs:
 
 ### ACE-Step
 
-ACE-Step support is exposed as the `ace_step` music provider when configured.
+ACE-Step is planned as the `ace_step` music provider behind the shared external HTTP adapter system. Treat this configuration as the target provider shape for the later music adapter slice rather than a prerequisite for the spoken-audio stabilization work.
 
 ```bash
 AUDIO_STUDIO_EXTERNAL_ENDPOINT_ALLOWLIST=
@@ -72,7 +80,7 @@ AUDIO_STUDIO_ACE_STEP_TIMEOUT_SECONDS=60
 AUDIO_STUDIO_ACE_STEP_API_KEY=
 ```
 
-For local development with an HTTP ACE-Step sidecar, set an allowlist entry for that exact loopback origin and set `AUDIO_STUDIO_ALLOW_HTTP_ENDPOINTS=true`. Do not allow broad internal networks or wildcard hosts. The MVP adapter reads these environment variables; `config.txt` keys are not active for Audio Studio providers yet.
+For local development with an HTTP ACE-Step sidecar, set an allowlist entry for that exact loopback origin and set `AUDIO_STUDIO_ALLOW_HTTP_ENDPOINTS=true`. Do not allow broad internal networks or wildcard hosts. The adapter should read these environment variables server-side; `config.txt` keys are not active for Audio Studio providers yet.
 
 ## Render And Export Separation
 

@@ -1,7 +1,7 @@
 # Audio Studio Remaining Work Roadmap
 
 Date: 2026-06-24
-Status: Reviewed, pending user review
+Status: Accepted for implementation planning
 Backlog: TASK-2355
 Related spec: Docs/superpowers/specs/2026-06-23-audio-studio-design.md
 Related implementation plan: Docs/superpowers/plans/2026-06-23-audio-studio-mvp-implementation-plan.md
@@ -328,13 +328,22 @@ Security, auth, and redaction tests should be attached to every affected provide
 
 ## Recommended Next Implementation Slice
 
-The next implementation plan should target **Phase 1, Slice 1: artifact playback/download foundation** and include the minimum provider capability contract if it remains small enough for one reviewable change. If that combined slice grows beyond a focused PR, split it into:
+The next implementation plan should target **Phase 1, Slice 1: artifact playback/download foundation**. The minimum provider capability contract should be planned as a separate follow-up by default. It can be included only if code inspection shows it is genuinely tiny, has a disjoint test surface, and does not blur the artifact-access review boundary.
 
 1. Artifact playback/download foundation.
 2. Minimum provider capability contract.
 
+The artifact slice must start by choosing the access strategy:
+
+- Backend streaming endpoint.
+- Signed temporary URL.
+- Hybrid strategy.
+
+The implementation plan should document the chosen strategy, rejected alternatives, auth implications, range/seek behavior, caching behavior, and how playback URLs are kept out of persisted project/export/job state.
+
 Initial acceptance criteria:
 
+- Artifact access strategy is chosen and documented before endpoint implementation begins.
 - Authorized artifact media endpoint or signed temporary URL strategy exists.
 - Browser playback works for generated artifacts.
 - Artifact metadata includes enough information for UI playback, render review, and future waveform work.
