@@ -18,7 +18,7 @@ modified_files:
 - tldw_Server_API/app/core/Moderation/moderation_service.py
 - tldw_Server_API/tests/unit/test_moderation_blocklist_parse.py
 - backlog/tasks/task-2432 - Implement-Moderation-PolicyCompiler-refactor.md
-updated_date: 2026-06-24 21:55
+updated_date: 2026-06-24 22:11
 ---
 
 ## Description
@@ -61,6 +61,23 @@ Verification:
 - `python -m py_compile tldw_Server_API/app/core/Moderation/moderation_service.py tldw_Server_API/app/core/Moderation/policy_compiler.py tldw_Server_API/tests/unit/test_moderation_policy_compiler.py tldw_Server_API/tests/unit/test_moderation_effective_settings.py` -> passed
 - `git diff --check HEAD~2..HEAD` -> passed
 - `python -m bandit -r tldw_Server_API/app/core/Moderation -f json -o /tmp/bandit_moderation_policy_compiler_task4.json` -> 0 findings
+Task 5 completed and reviewed.
+
+Implementation commits:
+- 09858ee8c Move moderation user policy assembly into compiler
+- 81140de7f Harden moderation user policy compiler tests
+
+Spec review: APPROVE. Verified `PolicyCompiler.compile_user_policy()` returns `PolicyCompilationResult`, owns per-user field/category/quick-rule assembly, and `ModerationService.get_effective_policy()` delegates while keeping compatibility wrappers for private helpers.
+
+Quality review: APPROVE. No blocking findings. Reviewer suggested extra compiler-boundary tests and copying default category sets to avoid shared mutable state. Follow-up commit 81140de7f added tests for `override=None`, non-list rules, invalid category type, invalid phase defaulting, and the mutable-category case; it also copies default category sets when reused.
+
+Verification:
+- Worker red check: mutability test failed before fix because base categories were mutated.
+- `python -m pytest tldw_Server_API/tests/unit/test_moderation_policy_compiler.py tldw_Server_API/tests/unit/test_moderation_blocklist_parse.py tldw_Server_API/tests/unit/test_moderation_user_override_validation.py -q` -> 64 passed
+- `python -m pytest tldw_Server_API/tests/unit/test_moderation*.py -q` -> 123 passed
+- `python -m py_compile tldw_Server_API/app/core/Moderation/policy_compiler.py tldw_Server_API/app/core/Moderation/moderation_service.py tldw_Server_API/tests/unit/test_moderation_policy_compiler.py tldw_Server_API/tests/unit/test_moderation_blocklist_parse.py tldw_Server_API/tests/unit/test_moderation_user_override_validation.py` -> passed
+- `git diff --check HEAD~2..HEAD` -> passed
+- `python -m bandit -r tldw_Server_API/app/core/Moderation/policy_compiler.py tldw_Server_API/app/core/Moderation/moderation_service.py -f json -o /tmp/bandit_moderation_policy_compiler_task5_final.json` -> 0 findings
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
