@@ -1,62 +1,71 @@
-import React, { useEffect } from "react"
-import { Typography } from "antd"
-import { PageShell } from "@/components/Common/PageShell"
-import { useLocation } from "react-router-dom"
-import { useAudioStudioProjects } from "@/hooks/useAudioStudioProjects"
+import React, { useEffect } from "react";
+import { Typography } from "antd";
+import { PageShell } from "@/components/Common/PageShell";
+import { useLocation } from "react-router-dom";
+import {
+  useAudioStudioArtifacts,
+  useAudioStudioProjects,
+} from "@/hooks/useAudioStudioProjects";
 import {
   AUDIO_STUDIO_WORKFLOWS,
   useAudioStudioStore,
-  type AudioStudioWorkflow
-} from "@/store/audio-studio"
-import { BriefingWorkflow } from "./BriefingWorkflow"
-import { GenerationPanel } from "./GenerationPanel"
-import { MigrationBanner } from "./MigrationBanner"
-import { MusicWorkflow } from "./MusicWorkflow"
-import { NarrationWorkflow } from "./NarrationWorkflow"
-import { PodcastWorkflow } from "./PodcastWorkflow"
-import { ProjectHeader } from "./ProjectHeader"
-import { ProjectSidebar } from "./ProjectSidebar"
-import { RenderExportPanel } from "./RenderExportPanel"
-import { TimelineEditor } from "./TimelineEditor"
-import { WorkflowSwitcher } from "./WorkflowSwitcher"
+  type AudioStudioWorkflow,
+} from "@/store/audio-studio";
+import { BriefingWorkflow } from "./BriefingWorkflow";
+import { GenerationPanel } from "./GenerationPanel";
+import { MigrationBanner } from "./MigrationBanner";
+import { MusicWorkflow } from "./MusicWorkflow";
+import { NarrationWorkflow } from "./NarrationWorkflow";
+import { PodcastWorkflow } from "./PodcastWorkflow";
+import { ProjectHeader } from "./ProjectHeader";
+import { ProjectSidebar } from "./ProjectSidebar";
+import { RenderExportPanel } from "./RenderExportPanel";
+import { TimelineEditor } from "./TimelineEditor";
+import { WorkflowSwitcher } from "./WorkflowSwitcher";
 
-const { Text } = Typography
+const { Text } = Typography;
 
 const WORKFLOW_IDS = new Set<AudioStudioWorkflow>(
-  AUDIO_STUDIO_WORKFLOWS.map((workflow) => workflow.id)
-)
+  AUDIO_STUDIO_WORKFLOWS.map((workflow) => workflow.id),
+);
 
 const getWorkflowFromSearch = (search: string): AudioStudioWorkflow | null => {
-  const workflow = new URLSearchParams(search).get("workflow")
+  const workflow = new URLSearchParams(search).get("workflow");
   return WORKFLOW_IDS.has(workflow as AudioStudioWorkflow)
     ? (workflow as AudioStudioWorkflow)
-    : null
-}
+    : null;
+};
 
 const WorkflowEditor: React.FC<{ workflow: AudioStudioWorkflow }> = ({
-  workflow
+  workflow,
 }) => {
-  if (workflow === "podcast") return <PodcastWorkflow />
-  if (workflow === "briefing") return <BriefingWorkflow />
-  if (workflow === "music") return <MusicWorkflow />
-  return <NarrationWorkflow />
-}
+  if (workflow === "podcast") return <PodcastWorkflow />;
+  if (workflow === "briefing") return <BriefingWorkflow />;
+  if (workflow === "music") return <MusicWorkflow />;
+  return <NarrationWorkflow />;
+};
 
 export const AudioStudioPage: React.FC = () => {
-  const location = useLocation()
-  const activeWorkflow = useAudioStudioStore((state) => state.activeWorkflow)
-  const setActiveWorkflow = useAudioStudioStore((state) => state.setActiveWorkflow)
+  const location = useLocation();
+  const activeWorkflow = useAudioStudioStore((state) => state.activeWorkflow);
+  const activeProject = useAudioStudioStore((state) => state.activeProject);
+  const setActiveWorkflow = useAudioStudioStore(
+    (state) => state.setActiveWorkflow,
+  );
   const projectsQuery = useAudioStudioProjects({
     workflow: activeWorkflow,
-    includeArchived: false
-  })
+    includeArchived: false,
+  });
+  const artifactsQuery = useAudioStudioArtifacts(
+    activeProject?.project_id ?? null,
+  );
 
   useEffect(() => {
-    const workflow = getWorkflowFromSearch(location.search)
+    const workflow = getWorkflowFromSearch(location.search);
     if (workflow && workflow !== activeWorkflow) {
-      setActiveWorkflow(workflow)
+      setActiveWorkflow(workflow);
     }
-  }, [activeWorkflow, location.search, setActiveWorkflow])
+  }, [activeWorkflow, location.search, setActiveWorkflow]);
 
   return (
     <PageShell maxWidthClassName="max-w-7xl" className="py-4">
@@ -91,8 +100,8 @@ export const AudioStudioPage: React.FC = () => {
             <RenderExportPanel />
           </div>
         </div>
-        <TimelineEditor />
+        <TimelineEditor artifacts={artifactsQuery.data ?? []} />
       </div>
     </PageShell>
-  )
-}
+  );
+};

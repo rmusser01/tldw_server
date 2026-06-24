@@ -1,126 +1,143 @@
-import { useEffect } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import {
-  createAudioStudioProject,
-  listAudioStudioProjects,
-  updateAudioStudioProject,
-  upsertAudioStudioClip,
-  upsertAudioStudioSection,
-  type AudioStudioClipUpsertRequest,
-  type AudioStudioSectionUpsertRequest,
-  type CreateAudioStudioProjectRequest,
-  type ListAudioStudioProjectsParams,
-  type UpdateAudioStudioProjectRequest
-} from "@/services/audio-studio"
-import { useAudioStudioStore } from "@/store/audio-studio"
+import { useEffect } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import * as audioStudioService from "@/services/audio-studio";
+import { useAudioStudioStore } from "@/store/audio-studio";
 
 export const audioStudioProjectQueryKeys = {
   all: ["audio-studio"] as const,
   projects: () => [...audioStudioProjectQueryKeys.all, "projects"] as const,
-  projectList: (params: ListAudioStudioProjectsParams = {}) =>
-    [...audioStudioProjectQueryKeys.projects(), params] as const
-}
+  projectList: (
+    params: audioStudioService.ListAudioStudioProjectsParams = {},
+  ) => [...audioStudioProjectQueryKeys.projects(), params] as const,
+  artifacts: (projectId: string | null) =>
+    [...audioStudioProjectQueryKeys.all, "artifacts", projectId] as const,
+};
 
 export const useAudioStudioProjects = (
-  params: ListAudioStudioProjectsParams = {}
+  params: audioStudioService.ListAudioStudioProjectsParams = {},
 ) => {
-  const setProjects = useAudioStudioStore((state) => state.setProjects)
+  const setProjects = useAudioStudioStore((state) => state.setProjects);
   const query = useQuery({
     queryKey: audioStudioProjectQueryKeys.projectList(params),
-    queryFn: () => listAudioStudioProjects(params)
-  })
+    queryFn: () => audioStudioService.listAudioStudioProjects(params),
+  });
 
   useEffect(() => {
     if (query.data) {
-      setProjects(query.data)
+      setProjects(query.data);
     }
-  }, [query.data, setProjects])
+  }, [query.data, setProjects]);
 
-  return query
-}
+  return query;
+};
+
+export const useAudioStudioArtifacts = (projectId: string | null) =>
+  useQuery({
+    queryKey: audioStudioProjectQueryKeys.artifacts(projectId),
+    queryFn: () => {
+      if (!projectId) return Promise.resolve([]);
+      return audioStudioService.listAudioStudioArtifacts(projectId);
+    },
+    enabled: Boolean(projectId),
+    initialData: [],
+  });
 
 export const useCreateAudioStudioProject = () => {
-  const queryClient = useQueryClient()
+  const queryClient = useQueryClient();
   const upsertProjectFromServer = useAudioStudioStore(
-    (state) => state.upsertProjectFromServer
-  )
-  const setActiveProjectId = useAudioStudioStore((state) => state.setActiveProjectId)
+    (state) => state.upsertProjectFromServer,
+  );
+  const setActiveProjectId = useAudioStudioStore(
+    (state) => state.setActiveProjectId,
+  );
 
   return useMutation({
-    mutationFn: (payload: CreateAudioStudioProjectRequest) =>
-      createAudioStudioProject(payload),
+    mutationFn: (payload: audioStudioService.CreateAudioStudioProjectRequest) =>
+      audioStudioService.createAudioStudioProject(payload),
     onSuccess: (project) => {
-      upsertProjectFromServer(project)
-      setActiveProjectId(project.project_id)
+      upsertProjectFromServer(project);
+      setActiveProjectId(project.project_id);
       queryClient.invalidateQueries({
-        queryKey: audioStudioProjectQueryKeys.projects()
-      })
-    }
-  })
-}
+        queryKey: audioStudioProjectQueryKeys.projects(),
+      });
+    },
+  });
+};
 
 export const useUpdateAudioStudioProject = (projectId: string | null) => {
-  const queryClient = useQueryClient()
+  const queryClient = useQueryClient();
   const upsertProjectFromServer = useAudioStudioStore(
-    (state) => state.upsertProjectFromServer
-  )
-  const markProjectClean = useAudioStudioStore((state) => state.markProjectClean)
+    (state) => state.upsertProjectFromServer,
+  );
+  const markProjectClean = useAudioStudioStore(
+    (state) => state.markProjectClean,
+  );
 
   return useMutation({
-    mutationFn: (payload: UpdateAudioStudioProjectRequest) => {
-      if (!projectId) throw new Error("Audio Studio project is required")
-      return updateAudioStudioProject(projectId, payload)
+    mutationFn: (
+      payload: audioStudioService.UpdateAudioStudioProjectRequest,
+    ) => {
+      if (!projectId) throw new Error("Audio Studio project is required");
+      return audioStudioService.updateAudioStudioProject(projectId, payload);
     },
     onSuccess: (project) => {
-      markProjectClean(project.project_id)
-      upsertProjectFromServer(project)
+      markProjectClean(project.project_id);
+      upsertProjectFromServer(project);
       queryClient.invalidateQueries({
-        queryKey: audioStudioProjectQueryKeys.projects()
-      })
-    }
-  })
-}
+        queryKey: audioStudioProjectQueryKeys.projects(),
+      });
+    },
+  });
+};
 
 export const useUpsertAudioStudioSection = (projectId: string | null) => {
-  const queryClient = useQueryClient()
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: ({
       sectionId,
-      payload
+      payload,
     }: {
-      sectionId: string
-      payload: AudioStudioSectionUpsertRequest
+      sectionId: string;
+      payload: audioStudioService.AudioStudioSectionUpsertRequest;
     }) => {
-      if (!projectId) throw new Error("Audio Studio project is required")
-      return upsertAudioStudioSection(projectId, sectionId, payload)
+      if (!projectId) throw new Error("Audio Studio project is required");
+      return audioStudioService.upsertAudioStudioSection(
+        projectId,
+        sectionId,
+        payload,
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: audioStudioProjectQueryKeys.projects()
-      })
-    }
-  })
-}
+        queryKey: audioStudioProjectQueryKeys.projects(),
+      });
+    },
+  });
+};
 
 export const useUpsertAudioStudioClip = (projectId: string | null) => {
-  const queryClient = useQueryClient()
+  const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: ({
       clipId,
-      payload
+      payload,
     }: {
-      clipId: string
-      payload: AudioStudioClipUpsertRequest
+      clipId: string;
+      payload: audioStudioService.AudioStudioClipUpsertRequest;
     }) => {
-      if (!projectId) throw new Error("Audio Studio project is required")
-      return upsertAudioStudioClip(projectId, clipId, payload)
+      if (!projectId) throw new Error("Audio Studio project is required");
+      return audioStudioService.upsertAudioStudioClip(
+        projectId,
+        clipId,
+        payload,
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: audioStudioProjectQueryKeys.projects()
-      })
-    }
-  })
-}
+        queryKey: audioStudioProjectQueryKeys.projects(),
+      });
+    },
+  });
+};
