@@ -58,9 +58,11 @@ from tldw_Server_API.app.core.Metrics.stt_metrics import (
 )
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Usage.audio_quota import (
+    AudioQuotaStoreUnavailable,
     add_daily_minutes,
     can_start_job,
     check_daily_minutes_allow,
+    consume_daily_minutes,
     finish_job,
     get_job_heartbeat_interval_seconds,
     get_limits_for_user,
@@ -76,6 +78,7 @@ router = APIRouter(
         429: {"description": "Rate limit exceeded"},
     },
 )
+_AUDIO_QUOTA_DB_EXC = (*EXPECTED_DB_EXC, AudioQuotaStoreUnavailable)
 
 _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -185,6 +188,7 @@ def _audio_shim_attr(name: str):
     defaults: dict[str, Any] = {
         "check_daily_minutes_allow": check_daily_minutes_allow,
         "add_daily_minutes": add_daily_minutes,
+        "consume_daily_minutes": consume_daily_minutes,
         "get_job_heartbeat_interval_seconds": get_job_heartbeat_interval_seconds,
         "heartbeat_jobs": heartbeat_jobs,
         "get_limits_for_user": get_limits_for_user,
@@ -262,6 +266,28 @@ async def _check_daily_minutes_allow(user_id: int, minutes: float):
 
 async def _add_daily_minutes(user_id: int, minutes: float):
     return await _audio_shim_attr("add_daily_minutes")(user_id, minutes)
+
+
+async def _consume_daily_minutes(user_id: int, minutes: float, *, operation_id: str | None = None):
+    check_fn = _audio_shim_attr("check_daily_minutes_allow")
+    add_fn = _audio_shim_attr("add_daily_minutes")
+    try:
+        consume_fn = _audio_shim_attr("consume_daily_minutes")
+    except (AttributeError, KeyError, NameError):
+        consume_fn = None
+    legacy_quota_override = (
+        consume_fn is None
+        or (
+            consume_fn is consume_daily_minutes
+            and (check_fn is not check_daily_minutes_allow or add_fn is not add_daily_minutes)
+        )
+    )
+    if legacy_quota_override:
+        allowed, remaining_after = await check_fn(user_id, minutes)
+        if allowed:
+            await add_fn(user_id, minutes)
+        return allowed, remaining_after
+    return await consume_fn(user_id, minutes, operation_id=operation_id)
 
 
 def _stt_provider_envelope(stt_registry: Any, provider_name: str) -> Optional[dict[str, Any]]:
@@ -832,10 +858,14 @@ async def create_transcription(
 
         minutes_est = duration_seconds / 60.0
         try:
-            allow, remaining_after = await _check_daily_minutes_allow(current_user.id, minutes_est)
-        except EXPECTED_DB_EXC as e:
+            allow, remaining_after = await _consume_daily_minutes(
+                current_user.id,
+                minutes_est,
+                operation_id=f"audio-transcription:{rid}:daily-minutes",
+            )
+        except _AUDIO_QUOTA_DB_EXC as e:
             logger.exception(
-                'check_daily_minutes_allow failed; allowing by default: user_id={}, error={}; request_id={}',
+                'consume_daily_minutes failed; allowing by default: user_id={}, error={}; request_id={}',
                 current_user.id,
                 e,
                 rid,
@@ -1083,15 +1113,6 @@ async def create_transcription(
         else:
             redaction_outcome = "skipped"
 
-        try:
-            await _add_daily_minutes(current_user.id, minutes_est)
-        except EXPECTED_DB_EXC as e:
-            logger.exception(
-                'Failed to record daily minutes: user_id={}, error={}; request_id={}',
-                current_user.id,
-                e,
-                rid,
-            )
         # Billing: record actual transcription minutes to org-level enforcement
         if enforcement_enabled() and billing_org_id is not None and minutes_est > 0:
             _billed_minutes = max(1, int(math.ceil(minutes_est)))

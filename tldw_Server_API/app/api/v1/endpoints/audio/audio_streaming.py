@@ -48,11 +48,13 @@ from tldw_Server_API.app.core.Audio.streaming_exceptions import QuotaExceeded
 from tldw_Server_API.app.core.Audio.transcription_service import _map_openai_audio_model_to_whisper
 from tldw_Server_API.app.core.Audio.quota_helpers import EXPECTED_DB_EXC, EXPECTED_REDIS_EXC, _get_failopen_cap_minutes
 from tldw_Server_API.app.core.Usage.audio_quota import (
+    AudioQuotaStoreUnavailable,
     active_streams_count,
     add_daily_minutes,
     bytes_to_seconds,
     can_start_stream,
     check_daily_minutes_allow,
+    consume_daily_minutes,
     finish_job,
     finish_stream,
     get_daily_minutes_used,
@@ -214,6 +216,7 @@ _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS = (
     *EXPECTED_DB_EXC,
     *EXPECTED_REDIS_EXC,
 )
+_AUDIO_QUOTA_DB_EXC = (*EXPECTED_DB_EXC, AudioQuotaStoreUnavailable)
 
 router = APIRouter(
     tags=["Audio"],
@@ -241,6 +244,7 @@ def _audio_shim_attr(name: str):
         "finish_stream": finish_stream,
         "check_daily_minutes_allow": check_daily_minutes_allow,
         "add_daily_minutes": add_daily_minutes,
+        "consume_daily_minutes": consume_daily_minutes,
         "bytes_to_seconds": bytes_to_seconds,
         "heartbeat_stream": heartbeat_stream,
         "active_streams_count": active_streams_count,
@@ -718,6 +722,28 @@ async def _check_daily_minutes_allow(user_id: int, minutes: float):
 
 async def _add_daily_minutes(user_id: int, minutes: float):
     return await _audio_shim_attr("add_daily_minutes")(user_id, minutes)
+
+
+async def _consume_daily_minutes(user_id: int, minutes: float, *, operation_id: str | None = None):
+    check_fn = _audio_shim_attr("check_daily_minutes_allow")
+    add_fn = _audio_shim_attr("add_daily_minutes")
+    try:
+        consume_fn = _audio_shim_attr("consume_daily_minutes")
+    except (AttributeError, KeyError, NameError):
+        consume_fn = None
+    legacy_quota_override = (
+        consume_fn is None
+        or (
+            consume_fn is consume_daily_minutes
+            and (check_fn is not check_daily_minutes_allow or add_fn is not add_daily_minutes)
+        )
+    )
+    if legacy_quota_override:
+        allowed, remaining_after = await check_fn(user_id, minutes)
+        if allowed:
+            await add_fn(user_id, minutes)
+        return allowed, remaining_after
+    return await consume_fn(user_id, minutes, operation_id=operation_id)
 
 
 def _bytes_to_seconds(size_bytes: int, sample_rate: int) -> float:
@@ -1291,12 +1317,10 @@ async def websocket_transcribe(
                 _QuotaExceeded: If adding this chunk would exceed the user's daily minutes quota.
 
             Notes:
-                - Checks whether the user's remaining daily minutes allow this chunk; if allowed, increments the nonlocal
-                  `used_minutes` counter and records the minutes via `_add_daily_minutes`.
+                - Consumes this chunk from the user's daily minutes in one quota-store operation.
             """
             nonlocal used_minutes, failopen_remaining, remaining_minutes_snapshot
             minutes_chunk = float(seconds) / 60.0
-            deducted = False
             allow = False
             # Fast-path local check: if we have a remaining snapshot and this
             # chunk would exceed it, raise immediately without a DB round-trip.
@@ -1307,13 +1331,13 @@ async def websocket_transcribe(
             # chunk; on success, we treat the returned "remaining_after" value
             # as the new snapshot.
             try:
-                allow, remaining_after = await _check_daily_minutes_allow(user_id_for_usage, minutes_chunk)
+                allow, remaining_after = await _consume_daily_minutes(user_id_for_usage, minutes_chunk)
                 if allow and remaining_after is not None:
                     remaining_minutes_snapshot = float(remaining_after)
-            except EXPECTED_DB_EXC as e:
+            except _AUDIO_QUOTA_DB_EXC as e:
                 # Backing store failed; allow temporarily but deduct from bounded fail-open budget
                 logger.warning(
-                    f"_check_daily_minutes_allow failed during streaming; temporarily allowing (bounded fail-open). user_id={user_id_for_usage}, error={e}"
+                    f"consume_daily_minutes failed during streaming; temporarily allowing (bounded fail-open). user_id={user_id_for_usage}, error={e}"
                 )
                 allow = True
                 failopen_remaining -= minutes_chunk
@@ -1324,7 +1348,6 @@ async def websocket_transcribe(
                     increment_counter("audio_failopen_events_total", labels={"reason": "db_check"})
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as m_err:
                     logger.debug(f"metrics increment failed (audio_failopen_db_check): error={m_err}")
-                deducted = True
                 if failopen_remaining <= 0:
                     try:
                         increment_counter("audio_failopen_cap_exhausted_total", labels={"reason": "db_check"})
@@ -1335,35 +1358,6 @@ async def websocket_transcribe(
                 # Raise structured signal to outer scope
                 raise _QuotaExceeded("daily_minutes")
             used_minutes += minutes_chunk
-            # Reduce the local snapshot so subsequent chunks can be checked
-            # without hitting the DB until it is exhausted or refreshed on
-            # the next successful check.
-            if remaining_minutes_snapshot is not None:
-                remaining_minutes_snapshot = max(0.0, remaining_minutes_snapshot - minutes_chunk)
-            try:
-                await _add_daily_minutes(user_id_for_usage, minutes_chunk)
-            except EXPECTED_DB_EXC as e:
-                # Could not record; continue streaming under bounded fail-open
-                logger.warning(
-                    f"Failed to record streaming minutes (bounded fail-open). user_id={user_id_for_usage}, error={e}"
-                )
-                if not deducted:
-                    failopen_remaining -= minutes_chunk
-                    try:
-                        increment_counter(
-                            "audio_failopen_minutes_total",
-                            value=float(minutes_chunk),
-                            labels={"reason": "db_record"},
-                        )
-                        increment_counter("audio_failopen_events_total", labels={"reason": "db_record"})
-                    except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as m_err:
-                        logger.debug(f"metrics increment failed (audio_failopen_db_record): error={m_err}")
-                    if failopen_remaining <= 0:
-                        try:
-                            increment_counter("audio_failopen_cap_exhausted_total", labels={"reason": "db_record"})
-                        except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as m_err:
-                            logger.debug(f"metrics increment failed (audio_failopen_cap_db_record): error={m_err}")
-                        raise _QuotaExceeded("daily_minutes") from None
             # Billing: accumulate fractional minutes; flush to cache when >= 1
             nonlocal _billing_minutes_accumulator
             if _ws_billing_org_id is not None:
@@ -1698,19 +1692,18 @@ async def websocket_audio_chat_stream(
         async def _on_audio_quota(seconds: float, _sr: int) -> None:
             nonlocal used_minutes, failopen_remaining, remaining_minutes_snapshot
             minutes_chunk = float(seconds) / 60.0
-            deducted = False
             allow = False
 
             if remaining_minutes_snapshot is not None and minutes_chunk > remaining_minutes_snapshot:
                 raise QuotaExceeded("daily_minutes")
 
             try:
-                allow, remaining_after = await _check_daily_minutes_allow(user_id_for_usage, minutes_chunk)
+                allow, remaining_after = await _consume_daily_minutes(user_id_for_usage, minutes_chunk)
                 if allow and remaining_after is not None:
                     remaining_minutes_snapshot = float(remaining_after)
-            except EXPECTED_DB_EXC as e:
+            except _AUDIO_QUOTA_DB_EXC as e:
                 logger.warning(
-                    f"_check_daily_minutes_allow failed during streaming; temporarily allowing "
+                    f"consume_daily_minutes failed during streaming; temporarily allowing "
                     f"(bounded fail-open). user_id={user_id_for_usage}, error={e}"
                 )
                 allow = True
@@ -1722,7 +1715,6 @@ async def websocket_audio_chat_stream(
                     increment_counter("audio_failopen_events_total", labels={"reason": "db_check"})
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as m_err:  # noqa: BLE001
                     logger.debug(f"metrics increment failed (audio_chat_failopen_db_check): error={m_err}")
-                deducted = True
                 if failopen_remaining <= 0:
                     try:
                         increment_counter("audio_failopen_cap_exhausted_total", labels={"reason": "db_check"})
@@ -1736,33 +1728,6 @@ async def websocket_audio_chat_stream(
                 raise QuotaExceeded("daily_minutes") from None
 
             used_minutes += minutes_chunk
-            if remaining_minutes_snapshot is not None:
-                remaining_minutes_snapshot = max(0.0, remaining_minutes_snapshot - minutes_chunk)
-            try:
-                await _add_daily_minutes(user_id_for_usage, minutes_chunk)
-            except EXPECTED_DB_EXC as e:
-                logger.warning(
-                    f"Failed to record streaming minutes (bounded fail-open). user_id={user_id_for_usage}, error={e}"
-                )
-                if not deducted:
-                    failopen_remaining -= minutes_chunk
-                    try:
-                        increment_counter(
-                            "audio_failopen_minutes_total",
-                            value=float(minutes_chunk),
-                            labels={"reason": "db_record"},
-                        )
-                        increment_counter("audio_failopen_events_total", labels={"reason": "db_record"})
-                    except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as m_err:
-                        logger.debug(f"metrics increment failed (audio_chat_failopen_db_record): error={m_err}")
-                    if failopen_remaining <= 0:
-                        try:
-                            increment_counter("audio_failopen_cap_exhausted_total", labels={"reason": "db_record"})
-                        except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as m_err:
-                            logger.debug(
-                                f"metrics increment failed (audio_chat_failopen_cap_db_record): error={m_err}"
-                            )
-                        raise QuotaExceeded("daily_minutes") from None
 
         async def _on_heartbeat() -> None:
             try:

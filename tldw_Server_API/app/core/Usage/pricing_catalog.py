@@ -41,6 +41,13 @@ def _rate_value(rates: dict, *keys: str, default: float | None = None) -> float 
     return default
 
 
+UNKNOWN_BILLABLE_RATE = {"prompt": 0.01, "completion": 0.03}
+
+
+def _unknown_billable_rate() -> dict[str, float]:
+    return dict(UNKNOWN_BILLABLE_RATE)
+
+
 # Baseline defaults (USD per 1K tokens). These are indicative and can be
 # refined over time. Kept conservative to avoid under-estimating.
 DEFAULT_PRICING: dict[str, dict[str, dict[str, float]]] = {
@@ -256,16 +263,20 @@ class PricingCatalog:
         if mdl in prov_map:
             return self._entry_rate_details(prov_map[mdl], estimated=False)
 
+        best_match: tuple[str, dict] | None = None
         for mk, rates in prov_map.items():
-            if mk in mdl or mdl in mk:
-                return self._entry_rate_details(rates, estimated=True)
+            if mdl and mk and (mk in mdl or mdl in mk):
+                if best_match is None or len(mk) > len(best_match[0]):
+                    best_match = (mk, rates)
+        if best_match is not None:
+            return self._entry_rate_details(best_match[1], estimated=True)
 
-        return {"prompt": 0.01, "completion": 0.03}, True
+        return _unknown_billable_rate(), True
 
     @staticmethod
     def _entry_rate_details(rates: dict, *, estimated: bool) -> tuple[dict[str, float], bool]:
         if isinstance(rates, dict) and rates.get("placeholder"):
-            return {"prompt": 0.0, "completion": 0.0}, True
+            return _unknown_billable_rate(), True
         if not isinstance(rates, dict):
             return {"prompt": 0.0, "completion": 0.0}, True
         details = {
@@ -342,23 +353,29 @@ def _lookup_model_across_providers(catalog: PricingCatalog, model: str) -> tuple
         if mdl in prov_map:
             r = prov_map[mdl]
             if isinstance(r, dict) and r.get("placeholder"):
-                return 0.0, 0.0, True
+                return UNKNOWN_BILLABLE_RATE["prompt"], UNKNOWN_BILLABLE_RATE["completion"], True
             return (
                 float(r.get("prompt", 0.0)),
                 float(r.get("completion", 0.0)),
                 bool(r.get("estimated", False)),
             )
 
-    # Second pass: partial match across all providers
+    # Second pass: partial match across all providers, preferring the most
+    # specific catalog key.
+    best_match: dict | None = None
+    best_key_length = -1
     for prov_name, prov_map in catalog._catalog.items():
         for mk, r in prov_map.items():
-            if mk in mdl or mdl in mk:
-                if isinstance(r, dict) and r.get("placeholder"):
-                    return 0.0, 0.0, True
-                return float(r.get("prompt", 0.0)), float(r.get("completion", 0.0)), True
+            if mdl and mk and (mk in mdl or mdl in mk) and len(mk) > best_key_length:
+                best_match = r
+                best_key_length = len(mk)
+    if best_match is not None:
+        if isinstance(best_match, dict) and best_match.get("placeholder"):
+            return UNKNOWN_BILLABLE_RATE["prompt"], UNKNOWN_BILLABLE_RATE["completion"], True
+        return float(best_match.get("prompt", 0.0)), float(best_match.get("completion", 0.0)), True
 
     # Fallback: same conservative default as PricingCatalog.get_rates
-    return 0.01, 0.03, True
+    return UNKNOWN_BILLABLE_RATE["prompt"], UNKNOWN_BILLABLE_RATE["completion"], True
 
 
 def list_provider_models(provider: str) -> list[str]:

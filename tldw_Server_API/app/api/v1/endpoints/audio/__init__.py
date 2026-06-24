@@ -53,6 +53,7 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     can_start_job,
     can_start_stream,
     check_daily_minutes_allow,
+    consume_daily_minutes,
     finish_job,
     finish_stream,
     get_daily_minutes_used,
