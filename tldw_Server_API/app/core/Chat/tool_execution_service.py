@@ -33,13 +33,9 @@ def _non_empty_request_value(value: Any) -> bool:
 def request_declares_local_tool_use(cleaned_args: dict[str, Any] | None) -> bool:
     if not isinstance(cleaned_args, dict):
         return False
-    if _non_empty_request_value(cleaned_args.get("tools")):
-        return True
-    if _non_empty_request_value(cleaned_args.get("functions")):
-        return True
-    if _non_empty_request_value(cleaned_args.get("tool_choice")):
-        return True
-    return _non_empty_request_value(cleaned_args.get("function_call"))
+    return _non_empty_request_value(cleaned_args.get("tools")) or _non_empty_request_value(
+        cleaned_args.get("functions")
+    )
 
 
 def ensure_tool_autoexec_supports_request(

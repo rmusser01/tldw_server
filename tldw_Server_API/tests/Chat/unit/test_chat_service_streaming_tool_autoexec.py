@@ -244,6 +244,7 @@ async def test_streaming_tool_autoexec_rejects_multi_choice_before_provider_call
         save_message_fn=save_message_fn,
         cleaned_args_overrides={
             "n": 2,
+            "tool_choice": "auto",
             "tools": [{"type": "function", "function": {"name": "notes.search", "parameters": {}}}],
         },
     )
@@ -350,6 +351,77 @@ async def test_streaming_tool_autoexec_rejects_multi_choice_fallback_args_before
 
 @pytest.mark.asyncio
 @pytest.mark.unit
+async def test_streaming_tool_autoexec_rejects_multi_choice_queued_fallback_args_before_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fallback_provider_called = False
+
+    def fake_fallback_call(**_kwargs):
+        nonlocal fallback_provider_called
+        fallback_provider_called = True
+        return _content_stream()
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-1"
+
+    class _FakeActiveQueue:
+        is_running = True
+
+        async def enqueue(self, *, processor, stream_channel, **_kwargs):
+            async def _run_processor():
+                try:
+                    result = await asyncio.get_running_loop().run_in_executor(None, processor)
+                    if hasattr(result, "__aiter__"):
+                        async for chunk in result:
+                            await stream_channel.put(chunk)
+                    else:
+                        for chunk in result:
+                            await stream_channel.put(chunk)
+                except Exception as exc:
+                    await stream_channel.put(f"data: {json.dumps({'error': {'message': str(exc)}})}\n\n")
+                    await stream_channel.put("data: [DONE]\n\n")
+                finally:
+                    await stream_channel.put(None)
+
+            asyncio.create_task(_run_processor())
+            fut = asyncio.Future()
+            fut.set_result({"status": "ok"})
+            return fut
+
+    provider_manager = _ProviderManagerStub("anthropic")
+
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", fake_fallback_call)
+    monkeypatch.setattr(chat_service, "get_request_queue", lambda: _FakeActiveQueue())
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=lambda: (_ for _ in ()).throw(chat_service.ChatAPIError("primary failed")),
+        save_message_fn=save_message_fn,
+        provider_manager=provider_manager,
+        queue_execution_enabled=True,
+        enable_provider_fallback=True,
+        refresh_provider_params=lambda fallback_provider: (
+            {
+                "api_endpoint": fallback_provider,
+                "api_key": "fallback-key",
+                "messages_payload": [{"role": "user", "content": "hi"}],
+                "model": "claude-3-7-sonnet",
+                "streaming": True,
+                "n": 2,
+                "tools": [{"type": "function", "function": {"name": "notes.search", "parameters": {}}}],
+            },
+            "claude-3-7-sonnet",
+        ),
+    )
+    chunks = await _collect_sse_chunks(response)
+
+    assert fallback_provider_called is False
+    assert provider_manager.failures == [("openai", "ChatAPIError")]
+    assert "unsupported_multi_choice_tool_autoexec" in "".join(chunks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_streaming_tool_autoexec_allows_multi_choice_without_request_tools(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -369,6 +441,34 @@ async def test_streaming_tool_autoexec_allows_multi_choice_without_request_tools
         llm_call_func=llm_call_func,
         save_message_fn=save_message_fn,
         cleaned_args_overrides={"n": 2},
+    )
+    chunks = await _collect_sse_chunks(response)
+
+    assert provider_called is True
+    assert "unsupported_multi_choice_tool_autoexec" not in "".join(chunks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_streaming_tool_autoexec_allows_multi_choice_tool_choice_without_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider_called = False
+
+    def llm_call_func():
+        nonlocal provider_called
+        provider_called = True
+        return _content_stream()
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-1"
+
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=llm_call_func,
+        save_message_fn=save_message_fn,
+        cleaned_args_overrides={"n": 2, "tool_choice": "auto"},
     )
     chunks = await _collect_sse_chunks(response)
 
