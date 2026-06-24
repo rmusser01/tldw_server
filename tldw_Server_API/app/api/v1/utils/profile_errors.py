@@ -34,13 +34,32 @@ _NOT_FOUND_MESSAGES = {
     "user_not_found",
 }
 
+_DOMAIN_CODE_PRECEDENCE = (
+    ProfileErrorCode.TEAM_NOT_FOUND,
+    ProfileErrorCode.ORG_NOT_FOUND,
+    ProfileErrorCode.TARGET_NOT_FOUND,
+    ProfileErrorCode.VERSION_MISMATCH,
+    ProfileErrorCode.FORBIDDEN_KEY,
+    ProfileErrorCode.FORBIDDEN_SCOPE,
+    ProfileErrorCode.FORBIDDEN_ROLE_ESCALATION,
+    ProfileErrorCode.UNKNOWN_KEY,
+    ProfileErrorCode.UNSUPPORTED_KEY,
+    ProfileErrorCode.INVALID_PAYLOAD,
+    ProfileErrorCode.INVALID_ACTION,
+    ProfileErrorCode.MEMBERSHIP_NOT_FOUND,
+    ProfileErrorCode.INVALID_VALUE,
+    ProfileErrorCode.TYPE_MISMATCH,
+    ProfileErrorCode.ENUM_VIOLATION,
+    ProfileErrorCode.MIN_VIOLATION,
+    ProfileErrorCode.MAX_VIOLATION,
+    ProfileErrorCode.INVALID_ROLE,
+)
+
 
 def _first_matching_code(messages: set[str]) -> ProfileErrorCode | None:
-    for message in messages:
-        try:
-            return ProfileErrorCode(message)
-        except ValueError:
-            continue
+    for code in _DOMAIN_CODE_PRECEDENCE:
+        if code.value in messages:
+            return code
     return None
 
 

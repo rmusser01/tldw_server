@@ -43,6 +43,16 @@ _UNKNOWN_KEY_MAPPING = ProfileErrorMapping(
     error_code="profile_update_unknown_key",
     detail="One or more keys are not recognized",
 )
+_INVALID_PAYLOAD_MAPPING = ProfileErrorMapping(
+    status_code=status.HTTP_400_BAD_REQUEST,
+    error_code="profile_update_invalid",
+    detail="Invalid profile update payload",
+)
+_INVALID_ACTION_MAPPING = ProfileErrorMapping(
+    status_code=status.HTTP_400_BAD_REQUEST,
+    error_code="profile_update_invalid",
+    detail="Invalid profile update action",
+)
 _FORBIDDEN_MAPPING = ProfileErrorMapping(
     status_code=status.HTTP_403_FORBIDDEN,
     error_code="profile_update_forbidden",
@@ -67,8 +77,8 @@ _INVALID_MAPPING = ProfileErrorMapping(
 _PROFILE_ERROR_MAPPINGS = {
     ProfileErrorCode.UNKNOWN_KEY: _UNKNOWN_KEY_MAPPING,
     ProfileErrorCode.UNSUPPORTED_KEY: _UNKNOWN_KEY_MAPPING,
-    ProfileErrorCode.INVALID_PAYLOAD: _UNKNOWN_KEY_MAPPING,
-    ProfileErrorCode.INVALID_ACTION: _UNKNOWN_KEY_MAPPING,
+    ProfileErrorCode.INVALID_PAYLOAD: _INVALID_PAYLOAD_MAPPING,
+    ProfileErrorCode.INVALID_ACTION: _INVALID_ACTION_MAPPING,
     ProfileErrorCode.INVALID_VALUE: _INVALID_MAPPING,
     ProfileErrorCode.TYPE_MISMATCH: _INVALID_MAPPING,
     ProfileErrorCode.ENUM_VIOLATION: _INVALID_MAPPING,
