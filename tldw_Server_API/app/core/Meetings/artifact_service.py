@@ -8,6 +8,7 @@ from typing import Any
 from tldw_Server_API.app.core.DB_Management.Meetings_DB import MeetingsDatabase
 
 _DEFAULT_FINAL_KINDS: tuple[str, ...] = ("summary", "action_items", "decisions", "speaker_stats")
+_FINALIZABLE_KINDS = set(_DEFAULT_FINAL_KINDS)
 
 
 class MeetingArtifactService:
@@ -56,23 +57,50 @@ class MeetingArtifactService:
         if self._db.get_session(session_id=session_id) is None:
             raise KeyError(f"meeting session not found: {session_id}")
 
-        requested_kinds = include or list(_DEFAULT_FINAL_KINDS)
         payloads = self._build_finalize_payloads(clean_transcript)
+        requested_kinds = self._normalize_requested_kinds(include=include)
+        unsupported = [kind for kind in requested_kinds if kind not in _FINALIZABLE_KINDS]
+        if unsupported:
+            raise ValueError(f"meeting artifact kinds are not finalizable: {', '.join(unsupported)}")
 
-        artifacts: list[dict[str, Any]] = []
-        for kind in requested_kinds:
+        artifact_specs = [
+            {
+                "kind": kind,
+                "format": "json",
+                "payload_json": payloads[kind],
+                "version": 1,
+            }
+            for kind in requested_kinds
+        ]
+        replace_kinds = requested_kinds
+        if include is not None and not requested_kinds:
+            replace_kinds = list(_DEFAULT_FINAL_KINDS)
+        artifact_ids = self._db.replace_artifacts(
+            session_id=session_id,
+            artifacts=artifact_specs,
+            replace_kinds=replace_kinds,
+            replace_version=1,
+        )
+        return [self.get_artifact(artifact_id=artifact_id) for artifact_id in artifact_ids]
+
+    @staticmethod
+    def _normalize_requested_kinds(*, include: list[str] | None) -> list[str]:
+        """Return ordered, lower-cased, de-duplicated final artifact kinds.
+
+        `None` requests the default final artifact set. An explicit list,
+        including an empty list, is preserved as the caller's requested scope
+        after trimming blank values and dropping duplicates.
+        """
+        raw_kinds = list(_DEFAULT_FINAL_KINDS) if include is None else include
+        requested_kinds: list[str] = []
+        seen: set[str] = set()
+        for kind in raw_kinds:
             normalized_kind = str(kind).strip().lower()
-            if normalized_kind not in payloads:
+            if not normalized_kind or normalized_kind in seen:
                 continue
-            artifacts.append(
-                self.create_artifact(
-                    session_id=session_id,
-                    kind=normalized_kind,
-                    format="json",
-                    payload_json=payloads[normalized_kind],
-                )
-            )
-        return artifacts
+            seen.add(normalized_kind)
+            requested_kinds.append(normalized_kind)
+        return requested_kinds
 
     @staticmethod
     def _build_finalize_payloads(transcript_text: str) -> dict[str, dict[str, Any]]:

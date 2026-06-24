@@ -38,3 +38,35 @@ def test_session_state_machine_allows_valid_transition(session_service):
 def test_session_transition_raises_for_missing_session(session_service):
     with pytest.raises(KeyError):
         session_service.transition(session_id="sess_missing", to_status="live")
+
+
+def test_session_transition_rejects_stale_current_status(
+    session_service: MeetingSessionService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = session_service.create_session(title="Race Review", meeting_type="standup")
+    real_update = session_service._db.update_session_status
+
+    def racing_update(
+        *,
+        session_id: str,
+        status: str,
+        user_id: int | str | None = None,
+        expected_status: str | None = None,
+    ) -> bool:
+        if expected_status == "scheduled":
+            assert real_update(session_id=session_id, status="processing", user_id=user_id) is True
+        return real_update(
+            session_id=session_id,
+            status=status,
+            user_id=user_id,
+            expected_status=expected_status,
+        )
+
+    monkeypatch.setattr(session_service._db, "update_session_status", racing_update)
+
+    with pytest.raises(ValueError, match="changed concurrently"):
+        session_service.transition(session_id=created["id"], to_status="live")
+
+    row = session_service.get_session(session_id=created["id"])
+    assert row["status"] == "processing"
