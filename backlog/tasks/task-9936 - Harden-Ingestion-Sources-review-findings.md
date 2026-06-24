@@ -12,6 +12,8 @@ labels:
 dependencies: []
 documentation:
   - Docs/superpowers/plans/2026-06-23-ingestion-sources-review-hardening.md
+references:
+  - https://github.com/rmusser01/tldw_server/pull/2457
 priority: high
 ---
 
@@ -52,6 +54,8 @@ Note: the default pytest run with all auto-loaded plugins was interrupted after 
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented archive member limit enforcement and explicit archive member path mapping, added local directory/local git file size fences, wrapped local git enumeration with a timeout, added ingestion source query indexes, rejected non-bool boolean payload values, and made sync job completion fail on active-job fence mismatches. Focused regression tests, py_compile, Bandit, and diff whitespace checks passed as recorded above.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2457
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
