@@ -229,6 +229,8 @@ def _validate_artifact_payload(
         return "invalid_artifact_format"
     if not target_workspace_id:
         return "missing_workspace"
+    if not isinstance(artifact, Mapping):
+        return "invalid_artifact_format"
     if note_db.get_workspace(target_workspace_id) is None:
         return "workspace_not_found"
     title = str(artifact.get("title") or "").strip()
