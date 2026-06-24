@@ -1,6 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { getAuthMode } from '@web/lib/auth';
 import { clearRuntimeAuth, setRuntimeApiBearer, setRuntimeApiKey } from '@web/lib/authStorage';
+
+vi.mock('@web/lib/api', () => {
+  return {
+    apiClient: {
+      get: vi.fn(),
+      post: vi.fn(),
+    },
+  };
+});
 
 const originalApiKey = process.env.NEXT_PUBLIC_X_API_KEY;
 const originalBearer = process.env.NEXT_PUBLIC_API_BEARER;
