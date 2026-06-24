@@ -7,6 +7,9 @@ from fastapi import Request
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.endpoints.telegram_support import (
+    TelegramCommand,
+    TelegramScope,
+    _handle_telegram_link_command,
     _reset_telegram_link_state_for_tests,
     _reset_telegram_webhook_state_for_tests,
 )
@@ -98,6 +101,99 @@ def _seed_telegram_bot(
         },
     )
     assert response.status_code == 200, response.text
+
+
+class _ScopeAwareRuntimeRepo:
+    def __init__(self) -> None:
+        self.consume_calls: list[tuple[str, str, int]] = []
+        self.link_calls: list[dict[str, object]] = []
+
+    async def consume_pairing_code(
+        self,
+        pairing_code: str,
+        *,
+        scope_type: str,
+        scope_id: int,
+    ) -> dict[str, int] | None:
+        self.consume_calls.append((pairing_code, scope_type, scope_id))
+        if scope_type == "team" and scope_id == 22:
+            return {"auth_user_id": 303}
+        return None
+
+    async def upsert_actor_link(
+        self,
+        *,
+        scope_type: str,
+        scope_id: int,
+        telegram_user_id: int,
+        auth_user_id: int,
+        telegram_username: str | None,
+    ) -> dict[str, object]:
+        link = {
+            "scope_type": scope_type,
+            "scope_id": scope_id,
+            "telegram_user_id": telegram_user_id,
+            "auth_user_id": auth_user_id,
+            "telegram_username": telegram_username,
+        }
+        self.link_calls.append(link)
+        return link
+
+
+@pytest.mark.unit
+async def test_link_command_rejects_pairing_code_for_wrong_scope() -> None:
+    runtime_repo = _ScopeAwareRuntimeRepo()
+    payload = {
+        "message": {
+            "chat": {"id": 1, "type": "private"},
+            "from": {"id": 99, "username": "candidate"},
+            "text": "/link ABCD1234",
+        }
+    }
+    command = TelegramCommand(action="link", input="ABCD1234")
+
+    wrong_scope = await _handle_telegram_link_command(
+        scope=TelegramScope(scope_type="team", scope_id=23),
+        payload=payload,
+        command=command,
+        runtime_repo=runtime_repo,
+    )
+
+    assert wrong_scope.status_code == 403
+    assert runtime_repo.consume_calls == [("ABCD1234", "team", 23)]
+    assert runtime_repo.link_calls == []
+
+
+@pytest.mark.unit
+async def test_link_command_links_pairing_code_for_current_scope() -> None:
+    runtime_repo = _ScopeAwareRuntimeRepo()
+    payload = {
+        "message": {
+            "chat": {"id": 1, "type": "private"},
+            "from": {"id": 99, "username": "candidate"},
+            "text": "/link ABCD1234",
+        }
+    }
+    command = TelegramCommand(action="link", input="ABCD1234")
+
+    correct_scope = await _handle_telegram_link_command(
+        scope=TelegramScope(scope_type="team", scope_id=22),
+        payload=payload,
+        command=command,
+        runtime_repo=runtime_repo,
+    )
+
+    assert correct_scope.status_code == 200
+    assert runtime_repo.consume_calls[-1] == ("ABCD1234", "team", 22)
+    assert runtime_repo.link_calls == [
+        {
+            "scope_type": "team",
+            "scope_id": 22,
+            "telegram_user_id": 99,
+            "auth_user_id": 303,
+            "telegram_username": "candidate",
+        }
+    ]
 
 
 def test_start_link_creates_pairing_code(client, auth_headers, principal_override):

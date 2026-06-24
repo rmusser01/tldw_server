@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
+from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
 
 
 def _normalize_scope_type(scope_type: str) -> str:
@@ -19,6 +23,27 @@ def _normalize_scope_type(scope_type: str) -> str:
 def _normalize_optional_text(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _normalize_pairing_code(value: Any) -> str:
+    """Normalize a user-entered Telegram pairing code for lookup or storage."""
+    code = str(value or "").strip().upper()
+    if not code:
+        raise ValueError("pairing_code is required")
+    return code
+
+
+@lru_cache(maxsize=1)
+def _telegram_pairing_hmac_key() -> bytes:
+    """Return cached HMAC key material for Telegram pairing-code digests."""
+    return derive_hmac_key()
+
+
+def _hash_pairing_code(pairing_code: str) -> str:
+    """Build a domain-separated HMAC digest for a normalized pairing code."""
+    message = f"telegram_pairing_code:{pairing_code}".encode("utf-8")
+    digest = hmac.new(_telegram_pairing_hmac_key(), message, hashlib.sha256).hexdigest()
+    return f"hmac_sha256:{digest}"
 
 
 @dataclass
@@ -252,7 +277,8 @@ class TelegramRuntimeRepo:
         now: datetime | None = None,
     ) -> dict[str, Any]:
         created_at = now or datetime.now(timezone.utc)
-        code = str(pairing_code or "").strip().upper()
+        code = _normalize_pairing_code(pairing_code)
+        code_hash = _hash_pairing_code(code)
         scope_type_value = _normalize_scope_type(scope_type)
         if getattr(self.db_pool, "pool", None) is not None:
             row = await self.db_pool.fetchone(
@@ -262,14 +288,16 @@ class TelegramRuntimeRepo:
                 ) VALUES ($1, $2, $3, $4, $5, $6, NULL)
                 RETURNING id, pairing_code, scope_type, scope_id, auth_user_id, created_at, expires_at, consumed_at
                 """,
-                code,
+                code_hash,
                 scope_type_value,
                 int(scope_id),
                 int(auth_user_id),
                 self._normalize_datetime_for_postgres(created_at),
                 self._normalize_datetime_for_postgres(expires_at),
             )
-            return self._row_to_dict(row)
+            out = self._row_to_dict(row)
+            out["pairing_code"] = code
+            return out
 
         await self.db_pool.execute(
             """
@@ -278,46 +306,78 @@ class TelegramRuntimeRepo:
             ) VALUES (?, ?, ?, ?, ?, ?, NULL)
             """,
             (
-                code,
+                code_hash,
                 scope_type_value,
                 int(scope_id),
                 int(auth_user_id),
                 created_at.isoformat(),
                 expires_at.isoformat(),
             ),
-        )
+            )
         row = await self.db_pool.fetchone(
             """
             SELECT id, pairing_code, scope_type, scope_id, auth_user_id, created_at, expires_at, consumed_at
             FROM telegram_pairing_codes
             WHERE pairing_code = ?
             """,
-            (code,),
+            (code_hash,),
         )
-        return self._row_to_dict(row)
+        out = self._row_to_dict(row)
+        out["pairing_code"] = code
+        return out
 
     async def consume_pairing_code(
         self,
         pairing_code: str,
         *,
+        scope_type: str,
+        scope_id: int,
         now: datetime | None = None,
     ) -> dict[str, Any] | None:
         current = now or datetime.now(timezone.utc)
-        code = str(pairing_code or "").strip().upper()
+        code = _normalize_pairing_code(pairing_code)
+        code_hash = _hash_pairing_code(code)
+        scope_type_value = _normalize_scope_type(scope_type)
+        scope_id_value = int(scope_id)
         if getattr(self.db_pool, "pool", None) is not None:
             row = await self.db_pool.fetchone(
                 """
                 UPDATE telegram_pairing_codes
                 SET consumed_at = $2
                 WHERE pairing_code = $1
+                  AND scope_type = $3
+                  AND scope_id = $4
                   AND consumed_at IS NULL
                   AND expires_at > $2
                 RETURNING id, pairing_code, scope_type, scope_id, auth_user_id, created_at, expires_at, consumed_at
                 """,
-                code,
+                code_hash,
                 self._normalize_datetime_for_postgres(current),
+                scope_type_value,
+                scope_id_value,
             )
-            return self._row_to_dict(row) if row else None
+            if row is None:
+                row = await self.db_pool.fetchone(
+                    """
+                    UPDATE telegram_pairing_codes
+                    SET consumed_at = $2
+                    WHERE pairing_code = $1
+                      AND scope_type = $3
+                      AND scope_id = $4
+                      AND consumed_at IS NULL
+                      AND expires_at > $2
+                    RETURNING id, pairing_code, scope_type, scope_id, auth_user_id, created_at, expires_at, consumed_at
+                    """,
+                    code,
+                    self._normalize_datetime_for_postgres(current),
+                    scope_type_value,
+                    scope_id_value,
+                )
+            if row is None:
+                return None
+            out = self._row_to_dict(row)
+            out["pairing_code"] = code
+            return out
 
         async with self.db_pool.transaction() as conn:
             await conn.execute(
@@ -325,29 +385,72 @@ class TelegramRuntimeRepo:
                 UPDATE telegram_pairing_codes
                 SET consumed_at = ?
                 WHERE pairing_code = ?
+                  AND scope_type = ?
+                  AND scope_id = ?
                   AND consumed_at IS NULL
                   AND datetime(expires_at) > datetime(?)
                 """,
                 (
                     current.isoformat(),
-                    code,
+                    code_hash,
+                    scope_type_value,
+                    scope_id_value,
                     current.isoformat(),
                 ),
             )
             changes_row = await conn.execute("SELECT changes() AS changed")
             changed = await changes_row.fetchone()
             if int(self._row_to_dict(changed).get("changed") or 0) <= 0:
-                return None
+                await conn.execute(
+                    """
+                    UPDATE telegram_pairing_codes
+                    SET consumed_at = ?
+                    WHERE pairing_code = ?
+                      AND scope_type = ?
+                      AND scope_id = ?
+                      AND consumed_at IS NULL
+                      AND datetime(expires_at) > datetime(?)
+                    """,
+                    (
+                        current.isoformat(),
+                        code,
+                        scope_type_value,
+                        scope_id_value,
+                        current.isoformat(),
+                    ),
+                )
+                changes_row = await conn.execute("SELECT changes() AS changed")
+                changed = await changes_row.fetchone()
+                if int(self._row_to_dict(changed).get("changed") or 0) <= 0:
+                    return None
             row_cursor = await conn.execute(
                 """
                 SELECT id, pairing_code, scope_type, scope_id, auth_user_id, created_at, expires_at, consumed_at
                 FROM telegram_pairing_codes
                 WHERE pairing_code = ?
+                  AND scope_type = ?
+                  AND scope_id = ?
                 """,
-                (code,),
+                (code_hash, scope_type_value, scope_id_value),
             )
             row = await row_cursor.fetchone()
-            return self._row_to_dict(row) if row else None
+            if row is None:
+                row_cursor = await conn.execute(
+                    """
+                    SELECT id, pairing_code, scope_type, scope_id, auth_user_id, created_at, expires_at, consumed_at
+                    FROM telegram_pairing_codes
+                    WHERE pairing_code = ?
+                      AND scope_type = ?
+                      AND scope_id = ?
+                    """,
+                    (code, scope_type_value, scope_id_value),
+                )
+                row = await row_cursor.fetchone()
+            if row is None:
+                return None
+            out = self._row_to_dict(row)
+            out["pairing_code"] = code
+            return out
 
     async def upsert_actor_link(
         self,
