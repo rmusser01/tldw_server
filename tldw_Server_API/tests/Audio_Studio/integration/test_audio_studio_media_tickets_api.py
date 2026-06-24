@@ -315,11 +315,19 @@ def test_expired_and_revoked_tickets_return_stable_gone_errors(client_audio_stud
     assert revoked_response.json()["detail"] == "audio_studio_media_ticket_revoked"  # nosec B101
 
 
-def test_unknown_and_malformed_ticket_paths_are_generic_not_found(client_audio_studio_tickets) -> None:
+def test_malformed_ticket_path_is_generic_not_found(client_audio_studio_tickets) -> None:
     client, _tmp_path = client_audio_studio_tickets
 
     malformed = client.get("/api/v1/audio-studio/media-tickets/not valid")
-    unknown = client.get("/api/v1/audio-studio/media-tickets/unknown-ticket-token")
 
     assert malformed.status_code == 404  # nosec B101
+
+
+def test_unknown_valid_ticket_path_is_generic_not_found(client_audio_studio_tickets) -> None:
+    client, _tmp_path = client_audio_studio_tickets
+    valid_unknown_token = "unknown-ticket-token-1234567890abcdef"  # nosec B105
+    assert len(valid_unknown_token) >= 32  # nosec B101
+
+    unknown = client.get(f"/api/v1/audio-studio/media-tickets/{valid_unknown_token}")
+
     assert unknown.status_code == 404  # nosec B101
