@@ -9,13 +9,15 @@ labels:
 - refactor
 priority: High
 modified_files:
-- tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_characterization.py
 - tldw_Server_API/app/core/Embeddings/request_types.py
-- tldw_Server_API/tests/Embeddings_isolated/test_request_types.py
 - tldw_Server_API/app/core/Embeddings/input_normalizer.py
+- tldw_Server_API/app/core/Embeddings/provider_resolution.py
+- tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py
+- tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_characterization.py
+- tldw_Server_API/tests/Embeddings_isolated/test_request_types.py
 - tldw_Server_API/tests/Embeddings_isolated/test_input_normalizer.py
-- backlog/tasks/task-12016 - Implement-Embeddings-request-orchestrator.md
-updated_date: 2026-06-24 19:57
+- tldw_Server_API/tests/Embeddings_isolated/test_provider_resolution.py
+updated_date: 2026-06-24 20:13
 ---
 
 ## Description
@@ -47,6 +49,12 @@ Created after baseline validation in the implementation worktree. Baseline comma
 Task 1 characterization tests completed and reviewed. Added test_embeddings_orchestrator_characterization.py covering full cache hit provider skip/order, partial cache hit miss-only execution/cache write, base64 response cache value, legacy dimension-adjustment cache write order, RG reserve/commit on full cache hit, and vector-count mismatch 502 behavior. Observed compatibility behavior: the legacy endpoint returns dimension-adjusted vectors but writes pre-adjustment provider vectors to cache. Verification: requested Task 1 pytest command passed with 11 passed, 174 warnings in 6.82s. Bandit on the touched test file passed. Spec-compliance review approved. Code-quality review initially requested fixture/app-state/assertion strengthening; worker fixed all issues; code-quality re-review approved.
 Task 2 request types completed and reviewed. Added dependency-light request_types.py with Embeddings domain errors, sanitized HTTP payloads, request/normalization/provider/policy/execution dataclasses, safe detail/tag scalar contracts, and runtime redaction for secret-bearing detail/tag values while preserving safe numeric token-count details for input_too_long. Added isolated tests for forbidden raw/secret context attributes, plan serialization, contract type hints, observability tag sanitization, domain error payload sanitization, detail redaction, post-construction detail mutation re-sanitization, token-count preservation, and mutable default isolation. Verification: initial red import failure observed; later red checks caught contract/safety regressions; final pytest passed with 9 passed, 30 warnings; compileall passed; Bandit passed. Spec compliance approved after fixes. Code-quality review approved after token-count preservation fix.
 Task 3 input normalizer completed and reviewed. Added pure input_normalizer.py with normalize_embedding_input using injected token counters/decoders and no endpoint/FastAPI/settings dependencies. Covered string, list[str], token-array, batch token-array, list-size limits, blank string/list-specific blank messages, decode failures, domain-error propagation, decoded text validation, decoder output count validation, strict token_lengths validation, raw-length accounting, absent third-return fallback, and token-limit details. Verification included multiple red checks for missing module and later shape/quality regressions; final pytest passed with 24 passed, 60 warnings; compileall passed; Bandit passed. Spec compliance approved after decoder-shape and token-accounting fixes. Code-quality review approved after list-specific empty-string and domain-error propagation fixes.
+Task 4 completed: extracted provider/model resolution into `app/core/Embeddings/provider_resolution.py`, added isolated coverage in `tests/Embeddings_isolated/test_provider_resolution.py`, and converted endpoint `_split_provider_model` / `_resolve_model_and_provider` into compatibility shims. Spec review approved with no required changes. Quality review approved; added suggested assertions for absent-model default provider/model resolution.
+
+Task 4 verification:
+- `python -m pytest -q tldw_Server_API/tests/Embeddings_isolated/test_provider_resolution.py tldw_Server_API/tests/Embeddings/test_embeddings_v5_unit.py::test_resolve_model_and_provider_strips_prefix tldw_Server_API/tests/Embeddings/test_embeddings_v5_unit.py::test_resolve_model_and_provider_rejects_mismatch` -> 34 passed, 77 warnings.
+- `python -m compileall -q tldw_Server_API/app/core/Embeddings/provider_resolution.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py tldw_Server_API/tests/Embeddings_isolated/test_provider_resolution.py` -> passed.
+- `python -m bandit -r tldw_Server_API/app/core/Embeddings/provider_resolution.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py -f json -o /tmp/bandit_embeddings_provider_resolution_coord.json` -> 0 findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -75,6 +75,11 @@ from tldw_Server_API.app.core.config import settings
 
 # Audit logging: unify later via unified audit DI; legacy import removed (unused here)
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
+from tldw_Server_API.app.core.Embeddings.provider_resolution import (
+    resolve_provider_model,
+    split_provider_model,
+)
+from tldw_Server_API.app.core.Embeddings.request_types import EmbeddingPolicyError
 
 # Circuit Breaker
 from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreaker
@@ -763,34 +768,23 @@ def _chroma_manager_for_user(user: User) -> ChromaDBManager:
 
 
 def _split_provider_model(model: str) -> tuple[str | None, str]:
-    """Split provider-qualified model IDs like 'openai:model'."""
-    if not isinstance(model, str):
-        return None, str(model)
-    if ":" in model:
-        prefix, rest = model.split(":", 1)
-        prefix = prefix.strip().lower()
-        rest = rest.strip()
-        if prefix and rest:
-            return prefix, rest
-    return None, model
+    """Compatibility shim; provider_resolution owns parsing until endpoint migration completes."""
+    return split_provider_model(model)
 
 
 def _resolve_model_and_provider(model: str | None, provider: str | None) -> tuple[str, str]:
     cfg = settings.get("EMBEDDING_CONFIG", {}) or {}
-    default_model = model or cfg.get("embedding_model") or cfg.get("default_model_id") or "sentence-transformers/all-MiniLM-L6-v2"
-    prefix_provider, stripped_model = _split_provider_model(default_model)
-    if provider:
-        resolved_provider = provider.lower()
-        if prefix_provider and prefix_provider != resolved_provider:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Model provider prefix '{prefix_provider}' does not match provider '{resolved_provider}'",
-            )
-        return stripped_model, resolved_provider
-    if prefix_provider:
-        return stripped_model, prefix_provider
-    resolved_provider = guess_provider_for_model(stripped_model, None)
-    return stripped_model, resolved_provider
+    try:
+        intent = resolve_provider_model(
+            model,
+            provider,
+            settings_config=cfg,
+            require_model=False,
+            guess_provider=guess_provider_for_model,
+        )
+    except EmbeddingPolicyError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message) from exc
+    return intent.model, intent.provider
 
 
 def _get_allowed_models() -> list[str] | None:
