@@ -47,6 +47,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     prepare_common_options,
     resolve_chunking_options_and_plan,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import redact_url_for_log
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import (
     open_safe_local_path,
     open_safe_local_path_async,
@@ -3981,8 +3982,8 @@ async def process_batch_media(
                     continue
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as policy_err:
                 logger.warning(
-                    "URL policy check failed for {}: {}",
-                    source_path_or_url,
+                        "URL policy check failed for {}: {}",
+                        redact_url_for_log(source_path_or_url),
                     policy_err,
                 )
 
@@ -4687,7 +4688,7 @@ async def process_document_like_item(
 
     try:
         if is_url:
-            logger.info("Downloading URL: {}", processing_source)
+            logger.info("Downloading URL: {}", redact_url_for_log(processing_source))
             # SSRF guard for individual item
             try:
                 from tldw_Server_API.app.core.Security.url_validation import (  # type: ignore
