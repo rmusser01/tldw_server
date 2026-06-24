@@ -4,8 +4,8 @@
 # Imports
 import asyncio
 import json
-import random
 import re
+import secrets
 import time
 from html import unescape
 from typing import Any, Optional, TypedDict
@@ -62,10 +62,46 @@ _WEBSEARCH_RUNTIME_EXCEPTIONS = (
     ValueError,
 )
 
+_SENSITIVE_LOG_FIELD_NAMES = {
+    "api_key",
+    "apikey",
+    "authorization",
+    "key",
+    "password",
+    "secret",
+    "token",
+}
+_DELAY_RANDOM = secrets.SystemRandom()
+
 
 def _set_processing_error(output_dict: dict[str, Any], message: str) -> None:
     output_dict["processing_error"] = message
     logging.error(message)
+
+
+def _redact_sensitive_mapping(mapping: dict[str, Any]) -> dict[str, Any]:
+    redacted: dict[str, Any] = {}
+    for key, value in mapping.items():
+        normalized_key = key.lower().replace("-", "_")
+        if normalized_key in _SENSITIVE_LOG_FIELD_NAMES or any(
+            token in normalized_key for token in ("api_key", "token", "secret")
+        ):
+            redacted[key] = "[REDACTED]"
+        else:
+            redacted[key] = value
+    return redacted
+
+
+def _legacy_provider_not_implemented(provider: str) -> dict[str, Any]:
+    message = f"Legacy WebSearch provider '{provider}' is not implemented"
+    return {
+        "search_engine": provider,
+        "results": [],
+        "total_results_found": 0,
+        "search_time": 0.0,
+        "error": None,
+        "processing_error": message,
+    }
 
 
 def _websearch_browser_headers(
@@ -259,6 +295,7 @@ def generate_and_search(question: str, search_params: dict) -> dict:
     web_search_results_dict["search_query"] = question
 
     # 3. Perform searches and accumulate all raw results
+    provider_warnings: list[dict[str, Any]] = []
     for q in all_queries:
         logging.info(f"Performing web search for query: {q}")
         raw_results = perform_websearch(
@@ -285,6 +322,16 @@ def generate_and_search(question: str, search_params: dict) -> dict:
         # Check for errors or invalid data
         if not isinstance(raw_results, dict) or raw_results.get("processing_error"):
             logging.error(f"Error or invalid data returned for query '{q}': {raw_results}")
+            message = (
+                raw_results.get("processing_error")
+                if isinstance(raw_results, dict)
+                else "Invalid web search result"
+            )
+            provider_warnings.append({
+                "phase": "provider",
+                "query": q,
+                "message": message,
+            })
             continue
 
         logging.info(f"Search results found for query '{q}': {len(raw_results.get('results', []))}")
@@ -294,6 +341,11 @@ def generate_and_search(question: str, search_params: dict) -> dict:
         web_search_results_dict["total_results_found"] += raw_results.get("total_results_found", 0)
         web_search_results_dict["search_time"] += raw_results.get("search_time", 0.0)
         logging.info(f"Total results found so far: {len(web_search_results_dict['results'])}")
+
+    if provider_warnings:
+        web_search_results_dict["warnings"] = provider_warnings
+        if not web_search_results_dict["results"]:
+            web_search_results_dict["processing_error"] = provider_warnings[0]["message"]
 
     return {
         "web_search_results_dict": web_search_results_dict,
@@ -325,8 +377,7 @@ async def analyze_and_aggregate(
     # 5. Allow user to review and select relevant results (if enabled)
     logging.info("Reviewing and selecting relevant results")
     if search_params.get("user_review", False):
-        logging.info("User review enabled")
-        relevant_results = review_and_select_results({"results": list(relevant_results.values())})
+        raise ValueError("Interactive user_review is not supported in server-side WebSearch")
 
     # 6. Summarize/aggregate final answer
     final_answer = aggregate_results(
@@ -522,7 +573,7 @@ async def search_result_relevance(
 
         try:
             # Add delay to avoid rate limiting
-            sleep_time = random.uniform(0.2, 0.6)
+            sleep_time = _DELAY_RANDOM.uniform(0.2, 0.6)
             await asyncio.sleep(sleep_time)
 
             if cancel_event and cancel_event.is_set():
@@ -613,18 +664,7 @@ def review_and_select_results(web_search_results_dict: dict) -> dict:
     Returns:
         Dict: A dictionary containing only the user-selected relevant results.
     """
-    relevant_results = {}
-    print("Review the search results and select the relevant ones:")
-    for idx, result in enumerate(web_search_results_dict["results"]):
-        print(f"\nResult {idx + 1}:")
-        print(f"Title: {result['title']}")
-        print(f"URL: {result['url']}")
-        print(f"Content: {result['content'][:200]}...")  # Show a preview of the content
-        user_input = input("Is this result relevant? (y/n): ").strip().lower()
-        if user_input == 'y':
-            relevant_results[str(idx)] = result
-
-    return relevant_results
+    raise ValueError("Interactive user_review is not supported in server-side WebSearch")
 
 
 ######################### Result Aggregation & Combination #########################
@@ -744,7 +784,6 @@ def aggregate_results(
         evidence_payload.append({
             "id": rid,
             "content": res.get("content"),
-            "original_content": res.get("original_content"),
             "reasoning": res.get("reasoning"),
             "chunk_index": chunk_assignments.get(rid),
         })
@@ -971,7 +1010,7 @@ def perform_websearch(search_engine, search_query, content_country, search_lang,
         search_engines_cfg = loaded_config_data.get('search_engines', {})
 
         if search_engine.lower() == "baidu":
-            raise NotImplementedError("Baidu search is not implemented")
+            return _legacy_provider_not_implemented("baidu")
 
         elif search_engine.lower() == "bing":
             # Prepare the arguments for search_web_bing
@@ -1070,19 +1109,26 @@ def perform_websearch(search_engine, search_query, content_country, search_lang,
             web_search_results = search_web_kagi(query=search_query, limit=result_count)
 
         elif search_engine.lower() == "serper":
-            raise NotImplementedError("Serper search is not implemented")
+            return _legacy_provider_not_implemented("serper")
 
         elif search_engine.lower() == "tavily":
-            raise NotImplementedError("Tavily search is not implemented")
+            return _legacy_provider_not_implemented("tavily")
 
         elif search_engine.lower() == "searx":
-            raise NotImplementedError("Searx search is not implemented")
+            return _legacy_provider_not_implemented("searx")
 
         elif search_engine.lower() == "yandex":
-            raise NotImplementedError("Yandex search is not implemented")
+            return _legacy_provider_not_implemented("yandex")
 
         else:
-            return f"Error: Invalid Search Engine Name {search_engine}"
+            return {
+                "search_engine": search_engine,
+                "results": [],
+                "total_results_found": 0,
+                "search_time": 0.0,
+                "error": None,
+                "processing_error": f"Error: Invalid Search Engine Name {search_engine}",
+            }
 
         web_search_results_dict = process_web_search_results(web_search_results, search_engine)
         return web_search_results_dict
@@ -1171,7 +1217,7 @@ def process_web_search_results(search_results: dict, search_engine: str) -> dict
     try:
         # Parse results based on the search engine
         if search_engine.lower() == "baidu":
-            pass  # Placeholder for Baidu-specific parsing
+            _set_processing_error(web_search_results_dict, "Legacy WebSearch provider 'baidu' is not implemented")
         elif search_engine.lower() == "bing":
             parse_bing_results(search_results, web_search_results_dict)
         elif search_engine.lower() == "brave":
@@ -1226,11 +1272,11 @@ def parse_html_search_results_generic(soup):
 # https://cloud.baidu.com/doc/APIGUIDE/s/Xk1myz05f
 # https://oxylabs.io/blog/how-to-scrape-baidu-search-results
 def search_web_baidu(arg1, arg2, arg3):
-    pass
+    raise NotImplementedError("Legacy WebSearch provider 'baidu' is not implemented")
 
 
 def search_parse_baidu_results():
-    pass
+    raise NotImplementedError("Legacy WebSearch provider 'baidu' is not implemented")
 
 
 ######################### Bing Search #########################
@@ -1497,7 +1543,8 @@ def search_web_duckduckgo(
         timelimit: str | None = None,
         max_results: int | None = None,
 ) -> list[dict[str, str]]:
-    assert keywords, "keywords is mandatory"
+    if not keywords:
+        raise ValueError("keywords is mandatory")
 
     payload = {
         "q": keywords,
@@ -1763,7 +1810,7 @@ def search_web_google(
         if sort_results_by:
             params["sort"] = sort_results_by
 
-        logging.info(f"Prepared parameters for Google Search: {params}")
+        logging.info(f"Prepared parameters for Google Search: {_redact_sensitive_mapping(params)}")
 
         # Make the API call
         response = fetch(method="GET", url=search_url, params=params)
@@ -2013,7 +2060,7 @@ def search_web_searx(search_query, language='auto', time_range='', safesearch=0,
         headers = _websearch_browser_headers(accept_lang="en-US,en;q=0.5")
 
         # Add a random delay to mimic human behavior
-        delay = random.uniform(2, 5)  # Random delay between 2 and 5 seconds
+        delay = _DELAY_RANDOM.uniform(2, 5)  # Random delay between 2 and 5 seconds
         time.sleep(delay)
 
         response = fetch(method="GET", url=search_url, headers=headers)
@@ -2052,7 +2099,7 @@ def search_web_searx(search_query, language='auto', time_range='', safesearch=0,
 
 
 def parse_searx_results(searx_search_results, web_search_results_dict):
-    pass
+    _set_processing_error(web_search_results_dict, "Legacy WebSearch provider 'searx' is not implemented")
 
 
 
@@ -2061,13 +2108,13 @@ def parse_searx_results(searx_search_results, web_search_results_dict):
 #
 # https://github.com/YassKhazzan/openperplex_backend_os/blob/main/sources_searcher.py
 def search_web_serper():
-    pass
+    raise NotImplementedError("Legacy WebSearch provider 'serper' is not implemented")
 
 
 
 
 def parse_serper_results(serper_search_results, web_search_results_dict):
-    pass
+    _set_processing_error(web_search_results_dict, "Legacy WebSearch provider 'serper' is not implemented")
 
 
 ######################### Tavily Search #########################
@@ -2107,7 +2154,7 @@ def search_web_tavily(search_query, result_count=10, site_whitelist=None, site_b
 
 
 def parse_tavily_results(tavily_search_results, web_search_results_dict):
-    pass
+    _set_processing_error(web_search_results_dict, "Legacy WebSearch provider 'tavily' is not implemented")
 
 
 
@@ -2119,13 +2166,13 @@ def parse_tavily_results(tavily_search_results, web_search_results_dict):
 # https://yandex.cloud/en/docs/search-api/concepts/response
 # https://github.com/yandex-cloud/cloudapi/blob/master/yandex/cloud/searchapi/v2/search_query.proto
 def search_web_yandex():
-    pass
+    raise NotImplementedError("Legacy WebSearch provider 'yandex' is not implemented")
 
 
 
 
 def parse_yandex_results(yandex_search_results, web_search_results_dict):
-    pass
+    _set_processing_error(web_search_results_dict, "Legacy WebSearch provider 'yandex' is not implemented")
 
 #
 # End of Web_Search.py
