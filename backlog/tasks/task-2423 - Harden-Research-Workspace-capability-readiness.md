@@ -32,6 +32,16 @@ Verification:
 - git diff --check => passed.
 
 Note: the official Backlog CLI hung in this environment and the fallback CLI did not support adding acceptance criteria after task creation, so the task acceptance criteria section remains empty.
+PR review follow-up on 2026-06-24:
+- Added Loguru exception logging for unexpected Research Workspace health probe and collector failures while keeping response payloads sanitized.
+- Updated async collector invocation to recognize callable objects with async __call__ methods.
+- Moved get_chacha_health_snapshot() behind asyncio.to_thread to preserve event-loop responsiveness.
+- Added focused regression coverage for async callable collector instances and off-thread ChaCha health snapshot collection.
+
+Follow-up verification:
+- AUTH_MODE=single_user SINGLE_USER_TEST_API_KEY=test-api-key-12345 SINGLE_USER_API_KEY=test-api-key-12345 python -m pytest --confcutdir=tldw_Server_API/tests/Research_Workspace tldw_Server_API/tests/Research_Workspace -q => 22 passed, 2 warnings in 14.38s.
+- python -m bandit -r tldw_Server_API/app/core/Research_Workspace tldw_Server_API/app/api/v1/schemas/research_workspace_capabilities.py -f json -o /tmp/bandit_research_workspace_capability_readiness_review_followup.json => 0 findings.
+- git diff --check => passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

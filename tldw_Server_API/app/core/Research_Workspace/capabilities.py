@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Mapping
 
+from loguru import logger
+
 from tldw_Server_API.app.api.v1.schemas.research_workspace_capabilities import (
     ResearchWorkspaceCapabilitiesResponse,
     ResearchWorkspaceCapability,
@@ -317,6 +319,7 @@ async def _run_health_probe(
     except (asyncio.TimeoutError, TimeoutError):
         return {"status": "unknown", "reason_code": f"{probe_name}_health_timeout"}
     except Exception:
+        logger.exception("Unexpected error running Research Workspace health probe: {}", probe_name)
         return {"status": "unknown", "reason_code": f"{probe_name}_health_unknown"}
     return result if isinstance(result, Mapping) else {"status": "unknown"}
 
@@ -325,12 +328,18 @@ async def _invoke_health_collector(
     collector: Callable[..., Mapping[str, Any] | Awaitable[Mapping[str, Any]]],
     **kwargs: Any,
 ) -> Mapping[str, Any]:
-    if inspect.iscoroutinefunction(collector):
+    if _is_async_callable(collector):
         return await collector(**kwargs)
     result = await asyncio.to_thread(collector, **kwargs)
     if inspect.isawaitable(result):
         return await result
     return result
+
+
+def _is_async_callable(collector: Callable[..., Any]) -> bool:
+    return inspect.iscoroutinefunction(collector) or inspect.iscoroutinefunction(
+        getattr(collector, "__call__", None)
+    )
 
 
 async def _collect_aggregate_health() -> Mapping[str, Any]:
@@ -346,17 +355,19 @@ async def _collect_aggregate_health() -> Mapping[str, Any]:
         if checks["database"].get("status") != "healthy":
             overall = "degraded"
     except Exception:
+        logger.exception("Failed to collect Research Workspace database health")
         checks["database"] = {"status": "unhealthy", "reason_code": "database_health_unknown"}
         overall = "unhealthy"
 
     try:
         from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_health_snapshot
 
-        chacha_health = get_chacha_health_snapshot()
+        chacha_health = await asyncio.to_thread(get_chacha_health_snapshot)
         checks["chacha_notes"] = chacha_health if isinstance(chacha_health, Mapping) else {"status": "unknown"}
         if checks["chacha_notes"].get("status") not in {"healthy", "ok"} and overall == "ok":
             overall = "degraded"
     except Exception:
+        logger.exception("Failed to collect Research Workspace ChaCha notes health")
         checks["chacha_notes"] = {"status": "unhealthy", "reason_code": "chacha_health_unknown"}
         if overall == "ok":
             overall = "degraded"
@@ -381,6 +392,7 @@ async def _collect_rag_health() -> Mapping[str, Any]:
             return {"status": "unhealthy", "components": components}
         return {"status": "healthy", "components": components}
     except Exception:
+        logger.exception("Failed to collect Research Workspace RAG health")
         return {"status": "unknown", "reason_code": "rag_health_unknown"}
 
 
@@ -423,6 +435,7 @@ async def _collect_llm_health() -> Mapping[str, Any]:
 
         return health
     except Exception:
+        logger.exception("Failed to collect Research Workspace LLM health")
         return {"status": "unknown", "reason_code": "llm_health_unknown"}
 
 
@@ -444,6 +457,7 @@ def _collect_slides_health(*, user_id: int | str | None = None) -> Mapping[str, 
         )
         return {"status": "ok"}
     except Exception:
+        logger.exception("Failed to collect Research Workspace Slides health")
         return {"status": "unavailable", "reason_code": "slides_unavailable"}
 
 
@@ -467,4 +481,5 @@ async def _collect_tts_health() -> Mapping[str, Any]:
             },
         }
     except Exception:
+        logger.exception("Failed to collect Research Workspace TTS health")
         return {"status": "unknown", "reason_code": "tts_health_unknown"}

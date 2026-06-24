@@ -353,3 +353,62 @@ async def test_capability_collection_runs_bounded_independent_probes_concurrentl
     assert set(started) == {"aggregate", "rag", "llm", "slides:42", "tts"}
     assert response.capabilities["source_browse"].status == "unknown"
     assert response.capabilities["chat"].mode == "warn"
+
+
+@pytest.mark.asyncio
+async def test_async_callable_collector_instances_are_invoked_without_thread_pool(monkeypatch):
+    class AsyncCollector:
+        async def __call__(self, *, marker: str):
+            return {"status": "healthy", "marker": marker}
+
+    async def forbidden_to_thread(*args, **kwargs):
+        raise AssertionError("async callable instances must not be sent to a thread pool")
+
+    monkeypatch.setattr(capabilities.asyncio, "to_thread", forbidden_to_thread)
+
+    result = await capabilities._invoke_health_collector(AsyncCollector(), marker="probe")
+
+    assert result == {"status": "healthy", "marker": "probe"}
+
+
+@pytest.mark.asyncio
+async def test_aggregate_health_collects_chacha_snapshot_off_thread(monkeypatch):
+    called: list[str] = []
+
+    class FakePool:
+        async def health_check(self):
+            return {"status": "healthy"}
+
+    async def get_db_pool():
+        return FakePool()
+
+    def get_chacha_health_snapshot():
+        return {"status": "healthy"}
+
+    fake_auth_database = ModuleType("tldw_Server_API.app.core.AuthNZ.database")
+    fake_auth_database.get_db_pool = get_db_pool
+    fake_chacha_deps = ModuleType("tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps")
+    fake_chacha_deps.get_chacha_health_snapshot = get_chacha_health_snapshot
+
+    async def tracking_to_thread(func, *args, **kwargs):
+        called.append(func.__name__)
+        return func(*args, **kwargs)
+
+    monkeypatch.setitem(sys.modules, "tldw_Server_API.app.core.AuthNZ.database", fake_auth_database)
+    monkeypatch.setitem(
+        sys.modules,
+        "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps",
+        fake_chacha_deps,
+    )
+    monkeypatch.setattr(capabilities.asyncio, "to_thread", tracking_to_thread)
+
+    result = await capabilities._collect_aggregate_health()
+
+    assert result == {
+        "status": "ok",
+        "checks": {
+            "database": {"status": "healthy"},
+            "chacha_notes": {"status": "healthy"},
+        },
+    }
+    assert called == ["get_chacha_health_snapshot"]
