@@ -14,6 +14,10 @@ documentation:
 modified_files:
 - Docs/superpowers/specs/2026-06-24-docker-webui-runtime-auth-bootstrap-design.md
 - Docs/superpowers/plans/2026-06-24-docker-webui-runtime-auth-bootstrap-implementation-plan.md
+- apps/tldw-frontend/pages/api/_tldw-webui/runtime-config.ts
+- apps/tldw-frontend/__tests__/pages/api/runtime-config.test.ts
+- apps/tldw-frontend/extension/shims/runtime-bootstrap.ts
+- apps/tldw-frontend/__tests__/extension/runtime-bootstrap.test.ts
 ---
 
 ## Description
@@ -43,7 +47,9 @@ Docs/superpowers/plans/2026-06-24-docker-webui-runtime-auth-bootstrap-implementa
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-2026-06-24 design review follow-up: tightened the design so runtime auth explicitly outranks stale build-time `NEXT_PUBLIC_X_API_KEY`, `_app.tsx` awaits a named bootstrap promise before auth-state checks, forwarded request headers disable default runtime-auth exposure, and the task has concrete acceptance criteria after the MCP edit helper did not populate the AC block.
+2026-06-24 implementation update: Task 1 runtime config endpoint completed and reviewed. Added WebUI-local /api/_tldw-webui/runtime-config guard path with quickstart-only runtime auth exposure, loopback/Docker-gateway peer handling, forwarded-header rejection, placeholder/short/whitespace API key rejection, and 40 focused Vitest cases. Local verification: bunx vitest run __tests__/pages/api/runtime-config.test.ts passed.
+
+2026-06-24 Task 2 update: Web runtime bootstrap now exports runtimeBootstrapReady, fetches /api/_tldw-webui/runtime-config before env/storage seeding on http/https pages, sets runtime API key precedence, preserves manual stored tldwConfig keys, replaces runtime-owned or stale build-time keys, and writes tldwRuntimeAuthMetadata with a non-secret fingerprint. Verification: bunx vitest run __tests__/extension/runtime-bootstrap.test.ts passed. Required exact command bunx vitest run __tests__/extension/runtime-bootstrap.test.ts __tests__/auth.mode.test.ts __tests__/auth.logout.test.ts is blocked by pre-existing auth.mode.test.ts import-time API base config failure when NEXT_PUBLIC_API_URL is unset; diagnostic with NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=advanced NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 passed all 25 tests. Bandit not run: touched implementation is TypeScript only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
