@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -13,14 +15,18 @@ from tldw_Server_API.app.core.DB_Management.ChatWorkflows_DB import ChatWorkflow
 
 
 @pytest.fixture
-def fake_chat_workflows_db(tmp_path):
+def fake_chat_workflows_db(tmp_path: Path) -> ChatWorkflowsDatabase:
     return ChatWorkflowsDatabase(
         db_path=tmp_path / "chat_workflows.db",
         client_id="test",
     )
 
 
-def _dialogue_template(*, max_rounds: int = 4, extra_steps: list[dict] | None = None) -> dict:
+def _dialogue_template(
+    *,
+    max_rounds: int = 4,
+    extra_steps: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     steps = [
         {
             "id": "debate",
@@ -133,10 +139,33 @@ def test_renderer_falls_back_to_base_question_on_error(fake_chat_workflows_db):
     assert "secret-token" not in json.dumps(question["question_generation_meta"])
 
 
+def test_missing_llm_phrased_renderer_reports_step_model_fallback(
+    fake_chat_workflows_db: ChatWorkflowsDatabase,
+) -> None:
+    service = ChatWorkflowService(db=fake_chat_workflows_db, question_renderer=None)
+    question = service._render_question_sync(
+        step={
+            "base_question": "What is your goal?",
+            "question_mode": "llm_phrased",
+            "model": "gpt-test",
+        },
+        prior_answers=[],
+        context_snapshot=[],
+    )
+
+    assert question["displayed_question"] == "What is your goal?"
+    assert question["fallback_used"] is True
+    assert question["question_generation_meta"] == {
+        "mode": "fallback",
+        "reason": "renderer_unavailable",
+        "model": "gpt-test",
+    }
+
+
 @pytest.mark.asyncio
 async def test_default_llm_phrased_renderer_reports_unavailable_fallback(
-    fake_chat_workflows_db,
-):
+    fake_chat_workflows_db: ChatWorkflowsDatabase,
+) -> None:
     service = ChatWorkflowService(
         db=fake_chat_workflows_db,
         question_renderer=ChatWorkflowQuestionRenderer(),
@@ -587,6 +616,80 @@ async def test_respond_to_round_rejects_idempotency_key_reuse_for_different_mess
             user_message="A different message.",
             idempotency_key="round-1",
         )
+
+
+@pytest.mark.asyncio
+async def test_respond_to_round_rejects_idempotency_key_reuse_in_later_dialogue_step(
+    fake_chat_workflows_db: ChatWorkflowsDatabase,
+) -> None:
+    class CountingDialogueOrchestrator:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def run_round(self, **kwargs: Any) -> dict[str, str | None]:
+            self.calls += 1
+            return {
+                "debate_llm_message": "Counterargument",
+                "moderator_decision": "finish",
+                "moderator_summary": "The thesis has been adequately tested.",
+                "next_user_prompt": None,
+            }
+
+    orchestrator = CountingDialogueOrchestrator()
+    service = ChatWorkflowService(
+        db=fake_chat_workflows_db,
+        question_renderer=None,
+        dialogue_orchestrator=orchestrator,
+    )
+    run = service.start_run(
+        tenant_id="default",
+        user_id="user-1",
+        template=_dialogue_template(
+            extra_steps=[
+                {
+                    "id": "second-debate",
+                    "step_index": 1,
+                    "step_type": "dialogue_round_step",
+                    "base_question": "Restate your thesis.",
+                    "question_mode": "stock",
+                    "context_refs": [],
+                    "dialogue_config": {
+                        "goal_prompt": "Stress-test the revised thesis.",
+                        "opening_prompt_mode": "base_question",
+                        "user_role_label": "Author",
+                        "debate_llm_config": {"provider": "openai", "model": "gpt-4o-mini"},
+                        "moderator_llm_config": {"provider": "openai", "model": "gpt-4o-mini"},
+                        "max_rounds": 4,
+                        "finish_conditions": ["clear compromise"],
+                        "context_refs": [],
+                        "debate_instruction_prompt": "Challenge weak assumptions.",
+                        "moderator_instruction_prompt": "Return structured control output only.",
+                    },
+                }
+            ]
+        ),
+        source_mode="saved_template",
+        selected_context_refs=[],
+    )
+
+    first = await service.respond_to_round(
+        run_id=run["run_id"],
+        round_index=0,
+        user_message="My thesis is sound.",
+        idempotency_key="round-1",
+    )
+
+    assert first["current_step_index"] == 1
+
+    with pytest.raises(ChatWorkflowConflictError, match="different dialogue round"):
+        await service.respond_to_round(
+            run_id=run["run_id"],
+            round_index=0,
+            user_message="My thesis is sound.",
+            idempotency_key="round-1",
+        )
+
+    assert orchestrator.calls == 1
 
 
 @pytest.mark.asyncio

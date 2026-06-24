@@ -1,5 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
 import json
+from pathlib import Path
+
+import pytest
 
 from tldw_Server_API.app.core.DB_Management import DB_Manager
 from tldw_Server_API.app.core.DB_Management.ChatWorkflows_DB import (
@@ -7,7 +10,7 @@ from tldw_Server_API.app.core.DB_Management.ChatWorkflows_DB import (
 )
 
 
-def test_chat_workflows_db_persists_template_and_run_snapshot(tmp_path):
+def test_chat_workflows_db_persists_template_and_run_snapshot(tmp_path: Path) -> None:
     db = ChatWorkflowsDatabase(db_path=tmp_path / "chat_workflows.db", client_id="test")
 
     template_id = db.create_template(
@@ -49,13 +52,10 @@ def test_chat_workflows_db_persists_template_and_run_snapshot(tmp_path):
     run = db.get_run(run_id)
 
     assert run["template_version"] == 1
-    assert (
-        json.loads(run["template_snapshot_json"])["steps"][0]["base_question"]
-        == "What outcome do you want?"
-    )
+    assert json.loads(run["template_snapshot_json"])["steps"][0]["base_question"] == "What outcome do you want?"
 
 
-def test_add_answer_is_unique_per_run_step(tmp_path):
+def test_add_answer_is_unique_per_run_step(tmp_path: Path) -> None:
     db = ChatWorkflowsDatabase(db_path=tmp_path / "chat_workflows.db", client_id="test")
 
     run_id = db.create_run(
@@ -85,7 +85,7 @@ def test_add_answer_is_unique_per_run_step(tmp_path):
     assert answers[0]["answer_text"] == "Because."
 
 
-def test_create_chat_workflows_database_uses_explicit_db_path(tmp_path):
+def test_create_chat_workflows_database_uses_explicit_db_path(tmp_path: Path) -> None:
     db = DB_Manager.create_chat_workflows_database(
         client_id="factory-test",
         db_path=tmp_path / "factory_chat_workflows.db",
@@ -95,7 +95,7 @@ def test_create_chat_workflows_database_uses_explicit_db_path(tmp_path):
     assert db.db_path == str(tmp_path / "factory_chat_workflows.db")
 
 
-def test_append_event_assigns_unique_sequences_under_concurrency(tmp_path):
+def test_append_event_assigns_unique_sequences_under_concurrency(tmp_path: Path) -> None:
     db = ChatWorkflowsDatabase(db_path=tmp_path / "chat_workflows.db", client_id="test")
     run_id = db.create_run(
         tenant_id="default",
@@ -125,7 +125,7 @@ def test_append_event_assigns_unique_sequences_under_concurrency(tmp_path):
     assert [event["seq"] for event in db.list_events(run_id)] == list(range(1, 21))
 
 
-def test_replace_template_steps_persists_dialogue_metadata(tmp_path):
+def test_replace_template_steps_persists_dialogue_metadata(tmp_path: Path) -> None:
     db = ChatWorkflowsDatabase(db_path=tmp_path / "chat_workflows.db", client_id="test")
 
     template_id = db.create_template(
@@ -169,7 +169,7 @@ def test_replace_template_steps_persists_dialogue_metadata(tmp_path):
     assert json.loads(step["dialogue_config_json"])["goal_prompt"] == "Test the thesis."
 
 
-def test_create_run_exposes_dialogue_runtime_state_columns(tmp_path):
+def test_create_run_exposes_dialogue_runtime_state_columns(tmp_path: Path) -> None:
     db = ChatWorkflowsDatabase(db_path=tmp_path / "chat_workflows.db", client_id="test")
 
     run_id = db.create_run(
@@ -199,39 +199,81 @@ def test_create_run_exposes_dialogue_runtime_state_columns(tmp_path):
     assert run["active_round_index"] == 0
 
 
-def test_chat_workflow_rounds_table_exists(tmp_path):
+def test_chat_workflow_rounds_table_exists(tmp_path: Path) -> None:
     db = ChatWorkflowsDatabase(db_path=tmp_path / "chat_workflows.db", client_id="test")
 
-    row = db._conn.execute(
-        """
+    row = db._conn.execute("""
         SELECT name
         FROM sqlite_master
         WHERE type = 'table' AND name = 'chat_workflow_rounds'
-        """
-    ).fetchone()
+        """).fetchone()
 
     assert row is not None
 
 
-def test_chat_workflow_runs_schema_includes_dialogue_runtime_columns(tmp_path):
+def test_chat_workflow_runs_schema_includes_dialogue_runtime_columns(tmp_path: Path) -> None:
     db = ChatWorkflowsDatabase(db_path=tmp_path / "chat_workflows.db", client_id="test")
 
-    columns = {
-        row["name"]
-        for row in db._conn.execute("PRAGMA table_info(chat_workflow_runs)").fetchall()
-    }
+    columns = {row["name"] for row in db._conn.execute("PRAGMA table_info(chat_workflow_runs)").fetchall()}
 
     assert "active_round_index" in columns
     assert "step_runtime_state_json" in columns
 
 
-def test_chat_workflow_template_steps_schema_includes_dialogue_columns(tmp_path):
+def test_chat_workflow_template_steps_schema_includes_dialogue_columns(tmp_path: Path) -> None:
     db = ChatWorkflowsDatabase(db_path=tmp_path / "chat_workflows.db", client_id="test")
 
-    columns = {
-        row["name"]
-        for row in db._conn.execute("PRAGMA table_info(chat_workflow_template_steps)").fetchall()
-    }
+    columns = {row["name"] for row in db._conn.execute("PRAGMA table_info(chat_workflow_template_steps)").fetchall()}
 
     assert "step_type" in columns
     assert "dialogue_config_json" in columns
+
+
+def test_chat_workflow_round_idempotency_index_is_run_scoped(tmp_path: Path) -> None:
+    db = ChatWorkflowsDatabase(db_path=tmp_path / "chat_workflows.db", client_id="test")
+
+    indexed_columns = [
+        row["name"] for row in db._conn.execute("PRAGMA index_info(idx_chat_workflow_rounds_idempotency)").fetchall()
+    ]
+
+    assert indexed_columns == ["run_id", "idempotency_key"]
+
+
+def test_chat_workflow_round_idempotency_migration_rejects_run_duplicates(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "chat_workflows.db"
+    db = ChatWorkflowsDatabase(db_path=db_path, client_id="test")
+    db._conn.execute("DROP INDEX idx_chat_workflow_rounds_idempotency")
+    db._conn.execute("""
+        CREATE UNIQUE INDEX idx_chat_workflow_rounds_idempotency
+        ON chat_workflow_rounds(run_id, step_index, idempotency_key)
+        WHERE idempotency_key IS NOT NULL
+        """)
+    run_id = db.create_run(
+        tenant_id="default",
+        user_id="user-1",
+        template_id=None,
+        template_version=1,
+        source_mode="generated_draft",
+        status="active",
+        template_snapshot={"steps": [{"id": "dialogue-step", "base_question": "Why?"}]},
+        selected_context_refs=[],
+        resolved_context_snapshot=[],
+    )
+    now = "2026-01-01T00:00:00+00:00"
+    for step_index in (0, 1):
+        db._conn.execute(
+            """
+            INSERT INTO chat_workflow_rounds (
+                run_id, step_index, round_index, user_message, status,
+                idempotency_key, created_at, updated_at
+            ) VALUES (?, ?, 0, ?, 'completed', 'round-key', ?, ?)
+            """,
+            (run_id, step_index, f"message {step_index}", now, now),
+        )
+    db._conn.commit()
+    db.close()
+
+    with pytest.raises(ValueError, match="duplicate idempotency keys"):
+        ChatWorkflowsDatabase(db_path=db_path, client_id="test")

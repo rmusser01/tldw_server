@@ -210,9 +210,7 @@ class ChatWorkflowService:
             existing_answer = await self._db_call_async("get_answer", run_id, step_index)
             if existing_answer is not None and existing_answer["answer_text"] == answer_text:
                 return await self._build_run_result(run_id)
-            raise ValueError(
-                f"invalid step submission: expected step submission for index {current_step_index}"
-            )
+            raise ValueError(f"invalid step submission: expected step submission for index {current_step_index}")
         if run.get("status") != "active":
             existing_answer = await self._db_call_async("get_answer", run_id, step_index)
             if existing_answer is not None and existing_answer["answer_text"] == answer_text:
@@ -328,8 +326,11 @@ class ChatWorkflowService:
                 idempotency_key,
             )
             if existing_by_key is not None:
+                replay_step_index = int(run["current_step_index"]) if run.get("status") == "active" else None
                 self._validate_replayed_round(
                     existing_round=existing_by_key,
+                    run_id=run_id,
+                    step_index=replay_step_index,
                     round_index=round_index,
                     user_message=normalized_user_message,
                 )
@@ -380,9 +381,7 @@ class ChatWorkflowService:
 
         rounds = await self._db_call_async("list_rounds", run_id, current_step_index)
         prior_rounds = [
-            row
-            for row in rounds
-            if int(row.get("round_index", -1)) < round_index and row.get("status") == "completed"
+            row for row in rounds if int(row.get("round_index", -1)) < round_index and row.get("status") == "completed"
         ]
         current_prompt = self._get_dialogue_prompt(step=step, run=run)
 
@@ -432,8 +431,7 @@ class ChatWorkflowService:
             next_round_index = round_index + 1
             next_status = "active"
             step_runtime_state = {
-                "current_prompt": normalized_round_result["next_user_prompt"]
-                or current_prompt,
+                "current_prompt": normalized_round_result["next_user_prompt"] or current_prompt,
             }
             completed_at = None
 
@@ -445,9 +443,7 @@ class ChatWorkflowService:
             debate_llm_message=normalized_round_result["debate_llm_message"],
             moderator_decision="finish" if should_finish else normalized_round_result["moderator_decision"],
             moderator_summary=normalized_round_result["moderator_summary"],
-            next_user_prompt=(
-                None if should_finish else step_runtime_state.get("current_prompt")
-            ),
+            next_user_prompt=(None if should_finish else step_runtime_state.get("current_prompt")),
             next_step_index=next_step_index,
             next_round_index=next_round_index,
             next_status=next_status,
@@ -471,9 +467,7 @@ class ChatWorkflowService:
             {
                 "step_index": current_step_index,
                 "round_index": round_index,
-                "moderator_decision": "finish"
-                if should_finish
-                else normalized_round_result["moderator_decision"],
+                "moderator_decision": "finish" if should_finish else normalized_round_result["moderator_decision"],
                 "advanced_to_step_index": next_step_index,
                 "next_round_index": next_round_index,
             },
@@ -499,8 +493,7 @@ class ChatWorkflowService:
                     "context_refs": list(context_refs if isinstance(context_refs, list) else []),
                     "dialogue_config": (
                         self._normalize_dialogue_config(
-                            step.get("dialogue_config")
-                            or _json_loads(step.get("dialogue_config_json"), default=None)
+                            step.get("dialogue_config") or _json_loads(step.get("dialogue_config_json"), default=None)
                         )
                         if step_type == "dialogue_round_step"
                         else None
@@ -546,9 +539,7 @@ class ChatWorkflowService:
             if current_step is not None:
                 step_type = self._get_step_type(current_step)
                 result["current_step_kind"] = step_type
-                result["current_prompt"] = current_step.get("current_prompt") or current_step.get(
-                    "displayed_question"
-                )
+                result["current_prompt"] = current_step.get("current_prompt") or current_step.get("displayed_question")
                 result["current_question"] = current_step.get("displayed_question")
                 if step_type == "dialogue_round_step":
                     result["current_round_index"] = int(run.get("active_round_index", 0))
@@ -563,29 +554,28 @@ class ChatWorkflowService:
         answer_text: str,
     ) -> None:
         if int(existing_answer["step_index"]) != step_index:
-            raise ChatWorkflowConflictError(
-                "idempotency key has already been used for a different step"
-            )
+            raise ChatWorkflowConflictError("idempotency key has already been used for a different step")
         if existing_answer["answer_text"] != answer_text:
-            raise ChatWorkflowConflictError(
-                "idempotency key has already been used for a different answer"
-            )
+            raise ChatWorkflowConflictError("idempotency key has already been used for a different answer")
 
     def _validate_replayed_round(
         self,
         *,
         existing_round: dict[str, Any],
+        run_id: str,
+        step_index: int | None,
         round_index: int,
         user_message: str,
     ) -> None:
+        """Validate that a stored dialogue round matches the submitted replay request."""
+        if existing_round["run_id"] != run_id:
+            raise ChatWorkflowConflictError("idempotency key has already been used for a different dialogue round")
+        if step_index is not None and int(existing_round["step_index"]) != step_index:
+            raise ChatWorkflowConflictError("idempotency key has already been used for a different dialogue round")
         if int(existing_round["round_index"]) != round_index:
-            raise ChatWorkflowConflictError(
-                "idempotency key has already been used for a different dialogue round"
-            )
+            raise ChatWorkflowConflictError("idempotency key has already been used for a different dialogue round")
         if existing_round["user_message"] != user_message:
-            raise ChatWorkflowConflictError(
-                "idempotency key has already been used for a different dialogue round"
-            )
+            raise ChatWorkflowConflictError("idempotency key has already been used for a different dialogue round")
 
     def _get_template_snapshot(self, run: dict[str, Any]) -> dict[str, Any]:
         snapshot = _json_loads(run.get("template_snapshot_json"), default={})
@@ -614,9 +604,7 @@ class ChatWorkflowService:
         normalized = dict(config)
         opening_prompt_mode = normalized.get("opening_prompt_mode", "base_question")
         if isinstance(opening_prompt_mode, str):
-            normalized["opening_prompt_mode"] = (
-                opening_prompt_mode.strip().lower().replace("-", "_")
-            )
+            normalized["opening_prompt_mode"] = opening_prompt_mode.strip().lower().replace("-", "_")
         return normalized
 
     def _get_dialogue_opening_prompt(self, step: dict[str, Any]) -> str:
@@ -697,6 +685,8 @@ class ChatWorkflowService:
         model: str | None = None,
     ) -> dict[str, Any]:
         base_question = str(step.get("base_question") or "").strip()
+        step_model = str(step.get("model") or "").strip() or None
+        effective_model = model if model is not None else step_model
         stock_result = {
             "displayed_question": base_question,
             "question_generation_meta": {"mode": "stock"},
@@ -708,7 +698,7 @@ class ChatWorkflowService:
             return self._build_question_fallback_result(
                 base_question,
                 reason="renderer_unavailable",
-                model=model,
+                model=effective_model,
             )
 
         try:
@@ -717,7 +707,7 @@ class ChatWorkflowService:
                 phrasing_instructions=step.get("phrasing_instructions"),
                 prior_answers=prior_answers,
                 context_snapshot=context_snapshot,
-                model=model,
+                model=effective_model,
             )
             displayed_question = str(rendered.get("displayed_question") or "").strip()
             if not displayed_question:
@@ -735,13 +725,13 @@ class ChatWorkflowService:
                 run_id,
                 step_index,
                 step.get("id"),
-                model,
+                effective_model,
                 error_type,
             )
             return self._build_question_fallback_result(
                 base_question,
                 reason="renderer_error",
-                model=model,
+                model=effective_model,
                 error_type=error_type,
             )
 
@@ -753,6 +743,7 @@ class ChatWorkflowService:
         model: str | None = None,
         error_type: str | None = None,
     ) -> dict[str, Any]:
+        """Build the sanitized fallback payload returned when question rendering is unavailable."""
         meta: dict[str, Any] = {
             "mode": "fallback",
             "reason": reason,
