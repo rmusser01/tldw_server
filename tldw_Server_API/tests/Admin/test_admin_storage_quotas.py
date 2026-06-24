@@ -215,8 +215,9 @@ class TestCheckStorageQuota:
         assert "Warning" in result["reason"]
 
     @pytest.mark.asyncio
-    async def test_quota_check_error_fails_open(self):
-        """If the quota check itself raises, we fail-open (allow)."""
+    async def test_quota_check_error_fails_closed_by_default_and_sanitizes_reason(self, monkeypatch):
+        """If the quota check itself raises, the default policy blocks without leaking backend details."""
+        monkeypatch.delenv("STORAGE_QUOTA_FAIL_OPEN", raising=False)
         mock_pool = _make_mock_pool()
 
         with patch(
@@ -224,7 +225,33 @@ class TestCheckStorageQuota:
         ) as MockRepo:
             instance = MockRepo.return_value
             instance.check_quota_status = AsyncMock(
-                side_effect=RuntimeError("DB unavailable")
+                side_effect=RuntimeError("DB unavailable at /private/quota.db")
+            )
+
+            result = await check_storage_quota(
+                user_id=1,
+                file_size_bytes=1024,
+                db_pool=mock_pool,
+                org_id=1,
+            )
+
+        assert result["allowed"] is False
+        assert result["reason"] == "Quota check unavailable"
+        assert "DB unavailable" not in result["reason"]
+        assert "/private/" not in result["reason"]
+
+    @pytest.mark.asyncio
+    async def test_quota_check_error_can_fail_open_when_explicitly_enabled(self, monkeypatch):
+        """Local deployments can opt into fail-open quota behavior without exposing raw errors."""
+        monkeypatch.setenv("STORAGE_QUOTA_FAIL_OPEN", "1")
+        mock_pool = _make_mock_pool()
+
+        with patch(
+            "tldw_Server_API.app.core.Storage.quota_enforcement.AuthnzStorageQuotasRepo"
+        ) as MockRepo:
+            instance = MockRepo.return_value
+            instance.check_quota_status = AsyncMock(
+                side_effect=RuntimeError("DB unavailable at /private/quota.db")
             )
 
             result = await check_storage_quota(
@@ -235,7 +262,9 @@ class TestCheckStorageQuota:
             )
 
         assert result["allowed"] is True
-        assert "fail-open" in result["reason"]
+        assert result["reason"] == "Quota check unavailable (fail-open)"
+        assert "DB unavailable" not in result["reason"]
+        assert "/private/" not in result["reason"]
 
     @pytest.mark.asyncio
     async def test_team_quota_check(self):

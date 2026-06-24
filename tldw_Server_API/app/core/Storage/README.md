@@ -18,7 +18,6 @@ Storage defines shared storage abstractions and local filesystem helpers used by
 - Register generated files and their metadata with the database layer after bytes are written.
 - Enforce AuthNZ-backed hard and soft storage quota checks before accepting new data.
 - Support cleanup flows used by file artifacts, image generation, voice/TTS storage, and VN assets.
-- Provide backup scheduling helpers for storage-related background work.
 
 ## Module Map
 
@@ -26,7 +25,7 @@ Storage defines shared storage abstractions and local filesystem helpers used by
 - `filesystem_storage.py` - local backend implementation and path construction/validation helpers.
 - `generated_file_helpers.py` - generated-file write and metadata registration helpers.
 - `quota_enforcement.py` - storage quota lookup and enforcement.
-- `backup_schedule_jobs.py` - job helpers for backup scheduling.
+- `backup_schedule_jobs.py` - compatibility shim for admin backup schedule helpers now owned by `app/core/Admin_Backups/`.
 
 ## How It Connects
 
@@ -58,8 +57,6 @@ Storage defines shared storage abstractions and local filesystem helpers used by
   account for orphaned files and orphaned metadata.
 - Quota checks distinguish hard-limit denial from soft-limit warnings. Do not
   turn soft-limit warnings into hard failures without updating admin quota tests.
-- Backup schedule jobs are identified by stable idempotency keys derived from
-  schedule id and scheduled slot.
 
 ### Extension Checklist
 

@@ -96,6 +96,38 @@ class TestFileSystemStorageBasic:
 
         asyncio.run(_test())
 
+    @pytest.mark.unit
+    def test_store_removes_partial_file_when_stream_read_fails(self, storage_backend):
+        """A failed streamed write must not leave partial content at the final storage path."""
+
+        class FailingStream:
+            def __init__(self):
+                self.calls = 0
+
+            def read(self, _size):
+                self.calls += 1
+                if self.calls == 1:
+                    return b"partial"
+                raise OSError("stream failed")
+
+            def seek(self, _offset):
+                return 0
+
+        async def _test():
+            with pytest.raises(StorageError):
+                await storage_backend.store("user1", 1, "file.bin", FailingStream())
+
+            final_path = storage_backend.base_path / "user1" / "media" / "1" / "file.bin"
+            assert not final_path.exists()
+            leftovers = [
+                path
+                for path in storage_backend.base_path.rglob("*")
+                if path.is_file()
+            ]
+            assert leftovers == []
+
+        asyncio.run(_test())
+
 
 class TestFileSystemStoragePathSecurity:
     """Path traversal and security tests."""
@@ -150,6 +182,31 @@ class TestFileSystemStoragePathSecurity:
             storage_backend._validate_path(outside_path)
 
         assert "escapes base directory" in str(exc_info.value)
+
+    @pytest.mark.unit
+    def test_validate_path_rejects_sibling_prefix_escape(self, tmp_path):
+        """Sibling directories whose names share the base prefix must not pass containment."""
+        base_path = tmp_path / "store"
+        base_path.mkdir()
+        sibling_path = tmp_path / "store_evil"
+        sibling_path.mkdir()
+        escaped_file = sibling_path / "secret.txt"
+        escaped_file.write_text("secret", encoding="utf-8")
+
+        storage = FileSystemStorage(base_path=base_path)
+        escaped_storage_path = "../store_evil/secret.txt"
+
+        with pytest.raises(StorageError):
+            storage._validate_path(escaped_file)
+
+        async def _test():
+            assert await storage.exists(escaped_storage_path) is False
+            with pytest.raises(StorageError):
+                await storage.get_size(escaped_storage_path)
+            with pytest.raises(StorageError):
+                await storage.retrieve(escaped_storage_path)
+
+        asyncio.run(_test())
 
 
 class TestFileSystemStorageExistsAndDelete:

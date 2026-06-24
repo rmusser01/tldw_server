@@ -17,6 +17,15 @@ class _BackupResult:
     path: str
 
 
+def test_backup_schedule_jobs_storage_import_is_compatibility_shim() -> None:
+    from tldw_Server_API.app.core.Admin_Backups import backup_schedule_jobs as canonical
+    from tldw_Server_API.app.core.Storage import backup_schedule_jobs as storage_shim
+
+    assert storage_shim.BACKUP_SCHEDULE_DOMAIN == canonical.BACKUP_SCHEDULE_DOMAIN
+    assert storage_shim.BACKUP_SCHEDULE_JOB_TYPE == canonical.BACKUP_SCHEDULE_JOB_TYPE
+    assert storage_shim.build_backup_schedule_job_payload is canonical.build_backup_schedule_job_payload
+
+
 @pytest.fixture()
 async def backup_jobs_repo(tmp_path, monkeypatch: pytest.MonkeyPatch):
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool

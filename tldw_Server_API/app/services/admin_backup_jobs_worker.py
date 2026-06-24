@@ -9,7 +9,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
-from tldw_Server_API.app.core.Storage.backup_schedule_jobs import (
+from tldw_Server_API.app.core.Admin_Backups.backup_schedule_jobs import (
     BACKUP_SCHEDULE_DOMAIN,
     BACKUP_SCHEDULE_JOB_TYPE,
     backup_schedule_queue,
