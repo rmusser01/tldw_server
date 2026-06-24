@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, ConflictError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 from .flashcard_adapter import build_flashcard_suggestion_context, extract_flashcard_suggestion_evidence
@@ -275,12 +275,16 @@ def _parse_job_created_at(value: Any) -> datetime | None:
 
 
 def _snapshot_created_at(snapshot_row: Mapping[str, Any] | None) -> datetime | None:
+    """Return the snapshot creation timestamp normalized to an aware UTC datetime."""
+
     if not snapshot_row:
         return None
     return _parse_job_created_at(snapshot_row.get("created_at"))
 
 
 def _job_activity_at(job: Mapping[str, Any]) -> datetime | None:
+    """Return the newest available timestamp that represents observable job activity."""
+
     for field_name in ("completed_at", "cancelled_at", "updated_at", "acquired_at", "started_at", "created_at"):
         parsed = _parse_job_created_at(job.get(field_name))
         if parsed is not None:
@@ -292,6 +296,8 @@ def _job_is_newer_than_snapshot(
     job: Mapping[str, Any] | None,
     snapshot_row: Mapping[str, Any] | None,
 ) -> bool:
+    """Return whether a job status should supersede the current active snapshot."""
+
     if not job:
         return False
     if not snapshot_row:
@@ -433,6 +439,8 @@ def _source_available_from_note_db(
     source_type: str | None,
     source_id: str | None,
 ) -> bool:
+    """Return whether a frozen evidence source still resolves in the note database."""
+
     if not source_type or not source_id:
         return False
     normalized_source_type = source_type.strip().lower()
@@ -440,29 +448,32 @@ def _source_available_from_note_db(
     if not normalized_source_id:
         return False
 
-    if normalized_source_type == "flashcard_deck":
-        with contextlib.suppress(TypeError, ValueError):
-            deck = note_db.get_deck(int(normalized_source_id))
-            return bool(deck) and not bool(deck.get("deleted"))
-        return False
-    if normalized_source_type == "flashcard_card":
-        card = note_db.get_flashcard(normalized_source_id)
-        if not card:
+    try:
+        if normalized_source_type == "flashcard_deck":
+            with contextlib.suppress(TypeError, ValueError):
+                deck = note_db.get_deck(int(normalized_source_id))
+                return bool(deck) and not bool(deck.get("deleted"))
             return False
-        deck_id = card.get("deck_id")
-        if deck_id is None:
-            return True
-        with contextlib.suppress(TypeError, ValueError):
-            deck = note_db.get_deck(int(deck_id))
-            return bool(deck) and not bool(deck.get("deleted"))
-        return False
-    if normalized_source_type == "quiz":
-        with contextlib.suppress(TypeError, ValueError):
-            return note_db.get_quiz(int(normalized_source_id)) is not None
-        return False
-    if normalized_source_type == "quiz_attempt":
-        with contextlib.suppress(TypeError, ValueError):
-            return note_db.get_attempt(int(normalized_source_id)) is not None
+        if normalized_source_type == "flashcard_card":
+            card = note_db.get_flashcard(normalized_source_id)
+            if not card:
+                return False
+            deck_id = card.get("deck_id")
+            if deck_id is None:
+                return True
+            with contextlib.suppress(TypeError, ValueError):
+                deck = note_db.get_deck(int(deck_id))
+                return bool(deck) and not bool(deck.get("deleted"))
+            return False
+        if normalized_source_type == "quiz":
+            with contextlib.suppress(TypeError, ValueError):
+                return note_db.get_quiz(int(normalized_source_id)) is not None
+            return False
+        if normalized_source_type == "quiz_attempt":
+            with contextlib.suppress(TypeError, ValueError):
+                return note_db.get_attempt(int(normalized_source_id)) is not None
+            return False
+    except CharactersRAGDBError:
         return False
 
     return True

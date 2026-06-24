@@ -4,7 +4,7 @@ title: Harden StudySuggestions review findings
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-23 22:05'
+updated_date: 2026-06-24 04:51
 labels: []
 dependencies: []
 ---
@@ -38,7 +38,7 @@ Verification: StudySuggestions worker/API test files pass; Bandit touched-scope 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed all four validated StudySuggestions review findings. Added regression coverage for fingerprint delimiter collisions, stale job status masking newer snapshots, deleted evidence sources, and failed follow-up finalization cleanup. Verification passed for the StudySuggestions worker/API test files and Bandit returned zero findings on the touched scope.
+Fixed all original StudySuggestions review findings plus PR #2490 review follow-up comments. Added core-owned generated-target cleanup, observable best-effort cleanup/release failure logging, helper docstrings, and live-evidence DB failure degradation with regression coverage. Final verification passed for 43 affected StudySuggestions tests, Ruff touched-file checks, Bandit touched backend scope with zero findings, and whitespace checks.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -50,3 +50,10 @@ Fixed all four validated StudySuggestions review findings. Added regression cove
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+PR #2490 review follow-up after rebasing onto latest `origin/dev`: address Qodo comments about moving generated-target cleanup into core StudySuggestions actions, documenting helper functions, logging best-effort cleanup/release failures, and degrading live evidence source lookup DB failures to unavailable instead of returning 500.
+Review follow-up completed: moved generated target cleanup into `app/core/StudySuggestions/actions.py`, replaced silent endpoint cleanup suppression with warning logs carrying operation identifiers, added docstrings to the reviewed snapshot helpers, and made live-evidence DB lookup failures return unavailable evidence. Verification: focused red tests failed before the fix; final `python -m pytest tldw_Server_API/tests/StudySuggestions/test_study_suggestions_endpoints_api.py tldw_Server_API/tests/StudySuggestions/test_study_suggestions_jobs_worker.py -q --tb=short` passed 43 tests. Ruff touched-file check passed. Bandit touched backend scope reported zero findings in `/tmp/bandit_study_suggestions_9940_reviewfix_worktree.json`. `git diff --check` passed.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

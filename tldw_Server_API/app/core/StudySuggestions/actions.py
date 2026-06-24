@@ -9,7 +9,6 @@ from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 
-
 DEFAULT_GENERATOR_VERSION = "v1"
 LEGACY_NORMALIZATION_VERSION = "legacy"
 SELECTION_FINGERPRINT_VERSION = "study-suggestions:v2"
@@ -600,6 +599,33 @@ def soft_delete_deck(note_db: CharactersRAGDB, *, deck_id: int) -> None:
     note_db.soft_delete_deck_by_id(int(deck_id))
 
 
+def cleanup_generated_action_target(
+    note_db: CharactersRAGDB,
+    *,
+    generated: Mapping[str, object] | None,
+) -> None:
+    """Delete or soft-delete a generated follow-up target that could not be linked."""
+
+    if not generated:
+        return
+    target_service = _normalize_text(generated.get("target_service"))
+    target_type = _normalize_text(generated.get("target_type"))
+    target_id = str(generated.get("target_id") or "").strip()
+    if not target_id:
+        return
+
+    try:
+        target_int = int(target_id)
+    except (TypeError, ValueError):
+        return
+
+    if target_service == "flashcards" and target_type == "deck":
+        soft_delete_deck(note_db, deck_id=target_int)
+        return
+    if target_service == "quiz" and target_type == "quiz":
+        note_db.delete_quiz(target_int)
+
+
 __all__ = [
     "DEFAULT_GENERATOR_VERSION",
     "FOLLOW_UP_ACTION_CONTRACTS",
@@ -613,6 +639,7 @@ __all__ = [
     "build_pending_generation_target_id",
     "build_selection_fingerprint",
     "canonicalize_follow_up_action",
+    "cleanup_generated_action_target",
     "finalize_generation_link",
     "find_generation_link_by_fingerprint",
     "is_pending_generation_target_id",

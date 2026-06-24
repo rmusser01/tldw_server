@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import threading
 from collections.abc import Iterable, Iterator
 from pathlib import Path
@@ -12,9 +11,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_auth_principal, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, User
 from tldw_Server_API.app.api.v1.schemas.study_suggestions import (
     SuggestionActionRequest,
     SuggestionActionResponse,
@@ -26,6 +25,7 @@ from tldw_Server_API.app.api.v1.schemas.study_suggestions import (
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.StudySuggestions import snapshot_service
 from tldw_Server_API.app.core.StudySuggestions.actions import (
     build_flashcard_generation_payload,
     build_follow_up_flashcard_deck_name,
@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.StudySuggestions.actions import (
     build_legacy_selection_fingerprint,
     build_selection_fingerprint,
     canonicalize_follow_up_action,
+    cleanup_generated_action_target,
     finalize_generation_link,
     find_generation_link_by_fingerprint,
     is_pending_generation_target_id,
@@ -46,7 +47,6 @@ from tldw_Server_API.app.core.StudySuggestions.actions import (
     resolve_selected_topic_semantic_keys,
     soft_delete_deck,
 )
-from tldw_Server_API.app.core.StudySuggestions import snapshot_service
 from tldw_Server_API.app.core.StudySuggestions.jobs import (
     STUDY_SUGGESTIONS_DOMAIN,
     STUDY_SUGGESTIONS_REFRESH_JOB_TYPE,
@@ -55,7 +55,6 @@ from tldw_Server_API.app.core.StudySuggestions.jobs import (
 )
 from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
 from tldw_Server_API.app.services.quiz_generator import generate_quiz_from_sources
-
 
 router = APIRouter(prefix="/study-suggestions", tags=["study-suggestions"])
 
@@ -380,9 +379,17 @@ def _persist_flashcard_deck(
     try:
         note_db.add_flashcards_bulk(flashcard_payloads)
     except Exception:
-        with contextlib.suppress(Exception):
+        try:
             soft_delete_deck(note_db, deck_id=int(deck_id))
-        logger.warning("Flashcard follow-up generation cleanup deleted deck after insert failure")
+        except Exception as cleanup_exc:
+            logger.warning(
+                "Flashcard follow-up generation cleanup failed deck_id={} snapshot_id={} error_type={}",
+                deck_id,
+                snapshot_row["id"],
+                type(cleanup_exc).__name__,
+            )
+        else:
+            logger.warning("Flashcard follow-up generation cleanup deleted deck after insert failure")
         raise
     return str(deck_id)
 
@@ -708,7 +715,7 @@ def _prepare_action(
                 selection_fingerprint=selection_fingerprint,
             )
             pending_reservation_created = True
-        except Exception:
+        except Exception as reservation_exc:
             existing_candidates = _list_generation_link_candidates(
                 db,
                 snapshot_id=snapshot_id,
@@ -735,7 +742,10 @@ def _prepare_action(
                 None,
             )
             if pending_existing:
-                raise HTTPException(status_code=409, detail="Study suggestion action already in progress")
+                raise HTTPException(
+                    status_code=409,
+                    detail="Study suggestion action already in progress",
+                ) from reservation_exc
             if live_existing and not payload.force_regenerate:
                 existing_link, _matched_existing_fingerprint = live_existing
                 raise _EarlyReturn(
@@ -749,7 +759,7 @@ def _prepare_action(
                             "target_id": str(existing_link["target_id"]),
                         }
                     )
-                )
+                ) from reservation_exc
             raise
 
     retired_selection_fingerprint = (
@@ -820,31 +830,88 @@ def _finalize_action(
         )
 
 
-def _cleanup_generated_action_target(
+async def _release_generation_link_reservation_best_effort(
+    db: CharactersRAGDB,
+    *,
+    snapshot_id: int,
+    target_service: str,
+    target_type: str,
+    selection_fingerprint: str,
+) -> None:
+    """Release an action reservation without hiding release failures from logs."""
+
+    try:
+        await asyncio.to_thread(
+            release_generation_link_reservation,
+            db,
+            snapshot_id=snapshot_id,
+            target_service=target_service,
+            target_type=target_type,
+            selection_fingerprint=selection_fingerprint,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to release study suggestion generation reservation "
+            "snapshot_id={} target={}/{} selection_fingerprint={} error_type={}",
+            snapshot_id,
+            target_service,
+            target_type,
+            selection_fingerprint,
+            type(exc).__name__,
+        )
+
+
+async def _cleanup_generated_action_target_best_effort(
     db: CharactersRAGDB,
     *,
     generated: dict[str, str] | None,
+    snapshot_id: int,
+    selection_fingerprint: str,
 ) -> None:
-    """Best-effort cleanup when a target was generated but its link could not be finalized."""
+    """Clean up an unlinked generated target without replacing the original action failure."""
 
     if not generated:
         return
-    target_service = str(generated.get("target_service") or "").strip().lower()
-    target_type = str(generated.get("target_type") or "").strip().lower()
-    target_id = str(generated.get("target_id") or "").strip()
-    if not target_id:
-        return
-
     try:
-        target_int = int(target_id)
-    except (TypeError, ValueError):
-        return
+        await asyncio.to_thread(cleanup_generated_action_target, db, generated=generated)
+    except Exception as exc:
+        logger.warning(
+            "Failed to cleanup generated study suggestion target "
+            "snapshot_id={} target={}/{} target_id={} selection_fingerprint={} error_type={}",
+            snapshot_id,
+            generated.get("target_service"),
+            generated.get("target_type"),
+            generated.get("target_id"),
+            selection_fingerprint,
+            type(exc).__name__,
+        )
 
-    if target_service == "flashcards" and target_type == "deck":
-        soft_delete_deck(db, deck_id=target_int)
-        return
-    if target_service == "quiz" and target_type == "quiz":
-        db.delete_quiz(target_int)
+
+async def _cleanup_failed_action_best_effort(
+    db: CharactersRAGDB,
+    *,
+    generated: dict[str, str] | None,
+    snapshot_id: int,
+    action_contract: dict[str, str],
+    selection_fingerprint: str,
+    pending_reservation_created: bool,
+) -> None:
+    """Best-effort reservation and generated-target cleanup for failed follow-up actions."""
+
+    if pending_reservation_created:
+        await _release_generation_link_reservation_best_effort(
+            db,
+            snapshot_id=snapshot_id,
+            target_service=action_contract["target_service"],
+            target_type=action_contract["target_type"],
+            selection_fingerprint=selection_fingerprint,
+        )
+    await _cleanup_generated_action_target_best_effort(
+        db,
+        generated=generated,
+        snapshot_id=snapshot_id,
+        selection_fingerprint=selection_fingerprint,
+    )
 
 
 class _EarlyReturn(Exception):
@@ -897,32 +964,24 @@ async def trigger_suggestion_action(
             retired_selection_fingerprint=retired_selection_fingerprint,
         )
     except HTTPException:
-        if pending_reservation_created:
-            with contextlib.suppress(Exception):
-                await asyncio.to_thread(
-                    release_generation_link_reservation,
-                    db,
-                    snapshot_id=snapshot_id,
-                    target_service=action_contract["target_service"],
-                    target_type=action_contract["target_type"],
-                    selection_fingerprint=selection_fingerprint,
-                )
-        with contextlib.suppress(Exception):
-            await asyncio.to_thread(_cleanup_generated_action_target, db, generated=generated)
+        await _cleanup_failed_action_best_effort(
+            db,
+            generated=generated,
+            snapshot_id=snapshot_id,
+            action_contract=action_contract,
+            selection_fingerprint=selection_fingerprint,
+            pending_reservation_created=pending_reservation_created,
+        )
         raise
     except Exception:
-        if pending_reservation_created:
-            with contextlib.suppress(Exception):
-                await asyncio.to_thread(
-                    release_generation_link_reservation,
-                    db,
-                    snapshot_id=snapshot_id,
-                    target_service=action_contract["target_service"],
-                    target_type=action_contract["target_type"],
-                    selection_fingerprint=selection_fingerprint,
-                )
-        with contextlib.suppress(Exception):
-            await asyncio.to_thread(_cleanup_generated_action_target, db, generated=generated)
+        await _cleanup_failed_action_best_effort(
+            db,
+            generated=generated,
+            snapshot_id=snapshot_id,
+            action_contract=action_contract,
+            selection_fingerprint=selection_fingerprint,
+            pending_reservation_created=pending_reservation_created,
+        )
         raise
     return SuggestionActionResponse.model_validate(
         {
