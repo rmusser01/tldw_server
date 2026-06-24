@@ -1,9 +1,16 @@
 import React from "react"
-import { Button, Space, Tabs, Tooltip } from "antd"
+import { Button, Card, Empty, Space, Tabs, Tooltip, Typography } from "antd"
 import { HelpCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useLocation, useNavigate } from "react-router-dom"
-import { ReviewTab, ManageTab, ImportExportTab, SchedulerTab, TemplatesTab } from "./tabs"
+import {
+  ReviewTab,
+  ManageTab,
+  ImportExportTab,
+  SchedulerTab,
+  TemplatesTab,
+  type TransferTaskKey
+} from "./tabs"
 import { KeyboardShortcutsModal } from "./components"
 import { useDecksQuery, type UseFlashcardQueriesOptions } from "./hooks"
 import type { Flashcard } from "@/services/flashcards"
@@ -13,6 +20,8 @@ import {
   buildQuizAssessmentRouteFromFlashcards,
   parseFlashcardsStudyIntentFromLocation
 } from "@/services/tldw/quiz-flashcards-handoff"
+
+const { Text } = Typography
 
 const parseInitialFlashcardsTab = (locationLike: { search?: string; hash?: string }): string | null => {
   const search = locationLike.search || ""
@@ -74,7 +83,7 @@ export const FlashcardsManager: React.FC = () => {
     includeWorkspaceItems: currentStudyIntent?.forceShowWorkspaceItems ?? false
   }), [currentStudyIntent?.forceShowWorkspaceItems])
   const { data: initialDecks } = useDecksQuery(deckVisibilityOptions)
-  const showSchedulerTab = initialDecks === undefined || initialDecks.length > 0
+  const hasNoInitialDecks = initialDecks !== undefined && initialDecks.length === 0
   const [reviewDeckId, setReviewDeckId] = React.useState<number | null | undefined>(
     currentStudyIntent?.deckId ?? undefined
   )
@@ -110,10 +119,19 @@ export const FlashcardsManager: React.FC = () => {
     deckId: number
     key: string
   } | null>(null)
+  const [transferTaskHandoff, setTransferTaskHandoff] = React.useState<{
+    task: TransferTaskKey
+    key: string
+  } | null>(null)
   const deckHandoffCounterRef = React.useRef(0)
+  const transferTaskHandoffCounterRef = React.useRef(0)
   const nextDeckHandoffKey = React.useCallback((prefix: string, deckId: number) => {
     deckHandoffCounterRef.current += 1
     return `${prefix}:${deckId}:${deckHandoffCounterRef.current}`
+  }, [])
+  const nextTransferTaskHandoffKey = React.useCallback((task: TransferTaskKey) => {
+    transferTaskHandoffCounterRef.current += 1
+    return `${task}:${transferTaskHandoffCounterRef.current}`
   }, [])
   const clearDeckHandoffs = React.useCallback(() => {
     setManageDeckHandoff(null)
@@ -163,6 +181,12 @@ export const FlashcardsManager: React.FC = () => {
     const nextTab =
       currentTab ?? (currentGenerateIntent || currentStudyPackIntent ? "importExport" : null)
     if (nextTab) {
+      if (
+        nextTab === "importExport" &&
+        (currentTab === "importExport" || currentGenerateIntent || currentStudyPackIntent)
+      ) {
+        setTransferTaskHandoff(null)
+      }
       setActiveTab(nextTab)
     }
     if (currentStudyIntent?.deckId !== undefined) {
@@ -171,13 +195,10 @@ export const FlashcardsManager: React.FC = () => {
   }, [applyReviewDeckChange, currentGenerateIntent, currentStudyIntent?.deckId, currentStudyPackIntent, currentTab])
 
   React.useEffect(() => {
-    if (!showSchedulerTab && activeTab === "scheduler") {
-      if (schedulerDirty) {
-        discardSchedulerChanges()
-      }
-      setActiveTab("review")
+    if (hasNoInitialDecks && activeTab === "scheduler" && schedulerDirty) {
+      discardSchedulerChanges()
     }
-  }, [activeTab, discardSchedulerChanges, schedulerDirty, showSchedulerTab])
+  }, [activeTab, discardSchedulerChanges, hasNoInitialDecks, schedulerDirty])
 
   const handleReviewCard = React.useCallback(
     (card: Flashcard) => {
@@ -221,6 +242,29 @@ export const FlashcardsManager: React.FC = () => {
     },
     [applyReviewDeckChange, nextDeckHandoffKey]
   )
+  const requestTransferTask = React.useCallback(
+    (task: TransferTaskKey) => {
+      setTransferTaskHandoff({
+        task,
+        key: nextTransferTaskHandoffKey(task)
+      })
+    },
+    [nextTransferTaskHandoffKey]
+  )
+  const navigateToTransferTask = React.useCallback(
+    (task: TransferTaskKey) => {
+      clearDeckHandoffs()
+      requestTransferTask(task)
+      setActiveTab("importExport")
+    },
+    [clearDeckHandoffs, requestTransferTask]
+  )
+  const navigateToImportTask = React.useCallback(() => {
+    navigateToTransferTask("import")
+  }, [navigateToTransferTask])
+  const navigateToGenerateTask = React.useCallback(() => {
+    navigateToTransferTask("create")
+  }, [navigateToTransferTask])
   const navigateToExportDeck = React.useCallback(
     (deckId: number) => {
       applyReviewDeckChange(deckId)
@@ -228,9 +272,10 @@ export const FlashcardsManager: React.FC = () => {
         deckId,
         key: nextDeckHandoffKey("export", deckId)
       })
+      requestTransferTask("export")
       setActiveTab("importExport")
     },
-    [applyReviewDeckChange, nextDeckHandoffKey]
+    [applyReviewDeckChange, nextDeckHandoffKey, requestTransferTask]
   )
 
   const quizCtaRoute = React.useMemo(() => {
@@ -244,16 +289,13 @@ export const FlashcardsManager: React.FC = () => {
     })
   }, [currentStudyIntent?.attemptId, currentStudyIntent?.deckId, currentStudyIntent?.forceShowWorkspaceItems, currentStudyIntent?.quizId, reviewDeckId])
   const canOpenQuizCta = currentStudyIntent?.quizId !== undefined
-  const effectiveActiveTab =
-    !showSchedulerTab && activeTab === "scheduler" ? "review" : activeTab
+  const effectiveActiveTab = activeTab
   const effectiveSchedulerDeckId = schedulerDeckHandoff?.deckId ?? schedulerHandoffDeckId
   const effectiveSchedulerHandoffKey =
     schedulerDeckHandoff?.key ?? schedulerHandoffKey
 
   const handleTabChange = React.useCallback(
     (nextTab: string) => {
-      if (nextTab === "scheduler" && !showSchedulerTab) return
-
       if (activeTab === "scheduler" && nextTab !== "scheduler" && schedulerDirty) {
         const shouldDiscard = window.confirm(
           t("option:flashcards.schedulerDiscardChangesPrompt", {
@@ -264,9 +306,49 @@ export const FlashcardsManager: React.FC = () => {
         discardSchedulerChanges()
       }
 
+      if (nextTab === "importExport") {
+        setTransferTaskHandoff(null)
+      }
+
       setActiveTab(nextTab)
     },
-    [activeTab, discardSchedulerChanges, schedulerDirty, showSchedulerTab, t]
+    [activeTab, discardSchedulerChanges, schedulerDirty, t]
+  )
+
+  const schedulerEmptyPreview = (
+    <Card size="small" data-testid="flashcards-scheduler-empty-preview">
+      <Empty
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+        description={
+          <Space orientation="vertical" size={8} align="center">
+            <Text strong>
+              {t("option:flashcards.schedulerEmptyTitle", {
+                defaultValue: "Create a deck before tuning scheduler rules."
+              })}
+            </Text>
+            <Text type="secondary" className="max-w-xl text-center">
+              {t("option:flashcards.schedulerEmptyDescription", {
+                defaultValue:
+                  "Scheduler policies control review timing per deck. Start with a new deck, or import and generate cards first."
+              })}
+            </Text>
+          </Space>
+        }
+      >
+        <Space wrap>
+          <Button type="primary" onClick={routeToCreateEntryPoint}>
+            {t("option:flashcards.schedulerEmptyCreateDeck", {
+              defaultValue: "Create a deck"
+            })}
+          </Button>
+          <Button onClick={navigateToImportTask}>
+            {t("option:flashcards.schedulerEmptyImportGenerate", {
+              defaultValue: "Import or generate cards"
+            })}
+          </Button>
+        </Space>
+      </Empty>
+    </Card>
   )
 
   return (
@@ -326,7 +408,8 @@ export const FlashcardsManager: React.FC = () => {
             children: (
               <ReviewTab
                 onNavigateToCreate={routeToCreateEntryPoint}
-                onNavigateToImport={() => setActiveTab("importExport")}
+                onNavigateToImport={navigateToImportTask}
+                onNavigateToGenerate={navigateToGenerateTask}
                 reviewDeckId={reviewDeckId}
                 onReviewDeckChange={applyReviewDeckChange}
                 reviewOverrideCard={reviewOverrideCard}
@@ -344,7 +427,8 @@ export const FlashcardsManager: React.FC = () => {
             label: t("option:flashcards.tabManage", { defaultValue: "Manage" }),
             children: (
               <ManageTab
-                onNavigateToImport={() => setActiveTab("importExport")}
+                onNavigateToImport={navigateToImportTask}
+                onNavigateToGenerate={navigateToGenerateTask}
                 onReviewCard={handleReviewCard}
                 openCreateSignal={openCreateSignal}
                 isActive={effectiveActiveTab === "cards"}
@@ -370,6 +454,8 @@ export const FlashcardsManager: React.FC = () => {
               <ImportExportTab
                 generateIntent={currentGenerateIntent}
                 studyPackIntent={currentStudyPackIntent}
+                initialTask={transferTaskHandoff?.task ?? null}
+                initialTaskHandoffKey={transferTaskHandoff?.key ?? null}
                 initialExportDeckId={exportDeckHandoff?.deckId ?? null}
                 initialExportDeckHandoffKey={exportDeckHandoff?.key ?? null}
               />
@@ -380,24 +466,22 @@ export const FlashcardsManager: React.FC = () => {
             label: t("option:flashcards.tabTemplates", { defaultValue: "Templates" }),
             children: <TemplatesTab />
           },
-          ...(showSchedulerTab
-            ? [
-                {
-                  key: "scheduler",
-                  label: t("option:flashcards.tabScheduler", { defaultValue: "Scheduler" }),
-                  children: (
-                    <SchedulerTab
-                      isActive={effectiveActiveTab === "scheduler"}
-                      initialDeckId={effectiveSchedulerDeckId}
-                      initialDeckHandoffKey={effectiveSchedulerHandoffKey}
-                      deckVisibilityOptions={deckVisibilityOptions}
-                      onDirtyChange={setSchedulerDirty}
-                      discardSignal={schedulerDiscardSignal}
-                    />
-                  )
-                }
-              ]
-            : [])
+          {
+            key: "scheduler",
+            label: t("option:flashcards.tabScheduler", { defaultValue: "Scheduler" }),
+            children: hasNoInitialDecks ? (
+              schedulerEmptyPreview
+            ) : (
+              <SchedulerTab
+                isActive={effectiveActiveTab === "scheduler"}
+                initialDeckId={effectiveSchedulerDeckId}
+                initialDeckHandoffKey={effectiveSchedulerHandoffKey}
+                deckVisibilityOptions={deckVisibilityOptions}
+                onDirtyChange={setSchedulerDirty}
+                discardSignal={schedulerDiscardSignal}
+              />
+            )
+          }
         ]}
       />
 

@@ -9,6 +9,7 @@ import {
   applyManageClientSort,
   cardHasAllTags,
   getManageServerOrderBy,
+  normalizeManageQuery,
   normalizeManageTags,
   type DueStatus,
   type UseFlashcardQueriesOptions,
@@ -55,7 +56,7 @@ export const getFlashcardDocumentQueryKey = (
 ) => [
   "flashcards:document",
   params.deckId ?? null,
-  params.query ?? "",
+  normalizeManageQuery(params.query) ?? "",
   (resolved?.normalizedTags ?? normalizeManageTags(params.tags, params.tag)).join("|"),
   resolved?.dueStatus ?? params.dueStatus ?? "all",
   resolved?.sortBy ?? params.sortBy ?? "due",
@@ -78,7 +79,7 @@ async function fetchSingleTagDocumentPage(
 ): Promise<FlashcardDocumentPage> {
   const response = await listFlashcards({
     deck_id: params.deckId ?? undefined,
-    q: params.query || undefined,
+    q: normalizeManageQuery(params.query),
     tag: params.primaryTag || undefined,
     due_status: params.dueStatus,
     limit: params.pageSize,
@@ -116,7 +117,7 @@ async function fetchMultiTagDocumentPage(
   while (offset < DOCUMENT_MAX_SCAN && matched.length < targetCount) {
     const response = await listFlashcards({
       deck_id: params.deckId ?? undefined,
-      q: params.query || undefined,
+      q: normalizeManageQuery(params.query),
       tag: params.primaryTag,
       due_status: params.dueStatus,
       limit: DOCUMENT_SCAN_PAGE_SIZE,
@@ -168,6 +169,7 @@ export function useFlashcardDocumentQuery(
 ) {
   const { flashcardsEnabled } = useFlashcardsEnabled()
   const normalizedTags = normalizeManageTags(params.tags, params.tag)
+  const normalizedQuery = normalizeManageQuery(params.query)
   const primaryTag = normalizedTags[0]
   const dueStatus = params.dueStatus ?? "all"
   const sortBy = params.sortBy ?? "due"
@@ -192,7 +194,7 @@ export function useFlashcardDocumentQuery(
         return fetchMultiTagDocumentPage(
           {
             deckId: params.deckId,
-            query: params.query,
+            query: normalizedQuery,
             dueStatus,
             sortBy,
             pageSize,
@@ -207,7 +209,7 @@ export function useFlashcardDocumentQuery(
       return fetchSingleTagDocumentPage(
         {
           deckId: params.deckId,
-          query: params.query,
+          query: normalizedQuery,
           dueStatus,
           sortBy,
           pageSize,

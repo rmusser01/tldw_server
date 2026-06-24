@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { FlashcardsManager } from "../FlashcardsManager"
 
@@ -56,6 +56,8 @@ vi.mock("../hooks", () => ({
 vi.mock("../tabs", () => ({
   ReviewTab: (props: {
     onNavigateToCreate: () => void
+    onNavigateToImport: () => void
+    onNavigateToGenerate?: () => void
     reviewDeckId?: number | null
     onReviewDeckChange: (deckId: number | null | undefined) => void
     onNavigateToManageDeck?: (deckId: number) => void
@@ -64,6 +66,8 @@ vi.mock("../tabs", () => ({
   }) => (
     <div data-testid="mock-review-tab">
       <button onClick={props.onNavigateToCreate}>Route Create</button>
+      <button onClick={props.onNavigateToImport}>Route Import</button>
+      <button onClick={() => props.onNavigateToGenerate?.()}>Route Generate</button>
       <button onClick={() => props.onReviewDeckChange(12)}>Select Deck 12</button>
       <button onClick={() => props.onReviewDeckChange(21)}>Select Deck 21</button>
       <button onClick={() => props.onReviewDeckChange(undefined)}>Clear Deck</button>
@@ -77,6 +81,7 @@ vi.mock("../tabs", () => ({
   ),
   ManageTab: (props: {
     onNavigateToImport: () => void
+    onNavigateToGenerate?: () => void
     onReviewCard: (card: { deck_id: number }) => void
     openCreateSignal?: number
     initialDeckId?: number
@@ -88,6 +93,7 @@ vi.mock("../tabs", () => ({
   }) => (
     <div data-testid="mock-manage-tab">
       <button onClick={props.onNavigateToImport}>Route Import</button>
+      <button onClick={() => props.onNavigateToGenerate?.()}>Route Generate</button>
       <button onClick={() => props.onReviewCard({ deck_id: 21 })}>Review Managed Card 21</button>
       <button onClick={() => props.onCreateHandoffConsumed?.()}>Consume Create Handoff</button>
       <span data-testid="mock-open-create-signal">{String(props.openCreateSignal ?? 0)}</span>
@@ -101,11 +107,15 @@ vi.mock("../tabs", () => ({
     </div>
   ),
   ImportExportTab: (props: {
+    initialTask?: "create" | "import" | "export" | null
+    initialTaskHandoffKey?: string | null
     initialExportDeckId?: number | null
     initialExportDeckHandoffKey?: string | null
   }) => (
     <div data-testid="mock-transfer-tab">
       Import / Export panel
+      <span data-testid="mock-transfer-initial-task">{String(props.initialTask ?? "")}</span>
+      <span data-testid="mock-transfer-task-handoff-key">{String(props.initialTaskHandoffKey ?? "")}</span>
       <span data-testid="mock-export-initial-deck-id">{String(props.initialExportDeckId ?? "")}</span>
       <span data-testid="mock-export-handoff-key">{String(props.initialExportDeckHandoffKey ?? "")}</span>
     </div>
@@ -418,7 +428,7 @@ describe("FlashcardsManager consistency standards", () => {
     expect(mocks.translationKeys).not.toContain("option:flashcards.tabImportExport")
   })
 
-  it("defaults empty accounts to Study and keeps import/export available without implying LLM-only import", () => {
+  it("defaults zero-deck users to Study and keeps Scheduler discoverable", () => {
     mocks.decks = []
     window.history.replaceState({}, "", "/flashcards")
 
@@ -428,15 +438,15 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByText("Import / Export")).toBeInTheDocument()
     expect(screen.queryByText("LLM")).not.toBeInTheDocument()
     expect(screen.getByText("Templates")).toBeInTheDocument()
-    expect(screen.queryByText("Scheduler")).not.toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /scheduler/i })).toBeInTheDocument()
     expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
   })
 
-  it("documents current zero-deck behavior before first-time IA remediation", async () => {
+  it("documents zero-deck behavior after first-time IA remediation", async () => {
     renderFlashcardsManager({ decks: [] })
 
     expect(await screen.findByText("Import / Export")).toBeInTheDocument()
-    expect(screen.queryByText("Scheduler")).not.toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /scheduler/i })).toBeInTheDocument()
   })
 
   it("still opens Import / Export first for explicit generate and study-pack intents", () => {
@@ -484,8 +494,8 @@ describe("FlashcardsManager consistency standards", () => {
 
     expect(screen.getByText("Templates")).toBeInTheDocument()
     expect(screen.getByTestId("mock-templates-tab")).toBeInTheDocument()
-    expect(screen.queryByRole("tab", { name: /scheduler/i })).not.toBeInTheDocument()
-    expect(screen.queryByText("Scheduler")).not.toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /scheduler/i })).toBeInTheDocument()
+    expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
   })
 
   it("requests workspace decks when study links include workspace items", () => {
@@ -504,13 +514,18 @@ describe("FlashcardsManager consistency standards", () => {
     )
   })
 
-  it("clamps scheduler deep-links to Study when Scheduler is hidden", () => {
+  it("opens a Scheduler preview for zero-deck Scheduler deep-links", () => {
     mocks.decks = []
     window.history.replaceState({}, "", "/flashcards?tab=scheduler&deck_id=9")
 
     render(<FlashcardsManager />)
 
-    expect(screen.getByTestId("mock-review-tab")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /scheduler/i })).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByTestId("flashcards-scheduler-empty-preview")).toHaveTextContent(
+      /create a deck/i
+    )
+    expect(screen.getByRole("button", { name: /create a deck/i })).toBeInTheDocument()
+    expect(screen.queryByTestId("mock-review-tab")).not.toBeInTheDocument()
     expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
   })
 
@@ -521,6 +536,47 @@ describe("FlashcardsManager consistency standards", () => {
     fireEvent.click(screen.getByText("Route Create"))
     expect(screen.getByTestId("mock-manage-tab")).toBeInTheDocument()
     expect(screen.getByTestId("mock-open-create-signal")).toHaveTextContent("1")
+  })
+
+  it("routes Study import CTA to the Import file task", () => {
+    window.history.replaceState({}, "", "/flashcards")
+    render(<FlashcardsManager />)
+
+    fireEvent.click(within(screen.getByTestId("mock-review-tab")).getByText("Route Import"))
+
+    expect(screen.getByTestId("mock-transfer-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-transfer-initial-task")).toHaveTextContent("import")
+    expect(screen.getByTestId("mock-transfer-task-handoff-key")).toHaveTextContent("import:")
+  })
+
+  it("routes Study generate CTA to the Create and generate task", () => {
+    window.history.replaceState({}, "", "/flashcards")
+    render(<FlashcardsManager />)
+
+    fireEvent.click(within(screen.getByTestId("mock-review-tab")).getByText("Route Generate"))
+
+    expect(screen.getByTestId("mock-transfer-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-transfer-initial-task")).toHaveTextContent("create")
+    expect(screen.getByTestId("mock-transfer-task-handoff-key")).toHaveTextContent("create:")
+  })
+
+  it("routes Manage empty-state transfer CTAs to distinct transfer tasks", () => {
+    window.history.replaceState({}, "", "/flashcards")
+    render(<FlashcardsManager />)
+
+    fireEvent.click(screen.getByText("Manage"))
+    fireEvent.click(within(screen.getByTestId("mock-manage-tab")).getByText("Route Import"))
+
+    expect(screen.getByTestId("mock-transfer-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-transfer-initial-task")).toHaveTextContent("import")
+    expect(screen.getByTestId("mock-transfer-task-handoff-key")).toHaveTextContent("import:")
+
+    fireEvent.click(screen.getByText("Manage"))
+    fireEvent.click(within(screen.getByTestId("mock-manage-tab")).getByText("Route Generate"))
+
+    expect(screen.getByTestId("mock-transfer-tab")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-transfer-initial-task")).toHaveTextContent("create")
+    expect(screen.getByTestId("mock-transfer-task-handoff-key")).toHaveTextContent("create:")
   })
 
   it("passes the selected Study deck to the Manage create drawer handoff", () => {
@@ -627,7 +683,8 @@ describe("FlashcardsManager consistency standards", () => {
     confirmSpy.mockRestore()
   })
 
-  it("discards scheduler draft state when Scheduler is auto-hidden", async () => {
+  it("discards scheduler draft state when Scheduler is replaced by the zero-deck preview", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm")
     window.history.replaceState({}, "", "/flashcards")
     const { rerender } = render(<FlashcardsManager />)
 
@@ -639,14 +696,14 @@ describe("FlashcardsManager consistency standards", () => {
     rerender(<FlashcardsManager />)
 
     await waitFor(() => {
-      expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
+      expect(screen.getByTestId("flashcards-scheduler-empty-preview")).toBeInTheDocument()
     })
 
-    mocks.decks = [{ id: 1, name: "Biology" }]
-    rerender(<FlashcardsManager />)
-    fireEvent.click(screen.getByText("Scheduler"))
+    fireEvent.click(screen.getByText("Manage"))
 
-    expect(screen.getByTestId("mock-scheduler-discard-signal")).toHaveTextContent("1")
-    expect(screen.getByTestId("mock-scheduler-draft-state")).toHaveTextContent("clean")
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(screen.getByTestId("mock-manage-tab")).toBeInTheDocument()
+
+    confirmSpy.mockRestore()
   })
 })

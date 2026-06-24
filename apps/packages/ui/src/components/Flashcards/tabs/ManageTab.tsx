@@ -103,6 +103,7 @@ type MoveUndoSnapshot = {
 
 interface ManageTabProps {
   onNavigateToImport: () => void
+  onNavigateToGenerate?: () => void
   onReviewCard: (card: Flashcard) => void
   openCreateSignal?: number
   isActive: boolean
@@ -130,6 +131,7 @@ export const buildFlashcardsWorkspaceVisibilityOptions = (
  */
 export const ManageTab: React.FC<ManageTabProps> = ({
   onNavigateToImport,
+  onNavigateToGenerate,
   onReviewCard,
   openCreateSignal,
   isActive,
@@ -284,8 +286,17 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     [mSort]
   )
 
-  // Check if any filters are active
-  const hasActiveFilters = !!(mQuery || mTags.length > 0 || mDeckId != null || mDue !== "all")
+  const normalizedManageQuery = mQuery.trim()
+
+  // Check if any manage filters are active
+  const hasActiveFilters = !!(
+    normalizedManageQuery ||
+    mTags.length > 0 ||
+    mDue !== "all" ||
+    mDeckId != null ||
+    selectedWorkspaceId != null ||
+    showWorkspaceDecks
+  )
 
   // Clear all filters
   const clearAllFilters = () => {
@@ -294,6 +305,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     setMTags([])
     setMTagInput("")
     setMDeckId(undefined)
+    setShowWorkspaceDecks(false)
+    setSelectedWorkspaceId(null)
     setMDue("all")
     setMSort("due")
     setPage(1)
@@ -432,7 +445,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
 
   const manageQuery = useManageQuery({
     deckId: mDeckId,
-    query: mQuery,
+    query: normalizedManageQuery,
     tags: mTags,
     dueStatus: mDue,
     sortBy: mSort,
@@ -443,7 +456,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const documentQuery = useFlashcardDocumentQuery(
     {
       deckId: mDeckId,
-      query: mQuery,
+      query: normalizedManageQuery,
       tags: mTags,
       dueStatus: mDue,
       sortBy: documentSort,
@@ -457,21 +470,29 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const documentFilterContext = React.useMemo(
     () => ({
       deckId: mDeckId,
-      query: mQuery,
+      query: normalizedManageQuery,
       tags: mTags,
       dueStatus: mDue,
       sortBy: documentSort,
       workspaceId: selectedWorkspaceId,
       includeWorkspaceItems: selectedWorkspaceId == null ? showWorkspaceDecks : false
     }),
-    [documentSort, mDeckId, mDue, mQuery, mTags, selectedWorkspaceId, showWorkspaceDecks]
+    [
+      documentSort,
+      mDeckId,
+      mDue,
+      normalizedManageQuery,
+      mTags,
+      selectedWorkspaceId,
+      showWorkspaceDecks
+    ]
   )
   const documentQueryKey = React.useMemo(
     () =>
       getFlashcardDocumentQueryKey(
         {
           deckId: mDeckId,
-          query: mQuery,
+          query: normalizedManageQuery,
           tags: mTags,
           dueStatus: mDue,
           sortBy: documentSort,
@@ -485,7 +506,15 @@ export const ManageTab: React.FC<ManageTabProps> = ({
           includeWorkspaceItems: selectedWorkspaceId == null ? showWorkspaceDecks : false
         }
       ),
-    [documentSort, mDeckId, mDue, mQuery, mTags, selectedWorkspaceId, showWorkspaceDecks]
+    [
+      documentSort,
+      mDeckId,
+      mDue,
+      normalizedManageQuery,
+      mTags,
+      selectedWorkspaceId,
+      showWorkspaceDecks
+    ]
   )
 
   React.useEffect(() => {
@@ -506,7 +535,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   React.useEffect(() => {
     setSelectedIds(new Set())
     setSelectAllAcross(false)
-  }, [mDeckId, mQuery, mTags, mDue, mSort])
+  }, [mDeckId, normalizedManageQuery, mTags, mDue, mSort])
 
   React.useEffect(() => {
     return () => {
@@ -648,7 +677,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   // Reset focused index when page or filters change
   React.useEffect(() => {
     setFocusedIndex(-1)
-  }, [page, pageSize, listDensity, mDeckId, mQuery, mTags, mDue, mSort])
+  }, [page, pageSize, listDensity, mDeckId, normalizedManageQuery, mTags, mDue, mSort])
 
   async function fetchAllItemsAcrossFilters(): Promise<Flashcard[]> {
     const items: Flashcard[] = []
@@ -672,7 +701,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     ) {
       const res = await listFlashcards({
         deck_id: mDeckId ?? undefined,
-        q: mQuery || undefined,
+        q: normalizedManageQuery || undefined,
         tag: primaryTag,
         due_status: mDue,
         workspace_id: selectedWorkspaceId ?? undefined,
@@ -2066,7 +2095,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                 <Empty
                   description={t("option:flashcards.noCardsTitle", {
                     defaultValue:
-                      mQuery || mTags.length > 0 || mDeckId != null || mDue !== "all"
+                      hasActiveFilters
                         ? "No cards match your filters"
                         : "No flashcards yet"
                   })}
@@ -2075,13 +2104,13 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                     <Text type="secondary">
                       {t("option:flashcards.noCardsDescription", {
                         defaultValue:
-                          mQuery || mTags.length > 0 || mDeckId != null || mDue !== "all"
+                          hasActiveFilters
                             ? "Try adjusting your search, deck, tag, or due filters."
                             : "Create cards from your notes and media, or import an existing deck."
                       })}
                     </Text>
                     <Space>
-                      {mQuery || mTags.length > 0 || mDeckId != null || mDue !== "all" ? (
+                      {hasActiveFilters ? (
                         <Button onClick={clearAllFilters}>
                           {t("option:flashcards.clearFilters", {
                             defaultValue: "Clear filters"
@@ -2107,7 +2136,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                             })}
                           </Button>
                           <Button
-                            onClick={onNavigateToImport}
+                            onClick={onNavigateToGenerate ?? onNavigateToImport}
                             data-testid="flashcards-manage-empty-generate-cta"
                           >
                             {t("option:flashcards.noCardsGenerateCta", {
