@@ -4,7 +4,7 @@ title: Fix legacy WebSearch module review findings
 status: Done
 assignee: []
 created_date: '2026-06-23 11:20'
-updated_date: '2026-06-23 15:10'
+updated_date: '2026-06-23 21:26'
 labels:
   - websearch
   - legacy
@@ -51,6 +51,9 @@ Final verification:
 - `source .venv/bin/activate && python -m compileall -q tldw_Server_API/app/core/WebSearch tldw_Server_API/tests/WebSearch/unit/test_legacy_websearch_sanitizers.py` passed.
 - `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/WebSearch -f json -o /tmp/bandit_legacy_websearch_review_fixes.json` exited 0; JSON reported `results: 0`, `errors: []`.
 - `git diff --check -- <touched files>` passed.
+
+Pull request:
+- https://github.com/rmusser01/tldw_server/pull/2492
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
