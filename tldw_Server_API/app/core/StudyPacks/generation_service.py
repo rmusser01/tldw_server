@@ -33,7 +33,6 @@ from tldw_Server_API.app.core.StudyPacks.types import (
     StudySourceBundle,
     StudySourceBundleItem,
 )
-from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
 
 try:
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
@@ -66,6 +65,38 @@ def _clean_text(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _normalized_for_match(value: Any) -> str:
+    return " ".join(_clean_text(value).split())
+
+
+def extract_openai_content(response: Any) -> str | None:
+    """Extract generated text from the small OpenAI-style response surface used here."""
+
+    if isinstance(response, Mapping):
+        try:
+            choices = response.get("choices") or []
+            if choices and isinstance(choices[0], Mapping):
+                message = choices[0].get("message") or {}
+                if isinstance(message, Mapping):
+                    content = message.get("content")
+                    if isinstance(content, str):
+                        return content
+            text = response.get("content") or response.get("text")
+            if isinstance(text, str):
+                return text
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+            return None
+    if isinstance(response, str):
+        return response
+    return None
+
+
+def _citation_text_matches_evidence(citation_text: str, evidence_text: str) -> bool:
+    normalized_citation = _normalized_for_match(citation_text)
+    normalized_evidence = _normalized_for_match(evidence_text)
+    return bool(normalized_citation and normalized_citation in normalized_evidence)
 
 
 def _bundle_item_key(source_type: Any, source_id: Any) -> tuple[str, str]:
@@ -331,20 +362,32 @@ class StudyPackGenerationService:
 
     def _next_destination_deck_name(self, base_name: str) -> str:
         cleaned_base_name = _clean_text(base_name) or "Study Pack"
-        existing_names = {
-            _clean_text(deck.get("name"))
-            for deck in self.note_db.list_decks(limit=10_000, include_deleted=True, include_workspace_items=True)
-            if _clean_text(deck.get("name"))
-        }
-        if cleaned_base_name not in existing_names:
+        if not self._deck_name_exists(cleaned_base_name):
             return cleaned_base_name
 
         for suffix in range(2, _MAX_DECK_NAME_ATTEMPTS + 1):
             candidate_name = f"{cleaned_base_name} ({suffix})"
-            if candidate_name not in existing_names:
+            if not self._deck_name_exists(candidate_name):
                 return candidate_name
 
         raise CharactersRAGDBError(f"Could not allocate a unique deck name for '{cleaned_base_name}'")  # noqa: TRY003
+
+    def _deck_name_exists(self, deck_name: str) -> bool:
+        get_deck_by_name = getattr(self.note_db, "get_deck_by_name", None)
+        if callable(get_deck_by_name):
+            try:
+                return bool(get_deck_by_name(deck_name, include_deleted=True))
+            except TypeError:
+                return bool(get_deck_by_name(deck_name))
+
+        list_decks = getattr(self.note_db, "list_decks", None)
+        if not callable(list_decks):
+            return False
+        try:
+            decks = list_decks(limit=10_000, include_deleted=True, include_workspace_items=True)
+        except TypeError:
+            decks = list_decks()
+        return any(_clean_text(deck.get("name")) == deck_name for deck in decks if isinstance(deck, Mapping))
 
     async def _call_generation_model(self, *, system_prompt: str, user_prompt: str) -> str:
         response = await perform_chat_api_call_async(
@@ -516,6 +559,8 @@ class StudyPackGenerationService:
         citation_text = _clean_text(raw_citation.get("citation_text"))
         if not citation_text:
             raise StudyPackValidationError("Study-pack citations must include citation_text")
+        if not _citation_text_matches_evidence(citation_text, bundle_item.evidence_text):
+            raise StudyPackValidationError("Study-pack citation_text must match source evidence")
 
         locator = self._merge_citation_locator(bundle_item, raw_citation.get("locator"))
         return {
@@ -559,16 +604,6 @@ class StudyPackGenerationService:
             return json.loads(candidate_text)
         except json.JSONDecodeError as exc:
             direct_error = exc
-
-        decoder = json.JSONDecoder()
-        for index, char in enumerate(candidate_text):
-            if char not in "[{":
-                continue
-            try:
-                payload, _ = decoder.raw_decode(candidate_text[index:])
-                return payload
-            except json.JSONDecodeError:
-                continue
         raise StudyPackMalformedResponseError("Study-pack generation did not return valid JSON") from direct_error
 
 

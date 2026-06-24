@@ -411,7 +411,7 @@ def test_unsupported_or_incomplete_sources_fail_fast(
         )
 
 
-def test_excerpt_text_is_allowed_only_when_the_parent_source_still_exists():
+def test_excerpt_text_must_match_parent_source_text():
     db = MagicMock(spec=CharactersRAGDB)
     db.get_note_by_id.return_value = {
         "id": "note-2",
@@ -421,13 +421,41 @@ def test_excerpt_text_is_allowed_only_when_the_parent_source_still_exists():
     selection = _selection(
         source_type="note",
         source_id="note-2",
-        excerpt_text="Fast retransmit reacts before the timeout expires.",
+        excerpt_text="longer than the selected excerpt",
     )
 
     bundle = _resolver(db=db).resolve([selection])
 
-    assert bundle.items[0].evidence_text == "Fast retransmit reacts before the timeout expires."  # nosec B101
+    assert bundle.items[0].evidence_text == "longer than the selected excerpt"  # nosec B101
+
+    fabricated = _selection(
+        source_type="note",
+        source_id="note-2",
+        excerpt_text="Fast retransmit reacts before the timeout expires.",
+    )
+
+    with pytest.raises(ValueError, match="excerpt_text"):
+        _resolver(db=db).resolve([fabricated])
 
     db.get_note_by_id.return_value = None
     with pytest.raises(ValueError, match="Note 'note-2' not found"):
         _resolver(db=db).resolve([selection])
+
+
+def test_resolved_evidence_is_bounded_and_marks_truncated_sources(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("STUDY_PACK_MAX_EVIDENCE_CHARS_PER_SOURCE", "32")
+    db = MagicMock(spec=CharactersRAGDB)
+    db.get_note_by_id.return_value = {
+        "id": "note-long",
+        "title": "Long note",
+        "content": "abcdefghijklmnopqrstuvwxyz0123456789SOURCE-TAIL",
+    }
+
+    bundle = _resolver(db=db).resolve(
+        [_selection(source_type="note", source_id="note-long")]
+    )
+
+    item = bundle.items[0]
+    assert item.evidence_text == "abcdefghijklmnopqrstuvwxyz012345"  # nosec B101
+    assert item.locator["evidence_truncated"] is True  # nosec B101
+    assert item.locator["evidence_original_chars"] == 47  # nosec B101

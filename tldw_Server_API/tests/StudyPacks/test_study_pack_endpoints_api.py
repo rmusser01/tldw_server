@@ -185,7 +185,14 @@ def test_regenerate_study_pack_job_uses_stored_source_bundle(
     assert int(job["payload"]["regenerate_from_pack_id"]) == pack_id  # nosec B101
     assert int(job["payload"]["expected_version"]) == 1  # nosec B101
     assert job["payload"]["title"] == "OSI Model"  # nosec B101
-    assert job["payload"]["source_items"] == [{"source_type": "note", "source_id": "note-1"}]  # nosec B101
+    assert job["payload"]["source_items"] == [  # nosec B101
+        {
+            "source_type": "note",
+            "source_id": "note-1",
+            "label": "Seed note",
+            "locator": {"note_id": "note-1"},
+        }
+    ]
 
 
 def test_failed_study_pack_jobs_return_diagnostics_without_partial_pack(

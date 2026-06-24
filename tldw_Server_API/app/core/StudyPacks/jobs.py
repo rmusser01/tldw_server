@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
@@ -63,30 +64,61 @@ def build_study_pack_job_result(
     return result
 
 
-def extract_study_pack_source_items(source_bundle_json: Any) -> list[dict[str, str]]:
-    """Recover minimal source selections from a persisted study-pack bundle."""
+def _clean_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
 
-    if isinstance(source_bundle_json, dict):
-        items = source_bundle_json.get("items")
-    elif isinstance(source_bundle_json, list):
-        items = source_bundle_json
+
+def _compact_mapping(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): item
+        for key, item in value.items()
+        if item not in (None, "", [], {})
+    }
+
+
+def extract_study_pack_source_items(source_bundle_json: Any) -> list[dict[str, Any]]:
+    """Recover source selections from a persisted study-pack bundle."""
+
+    bundle_payload = source_bundle_json
+    if isinstance(bundle_payload, str):
+        try:
+            bundle_payload = json.loads(bundle_payload)
+        except json.JSONDecodeError:
+            bundle_payload = None
+
+    if isinstance(bundle_payload, dict):
+        items = bundle_payload.get("items")
+    elif isinstance(bundle_payload, list):
+        items = bundle_payload
     else:
         items = None
 
-    normalized: list[dict[str, str]] = []
+    normalized: list[dict[str, Any]] = []
     for item in items or []:
         if not isinstance(item, dict):
             continue
-        source_type = str(item.get("source_type") or "").strip()
-        source_id = str(item.get("source_id") or "").strip()
+        source_type = _clean_text(item.get("source_type"))
+        source_id = _clean_text(item.get("source_id"))
         if not source_type or not source_id:
             continue
-        normalized.append(
-            {
-                "source_type": source_type,
-                "source_id": source_id,
-            }
-        )
+        source_item: dict[str, Any] = {
+            "source_type": source_type,
+            "source_id": source_id,
+        }
+        label = _clean_text(item.get("label"))
+        if label:
+            source_item["label"] = label
+        locator = _compact_mapping(item.get("locator"))
+        if locator:
+            source_item["locator"] = locator
+        excerpt_text = _clean_text(item.get("excerpt_text")) or _clean_text(item.get("evidence_text"))
+        if excerpt_text:
+            source_item["excerpt_text"] = excerpt_text
+        normalized.append(source_item)
     return normalized
 
 
