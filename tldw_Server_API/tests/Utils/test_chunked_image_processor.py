@@ -73,3 +73,21 @@ async def test_streaming_image_processor_rejects_invalid_image_payload():
     assert image_data is None
     assert mime_type == "image/png"
     assert "Invalid image format" in error
+
+
+@pytest.mark.asyncio
+async def test_process_image_chunked_rejects_original_pixel_count_before_resize(monkeypatch):
+    class OversizedImage:
+        width = cip.MAX_IMAGE_DIMENSION + 1
+        height = cip.MAX_IMAGE_DIMENSION + 1
+        mode = "RGB"
+
+        def thumbnail(self, *_args, **_kwargs):
+            raise AssertionError("thumbnail should not run before pixel limit validation")
+
+    monkeypatch.setattr(cip, "PIL_AVAILABLE", True)
+    monkeypatch.setattr(cip.Image, "open", lambda _payload: OversizedImage())
+
+    with pytest.raises(ValueError, match="Image too large"):
+        async for _chunk in cip.process_image_chunked(b"fake", "image/png"):
+            pass

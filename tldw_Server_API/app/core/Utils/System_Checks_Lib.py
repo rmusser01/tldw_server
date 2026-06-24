@@ -22,8 +22,10 @@
 import os
 import platform
 import shutil
-import subprocess
-import zipfile
+# TASK-9941 Bandit B404 rationale: subprocess is limited to the local
+# nvidia-smi availability probe; callers cannot supply commands and shell=True
+# is not used.
+import subprocess  # nosec B404
 
 from tldw_Server_API.app.core.Utils.Utils import logging
 
@@ -37,6 +39,7 @@ processing_choice: str = "cpu"
 #
 
 def platform_check():
+    """Detect the host operating system and record whether supported checks can run."""
     global userOS
     if platform.system() == "Linux":
         logging.info("Linux OS detected; running Linux-appropriate checks")
@@ -53,14 +56,24 @@ def platform_check():
 
 # Check for NVIDIA GPU and CUDA availability
 def cuda_check():
+    """Probe for NVIDIA CUDA support using a resolved local nvidia-smi executable."""
     global processing_choice
     if "CUDA_VISIBLE_DEVICES" in os.environ:
         logging.info(f"CUDA_VISIBLE_DEVICES is set: {os.environ['CUDA_VISIBLE_DEVICES']}")
     else:
         logging.info("CUDA_VISIBLE_DEVICES not set.")
+
+    nvidia_smi = shutil.which("nvidia-smi")
+    if not nvidia_smi:
+        logging.warning("CUDA is not installed or configured correctly.")
+        processing_choice = "cpu"
+        return False
+
     try:
         # Run nvidia-smi to capture its output
-        nvidia_smi_output = subprocess.check_output(["nvidia-smi"], text=True)
+        # TASK-9941 Bandit B603 rationale: nvidia_smi comes from shutil.which("nvidia-smi"),
+        # is executed as a fixed argv list, and shell=True is not used.
+        nvidia_smi_output = subprocess.check_output([nvidia_smi], text=True)  # nosec B603
 
         # Look for CUDA version in the output
         if "CUDA Version" in nvidia_smi_output:
@@ -75,7 +88,7 @@ def cuda_check():
             processing_choice = "cpu"
             return False
 
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, OSError) as e:
         logging.error(f"Failed to run 'nvidia-smi': {str(e)}")
         processing_choice = "cpu"
         return False
@@ -87,6 +100,7 @@ def cuda_check():
 
 # Ask user if they would like to use either their GPU or their CPU for transcription
 def decide_cpugpu():
+    """Prompt for CPU/GPU processing preference, defaulting to the current choice when non-interactive."""
     global processing_choice
     try:
         processing_input = input("Would you like to use your GPU or CPU for transcription? (1/cuda)GPU/(2/cpu)CPU): ")
@@ -112,6 +126,7 @@ def decide_cpugpu():
 
 # check for existence of ffmpeg
 def check_ffmpeg():
+    """Return whether ffmpeg is available from PATH or the local Bin fallback."""
     if shutil.which("ffmpeg"):
         logging.debug("ffmpeg found installed on the local system, in the local PATH, or in the './Bin' folder")
         return True #fix 'Asserion error: none is not true' in Tests\Summarization\test_summarize.py
@@ -149,58 +164,9 @@ def check_ffmpeg():
 
 # Download ffmpeg
 def download_ffmpeg():
-    FFMPEG_DOWNLOAD_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-    try:
-        user_choice = input("Do you want to download ffmpeg? (y/N): ")
-    except EOFError:
-        logging.debug("No interactive input available; skipping ffmpeg download prompt")
-        return False
-    if user_choice.lower() not in ['y', 'yes', '1']:  # Simplified input check
-        logging.info("ffmpeg will not be downloaded.")
-        return False
-
-    logging.info("Downloading ffmpeg...")
-    try:
-        zip_path = "ffmpeg-release-essentials.zip"
-        # Use centralized downloader with retries + egress enforcement
-        download(url=FFMPEG_DOWNLOAD_URL, dest=zip_path)
-
-        logging.info("Extracting ffmpeg.exe...")
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            ffmpeg_path = None
-            for file_info in zip_ref.infolist():
-                if file_info.filename.endswith("ffmpeg.exe"):
-                    ffmpeg_path = file_info.filename
-                    break
-            if ffmpeg_path is None:
-                # Raise a FileNotFoundError if ffmpeg.exe is not found in the zip.
-                raise FileNotFoundError("ffmpeg.exe not found in the zip file.")
-            bin_folder = os.path.join(".", "Bin")
-            if not os.path.exists(bin_folder):
-                os.makedirs(bin_folder)
-
-            zip_ref.extract(ffmpeg_path, path=bin_folder)
-
-            src_path = os.path.join(bin_folder, ffmpeg_path)
-            dst_path = os.path.join(bin_folder, "ffmpeg.exe")
-            shutil.move(src_path, dst_path)  # Move to the correct location (./Bin/ffmpeg.exe).
-
-        os.remove(zip_path)  # Clean up: Delete the downloaded zip file.
-        logging.info("ffmpeg.exe has been successfully downloaded and extracted to the './Bin' folder.")
-        return True # returns if the process was succesful
-
-    # Handle potential errors during the download and extraction process.
-    except DownloadError as e:
-        logging.error(f"Error downloading ffmpeg: {e}")
-        return False
-    except (FileNotFoundError, zipfile.BadZipFile, OSError) as e:
-        logging.error(f"Error extracting or moving ffmpeg: {e}")
-        return False
-    except Exception as e:
-        logging.error(f"An unexpected error occurred: {e}")
-        return False
-
-#
-#
-#######################################################################################################################
-from tldw_Server_API.app.core.http_client import DownloadError, download
+    """Refuse automatic executable download and direct users to trusted installation channels."""
+    logging.warning(
+        "Automatic ffmpeg executable download is disabled. Install ffmpeg manually "
+        "or through a trusted package manager."
+    )
+    return False
