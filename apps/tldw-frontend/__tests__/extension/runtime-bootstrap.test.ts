@@ -375,6 +375,49 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(readStoredValue("tldwRuntimeAuthMetadata")).toBeNull()
   })
 
+  it("uses runtime auth for shared requests when preserving a manual single-user key", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "single-user",
+        apiKey: "manual-user-key",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    )
+    stubRuntimeConfigFetch("runtime-key")
+
+    await importAndAwaitBootstrap()
+    const { tldwRequest } = await import("@/services/tldw/request-core")
+    const requestFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    )
+
+    await tldwRequest(
+      {
+        path: "/api/v1/config/docs-info",
+        method: "GET"
+      },
+      {
+        getConfig: async () =>
+          readStoredValue("tldwConfig") as Record<string, unknown>,
+        fetchFn: requestFetch
+      }
+    )
+
+    expect(requestFetch).toHaveBeenCalledWith(
+      "/api/v1/config/docs-info",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "X-API-KEY": "runtime-key"
+        })
+      })
+    )
+  })
+
   it("preserves manual multi-user credentials while runtime auth wins request precedence", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     localStorage.setItem(
@@ -398,6 +441,54 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(nextConfig.serverUrl).toBe(window.location.origin)
     expect(readStoredValue("tldwServerUrl")).toBe(window.location.origin)
     expect(readStoredValue("tldwRuntimeAuthMetadata")).toBeNull()
+  })
+
+  it("uses runtime auth for shared requests when preserving manual multi-user credentials", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "multi-user",
+        accessToken: "manual-token",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    )
+    stubRuntimeConfigFetch("runtime-key")
+
+    await importAndAwaitBootstrap()
+    const { tldwRequest } = await import("@/services/tldw/request-core")
+    const requestFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    )
+
+    await tldwRequest(
+      {
+        path: "/api/v1/config/docs-info",
+        method: "GET"
+      },
+      {
+        getConfig: async () =>
+          readStoredValue("tldwConfig") as Record<string, unknown>,
+        fetchFn: requestFetch
+      }
+    )
+
+    expect(requestFetch).toHaveBeenCalledWith(
+      "/api/v1/config/docs-info",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "X-API-KEY": "runtime-key"
+        })
+      })
+    )
+    const requestHeaders = requestFetch.mock.calls[0]?.[1]?.headers as Record<
+      string,
+      string
+    >
+    expect(requestHeaders.Authorization).toBeUndefined()
   })
 
   it("does not mark a matching manual key as runtime-owned without prior metadata", async () => {

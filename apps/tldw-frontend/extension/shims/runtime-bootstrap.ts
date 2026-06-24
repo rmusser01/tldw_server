@@ -18,6 +18,7 @@ import {
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
+import { setRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null
@@ -362,6 +363,7 @@ const seedTldwConfigFromRuntime = async (): Promise<void> => {
   }
 
   setRuntimeApiKey(runtimeKey)
+  setRuntimeSingleUserApiKeyOverride(runtimeKey)
 
   try {
     const storage = createSafeStorage()
