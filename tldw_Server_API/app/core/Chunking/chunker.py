@@ -31,6 +31,7 @@ from .process_text.preparation import (
     _prepare_frontmatter_options,
     extract_header,
 )
+from .process_text.options import resolve_process_options
 from .security_logger import get_security_logger
 from .strategies.fixed_size import FixedSizeChunkingStrategy
 from .strategies.rolling_summarize import RollingSummarizeStrategy
@@ -2315,125 +2316,18 @@ class Chunker:
         observe_histogram("chunker_header_extract_seconds", time.perf_counter() - hdr_start, labels=labels)
 
         # Resolve main parameters
-        requested_method = self._normalize_method_argument(opts.get('method'))
-        method = requested_method or self.config.default_method.value
-
-        max_size_opt = opts.get('max_size')
-        if max_size_opt is None:
-            max_size = self.config.default_max_size
-        else:
-            try:
-                max_size = int(max_size_opt)
-            except _CHUNKER_NONCRITICAL_EXCEPTIONS as exc:
-                raise InvalidInputError(f"Invalid max_size value: {max_size_opt}") from exc
-            if max_size <= 0:
-                raise InvalidInputError(f"max_size must be positive, got {max_size}")
-
-        overlap_opt = opts.get('overlap')
-        if overlap_opt is None:
-            overlap = self.config.default_overlap
-        else:
-            try:
-                overlap = int(overlap_opt)
-            except _CHUNKER_NONCRITICAL_EXCEPTIONS as exc:
-                raise InvalidInputError(f"Invalid overlap value: {overlap_opt}") from exc
-            if overlap < 0:
-                logger.warning(f"Negative overlap ({overlap}) adjusted to 0 in process_text")
-                overlap = 0
-
-        language = opts.get('language')
-        # Support explicit auto/detect override and default autodetect when not provided
-        if (not language) or (isinstance(language, str) and language.strip().lower() in {"auto", "detect"}):
-            # Lightweight language detection by Unicode script ranges
-            try:
-                if re.search(r'[\u3040-\u309f\u30a0-\u30ff]', processed_text):
-                    language = 'ja'       # Hiragana/Katakana (Japanese)
-                elif re.search(r'[\u4e00-\u9fff]', processed_text):
-                    language = 'zh'       # CJK Unified Ideographs (Chinese)
-                elif re.search(r'[\u0e00-\u0e7f]', processed_text):
-                    language = 'th'       # Thai
-                elif re.search(r'[\u0900-\u097f]', processed_text):
-                    language = 'hi'       # Devanagari (Hindi)
-                elif re.search(r'[\u0400-\u04ff]', processed_text):
-                    language = 'ru'       # Cyrillic (Russian)
-                elif re.search(r'[\uac00-\ud7af]', processed_text):
-                    language = 'ko'       # Hangul (Korean)
-                elif re.search(r'[\u0600-\u06ff]', processed_text):
-                    language = 'ar'       # Arabic
-                else:
-                    language = self.config.language
-            except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                language = self.config.language
-
-        method = self._resolve_method(method, language, opts)
-        method_lower = str(method).lower() if method is not None else ''
-        method_option_excludes = {
-            'method',
-            'max_size',
-            'overlap',
-            'language',
-            'hierarchical',
-            'hierarchical_template',
-            'multi_level',
-            'timecode_map',
-            'enable_frontmatter_parsing',
-            'frontmatter_sentinel_key',
-            'adaptive',
-            'base_adaptive_chunk_size',
-            'min_adaptive_chunk_size',
-            'max_adaptive_chunk_size',
-            'adaptive_overlap',
-            'base_overlap',
-            'max_adaptive_overlap',
-            'code_mode',
-            'align_text_to_source',
-        }
-        method_options = {
-            k: v for k, v in opts.items() if k not in method_option_excludes
-        }
-        code_mode_for_method: Optional[str] = None
-        if 'code_mode' in opts:
-            try:
-                cm_val = opts.get('code_mode')
-                if cm_val is not None:
-                    code_mode_for_method = str(cm_val).lower()
-            except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                code_mode_for_method = None
-        elif method_lower == 'code_ast':
-            code_mode_for_method = 'ast'
-        elif method_lower == 'code':
-            code_mode_for_method = 'auto'
-        method_options_for_chunk: dict[str, Any] = dict(method_options)
-        if code_mode_for_method is not None and method_lower in ('code', 'code_ast'):
-            method_options_for_chunk['code_mode'] = code_mode_for_method
-
-        # Adaptive sizing (simple heuristic parity)
-        adaptive = _coerce_bool_option(opts.get('adaptive'), False)
-        if adaptive and method not in ('semantic', 'json', 'xml', 'ebook_chapters', 'rolling_summarize'):
-            try:
-                base_adaptive = int(opts.get('base_adaptive_chunk_size') or max_size)
-                min_adaptive = int(opts.get('min_adaptive_chunk_size') or max_size)
-                max_adaptive_hi = int(opts.get('max_adaptive_chunk_size') or max_size)
-                # Very rough heuristic: scale with document size
-                density = max(0.0, min(3.0, len(processed_text) / 10000.0))
-                scaled = int(base_adaptive * (1.0 + 0.2 * density))
-                max_size = max(min_adaptive, min(max_adaptive_hi, scaled))
-                # Optional adaptive overlap tuned by density
-                if _coerce_bool_option(opts.get('adaptive_overlap'), False):
-                    try:
-                        base_overlap = int(opts.get('base_overlap') or overlap or 0)
-                        max_overlap = int(opts.get('max_adaptive_overlap') or max(0, base_overlap + 100))
-                        # Increase overlap slightly for denser/longer docs; cap to avoid waste
-                        tuned = int(base_overlap + (density * 10))
-                        overlap = max(0, min(max_overlap, tuned))
-                    except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                        pass
-            except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                pass
-
-        # Choose hierarchical vs normal
-        hierarchical = _coerce_bool_option(opts.get('hierarchical'), False)
-        hier_template = opts.get('hierarchical_template') if isinstance(opts.get('hierarchical_template'), dict) else None
+        resolved = resolve_process_options(self, processed_text, opts)
+        method = resolved.method
+        method_lower = resolved.method_lower
+        max_size = resolved.max_size
+        overlap = resolved.overlap
+        language = resolved.language
+        adaptive = resolved.adaptive
+        hierarchical = resolved.hierarchical
+        hier_template = resolved.hier_template
+        multi_level = resolved.multi_level
+        code_mode_for_method = resolved.code_mode_for_method
+        method_options_for_chunk = resolved.method_options_for_chunk
 
         # Set per-call LLM overrides without mutating shared state
         prev_llm_overrides = getattr(self._thread_local, "llm_overrides", _LLM_UNSET)
@@ -2442,9 +2336,6 @@ class Chunker:
             o_func = llm_call_func if llm_call_func is not None else _LLM_UNSET
             o_cfg = llm_config if llm_config is not None else _LLM_UNSET
             self._thread_local.llm_overrides = (o_func, o_cfg)
-
-        # Multi-level paragraph-aware chunking for words/sentences (parity with legacy)
-        multi_level = _coerce_bool_option(opts.get('multi_level'), False) and method in ('words', 'sentences') and not (hierarchical or hier_template)
 
         norm_chunks: list[dict[str, Any]] = []
         try:

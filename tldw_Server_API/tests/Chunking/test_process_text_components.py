@@ -17,6 +17,11 @@ from tldw_Server_API.app.core.Chunking.exceptions import (
 )
 from tldw_Server_API.app.core.Chunking.llm_context import _LLM_UNSET, llm_override_scope
 from tldw_Server_API.app.core.Chunking.option_utils import _coerce_bool_option
+from tldw_Server_API.app.core.Chunking.process_text import options as process_options
+from tldw_Server_API.app.core.Chunking.process_text.options import (
+    METHOD_OPTION_EXCLUDES,
+    resolve_process_options,
+)
 from tldw_Server_API.app.core.Chunking.process_text import preparation
 from tldw_Server_API.app.core.Chunking.process_text.preparation import (
     extract_header,
@@ -163,6 +168,158 @@ def test_process_text_preparation_module_does_not_import_chunker() -> None:
     assert not hasattr(preparation, "Chunker")
     assert ".chunker" not in source
     assert "Chunking.chunker" not in source
+
+
+def test_process_text_options_module_does_not_import_chunker() -> None:
+    source = inspect.getsource(process_options)
+
+    assert not hasattr(process_options, "Chunker")
+    assert ".chunker" not in source
+    assert "Chunking.chunker" not in source
+
+
+def test_resolve_process_options_rejects_invalid_max_size() -> None:
+    with pytest.raises(InvalidInputError, match="Invalid max_size value: bad"):
+        resolve_process_options(Chunker(), "Body text", {"max_size": "bad"})
+
+
+def test_resolve_process_options_rejects_nonpositive_max_size() -> None:
+    with pytest.raises(InvalidInputError, match="max_size must be positive, got 0"):
+        resolve_process_options(Chunker(), "Body text", {"max_size": 0})
+
+
+def test_resolve_process_options_clamps_negative_overlap() -> None:
+    resolved = resolve_process_options(Chunker(), "Body text", {"overlap": -5})
+
+    assert resolved.overlap == 0
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_language"),
+    [
+        ("ภาษาไทย", "th"),
+        ("これは日本語です", "ja"),
+        ("Русский текст", "ru"),
+    ],
+)
+def test_resolve_process_options_autodetects_script_languages(
+    text: str,
+    expected_language: str,
+) -> None:
+    resolved = resolve_process_options(Chunker(), text, {})
+
+    assert resolved.language == expected_language
+
+
+def test_resolve_process_options_default_language_detection_preserves_config_default() -> None:
+    chunker = Chunker()
+
+    resolved = resolve_process_options(chunker, "Plain English text", {})
+
+    assert resolved.language == chunker.config.language
+
+
+def test_resolve_process_options_excludes_process_only_options_and_keeps_tokenizer_overrides() -> None:
+    opts: dict[str, Any] = {
+        "method": "words",
+        "max_size": 100,
+        "overlap": 5,
+        "language": "en",
+        "hierarchical": False,
+        "hierarchical_template": {"levels": []},
+        "multi_level": False,
+        "timecode_map": [],
+        "enable_frontmatter_parsing": True,
+        "frontmatter_sentinel_key": "sentinel",
+        "adaptive": False,
+        "base_adaptive_chunk_size": 100,
+        "min_adaptive_chunk_size": 50,
+        "max_adaptive_chunk_size": 200,
+        "adaptive_overlap": False,
+        "base_overlap": 5,
+        "max_adaptive_overlap": 10,
+        "code_mode": "ast",
+        "align_text_to_source": True,
+    }
+    opts.update(
+        {
+            "custom_option": "kept",
+            "tokenizer_name": "explicit-tokenizer",
+            "tokenizer_name_or_path": "explicit-tokenizer-path",
+        }
+    )
+
+    resolved = resolve_process_options(Chunker(), "Body text", opts)
+
+    assert METHOD_OPTION_EXCLUDES == {
+        "method",
+        "max_size",
+        "overlap",
+        "language",
+        "hierarchical",
+        "hierarchical_template",
+        "multi_level",
+        "timecode_map",
+        "enable_frontmatter_parsing",
+        "frontmatter_sentinel_key",
+        "adaptive",
+        "base_adaptive_chunk_size",
+        "min_adaptive_chunk_size",
+        "max_adaptive_chunk_size",
+        "adaptive_overlap",
+        "base_overlap",
+        "max_adaptive_overlap",
+        "code_mode",
+        "align_text_to_source",
+    }
+    assert resolved.method_options_for_chunk == {
+        "custom_option": "kept",
+        "tokenizer_name": "explicit-tokenizer",
+        "tokenizer_name_or_path": "explicit-tokenizer-path",
+    }
+
+
+@pytest.mark.parametrize(
+    ("method", "expected_code_mode"),
+    [
+        ("code_ast", "ast"),
+        ("code", "auto"),
+    ],
+)
+def test_resolve_process_options_defaults_code_mode_for_code_methods(
+    method: str,
+    expected_code_mode: str,
+) -> None:
+    resolved = resolve_process_options(Chunker(), "def example():\n    return 1\n", {"method": method})
+
+    assert resolved.code_mode_for_method == expected_code_mode
+    assert resolved.method_options_for_chunk["code_mode"] == expected_code_mode
+
+
+def test_resolve_process_options_hierarchical_false_and_multi_level_exclusion() -> None:
+    template = {"levels": [{"name": "heading"}]}
+
+    resolved_without_hierarchy = resolve_process_options(
+        Chunker(),
+        "Paragraph one.\n\nParagraph two.",
+        {"method": "words", "hierarchical": "false", "multi_level": True},
+    )
+    resolved_with_template = resolve_process_options(
+        Chunker(),
+        "Paragraph one.\n\nParagraph two.",
+        {
+            "method": "words",
+            "hierarchical": "false",
+            "hierarchical_template": template,
+            "multi_level": True,
+        },
+    )
+
+    assert resolved_without_hierarchy.hierarchical is False
+    assert resolved_without_hierarchy.multi_level is True
+    assert resolved_with_template.hierarchical is False
+    assert resolved_with_template.hier_template == template
+    assert resolved_with_template.multi_level is False
 
 
 def test_prepare_frontmatter_extracts_default_sentinel_metadata() -> None:
