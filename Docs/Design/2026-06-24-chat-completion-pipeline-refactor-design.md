@@ -42,7 +42,7 @@ Out of scope:
 
 ## Architecture
 
-`chat_service.py` remains the import-facing compatibility facade. Existing endpoint imports and helper call sites continue to work. The implementation introduces a thin internal orchestration object, tentatively `ChatCompletionPipeline`, that delegates to focused modules.
+`chat_service.py` remains the import-facing compatibility facade. Existing endpoint imports and helper call sites continue to work. The implementation introduces a thin internal orchestration object named `ChatCompletionPipeline` that delegates to focused modules.
 
 New modules under `tldw_Server_API/app/core/Chat/`:
 
@@ -107,6 +107,7 @@ Usage estimation:
 
 - When provider usage exists, keep the current normalizer path and pass the full choices list.
 - When provider usage is missing, estimate completion tokens from all returned assistant choices, not only the persisted first choice.
+- This is an intentional accounting correction: usage and cost logs for missing-usage multi-choice responses may increase because the estimate now reflects all returned content. Tests must assert the new estimate behavior so the change is explicit.
 
 ## Streaming Data Flow
 
@@ -125,6 +126,10 @@ Rules:
 - In authenticated multi-user mode, users must have the declared permission.
 - In single-user API-key mode, the owner/admin context may satisfy declared command permissions through the existing AuthNZ owner/admin model.
 - Anonymous, malformed, or incomplete `CommandContext` values do not silently grant permission.
+- Command authorization receives a normalized `CommandAuthorizationContext` rather than inferring privileges from `CommandContext` alone. That context should include `auth_user_id`, principal kind, permissions, roles, `is_admin`, auth mode, and any API-key/single-user ownership signal already resolved by AuthNZ.
+- The chat endpoint should populate command authorization from the current authenticated user/principal or request state. Direct unit tests and internal callers must pass explicit permission/admin context instead of relying on implicit defaults.
+- The authorization decision should prefer request/principal permission claims, then admin or wildcard-style claims supported by AuthNZ, then DB-backed `user_has_permission` where a numeric user id is available.
+- RBAC lookup errors fail closed for dispatch and should be logged without exposing command arguments.
 - Command listing and command dispatch use the same authorization decision object.
 - Authenticated user-facing listings may filter unauthorized commands when permission enforcement is active. Admin/internal metadata paths may still expose `required_permission` and `rbac_required` for discoverability.
 - Dispatch preserves the existing `CommandResult(ok=False, metadata={"error": "permission_denied"})` shape on denial.
@@ -142,8 +147,11 @@ Preferred SQLite shape:
 Migration notes:
 
 - SQLite cannot drop the existing table-level unique constraint in place.
+- Because `user_prompts` is initialized by the Chat document-generation service, this should be an idempotent local schema repair in the prompt store/service initialization path unless implementation planning identifies an existing project migration hook that already owns this table. The repair should detect the old table shape, rebuild to the compatible shape, copy existing rows, and create the partial unique index.
+- The repair should run only for the `user_prompts` table and should not change the broader ChaChaNotes schema version unless the implementation plan deliberately moves ownership into the formal DB migration system.
 - The implementation should rebuild the table or otherwise migrate to a compatible shape without losing existing prompt rows.
 - Tests must use a temporary SQLite database and prove three or more consecutive saves succeed with exactly one active prompt.
+- Tests must also cover an existing old-shape table with active and inactive rows to prove the repair preserves data and leaves exactly one active prompt per document type.
 - Prompt content must not be logged during migration or save failures.
 
 ## Legacy History Replacement
@@ -153,8 +161,9 @@ Keep `save_chat_history_to_db_wrapper` exported with the same signature.
 Target behavior:
 
 - Validate replacement input before deleting existing messages.
-- If `CharactersRAGDB.transaction()` covers the relevant operations, soft-delete old messages and insert replacement messages in one transaction.
-- If DB helper internals commit independently, avoid claiming full atomicity. In that case, improve the ordering, document the remaining DB limitation in code comments, and cover the safest achievable behavior with tests.
+- Use one outer `CharactersRAGDB.transaction()` for validation-adjacent reads, soft-delete operations, and replacement inserts, and let exceptions propagate so the outer transaction can roll back.
+- SQLite currently defers nested helper commits to the outermost transaction when a transaction is already active; tests should prove the replacement path rolls back old-message soft deletes when a later insert fails.
+- If a backend-specific helper commits independently despite the outer transaction, avoid claiming full atomicity for that backend. In that case, improve the ordering, document the remaining DB limitation in code comments, and cover the safest achievable behavior with tests.
 - If replacement fails, old messages should remain intact whenever transaction semantics support it.
 
 ## Logging
@@ -246,6 +255,7 @@ Required targeted tests:
 - Every choice is moderated/redacted.
 - A block in any choice blocks the whole non-streaming response.
 - Missing provider usage estimates completion tokens from all assistant choices.
+- Missing-usage multi-choice accounting tests assert the intentional metric/cost-estimate correction.
 - Structured output validates every choice.
 - Tool auto-exec rejects `n > 1` before provider call.
 - Raw user input and full prompt/system content are not emitted in Chat logs.
@@ -300,7 +310,7 @@ Mitigation: move only orchestration wiring first; keep `StreamingResponseHandler
 
 Risk: command authorization breaks single-user local setups.
 
-Mitigation: explicitly support single-user owner/admin permission resolution while denying anonymous malformed contexts.
+Mitigation: explicitly pass normalized AuthNZ principal/admin/single-user context into command authorization while denying anonymous malformed contexts.
 
 Risk: document prompt migration loses data.
 
