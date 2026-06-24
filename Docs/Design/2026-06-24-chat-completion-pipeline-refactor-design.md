@@ -86,6 +86,7 @@ Plain non-streaming responses:
 - Moderate, redact, and self-monitor every choice.
 - If any choice is blocked, block the whole response using the current non-streaming moderation error behavior.
 - If choices are redacted, only the affected choice content is mutated.
+- Processing order is safety first: moderation, self-monitoring, and redaction run before structured validation or persistence. Structured validation uses the sanitized content that would be returned to the client.
 
 Structured output:
 
@@ -131,7 +132,7 @@ Rules:
 - The authorization decision should prefer request/principal permission claims, then admin or wildcard-style claims supported by AuthNZ, then DB-backed `user_has_permission` where a numeric user id is available.
 - RBAC lookup errors fail closed for dispatch and should be logged without exposing command arguments.
 - Command listing and command dispatch use the same authorization decision object.
-- Authenticated user-facing listings may filter unauthorized commands when permission enforcement is active. Admin/internal metadata paths may still expose `required_permission` and `rbac_required` for discoverability.
+- Authenticated user-facing listings use the same authorization decision by default and filter unauthorized commands. Admin/internal metadata paths may still expose all registered command metadata, including `required_permission` and `rbac_required`, for discoverability.
 - Dispatch preserves the existing `CommandResult(ok=False, metadata={"error": "permission_denied"})` shape on denial.
 
 ## Document Prompt Versioning
@@ -174,6 +175,8 @@ Chat logs must not include:
 - Full system prompts.
 - Custom prompts.
 - Tool arguments.
+- Tool outputs.
+- Tool execution error details.
 - API keys.
 - Generated assistant content.
 
