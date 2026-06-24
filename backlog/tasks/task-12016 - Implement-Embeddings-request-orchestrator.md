@@ -10,8 +10,10 @@ labels:
 priority: High
 modified_files:
 - tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_characterization.py
+- tldw_Server_API/app/core/Embeddings/request_types.py
+- tldw_Server_API/tests/Embeddings_isolated/test_request_types.py
 - backlog/tasks/task-12016 - Implement-Embeddings-request-orchestrator.md
-updated_date: 2026-06-24 18:45
+updated_date: 2026-06-24 19:17
 ---
 
 ## Description
@@ -41,6 +43,7 @@ Follow Docs/superpowers/plans/2026-06-24-embeddings-request-orchestrator-impleme
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created after baseline validation in the implementation worktree. Baseline command passed: source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_v5_unit.py::test_batch_length_mismatch_raises tldw_Server_API/tests/Embeddings/test_embeddings_v5_unit.py::test_batch_rate_limit_maps_to_429 tldw_Server_API/tests/Embeddings/test_embeddings_v5_unit.py::test_batch_generic_provider_error_is_sanitized tldw_Server_API/tests/Embeddings/test_embeddings_v5_unit.py::test_resolve_model_and_provider_strips_prefix tldw_Server_API/tests/Embeddings/test_embeddings_v5_unit.py::test_resolve_model_and_provider_rejects_mismatch. Result: 5 passed, 19 warnings in 0.73s.
 Task 1 characterization tests completed and reviewed. Added test_embeddings_orchestrator_characterization.py covering full cache hit provider skip/order, partial cache hit miss-only execution/cache write, base64 response cache value, legacy dimension-adjustment cache write order, RG reserve/commit on full cache hit, and vector-count mismatch 502 behavior. Observed compatibility behavior: the legacy endpoint returns dimension-adjusted vectors but writes pre-adjustment provider vectors to cache. Verification: requested Task 1 pytest command passed with 11 passed, 174 warnings in 6.82s. Bandit on the touched test file passed. Spec-compliance review approved. Code-quality review initially requested fixture/app-state/assertion strengthening; worker fixed all issues; code-quality re-review approved.
+Task 2 request types completed and reviewed. Added dependency-light request_types.py with Embeddings domain errors, sanitized HTTP payloads, request/normalization/provider/policy/execution dataclasses, safe detail/tag scalar contracts, and runtime redaction for secret-bearing detail/tag values while preserving safe numeric token-count details for input_too_long. Added isolated tests for forbidden raw/secret context attributes, plan serialization, contract type hints, observability tag sanitization, domain error payload sanitization, detail redaction, post-construction detail mutation re-sanitization, token-count preservation, and mutable default isolation. Verification: initial red import failure observed; later red checks caught contract/safety regressions; final pytest passed with 9 passed, 30 warnings; compileall passed; Bandit passed. Spec compliance approved after fixes. Code-quality review approved after token-count preservation fix.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
