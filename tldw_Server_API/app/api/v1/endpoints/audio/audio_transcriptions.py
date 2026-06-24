@@ -41,6 +41,7 @@ from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
 from tldw_Server_API.app.core.Audio.quota_helpers import EXPECTED_DB_EXC
 from tldw_Server_API.app.core.Audio.transcription_service import _map_openai_audio_model_to_whisper
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.exceptions import AudioQuotaStoreUnavailable
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy import (
     apply_transcript_text_policy,
     build_audio_retention_decision,
@@ -58,12 +59,11 @@ from tldw_Server_API.app.core.Metrics.stt_metrics import (
 )
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Usage.audio_quota import (
-    AudioQuotaStoreUnavailable,
     add_daily_minutes,
     can_start_job,
     check_daily_minutes_allow,
     consume_daily_minutes,
-    consume_daily_minutes_with_legacy_fallback,
+    consume_daily_minutes_with_compat,
     finish_job,
     get_job_heartbeat_interval_seconds,
     get_limits_for_user,
@@ -269,14 +269,17 @@ async def _add_daily_minutes(user_id: int, minutes: float):
     return await _audio_shim_attr("add_daily_minutes")(user_id, minutes)
 
 
-async def _consume_daily_minutes(user_id: int, minutes: float, *, operation_id: str | None = None):
-    return await consume_daily_minutes_with_legacy_fallback(
-        user_id,
-        minutes,
+async def _consume_daily_minutes(
+    user_id: int,
+    minutes: float,
+    *,
+    operation_id: str | None = None,
+) -> tuple[bool, float | None]:
+    return await consume_daily_minutes_with_compat(
+        user_id=user_id,
+        minutes=minutes,
         operation_id=operation_id,
-        consume_fn=_audio_shim_attr("consume_daily_minutes"),
-        check_fn=_audio_shim_attr("check_daily_minutes_allow"),
-        add_fn=_audio_shim_attr("add_daily_minutes"),
+        quota_helper_resolver=_audio_shim_attr,
     )
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -13,14 +14,14 @@ pytestmark = pytest.mark.unit
 async def test_add_daily_minutes_counts_repeated_same_duration_events(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Usage import audio_quota
 
-    entries = []
+    entries: list[Any] = []
 
     class FakeLedger:
-        async def add(self, entry):
+        async def add(self, entry: Any) -> bool:
             entries.append(entry)
             return True
 
-    async def fake_get_daily_ledger():
+    async def fake_get_daily_ledger() -> FakeLedger:
         return FakeLedger()
 
     monkeypatch.setattr(audio_quota, "_get_daily_ledger", fake_get_daily_ledger)
@@ -36,14 +37,14 @@ async def test_add_daily_minutes_counts_repeated_same_duration_events(monkeypatc
 async def test_add_daily_minutes_accepts_explicit_operation_id(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Usage import audio_quota
 
-    entries = []
+    entries: list[Any] = []
 
     class FakeLedger:
-        async def add(self, entry):
+        async def add(self, entry: Any) -> bool:
             entries.append(entry)
             return True
 
-    async def fake_get_daily_ledger():
+    async def fake_get_daily_ledger() -> FakeLedger:
         return FakeLedger()
 
     monkeypatch.setattr(audio_quota, "_get_daily_ledger", fake_get_daily_ledger)
@@ -57,24 +58,31 @@ async def test_add_daily_minutes_accepts_explicit_operation_id(monkeypatch: pyte
 async def test_consume_daily_minutes_records_allowed_usage(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Usage import audio_quota
 
-    entries = []
+    entries: list[Any] = []
 
     class FakeLedger:
-        async def remaining_for_day(self, *, entity_scope, entity_value, category, daily_cap):
+        async def remaining_for_day(
+            self,
+            *,
+            entity_scope: str,
+            entity_value: str,
+            category: str,
+            daily_cap: int,
+        ) -> int:
             assert entity_scope == "user"
             assert entity_value == "42"
             assert category == "minutes"
             assert daily_cap == 600
             return 300
 
-        async def add(self, entry):
+        async def add(self, entry: Any) -> bool:
             entries.append(entry)
             return True
 
-    async def fake_get_daily_ledger():
+    async def fake_get_daily_ledger() -> FakeLedger:
         return FakeLedger()
 
-    async def fake_get_limits_for_user(user_id: int):
+    async def fake_get_limits_for_user(user_id: int) -> dict[str, float]:
         assert user_id == 42
         return {"daily_minutes": 10.0}
 
@@ -98,20 +106,27 @@ async def test_consume_daily_minutes_records_allowed_usage(monkeypatch: pytest.M
 async def test_consume_daily_minutes_denies_without_recording(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Usage import audio_quota
 
-    entries = []
+    entries: list[Any] = []
 
     class FakeLedger:
-        async def remaining_for_day(self, *, entity_scope, entity_value, category, daily_cap):
+        async def remaining_for_day(
+            self,
+            *,
+            entity_scope: str,
+            entity_value: str,
+            category: str,
+            daily_cap: int,
+        ) -> int:
             return 30
 
-        async def add(self, entry):
+        async def add(self, entry: Any) -> bool:
             entries.append(entry)
             return True
 
-    async def fake_get_daily_ledger():
+    async def fake_get_daily_ledger() -> FakeLedger:
         return FakeLedger()
 
-    async def fake_get_limits_for_user(user_id: int):
+    async def fake_get_limits_for_user(user_id: int) -> dict[str, float]:
         return {"daily_minutes": 10.0}
 
     monkeypatch.setattr(audio_quota, "_get_daily_ledger", fake_get_daily_ledger)
@@ -132,10 +147,10 @@ async def test_consume_daily_minutes_denies_without_recording(monkeypatch: pytes
 async def test_consume_daily_minutes_surfaces_store_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Usage import audio_quota
 
-    async def fake_get_daily_ledger():
+    async def fake_get_daily_ledger() -> None:
         return None
 
-    async def fake_get_limits_for_user(user_id: int):
+    async def fake_get_limits_for_user(user_id: int) -> dict[str, float]:
         return {"daily_minutes": 10.0}
 
     monkeypatch.setattr(audio_quota, "_get_daily_ledger", fake_get_daily_ledger)
@@ -150,25 +165,22 @@ async def test_consume_daily_minutes_surfaces_store_unavailable(monkeypatch: pyt
 
 
 @pytest.mark.asyncio
-async def test_consume_daily_minutes_allows_unlimited_tier_when_store_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_consume_daily_minutes_zero_minutes_allows_without_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Usage import audio_quota
 
-    async def fake_get_daily_ledger():
+    async def fake_get_daily_ledger() -> None:
         return None
 
-    async def fake_get_limits_for_user(user_id: int):
-        assert user_id == 42
-        return {"daily_minutes": None}
+    async def fake_get_limits_for_user(user_id: int) -> dict[str, float]:
+        return {"daily_minutes": 10.0}
 
     monkeypatch.setattr(audio_quota, "_get_daily_ledger", fake_get_daily_ledger)
     monkeypatch.setattr(audio_quota, "get_limits_for_user", fake_get_limits_for_user)
 
     allowed, remaining = await audio_quota.consume_daily_minutes(
         user_id=42,
-        minutes_requested=10.0,
-        operation_id="audio-file:req-unlimited",
+        minutes_requested=0.0,
+        operation_id="audio-file:req-empty",
     )
 
     assert allowed is True
@@ -176,37 +188,55 @@ async def test_consume_daily_minutes_allows_unlimited_tier_when_store_unavailabl
 
 
 @pytest.mark.asyncio
-async def test_consume_daily_minutes_legacy_fallback_lives_in_core() -> None:
+async def test_consume_daily_minutes_fallback_cleans_user_lock(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Usage import audio_quota
 
-    calls = []
+    entries: list[Any] = []
 
-    async def fake_check(user_id: int, minutes: float):
-        calls.append(("check", user_id, minutes))
-        return True, 4.0
+    class FakeLedger:
+        async def remaining_for_day(
+            self,
+            *,
+            entity_scope: str,
+            entity_value: str,
+            category: str,
+            daily_cap: int,
+        ) -> int:
+            return 600
 
-    async def fake_add(user_id: int, minutes: float):
-        calls.append(("add", user_id, minutes))
+        async def add(self, entry: Any) -> bool:
+            entries.append(entry)
+            return True
 
-    allowed, remaining = await audio_quota.consume_daily_minutes_with_legacy_fallback(
+    async def fake_get_daily_ledger() -> FakeLedger:
+        return FakeLedger()
+
+    async def fake_get_limits_for_user(user_id: int) -> dict[str, float]:
+        return {"daily_minutes": 10.0}
+
+    async with audio_quota._audio_minutes_consume_locks_lock:
+        audio_quota._audio_minutes_consume_locks.clear()
+
+    monkeypatch.setattr(audio_quota, "_get_daily_ledger", fake_get_daily_ledger)
+    monkeypatch.setattr(audio_quota, "get_limits_for_user", fake_get_limits_for_user)
+
+    allowed, remaining = await audio_quota.consume_daily_minutes(
         user_id=42,
-        minutes=1.0,
-        operation_id="audio-file:req-legacy",
-        consume_fn=audio_quota.consume_daily_minutes,
-        check_fn=fake_check,
-        add_fn=fake_add,
+        minutes_requested=1.0,
+        operation_id="audio-file:req-lock-cleanup",
     )
 
     assert allowed is True
-    assert remaining == pytest.approx(4.0)
-    assert calls == [("check", 42, 1.0), ("add", 42, 1.0)]
+    assert remaining == pytest.approx(9.0)
+    assert len(entries) == 1
+    assert 42 not in audio_quota._audio_minutes_consume_locks
 
 
 @pytest.mark.asyncio
 async def test_audio_quota_helpers_propagate_cancelled_error(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Usage import audio_quota
 
-    async def cancelled_daily_ledger():
+    async def cancelled_daily_ledger() -> None:
         raise asyncio.CancelledError()
 
     monkeypatch.setattr(audio_quota, "_get_daily_ledger", cancelled_daily_ledger)
@@ -219,12 +249,12 @@ async def test_audio_quota_helpers_propagate_cancelled_error(monkeypatch: pytest
 async def test_log_llm_usage_does_not_emit_per_user_metric_labels(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Usage import usage_tracker
 
-    calls = []
+    calls: list[tuple[str, dict[str, str]]] = []
 
-    def capture_counter(name, value=1, labels=None):
+    def capture_counter(name: str, value: float = 1, labels: dict[str, str] | None = None) -> None:
         calls.append((name, dict(labels or {})))
 
-    async def fail_get_db_pool():
+    async def fail_get_db_pool() -> None:
         raise RuntimeError("stop before persistence")
 
     monkeypatch.setattr(

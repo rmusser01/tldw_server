@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
 
+from .AuthNZ.exceptions import DatabaseError as AuthNZDatabaseError
 from .exception_types import PromptCatalogError  # noqa: F401 - re-exported for compatibility.
 
 if hasattr(status, "HTTP_422_UNPROCESSABLE_CONTENT"):
@@ -25,6 +26,10 @@ class EgressPolicyError(Exception):
 
 class NetworkError(Exception):
     """Raised for network transport errors (connect/read timeouts, DNS, TLS, etc.)."""
+
+
+class AudioQuotaStoreUnavailable(AuthNZDatabaseError):
+    """Raised when canonical audio daily-minute quota storage is unavailable."""
 
 
 class RetryExhaustedError(Exception):

@@ -51,6 +51,11 @@ _tokens_daily_ledger_lock = asyncio.Lock()
 _tokens_legacy_backfill_done: set[str] = set()
 
 
+def _safe_exception_type(exc: BaseException) -> str:
+    """Return a log-safe exception type label without exception details."""
+    return type(exc).__name__
+
+
 async def _get_tokens_daily_ledger() -> ResourceDailyLedger | None:
     global _tokens_daily_ledger
     if ResourceDailyLedger is None or LedgerEntry is None:
@@ -414,9 +419,9 @@ async def log_llm_usage(
                     )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             # Metrics must never impact request flow
-            logger.debug("LLM usage metrics update skipped/failed")
+            logger.debug(f"LLM usage metrics update skipped/failed; exception_type={_safe_exception_type(exc)}")
 
         db_pool: DatabasePool = await get_db_pool()
         repo = AuthnzUsageRepo(db_pool)
@@ -424,7 +429,8 @@ async def log_llm_usage(
         try:
             if not effective_token_name and key_id is not None:
                 effective_token_name = await repo.get_api_key_name(key_id=int(key_id))
-        except Exception:
+        except Exception as exc:
+            logger.debug(f"LLM usage API key name lookup skipped/failed; exception_type={_safe_exception_type(exc)}")
             effective_token_name = token_name
         await repo.insert_llm_usage_log(
             user_id=user_id,
@@ -497,11 +503,11 @@ async def log_llm_usage(
                         await ledger.add(entry)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             # Ledger writes must never affect request flow
-            logger.debug("LLM usage daily ledger write skipped/failed")
+            logger.debug(f"LLM usage daily ledger write skipped/failed; exception_type={_safe_exception_type(exc)}")
     except asyncio.CancelledError:
         raise
-    except Exception:
+    except Exception as exc:
         # Never break request processing due to logging errors
-        logger.debug("LLM usage logging skipped/failed")
+        logger.debug(f"LLM usage logging skipped/failed; exception_type={_safe_exception_type(exc)}")
