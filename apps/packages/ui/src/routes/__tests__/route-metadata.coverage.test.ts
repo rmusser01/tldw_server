@@ -34,7 +34,6 @@ const AUDITED_ROOT_ROUTES = [
   "/research",
   "/workspaces",
   "/research-workspace",
-  "/explainer",
   "/document-workspace",
   "/repo2txt",
   "/model-playground",
