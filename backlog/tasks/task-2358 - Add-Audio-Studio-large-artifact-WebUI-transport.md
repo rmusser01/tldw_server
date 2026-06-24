@@ -5,6 +5,7 @@ status: In Progress
 documentation:
 - Docs/superpowers/plans/2026-06-24-audio-studio-artifact-playback-implementation-plan.md
 - Docs/superpowers/specs/2026-06-24-audio-studio-large-artifact-media-tickets-design.md
+- Docs/superpowers/plans/2026-06-24-audio-studio-media-tickets-implementation-plan.md
 ---
 
 ## Description
