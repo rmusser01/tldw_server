@@ -50,7 +50,8 @@ Add `tldw_Server_API/app/core/Moderation/policy_compiler.py`.
 The module should contain:
 
 - `PolicyCompiler`: pure policy normalization and rule compilation.
-- `PolicyCompilationInput`: a dataclass containing already-loaded inputs.
+- `ResolvedModerationConfig`: a service-built dataclass containing scalar moderation settings and defaults after config/env fallback resolution, with file paths excluded.
+- `PolicyCompilationInput`: a dataclass containing already-loaded inputs and the resolved config snapshot.
 - `PolicyCompilationResult`: a dataclass containing the compatible `ModerationPolicy` plus `PolicyCompilationReport`.
 - `PolicyCompilationReport`: sanitized internal diagnostics for skipped or normalized inputs.
 
@@ -85,14 +86,15 @@ The compiler should return existing `ModerationPolicy` objects. The optional rep
 
 The compiler receives already-loaded data, not file paths:
 
-- base moderation config mapping
-- environment-derived values that the service has already resolved
+- `ResolvedModerationConfig`, built by `ModerationService` after config, environment, and default resolution
 - runtime override mapping
 - blocklist lines
 - optional user override mapping
-- built-in PII rules supplied by `ModerationService` through a provider callback or explicit list
+- built-in PII `PatternRule` values already resolved by `ModerationService`
 
 The compiler must not call `open()`, inspect filesystem paths, create directories, or persist anything.
+
+`ResolvedModerationConfig` should not carry filesystem paths. `ModerationService` should continue resolving and storing blocklist, runtime override, and user override paths separately so the compiler cannot accidentally become an I/O boundary.
 
 ## Precedence
 
@@ -119,6 +121,8 @@ The design must preserve the current category distinction where `categories_enab
 
 Per-user quick-list rules should remain category-agnostic by using the existing wildcard behavior so they still apply when category filters are enabled.
 
+Existing `ModerationService` helper methods that tests or adjacent code currently call directly, including `_parse_rule_line()`, `_load_block_patterns()`, and `_build_block_patterns()`, should remain as delegating compatibility wrappers for this slice. If an implementation chooses to remove or rename one of these helpers, it must update every internal caller and test in the same branch and document that narrower break from private-helper compatibility in the implementation plan.
+
 ## Invalid Input Handling
 
 The compiler should continue forgiving load-time behavior:
@@ -136,15 +140,19 @@ Strict API validation for user override writes remains separate from forgiving l
 
 `ModerationService` may convert report entries into the same style of warning logs emitted today.
 
+Do not reuse `PolicyCompilationReport` as the public blocklist lint response. `lint_blocklist_lines()` currently returns endpoint-facing fields such as `line`, `sample`, `error`, and `warning`; that contract should remain behavior-compatible. Shared parser helpers may power both linting and compilation, but lint output can include user-submitted lint context while compilation reports stay sanitized for logs and diagnostics.
+
 ## Regex And Parser Ownership
 
 Regex parsing and regex safety checks should have one owner after the refactor. The preferred first-slice shape is for `PolicyCompiler` to own blocklist parsing and rule compilation helpers, while existing service lint and validation methods delegate to the shared compiler/parser helpers where behavior overlaps.
 
 The implementation should avoid copying the same regex flag parsing and dangerous-regex heuristics into multiple modules.
 
+When service linting delegates to shared helpers, preserve its current distinctions between valid ignored lines, invalid lines, regex samples, literal samples, invalid regex flags treated as literals, and dangerous regex errors.
+
 ## PII Rule Boundary
 
-Built-in PII rule loading should stay explicit. The compiler should not import PII detector dependencies implicitly. `ModerationService` should provide PII `PatternRule` values through a small provider callback or by calling an existing service method and passing the resulting rules into the compiler.
+Built-in PII rule loading should stay explicit. The compiler should not import PII detector dependencies implicitly and should not call a provider callback that can hide import or runtime failures. `ModerationService` should resolve PII `PatternRule` values before compilation and pass an explicit list into the compiler.
 
 This keeps compiler tests deterministic and makes dependency failures visible at the service boundary.
 
@@ -162,12 +170,14 @@ Add focused compiler unit tests for:
 - runtime override precedence
 - category parsing for lists, strings, empty strings, and invalid types
 - blocklist literal and regex parsing
+- service lint output compatibility when shared parser helpers are used
 - invalid action, invalid regex, invalid flags, and dangerous regex reports
 - effective PII enablement and appended PII rules
 - user override field precedence
 - user category override empty-string behavior
 - user quick-rule compilation and wildcard categories
 - sanitized report contents
+- `ModerationService` delegating wrappers for existing private helper compatibility
 
 Keep service compatibility tests around:
 
