@@ -855,7 +855,20 @@ class FlashcardsModule(BaseModule):
                     limit=100000,
                     offset=0,
                 )
-                apkg_bytes = export_apkg_from_rows(items, include_reverse=include_reverse)
+                if not items:
+                    return {
+                        "format": fmt,
+                        "success": False,
+                        "error": "No flashcards to export",
+                    }
+                try:
+                    apkg_bytes = export_apkg_from_rows(items, include_reverse=include_reverse)
+                except ValueError as exc:
+                    return {
+                        "format": fmt,
+                        "success": False,
+                        "error": str(exc),
+                    }
                 import base64
                 content_b64 = base64.b64encode(apkg_bytes).decode("utf-8")
                 return {

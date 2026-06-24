@@ -353,6 +353,63 @@ def test_apkg_export_rejects_oversized_total_media():
         export_apkg_from_rows(rows, asset_loader=asset_loader, max_total_media_bytes=4)
 
 
+@pytest.mark.unit
+def test_apkg_export_rejects_oversized_data_uri_media() -> None:
+    data_uri = "data:image/png;base64,MDEyMzQ1Njc4OQ=="
+    rows = [
+        {
+            "deck_name": "TooBigDataUriDeck",
+            "model_type": "basic",
+            "front": f'<img src="{data_uri}" />',
+            "back": "Answer",
+        }
+    ]
+
+    with pytest.raises(ValueError, match="APKG media exceeds max total size"):
+        export_apkg_from_rows(rows, max_total_media_bytes=4)
+
+
+@pytest.mark.unit
+def test_apkg_export_rejects_data_uri_media_before_large_decode() -> None:
+    data_uri = "data:image/png;base64," + ("A" * 13_336)
+    rows = [
+        {
+            "deck_name": "TooBigDataUriDeck",
+            "model_type": "basic",
+            "front": f'<img src="{data_uri}" />',
+            "back": "Answer",
+        }
+    ]
+
+    with pytest.raises(ValueError, match="APKG media exceeds max total size"):
+        export_apkg_from_rows(rows, max_total_media_bytes=4)
+
+
+@pytest.mark.unit
+def test_apkg_export_accepts_whitespace_wrapped_data_uri_media() -> None:
+    data_uri = "data:image/png;base64,c21h\nbGwtaW1hZ2U="
+    rows = [
+        {
+            "deck_name": "DataUriWhitespace",
+            "model_type": "basic",
+            "front": f'<img src="{data_uri}" />',
+            "back": "Answer",
+        }
+    ]
+
+    apkg = export_apkg_from_rows(rows, max_total_media_bytes=100)
+
+    with zipfile.ZipFile(io.BytesIO(apkg)) as zf:
+        media_map = json.loads(zf.read("media").decode("utf-8"))
+        assert len(media_map) == 1
+
+
+@pytest.mark.unit
+def test_apkg_export_rejects_empty_rows_with_clear_error() -> None:
+    with pytest.raises(ValueError, match="No flashcards to export"):
+        export_apkg_from_rows([])
+
+
 def test_apkg_importer_stub_scheduling_and_decks():
     now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     rows = [

@@ -21,6 +21,11 @@ class APKGImportError(ValueError):
     """Raised when APKG content cannot be parsed into importable rows."""
 
 
+DEFAULT_MAX_ARCHIVE_MEMBERS = 100_000
+DEFAULT_MAX_COLLECTION_BYTES = 128 * 1024 * 1024
+DEFAULT_MAX_MEDIA_MAPPING_BYTES = 5 * 1024 * 1024
+DEFAULT_MAX_TOTAL_MEDIA_BYTES = 256 * 1024 * 1024
+
 _IMG_TAG_RE = re.compile(
     r"<img\b(?P<attrs>[^>]*?)\bsrc\s*=\s*(['\"])(?P<src>.+?)\2(?P<tail>[^>]*)>",
     re.IGNORECASE,
@@ -141,6 +146,19 @@ def _guess_media_mime(filename: str, content: bytes) -> str:
     return "application/octet-stream"
 
 
+def _read_zip_info_with_limit(
+    zf: zipfile.ZipFile,
+    info: zipfile.ZipInfo,
+    *,
+    max_bytes: int,
+    label: str,
+) -> bytes:
+    """Read one zip member after verifying its declared uncompressed size is bounded."""
+    if info.file_size > max_bytes:
+        raise APKGImportError(f"APKG {label} exceeds max size of {max_bytes} bytes")
+    return zf.read(info)
+
+
 def _rewrite_media_html_to_markdown(
     value: str | None,
     *,
@@ -184,8 +202,11 @@ def import_rows_from_apkg_bytes(
     *,
     max_notes: int,
     max_field_length: int,
-    max_total_media_bytes: int | None = None,
+    max_total_media_bytes: int | None = DEFAULT_MAX_TOTAL_MEDIA_BYTES,
     asset_importer=None,
+    max_collection_bytes: int = DEFAULT_MAX_COLLECTION_BYTES,
+    max_archive_members: int = DEFAULT_MAX_ARCHIVE_MEMBERS,
+    max_media_mapping_bytes: int = DEFAULT_MAX_MEDIA_MAPPING_BYTES,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Parse APKG bytes into normalized flashcard rows.
@@ -204,26 +225,50 @@ def import_rows_from_apkg_bytes(
         raise APKGImportError("Invalid APKG archive") from exc
 
     with zf:
-        collection_member = next(
+        archive_members = zf.infolist()
+        if len(archive_members) > max_archive_members:
+            raise APKGImportError(f"APKG archive exceeds max entry count of {max_archive_members}")
+
+        collection_info = next(
             (
-                name
-                for name in zf.namelist()
-                if os.path.basename(name) in {"collection.anki2", "collection.anki21"}
+                info
+                for info in archive_members
+                if os.path.basename(info.filename) in {"collection.anki2", "collection.anki21"}
             ),
             None,
         )
-        if not collection_member:
+        if not collection_info:
             raise APKGImportError("APKG is missing collection database")
-        collection_bytes = zf.read(collection_member)
+        collection_bytes = _read_zip_info_with_limit(
+            zf,
+            collection_info,
+            max_bytes=max_collection_bytes,
+            label="collection database",
+        )
         media_files: dict[str, bytes] = {}
+        media_infos = {info.filename: info for info in archive_members}
         with contextlib.suppress(KeyError, json.JSONDecodeError):
-            media_mapping = json.loads(zf.read("media").decode("utf-8"))
+            media_index_info = media_infos["media"]
+            media_mapping = json.loads(
+                _read_zip_info_with_limit(
+                    zf,
+                    media_index_info,
+                    max_bytes=max_media_mapping_bytes,
+                    label="media mapping",
+                ).decode("utf-8")
+            )
             if isinstance(media_mapping, dict):
+                total_mapped_media_bytes = 0
                 for archive_name, original_name in media_mapping.items():
-                    try:
-                        media_files[str(original_name)] = zf.read(str(archive_name))
-                    except KeyError:
+                    media_info = media_infos.get(str(archive_name))
+                    if media_info is None:
                         continue
+                    total_mapped_media_bytes += int(media_info.file_size)
+                    if max_total_media_bytes is not None and total_mapped_media_bytes > max_total_media_bytes:
+                        raise APKGImportError(
+                            f"APKG media exceeds max total size of {max_total_media_bytes} bytes"
+                        )
+                    media_files[str(original_name)] = zf.read(media_info)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         collection_path = os.path.join(tmp_dir, "collection.anki2")
@@ -262,8 +307,10 @@ def import_rows_from_apkg_bytes(
                     if isinstance(deck, dict)
                 }
 
+                safe_max_notes = max(0, int(max_notes))
                 note_rows = conn.execute(
-                    "SELECT id, mid, tags, flds FROM notes ORDER BY id ASC"
+                    "SELECT id, mid, tags, flds FROM notes ORDER BY id ASC LIMIT ?",
+                    (safe_max_notes + 1,),
                 ).fetchall()
                 parsed_rows: list[dict[str, Any]] = []
                 processed = 0
@@ -271,7 +318,7 @@ def import_rows_from_apkg_bytes(
                 total_media_bytes = [0]
 
                 for note_index, note_row in enumerate(note_rows, start=1):
-                    if processed >= max_notes:
+                    if processed >= safe_max_notes:
                         errors.append(
                             {
                                 "index": note_index,
@@ -324,6 +371,27 @@ def import_rows_from_apkg_bytes(
                         reverse = any(_to_int(row["ord"], -1) == 1 for row in card_rows)
                         model_type = "basic_reverse" if reverse else "basic"
 
+                    front = str(front or "").strip()
+                    back = str(back or "").strip()
+                    extra = str(extra or "").strip() or None
+                    notes = str(notes or "").strip() or None
+                    if not front:
+                        errors.append({"index": note_index, "error": "Missing required field: Front"})
+                        continue
+
+                    if not _validate_field_lengths(
+                        index=note_index,
+                        deck_name=deck_name,
+                        front=front,
+                        back=back,
+                        notes=notes,
+                        extra=extra,
+                        tags=tags,
+                        max_field_length=max_field_length,
+                        errors=errors,
+                    ):
+                        continue
+
                     front = _rewrite_media_html_to_markdown(
                         front,
                         media_files=media_files,
@@ -356,27 +424,6 @@ def import_rows_from_apkg_bytes(
                         total_media_bytes=total_media_bytes,
                         max_total_media_bytes=max_total_media_bytes,
                     )
-
-                    front = str(front or "").strip()
-                    back = str(back or "").strip()
-                    extra = str(extra or "").strip() or None
-                    notes = str(notes or "").strip() or None
-                    if not front:
-                        errors.append({"index": note_index, "error": "Missing required field: Front"})
-                        continue
-
-                    if not _validate_field_lengths(
-                        index=note_index,
-                        deck_name=deck_name,
-                        front=front,
-                        back=back,
-                        notes=notes,
-                        extra=extra,
-                        tags=tags,
-                        max_field_length=max_field_length,
-                        errors=errors,
-                    ):
-                        continue
 
                     card_type = _to_int(primary_card["type"], 0)
                     queue = _to_int(primary_card["queue"], 0)

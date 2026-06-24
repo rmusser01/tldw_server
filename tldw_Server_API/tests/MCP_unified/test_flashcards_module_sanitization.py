@@ -153,3 +153,19 @@ def test_flashcards_db_close_fallback_logs_are_sanitized(
     operation(module, SimpleNamespace(metadata={}))
 
     _assert_close_fallback_log_is_sanitized(logger_stub, sensitive_detail)
+
+
+@pytest.mark.unit
+def test_flashcards_apkg_empty_export_returns_structured_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sensitive_detail = "close leaked /private/flashcards.db with sk-flashcards-secret"
+    module, _logger_stub = _module_with_failing_close(monkeypatch, sensitive_detail)
+
+    result = module._export_cards_sync(SimpleNamespace(metadata={}), {"format": "apkg"})
+
+    assert result == {
+        "format": "apkg",
+        "success": False,
+        "error": "No flashcards to export",
+    }
