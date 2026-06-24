@@ -9,8 +9,11 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+import re
+from collections.abc import Iterator
+from datetime import datetime, timedelta
 from pathlib import Path as FileSystemPath
-from typing import Annotated, Any, Iterator
+from typing import Annotated, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
@@ -24,19 +27,22 @@ from tldw_Server_API.app.api.v1.schemas.audio_studio_schemas import (
     AudioStudioArtifactResponse,
     AudioStudioClipResponse,
     AudioStudioClipUpsert,
+    AudioStudioExportCreate,
+    AudioStudioExportJobResponse,
+    AudioStudioGenerationCreate,
+    AudioStudioGenerationJobResponse,
+    AudioStudioMediaTicketCreate,
+    AudioStudioMediaTicketPurpose,
+    AudioStudioMediaTicketResponse,
+    AudioStudioMigrationCommit,
+    AudioStudioMigrationCommitResponse,
+    AudioStudioMigrationPreview,
+    AudioStudioMigrationPreviewResponse,
     AudioStudioProjectArchiveRequest,
     AudioStudioProjectCreate,
     AudioStudioProjectListResponse,
     AudioStudioProjectResponse,
     AudioStudioProjectUpdate,
-    AudioStudioGenerationCreate,
-    AudioStudioGenerationJobResponse,
-    AudioStudioExportCreate,
-    AudioStudioExportJobResponse,
-    AudioStudioMigrationCommit,
-    AudioStudioMigrationCommitResponse,
-    AudioStudioMigrationPreview,
-    AudioStudioMigrationPreviewResponse,
     AudioStudioProviderListResponse,
     AudioStudioProviderResponse,
     AudioStudioRenderCreate,
@@ -47,17 +53,6 @@ from tldw_Server_API.app.api.v1.schemas.audio_studio_schemas import (
     AudioStudioTrackUpsert,
     AudioStudioWorkflow,
 )
-from tldw_Server_API.app.core.DB_Management.Collections_DB import (
-    AudioStudioClipRow,
-    AudioStudioArtifactRow,
-    AudioStudioGenerationJobRow,
-    AudioStudioProjectRow,
-    AudioStudioSectionRow,
-    AudioStudioTrackRow,
-    CollectionsDatabase,
-)
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseError
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Audio_Studio.export import create_audio_studio_export_manifest
 from tldw_Server_API.app.core.Audio_Studio.jobs import (
     AUDIO_STUDIO_DOMAIN,
@@ -67,19 +62,36 @@ from tldw_Server_API.app.core.Audio_Studio.jobs import (
     enqueue_audio_studio_generation_job,
     enqueue_audio_studio_render_job,
 )
+from tldw_Server_API.app.core.Audio_Studio.media_tickets import (
+    AudioStudioMediaTicketRow,
+    AudioStudioMediaTicketStore,
+    hash_media_ticket_token,
+    utc_now,
+)
 from tldw_Server_API.app.core.Audio_Studio.migration import (
     commit_audio_studio_audiobook_migration,
     preview_audio_studio_audiobook_migration,
 )
 from tldw_Server_API.app.core.Audio_Studio.providers.registry import build_audio_studio_provider_registry
 from tldw_Server_API.app.core.Audio_Studio.render import build_render_plan
+from tldw_Server_API.app.core.AuthNZ.db_config import AuthDatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseError
+from tldw_Server_API.app.core.DB_Management.Collections_DB import (
+    AudioStudioArtifactRow,
+    AudioStudioClipRow,
+    AudioStudioGenerationJobRow,
+    AudioStudioProjectRow,
+    AudioStudioSectionRow,
+    AudioStudioTrackRow,
+    CollectionsDatabase,
+)
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.exceptions import (
     InvalidStoragePathError,
     InvalidStorageUserIdError,
     StorageUnavailableError,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-
 
 router = APIRouter(prefix="/audio-studio", tags=["audio-studio"])
 _AUDIO_STUDIO_ID_PATTERN = r"^[A-Za-z0-9_-]+$"
@@ -112,6 +124,9 @@ _AUDIO_MIME_SUFFIXES = {
 }
 _AUDIO_ALLOWED_SUFFIXES = {suffix for suffixes in _AUDIO_MIME_SUFFIXES.values() for suffix in suffixes}
 _HASH_HEX_CHARS = set("0123456789abcdefABCDEF")
+_MEDIA_TICKET_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,256}$")
+_PLAYBACK_TICKET_TTL = timedelta(minutes=30)
+_DOWNLOAD_TICKET_TTL = timedelta(minutes=10)
 
 
 def _new_project_id() -> str:
@@ -425,14 +440,54 @@ def _load_audio_studio_artifact_or_404(
     return rows[0]
 
 
-def _audio_artifact_roots(user_id: int | str) -> list[FileSystemPath]:
+_DANGEROUS_DOWNLOAD_SUFFIXES = {
+    ".app",
+    ".bat",
+    ".cmd",
+    ".com",
+    ".cpl",
+    ".dll",
+    ".dmg",
+    ".exe",
+    ".hta",
+    ".htm",
+    ".html",
+    ".jar",
+    ".js",
+    ".jse",
+    ".mjs",
+    ".msi",
+    ".ps1",
+    ".scr",
+    ".sh",
+    ".svg",
+    ".vb",
+    ".vbe",
+    ".vbs",
+    ".ws",
+    ".wsf",
+}
+
+_DANGEROUS_DOWNLOAD_MIME_TYPES = {
+    "application/javascript",
+    "application/x-msdownload",
+    "application/x-sh",
+    "application/x-shellscript",
+    "image/svg+xml",
+    "text/html",
+    "text/javascript",
+    "text/x-shellscript",
+}
+
+
+def _audio_studio_artifact_roots(user_id: int | str) -> list[FileSystemPath]:
     return [
         DatabasePaths.get_user_base_directory(user_id) / "outputs",
         DatabasePaths.get_user_temp_outputs_dir(user_id),
     ]
 
 
-def _resolve_contained_audio_file(
+def _resolve_contained_artifact_file(
     candidate: FileSystemPath,
     roots: list[FileSystemPath],
 ) -> FileSystemPath:
@@ -482,28 +537,23 @@ def _sha256_file(path: FileSystemPath) -> str:
     return digest.hexdigest()
 
 
-def _resolve_audio_artifact_media_path(
+def _resolve_audio_studio_artifact_path(
     *,
     collections_db: CollectionsDatabase,
-    current_user: User,
+    user_id: int | str,
     artifact: AudioStudioArtifactRow,
 ) -> FileSystemPath:
     raw_storage_path = str(artifact.storage_path or "").strip()
-    if not raw_storage_path:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="invalid_audio_studio_artifact_path",
-        )
-    if "://" in raw_storage_path:
+    if not raw_storage_path or "://" in raw_storage_path:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="invalid_audio_studio_artifact_path",
         )
 
-    roots = _audio_artifact_roots(current_user.id)
+    roots = _audio_studio_artifact_roots(user_id)
     raw_path = FileSystemPath(raw_storage_path)
     if raw_path.is_absolute():
-        return _resolve_contained_audio_file(raw_path, roots)
+        return _resolve_contained_artifact_file(raw_path, roots)
 
     try:
         relative_filename = collections_db.resolve_output_storage_path(raw_storage_path)
@@ -513,13 +563,11 @@ def _resolve_audio_artifact_media_path(
             detail="invalid_audio_studio_artifact_path",
         ) from exc
 
-    candidates: list[FileSystemPath] = []
-    for root in roots:
-        candidate = root / relative_filename
-        if not candidate.exists():
-            continue
-        candidates.append(_resolve_contained_audio_file(candidate, roots))
-
+    candidates = [
+        _resolve_contained_artifact_file(root / relative_filename, roots)
+        for root in roots
+        if (root / relative_filename).exists()
+    ]
     unique_candidates: list[FileSystemPath] = []
     for candidate in candidates:
         if candidate not in unique_candidates:
@@ -538,15 +586,13 @@ def _resolve_audio_artifact_media_path(
             status_code=status.HTTP_409_CONFLICT,
             detail="audio_studio_artifact_path_ambiguous",
         )
-    matching_candidates = [
-        candidate for candidate in unique_candidates if _sha256_file(candidate) == artifact.content_hash.lower()
-    ]
-    if len(matching_candidates) != 1:
+    matches = [candidate for candidate in unique_candidates if _sha256_file(candidate) == artifact.content_hash.lower()]
+    if len(matches) != 1:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="audio_studio_artifact_path_ambiguous",
         )
-    return matching_candidates[0]
+    return matches[0]
 
 
 def _normalize_audio_mime(mime_type: str | None, path: FileSystemPath) -> str:
@@ -566,6 +612,20 @@ def _normalize_audio_mime(mime_type: str | None, path: FileSystemPath) -> str:
             detail="unsupported_audio_studio_artifact_media_type",
         )
     return normalized_mime
+
+
+def _normalize_download_mime(mime_type: str | None, path: FileSystemPath) -> str:
+    normalized = str(mime_type or "").split(";", 1)[0].strip().lower()
+    inferred = str(mimetypes.guess_type(path.name)[0] or "").split(";", 1)[0].strip().lower()
+    if not normalized:
+        normalized = inferred or "application/octet-stream"
+    suffix = path.suffix.lower()
+    if suffix in _DANGEROUS_DOWNLOAD_SUFFIXES or normalized in _DANGEROUS_DOWNLOAD_MIME_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="unsupported_audio_studio_artifact_download_type",
+        )
+    return normalized
 
 
 def _safe_audio_artifact_filename(
@@ -647,6 +707,52 @@ def _iter_file_range(path: FileSystemPath, *, start: int, length: int) -> Iterat
                 break
             remaining -= len(chunk)
             yield chunk
+
+
+def get_audio_studio_media_ticket_store() -> AudioStudioMediaTicketStore:
+    """Return the AuthNZ-backed Audio Studio media ticket store."""
+
+    users_db = AuthDatabaseConfig().get_user_database(client_id="audio_studio_media_tickets")
+    return AudioStudioMediaTicketStore(users_db.backend)
+
+
+def _auth_mode_label(request: Request) -> str | None:
+    if request.headers.get("authorization"):
+        return "jwt"
+    if request.headers.get("x-api-key"):
+        return "single_user"
+    return None
+
+
+def _ticket_path(raw_token: str) -> str:
+    return f"/api/v1/audio-studio/media-tickets/{raw_token}"
+
+
+def _raise_invalid_media_ticket() -> None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="audio_studio_media_ticket_not_found")
+
+
+def _ticket_is_expired(ticket: AudioStudioMediaTicketRow) -> bool:
+    expiry = datetime.fromisoformat(ticket.expires_at.replace("Z", "+00:00"))
+    return expiry <= utc_now()
+
+
+def _validate_ticket_for_redemption(
+    raw_token: str,
+    store: AudioStudioMediaTicketStore,
+) -> AudioStudioMediaTicketRow:
+    if not _MEDIA_TICKET_TOKEN_PATTERN.fullmatch(raw_token):
+        _raise_invalid_media_ticket()
+    ticket = store.get_by_hash(hash_media_ticket_token(raw_token))
+    if ticket is None:
+        _raise_invalid_media_ticket()
+    if ticket.revoked_at:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="audio_studio_media_ticket_revoked")
+    if ticket.consumed_at:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="audio_studio_media_ticket_consumed")
+    if _ticket_is_expired(ticket):
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="audio_studio_media_ticket_expired")
+    return ticket
 
 
 def _raise_conflict_for_stale_base(exc: ValueError) -> None:
@@ -1311,6 +1417,142 @@ async def list_audio_studio_artifacts(
     )
 
 
+@router.post(
+    "/projects/{project_id}/artifacts/{artifact_id}/tickets",
+    response_model=AudioStudioMediaTicketResponse,
+)
+async def create_audio_studio_artifact_media_ticket(
+    request: Request,
+    project_id: AudioStudioIdPath,
+    artifact_id: AudioStudioIdPath,
+    ticket_request: AudioStudioMediaTicketCreate,
+    current_user: User = Depends(get_request_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
+    ticket_store: AudioStudioMediaTicketStore = Depends(get_audio_studio_media_ticket_store),
+) -> AudioStudioMediaTicketResponse:
+    """Create a scoped short-lived ticket for artifact playback or download."""
+
+    project = _load_project_or_404(collections_db, project_id)
+    artifact = _load_audio_studio_artifact_or_404(collections_db, project, artifact_id)
+    media_path = _resolve_audio_studio_artifact_path(
+        collections_db=collections_db,
+        user_id=current_user.id,
+        artifact=artifact,
+    )
+    actual_size = media_path.stat().st_size
+    if artifact.size_bytes is not None and artifact.size_bytes != actual_size:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="audio_studio_artifact_size_mismatch")
+
+    purpose = ticket_request.purpose.value
+    if ticket_request.purpose == AudioStudioMediaTicketPurpose.PLAYBACK:
+        _normalize_audio_mime(artifact.mime_type, media_path)
+        ttl = _PLAYBACK_TICKET_TTL
+    else:
+        _normalize_download_mime(artifact.mime_type, media_path)
+        ttl = _DOWNLOAD_TICKET_TTL
+
+    ticket_store.cleanup(retention=timedelta(hours=1))
+    raw_token, ticket = ticket_store.create_ticket(
+        user_id=int(current_user.id),
+        project_id=project.project_id,
+        artifact_id=artifact.artifact_id,
+        purpose=purpose,
+        expires_at=utc_now() + ttl,
+        created_by_auth_mode=_auth_mode_label(request),
+    )
+    return AudioStudioMediaTicketResponse(
+        ticket_path=_ticket_path(raw_token),
+        expires_at=ticket.expires_at,
+        purpose=ticket_request.purpose,
+        artifact_id=artifact.artifact_id,
+    )
+
+
+@router.get("/media-tickets/{token}", response_model=None)
+async def redeem_audio_studio_media_ticket(
+    request: Request,
+    token: str,
+    ticket_store: AudioStudioMediaTicketStore = Depends(get_audio_studio_media_ticket_store),
+) -> Response:
+    """Redeem a scoped Audio Studio artifact media ticket."""
+
+    ticket = _validate_ticket_for_redemption(token, ticket_store)
+    if ticket.purpose == AudioStudioMediaTicketPurpose.DOWNLOAD.value:
+        consumed = ticket_store.consume_download_ticket(ticket.token_hash)
+        if consumed is None:
+            refreshed = ticket_store.get_by_hash(ticket.token_hash)
+            if refreshed and refreshed.consumed_at:
+                raise HTTPException(status_code=status.HTTP_410_GONE, detail="audio_studio_media_ticket_consumed")
+            if refreshed and refreshed.revoked_at:
+                raise HTTPException(status_code=status.HTTP_410_GONE, detail="audio_studio_media_ticket_revoked")
+            if refreshed and _ticket_is_expired(refreshed):
+                raise HTTPException(status_code=status.HTTP_410_GONE, detail="audio_studio_media_ticket_expired")
+            _raise_invalid_media_ticket()
+        ticket = consumed
+    else:
+        ticket_store.touch_redeemed(ticket.token_hash)
+
+    collections_db = CollectionsDatabase.for_user(user_id=ticket.user_id)
+    project = _load_project_or_404(collections_db, ticket.project_id)
+    artifact = _load_audio_studio_artifact_or_404(collections_db, project, ticket.artifact_id)
+    media_path = _resolve_audio_studio_artifact_path(
+        collections_db=collections_db,
+        user_id=ticket.user_id,
+        artifact=artifact,
+    )
+    actual_size = media_path.stat().st_size
+    if artifact.size_bytes is not None and artifact.size_bytes != actual_size:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="audio_studio_artifact_size_mismatch")
+
+    if ticket.purpose == AudioStudioMediaTicketPurpose.PLAYBACK.value:
+        mime_type = _normalize_audio_mime(artifact.mime_type, media_path)
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": _content_disposition(
+                artifact=artifact,
+                media_path=media_path,
+                mime_type=mime_type,
+                download=False,
+            ),
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+        }
+        range_header = request.headers.get("range")
+        if range_header is not None:
+            start, end = _parse_single_byte_range(range_header, actual_size)
+            content_length = end - start + 1
+            return StreamingResponse(
+                _iter_file_range(media_path, start=start, length=content_length),
+                status_code=status.HTTP_206_PARTIAL_CONTENT,
+                headers={
+                    **headers,
+                    "Content-Range": f"bytes {start}-{end}/{actual_size}",
+                    "Content-Length": str(content_length),
+                    "Content-Type": mime_type,
+                },
+            )
+        return FileResponse(str(media_path), media_type=mime_type, headers=headers)
+
+    mime_type = _normalize_download_mime(artifact.mime_type, media_path)
+    return StreamingResponse(
+        _iter_file_range(media_path, start=0, length=actual_size),
+        media_type=mime_type,
+        headers={
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": _content_disposition(
+                artifact=artifact,
+                media_path=media_path,
+                mime_type=mime_type,
+                download=True,
+            ),
+            "Content-Length": str(actual_size),
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @router.get("/projects/{project_id}/artifacts/{artifact_id}/media", response_model=None)
 async def get_audio_studio_artifact_media(
     request: Request,
@@ -1324,9 +1566,9 @@ async def get_audio_studio_artifact_media(
 
     project = _load_project_or_404(collections_db, project_id)
     artifact = _load_audio_studio_artifact_or_404(collections_db, project, artifact_id)
-    media_path = _resolve_audio_artifact_media_path(
+    media_path = _resolve_audio_studio_artifact_path(
         collections_db=collections_db,
-        current_user=current_user,
+        user_id=current_user.id,
         artifact=artifact,
     )
     mime_type = _normalize_audio_mime(artifact.mime_type, media_path)

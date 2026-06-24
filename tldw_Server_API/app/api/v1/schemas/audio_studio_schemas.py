@@ -130,9 +130,7 @@ def _is_forbidden_client_key(key: object) -> bool:
         return True
     if "token" in parts and (normalized == "token" or any(part in _TOKEN_QUALIFIERS for part in parts)):
         return True
-    if "key" in parts and any(part in _KEY_QUALIFIERS for part in parts):
-        return True
-    return False
+    return "key" in parts and any(part in _KEY_QUALIFIERS for part in parts)
 
 
 def _is_forbidden_url_value(value: str) -> bool:
@@ -389,6 +387,29 @@ class AudioStudioArtifactListResponse(_BaseAudioStudioModel):
     artifacts: list[AudioStudioArtifactResponse]
     limit: int
     offset: int
+
+
+class AudioStudioMediaTicketPurpose(str, Enum):
+    """Allowed short-lived artifact media ticket purposes."""
+
+    PLAYBACK = "playback"
+    DOWNLOAD = "download"
+
+
+class AudioStudioMediaTicketCreate(_BaseAudioStudioModel):
+    """Request body for minting an Audio Studio artifact media ticket."""
+
+    purpose: AudioStudioMediaTicketPurpose
+
+
+class AudioStudioMediaTicketResponse(_BaseAudioStudioModel):
+    """Short-lived Audio Studio artifact media ticket response."""
+
+    ticket_path: str
+    ticket_url: str | None = None
+    expires_at: str
+    purpose: AudioStudioMediaTicketPurpose
+    artifact_id: str
 
 
 class AudioStudioRenderCreate(_AudioStudioJobCreate):
