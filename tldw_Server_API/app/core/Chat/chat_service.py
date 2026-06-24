@@ -97,6 +97,7 @@ from tldw_Server_API.app.core.Chat.run_first_presentation import (
     tool_names_from_definitions,
 )
 from tldw_Server_API.app.core.Chat.tool_auto_exec import execute_assistant_tool_calls
+from tldw_Server_API.app.core.Chat.tool_execution_service import ensure_tool_autoexec_supports_request
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.config import (
     resolve_chat_run_first_provider_allowlist,
@@ -4882,6 +4883,10 @@ async def execute_non_stream_call(
             apply_structured_response_request(
                 cleaned_args=cleaned_args,
                 structured_request_context=structured_request_context,
+            )
+            ensure_tool_autoexec_supports_request(
+                cleaned_args=cleaned_args,
+                should_run_tool_autoexec=should_run_legacy_tool_autoexec,
             )
             prompt_guardrail_decision = _evaluate_chat_prompt_cost_guardrails(
                 cleaned_args=cleaned_args,

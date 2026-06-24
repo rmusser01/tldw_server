@@ -346,6 +346,39 @@ async def test_non_stream_loop_mode_disables_legacy_autoexec(monkeypatch: pytest
 
 @pytest.mark.asyncio
 @pytest.mark.unit
+async def test_tool_autoexec_rejects_multi_choice_before_provider_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider_called = False
+
+    def llm_call_func():
+        nonlocal provider_called
+        provider_called = True
+        return _build_llm_response_with_tool_calls()
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-1"
+
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _run_execute_non_stream_call(
+            llm_call_func=llm_call_func,
+            save_message_fn=save_message_fn,
+            cleaned_args_overrides={
+                "n": 2,
+                "tools": [{"type": "function", "function": {"name": "notes.search", "parameters": {}}}],
+            },
+        )
+
+    assert provider_called is False
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == {
+        "code": "unsupported_multi_choice_tool_autoexec",
+        "message": "Local tool auto-execution supports one assistant choice per request.",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_run_first_presented_tools_drive_autoexec_allow_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_log_llm_usage(**_kwargs):
         return None
