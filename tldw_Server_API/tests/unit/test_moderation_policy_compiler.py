@@ -69,7 +69,7 @@ def test_compile_global_policy_compiles_literal_and_regex_blocklist_rules():
             runtime_override={},
             blocklist_lines=[
                 "secret -> block #confidential",
-                r"/leak\\d+/i -> redact:[MASK] #pii",
+                r"/leak\d+/i -> redact:[MASK] #pii",
             ],
             pii_rules=[],
         )
@@ -106,3 +106,39 @@ def test_compile_global_policy_reports_invalid_lines_without_raw_regex():
     rendered = repr(result.report.issues)
     assert "(a+)+$" not in rendered
     assert "(unclosed" not in rendered
+
+
+def test_compile_global_policy_reports_empty_pattern_after_parsing():
+    result = PolicyCompiler().compile_global(
+        PolicyCompilationInput(
+            config=_config(),
+            runtime_override={},
+            blocklist_lines=["-> block"],
+            pii_rules=[],
+        )
+    )
+
+    assert result.policy.block_patterns == []
+    reasons = [issue.reason for issue in result.report.issues]
+    assert reasons == ["empty_pattern"]
+
+
+def test_compile_global_policy_preserves_raw_regex_backslashes():
+    result = PolicyCompiler().compile_global(
+        PolicyCompilationInput(
+            config=_config(),
+            runtime_override={},
+            blocklist_lines=[
+                r"/leak\d+/ -> block",
+                r"/leak\\d+/ -> warn",
+            ],
+            pii_rules=[],
+        )
+    )
+
+    rules = result.policy.block_patterns
+    assert len(rules) == 2
+    assert rules[0].regex.search("leak123")
+    assert not rules[0].regex.search(r"leak\d")
+    assert not rules[1].regex.search("leak123")
+    assert rules[1].regex.search(r"leak\d")

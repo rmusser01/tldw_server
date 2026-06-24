@@ -120,7 +120,7 @@ class PolicyCompiler:
             if not line or line.startswith("#"):
                 continue
             expr, action, replacement, categories = self.parse_rule_line(line)
-            if expr is None:
+            if expr is None or expr == "":
                 active_report.add("blocklist", "empty_pattern", index=idx)
                 continue
             if action and not self.is_valid_action(action):
@@ -251,10 +251,6 @@ class PolicyCompiler:
             value |= re.VERBOSE
         return value
 
-    @staticmethod
-    def normalize_regex_escapes(expr: str) -> str:
-        return re.sub(r"\\\\([AbBdDsSwWZ])", r"\\\1", expr)
-
     @classmethod
     def is_valid_action(cls, action: str) -> bool:
         return str(action).strip().lower() in cls._ALLOWED_ACTIONS
@@ -299,7 +295,6 @@ class PolicyCompiler:
             regex_parts = self.parse_regex_expr(expr)
             if regex_parts:
                 raw, flags_str = regex_parts
-                raw = self.normalize_regex_escapes(raw)
                 if self.is_regex_dangerous(raw):
                     report.add(source, "dangerous_regex", index=index)
                     return None
