@@ -100,6 +100,12 @@ _CHAT_MAX_MESSAGES = int(os.getenv("DATA_TABLES_CHAT_MAX_MESSAGES", "1500") or "
 _LLM_MAX_TOKENS = int(os.getenv("DATA_TABLES_LLM_MAX_TOKENS", "2000") or "2000")
 _LLM_TEMPERATURE = float(os.getenv("DATA_TABLES_LLM_TEMPERATURE", "0.2") or "0.2")
 _LLM_TIMEOUT_SECONDS = int(os.getenv("DATA_TABLES_LLM_TIMEOUT", "300") or "300")
+_MAX_RAG_TOP_K = max(1, int(os.getenv("DATA_TABLES_RAG_MAX_TOP_K", "50") or "50"))
+_MAX_RAG_SNAPSHOT_CHUNKS = max(
+    1,
+    int(os.getenv("DATA_TABLES_RAG_MAX_SNAPSHOT_CHUNKS", str(_MAX_RAG_TOP_K)) or str(_MAX_RAG_TOP_K)),
+)
+_ALLOWED_RAG_SOURCES = {"media_db", "notes", "characters"}
 
 _PROMPT_TEMPLATE = """You are a data table generator.
 
@@ -193,6 +199,29 @@ def _normalize_user_id(job: dict[str, Any], payload: dict[str, Any]) -> str:
     return str(owner)
 
 
+def _resolve_worker_user_id(
+    job: dict[str, Any],
+    payload: dict[str, Any],
+    table_row: dict[str, Any] | None,
+) -> str:
+    """Resolve and validate the user id that owns the target table."""
+    payload_owner = str(payload.get("user_id") or "").strip()
+    job_owner = str(job.get("owner_user_id") or "").strip()
+    table_owner = str((table_row or {}).get("client_id") or "").strip()
+    effective_owner = payload_owner or job_owner
+
+    if table_row is not None and table_owner and effective_owner and effective_owner != table_owner:
+        raise DataTablesJobError("owner_mismatch", retryable=False)
+    if payload_owner:
+        if table_row is None and job_owner and payload_owner != job_owner:
+            raise DataTablesJobError("owner_mismatch", retryable=False)
+        return payload_owner
+
+    if job_owner:
+        return job_owner
+    return str(DatabasePaths.get_single_user_id())
+
+
 def _normalize_payload(raw: Any) -> dict[str, Any]:
     if isinstance(raw, dict):
         return dict(raw)
@@ -275,17 +304,29 @@ def _normalize_column_key(value: str) -> str:
 
 
 def _dedupe_column_names(names: Sequence[str]) -> list[str]:
+    """Return unique column names while preserving original labels where possible."""
     counts: dict[str, int] = {}
+    used: set[str] = set()
     output: list[str] = []
     for name in names:
         base = str(name or "").strip() or "Column"
         key = _normalize_column_key(base)
-        if key not in counts:
-            counts[key] = 1
-            output.append(base)
-            continue
-        counts[key] += 1
-        output.append(f"{base} ({counts[key]})")
+        next_count = counts.get(key, 0) + 1
+        if key not in used:
+            candidate = base
+            candidate_key = key
+            counts[key] = max(next_count, 1)
+        else:
+            while True:
+                candidate = f"{base} ({next_count})"
+                candidate_key = _normalize_column_key(candidate)
+                counts[key] = next_count
+                if candidate_key not in used:
+                    break
+                next_count += 1
+        used.add(candidate_key)
+        counts.setdefault(candidate_key, 1)
+        output.append(candidate)
     return output
 
 
@@ -507,7 +548,7 @@ def _normalize_rag_sources(raw_sources: Any) -> list[str]:
             normalized.append("notes")
         elif name in {"characters", "chats", "character_cards"}:
             normalized.append("characters")
-        else:
+        elif name in _ALLOWED_RAG_SOURCES:
             normalized.append(name)
     return normalized or ["media_db"]
 
@@ -536,6 +577,8 @@ def _build_rag_snapshot(
 ) -> dict[str, Any]:
     chunks: list[dict[str, Any]] = []
     for idx, doc in enumerate(documents, start=1):
+        if len(chunks) >= _MAX_RAG_SNAPSHOT_CHUNKS:
+            break
         doc_id, content, metadata, score = _normalize_rag_document(doc)
         if not content:
             continue
@@ -763,8 +806,18 @@ async def _resolve_rag_query_source(
     sources = _normalize_rag_sources(retrieval_params.get("sources"))
     search_mode = str(retrieval_params.get("search_mode") or "hybrid")
     fts_level = str(retrieval_params.get("fts_level") or "chunk")
-    top_k = _coerce_int(retrieval_params.get("top_k"), 10)
-    min_score = _coerce_float(retrieval_params.get("min_score"), 0.0)
+    top_k = max(1, min(_coerce_int(retrieval_params.get("top_k"), 10), _MAX_RAG_TOP_K))
+    min_score = max(0.0, _coerce_float(retrieval_params.get("min_score"), 0.0))
+    bounded_retrieval_params = dict(retrieval_params)
+    bounded_retrieval_params.update(
+        {
+            "sources": sources,
+            "search_mode": search_mode,
+            "fts_level": fts_level,
+            "top_k": top_k,
+            "min_score": min_score,
+        }
+    )
 
     result = await unified_rag_pipeline(
         query=query,
@@ -790,9 +843,38 @@ async def _resolve_rag_query_source(
         documents = list(result.documents or [])
     elif isinstance(result, dict):
         documents = list(result.get("documents") or [])
-    snapshot = _build_rag_snapshot(query=query, retrieval_params=retrieval_params, documents=documents)
+    snapshot = _build_rag_snapshot(query=query, retrieval_params=bounded_retrieval_params, documents=documents)
     text = _extract_text_from_snapshot(snapshot) or ""
     return text, snapshot
+
+
+def _mark_table_for_job_error(
+    db: Any,
+    *,
+    table_id: int,
+    user_id: str,
+    exc: Exception,
+) -> None:
+    """Persist table state for worker errors, keeping retryable failures queued."""
+    retryable = bool(getattr(exc, "retryable", False))
+    db.update_data_table(
+        table_id,
+        status="queued" if retryable else "failed",
+        last_error=str(exc),
+        owner_user_id=user_id,
+    )
+
+
+def _drain_late_llm_future(future: asyncio.Future[Any]) -> None:
+    """Consume late executor completion after timeout without blocking the worker."""
+    if future.cancelled():
+        return
+    try:
+        future.exception()
+    except asyncio.CancelledError:
+        return
+    except Exception as exc:
+        logger.debug("data_tables worker: late LLM future completed with error: {}", exc)
 
 
 def _is_job_cancelled(jm: JobManager, job_id: int) -> bool:
@@ -825,10 +907,26 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
         max_rows = _resolve_max_rows(payload)
 
         db = _get_media_db(user_id)
-        chacha_db = _get_chacha_db(user_id)
         table_row = db.get_data_table(table_id, include_deleted=True, owner_user_id=user_id)
         if not table_row or int(table_row.get("deleted") or 0):
             raise DataTablesJobError("data_table_not_found", retryable=False)
+        resolved_user_id = _resolve_worker_user_id(job, payload, table_row)
+        if resolved_user_id != user_id:
+            user_id = resolved_user_id
+            db = _get_media_db(user_id)
+            table_row = db.get_data_table(table_id, include_deleted=True, owner_user_id=user_id)
+            if not table_row or int(table_row.get("deleted") or 0):
+                raise DataTablesJobError("data_table_not_found", retryable=False)
+        else:
+            user_id = resolved_user_id
+
+        chacha_db: CharactersRAGDB | None = None
+
+        def _ensure_chacha_db() -> CharactersRAGDB:
+            nonlocal chacha_db
+            if chacha_db is None:
+                chacha_db = _get_chacha_db(user_id)
+            return chacha_db
 
         if not prompt:
             prompt = str(table_row.get("prompt") or "").strip()
@@ -907,7 +1005,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
 
             if source_type == "chat":
                 if not text:
-                    text = _extract_chat_text(chacha_db, source_id)
+                    text = _extract_chat_text(_ensure_chacha_db(), source_id)
             elif source_type == "document":
                 if not text:
                     try:
@@ -921,7 +1019,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
                     text, updated_snapshot = await _resolve_rag_query_source(
                         query=query,
                         media_db=db,
-                        chacha_db=chacha_db,
+                        chacha_db=_ensure_chacha_db(),
                         retrieval_params=dict(retrieval_params or {}),
                         user_id=user_id,
                     )
@@ -974,6 +1072,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
 
         messages_payload = [{"role": "user", "content": llm_prompt}]
         response_format = {"type": "json_object"}
+        timeout = _LLM_TIMEOUT_SECONDS if _LLM_TIMEOUT_SECONDS > 0 else None
 
         def _call_llm():
             adapter = _get_adapter(provider)
@@ -990,29 +1089,21 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
                     "max_tokens": _LLM_MAX_TOKENS,
                     "response_format": response_format,
                     "app_config": app_config,
-                }
+                },
+                timeout=timeout,
             )
 
         start = time.time()
         loop = asyncio.get_running_loop()
         llm_future = loop.run_in_executor(None, _call_llm)
-        timeout = _LLM_TIMEOUT_SECONDS if _LLM_TIMEOUT_SECONDS > 0 else None
         try:
             if timeout is None:
                 raw_response = await llm_future
             else:
-                raw_response = await asyncio.wait_for(llm_future, timeout=timeout)
+                raw_response = await asyncio.wait_for(asyncio.shield(llm_future), timeout=timeout)
         except asyncio.TimeoutError as exc:
+            llm_future.add_done_callback(_drain_late_llm_future)
             llm_future.cancel()
-            try:
-                await llm_future
-            except asyncio.CancelledError:
-                pass
-            except DATA_TABLES_RUNTIME_EXCEPTIONS as cleanup_exc:
-                logger.debug(
-                    "data_tables worker: error awaiting cancelled LLM future: {}",
-                    cleanup_exc,
-                )
             jm.update_job_progress(job_id, progress_percent=55.0, progress_message="llm_timeout")
             raise DataTablesJobError("llm_timeout", retryable=True) from exc
         logger.info(
@@ -1094,7 +1185,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
     except DataTablesJobError as exc:
         if db is not None and table_id > 0:
             try:
-                db.update_data_table(table_id, status="failed", last_error=str(exc), owner_user_id=user_id)
+                _mark_table_for_job_error(db, table_id=table_id, user_id=user_id, exc=exc)
             except DATA_TABLES_DB_EXCEPTIONS as reset_exc:
                 logger.debug(
                     "data_tables worker: failed to update table status for {}: {}",
