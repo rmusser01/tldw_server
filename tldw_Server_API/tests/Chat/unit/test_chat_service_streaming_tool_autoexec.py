@@ -141,6 +141,14 @@ def _run_then_notes_stream() -> Any:
     return _stream()
 
 
+def _content_stream() -> Any:
+    def _stream() -> Any:
+        yield 'data: {"choices": [{"delta": {"content": "hello"}}]}\n\n'
+        yield "data: [DONE]\n\n"
+
+    return _stream()
+
+
 async def _collect_sse_chunks(response: StreamingResponse) -> list[str]:
     chunks: list[str] = []
     agen = response.body_iterator
@@ -154,6 +162,218 @@ async def _collect_sse_chunks(response: StreamingResponse) -> list[str]:
         with contextlib.suppress(Exception):
             await agen.aclose()
     return chunks
+
+
+async def _run_execute_streaming_call(
+    *,
+    llm_call_func,
+    save_message_fn,
+    cleaned_args_overrides: dict[str, Any] | None = None,
+    metrics: Any | None = None,
+    provider_manager: Any | None = None,
+    selected_provider: str = "openai",
+    provider: str = "openai",
+    model: str = "gpt-4o-mini",
+    queue_execution_enabled: bool = False,
+    enable_provider_fallback: bool = False,
+    refresh_provider_params=None,
+) -> StreamingResponse:
+    cleaned_args = {
+        "api_endpoint": selected_provider,
+        "api_key": "test-key",
+        "messages_payload": [{"role": "user", "content": "hi"}],
+        "model": model,
+        "streaming": True,
+    }
+    if cleaned_args_overrides:
+        cleaned_args.update(cleaned_args_overrides)
+
+    request = SimpleNamespace(
+        method="POST",
+        url=SimpleNamespace(path="/api/v1/chat/completions"),
+        headers={},
+        state=SimpleNamespace(user_id=10, api_key_id=None, team_ids=None, org_ids=None),
+    )
+
+    return await execute_streaming_call(
+        current_loop=asyncio.get_running_loop(),
+        cleaned_args=cleaned_args,
+        selected_provider=selected_provider,
+        provider=provider,
+        model=model,
+        request_json="{}",
+        request=request,
+        metrics=metrics or _DummyMetrics(),
+        provider_manager=provider_manager,
+        templated_llm_payload=[{"role": "user", "content": "hi"}],
+        should_persist=True,
+        final_conversation_id="conv-stream-guard",
+        character_card_for_context={"name": "Test"},
+        chat_db=SimpleNamespace(),
+        save_message_fn=save_message_fn,
+        audit_service=None,
+        audit_context=None,
+        client_id="client-stream-guard",
+        queue_execution_enabled=queue_execution_enabled,
+        enable_provider_fallback=enable_provider_fallback,
+        llm_call_func=llm_call_func,
+        refresh_provider_params=refresh_provider_params or (lambda *_args, **_kwargs: ({}, None)),
+        moderation_getter=lambda: _NoModeration(),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_streaming_tool_autoexec_rejects_multi_choice_before_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider_called = False
+
+    def llm_call_func():
+        nonlocal provider_called
+        provider_called = True
+        return _content_stream()
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-1"
+
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=llm_call_func,
+        save_message_fn=save_message_fn,
+        cleaned_args_overrides={
+            "n": 2,
+            "tools": [{"type": "function", "function": {"name": "notes.search", "parameters": {}}}],
+        },
+    )
+    chunks = await _collect_sse_chunks(response)
+
+    assert provider_called is False
+    assert "unsupported_multi_choice_tool_autoexec" in "".join(chunks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_streaming_tool_autoexec_rejects_multi_choice_before_queue_admission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider_called = False
+
+    def llm_call_func():
+        nonlocal provider_called
+        provider_called = True
+        return _content_stream()
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-1"
+
+    class _FakeActiveQueue:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.enqueued = False
+
+        async def enqueue(self, *, processor, stream_channel, **_kwargs):
+            self.enqueued = True
+            processor()
+            await stream_channel.put(None)
+            fut = asyncio.Future()
+            fut.set_result({"status": "ok"})
+            return fut
+
+    fake_queue = _FakeActiveQueue()
+
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+    monkeypatch.setattr(chat_service, "get_request_queue", lambda: fake_queue)
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=llm_call_func,
+        save_message_fn=save_message_fn,
+        queue_execution_enabled=True,
+        cleaned_args_overrides={
+            "n": 2,
+            "tools": [{"type": "function", "function": {"name": "notes.search", "parameters": {}}}],
+        },
+    )
+    chunks = await _collect_sse_chunks(response)
+
+    assert fake_queue.enqueued is False
+    assert provider_called is False
+    assert "unsupported_multi_choice_tool_autoexec" in "".join(chunks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_streaming_tool_autoexec_rejects_multi_choice_fallback_args_before_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fallback_provider_called = False
+
+    def fake_fallback_call(**_kwargs):
+        nonlocal fallback_provider_called
+        fallback_provider_called = True
+        return _content_stream()
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-1"
+
+    provider_manager = _ProviderManagerStub("anthropic")
+
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", fake_fallback_call)
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=lambda: (_ for _ in ()).throw(chat_service.ChatAPIError("primary failed")),
+        save_message_fn=save_message_fn,
+        provider_manager=provider_manager,
+        enable_provider_fallback=True,
+        refresh_provider_params=lambda fallback_provider: (
+            {
+                "api_endpoint": fallback_provider,
+                "api_key": "fallback-key",
+                "messages_payload": [{"role": "user", "content": "hi"}],
+                "model": "claude-3-7-sonnet",
+                "streaming": True,
+                "n": 2,
+                "tools": [{"type": "function", "function": {"name": "notes.search", "parameters": {}}}],
+            },
+            "claude-3-7-sonnet",
+        ),
+    )
+    chunks = await _collect_sse_chunks(response)
+
+    assert fallback_provider_called is False
+    assert provider_manager.failures == [("openai", "ChatAPIError")]
+    assert "unsupported_multi_choice_tool_autoexec" in "".join(chunks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_streaming_tool_autoexec_allows_multi_choice_without_request_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider_called = False
+
+    def llm_call_func():
+        nonlocal provider_called
+        provider_called = True
+        return _content_stream()
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-1"
+
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=llm_call_func,
+        save_message_fn=save_message_fn,
+        cleaned_args_overrides={"n": 2},
+    )
+    chunks = await _collect_sse_chunks(response)
+
+    assert provider_called is True
+    assert "unsupported_multi_choice_tool_autoexec" not in "".join(chunks)
 
 
 @pytest.mark.asyncio
@@ -259,9 +479,9 @@ async def test_streaming_autoexec_enabled_persists_tool_messages_and_emits_tool_
     assert save_payloads[1]["role"] == "tool"
     assert save_payloads[1]["tool_call_id"] == "c1"
 
-    tool_event_idx = next(i for i, msg in enumerate(chunks) if msg.startswith("event: tool_results"))
+    tool_event_idx = next(i for i, msg in enumerate(chunks) if '"tool_results"' in msg)
     finish_idx = next(i for i, msg in enumerate(chunks) if '"finish_reason": "stop"' in msg)
-    end_idx = next(i for i, msg in enumerate(chunks) if msg.startswith("event: stream_end"))
+    end_idx = next(i for i, msg in enumerate(chunks) if '"success": true' in msg)
     done_idx = next(i for i, msg in enumerate(chunks) if "data: [DONE]" in msg)
     assert tool_event_idx < finish_idx < end_idx < done_idx
 

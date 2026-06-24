@@ -3574,6 +3574,32 @@ async def execute_streaming_call(
     queue_for_exec = None
     queue_future: asyncio.Future[Any] | None = None
     queue_enabled = False
+
+    def _streaming_error_response(error: BaseException) -> StreamingResponse:
+        err_msg = str(getattr(error, "detail", error))
+        err_type = type(error).__name__
+
+        async def _err_gen(msg: str = err_msg, typ: str = err_type):
+            payload = {"error": {"message": msg, "type": typ}}
+            if CHAT_STREAM_INCLUDE_METADATA and final_conversation_id:
+                payload["conversation_id"] = final_conversation_id
+                payload["tldw_conversation_id"] = final_conversation_id
+                if system_message_id:
+                    payload["tldw_system_message_id"] = system_message_id
+                if normalized_continuation_metadata:
+                    payload["tldw_continuation"] = normalized_continuation_metadata
+            yield f"data: {_json.dumps(payload)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(
+            _err_gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     try:
         try:
             if structured_request_context is None:
@@ -3585,6 +3611,10 @@ async def execute_streaming_call(
             apply_structured_response_request(
                 cleaned_args=cleaned_args,
                 structured_request_context=structured_request_context,
+            )
+            ensure_tool_autoexec_supports_request(
+                cleaned_args=cleaned_args,
+                should_run_tool_autoexec=should_run_legacy_tool_autoexec,
             )
             _evaluate_chat_prompt_cost_guardrails(
                 cleaned_args=cleaned_args,
@@ -3695,6 +3725,10 @@ async def execute_streaming_call(
                                 except _CHAT_NONCRITICAL_EXCEPTIONS as refresh_error:
                                     provider_manager.record_failure(fallback_provider, refresh_error)
                                     raise
+                                ensure_tool_autoexec_supports_request(
+                                    cleaned_args=refreshed_args,
+                                    should_run_tool_autoexec=should_run_legacy_tool_autoexec,
+                                )
                                 model = refreshed_model or model
                                 def llm_call_func_fb():
                                     return perform_chat_api_call(**refreshed_args)
@@ -3923,6 +3957,19 @@ async def execute_streaming_call(
                     except _CHAT_NONCRITICAL_EXCEPTIONS as refresh_error:
                         provider_manager.record_failure(fallback_provider, refresh_error)
                         raise
+                    try:
+                        ensure_tool_autoexec_supports_request(
+                            cleaned_args=refreshed_args,
+                            should_run_tool_autoexec=should_run_legacy_tool_autoexec,
+                        )
+                    except HTTPException as guard_error:
+                        _emit_chat_run_first_completion_metric(
+                            metrics,
+                            context=run_first_metric_context,
+                            outcome="error",
+                        )
+                        await _maybe_refund_streaming_rg(rg_refund_cb, cancelled=False, error=True)
+                        return _streaming_error_response(guard_error)
                     cleaned_args = refreshed_args
                     model = refreshed_model or model
                     fallback_start_time = time.time()

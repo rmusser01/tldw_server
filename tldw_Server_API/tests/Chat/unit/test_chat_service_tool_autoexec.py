@@ -461,6 +461,44 @@ async def test_tool_autoexec_allows_multi_choice_when_autoexec_disabled(monkeypa
 
 @pytest.mark.asyncio
 @pytest.mark.unit
+async def test_tool_autoexec_allows_multi_choice_without_request_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_log_llm_usage(**_kwargs):
+        return None
+
+    monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
+    monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+
+    provider_called = False
+
+    def llm_call_func():
+        nonlocal provider_called
+        provider_called = True
+        return {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "plain response"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        }
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-1"
+
+    response = await _run_execute_non_stream_call(
+        llm_call_func=llm_call_func,
+        save_message_fn=save_message_fn,
+        cleaned_args_overrides={"n": 2},
+    )
+
+    assert provider_called is True
+    assert response["choices"][0]["message"]["content"] == "plain response"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_run_first_presented_tools_drive_autoexec_allow_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_log_llm_usage(**_kwargs):
         return None
