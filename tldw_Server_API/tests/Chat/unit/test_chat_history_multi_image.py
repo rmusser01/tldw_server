@@ -2,6 +2,7 @@ from contextlib import contextmanager
 
 from tldw_Server_API.app.core.Chat.chat_history import save_chat_history_to_db_wrapper
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
 
 
 class DummyDB:
@@ -64,6 +65,7 @@ class ExistingConversationDB(DummyDB):
         super().__init__()
         self.transaction_id = 0
         self.active_transaction_id = None
+        self.fetch_transaction_ids = []
         self.soft_delete_transaction_ids = []
         self.add_message_transaction_ids = []
 
@@ -84,6 +86,7 @@ class ExistingConversationDB(DummyDB):
         return {"id": 1, "name": DEFAULT_CHARACTER_NAME}
 
     def get_messages_for_conversation(self, *_args, **_kwargs):
+        self.fetch_transaction_ids.append(self.active_transaction_id)
         return [{"id": "old-1", "version": 1}]
 
     def soft_delete_message(self, *_args, **_kwargs):
@@ -111,4 +114,76 @@ def test_legacy_history_replacement_deletes_and_inserts_in_one_transaction():
 
     assert conv_id == "conv-1"
     assert status == "Chat history saved successfully!"
+    assert db.fetch_transaction_ids == db.soft_delete_transaction_ids
     assert db.soft_delete_transaction_ids == db.add_message_transaction_ids
+
+
+class FailingReplacementDB(ExistingConversationDB):
+    def __init__(self):
+        super().__init__()
+        self.active_messages = [{"id": "old-1", "version": 1, "deleted": False}]
+
+    @contextmanager
+    def transaction(self):
+        self.transaction_id += 1
+        previous_transaction = self.active_transaction_id
+        message_snapshot = [message.copy() for message in self.active_messages]
+        added_snapshot = list(self.added_messages)
+        fetch_snapshot = list(self.fetch_transaction_ids)
+        soft_delete_snapshot = list(self.soft_delete_transaction_ids)
+        add_message_snapshot = list(self.add_message_transaction_ids)
+        self.active_transaction_id = self.transaction_id
+        try:
+            yield
+        except Exception:
+            self.active_messages = message_snapshot
+            self.added_messages = added_snapshot
+            self.fetch_transaction_ids = fetch_snapshot
+            self.soft_delete_transaction_ids = soft_delete_snapshot
+            self.add_message_transaction_ids = add_message_snapshot
+            raise
+        finally:
+            self.active_transaction_id = previous_transaction
+
+    def get_messages_for_conversation(self, *_args, **_kwargs):
+        self.fetch_transaction_ids.append(self.active_transaction_id)
+        return [
+            {"id": message["id"], "version": message["version"]}
+            for message in self.active_messages
+            if not message["deleted"]
+        ]
+
+    def soft_delete_message(self, message_id, _version):
+        self.soft_delete_transaction_ids.append(self.active_transaction_id)
+        for message in self.active_messages:
+            if message["id"] == message_id:
+                message["deleted"] = True
+                return True
+        return False
+
+    def add_message(self, payload):
+        self.add_message_transaction_ids.append(self.active_transaction_id)
+        raise CharactersRAGDBError("insert failed")
+
+
+def test_legacy_history_replacement_rolls_back_deletes_when_insert_fails():
+    db = FailingReplacementDB()
+
+    conv_id, status = save_chat_history_to_db_wrapper(
+        db=db,
+        chatbot_history=[{"role": "user", "content": "replacement"}],
+        conversation_id="conv-1",
+        media_content_for_char_assoc=None,
+        media_name_for_char_assoc=None,
+        character_name_for_chat=DEFAULT_CHARACTER_NAME,
+    )
+
+    active_message_ids = [
+        message["id"]
+        for message in db.active_messages
+        if not message["deleted"]
+    ]
+    assert conv_id == "conv-1"
+    assert status.startswith("Error saving messages:")
+    assert active_message_ids == ["old-1"]
+    assert db.added_messages == []
