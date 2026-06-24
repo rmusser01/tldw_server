@@ -1,7 +1,7 @@
 ---
 id: TASK-12016
 title: Implement Embeddings request orchestrator
-status: In Progress
+status: Done
 created_date: 2026-06-24 18:29
 labels:
 - embeddings
@@ -26,7 +26,7 @@ modified_files:
 - tldw_Server_API/tests/Embeddings_isolated/test_provider_resolution.py
 - tldw_Server_API/tests/Embeddings_isolated/test_embedding_policy.py
 - tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py
-updated_date: 2026-06-24 22:28
+updated_date: 2026-06-24 22:43
 ---
 
 ## Description
@@ -37,12 +37,12 @@ Execute the approved Embeddings request orchestrator implementation plan using s
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Characterization tests capture current endpoint/batch cache, dimensions, RG, fallback, and error behavior before production extraction.
-- [ ] #2 Core Embeddings modules are added for request types, input normalization, provider resolution, policy, and orchestrator prepare/execute phases.
-- [ ] #3 Endpoint preserves legacy behavior by default and exposes the orchestrator path only behind EMBEDDINGS_ORCHESTRATOR_ENABLED.
-- [ ] #4 Compatibility shims remain for existing endpoint helper symbols and tests while delegating to new owners where extracted.
-- [ ] #5 Dual-path parity tests cover representative success, cache, dimensions, base64, fallback, and error cases.
-- [ ] #6 Focused Embeddings tests, compile checks, git diff checks, and Bandit verification are recorded before completion.
+- [x] #1 Characterization tests capture current endpoint/batch cache, dimensions, RG, fallback, and error behavior before production extraction.
+- [x] #2 Core Embeddings modules are added for request types, input normalization, provider resolution, policy, and orchestrator prepare/execute phases.
+- [x] #3 Endpoint preserves legacy behavior by default and exposes the orchestrator path only behind EMBEDDINGS_ORCHESTRATOR_ENABLED.
+- [x] #4 Compatibility shims remain for existing endpoint helper symbols and tests while delegating to new owners where extracted.
+- [x] #5 Dual-path parity tests cover representative success, cache, dimensions, base64, fallback, and error cases.
+- [x] #6 Focused Embeddings tests, compile checks, git diff checks, and Bandit verification are recorded before completion.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -139,20 +139,29 @@ Task 8 verification:
 - `git diff --check` -> passed with no output.
 
 Task 8 touched tracked files: `tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py`, `tldw_Server_API/app/core/Embeddings/orchestrator.py`, `tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py`. The unrelated untracked watchlist template files were left untouched and unstaged.
+Task 9 completed: added short endpoint compatibility migration comments for `_split_provider_model`, `_resolve_model_and_provider`, `_validate_dimensions_request`, `adjust_dimensions`, `decide_and_apply_l2`, `resolve_fallback_chain`, `map_model_for_provider`, and `create_embeddings_batch_async`. Comments name the new owner module and note removal after endpoint/legacy caller migration without user-facing deprecation messaging.
+
+Final focused verification:
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Embeddings_isolated/test_request_types.py tldw_Server_API/tests/Embeddings_isolated/test_input_normalizer.py tldw_Server_API/tests/Embeddings_isolated/test_provider_resolution.py tldw_Server_API/tests/Embeddings_isolated/test_embedding_policy.py tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_characterization.py tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py tldw_Server_API/tests/Embeddings/test_embeddings_v5_unit.py tldw_Server_API/tests/Embeddings/test_embeddings_dimensions_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_token_arrays.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback_model_map.py tldw_Server_API/tests/Embeddings/test_batch_rate_headers.py` -> 168 passed, 1768 warnings.
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m compileall -q tldw_Server_API/app/core/Embeddings/request_types.py tldw_Server_API/app/core/Embeddings/input_normalizer.py tldw_Server_API/app/core/Embeddings/provider_resolution.py tldw_Server_API/app/core/Embeddings/embedding_policy.py tldw_Server_API/app/core/Embeddings/orchestrator.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py` -> passed with no output.
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Embeddings/request_types.py tldw_Server_API/app/core/Embeddings/input_normalizer.py tldw_Server_API/app/core/Embeddings/provider_resolution.py tldw_Server_API/app/core/Embeddings/embedding_policy.py tldw_Server_API/app/core/Embeddings/orchestrator.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py -f json -o /tmp/bandit_embeddings_orchestrator.json` -> 0 results, no errors. Stdout included Bandit comment-parser warnings for existing comment words (`non`, `cryptographic`, `retry`, `jitter`).
+- `git diff --check` -> passed with no output.
+
+Known skips/blockers: none for the focused Embeddings scope. Existing warnings remain in the selected test suite. Unrelated untracked watchlist template files remain untouched and unstaged.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented the Embeddings request orchestrator refactor behind `EMBEDDINGS_ORCHESTRATOR_ENABLED`. Added pure request types, input normalization, provider resolution, policy, and orchestrator modules; preserved endpoint compatibility shims and legacy default behavior; wired a feature-flagged orchestrator endpoint path; added characterization, isolated core, endpoint parity, policy, fallback, cache, BYOK, adapter, RG, and error-shape coverage; and completed focused verification plus Bandit with zero findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

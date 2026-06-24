@@ -555,7 +555,7 @@ Verification:
 
 ### Task 9: Compatibility Shims, Notes, And Security Verification
 
-- [ ] Add short inline migration comments to endpoint wrappers for:
+- [x] Add short inline migration comments to endpoint wrappers for:
   - `_split_provider_model`
   - `_resolve_model_and_provider`
   - `_validate_dimensions_request`
@@ -564,8 +564,8 @@ Verification:
   - `resolve_fallback_chain`
   - `map_model_for_provider`
   - `create_embeddings_batch_async`
-- [ ] Confirm comments name the new owner and removal condition without user-facing deprecation messaging.
-- [ ] Run focused Embeddings verification:
+- [x] Confirm comments name the new owner and removal condition without user-facing deprecation messaging.
+- [x] Run focused Embeddings verification:
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -587,7 +587,7 @@ python -m pytest -q \
 
 Expected result: all selected tests pass. If an unrelated pre-existing test fails, record the exact failing test, error, and reason in the Backlog task before continuing.
 
-- [ ] Run import compilation on touched Python files:
+- [x] Run import compilation on touched Python files:
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -602,7 +602,7 @@ python -m compileall -q \
 
 Expected result: command exits `0` with no output.
 
-- [ ] Run Bandit on touched production code:
+- [x] Run Bandit on touched production code:
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -618,7 +618,7 @@ python -m bandit -r \
 
 Expected result: command exits `0`, or any findings are confirmed pre-existing/non-actionable and documented with file, line, severity, and reason.
 
-- [ ] Run whitespace validation:
+- [x] Run whitespace validation:
 
 ```bash
 git diff --check
@@ -626,18 +626,26 @@ git diff --check
 
 Expected result: command exits `0` with no output.
 
-- [ ] Update the Backlog implementation task with modified files, verification output, known skips, and final summary.
-- [ ] Commit in reviewable slices. Recommended slice order:
+- [x] Update the Backlog implementation task with modified files, verification output, known skips, and final summary.
+- [x] Commit in reviewable slices. Recommended slice order:
   - Characterization tests.
   - Request types, normalizer, resolver, and policy extraction.
   - Orchestrator core.
   - Endpoint feature flag and parity tests.
   - Verification notes.
 
+Task 9 completed. Added endpoint migration comments for compatibility helpers, recorded final focused verification in Backlog task TASK-12016, and left user-facing API behavior unchanged.
+
+Verification:
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Embeddings_isolated/test_request_types.py tldw_Server_API/tests/Embeddings_isolated/test_input_normalizer.py tldw_Server_API/tests/Embeddings_isolated/test_provider_resolution.py tldw_Server_API/tests/Embeddings_isolated/test_embedding_policy.py tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_characterization.py tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py tldw_Server_API/tests/Embeddings/test_embeddings_v5_unit.py tldw_Server_API/tests/Embeddings/test_embeddings_dimensions_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_token_arrays.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback_model_map.py tldw_Server_API/tests/Embeddings/test_batch_rate_headers.py` -> 168 passed, 1768 warnings.
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m compileall -q tldw_Server_API/app/core/Embeddings/request_types.py tldw_Server_API/app/core/Embeddings/input_normalizer.py tldw_Server_API/app/core/Embeddings/provider_resolution.py tldw_Server_API/app/core/Embeddings/embedding_policy.py tldw_Server_API/app/core/Embeddings/orchestrator.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py` -> passed with no output.
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Embeddings/request_types.py tldw_Server_API/app/core/Embeddings/input_normalizer.py tldw_Server_API/app/core/Embeddings/provider_resolution.py tldw_Server_API/app/core/Embeddings/embedding_policy.py tldw_Server_API/app/core/Embeddings/orchestrator.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py -f json -o /tmp/bandit_embeddings_orchestrator.json` -> 0 results, no errors.
+- `git diff --check` -> passed with no output.
+
 ## Review Checkpoints
 
-- [ ] After Task 1, review characterization results before extraction. Confirm each behavior is marked as contract or compatibility.
-- [ ] After Task 5, review pure module APIs for over-coupling to FastAPI or endpoint globals.
+- [x] After Task 1, review characterization results before extraction. Confirm each behavior is marked as contract or compatibility.
+- [x] After Task 5, review pure module APIs for over-coupling to FastAPI or endpoint globals.
 - [x] After Task 7, review endpoint RG/billing ordering. No cache read or provider call should happen before the endpoint reservation decision.
 - [x] After Task 8, review parity failures as design feedback, not only test failures. If parity requires behavior changes, split them into a separate design decision.
 

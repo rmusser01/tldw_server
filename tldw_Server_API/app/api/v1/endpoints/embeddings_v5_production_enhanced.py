@@ -784,11 +784,13 @@ def _chroma_manager_for_user(user: User) -> ChromaDBManager:
 
 
 def _split_provider_model(model: str) -> tuple[str | None, str]:
-    """Compatibility shim; provider_resolution owns parsing until endpoint migration completes."""
+    """Split provider/model while preserving the legacy helper API."""
+    # Compatibility shim: provider_resolution owns parsing once endpoint callers migrate.
     return split_provider_model(model)
 
 
 def _resolve_model_and_provider(model: str | None, provider: str | None) -> tuple[str, str]:
+    # Compatibility shim: provider_resolution owns this once endpoint callers migrate.
     cfg = settings.get("EMBEDDING_CONFIG", {}) or {}
     try:
         intent = resolve_provider_model(
@@ -1448,6 +1450,7 @@ def _supports_openai_dimensions(model: str) -> bool:
 
 def _validate_dimensions_request(provider: str, model: str, dimensions: int | None) -> int | None:
     """Validate requested dimensions for the provider/model pair."""
+    # Compatibility shim: embedding_policy owns this after endpoint helper migration.
     try:
         return embedding_policy_core.validate_dimensions_request(provider, model, dimensions)
     except EmbeddingPolicyError as exc:
@@ -1459,6 +1462,7 @@ def adjust_dimensions(
     provider: str,
     model: str
 ) -> list[list[float]]:
+    # Compatibility shim: embedding_policy owns vector resizing once legacy tests migrate.
     def _record_adjustment(metric_provider: str, metric_model: str, method: str) -> None:
         embedding_dimension_adjustments_total.labels(
             provider=metric_provider,
@@ -1492,6 +1496,7 @@ def decide_and_apply_l2(
     and preserves default behavior (numeric outputs normalized; adapter vectors preserved
     unless normalization is explicitly requested via env flag).
     """
+    # Compatibility shim: embedding_policy owns L2 decisions after endpoint formatting migrates.
     normalize_requested: bool | None = None
     try:
         env_val = os.getenv("LLM_EMBEDDINGS_L2_NORMALIZE", "")
@@ -1593,6 +1598,7 @@ def _should_enforce_policy_for_request(
         return _should_enforce_policy(user)
 
 def resolve_fallback_chain(primary_provider: str) -> list[str]:
+    # Compatibility shim: embedding_policy owns fallback-chain resolution after callers migrate.
     mapping = None
     try:
         mapping = settings.get("EMBEDDINGS_FALLBACK_CHAIN", {}) or {}
@@ -1619,6 +1625,7 @@ def _fallback_model_map() -> dict[str, dict[str, str]]:
 
 def map_model_for_provider(src_provider: str, dst_provider: str, model_id: str) -> str:
     """Map a model id to the destination provider if a mapping exists."""
+    # Compatibility shim: embedding_policy owns fallback model mapping after callers migrate.
     return embedding_policy_core.map_model_for_provider(
         src_provider,
         dst_provider,
@@ -2056,6 +2063,7 @@ async def create_embeddings_batch_async(
     metadata: dict[str, Any] | None = None,
 ) -> list[list[float]]:
     """Async wrapper for embeddings with caching and circuit breaker"""
+    # Compatibility shim: orchestrator owns request execution after legacy path removal.
     provider = (provider or "").strip().lower()
 
     if model_id:
