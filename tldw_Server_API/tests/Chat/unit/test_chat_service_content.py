@@ -40,6 +40,43 @@ def test_collect_non_stream_choices_skips_unsupported_choices_without_mutation()
     assert payload == {"choices": [{"text": "legacy"}]}
 
 
+@pytest.mark.asyncio
+async def test_output_moderation_pipeline_redacts_choices_and_returns_first_choice_fallback():
+    from tldw_Server_API.app.core.Chat.moderation_pipeline import (
+        OutputModerationRuntime,
+        apply_output_safety_to_choices,
+    )
+
+    llm_response = {
+        "choices": [
+            {"message": {"role": "assistant", "content": "first secret"}, "finish_reason": "stop"},
+            {"message": {"role": "assistant", "content": "second secret"}, "finish_reason": "stop"},
+        ]
+    }
+    choices = collect_non_stream_choices(llm_response)
+
+    result = await apply_output_safety_to_choices(
+        choices=choices,
+        fallback_content=choices[0].content,
+        fallback_content_text=choices[0].content_text,
+        runtime=OutputModerationRuntime(
+            request=None,
+            client_id="client",
+            conversation_id="conversation-1",
+            metrics=_DummyMetrics(),
+            audit_service=None,
+            audit_context=None,
+            moderation_getter=lambda: _RedactingModeration(),
+            topic_monitoring_getter=lambda: None,
+        ),
+    )
+
+    assert llm_response["choices"][0]["message"]["content"] == "REDACTED:first secret"
+    assert llm_response["choices"][1]["message"]["content"] == "REDACTED:second secret"
+    assert result.content_to_save == "REDACTED:first secret"
+    assert result.content_text_for_usage == "REDACTED:first secret"
+
+
 class _RedactingModeration:
     class _Policy:
         enabled = True
