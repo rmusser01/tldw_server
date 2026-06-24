@@ -1241,6 +1241,66 @@ async def test_non_stream_auto_continue_redacts_continuation_before_return_and_p
     assert response["tldw_tool_auto_continue"] == {"attempted": True, "succeeded": True}
 
 
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_non_stream_auto_continue_redacts_raw_string_continuation_before_return_and_persist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_log_llm_usage(**_kwargs):
+        return None
+
+    monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
+    monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+    monkeypatch.setattr(chat_service, "get_chat_max_tool_calls", lambda: 2)
+    monkeypatch.setattr(chat_service, "get_chat_tool_timeout_ms", lambda: 3500)
+    monkeypatch.setattr(chat_service, "get_chat_tool_allow_catalog", lambda: ["notes.*"])
+    monkeypatch.setattr(chat_service, "should_attach_tool_idempotency", lambda: True)
+    monkeypatch.setattr(chat_service, "should_auto_continue_tools_once", lambda: True)
+    monkeypatch.setattr(chat_service, "should_force_normalize_string_responses", lambda: False)
+
+    async def fake_autoexec(**_kwargs):
+        rec = ToolExecutionRecord(
+            tool_call_id="c1",
+            tool_name="notes.search",
+            ok=True,
+            result={"ok": 1},
+            module="notes",
+            content='{"ok":true}',
+        )
+        return ToolExecutionBatchResult(
+            requested_calls=1,
+            processed_calls=1,
+            execution_attempts=1,
+            executed_calls=1,
+            truncated=False,
+            results=[rec],
+        )
+
+    monkeypatch.setattr(chat_service, "execute_assistant_tool_calls", fake_autoexec)
+
+    async def fake_followup_call(**_kwargs):
+        return "Final answer includes secret"
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_followup_call)
+
+    saved_payloads: list[dict[str, Any]] = []
+
+    async def save_message_fn(_db, _conv_id, payload, use_transaction=True):
+        saved_payloads.append(payload)
+        return f"m-{len(saved_payloads)}"
+
+    response = await _run_execute_non_stream_call(
+        llm_call_func=_build_llm_response_with_tool_calls,
+        save_message_fn=save_message_fn,
+        moderation_getter=lambda: _KeywordModeration(keyword="secret"),
+    )
+
+    assert [p["role"] for p in saved_payloads] == ["assistant", "tool", "assistant"]
+    assert saved_payloads[2]["content"] == "Final answer includes [redacted]"
+    assert response == "Final answer includes [redacted]"
+
+
 @pytest.mark.unit
 def test_emit_chat_run_first_tool_path_metrics_omits_ineligible_reason_for_strict_collectors(
     monkeypatch: pytest.MonkeyPatch,

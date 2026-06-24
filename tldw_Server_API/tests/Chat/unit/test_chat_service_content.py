@@ -190,6 +190,34 @@ async def _run_non_stream_content_test(
 
 
 @pytest.mark.asyncio
+async def test_execute_non_stream_call_does_not_persist_supported_later_choice_when_first_unsupported(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(chat_service, "INJECT_ASSISTANT_NAME", False)
+    save_calls: list[dict[str, object]] = []
+    llm_response = {
+        "choices": [
+            {"text": "legacy"},
+            {
+                "message": {"role": "assistant", "content": "provider choice 1"},
+                "finish_reason": "stop",
+            },
+        ]
+    }
+
+    response, save_calls, _logged_usage = await _run_non_stream_content_test(
+        monkeypatch,
+        llm_response=llm_response,
+        moderation=_NoModeration(),
+        should_persist=True,
+        save_calls=save_calls,
+    )
+
+    assert response["choices"] == llm_response["choices"]
+    assert save_calls == []
+
+
+@pytest.mark.asyncio
 async def test_execute_non_stream_call_redacts_list_content(monkeypatch):
     async def fake_log_llm_usage(**_kwargs):
         return None

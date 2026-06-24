@@ -5603,6 +5603,8 @@ async def execute_non_stream_call(
                             content_to_save = llm_response
                         content_text_for_usage = _extract_text_from_content(content_to_save)
                         await _apply_output_safety_to_current_choices()
+                        if not processed_choices and isinstance(llm_response, str):
+                            llm_response = content_to_save
                         try:
                             continuation_structured_metadata = validate_structured_choices(
                                 choices=processed_choices,

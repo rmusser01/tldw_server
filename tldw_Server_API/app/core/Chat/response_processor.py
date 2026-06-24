@@ -151,7 +151,7 @@ def estimate_completion_tokens_from_choices(choices: list[NonStreamChoice]) -> i
 
 
 def primary_choice(choices: list[NonStreamChoice]) -> NonStreamChoice | None:
-    return choices[0] if choices else None
+    return next((choice for choice in choices if choice.index == 0), None)
 
 
 def inject_assistant_name_into_choices(choices: list[NonStreamChoice], assistant_name: str | None) -> None:
