@@ -18,7 +18,7 @@ modified_files:
 - tldw_Server_API/app/core/Moderation/moderation_service.py
 - tldw_Server_API/tests/unit/test_moderation_blocklist_parse.py
 - backlog/tasks/task-2432 - Implement-Moderation-PolicyCompiler-refactor.md
-updated_date: 2026-06-24 21:31
+updated_date: 2026-06-24 21:55
 ---
 
 ## Description
@@ -44,6 +44,23 @@ Starting subagent-driven implementation. First dispatch target is Task 1 from th
 Task 1 complete and reviewed. Commit dd259bf1b added policy_compiler.py skeleton and test_moderation_policy_compiler.py smoke tests. Controller verification: focused pytest `2 passed, 16 warnings`; py_compile exit 0; git diff --check HEAD~1..HEAD exit 0. Independent spec review: compliant. Independent quality review: approved with no issues.
 Task 2 complete and reviewed. Commits 63e2bbd82 and a77c4694a moved blocklist parsing/rule compilation into PolicyCompiler and fixed review-found edge cases for empty parsed patterns and raw regex backslash preservation. Controller verification: focused pytest `6 passed, 24 warnings`; py_compile exit 0; git diff --check HEAD~2..HEAD exit 0. Spec re-review: compliant. Quality review: approved with no issues.
 Task 3 complete and reviewed. Commits c608d5d1d and 1518d154e wired ModerationService parser helpers to PolicyCompiler, preserved lint response assembly, derived service parser constants from compiler constants, and added direct wrapper-delegation coverage. Controller verification: blocklist parse suite `34 passed, 80 warnings`; py_compile exit 0; git diff --check exit 0. Spec re-review: compliant. Quality re-review: approved with no issues.
+Task 4 completed and reviewed.
+
+Implementation commits:
+- 46d2d7c7a Integrate moderation global policy compiler
+- cf750905a Fix moderation category env fallback
+
+Spec review: APPROVE. Verified service delegation through `_load_moderation_config_section()`, `_resolve_moderation_config()`, and `_compile_global_policy_from_resolved_config()`; paths remain service-owned; `ResolvedModerationConfig` has no paths; `categories_enabled=None` falls back to `MODERATION_CATEGORIES_ENABLED`; runtime overrides are applied by `PolicyCompiler`; compiler has no file/path ownership.
+
+Quality review: APPROVE. No blocking findings. Non-blocking observation: `_read_blocklist_lines_from_path()` reads the whole blocklist into memory; acceptable for current config-sized files and consistent with current APIs, possible future improvement if externally managed/large blocklists become a goal.
+
+Verification:
+- `python -m pytest tldw_Server_API/tests/unit/test_moderation_policy_compiler.py tldw_Server_API/tests/unit/test_moderation_effective_settings.py -q` -> 10 passed
+- `python -m pytest tldw_Server_API/tests/unit/test_moderation_blocklist_parse.py -q` -> 34 passed
+- `python -m pytest tldw_Server_API/tests/unit/test_moderation*.py -q` -> 115 passed
+- `python -m py_compile tldw_Server_API/app/core/Moderation/moderation_service.py tldw_Server_API/app/core/Moderation/policy_compiler.py tldw_Server_API/tests/unit/test_moderation_policy_compiler.py tldw_Server_API/tests/unit/test_moderation_effective_settings.py` -> passed
+- `git diff --check HEAD~2..HEAD` -> passed
+- `python -m bandit -r tldw_Server_API/app/core/Moderation -f json -o /tmp/bandit_moderation_policy_compiler_task4.json` -> 0 findings
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
