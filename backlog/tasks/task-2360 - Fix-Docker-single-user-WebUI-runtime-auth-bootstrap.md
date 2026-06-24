@@ -10,8 +10,10 @@ labels:
 priority: High
 documentation:
 - Docs/superpowers/specs/2026-06-24-docker-webui-runtime-auth-bootstrap-design.md
+- Docs/superpowers/plans/2026-06-24-docker-webui-runtime-auth-bootstrap-implementation-plan.md
 modified_files:
 - Docs/superpowers/specs/2026-06-24-docker-webui-runtime-auth-bootstrap-design.md
+- Docs/superpowers/plans/2026-06-24-docker-webui-runtime-auth-bootstrap-implementation-plan.md
 ---
 
 ## Description
@@ -35,7 +37,7 @@ Address Docker single-user startup/auth issues by designing and implementing a r
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Design first under Docs/superpowers/specs, then wait for explicit user review before implementation planning. Runtime-auth bootstrap should keep the WebUI image generic and avoid baking SINGLE_USER_API_KEY into NEXT_PUBLIC_X_API_KEY for Docker single-user quickstart.
+Docs/superpowers/plans/2026-06-24-docker-webui-runtime-auth-bootstrap-implementation-plan.md
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
