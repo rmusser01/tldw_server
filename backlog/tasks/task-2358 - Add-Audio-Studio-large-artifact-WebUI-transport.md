@@ -1,9 +1,10 @@
 ---
 id: TASK-2358
 title: Add Audio Studio large-artifact WebUI transport
-status: To Do
+status: In Progress
 documentation:
 - Docs/superpowers/plans/2026-06-24-audio-studio-artifact-playback-implementation-plan.md
+- Docs/superpowers/specs/2026-06-24-audio-studio-large-artifact-media-tickets-design.md
 ---
 
 ## Description
