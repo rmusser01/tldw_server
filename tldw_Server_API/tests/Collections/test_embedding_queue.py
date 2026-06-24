@@ -1,4 +1,6 @@
 import asyncio
+from typing import Any
+
 import pytest
 
 from tldw_Server_API.app.core.Collections import embedding_queue
@@ -43,6 +45,37 @@ async def test_enqueue_embeddings_job_uses_manager(monkeypatch):
     assert enqueue["root_job_uuid"] == "root-123"
     assert enqueue["payload"]["root_job_uuid"] == "root-123"
     assert enqueue["payload"]["user_id"] == "123"
+
+
+@pytest.mark.asyncio
+async def test_enqueue_embeddings_job_bounds_payload_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Embedding jobs cap payload content and include truncation metadata."""
+    captured: dict[str, Any] = {}
+    enqueue: dict[str, Any] = {}
+
+    class FakeManager:
+        def create_job(self, **kwargs: Any) -> dict[str, object]:
+            captured["job_kwargs"] = kwargs
+            return {"id": 123, "uuid": "root-123"}
+
+    _disable_test_mode(monkeypatch)
+    monkeypatch.setattr(embedding_queue, "_jobs_manager", lambda: FakeManager())
+    monkeypatch.setattr(embedding_queue, "EMBEDDING_JOB_CONTENT_MAX_CHARS", 12)
+    monkeypatch.setattr(redis_pipeline, "allow_stub", lambda: True)
+    monkeypatch.setattr(redis_pipeline, "enqueue_content_job", lambda **kwargs: enqueue.update(kwargs) or "stream-1")
+
+    await enqueue_embeddings_job_for_item(
+        user_id=123,
+        item_id=456,
+        content="A" * 80,
+        metadata={"origin": "reading"},
+    )
+
+    payload = captured["job_kwargs"]["payload"]
+    assert len(payload["content"]) <= 12
+    assert payload["metadata"]["content_truncated"] is True
+    assert payload["metadata"]["content_char_count"] == 80
+    assert enqueue["payload"]["metadata"]["content_truncated"] is True
 
 
 @pytest.mark.asyncio

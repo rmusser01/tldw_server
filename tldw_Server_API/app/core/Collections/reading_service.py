@@ -16,7 +16,14 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Collections.embedding_queue import enqueue_embeddings_job_for_item
 from tldw_Server_API.app.core.Collections.reading_importers import ReadingImportItem, normalize_import_items
-from tldw_Server_API.app.core.Collections.utils import hash_text_sha256, truncate_text, word_count
+from tldw_Server_API.app.core.Collections.utils import (
+    hash_text_sha256,
+    is_supported_reading_url,
+    normalize_reading_status,
+    truncate_text,
+    truncate_text_hard,
+    word_count,
+)
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase, ContentItemRow
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.exceptions import (
@@ -52,6 +59,8 @@ def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
 READING_DEFAULT_STATUS = "saved"
 READING_ARCHIVE_MAX_BYTES = _env_int("READING_ARCHIVE_MAX_BYTES", 5 * 1024 * 1024, minimum=0)
 READING_ARCHIVE_RETENTION_DAYS = _env_int("READING_ARCHIVE_RETENTION_DAYS", 30, minimum=0)
+READING_CONTENT_METADATA_MAX_CHARS = _env_int("READING_CONTENT_METADATA_MAX_CHARS", 50_000, minimum=0)
+READING_CLEAN_HTML_METADATA_MAX_CHARS = _env_int("READING_CLEAN_HTML_METADATA_MAX_CHARS", 50_000, minimum=0)
 
 _READING_SERVICE_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -137,6 +146,18 @@ def _safe_filename_fragment(raw: str, max_len: int = 64) -> str:
     return text[:max_len]
 
 
+def _add_bounded_metadata_text(metadata: dict[str, object], key: str, value: str | None, limit: int) -> None:
+    """Store bounded metadata text plus truncation diagnostics."""
+    bounded, truncated, original_len = truncate_text_hard(value, limit)
+    if bounded:
+        metadata[key] = bounded
+    if value:
+        metadata[f"{key}_char_count"] = original_len
+        if truncated:
+            metadata[f"{key}_truncated"] = True
+            metadata[f"{key}_max_chars"] = limit
+
+
 @dataclass
 class ReadingSaveResult:
     item: ContentItemRow
@@ -156,12 +177,159 @@ class ReadingImportResult:
     errors: list[str]
 
 
+class ReadingArchiveService:
+    """Create reading archive artifacts for saved items."""
+
+    def __init__(self, *, user_id: int, collections: CollectionsDatabase) -> None:
+        self.user_id = user_id
+        self.collections = collections
+
+    @staticmethod
+    def resolve_archive_retention() -> str | None:
+        try:
+            days = max(0, int(READING_ARCHIVE_RETENTION_DAYS))
+        except (TypeError, ValueError):
+            return None
+        if days <= 0:
+            return None
+        expires = datetime.now(tz=timezone.utc) + timedelta(days=days)
+        return expires.isoformat()
+
+    async def create_archive_artifact(
+        self,
+        *,
+        item_id: int,
+        title: str,
+        url: str | None,
+        body_text: str,
+        media_item_id: int | None,
+    ) -> tuple[int | None, str | None]:
+        text_value = (body_text or "").strip()
+        if not text_value:
+            return None, "archive_no_content"
+        content = f"# {title}\n\n{url or ''}\n\n{text_value}\n"
+        content_bytes = content.encode("utf-8")
+        if READING_ARCHIVE_MAX_BYTES > 0 and len(content_bytes) > READING_ARCHIVE_MAX_BYTES:
+            return None, "archive_too_large"
+
+        timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+        safe_title = _safe_filename_fragment(title, max_len=40)
+        filename = f"reading_archive_{item_id}_{safe_title}_{timestamp}.md"
+        outputs_dir = DatabasePaths.get_user_outputs_dir(self.user_id)
+        await asyncio.to_thread(outputs_dir.mkdir, parents=True, exist_ok=True)
+        path = outputs_dir / filename
+        await asyncio.to_thread(path.write_text, content, encoding="utf-8")
+
+        metadata = {
+            "item_id": item_id,
+            "url": url,
+            "canonical_url": url,
+            "source": "save_url",
+            "format": "md",
+            "title": title,
+        }
+        output_row = self.collections.create_output_artifact(
+            type_="reading_archive",
+            title=f"{title} (archive {timestamp})",
+            format_="md",
+            storage_path=filename,
+            metadata_json=json.dumps(metadata, ensure_ascii=False),
+            media_item_id=media_item_id,
+            retention_until=self.resolve_archive_retention(),
+        )
+        return int(output_row.id), None
+
+
+class ReadingImportService:
+    """Normalize and persist reading-list import items."""
+
+    def __init__(self, *, collections: CollectionsDatabase, normalize_url: Any) -> None:
+        self.collections = collections
+        self._normalize_url = normalize_url
+
+    def import_items(
+        self,
+        *,
+        items: list[ReadingImportItem],
+        merge_tags: bool = True,
+        origin_type: str = "import",
+    ) -> ReadingImportResult:
+        skipped = sum(
+            1
+            for item in items
+            if not is_supported_reading_url(str(getattr(item, "url", "") or "").strip())
+        )
+        normalized = normalize_import_items(items)
+        imported = 0
+        updated = 0
+        errors: list[str] = []
+
+        for item in normalized:
+            url = item.url.strip() if item.url else ""
+            if not url or not is_supported_reading_url(url):
+                skipped += 1
+                continue
+            normalized_url = self._normalize_url(url, "reading_import")
+            if not is_supported_reading_url(normalized_url):
+                skipped += 1
+                continue
+            parsed = urlparse(normalized_url)
+            domain = parsed.netloc.lower() if parsed.netloc else None
+            status = normalize_reading_status(item.status)
+            read_at = item.read_at
+            if status == "read" and not read_at:
+                read_at = _utcnow_iso()
+            tags = item.tags or []
+            metadata_payload = {"source": "reading_import"}
+            metadata_payload.update(item.metadata or {})
+            if normalized_url != url:
+                metadata_payload.setdefault("import_original_url", url)
+            try:
+                row = self.collections.upsert_content_item(
+                    origin="reading",
+                    origin_type=origin_type,
+                    origin_id=None,
+                    url=normalized_url,
+                    canonical_url=normalized_url,
+                    domain=domain,
+                    title=item.title or normalized_url,
+                    summary=None,
+                    notes=item.notes,
+                    content_hash=None,
+                    word_count=None,
+                    published_at=None,
+                    status=status,
+                    favorite=item.favorite,
+                    metadata=metadata_payload,
+                    media_id=None,
+                    job_id=None,
+                    run_id=None,
+                    source_id=None,
+                    read_at=read_at,
+                    tags=tags,
+                    merge_tags=merge_tags,
+                    preserve_existing_on_null=True,
+                )
+                if row.is_new:
+                    imported += 1
+                else:
+                    updated += 1
+            except _READING_SERVICE_NONCRITICAL_EXCEPTIONS as exc:
+                errors.append(f"{url}: {exc}")
+        return ReadingImportResult(imported=imported, updated=updated, skipped=skipped, errors=errors)
+
+
 class ReadingService:
     """Utilities for Reading List capture and updates."""
 
     def __init__(self, user_id: int | str) -> None:
         self.user_id = int(user_id)
         self.collections = CollectionsDatabase.for_user(self.user_id)
+        self._archive_service = ReadingArchiveService(user_id=self.user_id, collections=self.collections)
+        self._import_service = ReadingImportService(
+            collections=self.collections,
+            normalize_url=self._normalize_url,
+        )
 
     @staticmethod
     def _normalize_url(value: str, source: str) -> str:
@@ -406,14 +574,7 @@ class ReadingService:
 
     @staticmethod
     def _resolve_archive_retention() -> str | None:
-        try:
-            days = max(0, int(READING_ARCHIVE_RETENTION_DAYS))
-        except (TypeError, ValueError):
-            return None
-        if days <= 0:
-            return None
-        expires = datetime.now(tz=timezone.utc) + timedelta(days=days)
-        return expires.isoformat()
+        return ReadingArchiveService.resolve_archive_retention()
 
     async def _create_archive_artifact(
         self,
@@ -424,40 +585,13 @@ class ReadingService:
         body_text: str,
         media_item_id: int | None,
     ) -> tuple[int | None, str | None]:
-        text_value = (body_text or "").strip()
-        if not text_value:
-            return None, "archive_no_content"
-        content = f"# {title}\n\n{url or ''}\n\n{text_value}\n"
-        content_bytes = content.encode("utf-8")
-        if READING_ARCHIVE_MAX_BYTES > 0 and len(content_bytes) > READING_ARCHIVE_MAX_BYTES:
-            return None, "archive_too_large"
-
-        timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
-        safe_title = _safe_filename_fragment(title, max_len=40)
-        filename = f"reading_archive_{item_id}_{safe_title}_{timestamp}.md"
-        outputs_dir = DatabasePaths.get_user_outputs_dir(self.user_id)
-        await asyncio.to_thread(outputs_dir.mkdir, parents=True, exist_ok=True)
-        path = outputs_dir / filename
-        await asyncio.to_thread(path.write_text, content, encoding="utf-8")
-
-        metadata = {
-            "item_id": item_id,
-            "url": url,
-            "canonical_url": url,
-            "source": "save_url",
-            "format": "md",
-            "title": title,
-        }
-        output_row = self.collections.create_output_artifact(
-            type_="reading_archive",
-            title=f"{title} (archive {timestamp})",
-            format_="md",
-            storage_path=filename,
-            metadata_json=json.dumps(metadata, ensure_ascii=False),
+        return await self._archive_service.create_archive_artifact(
+            item_id=item_id,
+            title=title,
+            url=url,
+            body_text=body_text,
             media_item_id=media_item_id,
-            retention_until=self._resolve_archive_retention(),
         )
-        return int(output_row.id), None
 
     async def save_url(
         self,
@@ -474,7 +608,7 @@ class ReadingService:
         archive_mode: str = "use_default",
     ) -> ReadingSaveResult:
         """Fetch, dedupe, and persist a reading item."""
-        normalized_status = (status or READING_DEFAULT_STATUS).lower()
+        normalized_status = normalize_reading_status(status, default=READING_DEFAULT_STATUS)
         tags = [t for t in (tags or []) if t]
         archive_requested = self._resolve_archive_requested(archive_mode)
         try:
@@ -528,18 +662,21 @@ class ReadingService:
             metadata_payload["fetch_status"] = article.get("status_code")
         if media_uuid:
             metadata_payload["media_uuid"] = media_uuid
-        if article.get("clean_html"):
-            metadata_payload["clean_html"] = article.get("clean_html")
-        if content:
-            metadata_payload["text"] = content
+        if metadata:
+            metadata_payload.update(metadata)
+        _add_bounded_metadata_text(
+            metadata_payload,
+            "clean_html",
+            str(article.get("clean_html") or "") if article.get("clean_html") else None,
+            READING_CLEAN_HTML_METADATA_MAX_CHARS,
+        )
+        _add_bounded_metadata_text(metadata_payload, "text", content, READING_CONTENT_METADATA_MAX_CHARS)
         if content_word_count:
             metadata_payload["reading_time_seconds"] = max(1, int(content_word_count / 200 * 60))
         if fetch_error:
             metadata_payload["fetch_error"] = fetch_error
         else:
             metadata_payload["fetch_error"] = None
-        if metadata:
-            metadata_payload.update(metadata)
 
         item_row = self.collections.upsert_content_item(
             origin="reading",
@@ -825,6 +962,7 @@ class ReadingService:
         metadata: dict[str, object] | None = None,
     ) -> ContentItemRow:
         normalized_tags = tags if tags is None else [t for t in tags if t]
+        normalized_status = normalize_reading_status(status) if status is not None else None
         metadata = metadata or {}
         read_at: str | None = None
         clear_read_at = False
@@ -833,8 +971,7 @@ class ReadingService:
                 current = self.collections.get_content_item(item_id)
             except KeyError:
                 raise
-            status_lower = status.lower()
-            if status_lower == "read":
+            if normalized_status == "read":
                 if not current.read_at:
                     read_at = _utcnow_iso()
             else:
@@ -843,7 +980,7 @@ class ReadingService:
 
         return self.collections.update_content_item(
             item_id,
-            status=status,
+            status=normalized_status,
             favorite=favorite,
             tags=normalized_tags,
             notes=notes,
@@ -863,61 +1000,8 @@ class ReadingService:
         merge_tags: bool = True,
         origin_type: str = "import",
     ) -> ReadingImportResult:
-        normalized = normalize_import_items(items)
-        imported = 0
-        updated = 0
-        skipped = 0
-        errors: list[str] = []
-
-        for item in normalized:
-            url = item.url.strip() if item.url else ""
-            if not url:
-                skipped += 1
-                continue
-            normalized_url = self._normalize_url(url, "reading_import")
-            parsed = urlparse(normalized_url)
-            domain = parsed.netloc.lower() if parsed.netloc else None
-            status = (item.status or "saved").strip().lower()
-            if status not in {"saved", "reading", "read", "archived"}:
-                status = "saved"
-            read_at = item.read_at
-            if status == "read" and not read_at:
-                read_at = _utcnow_iso()
-            tags = item.tags or []
-            metadata_payload = {"source": "reading_import"}
-            metadata_payload.update(item.metadata or {})
-            if normalized_url != url:
-                metadata_payload.setdefault("import_original_url", url)
-            try:
-                row = self.collections.upsert_content_item(
-                    origin="reading",
-                    origin_type=origin_type,
-                    origin_id=None,
-                    url=normalized_url,
-                    canonical_url=normalized_url,
-                    domain=domain,
-                    title=item.title or normalized_url,
-                    summary=None,
-                    notes=item.notes,
-                    content_hash=None,
-                    word_count=None,
-                    published_at=None,
-                    status=status,
-                    favorite=item.favorite,
-                    metadata=metadata_payload,
-                    media_id=None,
-                    job_id=None,
-                    run_id=None,
-                    source_id=None,
-                    read_at=read_at,
-                    tags=tags,
-                    merge_tags=merge_tags,
-                    preserve_existing_on_null=True,
-                )
-                if row.is_new:
-                    imported += 1
-                else:
-                    updated += 1
-            except _READING_SERVICE_NONCRITICAL_EXCEPTIONS as exc:
-                errors.append(f"{url}: {exc}")
-        return ReadingImportResult(imported=imported, updated=updated, skipped=skipped, errors=errors)
+        return self._import_service.import_items(
+            items=items,
+            merge_tags=merge_tags,
+            origin_type=origin_type,
+        )

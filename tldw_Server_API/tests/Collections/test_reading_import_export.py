@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.Collections.reading_import_jobs import (
     resolve_reading_import_file,
     stage_reading_import_file,
 )
+import tldw_Server_API.app.core.Collections.reading_import_jobs as reading_import_jobs_module
 from tldw_Server_API.app.core.Collections.reading_importers import (
     parse_instapaper_export,
     parse_pocket_export,
@@ -65,6 +66,17 @@ def test_parse_instapaper_export():
     assert set(item.tags) == {"tag1", "tag2"}
     assert item.status == "archived"
     assert item.notes == "Note A"
+
+
+def test_reading_import_max_bytes_invalid_env_uses_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Invalid READING_IMPORT_MAX_BYTES falls back without import-time failure."""
+    monkeypatch.setenv("READING_IMPORT_MAX_BYTES", "not-an-int")
+    reloaded = importlib.reload(reading_import_jobs_module)
+    try:
+        assert reloaded.MAX_READING_IMPORT_BYTES == 10 * 1024 * 1024
+    finally:
+        monkeypatch.delenv("READING_IMPORT_MAX_BYTES", raising=False)
+        importlib.reload(reading_import_jobs_module)
 
 
 @pytest.mark.usefixtures("client_with_user")

@@ -9,6 +9,11 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+from tldw_Server_API.app.core.Collections.utils import (
+    is_supported_reading_url,
+    normalize_reading_status,
+)
+
 try:
     from tldw_Server_API.app.core.Web_Scraping.url_utils import normalize_for_crawl
 except Exception:  # pragma: no cover - import fallback for isolated tests
@@ -212,10 +217,7 @@ def _truthy(value: Any) -> bool:
 
 
 def _normalize_status(value: str | None) -> str:
-    text = str(value or "").strip().lower()
-    if text in _READING_STATUS_PRIORITY:
-        return text
-    return "saved"
+    return normalize_reading_status(value)
 
 
 def _merge_status(left: str | None, right: str | None) -> str:
@@ -231,12 +233,13 @@ def _normalize_import_url(url: str) -> str:
     if not raw:
         return ""
     if normalize_for_crawl is None:
-        return raw
+        return raw if is_supported_reading_url(raw) else ""
     try:
         normalized = normalize_for_crawl(raw, raw)
     except Exception:
         normalized = raw
-    return normalized or raw
+    candidate = normalized or raw
+    return candidate if is_supported_reading_url(candidate) else ""
 
 
 def _title_from_url(url: str) -> str | None:
