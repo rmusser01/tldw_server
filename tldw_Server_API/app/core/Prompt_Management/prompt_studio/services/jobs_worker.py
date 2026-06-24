@@ -62,6 +62,8 @@ class PromptStudioJobError(RuntimeError):
 
 _DB_CACHE: OrderedDict[str, Any] = OrderedDict()
 _PROCESSOR_CACHE: OrderedDict[str, JobProcessor] = OrderedDict()
+_ACTIVE_USER_COUNTS: dict[str, int] = {}
+_PENDING_CLOSE: dict[str, list[Any]] = {}
 _CACHE_LOCK = threading.RLock()
 
 
@@ -92,12 +94,18 @@ def _normalize_user_id(value: Any, *, allow_default: bool = False) -> str:
     return str(value)
 
 
-def _close_db(db: Any) -> None:
+def _close_db(db: Any, *, user_id: str | None = None) -> None:
     for method_name in ("close_connection", "close"):
         method = getattr(db, method_name, None)
         if callable(method):
-            with contextlib.suppress(Exception):
+            try:
                 method()
+            except Exception as exc:
+                logger.opt(exception=exc).warning(
+                    "Failed to close Prompt Studio DB for user {} via {}",
+                    user_id or "<unknown>",
+                    method_name,
+                )
             return
 
 
@@ -105,7 +113,30 @@ def _evict_cache_entries_if_needed() -> None:
     while len(_DB_CACHE) > _MAX_CACHE_ENTRIES:
         user_id, db = _DB_CACHE.popitem(last=False)
         _PROCESSOR_CACHE.pop(user_id, None)
-        _close_db(db)
+        if _ACTIVE_USER_COUNTS.get(user_id, 0) > 0:
+            _PENDING_CLOSE.setdefault(user_id, []).append(db)
+            logger.debug("Deferred Prompt Studio DB close for active user {}", user_id)
+            continue
+        _close_db(db, user_id=user_id)
+
+
+@contextlib.contextmanager
+def _active_user_cache_scope(user_id: str):
+    with _CACHE_LOCK:
+        _ACTIVE_USER_COUNTS[user_id] = _ACTIVE_USER_COUNTS.get(user_id, 0) + 1
+    try:
+        yield
+    finally:
+        pending_close: list[Any] = []
+        with _CACHE_LOCK:
+            remaining = _ACTIVE_USER_COUNTS.get(user_id, 0) - 1
+            if remaining > 0:
+                _ACTIVE_USER_COUNTS[user_id] = remaining
+            else:
+                _ACTIVE_USER_COUNTS.pop(user_id, None)
+                pending_close = _PENDING_CLOSE.pop(user_id, [])
+        for db in pending_close:
+            _close_db(db, user_id=user_id)
 
 
 def _normalize_payload(value: Any) -> dict[str, Any]:
@@ -219,13 +250,14 @@ async def _handle_job(job: dict[str, Any]) -> dict[str, Any]:
     if owner_missing and payload.get("user_id") is not None:
         raise PromptStudioJobError("Missing owner_user_id for prompt studio job", retryable=False)
     user_id = _normalize_user_id(owner_user_id, allow_default=True)
-    processor = _get_processor(user_id)
+    with _active_user_cache_scope(user_id):
+        processor = _get_processor(user_id)
 
-    if job_type == "optimization":
-        return await processor.process_optimization_job(payload, entity_id)
-    if job_type == "evaluation":
-        return await processor.process_evaluation_job(payload, entity_id)
-    return await processor.process_generation_job(payload, entity_id)
+        if job_type == "optimization":
+            return await processor.process_optimization_job(payload, entity_id)
+        if job_type == "evaluation":
+            return await processor.process_evaluation_job(payload, entity_id)
+        return await processor.process_generation_job(payload, entity_id)
 
 
 async def _inflight_quota_guard(job: dict[str, Any], jm: JobManager) -> bool:

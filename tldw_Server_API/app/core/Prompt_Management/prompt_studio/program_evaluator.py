@@ -6,7 +6,10 @@ Executes extracted Python code in a restricted subprocess with resource limits
 and evaluates objective/constraints to produce a reward in [-1..10].
 
 Notes:
-- Network and filesystem access are blocked via static checks and isolated mode.
+- Network and filesystem access are blocked via static checks and isolated mode, but this is
+  not an OS-level sandbox.
+- Code execution is intended for trusted local/dev use unless a deployment provides its own
+  process isolation and explicitly acknowledges production unsafe-eval risk.
 - Per-project feature toggle is supported via project metadata or env var.
 """
 
@@ -34,6 +37,14 @@ _FORBIDDEN_PATTERNS = [
     r"\bsocket\.",
     r"\b__import__\(",
 ]
+_PRODUCTION_VALUES = {"production", "prod", "live"}
+_PRODUCTION_ENV_KEYS = (
+    "ENVIRONMENT",
+    "APP_ENV",
+    "DEPLOYMENT_ENV",
+    "FASTAPI_ENV",
+    "TLDW_ENV",
+)
 
 
 @dataclass
@@ -53,6 +64,8 @@ class ProgramEvaluator:
     Usage:
       - feature toggle via env PROMPT_STUDIO_ENABLE_CODE_EVAL
       - execution requires explicit PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL acknowledgement
+      - production-like environments also require
+        PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL_IN_PRODUCTION
       - extract code from LLM output (``` fences preferred)
       - execute under resource limits and isolated mode
       - evaluate objective/constraints from test case spec or stdout JSON
@@ -76,6 +89,19 @@ class ProgramEvaluator:
     @staticmethod
     def is_unsafe_execution_acknowledged() -> bool:
         return ProgramEvaluator._env_truthy("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL")
+
+    @staticmethod
+    def is_unsafe_execution_acknowledged_for_production() -> bool:
+        return ProgramEvaluator._env_truthy("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL_IN_PRODUCTION")
+
+    @staticmethod
+    def is_production_like_environment() -> bool:
+        if ProgramEvaluator._env_truthy("tldw_production"):
+            return True
+        for key in _PRODUCTION_ENV_KEYS:
+            if str(os.getenv(key, "")).strip().lower() in _PRODUCTION_VALUES:
+                return True
+        return False
 
     @staticmethod
     def is_project_metadata_enablement_allowed() -> bool:
@@ -118,6 +144,11 @@ class ProgramEvaluator:
             return False, "code_eval_disabled"
         if not ProgramEvaluator.is_unsafe_execution_acknowledged():
             return False, "unsafe_code_eval_not_enabled"
+        if (
+            ProgramEvaluator.is_production_like_environment()
+            and not ProgramEvaluator.is_unsafe_execution_acknowledged_for_production()
+        ):
+            return False, "unsafe_code_eval_production_disabled"
         return True, ""
 
     @staticmethod
@@ -417,7 +448,8 @@ class ProgramEvaluator:
             # Run isolated Python: -I ignores env vars/user site; -B no pyc; no cwd files
             env = {"PYTHONHASHSEED": "0"}
             try:
-                # The code under test is untrusted, but this path is explicitly unsafe opt-in.
+                # This unsafe opt-in is still not an OS sandbox; production-like deployments
+                # require an additional acknowledgement gate before reaching this path.
                 proc = subprocess.run(  # nosec B603
                     [sys.executable, "-I", "-B", script_path],
                     cwd=td,
