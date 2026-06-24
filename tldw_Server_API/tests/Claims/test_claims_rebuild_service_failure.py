@@ -5,6 +5,7 @@ import pytest
 
 from tldw_Server_API.app.core.Claims_Extraction import claims_rebuild_service
 from tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service import ClaimsRebuildService, ClaimsRebuildTask
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 pytestmark = pytest.mark.unit
 
@@ -96,6 +97,10 @@ def test_claims_rebuild_service_process_task_uses_managed_media_database(monkeyp
             self.deleted_media_ids.append(media_id)
             return 1
 
+        @contextmanager
+        def transaction(self):
+            yield self
+
         def close_connection(self) -> None:
             pass
 
@@ -166,3 +171,73 @@ def test_claims_rebuild_service_process_task_uses_managed_media_database(monkeyp
             },
         }
     ]
+
+
+def test_claims_rebuild_process_task_rolls_back_soft_delete_when_store_returns_zero(monkeypatch, tmp_path):
+    db_path = str(tmp_path / "claims-rebuild-rollback.db")
+    seed_db = MediaDatabase(db_path=db_path, client_id="1")
+    seed_db.initialize_db()
+    media_id, _, _ = seed_db.add_media_with_keywords(
+        title="Doc",
+        media_type="text",
+        content="Original claim. Replacement claim.",
+        keywords=None,
+    )
+    seed_db.upsert_claims(
+        [
+            {
+                "media_id": media_id,
+                "chunk_index": 0,
+                "span_start": None,
+                "span_end": None,
+                "claim_text": "Original claim.",
+                "confidence": 0.9,
+                "extractor": "heuristic",
+                "extractor_version": "v1",
+                "chunk_hash": "oldhash",
+            }
+        ]
+    )
+    original = seed_db.execute_query(
+        "SELECT id FROM Claims WHERE media_id = ? AND deleted = 0",
+        (media_id,),
+    ).fetchone()
+    original_claim_id = int(original["id"])
+    seed_db.close_connection()
+
+    monkeypatch.setattr(
+        claims_rebuild_service,
+        "chunk_for_embedding",
+        lambda content, file_name: [
+            {
+                "text": content,
+                "metadata": {"chunk_index": 0},
+            }
+        ],
+    )
+    monkeypatch.setattr(claims_rebuild_service, "resolve_claims_job_budget", lambda settings: None)
+    monkeypatch.setattr(
+        claims_rebuild_service,
+        "extract_claims_for_chunks",
+        lambda chunks, extractor_mode, max_per_chunk, budget: [
+            {
+                "chunk_index": 0,
+                "claim_text": "Replacement claim.",
+            }
+        ],
+    )
+    monkeypatch.setattr(claims_rebuild_service, "store_claims", lambda *args, **kwargs: 0)
+
+    svc = ClaimsRebuildService(worker_threads=1)
+    with pytest.raises(RuntimeError, match="zero replacement claims"):
+        svc._process_task(ClaimsRebuildTask(media_id=media_id, db_path=db_path))
+
+    verify_db = MediaDatabase(db_path=db_path, client_id="1")
+    try:
+        row = verify_db.execute_query(
+            "SELECT deleted FROM Claims WHERE id = ?",
+            (original_claim_id,),
+        ).fetchone()
+        assert int(row["deleted"]) == 0
+    finally:
+        verify_db.close_connection()

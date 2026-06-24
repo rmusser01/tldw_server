@@ -244,9 +244,12 @@ class ClaimsRebuildService:
                 meta = (ch or {}).get("metadata", {}) or {}
                 idx = int(meta.get("chunk_index") or meta.get("index") or 0)
                 chunk_text_map[idx] = (ch or {}).get("text") or (ch or {}).get("content") or ""
-            # Soft delete old claims and store new
-            deleted = db.soft_delete_claims_for_media(task.media_id)
-            inserted = store_claims(db, media_id=task.media_id, chunk_texts_by_index=chunk_text_map, claims=claims)
+            # Replace old claims atomically so failed writes keep the previous claim set active.
+            with db.transaction():
+                deleted = db.soft_delete_claims_for_media(task.media_id)
+                inserted = store_claims(db, media_id=task.media_id, chunk_texts_by_index=chunk_text_map, claims=claims)
+                if inserted <= 0:
+                    raise RuntimeError(f"Claims rebuild stored zero replacement claims for media_id={task.media_id}")
             logger.info(f"Claims rebuild: media_id={task.media_id} deleted={deleted} inserted={inserted}")
 
     def get_stats(self) -> dict[str, int]:

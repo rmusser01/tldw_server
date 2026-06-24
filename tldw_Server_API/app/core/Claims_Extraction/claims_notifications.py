@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import html
 import json
 import random
 import socket
@@ -30,6 +31,8 @@ _CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS = (
     ValueError,
 )
 _CLAIMS_NOTIFICATION_PARSE_EXCEPTIONS = (TypeError, ValueError, json.JSONDecodeError)
+_CLAIMS_NOTIFICATION_MAX_PENDING = 32
+_notification_slots = threading.BoundedSemaphore(_CLAIMS_NOTIFICATION_MAX_PENDING)
 
 try:
     import httpx as _claims_httpx
@@ -50,6 +53,26 @@ _CLAIMS_WEBHOOK_EXCEPTIONS = (
     TypeError,
     ValueError,
 ) + _CLAIMS_HTTPX_EXCEPTIONS
+
+
+def submit_claims_notification_delivery(fn, *args, **kwargs) -> bool:
+    if not _notification_slots.acquire(blocking=False):
+        logger.warning("Claims notification dispatch queue is full")
+        return False
+
+    def _run() -> None:
+        try:
+            fn(*args, **kwargs)
+        finally:
+            _notification_slots.release()
+
+    try:
+        threading.Thread(target=_run, daemon=True).start()
+    except _CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS as exc:
+        _notification_slots.release()
+        logger.debug("Claims notification dispatch thread failed to start: {}", exc)
+        return False
+    return True
 
 
 def record_review_assignment_notifications(
@@ -358,7 +381,7 @@ def _build_review_email_bodies(notifications: list[dict[str, Any]]) -> tuple[str
         if claim_text:
             summary = f"{summary} | {claim_text}"
         lines.append(f"- {summary}")
-        html_lines.append(f"<li>{summary}</li>")
+        html_lines.append(f"<li>{html.escape(summary)}</li>")
     text_body = "Claims review notifications:\n" + "\n".join(lines)
     html_body = "<h2>Claims review notifications</h2><ul>" + "".join(html_lines) + "</ul>"
     return html_body, text_body
@@ -427,4 +450,4 @@ def dispatch_claim_review_notifications(
         except _CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug(f"Claims review notification delivery failed: {exc}")
 
-    threading.Thread(target=_deliver, daemon=True).start()
+    submit_claims_notification_delivery(_deliver)

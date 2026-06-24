@@ -298,8 +298,6 @@ class FVAPipeline:
                                         "to_status": final_verification.status.value,
                                     },
                                 )
-                        else:
-                            increment_counter("fva_wasted_falsification_total")
 
                             # Record adjudication scores
                             observe_histogram(
@@ -317,6 +315,8 @@ class FVAPipeline:
                                 adjudication.contestation_score,
                                 labels={"score_type": "contestation"},
                             )
+                        else:
+                            increment_counter("fva_wasted_falsification_total")
 
                     except asyncio.TimeoutError:
                         logger.warning(

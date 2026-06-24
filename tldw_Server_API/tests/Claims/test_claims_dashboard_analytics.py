@@ -11,6 +11,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
 from tldw_Server_API.app.core.AuthNZ.permissions import CLAIMS_ADMIN
+from tldw_Server_API.app.core.Claims_Extraction import claims_service
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 
@@ -217,3 +218,98 @@ def test_claims_dashboard_analytics_and_export():
         fastapi_app.dependency_overrides.pop(get_auth_principal, None)
         fastapi_app.dependency_overrides.pop(get_request_user, None)
         fastapi_app.dependency_overrides.pop(get_media_db_for_user, None)
+
+
+def test_claims_analytics_scope_aggregate_widgets_to_owner(tmp_path):
+    db_path = str(tmp_path / "claims-owner-analytics.db")
+    db = MediaDatabase(db_path=db_path, client_id="1")
+    db.initialize_db()
+    owner_one_content = "Owner one alpha. Owner one beta."
+    owner_two_content = "Owner two alpha. Owner two beta. Owner two gamma. Owner two delta. Owner two epsilon."
+    owner_one_media_id, _, _ = db.add_media_with_keywords(
+        title="Owner One",
+        media_type="text",
+        content=owner_one_content,
+        keywords=None,
+        owner_user_id=1,
+    )
+    owner_two_media_id, _, _ = db.add_media_with_keywords(
+        title="Owner Two",
+        media_type="text",
+        content=owner_two_content,
+        keywords=None,
+        owner_user_id=2,
+    )
+    owner_one_hash = hashlib.sha256(owner_one_content.encode()).hexdigest()
+    owner_two_hash = hashlib.sha256(owner_two_content.encode()).hexdigest()
+    db.upsert_claims(
+        [
+            {
+                "media_id": owner_one_media_id,
+                "chunk_index": 0,
+                "span_start": None,
+                "span_end": None,
+                "claim_text": "Owner one alpha.",
+                "confidence": 0.9,
+                "extractor": "heuristic",
+                "extractor_version": "v1",
+                "chunk_hash": owner_one_hash,
+            },
+            {
+                "media_id": owner_one_media_id,
+                "chunk_index": 0,
+                "span_start": None,
+                "span_end": None,
+                "claim_text": "Owner one beta.",
+                "confidence": 0.9,
+                "extractor": "heuristic",
+                "extractor_version": "v1",
+                "chunk_hash": owner_one_hash,
+            },
+            *[
+                {
+                    "media_id": owner_two_media_id,
+                    "chunk_index": 0,
+                    "span_start": None,
+                    "span_end": None,
+                    "claim_text": f"Owner two claim {idx}.",
+                    "confidence": 0.7,
+                    "extractor": "heuristic",
+                    "extractor_version": "v1",
+                    "chunk_hash": owner_two_hash,
+                }
+                for idx in range(5)
+            ],
+        ]
+    )
+    owner_one_claim_ids = [
+        int(row["id"])
+        for row in db.execute_query(
+            "SELECT id FROM Claims WHERE media_id = ? AND deleted = 0 ORDER BY id ASC",
+            (owner_one_media_id,),
+        ).fetchall()
+    ]
+    owner_two_claim_ids = [
+        int(row["id"])
+        for row in db.execute_query(
+            "SELECT id FROM Claims WHERE media_id = ? AND deleted = 0 ORDER BY id ASC",
+            (owner_two_media_id,),
+        ).fetchall()
+    ]
+    db.update_claim_review(owner_one_claim_ids[0], review_status="approved", reviewer_id=1)
+    db.update_claim_review(owner_one_claim_ids[1], review_status="flagged", reviewer_id=1)
+    for claim_id in owner_two_claim_ids:
+        db.update_claim_review(claim_id, review_status="rejected", reviewer_id=2)
+
+    try:
+        analytics = claims_service._build_claims_analytics(db, owner_user_id="1", window_days=1)
+    finally:
+        db.close_connection()
+
+    assert analytics["total_claims"] == 2
+    assert analytics["status_counts"] == {"approved": 1, "flagged": 1}
+    assert analytics["review_throughput"]["total"] == 2
+    assert analytics["review_status_trends"]["daily"][-1]["total"] == 2
+    assert analytics["claims_per_media_top"] == [{"media_id": owner_one_media_id, "count": 2}]
+    assert analytics["claims_per_media_stats"] == {"mean": 2.0, "p95": 2, "max": 2}
+    assert analytics["clusters"]["orphan_claims"] == 2

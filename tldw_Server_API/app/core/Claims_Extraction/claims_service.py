@@ -35,6 +35,7 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_embeddings import claim_e
 from tldw_Server_API.app.core.Claims_Extraction.claims_notifications import (
     dispatch_claim_review_notifications,
     record_watchlist_cluster_notifications,
+    submit_claims_notification_delivery,
 )
 from tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service import get_claims_rebuild_service
 from tldw_Server_API.app.core.Claims_Extraction.monitoring import (
@@ -58,7 +59,6 @@ from tldw_Server_API.app.core.exceptions import EgressPolicyError, RetryExhauste
 from tldw_Server_API.app.core.Setup import setup_manager
 
 _CLAIMS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
@@ -912,31 +912,25 @@ def _dispatch_claims_alert_notifications(
                 f"baseline {_format_ratio(payload.get('baseline_ratio'))})"
             )
         }
-        threading.Thread(
-            target=_deliver_claims_alert_webhook,
-            kwargs={
-                "url": str(slack_url),
-                "payload": slack_payload,
-                "channel": "slack",
-                "db_path": db_path,
-                "user_id": user_id,
-                "alert_id": alert_id,
-            },
-            daemon=True,
-        ).start()
+        submit_claims_notification_delivery(
+            _deliver_claims_alert_webhook,
+            url=str(slack_url),
+            payload=slack_payload,
+            channel="slack",
+            db_path=db_path,
+            user_id=user_id,
+            alert_id=alert_id,
+        )
     if channels.get("webhook") and webhook_url:
-        threading.Thread(
-            target=_deliver_claims_alert_webhook,
-            kwargs={
-                "url": str(webhook_url),
-                "payload": payload,
-                "channel": "webhook",
-                "db_path": db_path,
-                "user_id": user_id,
-                "alert_id": alert_id,
-            },
-            daemon=True,
-        ).start()
+        submit_claims_notification_delivery(
+            _deliver_claims_alert_webhook,
+            url=str(webhook_url),
+            payload=payload,
+            channel="webhook",
+            db_path=db_path,
+            user_id=user_id,
+            alert_id=alert_id,
+        )
 
 
 async def _send_claims_alert_email_digest(
@@ -1511,17 +1505,60 @@ def _fetch_claims_provider_usage(owner_user_id: str | None) -> list[dict[str, An
         return []
 
 
-def _build_review_latency_stats(db: MediaDatabase) -> dict[str, float | None]:
+def _claims_analytics_tables(db: MediaDatabase) -> tuple[str, str, str]:
+    if db.backend_type == BackendType.POSTGRESQL:
+        return "claims", "media", "%s"
+    return "Claims", "Media", "?"
+
+
+def _claims_owner_predicate(
+    owner_user_id: str | None,
+    *,
+    media_alias: str,
+    placeholder: str,
+) -> tuple[str, list[Any]]:
+    if not owner_user_id:
+        return "", []
+    return f" AND COALESCE(CAST({media_alias}.owner_user_id AS TEXT), {media_alias}.client_id) = {placeholder}", [
+        str(owner_user_id)
+    ]
+
+
+def _claims_owner_join(
+    db: MediaDatabase,
+    owner_user_id: str | None,
+    *,
+    claims_alias: str = "c",
+    media_alias: str = "m",
+) -> tuple[str, str, list[Any]]:
+    if not owner_user_id:
+        return "", "", []
+    _claims_table, media_table, placeholder = _claims_analytics_tables(db)
+    predicate, params = _claims_owner_predicate(
+        owner_user_id,
+        media_alias=media_alias,
+        placeholder=placeholder,
+    )
+    return f" JOIN {media_table} {media_alias} ON {media_alias}.id = {claims_alias}.media_id", predicate, params
+
+
+def _build_review_latency_stats(db: MediaDatabase, owner_user_id: str | None) -> dict[str, float | None]:
+    claims_table, _media_table, placeholder = _claims_analytics_tables(db)
+    owner_join, owner_predicate, owner_params = _claims_owner_join(db, owner_user_id)
     avg_latency_sec = None
     if db.backend_type == BackendType.POSTGRESQL:
         avg_row = db.execute_query(
-            "SELECT AVG(EXTRACT(EPOCH FROM (reviewed_at - created_at))) AS avg_sec "
-            "FROM claims WHERE reviewed_at IS NOT NULL AND deleted = 0"
+            "SELECT AVG(EXTRACT(EPOCH FROM (c.reviewed_at - c.created_at))) AS avg_sec "  # nosec B608
+            f"FROM {claims_table} c{owner_join} WHERE c.reviewed_at IS NOT NULL AND c.deleted = 0"
+            + owner_predicate,
+            tuple(owner_params),
         ).fetchone()
     else:
         avg_row = db.execute_query(
-            "SELECT AVG((julianday(reviewed_at) - julianday(created_at)) * 86400.0) AS avg_sec "
-            "FROM Claims WHERE reviewed_at IS NOT NULL AND deleted = 0"
+            "SELECT AVG((julianday(c.reviewed_at) - julianday(c.created_at)) * 86400.0) AS avg_sec "  # nosec B608
+            f"FROM {claims_table} c{owner_join} WHERE c.reviewed_at IS NOT NULL AND c.deleted = 0"
+            + owner_predicate,
+            tuple(owner_params),
         ).fetchone()
     if avg_row:
         try:
@@ -1530,32 +1567,37 @@ def _build_review_latency_stats(db: MediaDatabase) -> dict[str, float | None]:
             avg_latency_sec = None
 
     total_rows = db.execute_query(
-        "SELECT COUNT(*) AS count FROM Claims WHERE reviewed_at IS NOT NULL AND deleted = 0"
+        f"SELECT COUNT(*) AS count FROM {claims_table} c{owner_join} "  # nosec B608
+        "WHERE c.reviewed_at IS NOT NULL AND c.deleted = 0"
+        + owner_predicate,
+        tuple(owner_params),
     ).fetchone()
     total = int(total_rows[0]) if total_rows and total_rows[0] is not None else 0
     p95_latency = None
     if total > 0:
         offset = max(0, int(math.ceil(total * 0.95)) - 1)
         if db.backend_type == BackendType.POSTGRESQL:
-            latency_expr = "EXTRACT(EPOCH FROM (reviewed_at - created_at))"
+            latency_expr = "EXTRACT(EPOCH FROM (c.reviewed_at - c.created_at))"
             sql = (
                 "SELECT "
                 + latency_expr
-                + " AS latency FROM claims "
-                "WHERE reviewed_at IS NOT NULL AND deleted = 0 "
-                f"ORDER BY {latency_expr} LIMIT 1 OFFSET %s"
+                + f" AS latency FROM {claims_table} c{owner_join} "
+                "WHERE c.reviewed_at IS NOT NULL AND c.deleted = 0 "
+                + owner_predicate
+                + f" ORDER BY {latency_expr} LIMIT 1 OFFSET {placeholder}"
             )
-            row = db.execute_query(sql, (offset,)).fetchone()
+            row = db.execute_query(sql, (*owner_params, offset)).fetchone()
         else:
-            latency_expr = "(julianday(reviewed_at) - julianday(created_at)) * 86400.0"
+            latency_expr = "(julianday(c.reviewed_at) - julianday(c.created_at)) * 86400.0"
             sql = (
                 "SELECT "
                 + latency_expr
-                + " AS latency FROM Claims "
-                "WHERE reviewed_at IS NOT NULL AND deleted = 0 "
-                f"ORDER BY {latency_expr} LIMIT 1 OFFSET ?"
+                + f" AS latency FROM {claims_table} c{owner_join} "
+                "WHERE c.reviewed_at IS NOT NULL AND c.deleted = 0 "
+                + owner_predicate
+                + f" ORDER BY {latency_expr} LIMIT 1 OFFSET {placeholder}"
             )
-            row = db.execute_query(sql, (offset,)).fetchone()
+            row = db.execute_query(sql, (*owner_params, offset)).fetchone()
         if row:
             try:
                 p95_latency = float(row[0]) if row[0] is not None else None
@@ -1567,25 +1609,40 @@ def _build_review_latency_stats(db: MediaDatabase) -> dict[str, float | None]:
     }
 
 
-def _build_review_throughput(db: MediaDatabase, window_days: int) -> dict[str, Any]:
+def _build_review_throughput(db: MediaDatabase, window_days: int, owner_user_id: str | None) -> dict[str, Any]:
     window_days = max(1, int(window_days))
     today = datetime.utcnow().date()
     start_date = today - timedelta(days=window_days - 1)
     since_dt = datetime.combine(start_date, datetime.min.time())
+    claims_table, media_table, placeholder = _claims_analytics_tables(db)
+    owner_predicate, owner_params = _claims_owner_predicate(
+        owner_user_id,
+        media_alias="m",
+        placeholder=placeholder,
+    )
+    owner_join = (
+        f" JOIN {claims_table} c ON c.id = l.claim_id JOIN {media_table} m ON m.id = c.media_id"
+        if owner_user_id
+        else ""
+    )
     if db.backend_type == BackendType.POSTGRESQL:
         sql = (
-            "SELECT DATE(created_at) AS day, COUNT(*) AS count "
-            "FROM claims_review_log WHERE created_at >= %s "
+            "SELECT DATE(l.created_at) AS day, COUNT(*) AS count "  # nosec B608
+            f"FROM claims_review_log l{owner_join} WHERE l.created_at >= %s "
+            + owner_predicate
+            + " "
             "GROUP BY day ORDER BY day"
         )
-        rows = db.execute_query(sql, (since_dt,)).fetchall()
+        rows = db.execute_query(sql, (since_dt, *owner_params)).fetchall()
     else:
         sql = (
-            "SELECT DATE(created_at) AS day, COUNT(*) AS count "
-            "FROM claims_review_log WHERE created_at >= ? "
+            "SELECT DATE(l.created_at) AS day, COUNT(*) AS count "  # nosec B608
+            f"FROM claims_review_log l{owner_join} WHERE l.created_at >= ? "
+            + owner_predicate
+            + " "
             "GROUP BY day ORDER BY day"
         )
-        rows = db.execute_query(sql, (since_dt.strftime("%Y-%m-%d %H:%M:%S"),)).fetchall()
+        rows = db.execute_query(sql, (since_dt.strftime("%Y-%m-%d %H:%M:%S"), *owner_params)).fetchall()
 
     counts_by_day: dict[str, int] = {}
     for row in rows:
@@ -1606,26 +1663,41 @@ def _build_review_throughput(db: MediaDatabase, window_days: int) -> dict[str, A
     return {"window_days": window_days, "total": total, "daily": series}
 
 
-def _build_review_status_trends(db: MediaDatabase, window_days: int) -> dict[str, Any]:
+def _build_review_status_trends(db: MediaDatabase, window_days: int, owner_user_id: str | None) -> dict[str, Any]:
     window_days = max(1, int(window_days))
     today = datetime.utcnow().date()
     start_date = today - timedelta(days=window_days - 1)
     since_dt = datetime.combine(start_date, datetime.min.time())
+    claims_table, media_table, placeholder = _claims_analytics_tables(db)
+    owner_predicate, owner_params = _claims_owner_predicate(
+        owner_user_id,
+        media_alias="m",
+        placeholder=placeholder,
+    )
+    owner_join = (
+        f" JOIN {claims_table} c ON c.id = l.claim_id JOIN {media_table} m ON m.id = c.media_id"
+        if owner_user_id
+        else ""
+    )
 
     if db.backend_type == BackendType.POSTGRESQL:
         sql = (
-            "SELECT DATE(created_at) AS day, new_status, COUNT(*) AS count "
-            "FROM claims_review_log WHERE created_at >= %s "
+            "SELECT DATE(l.created_at) AS day, l.new_status, COUNT(*) AS count "  # nosec B608
+            f"FROM claims_review_log l{owner_join} WHERE l.created_at >= %s "
+            + owner_predicate
+            + " "
             "GROUP BY day, new_status ORDER BY day"
         )
-        rows = db.execute_query(sql, (since_dt,)).fetchall()
+        rows = db.execute_query(sql, (since_dt, *owner_params)).fetchall()
     else:
         sql = (
-            "SELECT DATE(created_at) AS day, new_status, COUNT(*) AS count "
-            "FROM claims_review_log WHERE created_at >= ? "
+            "SELECT DATE(l.created_at) AS day, l.new_status, COUNT(*) AS count "  # nosec B608
+            f"FROM claims_review_log l{owner_join} WHERE l.created_at >= ? "
+            + owner_predicate
+            + " "
             "GROUP BY day, new_status ORDER BY day"
         )
-        rows = db.execute_query(sql, (since_dt.strftime("%Y-%m-%d %H:%M:%S"),)).fetchall()
+        rows = db.execute_query(sql, (since_dt.strftime("%Y-%m-%d %H:%M:%S"), *owner_params)).fetchall()
 
     counts_by_day: dict[str, dict[str, int]] = {}
     for row in rows:
@@ -1654,9 +1726,18 @@ def _build_review_status_trends(db: MediaDatabase, window_days: int) -> dict[str
     return {"window_days": window_days, "daily": series}
 
 
-def _build_claims_per_media_stats(db: MediaDatabase) -> tuple[list[dict[str, int]], dict[str, float | None]]:
+def _build_claims_per_media_stats(
+    db: MediaDatabase,
+    owner_user_id: str | None,
+) -> tuple[list[dict[str, int]], dict[str, float | None]]:
+    claims_table, _media_table, _placeholder = _claims_analytics_tables(db)
+    owner_join, owner_predicate, owner_params = _claims_owner_join(db, owner_user_id)
     media_rows = db.execute_query(
-        "SELECT media_id, COUNT(*) AS count FROM Claims WHERE deleted = 0 GROUP BY media_id"
+        f"SELECT c.media_id, COUNT(*) AS count FROM {claims_table} c{owner_join} "  # nosec B608
+        "WHERE c.deleted = 0"
+        + owner_predicate
+        + " GROUP BY c.media_id",
+        tuple(owner_params),
     ).fetchall()
     media_counts = [{"media_id": int(r[0]), "count": int(r[1])} for r in media_rows if r]
     counts = [row["count"] for row in media_counts]
@@ -1668,10 +1749,11 @@ def _build_claims_per_media_stats(db: MediaDatabase) -> tuple[list[dict[str, int
 
 
 def _build_cluster_stats(db: MediaDatabase, owner_user_id: str | None) -> dict[str, Any]:
+    claims_table, media_table, placeholder = _claims_analytics_tables(db)
     conditions: list[str] = []
     params: list[Any] = []
     if owner_user_id:
-        conditions.append("c.user_id = ?")
+        conditions.append(f"c.user_id = {placeholder}")
         params.append(str(owner_user_id))
 
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
@@ -1697,8 +1779,12 @@ def _build_cluster_stats(db: MediaDatabase, owner_user_id: str | None) -> dict[s
     p95_member_count = _percentile_value(member_counts, 0.95) if member_counts else None
     max_member_count = max(member_counts) if member_counts else None
 
+    orphan_owner_join, orphan_owner_predicate, orphan_owner_params = _claims_owner_join(db, owner_user_id)
     orphan_row = db.execute_query(
-        "SELECT COUNT(*) AS count FROM Claims WHERE deleted = 0 AND claim_cluster_id IS NULL"
+        f"SELECT COUNT(*) AS count FROM {claims_table} c{orphan_owner_join} "  # nosec B608
+        "WHERE c.deleted = 0 AND c.claim_cluster_id IS NULL"
+        + orphan_owner_predicate,
+        tuple(orphan_owner_params),
     ).fetchone()
     orphan_claims = int(orphan_row[0]) if orphan_row and orphan_row[0] is not None else 0
 
@@ -1715,14 +1801,24 @@ def _build_cluster_stats(db: MediaDatabase, owner_user_id: str | None) -> dict[s
             }
         )
 
-    hotspot_conditions: list[str] = ["COALESCE(i.issue_count, 0) > 0"]
+    issue_owner_join = ""
+    issue_owner_predicate = ""
     hotspot_params: list[Any] = []
     if owner_user_id:
-        hotspot_conditions.append("c.user_id = ?")
+        issue_owner_join = f" JOIN {media_table} im ON im.id = ic.media_id"
+        issue_owner_predicate, issue_owner_params = _claims_owner_predicate(
+            owner_user_id,
+            media_alias="im",
+            placeholder=placeholder,
+        )
+        hotspot_params.extend(issue_owner_params)
+    hotspot_conditions: list[str] = ["COALESCE(i.issue_count, 0) > 0"]
+    if owner_user_id:
+        hotspot_conditions.append(f"c.user_id = {placeholder}")
         hotspot_params.append(str(owner_user_id))
     hotspot_where = f"WHERE {' AND '.join(hotspot_conditions)}" if hotspot_conditions else ""
     hotspot_sql_template = (
-        "SELECT c.id, c.canonical_claim_text, c.watchlist_count, c.updated_at, "
+        "SELECT c.id, c.canonical_claim_text, c.watchlist_count, c.updated_at, "  # nosec B608
         "COALESCE(m.member_count, 0) AS member_count, "
         "COALESCE(i.issue_count, 0) AS issue_count "
         "FROM claim_clusters c "
@@ -1730,9 +1826,11 @@ def _build_cluster_stats(db: MediaDatabase, owner_user_id: str | None) -> dict[s
         "FROM claim_cluster_membership GROUP BY cluster_id) m "
         "ON m.cluster_id = c.id "
         "LEFT JOIN (SELECT claim_cluster_id AS cluster_id, COUNT(*) AS issue_count "
-        "FROM Claims WHERE deleted = 0 AND claim_cluster_id IS NOT NULL "
-        "AND review_status IN ('flagged', 'rejected') "
-        "GROUP BY claim_cluster_id) i "
+        f"FROM {claims_table} ic{issue_owner_join} WHERE ic.deleted = 0 AND ic.claim_cluster_id IS NOT NULL "
+        "AND ic.review_status IN ('flagged', 'rejected') "
+        + issue_owner_predicate
+        + " "
+        "GROUP BY ic.claim_cluster_id) i "
         "ON i.cluster_id = c.id "
         "{hotspot_where} "
         "ORDER BY issue_count DESC, member_count DESC LIMIT 20"
@@ -1772,17 +1870,23 @@ def _build_cluster_stats(db: MediaDatabase, owner_user_id: str | None) -> dict[s
 
 
 def _build_claims_analytics(db: MediaDatabase, owner_user_id: str | None, window_days: int) -> dict[str, Any]:
+    claims_table, _media_table, _placeholder = _claims_analytics_tables(db)
+    owner_join, owner_predicate, owner_params = _claims_owner_join(db, owner_user_id)
     status_rows = db.execute_query(
-        "SELECT review_status, COUNT(*) AS count FROM Claims WHERE deleted = 0 GROUP BY review_status"
+        f"SELECT c.review_status, COUNT(*) AS count FROM {claims_table} c{owner_join} "  # nosec B608
+        "WHERE c.deleted = 0"
+        + owner_predicate
+        + " GROUP BY c.review_status",
+        tuple(owner_params),
     ).fetchall()
     status_counts = {str(r[0]): int(r[1]) for r in status_rows if r and r[0] is not None}
     total_claims = sum(status_counts.values())
     backlog = int(status_counts.get("pending", 0)) + int(status_counts.get("reassigned", 0))
 
-    latency_stats = _build_review_latency_stats(db)
-    top_media, media_stats = _build_claims_per_media_stats(db)
-    review_throughput = _build_review_throughput(db, window_days)
-    review_status_trends = _build_review_status_trends(db, window_days)
+    latency_stats = _build_review_latency_stats(db, owner_user_id)
+    top_media, media_stats = _build_claims_per_media_stats(db, owner_user_id)
+    review_throughput = _build_review_throughput(db, window_days, owner_user_id)
+    review_status_trends = _build_review_status_trends(db, window_days, owner_user_id)
     cluster_stats = _build_cluster_stats(db, owner_user_id)
 
     return {

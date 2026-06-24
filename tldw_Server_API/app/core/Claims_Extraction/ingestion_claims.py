@@ -409,13 +409,16 @@ def extract_claims_for_chunks(
             import concurrent.futures as _futures
 
             start_time = time.time()
-            with _futures.ThreadPoolExecutor(max_workers=1) as _exec:
+            _exec = _futures.ThreadPoolExecutor(max_workers=1)
+            try:
                 fut = _exec.submit(_call_provider)
                 try:
                     resp = fut.result(timeout=timeout_sec)
                 except _futures.TimeoutError:
                     with contextlib.suppress(_CLAIMS_NONCRITICAL_EXCEPTIONS):
                         fut.cancel()
+                    _exec.shutdown(wait=False, cancel_futures=True)
+                    _exec = None
                     record_claims_provider_request(
                         provider=provider,
                         model=model_override or "",
@@ -431,6 +434,9 @@ def extract_claims_for_chunks(
                         reason="timeout",
                     )
                     return []
+            finally:
+                if _exec is not None:
+                    _exec.shutdown(wait=True)
             record_claims_provider_request(
                 provider=provider,
                 model=model_override or "",

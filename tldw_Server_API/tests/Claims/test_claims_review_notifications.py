@@ -4,6 +4,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 
+from tldw_Server_API.app.core.Claims_Extraction import claims_service
 from tldw_Server_API.app.core.Claims_Extraction import claims_notifications
 from tldw_Server_API.app.core.Claims_Extraction.claims_notifications import dispatch_claim_review_notifications
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
@@ -23,6 +24,25 @@ class _FakeEmailService:
             }
         )
         return True
+
+
+def test_build_review_email_bodies_escapes_html() -> None:
+    html_body, text_body = claims_notifications._build_review_email_bodies(
+        [
+            {
+                "kind": "review_update",
+                "created_at": "2026-06-23T00:00:00Z",
+                "payload": {
+                    "new_status": "approved",
+                    "claim_text": "<script>alert(1)</script>",
+                },
+            }
+        ]
+    )
+
+    assert "<script>" not in html_body
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html_body
+    assert "<script>alert(1)</script>" in text_body
 
 
 def _seed_review_notification_db() -> MediaDatabase:
@@ -200,3 +220,67 @@ def test_dispatch_claim_review_notifications_uses_managed_media_database(monkeyp
             },
         }
     ]
+
+
+def test_submit_claims_notification_delivery_drops_when_queue_is_full(monkeypatch):
+    class _FullSemaphore:
+        def acquire(self, *, blocking: bool = True) -> bool:
+            assert blocking is False
+            return False
+
+        def release(self) -> None:
+            raise AssertionError("Saturated notification slots should not be released.")
+
+    started_threads: list[object] = []
+
+    class _Thread:
+        def __init__(self, **kwargs) -> None:
+            started_threads.append(kwargs)
+
+        def start(self) -> None:
+            raise AssertionError("Saturated notification dispatch should not start a thread.")
+
+    monkeypatch.setattr(claims_notifications, "_notification_slots", _FullSemaphore())
+    monkeypatch.setattr(claims_notifications.threading, "Thread", _Thread)
+
+    accepted = claims_notifications.submit_claims_notification_delivery(lambda: None)
+
+    assert accepted is False
+    assert started_threads == []
+
+
+def test_dispatch_claims_alert_notifications_uses_bounded_submission(monkeypatch):
+    submissions: list[dict[str, object]] = []
+
+    def _submit(fn, *args, **kwargs):
+        submissions.append({"fn": fn, "args": args, "kwargs": kwargs})
+        return True
+
+    class _RawThread:
+        def __init__(self, **kwargs) -> None:
+            raise AssertionError(f"Raw notification thread should not be created: {kwargs}")
+
+    monkeypatch.setattr(claims_service, "submit_claims_notification_delivery", _submit)
+    monkeypatch.setattr(claims_service.threading, "Thread", _RawThread)
+
+    claims_service._dispatch_claims_alert_notifications(
+        config_row={
+            "id": 9,
+            "channels_json": json.dumps({"slack": True, "webhook": True}),
+            "slack_webhook_url": "https://example.test/slack",
+            "webhook_url": "https://example.test/webhook",
+        },
+        payload={
+            "window_ratio": 0.5,
+            "threshold": 0.2,
+            "baseline_ratio": 0.1,
+        },
+        db_path="/tmp/claims-alert.db",
+        user_id="1",
+    )
+
+    assert len(submissions) == 2
+    assert submissions[0]["fn"] is claims_service._deliver_claims_alert_webhook
+    assert submissions[0]["kwargs"]["channel"] == "slack"
+    assert submissions[1]["fn"] is claims_service._deliver_claims_alert_webhook
+    assert submissions[1]["kwargs"]["channel"] == "webhook"

@@ -286,6 +286,40 @@ class TestFVAPipelineProcessClaim:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
+    async def test_process_claim_records_adjudication_scores_when_anti_context_found(self):
+        """Should record adjudication scores when anti-context produces adjudication."""
+        low_conf_verification = MockClaimVerification(
+            claim=MockClaim(id="1", text="Test"),
+            status=VerificationStatus.VERIFIED,
+            confidence=0.5,
+            evidence=[MockEvidence(doc_id="1", snippet="Evidence")],
+        )
+        verifier = MockVerifier(verification=low_conf_verification)
+        claims_engine = MockClaimsEngine(verifier=verifier)
+        anti_docs = [
+            Document(id="anti_1", content="Contradicting evidence", metadata={}, score=0.7),
+        ]
+        retriever = MockRetriever(documents=anti_docs)
+        pipeline = FVAPipeline(claims_engine, retriever)
+
+        with patch(
+            "tldw_Server_API.app.core.Claims_Extraction.fva_pipeline.observe_histogram"
+        ) as observe_histogram:
+            await pipeline.process_claim(
+                claim=MockClaim(id="1", text="Test claim"),
+                query="test",
+                documents=[Document(id="1", content="Support", metadata={}, score=0.8)],
+            )
+
+        score_types = {
+            call.kwargs["labels"]["score_type"]
+            for call in observe_histogram.call_args_list
+            if call.args and call.args[0] == "fva_adjudication_scores"
+        }
+        assert score_types == {"support", "contradict", "contestation"}
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
     async def test_process_claim_no_falsification_high_confidence(self):
         """Should not trigger falsification for high confidence claims."""
         # Create verification with high confidence
