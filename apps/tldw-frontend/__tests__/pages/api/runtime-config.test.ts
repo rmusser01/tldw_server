@@ -88,6 +88,8 @@ describe("WebUI runtime config API", () => {
     ["placeholder key", { SINGLE_USER_API_KEY: "change-me" }],
     ["repo placeholder key", { SINGLE_USER_API_KEY: "CHANGE_ME_TO_SECURE_API_KEY" }],
     ["repo placeholder key prefix", { SINGLE_USER_API_KEY: "CHANGE_ME_BEFORE_RUNNING" }],
+    ["migration hyphen placeholder key", { SINGLE_USER_API_KEY: "your-api-key-here" }],
+    ["migration underscore placeholder key", { SINGLE_USER_API_KEY: "your_api_key_here" }],
     ["default key", { SINGLE_USER_API_KEY: "default" }],
     ["test key", { SINGLE_USER_API_KEY: "test-key" }],
     ["short key", { SINGLE_USER_API_KEY: "short-key" }],

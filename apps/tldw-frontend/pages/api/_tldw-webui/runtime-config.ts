@@ -27,7 +27,9 @@ const PLACEHOLDER_KEYS = new Set([
   "default",
   "test-key",
   "your-api-key",
+  "your-api-key-here",
   "your_api_key",
+  "your_api_key_here",
   "placeholder",
   "replace-me",
   "replace_me"
