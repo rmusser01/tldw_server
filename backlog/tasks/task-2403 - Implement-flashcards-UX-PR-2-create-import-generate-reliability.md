@@ -4,7 +4,7 @@ title: Implement flashcards UX PR 2 create import generate reliability
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-23 21:52'
+updated_date: '2026-06-23 22:07'
 labels:
   - ux
   - flashcards
@@ -66,12 +66,26 @@ Second review follow-up verification:
 - RED: cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx failed 4 tests against 9d908856dd: structured zero-created/local-error draft preservation plus 401/403/500 operational classification.
 - PASS: git diff --check exited 0.
 - PASS: cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.deck-reference.test.tsx src/components/Flashcards/tabs/__tests__/ImageOcclusionTransferPanel.test.tsx (3 files passed, 51 tests passed).
+
+Third review follow-up 2026-06-23:
+- Rebased PR #2466 on latest origin/dev.
+- Fixed status-less JSON import endpoint request failures so transport wrapper text such as "Failed to fetch (POST /api/v1/flashcards/import/json)" is treated as an operational/API error instead of a validation error caused by the endpoint path.
+- Removed the bare "json" validation token, stripped trailing request context before fallback message classification, and kept JSON validation matching to explicit malformed/invalid/parse phrases.
+- Updated a stale transfer-summary empty-state assertion to match the current "No import/export actions yet in this session." UI copy from the rebased component.
+- Added a regression that keeps the JSON payload editable and shows operational retry guidance for status-less JSON endpoint fetch failures.
+
+Third review follow-up verification:
+- RED: cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx -t "status-less JSON endpoint" failed against the rebased branch because the status-less JSON endpoint request failure rendered "Import validation failed".
+- PASS: cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx -t "status-less JSON endpoint" (1 test passed, 38 skipped).
+- PASS: cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.deck-reference.test.tsx src/components/Flashcards/tabs/__tests__/ImageOcclusionTransferPanel.test.tsx (3 files passed, 53 tests passed).
+- PASS: git diff --check exited 0.
+- Bandit N/A: frontend-only TypeScript/React and Backlog markdown changes, no Python touched.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the PR 2 reliability slice for flashcards create/import recovery, including both review follow-ups. Invalid imports, zero-created/no-detail structured saves, and zero-created structured saves with available preview/local validation errors now render honest warning/error states without clearing user input or selected drafts. Failed import classification now uses HTTP status first so 400/422 are validation and status-bearing auth/server/network-style failures are operational even when their text says invalid. Image occlusion zero-created/no-detail saves preserve drafts, show an inline warning, and avoid success/undo side effects. Create drawer mutation failures render an inline Alert while preserving form values and re-enabling create actions. Transfer summary import limits are guarded against unresolved i18n placeholders with direct fallback coverage. F01 placeholder leakage, F03 invalid import recovery, and F05 create failure/zero-created recovery are closed for the touched frontend paths.
+Implemented the PR 2 reliability slice for flashcards create/import recovery, including review follow-ups. Invalid imports, zero-created/no-detail structured saves, and zero-created structured saves with available preview/local validation errors now render honest warning/error states without clearing user input or selected drafts. Failed import classification now uses HTTP status first so 400/422 are validation and status-bearing auth/server/network-style failures are operational even when their text says invalid. Status-less JSON endpoint transport failures are also operational because request-path suffixes are stripped and the bare "json" validation token was replaced with explicit malformed/invalid/parse JSON phrases. Image occlusion zero-created/no-detail saves preserve drafts, show an inline warning, and avoid success/undo side effects. Create drawer mutation failures render an inline Alert while preserving form values and re-enabling create actions. Transfer summary import limits are guarded against unresolved i18n placeholders with direct fallback coverage. F01 placeholder leakage, F03 invalid import recovery, and F05 create failure/zero-created recovery are closed for the touched frontend paths.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -1160,7 +1160,7 @@ describe("ImportExportTab import result details", () => {
       /\{\{(?:cards|bytes|lines|lineBytes|fieldBytes|maxLines|maxLineBytes|maxFieldBytes)\}\}/
     )
     expect(screen.getByTestId("flashcards-transfer-summary-last-action")).toHaveTextContent(
-      "No transfer actions yet in this session."
+      "No import/export actions yet in this session."
     )
   })
 
@@ -1295,6 +1295,45 @@ describe("ImportExportTab import result details", () => {
       expect(screen.getByTestId("flashcards-import-textarea")).toHaveValue(payload)
     }
   )
+
+  it("classifies status-less JSON endpoint request failures as operational", async () => {
+    const error = new Error("Failed to fetch (POST /api/v1/flashcards/import/json)")
+    const mutateAsync = vi.fn().mockRejectedValue(error)
+    vi.mocked(useImportFlashcardsJsonMutation).mockReturnValue({
+      mutateAsync,
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+    await openImportTask()
+
+    const payload = JSON.stringify([{ front: "Question", back: "Answer" }])
+    const formatSelect = screen.getByTestId("flashcards-import-format")
+    fireEvent.mouseDown(
+      formatSelect.querySelector(".ant-select-selector") ?? formatSelect
+    )
+    fireEvent.click(screen.getByText("JSON / JSONL"))
+    fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
+      target: {
+        value: payload
+      }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-import-button"))
+
+    const recoveryAlert = await screen.findByTestId("flashcards-import-last-result")
+    expect(recoveryAlert).toHaveTextContent("Import failed")
+    expect(recoveryAlert).toHaveTextContent(
+      "Failed to fetch (POST /api/v1/flashcards/import/json)"
+    )
+    expect(recoveryAlert).toHaveTextContent(
+      "Details are unavailable; check connection/API status and retry."
+    )
+    expect(recoveryAlert).not.toHaveTextContent("Import validation failed")
+    expect(recoveryAlert).not.toHaveTextContent(
+      "Fix the highlighted issue and import again."
+    )
+    expect(screen.getByTestId("flashcards-import-textarea")).toHaveValue(payload)
+  })
 
   it("updates transfer summary after import actions", async () => {
     const mutateAsync = vi.fn().mockResolvedValue({

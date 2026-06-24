@@ -73,8 +73,11 @@ import {
 
 const { Text } = Typography
 
+const stripRequestContextSuffix = (message: string): string =>
+  message.replace(/\s+\((?:GET|POST|PUT|PATCH|DELETE)\s+[^)]+\)\s*$/i, "").trim()
+
 const isValidationImportErrorMessage = (message: string): boolean => {
-  const normalized = message.toLowerCase()
+  const normalized = stripRequestContextSuffix(message).toLowerCase()
   return [
     "missing required",
     "invalid",
@@ -83,7 +86,9 @@ const isValidationImportErrorMessage = (message: string): boolean => {
     "line too long",
     "maximum import",
     "parse",
-    "json"
+    "malformed json",
+    "invalid json",
+    "json parse"
   ].some((token) => normalized.includes(token))
 }
 
