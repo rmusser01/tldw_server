@@ -1018,9 +1018,19 @@ def _build_import_note_companion_event(
     )
 
 
+_NOTES_KEYWORD_TOKEN_MAX_COUNT = 20
+_NOTES_KEYWORD_TOKEN_MAX_RAW_COUNT = 100
+_NOTES_KEYWORD_TOKEN_MAX_LENGTH = 100
+
+
 def _normalize_keyword_tokens(tokens: Optional[list[str]]) -> list[str]:
     if not tokens:
         return []
+    if len(tokens) > _NOTES_KEYWORD_TOKEN_MAX_RAW_COUNT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Too many keyword tokens; maximum raw tokens is {_NOTES_KEYWORD_TOKEN_MAX_RAW_COUNT}.",
+        )
     seen: set[str] = set()
     out: list[str] = []
     for token in tokens:
@@ -1029,9 +1039,19 @@ def _normalize_keyword_tokens(tokens: Optional[list[str]]) -> list[str]:
         text = str(token).strip()
         if not text:
             continue
+        if len(text) > _NOTES_KEYWORD_TOKEN_MAX_LENGTH:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Keyword tokens must be {_NOTES_KEYWORD_TOKEN_MAX_LENGTH} characters or fewer.",
+            )
         key = text.lower()
         if key in seen:
             continue
+        if len(out) >= _NOTES_KEYWORD_TOKEN_MAX_COUNT:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Too many keyword tokens; maximum is {_NOTES_KEYWORD_TOKEN_MAX_COUNT}.",
+            )
         seen.add(key)
         out.append(key)
     return out
@@ -3353,7 +3373,7 @@ async def derive_note_studio_endpoint(
 )
 async def regenerate_note_studio_endpoint(
         note_id: str,
-        regenerate_in: NoteStudioRegenerateRequest | None = Body(default=None),
+        regenerate_in: NoteStudioRegenerateRequest = Body(...),
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
@@ -3373,7 +3393,8 @@ async def regenerate_note_studio_endpoint(
 
         studio_state = await NotesStudioService(db=db).regenerate_note_markdown(
             note_id=note_id,
-            current_markdown=regenerate_in.current_markdown if regenerate_in else None,
+            expected_version=regenerate_in.expected_version,
+            current_markdown=regenerate_in.current_markdown,
         )
         studio_state["note"] = _attach_keywords_inline(db, studio_state["note"])
         studio_state["note"] = _attach_folders_inline(db, studio_state["note"])

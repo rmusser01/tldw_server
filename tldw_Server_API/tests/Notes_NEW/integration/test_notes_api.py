@@ -353,6 +353,30 @@ def test_search_notes_with_keyword_tokens_returns_pagination_total(client_with_n
     assert payload["pagination"]["next_offset"] == 2
 
 
+def test_search_notes_rejects_excessive_keyword_tokens(client_with_notes_db: TestClient):
+    client = client_with_notes_db
+
+    response = client.get(
+        "/api/v1/notes/search/",
+        params=[("tokens", f"topic-{index}") for index in range(21)],
+    )
+
+    assert response.status_code == 400
+    assert "Too many keyword tokens" in response.json()["detail"]
+
+
+def test_search_notes_rejects_excessive_raw_keyword_tokens(client_with_notes_db: TestClient):
+    client = client_with_notes_db
+
+    response = client.get(
+        "/api/v1/notes/search/",
+        params=[("tokens", "topic") for _ in range(101)],
+    )
+
+    assert response.status_code == 400
+    assert "maximum raw tokens is 100" in response.json()["detail"]
+
+
 def test_search_notes_falls_back_to_integer_total_when_count_fails(
     client_with_notes_db: TestClient,
     monkeypatch: pytest.MonkeyPatch,

@@ -168,6 +168,7 @@ async def run_notes_adapter(config: dict[str, Any], context: dict[str, Any]) -> 
             return {"notes": [], "count": 0, "simulated": True}
         return {"error": f"unknown_action:{action}", "simulated": True}
 
+    service = None
     try:
         from tldw_Server_API.app.core.Notes.Notes_Library import NotesInteropService
 
@@ -254,6 +255,14 @@ async def run_notes_adapter(config: dict[str, Any], context: dict[str, Any]) -> 
     except _KNOWLEDGE_CRUD_NONCRITICAL_EXCEPTIONS:
         logger.exception("Notes adapter error")
         return {"error": "notes_error"}
+    finally:
+        if service is not None:
+            close_connections = getattr(service, "close_all_user_connections", None)
+            if callable(close_connections):
+                try:
+                    close_connections()
+                except _KNOWLEDGE_CRUD_NONCRITICAL_EXCEPTIONS as close_err:
+                    logger.warning("Notes adapter failed to close user DB connections: {}", type(close_err).__name__)
 
 
 @registry.register(

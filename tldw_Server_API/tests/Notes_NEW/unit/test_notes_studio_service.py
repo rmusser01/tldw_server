@@ -10,12 +10,54 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
+    ConflictError,
     InputError,
 )
 from tldw_Server_API.app.core.Notes.studio_service import NotesStudioService
 
 
 pytestmark = pytest.mark.unit
+
+
+async def _test_generation_adapter(request: dict[str, object], _context: dict[str, object]) -> dict[str, object]:
+    excerpt = str(request.get("excerpt_text") or "").strip()
+    title = str(request.get("derived_title") or "Study Notes")
+    source_note_id = str(request.get("source_note_id") or "").strip()
+    template_type = str(request.get("template_type") or "lined")
+    cue_item = "Recall prompt: What is the key idea?" if template_type == "cornell" else "What is the key idea?"
+    return {
+        "payload": {
+            "meta": {
+                "title": title,
+                "source_note_id": source_note_id,
+            },
+            "sections": [
+                {
+                    "id": "cue-1",
+                    "kind": "cue",
+                    "title": "Key Questions",
+                    "items": [cue_item],
+                },
+                {
+                    "id": "notes-1",
+                    "kind": "notes",
+                    "title": "Notes",
+                    "content": excerpt,
+                },
+                {
+                    "id": "summary-1",
+                    "kind": "summary",
+                    "title": "Summary",
+                    "content": excerpt,
+                },
+            ],
+        }
+    }
+
+
+def _service(db: CharactersRAGDB, **kwargs) -> NotesStudioService:
+    kwargs.setdefault("generation_adapter", _test_generation_adapter)
+    return NotesStudioService(db=db, **kwargs)
 
 
 @pytest.fixture()
@@ -54,7 +96,7 @@ def test_derive_creates_derived_note_and_sidecar(studio_db):
     )
     assert source_note_id is not None
 
-    service = NotesStudioService(db=db)
+    service = _service(db)
     excerpt = "The mitochondrion is the powerhouse of the cell."
 
     result = _derive_note(
@@ -142,7 +184,7 @@ def test_cornell_generation_includes_explicit_recall_prompt(studio_db):
     )
     assert source_note_id is not None
 
-    service = NotesStudioService(db=db)
+    service = _service(db)
     result = _derive_note(
         service,
         source_note_id=str(source_note_id),
@@ -169,7 +211,7 @@ def test_derive_rolls_back_note_when_sidecar_persistence_fails(studio_db, monkey
     )
     assert source_note_id is not None
 
-    service = NotesStudioService(db=db)
+    service = _service(db)
     original_note_ids = [note["id"] for note in db.list_notes()]
 
     def _raise_sidecar_failure(**_kwargs):
@@ -195,7 +237,7 @@ def test_get_state_detects_markdown_drift_and_regenerate_rebuilds_payload_from_c
     )
     assert source_note_id is not None
 
-    service = NotesStudioService(db=db)
+    service = _service(db)
     result = _derive_note(
         service,
         source_note_id=str(source_note_id),
@@ -229,7 +271,15 @@ def test_get_state_detects_markdown_drift_and_regenerate_rebuilds_payload_from_c
     assert stale_state["is_stale"] is True
     assert stale_state["stale_reason"] == "companion_content_hash_mismatch"
 
-    regenerated = asyncio.run(service.regenerate_note_markdown(note_id=note_id))
+    latest_note = db.get_note_by_id(note_id=note_id)
+    assert latest_note is not None
+
+    regenerated = asyncio.run(
+        service.regenerate_note_markdown(
+            note_id=note_id,
+            expected_version=int(latest_note["version"]),
+        )
+    )
     assert regenerated["is_stale"] is False
     assert regenerated["stale_reason"] is None
     assert regenerated["note"]["title"] == "Chemistry Refined Study Notes"
@@ -277,7 +327,7 @@ def test_regenerate_uses_current_markdown_override_without_persisting_drift_firs
     )
     assert source_note_id is not None
 
-    service = NotesStudioService(db=db)
+    service = _service(db)
     result = _derive_note(
         service,
         source_note_id=str(source_note_id),
@@ -298,6 +348,7 @@ def test_regenerate_uses_current_markdown_override_without_persisting_drift_firs
     regenerated = asyncio.run(
         service.regenerate_note_markdown(
             note_id=note_id,
+            expected_version=int(result["note"]["version"]),
             current_markdown=override_markdown,
         )
     )
@@ -320,7 +371,7 @@ def test_regenerate_treats_empty_current_markdown_as_an_explicit_override(studio
     )
     assert source_note_id is not None
 
-    service = NotesStudioService(db=db)
+    service = _service(db)
     result = _derive_note(
         service,
         source_note_id=str(source_note_id),
@@ -331,6 +382,7 @@ def test_regenerate_treats_empty_current_markdown_as_an_explicit_override(studio
     regenerated = asyncio.run(
         service.regenerate_note_markdown(
             note_id=note_id,
+            expected_version=int(result["note"]["version"]),
             current_markdown="",
         )
     )
@@ -349,7 +401,7 @@ def test_regenerate_rolls_back_note_update_when_sidecar_upsert_fails(studio_db, 
     )
     assert source_note_id is not None
 
-    service = NotesStudioService(db=db)
+    service = _service(db)
     result = _derive_note(
         service,
         source_note_id=str(source_note_id),
@@ -382,12 +434,51 @@ def test_regenerate_rolls_back_note_update_when_sidecar_upsert_fails(studio_db, 
     monkeypatch.setattr(db, "upsert_note_studio_document", _raise_sidecar_failure)
 
     with pytest.raises(CharactersRAGDBError, match="sidecar upsert failed"):
-        asyncio.run(service.regenerate_note_markdown(note_id=note_id))
+        latest_note = db.get_note_by_id(note_id=note_id)
+        assert latest_note is not None
+        asyncio.run(
+            service.regenerate_note_markdown(
+                note_id=note_id,
+                expected_version=int(latest_note["version"]),
+            )
+        )
 
     note_after_failure = db.get_note_by_id(note_id=note_id)
     assert note_after_failure is not None
     assert note_after_failure["title"] == "Astronomy Study Notes"
     assert note_after_failure["content"] == draft_markdown
+
+
+def test_regenerate_rejects_stale_expected_version(studio_db):
+    db = studio_db
+    source_note_id = db.add_note(
+        title="Biology",
+        content="Cells use mitochondria to produce ATP.",
+    )
+    assert source_note_id is not None
+
+    service = _service(db)
+    result = _derive_note(
+        service,
+        source_note_id=str(source_note_id),
+        excerpt_text="Cells use mitochondria to produce ATP.",
+    )
+    note_id = result["note"]["id"]
+
+    db.update_note(
+        note_id=note_id,
+        update_data={"content": "# Edited elsewhere"},
+        expected_version=int(result["note"]["version"]),
+    )
+
+    with pytest.raises(ConflictError, match="version mismatch"):
+        asyncio.run(
+            service.regenerate_note_markdown(
+                note_id=note_id,
+                expected_version=int(result["note"]["version"]),
+                current_markdown="# Stale editor body",
+            )
+        )
 
 
 def test_update_diagram_manifest_persists_notebook_diagram_metadata(studio_db):
@@ -398,7 +489,7 @@ def test_update_diagram_manifest_persists_notebook_diagram_metadata(studio_db):
     )
     assert source_note_id is not None
 
-    service = NotesStudioService(db=db)
+    service = _service(db)
     result = _derive_note(
         service,
         source_note_id=str(source_note_id),
@@ -424,6 +515,81 @@ def test_update_diagram_manifest_persists_notebook_diagram_metadata(studio_db):
     assert manifest["generation_status"] == "ready"
 
 
+def test_update_diagram_manifest_rejects_unknown_section_ids(studio_db):
+    db = studio_db
+    source_note_id = db.add_note(
+        title="History",
+        content="The printing press accelerated the spread of written knowledge.",
+    )
+    assert source_note_id is not None
+
+    service = _service(db)
+    result = _derive_note(
+        service,
+        source_note_id=str(source_note_id),
+        excerpt_text="The printing press accelerated the spread of written knowledge.",
+    )
+
+    with pytest.raises(InputError, match="Unknown Studio section"):
+        asyncio.run(
+            service.update_diagram_manifest(
+                note_id=result["note"]["id"],
+                diagram_type="flowchart",
+                source_section_ids=["missing-section"],
+            )
+        )
+
+
+def test_update_diagram_manifest_rejects_concurrent_sidecar_change(studio_db):
+    db = studio_db
+    source_note_id = db.add_note(
+        title="History",
+        content="The printing press accelerated the spread of written knowledge.",
+    )
+    assert source_note_id is not None
+
+    note_id_holder: dict[str, str] = {}
+
+    async def _diagram_adapter(_request: dict[str, object], _context: dict[str, object]) -> dict[str, object]:
+        note_id = note_id_holder["note_id"]
+        current_document = db.get_note_studio_document(note_id)
+        assert current_document is not None
+        db.upsert_note_studio_document(
+            note_id=note_id,
+            payload_json=current_document["payload_json"],
+            template_type=current_document["template_type"],
+            handwriting_mode=current_document["handwriting_mode"],
+            source_note_id=current_document.get("source_note_id"),
+            excerpt_snapshot=current_document.get("excerpt_snapshot"),
+            excerpt_hash=current_document.get("excerpt_hash"),
+            diagram_manifest_json={"status": "concurrent"},
+            companion_content_hash="sha256:concurrent",
+            render_version=int(current_document["render_version"]),
+        )
+        return {"diagram": "graph TD; A-->B", "format": "mermaid"}
+
+    service = _service(db, diagram_adapter=_diagram_adapter)
+    result = _derive_note(
+        service,
+        source_note_id=str(source_note_id),
+        excerpt_text="The printing press accelerated the spread of written knowledge.",
+    )
+    note_id_holder["note_id"] = result["note"]["id"]
+
+    with pytest.raises(ConflictError, match="changed concurrently"):
+        asyncio.run(
+            service.update_diagram_manifest(
+                note_id=result["note"]["id"],
+                diagram_type="flowchart",
+            )
+        )
+
+    persisted_document = db.get_note_studio_document(result["note"]["id"])
+    assert persisted_document is not None
+    assert persisted_document["companion_content_hash"] == "sha256:concurrent"
+    assert persisted_document["diagram_manifest_json"] == {"status": "concurrent"}
+
+
 @pytest.mark.parametrize(
     ("excerpt_text", "expected_message"),
     [
@@ -439,7 +605,7 @@ def test_derive_rejects_invalid_excerpt_requests(studio_db, excerpt_text, expect
     )
     assert source_note_id is not None
 
-    service = NotesStudioService(db=db)
+    service = _service(db)
 
     with pytest.raises(InputError, match=expected_message):
         _derive_note(

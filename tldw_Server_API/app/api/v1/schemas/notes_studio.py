@@ -5,13 +5,20 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 if TYPE_CHECKING:
     from .notes_schemas import NoteResponse
 
 NoteStudioTemplateType = Literal["lined", "grid", "cornell"]
 NoteStudioHandwritingMode = Literal["off", "accented"]
+
+NOTE_STUDIO_MAX_MARKDOWN_LENGTH = 5_000_000
+NOTE_STUDIO_MAX_PROVIDER_LENGTH = 100
+NOTE_STUDIO_MAX_MODEL_LENGTH = 200
+NOTE_STUDIO_MAX_SOURCE_NOTE_ID_LENGTH = 128
+NOTE_STUDIO_MAX_SECTION_IDS = 50
+NOTE_STUDIO_MAX_SECTION_ID_LENGTH = 128
 
 
 class NoteStudioDocumentBase(BaseModel):
@@ -76,8 +83,18 @@ class NoteStudioDocumentResponse(NoteStudioDocumentBase):
 
 
 class NoteStudioDeriveRequest(BaseModel):
-    source_note_id: str = Field(..., description="Source note identifier used for derivation.")
-    excerpt_text: str = Field(..., description="Selected source excerpt used for Studio generation.")
+    source_note_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=NOTE_STUDIO_MAX_SOURCE_NOTE_ID_LENGTH,
+        description="Source note identifier used for derivation.",
+    )
+    excerpt_text: str = Field(
+        ...,
+        min_length=1,
+        max_length=NOTE_STUDIO_MAX_MARKDOWN_LENGTH,
+        description="Selected source excerpt used for Studio generation.",
+    )
     template_type: NoteStudioTemplateType = Field(
         "lined",
         description="Notebook template to use for the derived Studio note.",
@@ -86,13 +103,29 @@ class NoteStudioDeriveRequest(BaseModel):
         "accented",
         description="Handwriting accent mode for the derived Studio note.",
     )
-    provider: str | None = Field(default=None, description="Optional provider override for structured generation.")
-    model: str | None = Field(default=None, description="Optional model override for structured generation.")
+    provider: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=NOTE_STUDIO_MAX_PROVIDER_LENGTH,
+        description="Optional provider override for structured generation.",
+    )
+    model: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=NOTE_STUDIO_MAX_MODEL_LENGTH,
+        description="Optional model override for structured generation.",
+    )
 
 
 class NoteStudioRegenerateRequest(BaseModel):
+    expected_version: int = Field(
+        ...,
+        ge=1,
+        description="Current note version observed by the caller before regeneration.",
+    )
     current_markdown: str | None = Field(
         default=None,
+        max_length=NOTE_STUDIO_MAX_MARKDOWN_LENGTH,
         description="Optional current Markdown companion from the editor when regenerating a stale Studio note.",
     )
 
@@ -104,10 +137,36 @@ class NoteStudioDiagramRequest(BaseModel):
     )
     source_section_ids: list[str] = Field(
         default_factory=list,
+        max_length=NOTE_STUDIO_MAX_SECTION_IDS,
         description="Canonical Studio section identifiers used as diagram sources.",
     )
-    provider: str | None = Field(default=None, description="Optional provider override for diagram generation.")
-    model: str | None = Field(default=None, description="Optional model override for diagram generation.")
+    provider: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=NOTE_STUDIO_MAX_PROVIDER_LENGTH,
+        description="Optional provider override for diagram generation.",
+    )
+    model: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=NOTE_STUDIO_MAX_MODEL_LENGTH,
+        description="Optional model override for diagram generation.",
+    )
+
+    @field_validator("source_section_ids")
+    @classmethod
+    def validate_source_section_ids(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for section_id in value:
+            text = str(section_id).strip()
+            if not text:
+                raise ValueError("source_section_ids cannot contain empty section IDs.")
+            if len(text) > NOTE_STUDIO_MAX_SECTION_ID_LENGTH:
+                raise ValueError(
+                    f"source_section_ids entries must be {NOTE_STUDIO_MAX_SECTION_ID_LENGTH} characters or fewer."
+                )
+            normalized.append(text)
+        return normalized
 
 
 class NoteStudioStateResponse(BaseModel):

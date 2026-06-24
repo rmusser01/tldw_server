@@ -1436,6 +1436,7 @@ async def test_notes_adapter_create_production_mode(monkeypatch):
     assert result.get("success") is True
     assert result.get("note") == mock_note
     mock_service.add_note.assert_called_once()
+    mock_service.close_all_user_connections.assert_called_once()
 
 
 @pytest.mark.asyncio
