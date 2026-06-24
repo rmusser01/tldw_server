@@ -1,5 +1,7 @@
 import { bgRequest } from "@/services/background-proxy"
 import { buildQuery } from "@/services/resource-client"
+import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import type { LegacyAudiobookProjectMigrationPayload } from "@/db/dexie/audiobook-projects"
 
@@ -111,6 +113,20 @@ export type AudioStudioArtifactListResponse = {
   artifacts: AudioStudioArtifact[]
   limit: number
   offset: number
+}
+
+export type AudioStudioMediaTicketPurpose = "playback" | "download"
+
+export type AudioStudioMediaTicketResponse = {
+  ticket_path: string
+  ticket_url?: string | null
+  expires_at: string
+  purpose: AudioStudioMediaTicketPurpose
+  artifact_id: string
+}
+
+export type AudioStudioResolvedMediaTicket = AudioStudioMediaTicketResponse & {
+  ticket_url: string
 }
 
 export type ListAudioStudioProjectsParams = {
@@ -338,6 +354,41 @@ export const getAudioStudioArtifactMediaPath = (
 ): string => {
   const path = `${projectPath(projectId)}/artifacts/${encodeURIComponent(artifactId)}/media`
   return options.download ? `${path}?download=true` : path
+}
+
+const isAbsoluteHttpUrl = (value: string | null | undefined): value is string =>
+  typeof value === "string" && /^https?:\/\//i.test(value)
+
+const resolveAudioStudioTicketBrowserUrl = async (
+  ticket: AudioStudioMediaTicketResponse
+): Promise<string> => {
+  if (isAbsoluteHttpUrl(ticket.ticket_url)) {
+    return ticket.ticket_url
+  }
+  const config = await tldwClient.getConfig().catch(() => null)
+  return resolveBrowserRequestTransport({
+    config,
+    path: ticket.ticket_path
+  }).url
+}
+
+export const mintAudioStudioArtifactMediaTicket = async (
+  projectId: string,
+  artifactId: string,
+  purpose: AudioStudioMediaTicketPurpose
+): Promise<AudioStudioResolvedMediaTicket> => {
+  const response = await bgRequest<AudioStudioMediaTicketResponse>({
+    path: apiPath(
+      `${projectPath(projectId)}/artifacts/${encodeURIComponent(artifactId)}/tickets`
+    ),
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: { purpose }
+  })
+  return {
+    ...response,
+    ticket_url: await resolveAudioStudioTicketBrowserUrl(response)
+  }
 }
 
 export const fetchAudioStudioArtifactBlob = async (

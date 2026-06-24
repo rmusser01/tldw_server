@@ -4,8 +4,18 @@ const mocks = vi.hoisted(() => ({
   bgRequest: vi.fn()
 }))
 
+const tldwClientMocks = vi.hoisted(() => ({
+  getConfig: vi.fn()
+}))
+
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: (...args: unknown[]) => mocks.bgRequest(...args)
+}))
+
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: {
+    getConfig: (...args: unknown[]) => tldwClientMocks.getConfig(...args)
+  }
 }))
 
 import {
@@ -19,6 +29,7 @@ import {
   listAudioStudioArtifacts,
   listAudioStudioProjects,
   listAudioStudioWorkflows,
+  mintAudioStudioArtifactMediaTicket,
   previewAudiobookMigration,
   updateAudioStudioProject,
   upsertAudioStudioClip,
@@ -28,7 +39,7 @@ import {
 
 describe("audio-studio service", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     mocks.bgRequest.mockResolvedValue({})
   })
 
@@ -143,6 +154,59 @@ describe("audio-studio service", () => {
     expect(
       getAudioStudioArtifactMediaPath("p1", "a1", { download: true })
     ).toBe("/api/v1/audio-studio/projects/p1/artifacts/a1/media?download=true")
+  })
+
+  it("mints playback media tickets and resolves ticket paths against the configured server", async () => {
+    tldwClientMocks.getConfig.mockResolvedValueOnce({
+      serverUrl: "http://127.0.0.1:8000"
+    })
+    mocks.bgRequest.mockResolvedValueOnce({
+      ticket_path: "/api/v1/audio-studio/media-tickets/ticket-playback",
+      ticket_url: null,
+      expires_at: "2026-06-24T12:00:00Z",
+      purpose: "playback",
+      artifact_id: "artifact-1"
+    })
+
+    const ticket = await mintAudioStudioArtifactMediaTicket(
+      "project 1",
+      "artifact/1",
+      "playback"
+    )
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/audio-studio/projects/project%201/artifacts/artifact%2F1/tickets",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { purpose: "playback" }
+    })
+    expect(ticket.ticket_url).toBe(
+      "http://127.0.0.1:8000/api/v1/audio-studio/media-tickets/ticket-playback"
+    )
+    expect(ticket.ticket_path).toBe("/api/v1/audio-studio/media-tickets/ticket-playback")
+  })
+
+  it("prefers backend ticket_url when provided", async () => {
+    tldwClientMocks.getConfig.mockResolvedValueOnce({
+      serverUrl: "http://127.0.0.1:8000"
+    })
+    mocks.bgRequest.mockResolvedValueOnce({
+      ticket_path: "/api/v1/audio-studio/media-tickets/ticket-download",
+      ticket_url: "https://public.example.test/api/v1/audio-studio/media-tickets/ticket-download",
+      expires_at: "2026-06-24T12:00:00Z",
+      purpose: "download",
+      artifact_id: "artifact-1"
+    })
+
+    const ticket = await mintAudioStudioArtifactMediaTicket(
+      "project-1",
+      "artifact-1",
+      "download"
+    )
+
+    expect(ticket.ticket_url).toBe(
+      "https://public.example.test/api/v1/audio-studio/media-tickets/ticket-download"
+    )
   })
 
   it("fetches artifact media as a blob using the response MIME type", async () => {
