@@ -26,8 +26,10 @@ modified_files:
 - tldw_Server_API/tests/Jobs/test_jobs_idempotency_scope_postgres.py
 - tldw_Server_API/tests/Jobs/test_jobs_completion_idempotent_sqlite.py
 - tldw_Server_API/tests/Jobs/test_jobs_completion_idempotent_postgres.py
+- tldw_Server_API/tests/Jobs/test_jobs_admin_contract_sqlite.py
+- tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_adapter.py
 - backlog/tasks/task-12017 - Implement-Jobs-backend-parity-refactor-first-slice.md
-updated_date: 2026-06-24 22:39
+updated_date: 2026-06-24 22:50
 ---
 
 ## Description
@@ -50,6 +52,7 @@ Task 2 started: adding shared Jobs backend parity scenario helpers and refactori
 Task 2 completed: added shared Jobs backend parity scenario helpers under tldw_Server_API/tests/Jobs/parity and refactored the owned SQLite/Postgres idempotency tests to call shared scenarios. Verification: py_compile for scenarios.py exited 0; SQLite selected tests passed (3 passed, 19 warnings); Postgres selected tests exited 0 with 3 skips because Postgres was not reachable ("Postgres not reachable; skipping Postgres-backed tests"); git diff --check exited 0; Bandit full touched-scope report contained only low-severity B101 pytest assert findings, and the follow-up run with B101 excluded exited 0 with 0 findings.
 Task 3 started: adding first SQLite and Postgres parity wrapper tests around the existing shared Jobs parity scenarios. Applying the plan correction to update TASK-12017 only.
 Task 3 completed: added SQLite and Postgres parity wrapper tests around the shared Jobs parity scenarios. Verification: `RUN_JOBS=1 python -m pytest tldw_Server_API/tests/Jobs/parity/test_sqlite_parity.py -q` exited 0 with 6 passed and 26 warnings; `RUN_JOBS=1 python -m pytest tldw_Server_API/tests/Jobs/parity/test_postgres_parity.py -q` exited 0 with 6 skipped and 14 warnings because Postgres was unavailable; follow-up `-q -rs` confirmed the skip reason: "Postgres not reachable; skipping Postgres-backed tests". `git diff --check` exited 0. Bandit on the touched wrapper test files exited 0, and the B101-excluded follow-up reported no issues. No production code was changed.
+Task 4 completed: added public Jobs admin and Chatbooks adapter contract tests, then corrected the new admin list contract assertion after validation showed `/api/v1/jobs/list` intentionally returns the existing `JobItem` public field set without storage-only owner fields. Code-quality review findings were addressed by forcing the SQLite admin contract away from ambient `JOBS_DB_URL`, faking the Chatbooks Jobs manager for mapping-only tests, asserting the adapter query shape, and covering terminal export/import status preservation. Verification: `RUN_JOBS=1 python -m pytest tldw_Server_API/tests/Jobs/test_jobs_admin_contract_sqlite.py tldw_Server_API/tests/Chatbooks/test_chatbooks_jobs_adapter.py -q` exited 0 with 20 passed and 52 warnings; `git diff --check` with the new file included exited 0; Bandit on the touched test files with B101 excluded exited 0.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
