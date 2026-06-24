@@ -89,6 +89,11 @@ def _get_tts_ws_queue_maxsize() -> int:
     return max(2, min(256, parsed))
 
 
+def _allow_query_token_auth() -> bool:
+    """Return True only when legacy WebSocket query-token auth is explicitly enabled."""
+    return is_truthy(os.getenv("AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH", "0"))
+
+
 # Register audio fail-open metrics (idempotent if already registered)
 try:
     _reg = get_metrics_registry()
@@ -147,13 +152,15 @@ async def _stream_tts_to_websocket(
     QueueFull = getattr(aio, "QueueFull", asyncio.QueueFull)
     create_task = getattr(aio, "create_task", asyncio.create_task)
     wait = getattr(aio, "wait", asyncio.wait)
-    FIRST_EXCEPTION = getattr(aio, "FIRST_EXCEPTION", asyncio.FIRST_EXCEPTION)
+    FIRST_COMPLETED = getattr(aio, "FIRST_COMPLETED", asyncio.FIRST_COMPLETED)
     queue: asyncio.Queue[Optional[bytes]] = Queue(maxsize=_get_tts_ws_queue_maxsize())
     provider_label = (provider or getattr(speech_req, "model", None) or "default").lower()
     underrun_labels = {"provider": provider_label}
     error_labels = {"component": component_label, "provider": provider_label}
+    sentinel_enqueued = False
 
     async def _producer() -> None:
+        nonlocal sentinel_enqueued
         try:
             generate_kwargs: dict[str, Any] = {
                 "provider": provider,
@@ -189,6 +196,8 @@ async def _stream_tts_to_websocket(
                         logger.debug(f"{route} queue recovery after full failed: error={m_err}")
                         with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
                             reg.increment("audio_stream_errors_total", 1, labels=error_labels)
+        except asyncio.CancelledError:
+            raise
         except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
             try:
                 reg.increment("audio_stream_errors_total", 1, labels=error_labels)
@@ -197,11 +206,16 @@ async def _stream_tts_to_websocket(
             if error_handler is not None:
                 try:
                     await error_handler(exc)
+                except asyncio.CancelledError:
+                    raise
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as send_exc:
                     logger.debug(f"{route} error handler failed: error={send_exc}")
         finally:
             try:
                 await queue.put(None)
+                sentinel_enqueued = True
+            except asyncio.CancelledError:
+                raise
             except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as q_err:
                 logger.debug(f"{route} queue sentinel enqueue failed: error={q_err}")
 
@@ -215,6 +229,8 @@ async def _stream_tts_to_websocket(
                     await websocket.send_bytes(item)
                     if outer_stream:
                         outer_stream.mark_activity()
+                except asyncio.CancelledError:
+                    raise
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
                     try:
                         reg.increment("audio_stream_errors_total", 1, labels=error_labels)
@@ -222,14 +238,20 @@ async def _stream_tts_to_websocket(
                         logger.debug(f"{route} consumer metrics update failed: error={m_err}")
                     try:
                         await websocket.close(code=1011)
+                    except asyncio.CancelledError:
+                        raise
                     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as close_exc:
                         logger.debug(f"{route} websocket close in consumer failed: error={close_exc}")
                     if error_handler is not None:
                         try:
                             await error_handler(exc)
+                        except asyncio.CancelledError:
+                            raise
                         except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as send_exc:
                             logger.debug(f"{route} consumer error handler failed: error={send_exc}")
                     break
+        except asyncio.CancelledError:
+            raise
         except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
             try:
                 reg.increment("audio_stream_errors_total", 1, labels=error_labels)
@@ -239,20 +261,74 @@ async def _stream_tts_to_websocket(
     producer_task = create_task(_producer())
     consumer_task = create_task(_consumer())
 
+    async def _cancel_task(task: Any, task_name: str) -> None:
+        """Cancel one child task while preserving cancellation of this stream."""
+        if task.done():
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
+            logger.debug(f"{route} {task_name} task cancelled")
+        except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as wait_exc:
+            logger.debug(f"{route} wait for {task_name} task failed after cancel: error={wait_exc}")
+
+    def _observe_task_result(task: Any, task_name: str) -> bool:
+        """Return whether a completed task exited without a handled stream error."""
+        if not task.done():
+            return False
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
+            logger.debug(f"{route} {task_name} task cancelled")
+            return False
+        except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as done_exc:
+            logger.debug(f"{route} {task_name} task returned error: error={done_exc}")
+            return False
+        return True
+
     try:
-        _done, pending = await wait(
+        done, pending = await wait(
             {producer_task, consumer_task},
-            return_when=FIRST_EXCEPTION,
+            return_when=FIRST_COMPLETED,
         )
-        for task in pending:
-            task.cancel()
-            try:
-                await task
-            except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as wait_exc:
-                logger.debug(f"{route} wait for pending task failed after cancel: error={wait_exc}")
+        if producer_task in done:
+            producer_ok = _observe_task_result(producer_task, "producer")
+            if consumer_task in pending:
+                if producer_ok and sentinel_enqueued:
+                    try:
+                        await consumer_task
+                    except asyncio.CancelledError:
+                        raise
+                    except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as wait_exc:
+                        logger.debug(f"{route} wait for consumer task failed: error={wait_exc}")
+                    _observe_task_result(consumer_task, "consumer")
+                else:
+                    await _cancel_task(consumer_task, "consumer")
+            elif consumer_task in done:
+                _observe_task_result(consumer_task, "consumer")
+        elif consumer_task in done:
+            _observe_task_result(consumer_task, "consumer")
+            if producer_task in pending:
+                await _cancel_task(producer_task, "producer")
     finally:
-        producer_task.cancel()
-        consumer_task.cancel()
+        cleanup_cancelled = False
+        for task, task_name in ((producer_task, "producer"), (consumer_task, "consumer")):
+            try:
+                await _cancel_task(task, task_name)
+            except asyncio.CancelledError:
+                cleanup_cancelled = True
+                logger.debug(f"{route} parent cancellation while cleaning up {task_name} task")
+            except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as cleanup_exc:
+                logger.debug(f"{route} cleanup for {task_name} task failed: error={cleanup_exc}")
+        if cleanup_cancelled:
+            raise asyncio.CancelledError
 
 
 async def _audio_ws_authenticate(
@@ -445,9 +521,10 @@ async def _audio_ws_authenticate(
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"Failed to read X-API-KEY header: {exc}")
             x_api_key = None
-        # Query-string token support (multi-user): allow `?token=` as an API key
-        # source when no X-API-KEY header is present.
-        if not x_api_key:
+        # Legacy query-string token support is disabled by default because URLs
+        # are frequently captured in logs and browser history.
+        allow_query_token_auth = _allow_query_token_auth()
+        if not x_api_key and allow_query_token_auth:
             try:
                 query_token = websocket.query_params.get("token") if hasattr(websocket, "query_params") else None
             except Exception as exc:  # noqa: BLE001
@@ -538,8 +615,9 @@ async def _audio_ws_authenticate(
             parts = auth_header.split()
             if len(parts) == 2 and parts[0].lower() == "bearer":
                 bearer = parts[1]
-        if not bearer:
-            # Fallback: support `?token=` as a JWT bearer source in multi-user mode.
+        if not bearer and allow_query_token_auth:
+            # Legacy fallback: support `?token=` as a JWT bearer source only
+            # when explicitly enabled.
             try:
                 query_token = websocket.query_params.get("token") if hasattr(websocket, "query_params") else None
             except Exception as exc:  # noqa: BLE001
@@ -615,11 +693,13 @@ async def _audio_ws_authenticate(
     header_bearer = None
     if auth_header and auth_header.lower().startswith("bearer "):
         header_bearer = auth_header.split(" ", 1)[1].strip()
-    try:
-        query_token = websocket.query_params.get("token") if hasattr(websocket, "query_params") else None
-    except Exception as exc:  # noqa: BLE001
-        logger.debug(f"Failed to read query token: {exc}")
-        query_token = None
+    query_token = None
+    if _allow_query_token_auth():
+        try:
+            query_token = websocket.query_params.get("token") if hasattr(websocket, "query_params") else None
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"Failed to read query token: {exc}")
+            query_token = None
 
     if (
         (header_api_key and header_api_key == expected_key)

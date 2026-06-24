@@ -108,7 +108,7 @@ async def encode_audio_tokenizer(
                 status_code=400,
                 detail=_http_error_detail("Invalid JSON payload", request_id, exc=exc),
             ) from exc
-        audio_bytes = _decode_base64_payload(payload.audio_base64)
+        audio_bytes = _decode_base64_payload(payload.audio_base64, request_id=request_id)
         tokenizer_model = payload.tokenizer_model or tokenizer_model
         token_format = payload.token_format or token_format
         sample_rate_hint = payload.sample_rate
@@ -211,7 +211,7 @@ async def decode_audio_tokenizer(
     tokenizer_model = payload.tokenizer_model or settings["tokenizer_model"]
 
     if isinstance(payload.tokens, str):
-        token_bytes = _decode_base64_payload(payload.tokens)
+        token_bytes = _decode_base64_payload(payload.tokens, request_id=request_id)
         _enforce_payload_limit(token_bytes, settings["tokenizer_max_payload_mb"], request_id)
         tokens = np.frombuffer(token_bytes, dtype=np.int32).tolist()
     elif isinstance(payload.tokens, list):

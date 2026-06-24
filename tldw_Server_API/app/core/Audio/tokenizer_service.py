@@ -1,6 +1,8 @@
 import base64
+import binascii
 import importlib
 import io
+from inspect import Parameter, signature
 from typing import Any, Optional
 
 import numpy as np
@@ -46,11 +48,17 @@ def _get_qwen3_tokenizer_settings() -> dict[str, Any]:
     }
 
 
-def _decode_base64_payload(raw: str) -> bytes:
+def _decode_base64_payload(raw: str, request_id: Optional[str] = None) -> bytes:
     payload = raw
     if "," in payload:
         payload = payload.split(",", 1)[1]
-    return base64.b64decode(payload, validate=True)
+    try:
+        return base64.b64decode(payload, validate=True)
+    except (binascii.Error, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_http_error_detail("Invalid base64 payload", request_id, exc=exc),
+        ) from exc
 
 
 def _enforce_payload_limit(payload_bytes: bytes, max_payload_mb: int, request_id: Optional[str]) -> None:
@@ -97,14 +105,48 @@ def _read_audio_from_bytes(
                     request_id,
                 ),
             ) from None
-        pcm = np.frombuffer(audio_bytes, dtype=np.int16)
+        try:
+            sample_rate = int(sample_rate_hint)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_http_error_detail("Invalid sample_rate for raw PCM", request_id, exc=exc),
+            ) from exc
+        if sample_rate <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_http_error_detail("sample_rate must be a positive integer for raw PCM", request_id),
+            )
+        if len(audio_bytes) % np.dtype(np.int16).itemsize != 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_http_error_detail("Raw PCM payload length must be a multiple of 2 bytes", request_id),
+            )
+        try:
+            pcm = np.frombuffer(audio_bytes, dtype=np.int16)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_http_error_detail("Invalid raw PCM payload", request_id, exc=exc),
+            ) from exc
         audio_data = pcm.astype(np.float32) / 32768.0
-        sample_rate = int(sample_rate_hint)
 
     if audio_data.ndim > 1:
         audio_data = np.mean(audio_data, axis=1)
-    duration_seconds = float(len(audio_data)) / float(sample_rate or 24000)
-    return audio_data, int(sample_rate), duration_seconds
+    try:
+        sample_rate_int = int(sample_rate)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_http_error_detail("Decoded audio sample rate is invalid", request_id, exc=exc),
+        ) from exc
+    if sample_rate_int <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_http_error_detail("Decoded audio sample rate must be positive", request_id),
+        )
+    duration_seconds = float(len(audio_data)) / float(sample_rate_int)
+    return audio_data, sample_rate_int, duration_seconds
 
 
 def _resolve_tokenizer_sample_rate(tokenizer: Any, fallback: int) -> int:
@@ -129,12 +171,31 @@ def _resolve_tokenizer_frame_rate(tokenizer: Any) -> Optional[float]:
     return None
 
 
+def _callable_supports_keyword(fn: Any, keyword: str) -> bool:
+    """Return whether a callable explicitly accepts the named keyword."""
+    try:
+        params = signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(param.kind == Parameter.VAR_KEYWORD or param.name == keyword for param in params)
+
+
+def _local_only_not_supported() -> HTTPException:
+    """Build the fail-closed response for backends without local-only loading."""
+    return HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Tokenizer backend cannot enforce local-only model loading",
+    )
+
+
 def _instantiate_tokenizer(tokenizer_cls: Any, model_id: str, allow_download: bool) -> Any:
     if hasattr(tokenizer_cls, "from_pretrained"):
-        try:
-            return tokenizer_cls.from_pretrained(model_id, local_files_only=not allow_download)
-        except TypeError:
-            return tokenizer_cls.from_pretrained(model_id)
+        from_pretrained = tokenizer_cls.from_pretrained
+        if _callable_supports_keyword(from_pretrained, "local_files_only"):
+            return from_pretrained(model_id, local_files_only=not allow_download)
+        if not allow_download:
+            raise _local_only_not_supported()
+        return from_pretrained(model_id)
     try:
         return tokenizer_cls(model_id)
     except TypeError:
@@ -158,6 +219,10 @@ def _load_qwen3_tokenizer(model_id: str, allow_download: bool) -> Any:
     for fn_name in ("load_tokenizer", "get_tokenizer", "create_tokenizer"):
         fn = getattr(module, fn_name, None)
         if callable(fn):
+            if _callable_supports_keyword(fn, "local_files_only"):
+                return fn(model_id, local_files_only=not allow_download)
+            if not allow_download:
+                raise _local_only_not_supported()
             try:
                 return fn(model_id)
             except Exception:

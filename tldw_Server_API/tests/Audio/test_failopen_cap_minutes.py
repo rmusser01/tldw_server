@@ -100,6 +100,13 @@ def test_failopen_default_when_no_env_or_config(monkeypatch):
     assert abs(mod._get_failopen_cap_minutes() - 5.0) < 1e-6
 
 
+def test_expected_quota_exceptions_do_not_catch_programmer_errors():
+    from tldw_Server_API.app.core.Audio import quota_helpers
+
+    assert NameError not in quota_helpers.EXPECTED_DB_EXC
+    assert NameError not in quota_helpers.EXPECTED_REDIS_EXC
+
+
 def test_failopen_env_overrides(monkeypatch):
 
 
@@ -287,6 +294,41 @@ async def test_aggregate_resolve_tts_byok_user_id_failure_log_is_sanitized(monke
 
     assert result == (None, None, None)
     _assert_sanitized_debug_log(logger_stub, "Failed to extract user_id from current_user")
+
+
+@pytest.mark.asyncio
+async def test_aggregate_resolve_tts_byok_delegates_to_core(monkeypatch):
+    from tldw_Server_API.app.core.Audio import tts_service
+
+    mod = _import_audio_aggregate_module(monkeypatch, cfg=_fake_cfg({}))
+    calls = []
+
+    async def _core_resolver(**kwargs):
+        calls.append(kwargs)
+        return 42, {"api_key": "resolved"}, types.SimpleNamespace(uses_byok=True)
+
+    monkeypatch.setattr(tts_service, "_resolve_tts_byok", _core_resolver)
+
+    request = object()
+    user = types.SimpleNamespace(id=7)
+
+    result = await mod._resolve_tts_byok(
+        provider_hint=None,
+        current_user=user,
+        request=request,
+        force_oauth_refresh=True,
+    )
+
+    assert result[0] == 42
+    assert result[1] == {"api_key": "resolved"}
+    assert calls == [
+        {
+            "provider_hint": None,
+            "current_user": user,
+            "request": request,
+            "force_oauth_refresh": True,
+        }
+    ]
 
 
 def test_aggregate_quota_helper_import_logs_are_sanitized(monkeypatch):

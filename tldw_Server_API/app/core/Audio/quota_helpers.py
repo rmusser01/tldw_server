@@ -24,8 +24,8 @@ try:
 except ImportError:  # pragma: no cover
     AuthNZDatabaseError = None  # type: ignore
 
-# Build precise exception tuples we’ll catch in quota-limit helpers
-EXPECTED_DB_EXC = (NameError,)  # NameError if optional imports are unavailable
+# Build precise exception tuples we’ll catch in quota-limit helpers.
+EXPECTED_DB_EXC = ()
 if hasattr(sqlite3, "Error"):
     EXPECTED_DB_EXC = (*EXPECTED_DB_EXC, sqlite3.Error)  # type: ignore[attr-defined]
 if asyncpg and hasattr(asyncpg, "PostgresError"):
@@ -35,7 +35,7 @@ if aiosqlite and hasattr(aiosqlite, "Error"):
 if AuthNZDatabaseError is not None:
     EXPECTED_DB_EXC = (*EXPECTED_DB_EXC, AuthNZDatabaseError)  # type: ignore
 
-EXPECTED_REDIS_EXC = (NameError,)
+EXPECTED_REDIS_EXC = ()
 if redis_exceptions and hasattr(redis_exceptions, "RedisError"):
     EXPECTED_REDIS_EXC = (*EXPECTED_REDIS_EXC, redis_exceptions.RedisError)  # type: ignore[attr-defined]
 

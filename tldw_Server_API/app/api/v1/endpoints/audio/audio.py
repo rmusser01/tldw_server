@@ -5,9 +5,8 @@ import importlib
 import os
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from loguru import logger
-from starlette import status
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import get_usage_event_logger
@@ -106,14 +105,6 @@ get_tts_service = audio_tts.get_tts_service
 get_usage_event_logger = get_usage_event_logger
 check_rate_limit = check_rate_limit
 
-# Shared helper re-exports used in tests
-from tldw_Server_API.app.core.Audio.tts_service import (
-    _tts_fallback_resolver,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    record_byok_missing_credentials,
-    resolve_byok_credentials,
-)
 from tldw_Server_API.app.core.config import load_comprehensive_config as _load_comprehensive_config
 
 # Re-export config loader for tests to monkeypatch
@@ -128,51 +119,14 @@ async def _resolve_tts_byok(
     force_oauth_refresh: bool = False,
 ):
     """Wrapper to preserve audio.py patch points for BYOK resolution."""
-    user_id_int = None
-    try:
-        user_id_int = getattr(current_user, "id_int", None)
-        if user_id_int is None:
-            raw_id = getattr(current_user, "id", None)
-            if raw_id is not None:
-                user_id_int = int(raw_id)
-    except (AttributeError, TypeError, ValueError):
-        logger.debug("Failed to extract user_id from current_user")
-        user_id_int = None
+    from tldw_Server_API.app.core.Audio import tts_service as core_tts_service
 
-    tts_overrides = None
-    byok_tts_resolution = None
-    if provider_hint:
-        resolver = resolve_byok_credentials
-        try:
-            from tldw_Server_API.app.api.v1.endpoints import audio as _audio_pkg
-
-            resolver = getattr(_audio_pkg, "resolve_byok_credentials", resolve_byok_credentials)
-        except Exception:
-            resolver = resolve_byok_credentials
-        byok_tts_resolution = await resolver(
-            provider_hint,
-            user_id=user_id_int,
-            request=request,
-            fallback_resolver=_tts_fallback_resolver,
-            force_oauth_refresh=force_oauth_refresh,
-        )
-        if byok_tts_resolution.uses_byok:
-            tts_overrides = {"api_key": byok_tts_resolution.api_key}
-            base_url = byok_tts_resolution.credential_fields.get("base_url")
-            if isinstance(base_url, str) and base_url.strip():
-                tts_overrides["base_url"] = base_url.strip()
-        elif not byok_tts_resolution.api_key:
-            if provider_hint in {"openai", "elevenlabs"}:
-                record_byok_missing_credentials(provider_hint, operation="audio_tts")
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={
-                        "error_code": "missing_provider_credentials",
-                        "message": f"TTS provider '{provider_hint}' requires an API key.",
-                    },
-                )
-
-    return user_id_int, tts_overrides, byok_tts_resolution
+    return await core_tts_service._resolve_tts_byok(
+        provider_hint=provider_hint,
+        current_user=current_user,
+        request=request,
+        force_oauth_refresh=force_oauth_refresh,
+    )
 
 
 def _get_failopen_cap_minutes() -> float:

@@ -234,8 +234,8 @@ async def _resolve_tts_byok(
             raw_id = getattr(current_user, "id", None)
             if raw_id is not None:
                 user_id_int = int(raw_id)
-    except (AttributeError, TypeError, ValueError) as exc:
-        logger.debug(f"Failed to extract user_id from current_user: {exc}")
+    except (AttributeError, TypeError, ValueError):
+        logger.debug("Failed to extract user_id from current_user")
         user_id_int = None
 
     tts_overrides: Optional[dict[str, Any]] = None
