@@ -7,15 +7,20 @@ Coordinates between the billing repository and Stripe client.
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.Billing.plan_limits import check_limit, get_plan_limits
 from tldw_Server_API.app.core.Billing.runtime_flags import is_billing_enabled
+
+_LOCAL_REDIRECT_HOSTS = {"localhost", "127.0.0.1", "::1"}
+_BILLING_CYCLES = {"monthly", "yearly"}
 
 
 @dataclass
@@ -56,6 +61,66 @@ class SubscriptionStatus:
     trial_end: str | None
     cancel_at_period_end: bool
     limits: dict[str, Any]
+
+
+def _safe_exception_label(exc: BaseException) -> str:
+    """Return a sanitized exception label suitable for billing audit state."""
+    return exc.__class__.__name__
+
+
+def _get_public_web_base_url() -> str | None:
+    """Resolve the public web base URL without requiring settings at import time."""
+    env_value = os.getenv("PUBLIC_WEB_BASE_URL")
+    if env_value:
+        return env_value.strip()
+    try:
+        from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+        value = getattr(get_settings(), "PUBLIC_WEB_BASE_URL", None)
+    except Exception as exc:
+        logger.warning(
+            "Unable to resolve PUBLIC_WEB_BASE_URL from settings; error_type={}",
+            _safe_exception_label(exc),
+        )
+        return None
+    return str(value).strip() if value else None
+
+
+def _url_origin_tuple(url: str) -> tuple[str, str, int | None]:
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    hostname = (parsed.hostname or "").strip().lower()
+    port = parsed.port
+    if (scheme == "https" and port == 443) or (scheme == "http" and port == 80):
+        port = None
+    return scheme, hostname, port
+
+
+def _validate_checkout_redirect_url(url: str, label: str) -> str:
+    """Validate a checkout or portal redirect URL against the configured public origin."""
+    value = str(url or "").strip()
+    parsed = urlparse(value)
+    hostname = (parsed.hostname or "").strip().lower()
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc or not hostname:
+        raise ValueError(f"Redirect URL for {label} must be an absolute HTTP(S) URL")
+    if parsed.username or parsed.password:
+        raise ValueError(f"Redirect URL for {label} must not include credentials")
+    if parsed.scheme.lower() != "https" and hostname not in _LOCAL_REDIRECT_HOSTS:
+        raise ValueError(f"Redirect URL for {label} must use HTTPS")
+
+    public_base_url = _get_public_web_base_url()
+    if public_base_url:
+        allowed_origin = _url_origin_tuple(public_base_url)
+        if _url_origin_tuple(value) != allowed_origin:
+            raise ValueError(f"Redirect URL for {label} is not allowed")
+    return value
+
+
+def _normalize_billing_cycle(billing_cycle: str) -> str:
+    normalized = str(billing_cycle or "").strip().lower()
+    if normalized not in _BILLING_CYCLES:
+        raise ValueError("billing_cycle must be 'monthly' or 'yearly'")
+    return normalized
 
 
 class SubscriptionService:
@@ -115,6 +180,10 @@ class SubscriptionService:
         synthesize the neutral free/self-host tier so the public endpoint
         never returns an empty catalog on a fresh install.
         """
+        if self._billing_repo is not None and hasattr(self._billing_repo, "list_plans"):
+            plans = await self._billing_repo.list_plans(active_only=True, public_only=True)
+            if plans:
+                return plans
         return [self._free_plan_record()]
 
     async def get_plan(self, plan_name: str) -> dict[str, Any] | None:
@@ -123,7 +192,12 @@ class SubscriptionService:
         Only the neutral free/self-host fallback is synthesized when the
         database does not contain a matching plan row.
         """
-        if str(plan_name).strip().lower() != "free":
+        normalized_name = str(plan_name).strip().lower()
+        if self._billing_repo is not None and hasattr(self._billing_repo, "get_plan_by_name"):
+            plan = await self._billing_repo.get_plan_by_name(normalized_name)
+            if plan and (normalized_name == "free" or plan.get("is_public") is not False):
+                return plan
+        if normalized_name != "free":
             return None
         return self._free_plan_record()
 
@@ -155,7 +229,26 @@ class SubscriptionService:
         Organizations without an explicit subscription are treated as being
         on the implicit free tier.
         """
+        repo = self._billing_repo
+        sub = None
+        if repo is not None and hasattr(repo, "get_org_subscription"):
+            sub = await repo.get_org_subscription(org_id)
+
         limits = await self.get_org_limits(org_id)
+        if sub:
+            plan_name = str(sub.get("plan_name") or "free")
+            return SubscriptionStatus(
+                org_id=org_id,
+                plan_name=plan_name,
+                plan_display_name=str(sub.get("plan_display_name") or plan_name.title()),
+                status=str(sub.get("status") or "active"),
+                billing_cycle=sub.get("billing_cycle"),
+                current_period_end=sub.get("current_period_end"),
+                trial_end=sub.get("trial_end"),
+                cancel_at_period_end=bool(sub.get("cancel_at_period_end")),
+                limits=limits,
+            )
+
         return SubscriptionStatus(
             org_id=org_id,
             plan_name="free",
@@ -247,55 +340,54 @@ class SubscriptionService:
         if not is_billing_enabled():
             raise RuntimeError("Billing is not enabled")
 
+        success_url = _validate_checkout_redirect_url(success_url, "success_url")
+        cancel_url = _validate_checkout_redirect_url(cancel_url, "cancel_url")
+        normalized_cycle = _normalize_billing_cycle(billing_cycle)
+
         stripe = self._get_stripe_client()
         if not stripe.is_available:
             raise RuntimeError("Stripe is not configured")
 
         repo = await self._require_billing_repo()
+        plan = await repo.get_plan_by_name(plan_name)
+        if not plan:
+            raise ValueError(f"Plan '{plan_name}' not found")
+        if plan.get("is_active") is False:
+            raise ValueError(f"Plan '{plan_name}' is not active")
+        if plan.get("is_public") is False:
+            raise ValueError(f"Plan '{plan_name}' is not public")
 
-        # Get or create Stripe customer
+        # Get price ID
+        price_id = stripe.get_price_id(plan_name, normalized_cycle)
+        if not price_id:
+            if normalized_cycle == "yearly":
+                price_id = plan.get("stripe_price_id_yearly")
+            else:
+                price_id = plan.get("stripe_price_id")
+
+        if not price_id:
+            raise ValueError(f"No Stripe price configured for plan '{plan_name}'")
+
+        # Get or create Stripe customer only after all local preconditions pass.
         sub = await repo.get_org_subscription(org_id)
         customer_id = sub.get("stripe_customer_id") if sub else None
 
         if not customer_id:
-            # Create Stripe customer record first so we have a stable id for
-            # downstream billing flows, then ensure the requested plan exists.
             customer_id = await stripe.create_customer(
                 email=org_email,
                 name=org_name,
                 metadata={"org_id": str(org_id)},
             )
-            # Save customer ID
             if sub:
                 await repo.update_org_subscription(org_id, stripe_customer_id=customer_id)
             else:
-                # Create pending subscription; unknown plans are treated as an
-                # error rather than silently defaulting to an arbitrary plan.
-                plan = await repo.get_plan_by_name(plan_name)
-                if not plan:
-                    raise ValueError(f"Plan '{plan_name}' not found")
                 await repo.create_org_subscription(
                     org_id=org_id,
                     plan_id=plan["id"],
                     stripe_customer_id=customer_id,
-                    billing_cycle=billing_cycle,
+                    billing_cycle=normalized_cycle,
                     status="pending",
                 )
-
-        # Get price ID
-        normalized_cycle = billing_cycle.lower()
-        price_id = stripe.get_price_id(plan_name, normalized_cycle)
-        if not price_id:
-            # Try to get from database plan
-            plan = await repo.get_plan_by_name(plan_name)
-            if plan:
-                if normalized_cycle == "yearly":
-                    price_id = plan.get("stripe_price_id_yearly")
-                else:
-                    price_id = plan.get("stripe_price_id")
-
-        if not price_id:
-            raise ValueError(f"No Stripe price configured for plan '{plan_name}'")
 
         # Create checkout session
         session = await stripe.create_checkout_session(
@@ -306,7 +398,7 @@ class SubscriptionService:
             metadata={
                 "org_id": str(org_id),
                 "plan_name": plan_name,
-                "billing_cycle": billing_cycle,
+                "billing_cycle": normalized_cycle,
             },
         )
 
@@ -316,7 +408,7 @@ class SubscriptionService:
             action="checkout.initiated",
             details={
                 "plan_name": plan_name,
-                "billing_cycle": billing_cycle,
+                "billing_cycle": normalized_cycle,
                 "checkout_session_id": session.id,
             },
         )
@@ -336,6 +428,8 @@ class SubscriptionService:
         """
         if not is_billing_enabled():
             raise RuntimeError("Billing is not enabled")
+
+        return_url = _validate_checkout_redirect_url(return_url, "return_url")
 
         stripe = self._get_stripe_client()
         if not stripe.is_available:
@@ -466,7 +560,8 @@ class SubscriptionService:
 
     async def get_org_limits(self, org_id: int) -> dict[str, Any]:
         """Get the effective limits for an organization."""
-        del org_id
+        if self._billing_repo is not None and hasattr(self._billing_repo, "get_org_limits"):
+            return await self._billing_repo.get_org_limits(org_id)
         return get_plan_limits("free")
 
     async def check_usage(
@@ -521,6 +616,8 @@ class SubscriptionService:
         self,
         event_type: str,
         event_data: dict[str, Any],
+        *,
+        stripe_event_id: str | None = None,
     ) -> dict[str, Any]:
         """
         Handle a Stripe webhook event.
@@ -545,10 +642,63 @@ class SubscriptionService:
 
         handler = handlers.get(event_type)
         if handler:
+            if stripe_event_id:
+                return await self._handle_idempotent_webhook_event(
+                    stripe_event_id=stripe_event_id,
+                    event_type=event_type,
+                    event_data=event_data,
+                    repo=repo,
+                    handler=handler,
+                )
             return await handler(event_data, repo)
 
         logger.debug(f"Unhandled webhook event type: {event_type}")
         return {"handled": False, "event_type": event_type, "retryable": False}
+
+    async def _handle_idempotent_webhook_event(
+        self,
+        *,
+        stripe_event_id: str,
+        event_type: str,
+        event_data: dict[str, Any],
+        repo: Any,
+        handler: Any,
+    ) -> dict[str, Any]:
+        """Claim a Stripe event ID before running mutating webhook handlers."""
+        record_event = getattr(repo, "record_webhook_event", None)
+        try_claim = getattr(repo, "try_claim_webhook_event", None)
+        mark_processed = getattr(repo, "mark_webhook_processed", None)
+
+        if record_event is not None:
+            is_new_event = await record_event(stripe_event_id, event_type, event_data)
+            if is_new_event is False and try_claim is None:
+                return {
+                    "handled": True,
+                    "event_type": event_type,
+                    "duplicate": True,
+                    "retryable": False,
+                }
+
+        if try_claim is not None:
+            claimed = await try_claim(stripe_event_id)
+            if not claimed:
+                return {
+                    "handled": True,
+                    "event_type": event_type,
+                    "duplicate": True,
+                    "retryable": False,
+                }
+
+        try:
+            result = await handler(event_data, repo)
+        except Exception as exc:
+            if mark_processed is not None:
+                await mark_processed(stripe_event_id, error_message=_safe_exception_label(exc))
+            raise
+
+        if mark_processed is not None:
+            await mark_processed(stripe_event_id)
+        return result
 
     async def _handle_checkout_completed(
         self,

@@ -1,7 +1,7 @@
 # Billing
 
-The Billing module owns OSS/self-host plan limits, overage settings, billing
-audit records, and runtime limit enforcement. Historical Stripe checkout,
+The Billing module owns OSS/self-host plan limits, overage settings, and runtime
+limit enforcement. Historical Stripe checkout,
 portal, and webhook compatibility remains in the service layer for non-public
 or injected-client deployments, but the public OSS runtime keeps payment
 billing disabled.
@@ -14,7 +14,7 @@ billing disabled.
   billing.
 - Historical subscription and injected-client Stripe compatibility:
   `subscription_service.py`.
-- Audit helpers: `billing_audit.py`.
+- Audit persistence for compatibility flows: `app/core/AuthNZ/repos/billing_repo.py`.
 - API dependency helpers: `app/api/v1/API_Deps/billing_deps.py`.
 - API endpoint and schemas: `app/api/v1/endpoints/billing.py` and
   `app/api/v1/schemas/billing_schemas.py`.
@@ -30,7 +30,8 @@ billing disabled.
   request contexts.
 - Preserve non-public/injected-client checkout, portal, and webhook
   compatibility paths without exposing an active public payment runtime.
-- Record billing audit events without leaking secrets or raw provider payloads.
+- Record billing audit events through the AuthNZ billing repository without
+  leaking secrets or raw provider payloads.
 
 ## Module Map
 
@@ -41,7 +42,8 @@ billing disabled.
   resume, and webhook compatibility, but `_get_stripe_client()` raises in OSS
   unless a client is injected and `runtime_flags.is_billing_enabled()` still
   reports payment billing disabled.
-- `billing_audit.py` records security-relevant billing events.
+- `app/core/AuthNZ/repos/billing_repo.py` records security-relevant billing
+  events for compatibility flows.
 - `runtime_flags.py` centralizes the OSS payment-billing flag; `enforcement.py`
   reads `LIMIT_ENFORCEMENT_ENABLED` for quota enforcement.
 
@@ -86,8 +88,9 @@ billing disabled.
 - New overage mode: update `overage_config.py`,
   `tests/Billing/test_overage_config.py`, and integration coverage for allow,
   deny, and failure-mode behavior.
-- New provider compatibility event: update `subscription_service.py`,
-  `billing_audit.py`, webhook sanitization tests, and idempotency checks.
+- New provider compatibility event: update `subscription_service.py`, AuthNZ
+  billing repository audit handling, webhook sanitization tests, and idempotency
+  checks.
 
 ## Extension Points
 

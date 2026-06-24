@@ -8,11 +8,33 @@ Configures behavior when usage exceeds plan limits:
 """
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
+
+_ALLOWED_OVERAGE_MODES = {"hard_block", "degraded", "notify_only"}
+_DEFAULT_OVERAGE_MODE = "notify_only"
+_DEFAULT_GRACE_PERCENTAGE = 10.0
+_DEFAULT_NOTIFICATION_THRESHOLD = 80.0
+
+
+def _safe_float_from_env(env_name: str, default: float) -> float:
+    """Parse a non-negative percentage from the environment."""
+    raw_value = os.getenv(env_name)
+    if raw_value is None:
+        return default
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        logger.warning("Invalid {} configured; using default", env_name)
+        return default
+    if not math.isfinite(value) or value < 0:
+        logger.warning("Invalid or negative {} configured; using default", env_name)
+        return default
+    return value
 
 
 @dataclass
@@ -32,10 +54,21 @@ class OveragePolicy:
         - ``BILLING_OVERAGE_GRACE_PCT`` (default ``10``)
         - ``BILLING_OVERAGE_NOTIFY_PCT`` (default ``80``)
         """
+        mode = os.getenv("BILLING_OVERAGE_MODE", _DEFAULT_OVERAGE_MODE).strip().lower()
+        if mode not in _ALLOWED_OVERAGE_MODES:
+            logger.warning("Invalid BILLING_OVERAGE_MODE configured; using default")
+            mode = _DEFAULT_OVERAGE_MODE
+
         return cls(
-            mode=os.getenv("BILLING_OVERAGE_MODE", "notify_only"),
-            grace_percentage=float(os.getenv("BILLING_OVERAGE_GRACE_PCT", "10")),
-            notification_threshold=float(os.getenv("BILLING_OVERAGE_NOTIFY_PCT", "80")),
+            mode=mode,
+            grace_percentage=_safe_float_from_env(
+                "BILLING_OVERAGE_GRACE_PCT",
+                _DEFAULT_GRACE_PERCENTAGE,
+            ),
+            notification_threshold=_safe_float_from_env(
+                "BILLING_OVERAGE_NOTIFY_PCT",
+                _DEFAULT_NOTIFICATION_THRESHOLD,
+            ),
         )
 
     def should_block(self, usage_pct: float) -> bool:

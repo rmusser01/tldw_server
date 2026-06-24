@@ -22,6 +22,26 @@ class TestOveragePolicyFromEnv:
         assert policy.grace_percentage == 5.0
         assert policy.notification_threshold == 90.0
 
+    def test_invalid_env_values_fall_back_to_safe_defaults(self, monkeypatch):
+        monkeypatch.setenv("BILLING_OVERAGE_MODE", "hard-block")
+        monkeypatch.setenv("BILLING_OVERAGE_GRACE_PCT", "-5")
+        monkeypatch.setenv("BILLING_OVERAGE_NOTIFY_PCT", "not-a-number")
+
+        policy = OveragePolicy.from_env()
+
+        assert policy.mode == "notify_only"
+        assert policy.grace_percentage == 10.0
+        assert policy.notification_threshold == 80.0
+
+    def test_non_finite_env_values_fall_back_to_safe_defaults(self, monkeypatch):
+        monkeypatch.setenv("BILLING_OVERAGE_GRACE_PCT", "nan")
+        monkeypatch.setenv("BILLING_OVERAGE_NOTIFY_PCT", "inf")
+
+        policy = OveragePolicy.from_env()
+
+        assert policy.grace_percentage == 10.0
+        assert policy.notification_threshold == 80.0
+
 
 class TestShouldBlock:
     def test_hard_block_under_grace(self):

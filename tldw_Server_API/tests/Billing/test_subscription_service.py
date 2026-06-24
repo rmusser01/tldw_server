@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 
 import pytest
 
+from tldw_Server_API.app.core.Billing import subscription_service as subscription_service_module
 from tldw_Server_API.app.core.Billing.subscription_service import SubscriptionService
 
 
@@ -160,8 +161,11 @@ class _FakeStripeClient:
     def __init__(self) -> None:
 
         self.is_available = True
+        self.created_customers: list[Dict[str, Any]] = []
+        self.created_sessions: list[Dict[str, Any]] = []
 
     async def create_customer(self, *, email: str, name: Optional[str] = None, metadata: Optional[Dict[str, str]] = None) -> str:
+        self.created_customers.append({"email": email, "name": name, "metadata": metadata})
         return "cus_test_123"
 
     def get_price_id(self, plan_name: str, billing_cycle: str = "monthly") -> Optional[str]:
@@ -179,6 +183,15 @@ class _FakeStripeClient:
     ):
         from tldw_Server_API.app.core.Billing.subscription_service import CheckoutSession
 
+        self.created_sessions.append(
+            {
+                "customer_id": customer_id,
+                "price_id": price_id,
+                "success_url": success_url,
+                "cancel_url": cancel_url,
+                "metadata": metadata,
+            }
+        )
         return CheckoutSession(id="sess_test_123", url="https://example.com/checkout")
 
 
@@ -433,6 +446,199 @@ async def test_create_checkout_session_unknown_plan_raises_value_error(monkeypat
 
     msg = str(exc_info.value)
     assert "Plan 'pro' not found" in msg
+    assert stripe_client.created_customers == []
+
+
+@pytest.mark.asyncio
+async def test_create_checkout_session_rejects_disallowed_redirect_before_stripe_side_effect(monkeypatch) -> None:
+    """Checkout redirects should be constrained to the configured public web origin."""
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Billing.subscription_service.is_billing_enabled",
+        lambda: True,
+    )
+    monkeypatch.setenv("PUBLIC_WEB_BASE_URL", "https://app.example.test")
+
+    repo = _FakeBillingRepo()
+    stripe_client = _FakeStripeClient()
+    service = SubscriptionService(billing_repo=repo, stripe_client=stripe_client)
+
+    with pytest.raises(ValueError, match="Redirect URL"):
+        await service.create_checkout_session(
+            org_id=42,
+            plan_name="pro",
+            billing_cycle="monthly",
+            success_url="https://evil.example.test/success",
+            cancel_url="https://app.example.test/cancel",
+            org_email="owner@example.com",
+            org_name="Example Org",
+        )
+
+    assert stripe_client.created_customers == []
+    assert stripe_client.created_sessions == []
+
+
+@pytest.mark.asyncio
+async def test_create_checkout_session_allows_equivalent_default_port_redirects(monkeypatch) -> None:
+    """Explicit default HTTPS ports should match an allowlist origin without a port."""
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Billing.subscription_service.is_billing_enabled",
+        lambda: True,
+    )
+    monkeypatch.setenv("PUBLIC_WEB_BASE_URL", "https://app.example.test")
+
+    repo = _FakeBillingRepo()
+    stripe_client = _FakeStripeClient()
+    service = SubscriptionService(billing_repo=repo, stripe_client=stripe_client)
+
+    await service.create_checkout_session(
+        org_id=42,
+        plan_name="pro",
+        billing_cycle="monthly",
+        success_url="https://app.example.test:443/success",
+        cancel_url="https://app.example.test/cancel",
+        org_email="owner@example.com",
+        org_name="Example Org",
+    )
+
+    assert len(stripe_client.created_customers) == 1
+    assert len(stripe_client.created_sessions) == 1
+
+
+def test_public_web_base_url_settings_failure_is_logged_without_raw_details(monkeypatch) -> None:
+    """Settings lookup failures should be visible without leaking raw exception text."""
+
+    monkeypatch.delenv("PUBLIC_WEB_BASE_URL", raising=False)
+
+    def _raise_settings_error():
+        raise RuntimeError("/private/secret-config-path")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.AuthNZ.settings.get_settings",
+        _raise_settings_error,
+    )
+    messages: list[str] = []
+    handler_id = subscription_service_module.logger.add(
+        lambda message: messages.append(str(message)),
+        format="{message}",
+    )
+    try:
+        assert subscription_service_module._get_public_web_base_url() is None
+    finally:
+        subscription_service_module.logger.remove(handler_id)
+
+    rendered_logs = "\n".join(messages)
+    assert "Unable to resolve PUBLIC_WEB_BASE_URL" in rendered_logs
+    assert "RuntimeError" in rendered_logs
+    assert "/private/secret-config-path" not in rendered_logs
+
+
+class _RepoForSubscriptionRead:
+    async def get_org_subscription(self, org_id: int) -> Dict[str, Any]:
+        assert org_id == 7
+        return {
+            "org_id": org_id,
+            "plan_name": "pro",
+            "plan_display_name": "Pro",
+            "status": "trialing",
+            "billing_cycle": "yearly",
+            "current_period_end": "2026-07-01T00:00:00+00:00",
+            "trial_end": "2026-06-30T00:00:00+00:00",
+            "cancel_at_period_end": True,
+            "effective_limits": {"api_calls_day": 5000, "llm_tokens_month": 5_000_000},
+        }
+
+    async def get_org_limits(self, org_id: int) -> Dict[str, Any]:
+        assert org_id == 7
+        return {"api_calls_day": 5000, "llm_tokens_month": 5_000_000}
+
+
+@pytest.mark.asyncio
+async def test_injected_subscription_repo_reads_return_persisted_subscription_and_limits() -> None:
+    """Injected-client compatibility should read back persisted subscription state."""
+
+    service = SubscriptionService(billing_repo=_RepoForSubscriptionRead())
+
+    subscription = await service.get_subscription(7)
+    limits = await service.get_org_limits(7)
+
+    assert subscription.plan_name == "pro"
+    assert subscription.plan_display_name == "Pro"
+    assert subscription.status == "trialing"
+    assert subscription.cancel_at_period_end is True
+    assert subscription.limits["api_calls_day"] == 5000
+    assert limits["llm_tokens_month"] == 5_000_000
+
+
+class _IdempotentWebhookRepo:
+    def __init__(self) -> None:
+        self.events: dict[str, str] = {}
+        self.payments: list[Dict[str, Any]] = []
+        self.marked: list[tuple[str, str | None]] = []
+
+    async def record_webhook_event(self, stripe_event_id: str, event_type: str, event_data: Dict[str, Any]) -> bool:
+        if stripe_event_id in self.events:
+            return False
+        self.events[stripe_event_id] = "pending"
+        return True
+
+    async def try_claim_webhook_event(self, stripe_event_id: str, *, processing_timeout_seconds: int | None = None) -> bool:
+        if self.events.get(stripe_event_id) == "processed":
+            return False
+        self.events[stripe_event_id] = "processing"
+        return True
+
+    async def mark_webhook_processed(self, stripe_event_id: str, *, error_message: str | None = None) -> None:
+        self.events[stripe_event_id] = "failed" if error_message else "processed"
+        self.marked.append((stripe_event_id, error_message))
+
+    async def get_subscription_by_stripe_customer(self, stripe_customer_id: str) -> Dict[str, Any]:
+        assert stripe_customer_id == "cus_idem"
+        return {"org_id": 88}
+
+    async def add_payment(self, **kwargs: Any) -> Dict[str, Any]:
+        self.payments.append(dict(kwargs))
+        return dict(kwargs)
+
+
+@pytest.mark.asyncio
+async def test_handle_webhook_event_claims_event_id_before_mutating_payment_history() -> None:
+    """Duplicate webhook event IDs should not create duplicate invoice payments."""
+
+    repo = _IdempotentWebhookRepo()
+    service = SubscriptionService(billing_repo=repo)
+    event_data = {
+        "object": {
+            "id": "in_test_123",
+            "customer": "cus_idem",
+            "amount_paid": 1200,
+            "currency": "usd",
+            "description": "Monthly plan",
+            "invoice_pdf": "https://stripe.example/invoice.pdf",
+        }
+    }
+
+    first = await service.handle_webhook_event(
+        "invoice.paid",
+        event_data,
+        stripe_event_id="evt_idem_1",
+    )
+    duplicate = await service.handle_webhook_event(
+        "invoice.paid",
+        event_data,
+        stripe_event_id="evt_idem_1",
+    )
+
+    assert first["handled"] is True
+    assert duplicate == {
+        "handled": True,
+        "event_type": "invoice.paid",
+        "duplicate": True,
+        "retryable": False,
+    }
+    assert len(repo.payments) == 1
+    assert repo.marked == [("evt_idem_1", None)]
 
 
 @pytest.mark.asyncio
