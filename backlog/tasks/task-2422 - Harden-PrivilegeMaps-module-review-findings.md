@@ -1,10 +1,10 @@
 ---
 id: TASK-2422
 title: Harden PrivilegeMaps module review findings
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-06-23 18:26
-updated_date: 2026-06-24 19:40
+updated_date: 2026-06-24 19:49
 labels:
 - authnz
 - privilege-maps
@@ -16,6 +16,12 @@ references:
 - tldw_Server_API/app/core/PrivilegeMaps/trends.py
 - tldw_Server_API/app/api/v1/endpoints/privileges.py
 priority: high
+modified_files:
+- tldw_Server_API/app/core/PrivilegeMaps/db_utils.py
+- tldw_Server_API/app/core/PrivilegeMaps/service.py
+- tldw_Server_API/tests/Privileges/test_privilege_endpoints.py
+- tldw_Server_API/tests/Privileges/test_privilege_service_sqlite.py
+- tldw_Server_API/tests/Privileges/test_privilege_snapshot_store.py
 ---
 
 ## Description
@@ -70,4 +76,10 @@ Hardened PrivilegeMaps against the review findings: transaction writes now norma
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Reopened to address PR #2461 review comments after initial push: rebase on latest dev, harden placeholder conversion around literal question marks, treat NULL active flags as inactive, clean up endpoint test formatting, and respond to the DB_Management boundary comment.
+PR #2461 follow-up verification completed after rebasing on latest dev:
+- source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Privileges/test_privilege_service_sqlite.py tldw_Server_API/tests/Privileges/test_privilege_snapshot_store.py tldw_Server_API/tests/Privileges/test_privilege_trends.py tldw_Server_API/tests/Privileges/test_privilege_role_normalization.py -q -> 15 passed
+- source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Privileges -q -> 42 passed
+- source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/PrivilegeMaps tldw_Server_API/app/api/v1/endpoints/privileges.py -f json -o /tmp/bandit_privilege_maps_2422_pr2461.json -> 0 findings
+- git diff --check -> clean
+Resolved review comments: robust PostgreSQL placeholder conversion skips SQL literals/identifiers/comments, NULL active flags are treated as inactive for users/teams/orgs, endpoint test signature was formatted. DB_Management boundary comment was addressed with PR discussion because a full PrivilegeMaps persistence relocation is broader than this hardening PR.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.PrivilegeMaps.db_utils import _question_marks_to_dollar_params
 from tldw_Server_API.app.core.PrivilegeMaps.snapshots import PrivilegeSnapshotStore
 
 
@@ -30,6 +31,28 @@ class _FakePostgresPool:
     @asynccontextmanager
     async def transaction(self):
         yield self.connection
+
+
+def test_question_mark_conversion_ignores_sql_literals_identifiers_and_comments() -> None:
+    query = (
+        "SELECT '?' AS literal, \"column?name\" "
+        "FROM privilege_snapshots "
+        "WHERE snapshot_id = ? AND generated_by = ? -- ? comment\n"
+        "AND catalog_version = ?"
+    )
+
+    assert _question_marks_to_dollar_params(query, 3) == (
+        "SELECT '?' AS literal, \"column?name\" "
+        "FROM privilege_snapshots "
+        "WHERE snapshot_id = $1 AND generated_by = $2 -- ? comment\n"
+        "AND catalog_version = $3"
+    )
+
+
+def test_question_mark_conversion_returns_original_on_placeholder_count_mismatch() -> None:
+    query = "SELECT '?' AS literal FROM privilege_snapshots WHERE snapshot_id = ?"
+
+    assert _question_marks_to_dollar_params(query, 2) == query
 
 
 @pytest.mark.asyncio

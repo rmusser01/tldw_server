@@ -20,7 +20,17 @@ class InMemoryTrendStore:
     def __init__(self) -> None:
         self.snapshots = []
 
-    async def record_snapshot(self, *, scope, group_by, catalog_version, generated_at, buckets, team_id=None, org_id=None):  # type: ignore[no-untyped-def]
+    async def record_snapshot(
+        self,
+        *,
+        scope,
+        group_by,
+        catalog_version,
+        generated_at,
+        buckets,
+        team_id=None,
+        org_id=None,
+    ):  # type: ignore[no-untyped-def]
         self.snapshots.append((scope, group_by, generated_at, buckets, team_id, org_id))
 
     async def compute_trends(self, *, scope, group_by, bucket_counts, window_start, window_end, team_id=None, org_id=None):  # type: ignore[no-untyped-def]

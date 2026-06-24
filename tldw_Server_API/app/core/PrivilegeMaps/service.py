@@ -543,7 +543,10 @@ class PrivilegeMapService:
             base_users: dict[str, dict[str, Any]] = {}
             for row in rows:
                 record = self._row_to_dict(row)
-                if not record or not self._truthy(record.get("is_active", 1)):
+                if not record or not self._truthy(
+                    record.get("is_active", 1),
+                    default=False,
+                ):
                     continue
                 user_id = str(record.get("id"))
                 base_users[user_id] = {
@@ -631,7 +634,7 @@ class PrivilegeMapService:
                 if (
                     record
                     and self._is_active_status(record.get("membership_status"))
-                    and self._truthy(record.get("team_is_active", 1))
+                    and self._truthy(record.get("team_is_active", 1), default=False)
                 ):
                     memberships.append(record)
             return memberships
@@ -657,7 +660,7 @@ class PrivilegeMapService:
                 if (
                     record
                     and self._is_active_status(record.get("membership_status"))
-                    and self._truthy(record.get("org_is_active", 1))
+                    and self._truthy(record.get("org_is_active", 1), default=False)
                 ):
                     memberships.append(record)
             return memberships

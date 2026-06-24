@@ -375,10 +375,18 @@ async def test_privilege_service_org_filter_uses_org_members(tmp_path, monkeypat
                 """,
                 (username, email, "hashed", 1, primary_role),
             )
+        await conn.execute(
+            """
+            INSERT INTO users (username, email, password_hash, is_active, role)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("org-user-4", "org4@example.com", "hashed", None, "viewer"),
+        )
 
     user1_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "org-user-1")
     user2_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "org-user-2")
     user3_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "org-user-3")
+    user4_id = await _fetch_id(pool, "SELECT id FROM users WHERE username = ?", "org-user-4")
 
     async with pool.transaction() as conn:
         await conn.execute(
@@ -413,10 +421,17 @@ async def test_privilege_service_org_filter_uses_org_members(tmp_path, monkeypat
             INSERT OR IGNORE INTO org_members (org_id, user_id, role, status)
             VALUES (?, ?, ?, ?)
             """,
+            (org1_id, user4_id, "member", "active"),
+        )
+        await conn.execute(
+            """
+            INSERT OR IGNORE INTO org_members (org_id, user_id, role, status)
+            VALUES (?, ?, ?, ?)
+            """,
             (org2_id, user3_id, "member", "active"),
         )
         await conn.execute(
-            "UPDATE organizations SET is_active = 0 WHERE id = ?",
+            "UPDATE organizations SET is_active = NULL WHERE id = ?",
             (org2_id,),
         )
 
@@ -496,8 +511,8 @@ async def test_privilege_service_team_filter_uses_active_memberships_and_teams(t
             (org_id, "Active Team", "active-team"),
         )
         await conn.execute(
-            "INSERT INTO teams (org_id, name, slug, is_active) VALUES (?, ?, ?, 0)",
-            (org_id, "Inactive Team", "inactive-team"),
+            "INSERT INTO teams (org_id, name, slug, is_active) VALUES (?, ?, ?, ?)",
+            (org_id, "Inactive Team", "inactive-team", None),
         )
 
     active_team_id = await _fetch_id(pool, "SELECT id FROM teams WHERE slug = ?", "active-team")
