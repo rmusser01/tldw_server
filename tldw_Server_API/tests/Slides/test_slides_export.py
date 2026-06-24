@@ -7,6 +7,7 @@ from tldw_Server_API.app.core.Slides.slides_export import (
     SlidesAssetsMissingError,
     SlidesExportInputError,
     _normalize_pdf_options,
+    _sanitize_markdown,
     export_presentation_bundle,
     export_presentation_markdown,
 )
@@ -81,6 +82,41 @@ def test_export_bundle_includes_assets(tmp_path):
         assert "assets/custom.css" in index_html
         assert "data:image/png;base64," in index_html
         assert "alt=\"Logo\"" in index_html
+
+
+def test_export_bundle_escapes_settings_for_inline_script(tmp_path):
+    assets_dir = _build_assets(tmp_path)
+    bundle = export_presentation_bundle(
+        title="Deck",
+        slides=[
+            {
+                "order": 0,
+                "layout": "content",
+                "title": "Slide",
+                "content": "Hello",
+                "speaker_notes": None,
+                "metadata": {},
+            }
+        ],
+        theme="black",
+        settings={"transition": "</script><script>alert(1)</script>", "controls": True},
+        custom_css=None,
+        assets_dir=assets_dir,
+    )
+
+    with zipfile.ZipFile(io.BytesIO(bundle)) as zf:
+        index_html = zf.read("index.html").decode("utf-8")
+
+    assert "</script><script>alert(1)</script>" not in index_html
+    assert "\\u003c/script\\u003e\\u003cscript\\u003ealert(1)\\u003c/script\\u003e" in index_html
+
+
+def test_sanitize_markdown_uses_bleach_without_css_sanitizer():
+    html = _sanitize_markdown("- one")
+
+    assert "<ul>" in html
+    assert "<li>one</li>" in html
+    assert "&lt;ul" not in html
 
 
 @pytest.mark.unit

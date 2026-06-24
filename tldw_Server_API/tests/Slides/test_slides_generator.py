@@ -55,6 +55,34 @@ def test_generate_rejects_large_input_without_chunking():
         )
 
 
+def test_generate_rejects_excessive_chunk_fanout(monkeypatch):
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Slides.slides_generator.is_test_mode",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Slides.slides_generator.MAX_SOURCE_CHUNKS",
+        2,
+    )
+    generator = SlidesGenerator(llm_call=_stub_llm_call)
+
+    with pytest.raises(SlidesSourceTooLargeError):
+        generator.generate_from_text(
+            source_text=" ".join(f"word{i}" for i in range(9)),
+            title_hint=None,
+            provider="openai",
+            model=None,
+            api_key=None,
+            temperature=None,
+            max_tokens=None,
+            max_source_tokens=None,
+            max_source_chars=None,
+            enable_chunking=True,
+            chunk_size_tokens=3,
+            summary_tokens=None,
+        )
+
+
 def test_generate_parses_json_response(monkeypatch):
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Slides.slides_generator.is_test_mode",

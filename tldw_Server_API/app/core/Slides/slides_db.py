@@ -89,6 +89,7 @@ class VisualStyleRow:
 class SlidesDatabase:
     _SCHEMA_VERSION = 1
     _schema_init_paths: ClassVar[set[str]] = set()
+    _schema_init_lock: ClassVar[threading.Lock] = threading.Lock()
 
     def __init__(self, db_path: str | Path, client_id: str) -> None:
         if not client_id:
@@ -104,125 +105,130 @@ class SlidesDatabase:
         self._ensure_schema()
 
     def _ensure_schema(self) -> None:
-        if self._db_path_str in self._schema_init_paths:
+        cache_schema_path = self._db_path_str != ":memory:"
+        if cache_schema_path and self._db_path_str in self._schema_init_paths:
             return
-        conn = self.get_connection()
-        try:
-            conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS schema_version (
-                    version INTEGER PRIMARY KEY NOT NULL
-                );
-                INSERT OR IGNORE INTO schema_version (version) VALUES (0);
+        with self._schema_init_lock:
+            if cache_schema_path and self._db_path_str in self._schema_init_paths:
+                return
+            conn = self.get_connection()
+            try:
+                conn.executescript(
+                    """
+                    CREATE TABLE IF NOT EXISTS schema_version (
+                        version INTEGER PRIMARY KEY NOT NULL
+                    );
+                    INSERT OR IGNORE INTO schema_version (version) VALUES (0);
 
-                CREATE TABLE IF NOT EXISTS presentations (
-                    id TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    description TEXT,
-                    theme TEXT DEFAULT 'black',
-                    marp_theme TEXT,
-                    template_id TEXT,
-                    visual_style_id TEXT,
-                    visual_style_scope TEXT,
-                    visual_style_name TEXT,
-                    visual_style_version INTEGER,
-                    visual_style_snapshot TEXT,
-                    settings TEXT,
-                    studio_data TEXT,
-                    slides TEXT NOT NULL,
-                    slides_text TEXT NOT NULL,
-                    source_type TEXT,
-                    source_ref TEXT,
-                    source_query TEXT,
-                    custom_css TEXT,
-                    created_at DATETIME NOT NULL,
-                    last_modified DATETIME NOT NULL,
-                    deleted INTEGER DEFAULT 0,
-                    client_id TEXT NOT NULL,
-                    version INTEGER DEFAULT 1
-                );
+                    CREATE TABLE IF NOT EXISTS presentations (
+                        id TEXT PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        description TEXT,
+                        theme TEXT DEFAULT 'black',
+                        marp_theme TEXT,
+                        template_id TEXT,
+                        visual_style_id TEXT,
+                        visual_style_scope TEXT,
+                        visual_style_name TEXT,
+                        visual_style_version INTEGER,
+                        visual_style_snapshot TEXT,
+                        settings TEXT,
+                        studio_data TEXT,
+                        slides TEXT NOT NULL,
+                        slides_text TEXT NOT NULL,
+                        source_type TEXT,
+                        source_ref TEXT,
+                        source_query TEXT,
+                        custom_css TEXT,
+                        created_at DATETIME NOT NULL,
+                        last_modified DATETIME NOT NULL,
+                        deleted INTEGER DEFAULT 0,
+                        client_id TEXT NOT NULL,
+                        version INTEGER DEFAULT 1
+                    );
 
-                CREATE INDEX IF NOT EXISTS idx_presentations_deleted ON presentations(deleted);
-                CREATE INDEX IF NOT EXISTS idx_presentations_created ON presentations(created_at);
+                    CREATE INDEX IF NOT EXISTS idx_presentations_deleted ON presentations(deleted);
+                    CREATE INDEX IF NOT EXISTS idx_presentations_created ON presentations(created_at);
 
-                CREATE TABLE IF NOT EXISTS presentations_versions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    presentation_id TEXT NOT NULL,
-                    version INTEGER NOT NULL,
-                    payload_json TEXT NOT NULL,
-                    created_at DATETIME NOT NULL,
-                    client_id TEXT NOT NULL
-                );
+                    CREATE TABLE IF NOT EXISTS presentations_versions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        presentation_id TEXT NOT NULL,
+                        version INTEGER NOT NULL,
+                        payload_json TEXT NOT NULL,
+                        created_at DATETIME NOT NULL,
+                        client_id TEXT NOT NULL
+                    );
 
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_presentations_versions_unique
-                    ON presentations_versions(presentation_id, version);
-                CREATE INDEX IF NOT EXISTS idx_presentations_versions_pid
-                    ON presentations_versions(presentation_id);
-                CREATE INDEX IF NOT EXISTS idx_presentations_versions_created
-                    ON presentations_versions(created_at);
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_presentations_versions_unique
+                        ON presentations_versions(presentation_id, version);
+                    CREATE INDEX IF NOT EXISTS idx_presentations_versions_pid
+                        ON presentations_versions(presentation_id);
+                    CREATE INDEX IF NOT EXISTS idx_presentations_versions_created
+                        ON presentations_versions(created_at);
 
-                CREATE VIRTUAL TABLE IF NOT EXISTS presentations_fts USING fts5(
-                    title,
-                    slides_text,
-                    content=presentations,
-                    content_rowid=rowid
-                );
+                    CREATE VIRTUAL TABLE IF NOT EXISTS presentations_fts USING fts5(
+                        title,
+                        slides_text,
+                        content=presentations,
+                        content_rowid=rowid
+                    );
 
-                CREATE TRIGGER IF NOT EXISTS presentations_ai AFTER INSERT ON presentations BEGIN
-                  INSERT INTO presentations_fts(rowid, title, slides_text)
-                  VALUES (new.rowid, new.title, new.slides_text);
-                END;
+                    CREATE TRIGGER IF NOT EXISTS presentations_ai AFTER INSERT ON presentations BEGIN
+                      INSERT INTO presentations_fts(rowid, title, slides_text)
+                      VALUES (new.rowid, new.title, new.slides_text);
+                    END;
 
-                CREATE TRIGGER IF NOT EXISTS presentations_ad AFTER DELETE ON presentations BEGIN
-                  INSERT INTO presentations_fts(presentations_fts, rowid, title, slides_text)
-                  VALUES ('delete', old.rowid, old.title, old.slides_text);
-                END;
+                    CREATE TRIGGER IF NOT EXISTS presentations_ad AFTER DELETE ON presentations BEGIN
+                      INSERT INTO presentations_fts(presentations_fts, rowid, title, slides_text)
+                      VALUES ('delete', old.rowid, old.title, old.slides_text);
+                    END;
 
-                CREATE TRIGGER IF NOT EXISTS presentations_au AFTER UPDATE ON presentations BEGIN
-                  INSERT INTO presentations_fts(presentations_fts, rowid, title, slides_text)
-                  VALUES ('delete', old.rowid, old.title, old.slides_text);
-                  INSERT INTO presentations_fts(rowid, title, slides_text)
-                  VALUES (new.rowid, new.title, new.slides_text);
-                END;
+                    CREATE TRIGGER IF NOT EXISTS presentations_au AFTER UPDATE ON presentations BEGIN
+                      INSERT INTO presentations_fts(presentations_fts, rowid, title, slides_text)
+                      VALUES ('delete', old.rowid, old.title, old.slides_text);
+                      INSERT INTO presentations_fts(rowid, title, slides_text)
+                      VALUES (new.rowid, new.title, new.slides_text);
+                    END;
 
-                CREATE TABLE IF NOT EXISTS sync_log (
-                    change_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    entity TEXT NOT NULL,
-                    entity_uuid TEXT NOT NULL,
-                    operation TEXT NOT NULL CHECK(operation IN ('create','update','delete','restore')),
-                    timestamp DATETIME NOT NULL,
-                    client_id TEXT NOT NULL,
-                    version INTEGER NOT NULL,
-                    payload TEXT
-                );
+                    CREATE TABLE IF NOT EXISTS sync_log (
+                        change_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        entity TEXT NOT NULL,
+                        entity_uuid TEXT NOT NULL,
+                        operation TEXT NOT NULL CHECK(operation IN ('create','update','delete','restore')),
+                        timestamp DATETIME NOT NULL,
+                        client_id TEXT NOT NULL,
+                        version INTEGER NOT NULL,
+                        payload TEXT
+                    );
 
-                CREATE INDEX IF NOT EXISTS idx_sync_log_ts ON sync_log(timestamp);
-                CREATE INDEX IF NOT EXISTS idx_sync_log_entity_uuid ON sync_log(entity_uuid);
-                CREATE INDEX IF NOT EXISTS idx_sync_log_client_id ON sync_log(client_id);
+                    CREATE INDEX IF NOT EXISTS idx_sync_log_ts ON sync_log(timestamp);
+                    CREATE INDEX IF NOT EXISTS idx_sync_log_entity_uuid ON sync_log(entity_uuid);
+                    CREATE INDEX IF NOT EXISTS idx_sync_log_client_id ON sync_log(client_id);
 
-                CREATE TABLE IF NOT EXISTS visual_styles (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    scope TEXT NOT NULL,
-                    style_payload TEXT NOT NULL,
-                    created_at DATETIME NOT NULL,
-                    updated_at DATETIME NOT NULL
-                );
+                    CREATE TABLE IF NOT EXISTS visual_styles (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        scope TEXT NOT NULL,
+                        style_payload TEXT NOT NULL,
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME NOT NULL
+                    );
 
-                CREATE INDEX IF NOT EXISTS idx_visual_styles_scope ON visual_styles(scope);
-                CREATE INDEX IF NOT EXISTS idx_visual_styles_name ON visual_styles(name);
-                """
-            )
-            self._ensure_marp_theme_column(conn)
-            self._ensure_template_id_column(conn)
-            self._ensure_presentation_visual_style_columns(conn)
-            self._ensure_studio_data_column(conn)
-            self._ensure_visual_styles_table(conn)
-            conn.commit()
-            self._schema_init_paths.add(self._db_path_str)
-        except sqlite3.Error as exc:
-            conn.rollback()
-            raise SchemaError(f"Failed to initialize Slides DB schema: {exc}") from exc
+                    CREATE INDEX IF NOT EXISTS idx_visual_styles_scope ON visual_styles(scope);
+                    CREATE INDEX IF NOT EXISTS idx_visual_styles_name ON visual_styles(name);
+                    """
+                )
+                self._ensure_marp_theme_column(conn)
+                self._ensure_template_id_column(conn)
+                self._ensure_presentation_visual_style_columns(conn)
+                self._ensure_studio_data_column(conn)
+                self._ensure_visual_styles_table(conn)
+                conn.commit()
+                if cache_schema_path:
+                    self._schema_init_paths.add(self._db_path_str)
+            except sqlite3.Error as exc:
+                conn.rollback()
+                raise SchemaError(f"Failed to initialize Slides DB schema: {exc}") from exc
 
     def get_connection(self) -> sqlite3.Connection:
         conn = getattr(self._local, "connection", None)
@@ -255,6 +261,8 @@ class SlidesDatabase:
 
     def _insert_sync_log(
         self,
+        conn: sqlite3.Connection,
+        /,
         *,
         entity_uuid: str,
         operation: str,
@@ -262,22 +270,21 @@ class SlidesDatabase:
         payload: dict[str, Any] | None = None,
     ) -> None:
         payload_json = json.dumps(payload) if payload is not None else None
-        with self.transaction() as conn:
-            conn.execute(
-                """
-                INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    "presentations",
-                    entity_uuid,
-                    operation,
-                    self._utcnow_iso(),
-                    self.client_id,
-                    version,
-                    payload_json,
-                ),
+        conn.execute(
+            """
+            INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "presentations",
+                entity_uuid,
+                operation,
+                self._utcnow_iso(),
+                self.client_id,
+                version,
+                payload_json,
             )
+        )
 
     @staticmethod
     def _ensure_marp_theme_column(conn: sqlite3.Connection) -> None:
@@ -619,12 +626,13 @@ class SlidesDatabase:
                 )
                 row = self._fetch_presentation_by_id(conn, pres_id, include_deleted=True)
                 self._insert_version_snapshot(conn, row)
-            self._insert_sync_log(
-                entity_uuid=pres_id,
-                operation="create",
-                version=1,
-                payload={"title": title, "theme": theme},
-            )
+                self._insert_sync_log(
+                    conn,
+                    entity_uuid=pres_id,
+                    operation="create",
+                    version=1,
+                    payload={"title": title, "theme": theme},
+                )
             return row
         except sqlite3.IntegrityError as exc:
             if "UNIQUE" in str(exc).upper() or "PRIMARY" in str(exc).upper():
@@ -693,8 +701,11 @@ class SlidesDatabase:
         )
         count_sql = count_sql_template.format_map(locals())  # nosec B608
         conn = self.get_connection()
-        rows = conn.execute(sql, (query, limit, offset)).fetchall()
-        count_row = conn.execute(count_sql, (query,)).fetchone()
+        try:
+            rows = conn.execute(sql, (query, limit, offset)).fetchall()
+            count_row = conn.execute(count_sql, (query,)).fetchone()
+        except sqlite3.OperationalError as exc:
+            raise InputError("search query is invalid") from exc
         total = int(count_row["cnt"]) if count_row else 0
         return [PresentationRow(**dict(row)) for row in rows], total
 
@@ -754,12 +765,13 @@ class SlidesDatabase:
                 raise ConflictError("version_conflict", entity="presentations", identifier=presentation_id)
             row = self._fetch_presentation_by_id(conn, presentation_id, include_deleted=True)
             self._insert_version_snapshot(conn, row)
-        self._insert_sync_log(
-            entity_uuid=presentation_id,
-            operation=operation,
-            version=next_version,
-            payload={"fields": list(update_fields.keys())},
-        )
+            self._insert_sync_log(
+                conn,
+                entity_uuid=presentation_id,
+                operation=operation,
+                version=next_version,
+                payload={"fields": list(update_fields.keys())},
+            )
         return row
 
     def list_presentation_versions(
