@@ -18,7 +18,7 @@ modified_files:
 - tldw_Server_API/app/core/Moderation/moderation_service.py
 - tldw_Server_API/tests/unit/test_moderation_blocklist_parse.py
 - backlog/tasks/task-2432 - Implement-Moderation-PolicyCompiler-refactor.md
-updated_date: 2026-06-24 22:11
+updated_date: 2026-06-24 22:22
 ---
 
 ## Description
@@ -78,6 +78,23 @@ Verification:
 - `python -m py_compile tldw_Server_API/app/core/Moderation/policy_compiler.py tldw_Server_API/app/core/Moderation/moderation_service.py tldw_Server_API/tests/unit/test_moderation_policy_compiler.py tldw_Server_API/tests/unit/test_moderation_blocklist_parse.py tldw_Server_API/tests/unit/test_moderation_user_override_validation.py` -> passed
 - `git diff --check HEAD~2..HEAD` -> passed
 - `python -m bandit -r tldw_Server_API/app/core/Moderation/policy_compiler.py tldw_Server_API/app/core/Moderation/moderation_service.py -f json -o /tmp/bandit_moderation_policy_compiler_task5_final.json` -> 0 findings
+Task 6 completed and reviewed.
+
+Implementation commits:
+- b5adac140 Preserve moderation service behavior with compiler integration
+- 26d48dcbd Harden moderation recompile regression tests
+
+Spec review: APPROVE. Verified only test files changed, `update_settings()` regression uses temp config paths and `persist=False`, `set_blocklist_lines()` regression proves the active policy reloads from file contents, and supervised overlay consumes a compiler-produced `ModerationPolicy` while preserving base settings/patterns.
+
+Quality review: APPROVE. No blocking findings. Reviewer suggested adding `blocklist_write_debounce_ms: "0"` to temp config helpers to guard against polluted debounce environment; follow-up commit 26d48dcbd made that test-only hardening.
+
+Verification:
+- Worker initial new-test regression run -> 3 passed
+- `python -m pytest tldw_Server_API/tests/unit/test_moderation_blocklist_parse.py tldw_Server_API/tests/unit/test_moderation_effective_settings.py tldw_Server_API/tests/Guardian/test_supervised_policy.py -q` -> 127 passed
+- `python -m pytest tldw_Server_API/tests/unit/test_moderation*.py -q` -> 125 passed
+- `python -m py_compile tldw_Server_API/app/core/Moderation/moderation_service.py tldw_Server_API/tests/unit/test_moderation_blocklist_parse.py tldw_Server_API/tests/unit/test_moderation_effective_settings.py tldw_Server_API/tests/Guardian/test_supervised_policy.py` -> passed
+- `git diff --check` after follow-up -> passed
+- No production code changed in Task 6; Bandit not rerun for Task 6 specifically.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
