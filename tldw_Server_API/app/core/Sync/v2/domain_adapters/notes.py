@@ -84,7 +84,7 @@ def _manual_delete_conflict(envelope: SyncEnvelopeCreate) -> AdapterConflict:
 
 
 def _is_delete(envelope: SyncEnvelope | SyncEnvelopeCreate) -> bool:
-    return envelope.operation == "delete" or bool(
+    return envelope.operation == "tombstone" or bool(
         envelope.payload_clear.get("deleted")
         or envelope.payload_clear.get("soft_deleted")
         or envelope.payload_clear.get("tombstone")

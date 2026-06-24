@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import tempfile
 from collections.abc import Iterator
@@ -43,9 +44,19 @@ class LocalSyncBlobStore:
         storage_key = f"_uploads/{upload_segment}/{chunk_index}.part"
         target = self.resolve_storage_key(storage_key)
         target.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = target.with_suffix(target.suffix + ".tmp")
-        temp_path.write_bytes(payload)
-        temp_path.replace(target)
+        temp_path = _chunk_temp_path(target, chunk_index=chunk_index)
+        try:
+            temp_path.write_bytes(payload)
+            os.link(temp_path, target)
+        except FileExistsError:
+            if _sha256_file(target) != expected_hash:
+                raise SyncBlobStoreError(
+                    "Sync blob chunk storage key already contains different content"
+                )
+        except OSError as exc:
+            raise SyncBlobStoreError("Sync blob chunk write failed") from exc
+        finally:
+            _discard_temp_path(temp_path)
         return storage_key
 
     def commit_upload(
@@ -158,6 +169,16 @@ def _sha256(payload: bytes) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
+def _sha256_file(path: Path) -> str:
+    """Return the SHA-256 digest for a file without loading it all into memory."""
+
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(STREAM_CHUNK_SIZE):
+            hasher.update(chunk)
+    return "sha256:" + hasher.hexdigest()
+
+
 def _hash_digest(value: str) -> str:
     prefix = "sha256:"
     if not value.startswith(prefix) or len(value) != len(prefix) + 64:
@@ -190,6 +211,18 @@ def _commit_temp_path(final_path: Path, *, digest: str, upload_segment: str) -> 
         delete=False,
         dir=final_path.parent,
         prefix=f"{digest}.{upload_segment}.",
+        suffix=".tmp",
+    )
+    temp_path = Path(temp_file.name)
+    temp_file.close()
+    return temp_path
+
+
+def _chunk_temp_path(target: Path, *, chunk_index: int) -> Path:
+    temp_file = tempfile.NamedTemporaryFile(
+        delete=False,
+        dir=target.parent,
+        prefix=f"{chunk_index}.",
         suffix=".tmp",
     )
     temp_path = Path(temp_file.name)

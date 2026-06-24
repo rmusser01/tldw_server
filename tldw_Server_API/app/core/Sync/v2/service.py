@@ -2197,11 +2197,29 @@ class SyncV2Service:
         self._validate_sha256_hash(chunk_hash, field_name="chunk_hash")
         if len(chunk_payload) > self.settings.max_chunk_bytes:
             raise SyncStoreError("Sync blob chunk exceeds the server size limit")
+        if chunk_index < 0 or chunk_index >= session.chunk_count:
+            raise SyncStoreError("Sync blob chunk index is outside the upload session")
         if offset_bytes < 0:
             raise SyncStoreError("Sync blob chunk offset is invalid")
+        expected_offset = session.chunk_size * chunk_index
+        if offset_bytes != expected_offset:
+            raise SyncStoreError("Sync blob chunk offset does not match the upload session")
         expected_size = min(session.chunk_size, max(session.size_bytes - offset_bytes, 0))
         if len(chunk_payload) != expected_size:
             raise SyncStoreError("Sync blob chunk size does not match the upload session")
+        existing_chunk = self.store.get_blob_chunk(
+            upload_id,
+            chunk_index,
+            dataset_id=dataset_id,
+        )
+        if existing_chunk is not None and (
+            existing_chunk.offset_bytes != offset_bytes
+            or existing_chunk.size_bytes != len(chunk_payload)
+            or existing_chunk.chunk_hash != chunk_hash
+        ):
+            raise SyncIdempotencyConflictError(
+                "Sync blob chunk was reused with different content"
+            )
         try:
             storage_key = blob_store.write_upload_chunk(
                 upload_id=upload_id,
@@ -3473,7 +3491,12 @@ class SyncV2Service:
         actual_size = 0
         if envelope.payload_ciphertext is not None:
             actual_size += len(envelope.payload_ciphertext.encode("utf-8"))
-        actual_size += _compact_json_size(envelope.payload_clear)
+        payload_size = _compact_json_size(envelope.payload)
+        payload_clear_size = _compact_json_size(envelope.payload_clear)
+        if envelope.payload and envelope.payload_clear and envelope.payload != envelope.payload_clear:
+            actual_size += payload_size + payload_clear_size
+        else:
+            actual_size += max(payload_size, payload_clear_size)
         actual_size += _compact_json_size(envelope.routing_metadata)
         actual_size += _compact_json_size(envelope.dependencies)
         return actual_size > max_bytes

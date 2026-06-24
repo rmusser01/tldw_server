@@ -5,6 +5,7 @@
 import json
 import os
 from datetime import datetime, timedelta
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -332,6 +333,38 @@ class TestClientSyncEnginePush:
         assert sync_engine.last_local_log_id_sent == only_change_id
 
 
+    @patch('tldw_Server_API.app.core.Sync.Sync_Client.fetch')
+    def test_push_advances_past_other_clients_changes_without_network_call(
+        self,
+        mock_post: MagicMock,
+        sync_engine: ClientSyncEngine,
+        client_db: Any,
+    ) -> None:
+        """Rows from other local DB clients should not pin the outbound cursor forever."""
+        client_db.execute_query(
+            (
+                "INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, payload) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)"
+            ),
+            (
+                "Keywords",
+                "keyword-from-other-client",
+                "create",
+                "2023-10-27T11:05:00Z",
+                "other-client",
+                1,
+                '{"uuid":"keyword-from-other-client","keyword":"other client row"}',
+            ),
+            commit=True,
+        )
+        only_change_id = client_db.get_sync_log_entries(since_change_id=0)[0]["change_id"]
+
+        sync_engine._push_local_changes()
+
+        mock_post.assert_not_called()
+        assert sync_engine.last_local_log_id_sent == only_change_id
+
+
 class TestClientSyncEnginePullApply:
 
     @patch('tldw_Server_API.app.core.Sync.Sync_Client.fetch')
@@ -638,6 +671,56 @@ class TestClientSyncEnginePullApply:
         ).fetchone()
         assert row["cnt"] == 0
         assert sync_engine.last_server_log_id_processed == 121
+
+    @patch('tldw_Server_API.app.core.Sync.Sync_Client.fetch')
+    def test_pull_and_apply_media_title_update_refreshes_fts(
+        self,
+        mock_get: MagicMock,
+        sync_engine: ClientSyncEngine,
+        client_db: Any,
+    ) -> None:
+        """Media title/content updates should preserve current FTS values for omitted fields."""
+        media_id, media_uuid, _ = client_db.add_media_with_keywords(
+            title="sync original media",
+            media_type="article",
+            content="media content alpha",
+            keywords=[],
+        )
+        assert media_id is not None
+
+        server_change = create_mock_log_entry(
+            change_id=122,
+            entity="Media",
+            uuid=media_uuid,
+            op="update",
+            client="other_client",
+            version=2,
+            payload_dict={"uuid": media_uuid, "title": "sync updated media"},
+            ts="2023-10-28T12:32:00Z",
+        )
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"changes": [server_change], "latest_change_id": 122}
+        mock_get.return_value = mock_response
+
+        sync_engine.last_server_log_id_processed = 121
+        sync_engine._pull_and_apply_remote_changes()
+
+        media_row = client_db.execute_query(
+            "SELECT title, content, version, last_modified FROM Media WHERE uuid = ?",
+            (media_uuid,),
+        ).fetchone()
+        fts_row = client_db.execute_query(
+            "SELECT title, content FROM media_fts WHERE rowid = ?",
+            (media_id,),
+        ).fetchone()
+        assert media_row["title"] == "sync updated media"
+        assert media_row["content"] == "media content alpha"
+        assert media_row["version"] == 2
+        assert media_row["last_modified"] == "2023-10-28T12:32:00Z"
+        assert fts_row["title"] == "sync updated media"
+        assert fts_row["content"] == "media content alpha"
+        assert sync_engine.last_server_log_id_processed == 122
 
     @patch('tldw_Server_API.app.core.Sync.Sync_Client.fetch')
     def test_apply_idempotency(self, mock_get, sync_engine, client_db):

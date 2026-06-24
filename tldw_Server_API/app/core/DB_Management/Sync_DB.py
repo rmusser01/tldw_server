@@ -4363,6 +4363,39 @@ class SyncDatabase:
                 connection=conn,
             )
 
+    def get_blob_chunk(
+        self,
+        upload_id: str,
+        chunk_index: int,
+        *,
+        dataset_id: str | None = None,
+    ) -> SyncBlobChunk | None:
+        """Return a recorded blob chunk for duplicate-upload preflight checks."""
+
+        if dataset_id is None:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_blob_chunks
+                     WHERE upload_id = ? AND chunk_index = ?
+                    """,
+                    (upload_id, chunk_index),
+                )
+            )
+        else:
+            row = _first(
+                self.execute(
+                    """
+                    SELECT * FROM sync_blob_chunks
+                     WHERE upload_id = ? AND dataset_id = ? AND chunk_index = ?
+                    """,
+                    (upload_id, dataset_id, chunk_index),
+                )
+            )
+        if row is None:
+            return None
+        return _blob_chunk_from_row(row)
+
     def record_blob_chunk(self, chunk: SyncBlobChunkCreate) -> SyncBlobChunk:
         """Record one uploaded blob chunk idempotently."""
 

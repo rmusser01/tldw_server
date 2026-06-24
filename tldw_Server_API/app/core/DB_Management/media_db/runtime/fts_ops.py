@@ -335,10 +335,32 @@ def sync_refresh_fts_for_entity(
         return
 
 
+def sync_get_media_fts_values(
+    self: Any,
+    conn,
+    *,
+    entity_uuid: str,
+) -> dict[str, str]:
+    """Return current Media values needed for legacy sync FTS refreshes."""
+
+    row = self._fetchone_with_connection(
+        conn,
+        "SELECT title, content FROM Media WHERE uuid = ?",
+        (entity_uuid,),
+    )
+    if row is None:
+        return {}
+    return {
+        "title": str(row.get("title") or ""),
+        "content": str(row.get("content") or ""),
+    }
+
+
 __all__ = [
     "_delete_fts_keyword",
     "_delete_fts_media",
     "_update_fts_keyword",
     "_update_fts_media",
+    "sync_get_media_fts_values",
     "sync_refresh_fts_for_entity",
 ]
