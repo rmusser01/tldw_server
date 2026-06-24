@@ -206,10 +206,10 @@ class DocumentGeneratorService:
                         max_tokens INTEGER DEFAULT 2000,
                         is_active BOOLEAN DEFAULT 1,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        UNIQUE(document_type, is_active)
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
+                self._repair_user_prompts_schema(conn)
 
                 # Create generated_documents table for storing results
                 conn.execute("""
@@ -239,6 +239,90 @@ class DocumentGeneratorService:
         except _DOCGEN_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to initialize document generator tables: {e}")
             raise CharactersRAGDBError(f"Failed to initialize document generator tables: {e}") from e
+
+    def _repair_user_prompts_schema(self, conn) -> None:
+        """Migrate legacy prompt tables so inactive prompt history is not unique-limited."""
+        cursor = conn.execute(
+            """
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'user_prompts'
+            """
+        )
+        row = cursor.fetchone()
+        table_sql = row[0] if row else ""
+        compact_sql = "".join(str(table_sql).lower().split())
+
+        if "unique(document_type,is_active)" in compact_sql:
+            logger.info("Repairing legacy user_prompts uniqueness constraint")
+            conn.execute("DROP TABLE IF EXISTS user_prompts_new")
+            conn.execute("""
+                CREATE TABLE user_prompts_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    document_type TEXT NOT NULL,
+                    system_prompt TEXT NOT NULL,
+                    user_prompt TEXT NOT NULL,
+                    temperature REAL DEFAULT 0.7,
+                    max_tokens INTEGER DEFAULT 2000,
+                    is_active BOOLEAN DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                INSERT INTO user_prompts_new (
+                    id,
+                    document_type,
+                    system_prompt,
+                    user_prompt,
+                    temperature,
+                    max_tokens,
+                    is_active,
+                    created_at,
+                    updated_at
+                )
+                SELECT
+                    id,
+                    document_type,
+                    system_prompt,
+                    user_prompt,
+                    temperature,
+                    max_tokens,
+                    is_active,
+                    created_at,
+                    updated_at
+                FROM user_prompts
+            """)
+            conn.execute("""
+                UPDATE user_prompts_new
+                SET is_active = 0
+                WHERE is_active = 1
+                  AND id NOT IN (
+                      SELECT MAX(id)
+                      FROM user_prompts_new
+                      WHERE is_active = 1
+                      GROUP BY document_type
+                  )
+            """)
+            conn.execute("DROP TABLE user_prompts")
+            conn.execute("ALTER TABLE user_prompts_new RENAME TO user_prompts")
+
+        conn.execute("""
+            UPDATE user_prompts
+            SET is_active = 0
+            WHERE is_active = 1
+              AND id NOT IN (
+                  SELECT MAX(id)
+                  FROM user_prompts
+                  WHERE is_active = 1
+                  GROUP BY document_type
+              )
+        """)
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_user_prompts_active_document_type
+            ON user_prompts(document_type)
+            WHERE is_active = 1
+        """)
 
     def get_conversation_context(
         self,

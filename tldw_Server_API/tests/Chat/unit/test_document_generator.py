@@ -368,6 +368,103 @@ class TestDocumentGeneratorService:
         if not hasattr(service, 'get_prompt_config'):
             pytest.skip("get_prompt_config not implemented")
 
+    def test_save_user_prompt_config_allows_multiple_inactive_versions(self, service, real_db):
+        """Saving new prompt versions keeps history while leaving one active prompt."""
+        assert service.save_user_prompt_config(
+            DocumentType.SUMMARY,
+            "System v1",
+            "User v1",
+        )
+        assert service.save_user_prompt_config(
+            DocumentType.SUMMARY,
+            "System v2",
+            "User v2",
+        )
+        assert service.save_user_prompt_config(
+            DocumentType.SUMMARY,
+            "System v3",
+            "User v3",
+        )
+
+        rows = real_db.execute_query(
+            """
+            SELECT user_prompt, is_active
+            FROM user_prompts
+            WHERE document_type = ?
+            ORDER BY id
+            """,
+            (DocumentType.SUMMARY.value,)
+        ).fetchall()
+
+        assert [row["user_prompt"] for row in rows] == ["User v1", "User v2", "User v3"]
+        assert [row["is_active"] for row in rows] == [0, 0, 1]
+
+    def test_init_repairs_legacy_user_prompt_unique_constraint(self, real_db):
+        """Existing prompt tables with legacy uniqueness are repaired in place."""
+        with real_db.get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE user_prompts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    document_type TEXT NOT NULL,
+                    system_prompt TEXT NOT NULL,
+                    user_prompt TEXT NOT NULL,
+                    temperature REAL DEFAULT 0.7,
+                    max_tokens INTEGER DEFAULT 2000,
+                    is_active BOOLEAN DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(document_type, is_active)
+                )
+            """)
+            conn.execute(
+                """
+                INSERT INTO user_prompts
+                (document_type, system_prompt, user_prompt, is_active)
+                VALUES (?, ?, ?, 0)
+                """,
+                (DocumentType.SUMMARY.value, "System v1", "User v1")
+            )
+            conn.execute(
+                """
+                INSERT INTO user_prompts
+                (document_type, system_prompt, user_prompt, is_active)
+                VALUES (?, ?, ?, 1)
+                """,
+                (DocumentType.SUMMARY.value, "System v2", "User v2")
+            )
+            conn.commit()
+
+        service = DocumentGeneratorService(real_db, user_id="test_user")
+
+        assert service.save_user_prompt_config(
+            DocumentType.SUMMARY,
+            "System v3",
+            "User v3",
+        )
+
+        with real_db.get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_prompt, is_active
+                FROM user_prompts
+                WHERE document_type = ?
+                ORDER BY id
+                """,
+                (DocumentType.SUMMARY.value,)
+            ).fetchall()
+            index_row = conn.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'index'
+                  AND name = 'idx_user_prompts_active_document_type'
+                """
+            ).fetchone()
+
+        assert [row["user_prompt"] for row in rows] == ["User v1", "User v2", "User v3"]
+        assert [row["is_active"] for row in rows] == [0, 0, 1]
+        assert index_row is not None
+
     @pytest.mark.asyncio
     async def test_bulk_generation(self, service, real_db):
         """Test generating multiple document types at once."""
