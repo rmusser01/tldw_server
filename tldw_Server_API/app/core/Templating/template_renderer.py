@@ -1,13 +1,16 @@
+"""Sandboxed Jinja template rendering for chat dictionary substitutions."""
+
 from __future__ import annotations
 
+import contextlib
 import os
 import re
-import time
 import threading
+import time
 from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from jinja2 import StrictUndefined, TemplateError, nodes
@@ -15,6 +18,7 @@ from jinja2.sandbox import SandboxedEnvironment
 from loguru import logger
 
 from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
+from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.testing import is_truthy
 
 try:  # Python 3.9+
@@ -65,19 +69,15 @@ class TemplateContext:
 @dataclass
 class TemplateOptions:
     allow_random: bool = False
-    allow_external_calls: bool = False
     max_output_chars: int = 2000
     timeout_ms: int = 250
     random_seed: int | None = None
     cache_max_entries: int = 256
 
 
-import contextlib
-
-from tldw_Server_API.app.core.config import load_comprehensive_config
-
-
 def options_from_env() -> TemplateOptions:
+    """Build renderer options from environment variables and config.txt fallbacks."""
+
     def _truthy(name: str, default: bool = False) -> bool:
         val = os.getenv(name)
         if val is None:
@@ -127,7 +127,6 @@ def options_from_env() -> TemplateOptions:
 
     return TemplateOptions(
         allow_random=_truthy("CHAT_DICT_TEMPLATES_ALLOW_RANDOM", _cfg_bool("Chat-Templating", "allow_random", False)),
-        allow_external_calls=_truthy("TEMPLATES_ALLOW_EXTERNAL_CALLS", _cfg_bool("Chat-Templating", "allow_external_calls", False)),
         max_output_chars=_int("MAX_TEMPLATE_OUTPUT_CHARS", _cfg_int("Chat-Templating", "max_output_chars", 2000)),
         timeout_ms=_int("TEMPLATE_RENDER_TIMEOUT_MS", _cfg_int("Chat-Templating", "render_timeout_ms", 250)),
         random_seed=seed,
@@ -140,10 +139,37 @@ def options_from_env() -> TemplateOptions:
 # -----------------------------
 
 
+_TEMPLATE_SAFE_CALLABLE_ATTR = "_tldw_template_safe_callable"
+_TEMPLATE_SAFE_METHODS_ATTR = "_tldw_template_safe_methods"
+
+
+def _mark_template_safe_callable(fn: Any) -> Any:
+    """Mark an internal helper callable as safe for the template sandbox."""
+    setattr(fn, _TEMPLATE_SAFE_CALLABLE_ATTR, True)
+    return fn
+
+
+class _TemplateSandboxedEnvironment(SandboxedEnvironment):
+    """Jinja sandbox that only permits explicitly marked helper callables."""
+
+    def is_safe_callable(self, obj: Any) -> bool:
+        """Return whether the sandbox may invoke ``obj`` from a template."""
+        if bool(getattr(obj, _TEMPLATE_SAFE_CALLABLE_ATTR, False)):
+            return True
+
+        bound_self = getattr(obj, "__self__", None)
+        method_name = getattr(obj, "__name__", None)
+        allowed_methods = getattr(bound_self, _TEMPLATE_SAFE_METHODS_ATTR, ())
+        if not isinstance(method_name, str) or not isinstance(allowed_methods, frozenset):
+            return False
+        return method_name in allowed_methods
+
+
 def _build_env() -> SandboxedEnvironment:
-    env = SandboxedEnvironment(autoescape=False, undefined=StrictUndefined)
+    env = _TemplateSandboxedEnvironment(autoescape=False, undefined=StrictUndefined)
 
     # Add minimal custom filter: slugify
+    @_mark_template_safe_callable
     def _slugify(s: Any) -> str:
         t = str(s or "")
         t = t.strip().lower()
@@ -181,8 +207,9 @@ def _fn_now(fmt: str = "%Y-%m-%d", tz: str | None = None) -> str:
     return datetime.now(tz=tzinfo).strftime(fmt)
 
 
-def _fn_today(fmt: str = "%Y-%m-%d") -> str:
-    return date.today().strftime(fmt)
+def _fn_today(fmt: str = "%Y-%m-%d", tz: str | None = None) -> str:
+    tzinfo = _tzinfo(tz)
+    return datetime.now(tz=tzinfo).date().strftime(fmt)
 
 
 def _fn_iso_now(tz: str | None = None) -> str:
@@ -200,10 +227,13 @@ def _sanitize_user(user_raw: Mapping[str, Any] | None) -> dict[str, Any]:
 
 
 class _RandomFacade:
+    _tldw_template_safe_methods = frozenset({"randint", "choice"})
+
     def __init__(self, seed: int | None = None):
         import random as _random  # local import to avoid global state surprises
 
-        self._random = _random.Random()
+        # Template random helpers are non-cryptographic and seedable for tests.
+        self._random = _random.Random()  # nosec B311
         if seed is not None:
             with contextlib.suppress(_TEMPLATE_NONCRITICAL_EXCEPTIONS):
                 self._random.seed(seed)
@@ -240,15 +270,35 @@ _DISALLOWED_NODE_TYPES = {
     nodes.Extends,
     nodes.With,
     nodes.ScopedEvalContextModifier,
+    nodes.Mul,
+    nodes.Pow,
+}
+
+_ALLOWED_CALL_NAMES = {
+    "choice",
+    "iso_now",
+    "lower",
+    "now",
+    "now_tz",
+    "randint",
+    "title",
+    "today",
+    "upper",
+    "user",
+}
+
+_ALLOWED_METHOD_CALLS_BY_ROOT = {
+    "match": frozenset({"end", "group", "groupdict", "groups", "start"}),
 }
 
 _COMPILED_TEMPLATE_CACHE: OrderedDict[str, Any] = OrderedDict()
 _COMPILED_TEMPLATE_CACHE_LOCK = threading.Lock()
+_MAX_CACHED_TEMPLATE_SOURCE_CHARS = 8192
 
 
 def _get_compiled_template(template_src: str, max_entries: int) -> Any:
     """Return a compiled template using a bounded LRU cache keyed by source text."""
-    if max_entries <= 0:
+    if max_entries <= 0 or len(template_src) > _MAX_CACHED_TEMPLATE_SOURCE_CHARS:
         return _ENV.from_string(template_src)
 
     with _COMPILED_TEMPLATE_CACHE_LOCK:
@@ -273,15 +323,37 @@ def _clear_template_cache() -> None:
 
 
 def _validate_expression_only(template_src: str) -> None:
+    """Reject unsupported Jinja constructs before compiling the template."""
     # Block statements/tags are intentionally unsupported for this feature.
     if "{%" in template_src:
         raise ValueError("Forbidden construct in template: BlockTag")
 
     ast = _ENV.parse(template_src)
 
+    def _root_name(n: nodes.Node) -> str | None:
+        if isinstance(n, nodes.Name):
+            return n.name
+        if isinstance(n, nodes.Getattr):
+            return _root_name(n.node)
+        if isinstance(n, nodes.Getitem):
+            return _root_name(n.node)
+        return None
+
     def _walk(n: nodes.Node) -> None:
         if isinstance(n, tuple(_DISALLOWED_NODE_TYPES)):
             raise ValueError(f"Forbidden construct in template: {type(n).__name__}")
+        if isinstance(n, nodes.Call):
+            target = n.node
+            if isinstance(target, nodes.Name):
+                if target.name not in _ALLOWED_CALL_NAMES:
+                    raise ValueError(f"Forbidden callable in template: {target.name}")
+            elif isinstance(target, nodes.Getattr):
+                root = _root_name(target.node)
+                allowed_methods = _ALLOWED_METHOD_CALLS_BY_ROOT.get(str(root or ""))
+                if allowed_methods is None or target.attr not in allowed_methods:
+                    raise ValueError(f"Forbidden method call in template: {target.attr}")
+            else:
+                raise ValueError(f"Forbidden callable in template: {type(target).__name__}")
         for child in n.iter_child_nodes():
             _walk(child)
 
@@ -291,10 +363,6 @@ def _validate_expression_only(template_src: str) -> None:
 # -----------------------------
 # Render Entry Point
 # -----------------------------
-
-
-class TemplateRenderError(Exception):
-    pass
 
 
 def render(text: str, ctx: TemplateContext, options: TemplateOptions | None = None) -> str:
@@ -325,15 +393,45 @@ def render(text: str, ctx: TemplateContext, options: TemplateOptions | None = No
 
     # Build helper functions and variables exposed to the template
     # Functions are provided via the render context so they can be gated per-call.
+    default_tz = str(ctx.env.timezone or "UTC")
+
+    @_mark_template_safe_callable
+    def _now(fmt: str = "%Y-%m-%d", tz: str | None = None) -> str:
+        return _fn_now(fmt=fmt, tz=tz or default_tz)
+
+    @_mark_template_safe_callable
+    def _today(fmt: str = "%Y-%m-%d", tz: str | None = None) -> str:
+        return _fn_today(fmt=fmt, tz=tz or default_tz)
+
+    @_mark_template_safe_callable
+    def _iso_now(tz: str | None = None) -> str:
+        return _fn_iso_now(tz=tz or default_tz)
+
+    @_mark_template_safe_callable
+    def _now_tz(fmt: str = "%Y-%m-%d", tz: str = "UTC") -> str:
+        return _fn_now(fmt=fmt, tz=tz)
+
+    @_mark_template_safe_callable
+    def _upper(s: Any) -> str:
+        return str(s).upper()
+
+    @_mark_template_safe_callable
+    def _lower(s: Any) -> str:
+        return str(s).lower()
+
+    @_mark_template_safe_callable
+    def _title(s: Any) -> str:
+        return str(s).title()
+
     helpers: dict[str, Any] = {
-        "now": _fn_now,
-        "today": _fn_today,
-        "iso_now": _fn_iso_now,
-        "now_tz": lambda fmt="%Y-%m-%d", tz="UTC": _fn_now(fmt=fmt, tz=tz),
+        "now": _now,
+        "today": _today,
+        "iso_now": _iso_now,
+        "now_tz": _now_tz,
         # Built-in string helpers also exist as Jinja filters, but provide callables too
-        "upper": lambda s: str(s).upper(),
-        "lower": lambda s: str(s).lower(),
-        "title": lambda s: str(s).title(),
+        "upper": _upper,
+        "lower": _lower,
+        "title": _title,
     }
 
     # Random helpers gated
@@ -346,7 +444,12 @@ def render(text: str, ctx: TemplateContext, options: TemplateOptions | None = No
 
     # Optional user() callable returns a sanitized view
     safe_user = _sanitize_user(ctx.user)
-    helpers["user"] = (lambda _u=safe_user: lambda: dict(_u))()
+
+    @_mark_template_safe_callable
+    def _user() -> dict[str, Any]:
+        return dict(safe_user)
+
+    helpers["user"] = _user
 
     # Collect variables for rendering
     render_vars: dict[str, Any] = {}
@@ -367,6 +470,14 @@ def render(text: str, ctx: TemplateContext, options: TemplateOptions | None = No
     try:
         tmpl = _get_compiled_template(text, int(opts.cache_max_entries))
         output = tmpl.render(render_vars)
+    except ArithmeticError as e:
+        logger.debug(f"template_render_arithmetic_failure: {e}")
+        with contextlib.suppress(_TEMPLATE_NONCRITICAL_EXCEPTIONS):
+            increment_counter(
+                "template_render_failure_total",
+                labels={"source": metrics_source, "reason": "arithmetic"},
+            )
+        return text
     except _TEMPLATE_NONCRITICAL_EXCEPTIONS as e:
         logger.debug(f"template_render_failure: {e}")
         with contextlib.suppress(_TEMPLATE_NONCRITICAL_EXCEPTIONS):

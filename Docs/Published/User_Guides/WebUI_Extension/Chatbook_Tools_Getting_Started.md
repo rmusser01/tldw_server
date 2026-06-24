@@ -51,7 +51,6 @@ Optional defaults in config.txt:
 ```ini
 [Chat-Templating]
 allow_random = false
-allow_external_calls = false
 max_output_chars = 2000
 render_timeout_ms = 250
 default_timezone = UTC

@@ -94,6 +94,7 @@ class _SafeMatch:
     """
 
     __slots__ = ("_m",)
+    _tldw_template_safe_methods = frozenset({"group", "groups", "groupdict", "start", "end"})
 
     def __init__(self, match: re.Match):
         self._m = match
