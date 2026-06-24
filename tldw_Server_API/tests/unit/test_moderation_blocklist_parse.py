@@ -9,6 +9,25 @@ import tldw_Server_API.app.core.Moderation.moderation_service as moderation_serv
 from tldw_Server_API.app.core.Moderation.moderation_service import ModerationService, ModerationPolicy, PatternRule
 
 
+def _tmp_moderation_config(tmp_path, blocklist_path):
+    return {
+        "moderation": {
+            "enabled": "true",
+            "input_enabled": "true",
+            "output_enabled": "true",
+            "input_action": "block",
+            "output_action": "redact",
+            "redact_replacement": "[REDACTED]",
+            "per_user_overrides": "true",
+            "categories_enabled": "runtime",
+            "pii_enabled": "false",
+            "blocklist_file": str(blocklist_path),
+            "user_overrides_file": str(tmp_path / "moderation_user_overrides.json"),
+            "runtime_overrides_file": str(tmp_path / "moderation_runtime_overrides.json"),
+        }
+    }
+
+
 @pytest.mark.unit
 def test_parse_line_with_categories_suffix_after_action():
     svc = ModerationService()
@@ -747,6 +766,45 @@ def test_set_blocklist_lines_empty_writes_empty_file():
             os.unlink(tmp_path)
         except Exception:
             _ = None
+
+
+@pytest.mark.unit
+def test_set_blocklist_lines_recompiles_policy_from_file(monkeypatch, tmp_path):
+    blocklist_path = tmp_path / "moderation_blocklist.txt"
+    blocklist_path.write_text("old-secret -> block #runtime\n", encoding="utf-8")
+    monkeypatch.setattr(
+        moderation_service_module,
+        "load_and_log_configs",
+        lambda: _tmp_moderation_config(tmp_path, blocklist_path),
+    )
+
+    svc = ModerationService()
+
+    old_before, _red_before, _pattern_before, old_cat_before = svc.evaluate_action(
+        "old-secret",
+        svc._global_policy,
+        "input",
+    )
+    assert old_before == "block"
+    assert old_cat_before == "runtime"
+
+    ok = svc.set_blocklist_lines(["new-secret -> block #runtime"])
+
+    assert ok is True
+    assert blocklist_path.read_text(encoding="utf-8") == "new-secret -> block #runtime\n"
+    old_after, _red_old_after, _pattern_old_after, _cat_old_after = svc.evaluate_action(
+        "old-secret",
+        svc._global_policy,
+        "input",
+    )
+    new_after, _red_new_after, _pattern_new_after, new_cat_after = svc.evaluate_action(
+        "new-secret",
+        svc._global_policy,
+        "input",
+    )
+    assert old_after == "pass"
+    assert new_after == "block"
+    assert new_cat_after == "runtime"
 
 
 @pytest.mark.unit
