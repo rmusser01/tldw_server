@@ -33,7 +33,7 @@ ARXIV_DEFAULT_PAGE_SIZE = 10
 
 
 def fetch_arxiv_pdf_url(paper_id: str) -> Optional[str]:
-    base_url = f"http://export.arxiv.org/api/query?id_list={paper_id}"
+    base_url = f"https://export.arxiv.org/api/query?id_list={paper_id}"
     try:
         r = fetch(method="GET", url=base_url, timeout=10)
         if r.status_code >= 400:
@@ -83,7 +83,7 @@ def search_arxiv_custom_api(query: Optional[str], author: Optional[str], year: O
 
 
 def fetch_arxiv_xml(paper_id: str) -> Optional[str]:
-    base_url = "http://export.arxiv.org/api/query?id_list="
+    base_url = "https://export.arxiv.org/api/query?id_list="
     try:
         r = fetch(method="GET", url=base_url + paper_id, timeout=10)
         if r.status_code >= 400:
@@ -165,7 +165,7 @@ def parse_arxiv_feed(xml_content: bytes) -> list[dict[str, Any]]:
 
 def build_query_url(query: Optional[str], author: Optional[str], year: Optional[str], start: int,
                     max_results: int = ARXIV_DEFAULT_PAGE_SIZE) -> str:
-    base_url = "http://export.arxiv.org/api/query?"  # HTTP, not HTTPS for export.arxiv.org
+    base_url = "https://export.arxiv.org/api/query?"
     search_terms = []
 
     if query:

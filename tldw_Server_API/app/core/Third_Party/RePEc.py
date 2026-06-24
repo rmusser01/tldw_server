@@ -115,7 +115,7 @@ def get_ref_by_handle(handle: str) -> tuple[dict[str, Any] | None, str | None]:
 
 # ---------------- CitEc API: citations for a RePEc handle ----------------
 
-_CITEC_BASE = "http://citec.repec.org/api"
+_CITEC_BASE = "https://citec.repec.org/api"
 
 
 def get_citations_plain(handle: str) -> tuple[dict[str, Any] | None, str | None]:

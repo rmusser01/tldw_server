@@ -14,6 +14,8 @@ from tldw_Server_API.app.core.Third_Party import OSF as osf
 from tldw_Server_API.app.core.Third_Party import BioRxiv as biorxiv
 from tldw_Server_API.app.core.Third_Party import IACR as iacr
 from tldw_Server_API.app.core.Third_Party import Figshare as figshare
+from tldw_Server_API.app.core.Third_Party import Semantic_Scholar as semantic_scholar
+from tldw_Server_API.app.core.Third_Party import Springer_Nature as springer
 
 
 def _mock_transport(handler):
@@ -348,3 +350,84 @@ def test_figshare_search_and_oai_raw(monkeypatch):
     assert err is None and items and total >= 1
     content, media_type, err2 = figshare.oai_raw({"verb": "Identify"})
     assert err2 is None and content == b"<oai/>" and media_type == "application/xml"
+
+
+def test_semantic_scholar_search_surfaces_http_error_status(monkeypatch):
+    monkeypatch.setenv("EGRESS_ALLOWLIST", "api.semanticscholar.org")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "api.semanticscholar.org"
+        return httpx.Response(429, json={"message": "Too Many Requests"}, request=request)
+
+    def fake_create_client(*args: Any, **kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=_mock_transport(handler))
+
+    monkeypatch.setattr(http_client, "create_client", fake_create_client)
+
+    data, err = semantic_scholar.search_papers_semantic_scholar("retrieval")
+
+    assert data is None
+    assert err is not None
+    assert "HTTP Error: 429" in err
+
+
+def test_ieee_search_surfaces_http_error_status(monkeypatch):
+    monkeypatch.setenv("EGRESS_ALLOWLIST", "ieeexploreapi.ieee.org")
+    monkeypatch.setenv("IEEE_API_KEY", "bad-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "ieeexploreapi.ieee.org"
+        return httpx.Response(401, json={"message": "invalid key"}, request=request)
+
+    def fake_create_client(*args: Any, **kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=_mock_transport(handler))
+
+    monkeypatch.setattr(http_client, "create_client", fake_create_client)
+
+    items, total, err = ieee.search_ieee("retrieval", 0, 10)
+
+    assert items is None
+    assert total == 0
+    assert err is not None
+    assert "HTTP Error: 401" in err
+
+
+def test_springer_search_surfaces_http_error_status(monkeypatch):
+    monkeypatch.setenv("EGRESS_ALLOWLIST", "api.springernature.com")
+    monkeypatch.setenv("SPRINGER_NATURE_API_KEY", "bad-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "api.springernature.com"
+        return httpx.Response(500, json={"error": "server error"}, request=request)
+
+    def fake_create_client(*args: Any, **kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=_mock_transport(handler))
+
+    monkeypatch.setattr(http_client, "create_client", fake_create_client)
+
+    items, total, err = springer.search_springer("retrieval", 0, 10)
+
+    assert items is None
+    assert total == 0
+    assert err is not None
+    assert "HTTP Error: 500" in err
+
+
+def test_scopus_lookup_surfaces_non_404_http_error_status(monkeypatch):
+    monkeypatch.setenv("EGRESS_ALLOWLIST", "api.elsevier.com")
+    monkeypatch.setenv("ELSEVIER_API_KEY", "bad-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "api.elsevier.com"
+        return httpx.Response(500, json={"service-error": "unavailable"}, request=request)
+
+    def fake_create_client(*args: Any, **kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=_mock_transport(handler))
+
+    monkeypatch.setattr(http_client, "create_client", fake_create_client)
+
+    item, err = scopus.get_scopus_by_doi("10.500/error")
+
+    assert item is None
+    assert err is not None
+    assert "HTTP Error: 500" in err

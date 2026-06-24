@@ -189,7 +189,7 @@ def search_biorxiv(
                 return f"/details/{server_norm}/{interval}/{cursor}"
             return f"/details/{server_norm}/{f}/{t}/{cursor}"
 
-        def _fetch(cursor: int) -> tuple[list[dict[str, Any]], int]:
+        def _fetch(cursor: int) -> tuple[list[dict[str, Any]], int, int]:
             # Rely on /details; apply keyword/category filters client-side; pass category as query param too when possible
             path = _details_path(cursor)
             url = f"{BIO_RXIV_API_BASE}{path}"
@@ -219,10 +219,11 @@ def search_biorxiv(
                         pass
 
             collection = data.get("collection") or []
+            raw_count = len(collection)
             normed = [_normalize_item(item) for item in collection]
             # Be a good citizen: tiny delay to avoid hammering
             time.sleep(0.2)
-            return normed, total
+            return normed, total, raw_count
 
         # Gather enough batches to satisfy post-filter slicing
         collected: list[dict[str, Any]] = []
@@ -231,7 +232,7 @@ def search_biorxiv(
         batches = 0
         total = 0
         while batches < max_batches and len(collected) < (within_batch_offset + limit):
-            batch_items, total_val = _fetch(cursor)
+            batch_items, total_val, raw_count = _fetch(cursor)
             if total == 0:
                 total = total_val
             # Apply client-side filters (ensure results reflect requested filters even if server ignores params)
@@ -249,11 +250,11 @@ def search_biorxiv(
                 batch_items = [it for it in batch_items if (item := (it.get("category") or "").lower()) == cl or item.replace(" ", "_") == cl]
 
             collected.extend(batch_items)
-            if len(batch_items) < BATCH:
-                # End reached (returned fewer than BATCH entries)
+            batches += 1
+            if raw_count < BATCH:
+                # End reached (upstream returned fewer than BATCH entries)
                 break
             cursor += BATCH
-            batches += 1
 
         # Now slice according to within-batch offset and limit
         page_items = collected[within_batch_offset:within_batch_offset + limit]
@@ -328,7 +329,7 @@ def search_biorxiv_pubs(
                 return f"/pubs/{server_norm}/{interval}/{cursor}"
             return f"/pubs/{server_norm}/{f}/{t}/{cursor}"
 
-        def _fetch(cursor: int) -> tuple[list[dict[str, Any]], int]:
+        def _fetch(cursor: int) -> tuple[list[dict[str, Any]], int, int]:
             url = f"{BIO_RXIV_API_BASE}{_interval_path(cursor)}"
             data = _get_json(url, timeout=15)
             cnt = 0
@@ -338,9 +339,10 @@ def search_biorxiv_pubs(
                     cnt = int(msgs[0].get("count") or 0)
                 except (TypeError, ValueError):
                     cnt = 0
-            coll = [_normalize_published_item(it) for it in (data.get("collection") or [])]
+            raw_collection = data.get("collection") or []
+            coll = [_normalize_published_item(it) for it in raw_collection]
             time.sleep(0.2)
-            return coll, cnt
+            return coll, cnt, len(raw_collection)
 
         collected: list[dict[str, Any]] = []
         cursor = first_cursor
@@ -348,17 +350,17 @@ def search_biorxiv_pubs(
         max_batches = 5
         total_count = 0
         while batches < max_batches and len(collected) < (within_batch_offset + limit):
-            items, cnt = _fetch(cursor)
+            items, cnt, raw_count = _fetch(cursor)
             if total_count == 0:
                 total_count = cnt
             if q and q.strip():
                 ql = q.strip().lower()
                 items = [it for it in items if (it.get("preprint_title") or "").lower().find(ql) >= 0 or (it.get("preprint_abstract") or "").lower().find(ql) >= 0 or (it.get("preprint_authors") or "").lower().find(ql) >= 0]
             collected.extend(items)
-            if len(items) < BATCH:
+            batches += 1
+            if raw_count < BATCH:
                 break
             cursor += BATCH
-            batches += 1
 
         page_items = collected[within_batch_offset:within_batch_offset + limit]
         return page_items, (len(collected) if q else total_count), None

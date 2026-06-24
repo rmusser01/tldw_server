@@ -92,3 +92,27 @@ def test_get_citations_amf_raw_preserves_timeout_classification(monkeypatch):
     assert error == "CitEc request timed out."
     assert "timed out at" not in error
     assert "/private/citec-amf-timeout.key" not in error
+
+
+def test_citec_base_uses_https():
+    assert repec._CITEC_BASE.startswith("https://")
+
+
+def test_get_citations_plain_uses_https_citec_url(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = "<citationData id=\"RePEc:abc:def:123\"><citedBy>1</citedBy><cites>2</cites></citationData>"
+
+    def fake_fetch(**kwargs):
+        captured["url"] = kwargs["url"]
+        return FakeResponse()
+
+    monkeypatch.setattr(repec, "fetch", fake_fetch)
+
+    item, error = repec.get_citations_plain("RePEc:abc:def:123")
+
+    assert error is None
+    assert item is not None
+    assert captured["url"] == "https://citec.repec.org/api/plain/RePEc:abc:def:123"

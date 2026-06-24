@@ -8,7 +8,14 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from tldw_Server_API.app.core.http_client import fetch_json
+from tldw_Server_API.app.core.Third_Party._http_helpers import (
+    ThirdPartyHTTPStatusError,
+    fetch_json_checked,
+)
+
+
+def fetch_json(**kwargs: Any) -> Any:
+    return fetch_json_checked(**kwargs)
 
 
 def _missing_key_error() -> str:
@@ -102,6 +109,8 @@ def search_ieee(
         articles = data.get("articles") or []
         items = [_normalize_article(it) for it in articles]
         return items, total, None
+    except ThirdPartyHTTPStatusError as exc:
+        return None, 0, f"IEEE Xplore API HTTP Error: {exc.status_code}"
     except TimeoutError:
         return None, 0, "IEEE Xplore request timed out."
     except Exception:
@@ -125,6 +134,10 @@ def get_ieee_by_doi(doi: str) -> tuple[dict | None, str | None]:
         if not articles:
             return None, None
         return _normalize_article(articles[0]), None
+    except ThirdPartyHTTPStatusError as exc:
+        if exc.status_code == 404:
+            return None, None
+        return None, f"IEEE Xplore API HTTP Error: {exc.status_code}"
     except TimeoutError:
         return None, "IEEE Xplore request timed out."
     except Exception:
@@ -148,6 +161,10 @@ def get_ieee_by_id(article_number: str) -> tuple[dict | None, str | None]:
         if not articles:
             return None, None
         return _normalize_article(articles[0]), None
+    except ThirdPartyHTTPStatusError as exc:
+        if exc.status_code == 404:
+            return None, None
+        return None, f"IEEE Xplore API HTTP Error: {exc.status_code}"
     except TimeoutError:
         return None, "IEEE Xplore request timed out."
     except Exception:

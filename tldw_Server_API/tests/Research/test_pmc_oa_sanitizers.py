@@ -65,11 +65,11 @@ def test_pmc_oa_query_preserves_timeout_classification(monkeypatch):
     assert "/private/pmc-oa-query-timeout.key" not in error
 
 
-def test_download_pmc_pdf_sanitizes_fetch_failures(monkeypatch):
-    def fail_fetch(**_kwargs):
+def test_download_pmc_pdf_sanitizes_download_failures(monkeypatch):
+    def fail_download(**_kwargs):
         raise RuntimeError("pmc pdf token at /private/pmc-pdf.key")
 
-    monkeypatch.setattr(pmc_oa, "fetch", fail_fetch)
+    monkeypatch.setattr(pmc_oa, "download", fail_download)
 
     content, filename, error = pmc_oa.download_pmc_pdf("PMC123456")
 
@@ -82,10 +82,10 @@ def test_download_pmc_pdf_sanitizes_fetch_failures(monkeypatch):
 
 
 def test_download_pmc_pdf_preserves_timeout_classification(monkeypatch):
-    def fail_fetch(**_kwargs):
+    def fail_download(**_kwargs):
         raise TimeoutError("timed out at /private/pmc-pdf-timeout.key")
 
-    monkeypatch.setattr(pmc_oa, "fetch", fail_fetch)
+    monkeypatch.setattr(pmc_oa, "download", fail_download)
 
     content, filename, error = pmc_oa.download_pmc_pdf("PMC123456")
 
@@ -94,3 +94,53 @@ def test_download_pmc_pdf_preserves_timeout_classification(monkeypatch):
     assert error == "PMC PDF download timed out."
     assert "timed out at" not in error
     assert "/private/pmc-pdf-timeout.key" not in error
+
+
+def test_download_pmc_pdf_rejects_invalid_pmcid_without_fetch(monkeypatch):
+    def fail_fetch(**_kwargs):
+        raise AssertionError("fetch should not be called for an invalid PMCID")
+
+    monkeypatch.setattr(pmc_oa, "fetch", fail_fetch)
+
+    content, filename, error = pmc_oa.download_pmc_pdf("PMCX123")
+
+    assert content is None
+    assert filename is None
+    assert error == "Invalid PMCID."
+
+
+def test_download_pmc_pdf_uses_bounded_download_and_validates_pdf(monkeypatch, tmp_path):
+    calls = {}
+
+    def fake_download(**kwargs):
+        calls.update(kwargs)
+        dest = tmp_path / "pmc.pdf"
+        dest.write_bytes(b"%PDF-1.7\nbody")
+        return dest
+
+    monkeypatch.setattr(pmc_oa, "download", fake_download)
+
+    content, filename, error = pmc_oa.download_pmc_pdf("pmc123456")
+
+    assert error is None
+    assert filename == "PMC123456.pdf"
+    assert content == b"%PDF-1.7\nbody"
+    assert calls["url"] == "https://pmc.ncbi.nlm.nih.gov/PMC123456/pdf"
+    assert calls["max_bytes_total"] == pmc_oa.PMC_PDF_MAX_BYTES
+    assert calls["require_content_type"] == "application/pdf"
+    assert calls["dest"].name == "PMC123456.pdf"
+
+
+def test_download_pmc_pdf_rejects_non_pdf_download(monkeypatch, tmp_path):
+    def fake_download(**kwargs):
+        dest = tmp_path / "not-pdf.pdf"
+        dest.write_bytes(b"<html>not found</html>")
+        return dest
+
+    monkeypatch.setattr(pmc_oa, "download", fake_download)
+
+    content, filename, error = pmc_oa.download_pmc_pdf("PMC123456")
+
+    assert content is None
+    assert filename is None
+    assert error == "PMC PDF download did not return a valid PDF."

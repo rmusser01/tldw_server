@@ -129,3 +129,29 @@ def test_get_arxiv_by_id_sanitizes_fetch_failures(monkeypatch):
     assert "arxiv by-id token" not in error
     assert "/private/arxiv-by-id.xml" not in error
     assert "paper-id-from-/private/request" not in error
+
+
+def test_arxiv_query_builder_uses_https_export_endpoint():
+    url = arxiv.build_query_url("retrieval", author=None, year=None, start=0, max_results=1)
+
+    assert url.startswith("https://export.arxiv.org/api/query?")
+
+
+def test_fetch_arxiv_xml_uses_https_export_endpoint(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = "<feed />"
+
+    def fake_fetch(**kwargs):
+        captured["url"] = kwargs["url"]
+        return FakeResponse()
+
+    monkeypatch.setattr(arxiv, "fetch", fake_fetch)
+    monkeypatch.setattr(arxiv.time, "sleep", lambda _seconds: None)
+
+    xml = arxiv.fetch_arxiv_xml("2401.00001")
+
+    assert xml == "<feed />"
+    assert captured["url"] == "https://export.arxiv.org/api/query?id_list=2401.00001"

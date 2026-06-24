@@ -143,9 +143,14 @@ def search(term: str, page: int = 1, results_per_page: int = 10) -> tuple[list[d
         if not html:
             return [], 0, "viXra search failed to fetch results"
 
-        # Parse /abs/ links with titles
-        # Look for anchors like <a href="/abs/1901.0001">Title...</a>
-        items: list[dict[str, Any]] = []
+        safe_page = max(1, int(page or 1))
+        safe_page_size = max(1, int(results_per_page or 10))
+        start_index = (safe_page - 1) * safe_page_size
+        end_index = start_index + safe_page_size
+
+        # Parse /abs/ links with titles before slicing, so pagination applies
+        # to the result set rather than to enriched first-page items.
+        candidates: list[tuple[str, str]] = []
         seen: set[str] = set()
         for m in re.finditer(r"<a[^>]+href=\"(/abs/[A-Za-z0-9\.v/_-]+)\"[^>]*>(.*?)</a>", html, re.IGNORECASE | re.DOTALL):
             href = m.group(1)
@@ -157,6 +162,10 @@ def search(term: str, page: int = 1, results_per_page: int = 10) -> tuple[list[d
             if not vid or vid in seen:
                 continue
             seen.add(vid)
+            candidates.append((vid, title))
+
+        items: list[dict[str, Any]] = []
+        for vid, title in candidates[start_index:end_index]:
             # Enrich from abstract page for authors (and better title if available)
             abs_url = f"https://vixra.org/abs/{vid}"
             authors = None
@@ -181,9 +190,7 @@ def search(term: str, page: int = 1, results_per_page: int = 10) -> tuple[list[d
                 "provider": "vixra",
             }
             items.append(item)
-            if len(items) >= results_per_page:
-                break
-        total = len(items)
+        total = len(candidates)
         return items, total, None
     except TimeoutError:
         return None, 0, "viXra search request timed out."

@@ -6,7 +6,14 @@ Adapter for the Semantic Scholar API using the centralized HTTP client.
 
 from typing import Any, Optional
 
-from tldw_Server_API.app.core.http_client import fetch_json
+from tldw_Server_API.app.core.Third_Party._http_helpers import (
+    ThirdPartyHTTPStatusError,
+    fetch_json_checked,
+)
+
+
+def fetch_json(**kwargs: Any) -> Any:
+    return fetch_json_checked(**kwargs)
 
 FIELDS_OF_STUDY_CHOICES = [
     "Computer Science", "Medicine", "Chemistry", "Biology", "Materials Science",
@@ -80,6 +87,8 @@ def search_papers_semantic_scholar(
         # Optional pacing if needed; retries/backoff handled centrally
         # time.sleep(0.2)
         return data, None
+    except ThirdPartyHTTPStatusError as exc:
+        return None, f"Semantic Scholar API HTTP Error: {exc.status_code}"
     except Exception:
         return None, "Semantic Scholar search failed."
 
@@ -97,6 +106,10 @@ def get_paper_details_semantic_scholar(
         data = fetch_json(method="GET", url=url, params=params, timeout=10)
         # time.sleep(0.2)
         return data, None
+    except ThirdPartyHTTPStatusError as exc:
+        if exc.status_code == 404:
+            return None, None
+        return None, f"Semantic Scholar API HTTP Error: {exc.status_code}"
     except Exception:
         return None, "Semantic Scholar paper details lookup failed."
 

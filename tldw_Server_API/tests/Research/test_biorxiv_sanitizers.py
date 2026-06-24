@@ -150,3 +150,93 @@ def test_biorxiv_provider_paths_preserve_timeout_classification(
     assert error == expected_timeout
     for term in sensitive_terms:
         assert term not in error
+
+
+def test_search_biorxiv_filtered_query_continues_after_empty_filtered_batch(monkeypatch):
+    cursors: list[int] = []
+
+    def fake_get_json(url, params=None, timeout=15):
+        del params, timeout
+        cursor = int(url.rstrip("/").split("/")[-1])
+        cursors.append(cursor)
+        if cursor == 0:
+            collection = [
+                {
+                    "doi": f"10.1101/nonmatch.{i}",
+                    "title": f"Unrelated preprint {i}",
+                    "authors": "No Match",
+                    "abstract": "irrelevant",
+                    "server": "biorxiv",
+                    "version": 1,
+                }
+                for i in range(100)
+            ]
+            return {"messages": [{"count": "100", "total": "101"}], "collection": collection}
+        if cursor == 100:
+            return {
+                "messages": [{"count": "1", "total": "101"}],
+                "collection": [
+                    {
+                        "doi": "10.1101/target",
+                        "title": "Target kinase discovery",
+                        "authors": "Match Author",
+                        "abstract": "relevant",
+                        "server": "biorxiv",
+                        "version": 1,
+                    }
+                ],
+            }
+        return {"messages": [{"count": "0", "total": "101"}], "collection": []}
+
+    monkeypatch.setattr(biorxiv, "_get_json", fake_get_json)
+    monkeypatch.setattr(biorxiv.time, "sleep", lambda _seconds: None)
+
+    items, total, error = biorxiv.search_biorxiv("target kinase", limit=1)
+
+    assert error is None
+    assert [item["doi"] for item in items or []] == ["10.1101/target"]
+    assert total == 1
+    assert cursors == [0, 100]
+
+
+def test_search_biorxiv_pubs_filtered_query_continues_after_empty_filtered_batch(monkeypatch):
+    cursors: list[int] = []
+
+    def fake_get_json(url, timeout=15, params=None):
+        del timeout, params
+        cursor = int(url.rstrip("/").split("/")[-1])
+        cursors.append(cursor)
+        if cursor == 0:
+            collection = [
+                {
+                    "biorxiv_doi": f"10.1101/pub-nonmatch.{i}",
+                    "preprint_title": f"Unrelated publication {i}",
+                    "preprint_authors": "No Match",
+                    "preprint_abstract": "irrelevant",
+                }
+                for i in range(100)
+            ]
+            return {"messages": [{"count": "100"}], "collection": collection}
+        if cursor == 100:
+            return {
+                "messages": [{"count": "1"}],
+                "collection": [
+                    {
+                        "biorxiv_doi": "10.1101/pub-target",
+                        "preprint_title": "Target clinical publication",
+                        "preprint_authors": "Match Author",
+                        "preprint_abstract": "relevant",
+                    }
+                ],
+            }
+        return {"messages": [{"count": "0"}], "collection": []}
+
+    monkeypatch.setattr(biorxiv, "_get_json", fake_get_json)
+    monkeypatch.setattr(biorxiv.time, "sleep", lambda _seconds: None)
+
+    items, total, error = biorxiv.search_biorxiv_pubs(q="target clinical", limit=1)
+
+    assert error is None
+    assert [item["biorxiv_doi"] for item in items or []] == ["10.1101/pub-target"]
+    assert total == 1
+    assert cursors == [0, 100]
