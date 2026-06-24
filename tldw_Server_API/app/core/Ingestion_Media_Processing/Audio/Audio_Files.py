@@ -51,6 +51,7 @@ from tldw_Server_API.app.core.http_client import download as http_download
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (
     ConversionError as TranscriptionConversionError,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import redact_url_for_log
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import extract_metadata
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
@@ -506,11 +507,12 @@ def download_audio_file(
         TypeError: If `cookies` is not a string or dictionary when `use_cookies` is True.
         Exception: For other unexpected errors during the download process.
     """
+    safe_url = redact_url_for_log(url)
     try:
         block_reason = _validate_outbound_url(url)
         if block_reason:
             raise AudioDownloadError(f"URL blocked by security policy: {block_reason}")
-        logging.info(f"Attempting audio download from: {url} into {target_temp_dir}")
+        logging.info(f"Attempting audio download from: {safe_url} into {target_temp_dir}")
         headers = {}
         if use_cookies and cookies:
             try:
@@ -523,7 +525,7 @@ def download_audio_file(
                 headers['Cookie'] = '; '.join([f'{k}={v}' for k, v in cookie_dict.items()])
                 logging.debug("Using cookies for download.")
             except (json.JSONDecodeError, TypeError) as e:
-                logging.warning(f"Invalid cookie format provided for {url}. Proceeding without cookies. Error: {e}")
+                logging.warning(f"Invalid cookie format provided for {safe_url}. Proceeding without cookies. Error: {e}")
                 # Raise ValueError to signal bad input if cookies were intended but unusable
                 if isinstance(cookies, str):  # Only raise if it was a string that failed to parse
                     raise ValueError(f"Invalid JSON format for cookies: {e}") from e
@@ -554,7 +556,7 @@ def download_audio_file(
         save_dir.mkdir(parents=True, exist_ok=True) # Ensure it exists
         save_path = save_dir / file_name
 
-        logging.info(f"Downloading {url} to: {save_path}")
+        logging.info(f"Downloading {safe_url} to: {save_path}")
 
         def _stream_download(get_callable: Callable[..., Any]) -> str:
             resp = get_callable(url, headers=headers, stream=True, timeout=30)
@@ -562,7 +564,7 @@ def download_audio_file(
             content_type = (resp.headers.get("content-type") or "").lower()
             if "audio/" not in content_type:
                 raise AudioDownloadError(
-                    f"Unexpected Content-Type for {url}: {content_type or 'unknown'}"
+                    f"Unexpected Content-Type for {safe_url}: {content_type or 'unknown'}"
                 )
             # Prefer filename from Content-Disposition if provided by server
             content_disposition_hdr = resp.headers.get('content-disposition')
@@ -585,7 +587,7 @@ def download_audio_file(
             try:
                 if clen and MAX_FILE_SIZE and int(clen) > int(MAX_FILE_SIZE):
                     raise AudioFileSizeError(
-                        f"File size ({int(clen) / (1024*1024):.2f} MB) exceeds the {MAX_FILE_SIZE / (1024*1024):.0f}MB limit for URL {url}."
+                            f"File size ({int(clen) / (1024*1024):.2f} MB) exceeds the {MAX_FILE_SIZE / (1024*1024):.0f}MB limit for URL {safe_url}."
                     )
             except ValueError:
                 pass
@@ -601,11 +603,11 @@ def download_audio_file(
                         with contextlib.suppress(_AUDIO_FILES_NONCRITICAL_EXCEPTIONS):
                             Path(save_path).unlink(missing_ok=True)
                         raise AudioFileSizeError(
-                            f"Downloaded content for {url} exceeded the {MAX_FILE_SIZE / (1024*1024):.0f}MB limit."
+                            f"Downloaded content for {safe_url} exceeded the {MAX_FILE_SIZE / (1024*1024):.0f}MB limit."
                         )
                     f.write(chunk)
             logging.info(
-                f"Audio file downloaded successfully from {url}: {save_path} ({total / (1024*1024):.2f} MB)"
+                f"Audio file downloaded successfully from {safe_url}: {save_path} ({total / (1024*1024):.2f} MB)"
             )
             return str(save_path)
 
@@ -630,24 +632,24 @@ def download_audio_file(
                 with contextlib.suppress(_AUDIO_FILES_NONCRITICAL_EXCEPTIONS):
                     Path(save_path).unlink(missing_ok=True)
                 raise AudioFileSizeError(
-                    f"Downloaded content for {url} exceeded the configured limit."
+                    f"Downloaded content for {safe_url} exceeded the configured limit."
                 ) from e
             # Clean up and wrap remaining errors
             with contextlib.suppress(_AUDIO_FILES_NONCRITICAL_EXCEPTIONS):
                 Path(save_path).unlink(missing_ok=True)
-            raise AudioDownloadError(f"Download failed for {url}: {e}") from e
+            raise AudioDownloadError(f"Download failed for {safe_url}: {e}") from e
         # Success path
         try:
             downloaded_bytes = Path(save_path).stat().st_size
         except _AUDIO_FILES_NONCRITICAL_EXCEPTIONS:
             downloaded_bytes = 0
         logging.info(
-            f"Audio file downloaded successfully from {url}: {save_path} ({downloaded_bytes / (1024*1024):.2f} MB)"
+            f"Audio file downloaded successfully from {safe_url}: {save_path} ({downloaded_bytes / (1024*1024):.2f} MB)"
         )
         return str(save_path)
 
     except AudioFileSizeError:
-        logging.error(f"Audio download aborted: file exceeded configured limit for {url}")
+        logging.error(f"Audio download aborted: file exceeded configured limit for {safe_url}")
         # Ensure partial file is removed if present
         try:
             if 'save_path' in locals():
@@ -659,27 +661,27 @@ def download_audio_file(
         # Allow previously raised download errors to bubble without double-wrapping
         raise
     except ValueError as e: # Handles cookie format issues and other value errors
-        logging.error(f"Value error during download from {url}: {e}")
+        logging.error(f"Value error during download from {safe_url}: {e}")
         if "cookies" in str(e).lower():
-            raise AudioCookieError(f"Invalid cookie format for {url}: {e}") from e
-        raise AudioDownloadError(f"Value error during download from {url}: {e}") from e
+            raise AudioCookieError(f"Invalid cookie format for {safe_url}: {e}") from e
+        raise AudioDownloadError(f"Value error during download from {safe_url}: {e}") from e
     except TypeError as e: # Handles cookie type issues
-        logging.error(f"Type error with cookies for {url}: {e}")
-        raise AudioCookieError(f"Cookie type error for {url}: {e}") from e
+        logging.error(f"Type error with cookies for {safe_url}: {e}")
+        raise AudioCookieError(f"Cookie type error for {safe_url}: {e}") from e
     except _AUDIO_FILES_NONCRITICAL_EXCEPTIONS as e:
-        logging.error(f"Unexpected error downloading audio file from {url}: {type(e).__name__} - {e}", exc_info=True)
-        raise AudioDownloadError(f"Unexpected download error for {url}: {type(e).__name__} - {str(e)}") from e
+        logging.error(f"Unexpected error downloading audio file from {safe_url}: {type(e).__name__} - {e}", exc_info=True)
+        raise AudioDownloadError(f"Unexpected download error for {safe_url}: {type(e).__name__} - {str(e)}") from e
     except Exception as e:
         # Some HTTP client failures (for example httpx.ConnectError in
         # restricted CI/network environments) are not covered by the noncritical
         # tuple above. Normalize them to AudioDownloadError so per-item handling
         # can continue without aborting the whole batch.
         logging.error(
-            f"Unhandled download exception for {url}: {type(e).__name__} - {e}",
+            f"Unhandled download exception for {safe_url}: {type(e).__name__} - {e}",
             exc_info=True,
         )
         raise AudioDownloadError(
-            f"Unexpected download error for {url}: {type(e).__name__} - {e}"
+            f"Unexpected download error for {safe_url}: {type(e).__name__} - {e}"
         ) from e
 
 
@@ -1778,7 +1780,7 @@ def process_podcast(
     temp_directory_manager = tempfile.TemporaryDirectory(prefix="podcast_proc_", dir=temp_dir)
 
     def update_progress(message):
-        logging.info(f"Podcast ({url[:50]}...): {message}")
+        logging.info(f"Podcast ({redact_url_for_log(url)[:50]}...): {message}")
         progress.append(message)
 
     def _cleanup_temp_files():

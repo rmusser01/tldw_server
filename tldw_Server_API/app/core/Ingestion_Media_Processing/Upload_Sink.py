@@ -30,6 +30,7 @@ import zipfile
 #
 # Local Imports (adjust path as per your project structure)
 from tldw_Server_API.app.core.config import MAGIC_FILE_PATH, loaded_config_data
+from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 # If the above import fails in a different context, fallback to standard logging:
@@ -854,9 +855,9 @@ class FileValidator:
                                 issues.append(f"Archive contains potentially malicious path: {member_filename}")
                                 continue
 
-                            # Additional check: ensure the extracted path stays within extract_dir
-                            intended_path = (extract_dir / member_filename).resolve()
-                            if not str(intended_path).startswith(str(extract_dir.resolve())):
+                            # Additional check: ensure the extracted path stays within extract_dir.
+                            intended_path = resolve_safe_local_path(extract_dir / member_filename, extract_dir)
+                            if intended_path is None:
                                 logging.warning(f"Path traversal attempt detected: {member_filename}")
                                 issues.append(f"Archive contains path traversal attempt: {member_filename}")
                                 continue
@@ -912,7 +913,7 @@ class FileValidator:
                             # Now that we've validated the path, proceed with extraction
                             try:
                                 zip_ref.extract(member, path=extract_dir)
-                                internal_file_path = extract_dir / member.filename
+                                internal_file_path = intended_path
 
                                 # Determine media_type_key for internal file based on its extension
                                 internal_media_type_key = _resolve_media_type_key(internal_file_path)
@@ -1000,8 +1001,8 @@ class FileValidator:
                                         continue
                                 except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS:
                                     pass
-                                intended_path = (extract_dir / member_filename).resolve()
-                                if not str(intended_path).startswith(str(extract_dir.resolve())):
+                                intended_path = resolve_safe_local_path(extract_dir / member_filename, extract_dir)
+                                if intended_path is None:
                                     logging.warning(f"Path traversal attempt detected: {member_filename}")
                                     issues.append(f"Archive contains path traversal attempt: {member_filename}")
                                     continue
@@ -1026,7 +1027,7 @@ class FileValidator:
                                         # Older Python versions without 'filter' support: we validated member type
                                         # and path above; continue extracting with the safer prerequisites enforced.
                                         tar.extract(member, path=extract_dir)
-                                    internal_file_path = extract_dir / member.name
+                                    internal_file_path = intended_path
                                     internal_media_type_key = _resolve_media_type_key(internal_file_path)
 
                                     if not internal_media_type_key:
@@ -1167,25 +1168,8 @@ class FileValidator:
         except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as e:
             raise FileValidationError(f"Invalid XML content: {e}") from e
 
-        # Optionally strip comments and processing instructions
-        try:
-            from xml.etree.ElementTree import Comment, ProcessingInstruction  # type: ignore
-            strip_comments = bool((config or {}).get("strip_comments", True))
-            strip_pi = bool((config or {}).get("strip_processing_instructions", True))
-            if strip_comments or strip_pi:
-                def _strip(parent):
-                    for elem in list(parent):
-                        tag_repr = getattr(elem, 'tag', None)
-                        if strip_comments and tag_repr is Comment:
-                            parent.remove(elem)
-                            continue
-                        if strip_pi and tag_repr is ProcessingInstruction:
-                            parent.remove(elem)
-                            continue
-                        _strip(elem)
-                _strip(root)
-        except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS:
-            pass
+        # defusedxml's default parser does not preserve comments or processing
+        # instructions, so no stdlib XML comment handling is needed here.
 
         try:
             cleaned = DET.tostring(root, encoding='unicode')
