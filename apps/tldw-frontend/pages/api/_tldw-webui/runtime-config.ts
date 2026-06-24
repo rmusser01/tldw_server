@@ -43,6 +43,9 @@ const LOOPBACK_PEER_ADDRESSES = new Set([
 
 const normalizeEnvValue = (value?: string): string => String(value || "").trim()
 
+const getDeploymentMode = (): string =>
+  normalizeEnvValue(process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE) || "quickstart"
+
 const isSingleUserMode = (value?: string): boolean => value === "single_user"
 
 const isEnabled = (value?: string): boolean => value === "1"
@@ -77,6 +80,46 @@ const isLoopbackHost = (hostHeader?: string | string[]): boolean => {
 const isLoopbackPeerAddress = (remoteAddress?: string): boolean =>
   LOOPBACK_PEER_ADDRESSES.has(normalizeEnvValue(remoteAddress).toLowerCase())
 
+const extractIPv4Address = (remoteAddress?: string): number[] | null => {
+  const normalized = normalizeEnvValue(remoteAddress).toLowerCase()
+  const address = normalized.startsWith("::ffff:")
+    ? normalized.slice("::ffff:".length)
+    : normalized
+  const octets = address.split(".")
+
+  if (octets.length !== 4) return null
+
+  const parts = octets.map((octet) => {
+    if (!/^\d+$/.test(octet)) return Number.NaN
+    const value = Number(octet)
+    return value >= 0 && value <= 255 ? value : Number.NaN
+  })
+
+  return parts.every((part) => Number.isInteger(part)) ? parts : null
+}
+
+const isDockerGatewayPeerAddress = (remoteAddress?: string): boolean => {
+  const parts = extractIPv4Address(remoteAddress)
+  if (!parts) return false
+
+  const [first, second, third, fourth] = parts
+  const isLinuxBridgeGateway =
+    first === 172 && second >= 16 && second <= 31 && third === 0 && fourth === 1
+  const isDockerDesktopGateway =
+    first === 192 && second === 168 && third === 65 && fourth === 1
+
+  return isLinuxBridgeGateway || isDockerDesktopGateway
+}
+
+const isTrustedLocalPeerAddress = (
+  remoteAddress: string | undefined,
+  deploymentMode: string,
+  runtimeAuthEnabled: boolean
+): boolean => {
+  if (isLoopbackPeerAddress(remoteAddress)) return true
+  return runtimeAuthEnabled && deploymentMode === "quickstart" && isDockerGatewayPeerAddress(remoteAddress)
+}
+
 const hasForwardingHeaders = (req: NextApiRequest): boolean =>
   FORWARDED_HEADER_NAMES.some((name) =>
     Object.prototype.hasOwnProperty.call(req.headers, name)
@@ -88,7 +131,7 @@ const unavailable = (reason: string): RuntimeConfigResponse => ({
     reason
   },
   networking: {
-    deploymentMode: normalizeEnvValue(process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE) || "quickstart",
+    deploymentMode: getDeploymentMode(),
     serverUrl: ""
   }
 })
@@ -110,17 +153,20 @@ export default function handler(
     return
   }
 
-  if (!isEnabled(process.env.TLDW_WEBUI_EXPOSE_RUNTIME_AUTH)) {
+  const runtimeAuthEnabled = isEnabled(process.env.TLDW_WEBUI_EXPOSE_RUNTIME_AUTH)
+  if (!runtimeAuthEnabled) {
     res.status(200).json(unavailable("disabled"))
     return
   }
+
+  const deploymentMode = getDeploymentMode()
 
   if (!isLoopbackHost(req.headers.host)) {
     res.status(200).json(unavailable("host"))
     return
   }
 
-  if (!isLoopbackPeerAddress(req.socket?.remoteAddress)) {
+  if (!isTrustedLocalPeerAddress(req.socket?.remoteAddress, deploymentMode, runtimeAuthEnabled)) {
     res.status(200).json(unavailable("peer"))
     return
   }
@@ -143,7 +189,7 @@ export default function handler(
       apiKey
     },
     networking: {
-      deploymentMode: normalizeEnvValue(process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE) || "quickstart",
+      deploymentMode,
       serverUrl: ""
     }
   })

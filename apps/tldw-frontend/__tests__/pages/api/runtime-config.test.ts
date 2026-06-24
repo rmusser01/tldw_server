@@ -124,6 +124,55 @@ describe("WebUI runtime config API", () => {
     })
   })
 
+  it.each([
+    ["172.17.0.1"],
+    ["172.18.0.1"],
+    ["::ffff:172.18.0.1"],
+    ["192.168.65.1"]
+  ])("returns runtime single-user auth for quickstart Docker gateway peer %s", async (remoteAddress) => {
+    const res = await callRuntimeConfig({}, remoteAddress)
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatchObject({
+      runtimeAuth: {
+        available: true,
+        authMode: "single-user",
+        apiKey: "runtime-single-user-key"
+      }
+    })
+  })
+
+  it.each([
+    ["192.168.1.50"],
+    ["10.0.0.5"],
+    ["172.17.0.2"],
+    ["172.32.0.1"]
+  ])("returns unavailable for nonlocal spoof peer %s", async (remoteAddress) => {
+    const res = await callRuntimeConfig({ host: "127.0.0.1:8080" }, remoteAddress)
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatchObject({
+      runtimeAuth: {
+        available: false
+      }
+    })
+    expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
+  })
+
+  it("returns unavailable for a Docker gateway peer outside quickstart deployment mode", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "production"
+
+    const res = await callRuntimeConfig({}, "172.17.0.1")
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatchObject({
+      runtimeAuth: {
+        available: false
+      }
+    })
+    expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
+  })
+
   it("returns unavailable for a spoofed loopback host from a non-loopback peer", async () => {
     const res = await callRuntimeConfig({ host: "127.0.0.1:8080" }, "203.0.113.10")
 
