@@ -466,9 +466,6 @@ async def _handle_job(job: dict[str, Any]) -> dict[str, Any]:
 
 
 async def main() -> None:
-    if os.getenv("CHATBOOKS_JOBS_BACKEND") == "prompt_studio":
-        logger.warning("CHATBOOKS_JOBS_BACKEND is prompt_studio; chatbooks Jobs worker expects core backend")
-
     worker_id = (os.getenv("CHATBOOKS_JOBS_WORKER_ID") or f"chatbooks-jobs-{os.getpid()}").strip()
     queue = (os.getenv("CHATBOOKS_JOBS_QUEUE") or "default").strip() or "default"
 

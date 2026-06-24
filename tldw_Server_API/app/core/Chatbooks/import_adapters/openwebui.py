@@ -18,6 +18,11 @@ _ATTACHMENT_KEYS = (
     "file_ids",
     "fileIds",
 )
+MAX_OPENWEBUI_JSON_BYTES = 100 * 1024 * 1024
+MAX_OPENWEBUI_CHATS = 10_000
+MAX_OPENWEBUI_MESSAGES_PER_CHAT = 20_000
+MAX_OPENWEBUI_TOTAL_MESSAGES = 200_000
+MAX_OPENWEBUI_PREVIEW_ITEMS = 1_000
 
 
 @dataclass(frozen=True)
@@ -226,9 +231,22 @@ def _is_branched(messages: list[OpenWebUIMessagePlan]) -> bool:
     return root_count > 1
 
 
-def load_openwebui_export(file_path: str | Path) -> OpenWebUIParsedExport:
+def load_openwebui_export(
+    file_path: str | Path,
+    *,
+    max_bytes: int = MAX_OPENWEBUI_JSON_BYTES,
+    max_chats: int = MAX_OPENWEBUI_CHATS,
+    max_messages_per_chat: int = MAX_OPENWEBUI_MESSAGES_PER_CHAT,
+    max_total_messages: int = MAX_OPENWEBUI_TOTAL_MESSAGES,
+) -> OpenWebUIParsedExport:
     """Load and normalize an OpenWebUI chat export JSON file."""
     path = Path(file_path)
+    try:
+        if max_bytes > 0 and path.stat().st_size > max_bytes:
+            raise ValueError(f"OpenWebUI JSON export is too large; maximum is {max_bytes} bytes")
+    except OSError as exc:
+        raise ValueError("Unable to read OpenWebUI JSON export") from exc
+
     try:
         with path.open("r", encoding="utf-8") as handle:
             raw_data = json.load(handle)
@@ -239,10 +257,13 @@ def load_openwebui_export(file_path: str | Path) -> OpenWebUIParsedExport:
 
     if not isinstance(raw_data, list):
         raise ValueError("OpenWebUI export top-level JSON value must be an array")
+    if max_chats > 0 and len(raw_data) > max_chats:
+        raise ValueError(f"OpenWebUI export has too many OpenWebUI chats; maximum is {max_chats}")
 
     chats: list[OpenWebUIConversationPlan] = []
     warnings: list[str] = []
     malformed_chat_count = 0
+    total_messages = 0
 
     for index, item in enumerate(raw_data):
         extracted = _extract_chat_payload(item)
@@ -266,6 +287,16 @@ def load_openwebui_export(file_path: str | Path) -> OpenWebUIParsedExport:
                 chat_warnings.append(f"Message {source_key} is malformed and was skipped.")
                 continue
             messages.append(message)
+            if max_messages_per_chat > 0 and len(messages) > max_messages_per_chat:
+                raise ValueError(
+                    f"OpenWebUI chat at index {index} has too many OpenWebUI messages; "
+                    f"maximum is {max_messages_per_chat}"
+                )
+            total_messages += 1
+            if max_total_messages > 0 and total_messages > max_total_messages:
+                raise ValueError(
+                    f"OpenWebUI export has too many OpenWebUI messages; maximum is {max_total_messages}"
+                )
 
         current_id = _coerce_optional_text(history.get("currentId") or history.get("current_id"))
         attachment_count = sum(len(message.attachment_refs) for message in messages)
@@ -301,17 +332,31 @@ def load_openwebui_export(file_path: str | Path) -> OpenWebUIParsedExport:
 def preview_openwebui_export(
     file_path: str | Path,
     duplicate_lookup: Callable[[str], bool] | None = None,
+    *,
+    max_bytes: int = MAX_OPENWEBUI_JSON_BYTES,
+    max_chats: int = MAX_OPENWEBUI_CHATS,
+    max_messages_per_chat: int = MAX_OPENWEBUI_MESSAGES_PER_CHAT,
+    max_total_messages: int = MAX_OPENWEBUI_TOTAL_MESSAGES,
+    max_preview_items: int = MAX_OPENWEBUI_PREVIEW_ITEMS,
 ) -> OpenWebUIImportPreview:
     """Build a preview for an OpenWebUI chat export JSON file."""
-    parsed = load_openwebui_export(file_path)
+    parsed = load_openwebui_export(
+        file_path,
+        max_bytes=max_bytes,
+        max_chats=max_chats,
+        max_messages_per_chat=max_messages_per_chat,
+        max_total_messages=max_total_messages,
+    )
     duplicate_lookup = duplicate_lookup or (lambda _external_ref: False)
 
     items: list[OpenWebUIPreviewChatItem] = []
     duplicate_chat_count = 0
-    for chat in parsed.chats:
+    for index, chat in enumerate(parsed.chats):
         duplicate = bool(duplicate_lookup(chat.external_ref))
         if duplicate:
             duplicate_chat_count += 1
+        if max_preview_items > 0 and index >= max_preview_items:
+            continue
         items.append(
             OpenWebUIPreviewChatItem(
                 external_ref=chat.external_ref,
@@ -323,6 +368,12 @@ def preview_openwebui_export(
             )
         )
 
+    warnings = list(parsed.warnings)
+    if max_preview_items > 0 and len(parsed.chats) > max_preview_items:
+        warnings.append(
+            f"OpenWebUI preview items truncated to {max_preview_items} of {len(parsed.chats)} chats."
+        )
+
     return OpenWebUIImportPreview(
         chat_count=len(parsed.chats),
         message_count=sum(len(chat.messages) for chat in parsed.chats),
@@ -330,6 +381,6 @@ def preview_openwebui_export(
         duplicate_chat_count=duplicate_chat_count,
         attachment_reference_count=sum(chat.attachment_reference_count for chat in parsed.chats),
         malformed_chat_count=parsed.malformed_chat_count,
-        warnings=list(parsed.warnings),
+        warnings=warnings,
         items=items,
     )

@@ -378,6 +378,103 @@ def test_v1_1_import_rejects_missing_payload_inventory_entry_before_writes(servi
     service.db.add_note.assert_not_called()
 
 
+def test_v1_1_import_uses_verified_explicit_content_item_path(service):
+    verified_path = "content/custom/verified_note.md"
+    fallback_path = "content/notes/note_1.md"
+    verified_payload = b"---\ntitle: Verified Note\n---\n\nVerified body"
+    fallback_payload = b"---\ntitle: Fallback Note\n---\n\nUnverified fallback body"
+    verified_hash = f"sha256:{hashlib.sha256(verified_payload).hexdigest()}"
+
+    manifest = {
+        "version": "1.1.0",
+        "name": "Explicit Path Import",
+        "description": "Importer must use the same path validated by inventory.",
+        "author": None,
+        "created_at": "2026-06-18T12:00:00+00:00",
+        "updated_at": "2026-06-18T12:00:00+00:00",
+        "export_id": "explicit-path-import",
+        "content_items": [
+            {
+                "id": "1",
+                "type": "note",
+                "title": "Verified Note",
+                "description": None,
+                "created_at": None,
+                "updated_at": None,
+                "tags": [],
+                "metadata": {},
+                "file_path": verified_path,
+                "checksum": verified_hash,
+            }
+        ],
+        "relationships": [],
+        "configuration": {
+            "include_media": False,
+            "include_embeddings": False,
+            "include_generated_content": True,
+            "media_quality": "compressed",
+            "max_file_size_mb": 100,
+        },
+        "statistics": {
+            "total_conversations": 0,
+            "total_notes": 1,
+            "total_characters": 0,
+            "total_media_items": 0,
+            "total_prompts": 0,
+            "total_evaluations": 0,
+            "total_embeddings": 0,
+            "total_world_books": 0,
+            "total_dictionaries": 0,
+            "total_documents": 0,
+            "total_size_bytes": len(verified_payload),
+        },
+        "metadata": {"tags": [], "categories": [], "language": "en", "license": None},
+        "user_info": {"user_id": "test_user"},
+        "features_used": ["file_inventory", "integrity_metadata"],
+        "producer": {"name": "tldw_server"},
+        "source_instance": {},
+        "compatibility": {
+            "min_reader_version": "1.0.0",
+            "recommended_reader_version": "1.1.0",
+        },
+        "file_inventory": [
+            {
+                "path": verified_path,
+                "media_type": "text/markdown",
+                "size_bytes": len(verified_payload),
+                "integrity": {
+                    "status": "verified",
+                    "algorithm": "sha256",
+                    "value": verified_hash,
+                },
+                "role": "payload",
+                "content_item_ids": ["1"],
+            }
+        ],
+    }
+
+    archive_path = service.import_dir / "explicit_path_import.chatbook"
+    with zipfile.ZipFile(archive_path, "w") as zf:
+        zf.writestr(verified_path, verified_payload)
+        zf.writestr(fallback_path, fallback_payload)
+        zf.writestr("manifest.json", json.dumps(manifest))
+
+    service.db.add_note = MagicMock(return_value=123)
+
+    success, message, details = service._import_chatbook_sync(
+        file_path=str(archive_path),
+        content_selections=None,
+        conflict_resolution=ConflictResolution.SKIP,
+        prefix_imported=False,
+        import_media=False,
+        import_embeddings=False,
+    )
+
+    assert success is True, message
+    assert details == {"imported_items": {"note": 1}, "warnings": []}
+    service.db.add_note.assert_called_once_with(title="Verified Note", content="Verified body")
+
+
 def test_v1_1_import_rejects_null_file_path_missing_fallback_inventory_before_writes(service):
     readme_payload = b"# Import Validation\n"
     readme_hash = f"sha256:{hashlib.sha256(readme_payload).hexdigest()}"

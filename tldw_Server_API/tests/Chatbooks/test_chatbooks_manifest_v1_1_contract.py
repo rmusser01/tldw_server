@@ -3,6 +3,7 @@ import json
 import shutil
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 import jsonschema
 import pytest
@@ -169,28 +170,46 @@ async def test_create_chatbook_export_canonicalizes_legacy_v1_manifest_version(c
     assert manifest["version"] == "1.0.0"
 
 
-async def test_prompt_studio_export_payload_includes_format_version(chatbook_v1_1_service):
+async def test_core_jobs_export_payload_includes_format_version(chatbook_v1_1_service):
     captured_payload = {}
 
-    class _PromptStudioAdapter:
-        def create_export_job(self, payload, request_id=None):
-            captured_payload.update(payload)
-            return {"id": 123}
+    def _capture_create_job(_self, **kwargs):
+        captured_payload.update(kwargs["payload"])
+        return {"uuid": "core-job-123"}
 
-    chatbook_v1_1_service._jobs_backend = "prompt_studio"
-    chatbook_v1_1_service._ps_job_adapter = _PromptStudioAdapter()
-
-    success, _message, job_id = await chatbook_v1_1_service.create_chatbook(
-        name="v1.1 async",
-        description="v1.1 async",
-        content_selections={},
-        format_version=ChatbookVersion.V1_1,
-        async_mode=True,
-    )
+    with patch("tldw_Server_API.app.core.Jobs.manager.JobManager.create_job", new=_capture_create_job):
+        success, _message, job_id = await chatbook_v1_1_service.create_chatbook(
+            name="v1.1 async",
+            description="v1.1 async",
+            content_selections={},
+            format_version=ChatbookVersion.V1_1,
+            async_mode=True,
+        )
 
     assert success is True
-    assert job_id == "123"
+    assert captured_payload["chatbooks_job_id"] == job_id
     assert captured_payload["format_version"] == "1.1.0"
+
+
+async def test_core_jobs_export_payload_accepts_none_content_selections(chatbook_v1_1_service):
+    captured_payload = {}
+
+    def _capture_create_job(_self, **kwargs):
+        captured_payload.update(kwargs["payload"])
+        return {"uuid": "core-job-123"}
+
+    with patch("tldw_Server_API.app.core.Jobs.manager.JobManager.create_job", new=_capture_create_job):
+        success, _message, job_id = await chatbook_v1_1_service.create_chatbook(
+            name="v1.1 async",
+            description="v1.1 async",
+            content_selections=None,
+            format_version=ChatbookVersion.V1_1,
+            async_mode=True,
+        )
+
+    assert success is True
+    assert captured_payload["chatbooks_job_id"] == job_id
+    assert captured_payload["content_selections"] == {}
 
 
 async def test_core_jobs_worker_forwards_format_version_to_archive_creation():

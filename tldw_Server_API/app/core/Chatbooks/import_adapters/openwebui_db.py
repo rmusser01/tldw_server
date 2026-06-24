@@ -28,6 +28,11 @@ from .openwebui import (
 UNFILED_FOLDER_PATH = ["Unfiled"]
 MAX_PREVIEW_WARNINGS_PER_USER = 100
 MAX_PREVIEW_WARNINGS_TOTAL = 500
+MAX_OPENWEBUI_DB_BYTES = 512 * 1024 * 1024
+MAX_OPENWEBUI_DB_USERS = 1_000
+MAX_OPENWEBUI_DB_CHATS_PER_USER = 10_000
+MAX_OPENWEBUI_DB_MESSAGES_PER_CHAT = 20_000
+MAX_OPENWEBUI_DB_TOTAL_MESSAGES_PER_USER = 200_000
 
 
 @dataclass
@@ -127,14 +132,53 @@ class OpenWebUIDatabaseExtractionResult:
     warnings: list[str] = field(default_factory=list)
 
 
+def _check_db_file_size(file_path: str | Path, max_bytes: int) -> None:
+    if max_bytes <= 0:
+        return
+    try:
+        if Path(file_path).stat().st_size > max_bytes:
+            raise ValueError(f"OpenWebUI database is too large; maximum is {max_bytes} bytes")
+    except OSError as exc:
+        raise ValueError("Unable to read OpenWebUI database") from exc
+
+
+def _enforce_message_limits(
+    chat_plan: OpenWebUIConversationPlan,
+    *,
+    user_id: str,
+    current_total: int,
+    max_messages_per_chat: int,
+    max_total_messages: int,
+) -> None:
+    message_count = len(chat_plan.messages)
+    if max_messages_per_chat > 0 and message_count > max_messages_per_chat:
+        raise ValueError(
+            f"OpenWebUI chat {chat_plan.external_ref} for user {user_id} has too many OpenWebUI messages; "
+            f"maximum is {max_messages_per_chat}"
+        )
+    if max_total_messages > 0 and current_total + message_count > max_total_messages:
+        raise ValueError(
+            f"OpenWebUI user {user_id} has too many OpenWebUI messages; maximum is {max_total_messages}"
+        )
+
+
 def preview_openwebui_db(
     file_path: str | Path,
     duplicate_lookup: Callable[[str], bool] | None = None,
+    *,
+    max_bytes: int = MAX_OPENWEBUI_DB_BYTES,
+    max_users: int = MAX_OPENWEBUI_DB_USERS,
+    max_chats_per_user: int = MAX_OPENWEBUI_DB_CHATS_PER_USER,
+    max_messages_per_chat: int = MAX_OPENWEBUI_DB_MESSAGES_PER_CHAT,
+    max_total_messages_per_user: int = MAX_OPENWEBUI_DB_TOTAL_MESSAGES_PER_USER,
 ) -> OpenWebUIDatabasePreview:
     """Build a per-user preview for an uploaded OpenWebUI SQLite database."""
     duplicate_lookup = duplicate_lookup or (lambda _external_ref: False)
+    _check_db_file_size(file_path, max_bytes)
     with _open_validated_db(file_path) as conn:
         users = _load_users(conn)
+        if max_users > 0 and len(users) > max_users:
+            raise ValueError(f"OpenWebUI database has too many users; maximum is {max_users}")
         user_previews: list[OpenWebUIDatabaseUserPreview] = []
         warnings = _PreviewWarningAccumulator(
             MAX_PREVIEW_WARNINGS_TOTAL,
@@ -154,8 +198,15 @@ def preview_openwebui_db(
             archived_chat_count = 0
             pinned_chat_count = 0
             attachment_reference_count = 0
+            scanned_chat_count = 0
 
             for chat_row in _iter_chats_for_user(conn, user_id):
+                scanned_chat_count += 1
+                if max_chats_per_user > 0 and scanned_chat_count > max_chats_per_user:
+                    raise ValueError(
+                        f"OpenWebUI user {user_id} has too many OpenWebUI chats; "
+                        f"maximum is {max_chats_per_user}"
+                    )
                 if _sqlite_truthy(chat_row["archived"]):
                     archived_chat_count += 1
                 if _sqlite_truthy(chat_row["pinned"]):
@@ -165,6 +216,13 @@ def preview_openwebui_db(
                     user_warnings.extend(chat_warnings)
                     warnings.extend(chat_warnings)
                     continue
+                _enforce_message_limits(
+                    chat_plan,
+                    user_id=user_id,
+                    current_total=message_count,
+                    max_messages_per_chat=max_messages_per_chat,
+                    max_total_messages=max_total_messages_per_user,
+                )
                 user_warnings.extend(chat_warnings)
                 warnings.extend(chat_warnings)
                 folder_plan = _folder_plan_for_chat(chat_row, folders)
@@ -201,11 +259,16 @@ def extract_openwebui_db_user(
     file_path: str | Path,
     *,
     selected_user_id: str,
+    max_bytes: int = MAX_OPENWEBUI_DB_BYTES,
+    max_chats: int = MAX_OPENWEBUI_DB_CHATS_PER_USER,
+    max_messages_per_chat: int = MAX_OPENWEBUI_DB_MESSAGES_PER_CHAT,
+    max_total_messages: int = MAX_OPENWEBUI_DB_TOTAL_MESSAGES_PER_USER,
 ) -> OpenWebUIDatabaseExtractionResult:
     """Extract normalized conversations for one selected OpenWebUI source user."""
     if not selected_user_id or not str(selected_user_id).strip():
         raise ValueError("selected_user_id is required for OpenWebUI database imports")
 
+    _check_db_file_size(file_path, max_bytes)
     with _open_validated_db(file_path) as conn:
         user = _load_user(conn, selected_user_id)
         if user is None:
@@ -215,8 +278,16 @@ def extract_openwebui_db_user(
         chats: list[OpenWebUIConversationPlan] = []
         folder_plans_by_external_ref: dict[str, OpenWebUIDatabaseFolderPlan] = {}
         warnings: list[str] = []
+        scanned_chat_count = 0
+        total_messages = 0
 
         for chat_row in _iter_chats_for_user(conn, selected_user_id):
+            scanned_chat_count += 1
+            if max_chats > 0 and scanned_chat_count > max_chats:
+                raise ValueError(
+                    f"OpenWebUI user {selected_user_id} has too many OpenWebUI chats; "
+                    f"maximum is {max_chats}"
+                )
             chat_plan, chat_warnings = _conversation_plan_from_chat_row(
                 chat_row,
                 source_user_id=selected_user_id,
@@ -224,6 +295,14 @@ def extract_openwebui_db_user(
             warnings.extend(chat_warnings)
             if chat_plan is None:
                 continue
+            _enforce_message_limits(
+                chat_plan,
+                user_id=selected_user_id,
+                current_total=total_messages,
+                max_messages_per_chat=max_messages_per_chat,
+                max_total_messages=max_total_messages,
+            )
+            total_messages += len(chat_plan.messages)
 
             folder_plan = _folder_plan_for_chat(chat_row, folders)
             warnings.extend(folder_plan.warnings)

@@ -27,7 +27,7 @@ import os
 import shutil
 import zipfile
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from collections.abc import Callable
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -78,6 +78,7 @@ from .exceptions import (
     ExportError,
     FileOperationError,
     JobError,
+    QuotaExceededError,
     SecurityError,
     ValidationError,
 )
@@ -109,6 +110,7 @@ from .openwebui_hydration import (
     resolve_openwebui_file_path,
     validate_openwebui_data_root,
 )
+from .quota_manager import QuotaManager, UNLIMITED_QUOTA
 
 _CHATBOOK_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ArchiveError,
@@ -130,7 +132,6 @@ _CHATBOOK_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ValueError,
     json.JSONDecodeError,
     zipfile.BadZipFile,
-    asyncio.CancelledError,
 )
 _OPENWEBUI_FOLDER_MIRROR_EXCEPTIONS: tuple[type[BaseException], ...] = (
     *_CHATBOOK_NONCRITICAL_EXCEPTIONS,
@@ -139,6 +140,7 @@ _OPENWEBUI_FOLDER_MIRROR_EXCEPTIONS: tuple[type[BaseException], ...] = (
 
 _CHATBOOK_TEMPLATE_MODES = {"pass_through", "render_on_export", "render_on_import"}
 MAX_OPENWEBUI_HYDRATION_RESPONSE_ITEMS = 1000
+ManifestImportPathIndex = dict[tuple[str, str], tuple[str | None, str]]
 
 try:  # Prompts database is optional in some deployments
     from ..DB_Management.Prompts_DB import PromptsDatabase  # type: ignore
@@ -173,6 +175,14 @@ except _CHATBOOK_NONCRITICAL_EXCEPTIONS:  # pragma: no cover
 
 class ChatbookService:
     """Service for creating and importing chatbooks with user isolation."""
+
+    _IMPORT_PAYLOAD_FALLBACK_TEMPLATES = {
+        ContentType.CONVERSATION: "content/conversations/conversation_{id}.json",
+        ContentType.NOTE: "content/notes/note_{id}.md",
+        ContentType.CHARACTER: "content/characters/character_{id}.json",
+        ContentType.WORLD_BOOK: "content/world_books/world_book_{id}.json",
+        ContentType.DICTIONARY: "content/dictionaries/dictionary_{id}.json",
+    }
 
     @staticmethod
     def _is_unsafe_archive_path(member_path: str) -> bool:
@@ -212,6 +222,83 @@ class ChatbookService:
                 return True
 
         return False
+
+    @staticmethod
+    def _normalize_manifest_archive_path(raw_path: str) -> str | None:
+        """Normalize a manifest archive path and reject absolute/traversal paths."""
+        if not isinstance(raw_path, str) or not raw_path:
+            return None
+        normalized = raw_path.replace("\\", "/")
+        pure_path = PurePosixPath(normalized)
+        if pure_path.is_absolute() or not pure_path.parts:
+            return None
+        if any(part in {"", ".", ".."} or "\x00" in part for part in pure_path.parts):
+            return None
+        return pure_path.as_posix()
+
+    @staticmethod
+    def _content_type_value(value: Any) -> str | None:
+        if value is None:
+            return None
+        raw_value = getattr(value, "value", value)
+        return raw_value if isinstance(raw_value, str) else None
+
+    def _build_manifest_import_path_index(self, manifest: ChatbookManifest) -> ManifestImportPathIndex:
+        """Index explicit manifest payload paths by content type and item id."""
+        index: ManifestImportPathIndex = {}
+        for item in manifest.content_items:
+            item_id = str(getattr(item, "id", "") or "")
+            type_value = self._content_type_value(getattr(item, "type", None))
+            explicit_path = getattr(item, "file_path", None)
+            if not item_id or not type_value or not explicit_path:
+                continue
+            explicit_path_text = str(explicit_path)
+            index[(type_value, item_id)] = (
+                self._normalize_manifest_archive_path(explicit_path_text),
+                explicit_path_text,
+            )
+        return index
+
+    def _resolve_manifest_import_file(
+        self,
+        extract_dir: Path,
+        manifest: ChatbookManifest,
+        content_type: ContentType,
+        item_id: str,
+        manifest_path_index: ManifestImportPathIndex | None = None,
+    ) -> tuple[Path | None, str]:
+        """
+        Resolve the exact payload path for an import item from the manifest.
+
+        v1.1 validation verifies content item ``file_path`` entries when present;
+        import must consume the same path instead of reconstructing fallback names.
+        """
+        item_id_text = str(item_id)
+        fallback_template = self._IMPORT_PAYLOAD_FALLBACK_TEMPLATES.get(content_type)
+        rel_path = fallback_template.format(id=item_id_text) if fallback_template else ""
+
+        path_index = (
+            manifest_path_index
+            if manifest_path_index is not None
+            else self._build_manifest_import_path_index(manifest)
+        )
+        explicit_entry = path_index.get((content_type.value, item_id_text))
+        if explicit_entry is not None:
+            normalized, display_path = explicit_entry
+            if normalized is None:
+                return None, display_path
+            rel_path = normalized
+
+        if not rel_path:
+            return None, item_id_text
+
+        try:
+            base_path = extract_dir.resolve()
+            candidate = (base_path / rel_path).resolve()
+            candidate.relative_to(base_path)
+        except (OSError, ValueError):
+            return None, rel_path
+        return candidate, rel_path
 
     @staticmethod
     def _get_env_int(name: str, default: int) -> int:
@@ -470,7 +557,13 @@ class ChatbookService:
                 safe_name = "chatbook"
         return f"{safe_name}{suffix}"
 
-    def __init__(self, user_id: str | int, db: CharactersRAGDB, user_id_int: int | None = None):
+    def __init__(
+        self,
+        user_id: str | int,
+        db: CharactersRAGDB,
+        user_id_int: int | None = None,
+        user_tier: str = "free",
+    ):
         """
         Initialize the chatbook service for a specific user.
 
@@ -478,6 +571,7 @@ class ChatbookService:
             user_id: User identifier (string or integer)
             db: User's ChaChaNotes database instance
             user_id_int: Optional integer form of the user id for cross-database access
+            user_tier: User quota tier
         """
         self.user_id_raw = user_id
         self.user_id = str(user_id)
@@ -492,6 +586,7 @@ class ChatbookService:
                 self.user_id_int = int(self.user_id)
             except (TypeError, ValueError):
                 self.user_id_int = None
+        self.user_tier = user_tier
         self.db = db
 
         # Track TODOs once per session so we comply with PRD while exposing gaps
@@ -522,8 +617,6 @@ class ChatbookService:
             logger.warning("Chatbooks jobs backend override ignored; only core Jobs is supported now.")
         self._jobs_backend = "core"
 
-        # Legacy Prompt Studio adapter placeholder (no longer used; core Jobs only)
-        self._ps_job_adapter = None
         self._jobs_adapter = None
         self._jobs_db_path: Path | None = None
         try:
@@ -1274,7 +1367,7 @@ class ChatbookService:
         self,
         name: str,
         description: str,
-        content_selections: dict[ContentType, list[str]],
+        content_selections: dict[ContentType, list[str]] | None,
         author: str | None = None,
         include_media: bool = False,
         media_quality: str = "compressed",
@@ -1307,32 +1400,14 @@ class ChatbookService:
             Tuple of (success, message, job_id or file_path)
         """
         format_version = self._coerce_format_version(format_version)
+        content_selections = content_selections or {}
+
+        if not async_mode:
+            self._check_chatbook_job_admission_with_lock("export")
+
         if async_mode:
             # Create job and run asynchronously
-            # If using Prompt Studio backend, create PS job first and reuse its id
-            job_id = None
-            if self._jobs_backend == "prompt_studio" and self._ps_job_adapter is not None:
-                payload = {
-                    "domain": "chatbooks",
-                    "job_type": "export",
-                    "user_id": self.user_id,
-                    "name": name,
-                    "include_media": include_media,
-                    "include_embeddings": include_embeddings,
-                    "include_generated_content": include_generated_content,
-                    "tags": tags or [],
-                    "categories": categories or [],
-                    "format_version": format_version.value,
-                }
-                try:
-                    ps_job = self._ps_job_adapter.create_export_job(payload, request_id=request_id)
-                    if ps_job and ps_job.get("id") is not None:
-                        job_id = str(ps_job["id"])  # mirror PS id
-                except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
-                    logger.warning(f"Failed to create PS export job, falling back to core: {e}")
-                    job_id = None
-            if job_id is None:
-                job_id = str(uuid4())
+            job_id = str(uuid4())
             job = ExportJob(
                 job_id=job_id,
                 user_id=self.user_id,
@@ -1340,60 +1415,54 @@ class ChatbookService:
                 chatbook_name=name
             )
 
-            # Store job in database
-            self._save_export_job(job)
+            # Store job in database after atomically reserving Chatbooks quota.
+            self._save_export_job_with_quota(job)
 
-            # Start async processing depending on backend
-            if self._jobs_backend == "core":
-                # Enqueue into core Jobs and start worker if needed
-                job_created = None
-                enqueue_error: str | None = None
+            # Enqueue into core Jobs and start worker if needed
+            job_created = None
+            enqueue_error: str | None = None
+            try:
+                from tldw_Server_API.app.core.Jobs.manager import JobManager
+                if not hasattr(self, "_core_jobs"):
+                    self._core_jobs = JobManager()
+                payload = {
+                    "action": "export",
+                    "chatbooks_job_id": job_id,
+                    "name": name,
+                    "description": description,
+                    "content_selections": {k.value if hasattr(k, 'value') else str(k): v for k, v in content_selections.items()},
+                    "author": author,
+                    "include_media": include_media,
+                    "media_quality": media_quality,
+                    "include_embeddings": include_embeddings,
+                    "include_generated_content": include_generated_content,
+                    "tags": tags or [],
+                    "categories": categories or [],
+                    "format_version": format_version.value if hasattr(format_version, "value") else str(format_version),
+                }
+                job_created = self._core_jobs.create_job(
+                    domain="chatbooks",
+                    queue="default",
+                    job_type="export",
+                    payload=payload,
+                    owner_user_id=self.user_id,
+                    priority=5,
+                    max_retries=3,
+                    request_id=request_id,
+                )
+            except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
+                enqueue_error = str(e)
+                logger.warning(f"Failed to enqueue export job into core Jobs: {e}")
+            if not job_created:
+                err_msg = enqueue_error or "Failed to enqueue export job"
+                job.status = ExportStatus.FAILED
+                job.completed_at = datetime.now(timezone.utc)
+                job.error_message = err_msg
                 try:
-                    from tldw_Server_API.app.core.Jobs.manager import JobManager
-                    if not hasattr(self, "_core_jobs"):
-                        self._core_jobs = JobManager()
-                    payload = {
-                        "action": "export",
-                        "chatbooks_job_id": job_id,
-                        "name": name,
-                        "description": description,
-                        "content_selections": {k.value if hasattr(k, 'value') else str(k): v for k, v in content_selections.items()},
-                        "author": author,
-                        "include_media": include_media,
-                        "media_quality": media_quality,
-                        "include_embeddings": include_embeddings,
-                        "include_generated_content": include_generated_content,
-                        "tags": tags or [],
-                        "categories": categories or [],
-                        "format_version": format_version.value if hasattr(format_version, "value") else str(format_version),
-                    }
-                    job_created = self._core_jobs.create_job(
-                        domain="chatbooks",
-                        queue="default",
-                        job_type="export",
-                        payload=payload,
-                        owner_user_id=self.user_id,
-                        priority=5,
-                        max_retries=3,
-                        request_id=request_id,
-                    )
-                except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
-                    enqueue_error = str(e)
-                    logger.warning(f"Failed to enqueue export job into core Jobs: {e}")
-                if not job_created:
-                    err_msg = enqueue_error or "Failed to enqueue export job"
-                    job.status = ExportStatus.FAILED
-                    job.completed_at = datetime.now(timezone.utc)
-                    job.error_message = err_msg
-                    try:
-                        self._save_export_job(job)
-                    except _CHATBOOK_NONCRITICAL_EXCEPTIONS as save_err:
-                        logger.warning(f"Failed to persist failed export job state: {save_err}")
-                    return False, f"Export job failed to enqueue: {err_msg}", job_id
-            elif self._jobs_backend == "prompt_studio":
-                # Do not start local processing when using Prompt Studio backend.
-                # PS worker (external) is responsible for running the job.
-                pass
+                    self._save_export_job(job)
+                except _CHATBOOK_NONCRITICAL_EXCEPTIONS as save_err:
+                    logger.warning(f"Failed to persist failed export job state: {save_err}")
+                return False, f"Export job failed to enqueue: {err_msg}", job_id
 
             return True, f"Export job started: {job_id}", job_id
         else:
@@ -1404,41 +1473,6 @@ class ChatbookService:
                 include_generated_content, tags, categories,
                 format_version=format_version,
             )
-
-    def _with_transaction(self, func, *args, **kwargs):
-        """Execute a function within a database transaction."""
-        conn = None
-        try:
-            # Get connection and start transaction
-            conn = self.db.get_connection() if hasattr(self.db, 'get_connection') else None
-            if conn:
-                conn.execute("BEGIN TRANSACTION")
-
-            # Execute the function
-            result = func(*args, **kwargs)
-
-            # Commit if we have a connection
-            if conn:
-                conn.execute("COMMIT")
-
-            return result
-
-        except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
-            # Rollback on error
-            if conn:
-                try:
-                    conn.execute("ROLLBACK")
-                except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e2:
-                    logger.warning(f"Transaction rollback failed: error={e2}")
-            logger.error(f"Transaction rolled back: {e}")
-            raise
-        finally:
-            # Close connection
-            if conn:
-                try:
-                    conn.close()
-                except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e3:
-                    logger.warning(f"Connection close failed after transaction: error={e3}")
 
     async def continue_chatbook_export(
         self,
@@ -1813,12 +1847,6 @@ class ChatbookService:
             job.status = ExportStatus.IN_PROGRESS
             job.started_at = datetime.now(timezone.utc)
             self._save_export_job(job)
-            # PS backend: reflect processing
-            if getattr(self, "_jobs_backend", "core") == "prompt_studio" and getattr(self, "_ps_job_adapter", None) is not None:
-                try:
-                    self._ps_job_adapter.update_status(int(job.job_id), "in_progress")
-                except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
-                    logger.debug(f"PS adapter update_status failed for export job {job.job_id}: {e}")
 
             # Create chatbook using the sync wrapper (could be made truly async)
             success, message, file_path = await self._create_chatbook_sync_wrapper(
@@ -1832,12 +1860,6 @@ class ChatbookService:
                 # Update job with success; respect cancellation
                 latest = self._get_export_job(job.job_id)
                 if latest and latest.status == ExportStatus.CANCELLED:
-                    # PS backend: reflect cancellation terminal state
-                    if getattr(self, "_jobs_backend", "core") == "prompt_studio" and getattr(self, "_ps_job_adapter", None) is not None:
-                        try:
-                            self._ps_job_adapter.update_status(int(job.job_id), "cancelled")
-                        except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
-                            logger.debug(f"PS adapter update_status (cancelled) failed for export job {job.job_id}: {e}")
                     return
                 job.status = ExportStatus.COMPLETED
                 now_utc = datetime.now(timezone.utc)
@@ -1853,15 +1875,6 @@ class ChatbookService:
                 job.status = ExportStatus.FAILED
                 job.completed_at = datetime.now(timezone.utc)
                 job.error_message = message
-            # PS backend: reflect terminal state
-            if getattr(self, "_jobs_backend", "core") == "prompt_studio" and getattr(self, "_ps_job_adapter", None) is not None:
-                try:
-                    if job.status == ExportStatus.COMPLETED:
-                        self._ps_job_adapter.update_status(int(job.job_id), "completed", result={"path": job.output_path})
-                    elif job.status == ExportStatus.FAILED:
-                        self._ps_job_adapter.update_status(int(job.job_id), "failed", error_message=job.error_message)
-                except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
-                    logger.debug(f"PS adapter update_status (completion) failed for export job {job.job_id}: {e}")
             self._save_export_job(job)
 
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
@@ -1870,11 +1883,6 @@ class ChatbookService:
             job.completed_at = datetime.now(timezone.utc)
             job.error_message = str(e)
             self._save_export_job(job)
-            if getattr(self, "_jobs_backend", "core") == "prompt_studio" and getattr(self, "_ps_job_adapter", None) is not None:
-                try:
-                    self._ps_job_adapter.update_status(int(job.job_id), "failed", error_message=str(e))
-                except _CHATBOOK_NONCRITICAL_EXCEPTIONS as ps_err:
-                    logger.debug(f"PS adapter update_status (failed) failed for export job {job.job_id}: {ps_err}")
 
     async def import_chatbook(
         self,
@@ -1989,31 +1997,12 @@ class ChatbookService:
             return False, detail, None
         file_token = self._build_import_file_token(resolved_path)
 
+        if not async_mode:
+            self._check_chatbook_job_admission_with_lock("import")
+
         if async_mode:
             # Create job and run asynchronously
-            job_id = None
-            if getattr(self, "_jobs_backend", "core") == "prompt_studio" and getattr(self, "_ps_job_adapter", None) is not None:
-                payload = {
-                    "domain": "chatbooks",
-                    "job_type": "import",
-                    "user_id": self.user_id,
-                    "path": file_token,
-                    "file_token": file_token,
-                    "source_format": source_format_value,
-                    "selected_openwebui_user_id": selected_openwebui_user_id,
-                    "import_media": import_media,
-                    "import_embeddings": import_embeddings,
-                    "conflict_resolution": str(conflict_resolution.value if hasattr(conflict_resolution, 'value') else conflict_resolution),
-                }
-                try:
-                    ps_job = self._ps_job_adapter.create_import_job(payload, request_id=request_id)
-                    if ps_job and ps_job.get("id") is not None:
-                        job_id = str(ps_job["id"])  # mirror PS id
-                except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
-                    logger.warning(f"Failed to create PS import job, falling back to core: {e}")
-                    job_id = None
-            if job_id is None:
-                job_id = str(uuid4())
+            job_id = str(uuid4())
             job = ImportJob(
                 job_id=job_id,
                 user_id=self.user_id,
@@ -2021,60 +2010,51 @@ class ChatbookService:
                 chatbook_path=file_token
             )
 
-            # Store job in database
-            self._save_import_job(job)
+            # Store job in database after atomically reserving Chatbooks quota.
+            self._save_import_job_with_quota(job)
 
-            # Start async task
-            if self._jobs_backend == "core":
-                job_created = None
-                enqueue_error: str | None = None
+            # Start async task through core Jobs.
+            job_created = None
+            enqueue_error: str | None = None
+            try:
+                from tldw_Server_API.app.core.Jobs.manager import JobManager
+                if not hasattr(self, "_core_jobs"):
+                    self._core_jobs = JobManager()
+                payload = {
+                    "action": "import",
+                    "chatbooks_job_id": job_id,
+                    "file_token": file_token,
+                    "source_format": source_format_value,
+                    "selected_openwebui_user_id": selected_openwebui_user_id,
+                    "content_selections": {k.value if hasattr(k, 'value') else str(k): v for k, v in (content_selections or {}).items()},
+                    "conflict_resolution": conflict_resolution.value if hasattr(conflict_resolution, 'value') else str(conflict_resolution),
+                    "prefix_imported": bool(prefix_imported),
+                    "import_media": bool(import_media),
+                    "import_embeddings": bool(import_embeddings),
+                }
+                job_created = self._core_jobs.create_job(
+                    domain="chatbooks",
+                    queue="default",
+                    job_type="import",
+                    payload=payload,
+                    owner_user_id=self.user_id,
+                    priority=5,
+                    max_retries=3,
+                    request_id=request_id,
+                )
+            except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
+                enqueue_error = str(e)
+                logger.warning(f"Failed to enqueue import job into core Jobs: {e}")
+            if not job_created:
+                err_msg = enqueue_error or "Failed to enqueue import job"
+                job.status = ImportStatus.FAILED
+                job.completed_at = datetime.now(timezone.utc)
+                job.error_message = err_msg
                 try:
-                    from tldw_Server_API.app.core.Jobs.manager import JobManager
-                    if not hasattr(self, "_core_jobs"):
-                        self._core_jobs = JobManager()
-                    payload = {
-                        "action": "import",
-                        "chatbooks_job_id": job_id,
-                        "file_token": file_token,
-                        "source_format": source_format_value,
-                        "selected_openwebui_user_id": selected_openwebui_user_id,
-                        "content_selections": {k.value if hasattr(k, 'value') else str(k): v for k, v in (content_selections or {}).items()},
-                        "conflict_resolution": conflict_resolution.value if hasattr(conflict_resolution, 'value') else str(conflict_resolution),
-                        "prefix_imported": bool(prefix_imported),
-                        "import_media": bool(import_media),
-                        "import_embeddings": bool(import_embeddings),
-                    }
-                    job_created = self._core_jobs.create_job(
-                        domain="chatbooks",
-                        queue="default",
-                        job_type="import",
-                        payload=payload,
-                        owner_user_id=self.user_id,
-                        priority=5,
-                        max_retries=3,
-                        request_id=request_id,
-                    )
-                except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
-                    enqueue_error = str(e)
-                    logger.warning(f"Failed to enqueue import job into core Jobs: {e}")
-                if not job_created:
-                    err_msg = enqueue_error or "Failed to enqueue import job"
-                    job.status = ImportStatus.FAILED
-                    job.completed_at = datetime.now(timezone.utc)
-                    job.error_message = err_msg
-                    try:
-                        self._save_import_job(job)
-                    except _CHATBOOK_NONCRITICAL_EXCEPTIONS as save_err:
-                        logger.warning(f"Failed to persist failed import job state: {save_err}")
-                    return False, f"Import job failed to enqueue: {err_msg}", job_id
-            else:
-                task = asyncio.create_task(self._import_chatbook_async(
-                    job_id, str(resolved_path), content_selections,
-                    conflict_resolution, prefix_imported,
-                    import_media, import_embeddings
-                ))
-                self._tasks[job_id] = task
-                task.add_done_callback(lambda _t: self._tasks.pop(job_id, None))
+                    self._save_import_job(job)
+                except _CHATBOOK_NONCRITICAL_EXCEPTIONS as save_err:
+                    logger.warning(f"Failed to persist failed import job state: {save_err}")
+                return False, f"Import job failed to enqueue: {err_msg}", job_id
 
             return True, f"Import job started: {job_id}", job_id
         else:
@@ -2248,6 +2228,7 @@ class ChatbookService:
                     )
                 content_selections.pop(ct, None)
 
+            manifest_path_index = self._build_manifest_import_path_index(manifest)
             character_id_map: dict[str, int] = {}
             imported_items: dict[str, int] = {}
 
@@ -2272,6 +2253,7 @@ class ChatbookService:
                     content_selections[ContentType.CHARACTER],
                     conflict_resolution, prefix_imported,
                     import_status,
+                    manifest_path_index=manifest_path_index,
                     character_id_map=character_id_map
                 )
 
@@ -2283,7 +2265,8 @@ class ChatbookService:
                     extract_dir, manifest,
                     content_selections[ContentType.WORLD_BOOK],
                     conflict_resolution, prefix_imported,
-                    import_status
+                    import_status,
+                    manifest_path_index=manifest_path_index,
                 )
 
             # Import dictionaries
@@ -2294,7 +2277,8 @@ class ChatbookService:
                     extract_dir, manifest,
                     content_selections[ContentType.DICTIONARY],
                     conflict_resolution, prefix_imported,
-                    import_status
+                    import_status,
+                    manifest_path_index=manifest_path_index,
                 )
 
             # Import conversations
@@ -2306,6 +2290,7 @@ class ChatbookService:
                     content_selections[ContentType.CONVERSATION],
                     conflict_resolution, prefix_imported,
                     import_status,
+                    manifest_path_index=manifest_path_index,
                     character_id_map=character_id_map
                 )
 
@@ -2317,7 +2302,8 @@ class ChatbookService:
                     extract_dir, manifest,
                     content_selections[ContentType.NOTE],
                     conflict_resolution, prefix_imported,
-                    import_status
+                    import_status,
+                    manifest_path_index=manifest_path_index,
                 )
 
             # Note: We do NOT delete the original import file - the caller owns it
@@ -2374,11 +2360,6 @@ class ChatbookService:
             job.status = ImportStatus.IN_PROGRESS
             job.started_at = datetime.now(timezone.utc)
             self._save_import_job(job)
-            if getattr(self, "_jobs_backend", "core") == "prompt_studio" and getattr(self, "_ps_job_adapter", None) is not None:
-                try:
-                    self._ps_job_adapter.update_status(int(job.job_id), "in_progress")
-                except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
-                    logger.debug(f"PS adapter update_status failed for import job {job.job_id}: {e}")
 
             # Import chatbook synchronously using thread pool
             success, message, _ = await asyncio.to_thread(
@@ -2391,11 +2372,6 @@ class ChatbookService:
             if success:
                 latest = self._get_import_job(job.job_id)
                 if latest and latest.status == ImportStatus.CANCELLED:
-                    if getattr(self, "_jobs_backend", "core") == "prompt_studio" and getattr(self, "_ps_job_adapter", None) is not None:
-                        try:
-                            self._ps_job_adapter.update_status(int(job.job_id), "cancelled")
-                        except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
-                            logger.debug(f"PS adapter update_status (cancelled) failed for import job {job.job_id}: {e}")
                     return
                 job.status = ImportStatus.COMPLETED
             else:
@@ -2404,25 +2380,12 @@ class ChatbookService:
 
             job.completed_at = datetime.now(timezone.utc)
             self._save_import_job(job)
-            if getattr(self, "_jobs_backend", "core") == "prompt_studio" and getattr(self, "_ps_job_adapter", None) is not None:
-                try:
-                    if job.status == ImportStatus.COMPLETED:
-                        self._ps_job_adapter.update_status(int(job.job_id), "completed")
-                    elif job.status == ImportStatus.FAILED:
-                        self._ps_job_adapter.update_status(int(job.job_id), "failed", error_message=job.error_message)
-                except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
-                    logger.debug(f"PS adapter update_status (completion) failed for import job {job.job_id}: {e}")
 
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             job.status = ImportStatus.FAILED
             job.completed_at = datetime.now(timezone.utc)
             job.error_message = str(e)
             self._save_import_job(job)
-            if getattr(self, "_jobs_backend", "core") == "prompt_studio" and getattr(self, "_ps_job_adapter", None) is not None:
-                try:
-                    self._ps_job_adapter.update_status(int(job.job_id), "failed", error_message=str(e))
-                except _CHATBOOK_NONCRITICAL_EXCEPTIONS as ps_err:
-                    logger.debug(f"PS adapter update_status (failed) failed for import job {job.job_id}: {ps_err}")
         finally:
             # Ensure original import archive is removed for async mode
             try:
@@ -3480,26 +3443,7 @@ class ChatbookService:
     def get_export_job(self, job_id: str) -> ExportJob | None:
         """Get export job status."""
         job = self._get_export_job(job_id)
-        # If using PS backend, reflect PS status for live view
-        if job and getattr(self, "_jobs_backend", "core") == "prompt_studio" and getattr(self, "_ps_job_adapter", None) is not None:
-            try:
-                ps_id = int(job_id)
-                ps_job = self._ps_job_adapter.get(ps_id)
-                if ps_job and isinstance(ps_job, dict):
-                    ps_status = str(ps_job.get("status", "")).lower()
-                    status_map = {
-                        "queued": ExportStatus.PENDING,
-                        "processing": ExportStatus.IN_PROGRESS,
-                        "completed": ExportStatus.COMPLETED,
-                        "failed": ExportStatus.FAILED,
-                        "cancelled": ExportStatus.CANCELLED,
-                    }
-                    mapped = status_map.get(ps_status)
-                    if mapped and job.status not in {ExportStatus.COMPLETED, ExportStatus.FAILED}:
-                        job.status = mapped
-            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
-                pass
-        if job and getattr(self, "_jobs_backend", "core") == "core" and getattr(self, "_jobs_adapter", None) is not None:
+        if job and getattr(self, "_jobs_adapter", None) is not None:
             with contextlib.suppress(_CHATBOOK_NONCRITICAL_EXCEPTIONS):
                 self._jobs_adapter.apply_export_status(job)
         return job
@@ -3507,25 +3451,7 @@ class ChatbookService:
     def get_import_job(self, job_id: str) -> ImportJob | None:
         """Get import job status."""
         job = self._get_import_job(job_id)
-        if job and getattr(self, "_jobs_backend", "core") == "prompt_studio" and getattr(self, "_ps_job_adapter", None) is not None:
-            try:
-                ps_id = int(job_id)
-                ps_job = self._ps_job_adapter.get(ps_id)
-                if ps_job and isinstance(ps_job, dict):
-                    ps_status = str(ps_job.get("status", "")).lower()
-                    status_map = {
-                        "queued": ImportStatus.PENDING,
-                        "processing": ImportStatus.IN_PROGRESS,
-                        "completed": ImportStatus.COMPLETED,
-                        "failed": ImportStatus.FAILED,
-                        "cancelled": ImportStatus.CANCELLED,
-                    }
-                    mapped = status_map.get(ps_status)
-                    if mapped and job.status not in {ImportStatus.COMPLETED, ImportStatus.FAILED}:
-                        job.status = mapped
-            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
-                pass
-        if job and getattr(self, "_jobs_backend", "core") == "core" and getattr(self, "_jobs_adapter", None) is not None:
+        if job and getattr(self, "_jobs_adapter", None) is not None:
             with contextlib.suppress(_CHATBOOK_NONCRITICAL_EXCEPTIONS):
                 self._jobs_adapter.apply_import_status(job)
         return job
@@ -3626,25 +3552,6 @@ class ChatbookService:
                         expires_at=ChatbookService._parse_timestamp(row[14]) if len(row) > 14 else None,
                         metadata={}  # Initialize empty metadata
                     )
-                # Reflect PS status if applicable
-                if getattr(self, "_jobs_backend", "core") == "prompt_studio" and getattr(self, "_ps_job_adapter", None) is not None:
-                    try:
-                        ps_id = int(job.job_id)
-                        ps_job = self._ps_job_adapter.get(ps_id)
-                        if ps_job and isinstance(ps_job, dict):
-                            ps_status = str(ps_job.get("status", "")).lower()
-                            status_map = {
-                                "queued": ExportStatus.PENDING,
-                                "processing": ExportStatus.IN_PROGRESS,
-                                "completed": ExportStatus.COMPLETED,
-                                "failed": ExportStatus.FAILED,
-                                "cancelled": ExportStatus.CANCELLED,
-                            }
-                            mapped = status_map.get(ps_status)
-                            if mapped and job.status not in {ExportStatus.COMPLETED, ExportStatus.FAILED}:
-                                job.status = mapped
-                    except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
-                        pass
                 jobs.append(job)
 
             if getattr(self, "_jobs_backend", "core") == "core" and getattr(self, "_jobs_adapter", None) is not None:
@@ -3760,24 +3667,6 @@ class ChatbookService:
                         conflicts=json.loads(row[14]) if len(row) > 14 and row[14] else [],
                         warnings=json.loads(row[15]) if len(row) > 15 and row[15] else []
                     )
-                if getattr(self, "_jobs_backend", "core") == "prompt_studio" and getattr(self, "_ps_job_adapter", None) is not None:
-                    try:
-                        ps_id = int(job.job_id)
-                        ps_job = self._ps_job_adapter.get(ps_id)
-                        if ps_job and isinstance(ps_job, dict):
-                            ps_status = str(ps_job.get("status", "")).lower()
-                            status_map = {
-                                "queued": ImportStatus.PENDING,
-                                "processing": ImportStatus.IN_PROGRESS,
-                                "completed": ImportStatus.COMPLETED,
-                                "failed": ImportStatus.FAILED,
-                                "cancelled": ImportStatus.CANCELLED,
-                            }
-                            mapped = status_map.get(ps_status)
-                            if mapped and job.status not in {ImportStatus.COMPLETED, ImportStatus.FAILED}:
-                                job.status = mapped
-                    except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
-                        pass
                 jobs.append(job)
 
             if getattr(self, "_jobs_backend", "core") == "core" and getattr(self, "_jobs_adapter", None) is not None:
@@ -4994,21 +4883,33 @@ class ChatbookService:
         conflict_resolution: ConflictResolution,
         prefix_imported: bool,
         status: ImportJob,
+        manifest_path_index: ManifestImportPathIndex | None = None,
         character_id_map: dict[str, int] | None = None
     ):
         """Import conversations from chatbook."""
-        conv_dir = extract_dir / "content" / "conversations"
         max_img_bytes = self._get_max_message_image_bytes()
+        if manifest_path_index is None:
+            manifest_path_index = self._build_manifest_import_path_index(manifest)
 
         for conv_id in conversation_ids:
             status.processed_items += 1
 
             try:
                 # Load conversation file
-                conv_file = conv_dir / f"conversation_{conv_id}.json"
+                conv_file, conv_path = self._resolve_manifest_import_file(
+                    extract_dir,
+                    manifest,
+                    ContentType.CONVERSATION,
+                    conv_id,
+                    manifest_path_index,
+                )
+                if conv_file is None:
+                    status.failed_items += 1
+                    status.warnings.append(f"Unsafe conversation file path: {conv_path}")
+                    continue
                 if not conv_file.exists():
                     status.failed_items += 1
-                    status.warnings.append(f"Conversation file not found: {conv_file.name}")
+                    status.warnings.append(f"Conversation file not found: {conv_path}")
                     continue
 
                 with open(conv_file, encoding='utf-8') as f:
@@ -5150,11 +5051,13 @@ class ChatbookService:
         note_ids: list[str],
         conflict_resolution: ConflictResolution,
         prefix_imported: bool,
-        status: ImportJob
+        status: ImportJob,
+        manifest_path_index: ManifestImportPathIndex | None = None,
     ):
         """Import notes from chatbook."""
-        notes_dir = extract_dir / "content" / "notes"
         template_settings = self._resolve_template_settings(manifest)
+        if manifest_path_index is None:
+            manifest_path_index = self._build_manifest_import_path_index(manifest)
 
         def _parse_yaml_scalar(text: str) -> str:
             if not text:
@@ -5185,10 +5088,20 @@ class ChatbookService:
 
             try:
                 # Find note file
-                note_file = notes_dir / f"note_{note_id}.md"
+                note_file, note_path = self._resolve_manifest_import_file(
+                    extract_dir,
+                    manifest,
+                    ContentType.NOTE,
+                    note_id,
+                    manifest_path_index,
+                )
+                if note_file is None:
+                    status.failed_items += 1
+                    status.warnings.append(f"Unsafe note file path: {note_path}")
+                    continue
                 if not note_file.exists():
                     status.failed_items += 1
-                    status.warnings.append(f"Note file not found: {note_file.name}")
+                    status.warnings.append(f"Note file not found: {note_path}")
                     continue
 
                 # Parse markdown with frontmatter
@@ -5264,20 +5177,32 @@ class ChatbookService:
         conflict_resolution: ConflictResolution,
         prefix_imported: bool,
         status: ImportJob,
+        manifest_path_index: ManifestImportPathIndex | None = None,
         character_id_map: dict[str, int] | None = None
     ):
         """Import character cards from chatbook."""
-        chars_dir = extract_dir / "content" / "characters"
+        if manifest_path_index is None:
+            manifest_path_index = self._build_manifest_import_path_index(manifest)
 
         for char_id in character_ids:
             status.processed_items += 1
 
             try:
                 # Load character file
-                char_file = chars_dir / f"character_{char_id}.json"
+                char_file, char_path = self._resolve_manifest_import_file(
+                    extract_dir,
+                    manifest,
+                    ContentType.CHARACTER,
+                    char_id,
+                    manifest_path_index,
+                )
+                if char_file is None:
+                    status.failed_items += 1
+                    status.warnings.append(f"Unsafe character file path: {char_path}")
+                    continue
                 if not char_file.exists():
                     status.failed_items += 1
-                    status.warnings.append(f"Character file not found: {char_file.name}")
+                    status.warnings.append(f"Character file not found: {char_path}")
                     continue
 
                 with open(char_file, encoding='utf-8') as f:
@@ -5328,24 +5253,35 @@ class ChatbookService:
         world_book_ids: list[str],
         conflict_resolution: ConflictResolution,
         prefix_imported: bool,
-        status: ImportJob
+        status: ImportJob,
+        manifest_path_index: ManifestImportPathIndex | None = None,
     ):
         """Import world books from chatbook."""
-        wb_dir = extract_dir / "content" / "world_books"
-
         # Import the world book service
         from ..Character_Chat.world_book_manager import WorldBookService
         wb_service = WorldBookService(self.db)
+        if manifest_path_index is None:
+            manifest_path_index = self._build_manifest_import_path_index(manifest)
 
         for wb_id in world_book_ids:
             status.processed_items += 1
 
             try:
                 # Load world book file
-                wb_file = wb_dir / f"world_book_{wb_id}.json"
+                wb_file, wb_path = self._resolve_manifest_import_file(
+                    extract_dir,
+                    manifest,
+                    ContentType.WORLD_BOOK,
+                    wb_id,
+                    manifest_path_index,
+                )
+                if wb_file is None:
+                    status.failed_items += 1
+                    status.warnings.append(f"Unsafe world book file path: {wb_path}")
+                    continue
                 if not wb_file.exists():
                     status.failed_items += 1
-                    status.warnings.append(f"World book file not found: {wb_file.name}")
+                    status.warnings.append(f"World book file not found: {wb_path}")
                     continue
 
                 with open(wb_file, encoding='utf-8') as f:
@@ -5385,12 +5321,14 @@ class ChatbookService:
         dictionary_ids: list[str],
         conflict_resolution: ConflictResolution,
         prefix_imported: bool,
-        status: ImportJob
+        status: ImportJob,
+        manifest_path_index: ManifestImportPathIndex | None = None,
     ):
         """Import chat dictionaries from chatbook."""
-        dict_dir = extract_dir / "content" / "dictionaries"
         template_settings = self._resolve_template_settings(manifest)
         strict_dict_import = self._truthy_env("CHATBOOKS_IMPORT_DICT_STRICT", False)
+        if manifest_path_index is None:
+            manifest_path_index = self._build_manifest_import_path_index(manifest)
 
         # Import the dictionary service
         from ..Character_Chat.chat_dictionary import ChatDictionaryService
@@ -5401,10 +5339,20 @@ class ChatbookService:
 
             try:
                 # Load dictionary file
-                dict_file = dict_dir / f"dictionary_{dict_id}.json"
+                dict_file, dict_path = self._resolve_manifest_import_file(
+                    extract_dir,
+                    manifest,
+                    ContentType.DICTIONARY,
+                    dict_id,
+                    manifest_path_index,
+                )
+                if dict_file is None:
+                    status.failed_items += 1
+                    status.warnings.append(f"Unsafe dictionary file path: {dict_path}")
+                    continue
                 if not dict_file.exists():
                     status.failed_items += 1
-                    status.warnings.append(f"Dictionary file not found: {dict_file.name}")
+                    status.warnings.append(f"Dictionary file not found: {dict_path}")
                     continue
 
                 with open(dict_file, encoding='utf-8') as f:
@@ -5586,10 +5534,127 @@ class ChatbookService:
 
     # Database helper methods
 
-    def _save_export_job(self, job: ExportJob):
+    def _cursor_count(self, cursor: Any) -> int:
+        """Read a COUNT(*) result from supported cursor/list row shapes."""
+        if hasattr(cursor, "fetchone"):
+            row = cursor.fetchone()
+        elif isinstance(cursor, list) and cursor:
+            row = cursor[0]
+        else:
+            row = None
+        if not row:
+            return 0
+        if isinstance(row, dict):
+            return int(row.get("c", row.get("COUNT(1)", row.get("COUNT(*)", 0))) or 0)
+        if hasattr(row, "keys"):
+            try:
+                return int(row["c"])
+            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+                try:
+                    return int(row["COUNT(1)"])
+                except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+                    return int(row[0])
+        return int(row[0])
+
+    def _count_operations_today_for_quota(self, operation_type: str) -> int:
+        start = datetime.now(timezone.utc).date().isoformat()
+        if operation_type == "export":
+            cursor = self.db.execute_query(
+                "SELECT COUNT(1) AS c FROM export_jobs WHERE user_id = ? AND created_at >= ?",
+                (self.user_id, start),
+            )
+        else:
+            cursor = self.db.execute_query(
+                "SELECT COUNT(1) AS c FROM import_jobs WHERE user_id = ? AND created_at >= ?",
+                (self.user_id, start),
+            )
+        return self._cursor_count(cursor)
+
+    def _count_active_jobs_for_quota(self) -> int:
+        export_cursor = self.db.execute_query(
+            "SELECT COUNT(1) AS c FROM export_jobs WHERE user_id = ? AND status IN (?, ?)",
+            (self.user_id, ExportStatus.PENDING.value, ExportStatus.IN_PROGRESS.value),
+        )
+        import_cursor = self.db.execute_query(
+            "SELECT COUNT(1) AS c FROM import_jobs WHERE user_id = ? AND status IN (?, ?, ?)",
+            (
+                self.user_id,
+                ImportStatus.PENDING.value,
+                ImportStatus.VALIDATING.value,
+                ImportStatus.IN_PROGRESS.value,
+            ),
+        )
+        return self._cursor_count(export_cursor) + self._cursor_count(import_cursor)
+
+    def _uses_postgres_backend(self) -> bool:
+        backend_type = getattr(self.db, "backend_type", None)
+        backend_value = getattr(backend_type, "value", backend_type)
+        return str(backend_value).strip().lower() in {"postgres", "postgresql"}
+
+    def _acquire_chatbook_quota_admission_lock(self) -> None:
+        if not self._uses_postgres_backend():
+            return
+        self.db.execute_query(
+            "SELECT pg_advisory_xact_lock(hashtext(?), hashtext(?))",
+            ("chatbooks_quota", str(self.user_id)),
+        )
+
+    def _check_chatbook_job_admission(self, operation_type: str) -> None:
+        quota_manager = QuotaManager(self.user_id, self.user_tier, db=self.db)
+        if quota_manager._quotas_disabled:
+            return
+
+        if operation_type == "export":
+            operation_limit = quota_manager.quotas["max_exports_per_day"]
+            limit_message = f"Daily export limit ({operation_limit}) reached. Try again tomorrow."
+            quota_type = "daily_export"
+        else:
+            operation_limit = quota_manager.quotas["max_imports_per_day"]
+            limit_message = f"Daily import limit ({operation_limit}) reached. Try again tomorrow."
+            quota_type = "daily_import"
+
+        if operation_limit != UNLIMITED_QUOTA:
+            operations_today = self._count_operations_today_for_quota(operation_type)
+            if operations_today >= operation_limit:
+                raise QuotaExceededError(
+                    limit_message,
+                    quota_type=quota_type,
+                    limit=operation_limit,
+                    current=operations_today,
+                )
+
+        concurrent_limit = quota_manager.quotas["max_concurrent_jobs"]
+        if concurrent_limit != UNLIMITED_QUOTA:
+            active_jobs = self._count_active_jobs_for_quota()
+            if active_jobs >= concurrent_limit:
+                raise QuotaExceededError(
+                    f"Maximum concurrent jobs ({concurrent_limit}) reached. Wait for current jobs to complete.",
+                    quota_type="concurrent_jobs",
+                    limit=concurrent_limit,
+                    current=active_jobs,
+                )
+
+    def _check_chatbook_job_admission_with_lock(self, operation_type: str) -> None:
+        with self.db.transaction():
+            self._acquire_chatbook_quota_admission_lock()
+            self._check_chatbook_job_admission(operation_type)
+
+    def _save_export_job_with_quota(self, job: ExportJob) -> None:
+        with self.db.transaction():
+            self._acquire_chatbook_quota_admission_lock()
+            self._check_chatbook_job_admission("export")
+            self._save_export_job(job, commit=False)
+
+    def _save_import_job_with_quota(self, job: ImportJob) -> None:
+        with self.db.transaction():
+            self._acquire_chatbook_quota_admission_lock()
+            self._check_chatbook_job_admission("import")
+            self._save_import_job(job, commit=False)
+
+    def _save_export_job(self, job: ExportJob, *, commit: bool = True):
         """Save export job to database.
 
-        Note: Uses execute_query with commit=True which handles its own transaction.
+        Note: Uses execute_query with commit=True by default, which handles its own transaction.
         Previous _with_transaction wrapper was removed because it created a separate
         connection that didn't share the transaction with execute_query's connection.
         """
@@ -5610,7 +5675,7 @@ class ChatbookService:
                 job.error_message, job.progress_percentage, job.total_items,
                 job.processed_items, job.file_size_bytes, job.download_url,
                 job.expires_at.strftime('%Y-%m-%d %H:%M:%S.%f') if job.expires_at else None
-            ), commit=True)
+            ), commit=commit)
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error saving export job: {e}")
             raise
@@ -5758,10 +5823,10 @@ class ChatbookService:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return None
 
-    def _save_import_job(self, job: ImportJob):
+    def _save_import_job(self, job: ImportJob, *, commit: bool = True):
         """Save import job to database.
 
-        Note: Uses execute_query with commit=True which handles its own transaction.
+        Note: Uses execute_query with commit=True by default, which handles its own transaction.
         Previous _with_transaction wrapper was removed because it created a separate
         connection that didn't share the transaction with execute_query's connection.
         """
@@ -5782,7 +5847,7 @@ class ChatbookService:
                 job.error_message, job.progress_percentage, job.total_items,
                 job.processed_items, job.successful_items, job.failed_items,
                 job.skipped_items, json.dumps(job.conflicts), json.dumps(job.warnings)
-            ), commit=True)
+            ), commit=commit)
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error saving import job: {e}")
             raise
@@ -5987,28 +6052,23 @@ class ChatbookService:
         if task:
             with contextlib.suppress(_CHATBOOK_NONCRITICAL_EXCEPTIONS):
                 task.cancel()
-        # PS backend cancel
-        if getattr(self, "_jobs_backend", "core") == "prompt_studio" and getattr(self, "_ps_job_adapter", None) is not None:
-            with contextlib.suppress(_CHATBOOK_NONCRITICAL_EXCEPTIONS):
-                self._ps_job_adapter.cancel(int(job_id))
         # Core backend: cancel queued or request cancel for processing in core Jobs
-        if getattr(self, "_jobs_backend", "core") == "core":
-            try:
-                from tldw_Server_API.app.core.Jobs.manager import JobManager
-                jm = getattr(self, "_core_jobs", None) or JobManager()
-                # scan recent jobs for this user and domain
-                for st in ("queued", "processing"):
-                    jobs = jm.list_jobs(domain="chatbooks", queue="default", status=st, owner_user_id=self.user_id, limit=50)
-                    for j in jobs:
-                        try:
-                            payload = j.get("payload") or {}
-                            job_uuid = str(j.get("uuid") or j.get("id"))
-                            if payload.get("chatbooks_job_id") == job_id or job_uuid == job_id:
-                                jm.cancel_job(int(j["id"]))
-                        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
-                            pass
-            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
-                pass
+        try:
+            from tldw_Server_API.app.core.Jobs.manager import JobManager
+            jm = getattr(self, "_core_jobs", None) or JobManager()
+            # scan recent jobs for this user and domain
+            for st in ("queued", "processing"):
+                jobs = jm.list_jobs(domain="chatbooks", queue="default", status=st, owner_user_id=self.user_id, limit=50)
+                for j in jobs:
+                    try:
+                        payload = j.get("payload") or {}
+                        job_uuid = str(j.get("uuid") or j.get("id"))
+                        if payload.get("chatbooks_job_id") == job_id or job_uuid == job_id:
+                            jm.cancel_job(int(j["id"]))
+                    except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+                        pass
+        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+            pass
 
         # Audit is performed at the API layer.
 
@@ -6027,25 +6087,21 @@ class ChatbookService:
         if task:
             with contextlib.suppress(_CHATBOOK_NONCRITICAL_EXCEPTIONS):
                 task.cancel()
-        if getattr(self, "_jobs_backend", "core") == "prompt_studio" and getattr(self, "_ps_job_adapter", None) is not None:
-            with contextlib.suppress(_CHATBOOK_NONCRITICAL_EXCEPTIONS):
-                self._ps_job_adapter.cancel(int(job_id))
-        if getattr(self, "_jobs_backend", "core") == "core":
-            try:
-                from tldw_Server_API.app.core.Jobs.manager import JobManager
-                jm = getattr(self, "_core_jobs", None) or JobManager()
-                for st in ("queued", "processing"):
-                    jobs = jm.list_jobs(domain="chatbooks", queue="default", status=st, owner_user_id=self.user_id, limit=50)
-                    for j in jobs:
-                        try:
-                            payload = j.get("payload") or {}
-                            job_uuid = str(j.get("uuid") or j.get("id"))
-                            if payload.get("chatbooks_job_id") == job_id or job_uuid == job_id:
-                                jm.cancel_job(int(j["id"]))
-                        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
-                            pass
-            except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
-                pass
+        try:
+            from tldw_Server_API.app.core.Jobs.manager import JobManager
+            jm = getattr(self, "_core_jobs", None) or JobManager()
+            for st in ("queued", "processing"):
+                jobs = jm.list_jobs(domain="chatbooks", queue="default", status=st, owner_user_id=self.user_id, limit=50)
+                for j in jobs:
+                    try:
+                        payload = j.get("payload") or {}
+                        job_uuid = str(j.get("uuid") or j.get("id"))
+                        if payload.get("chatbooks_job_id") == job_id or job_uuid == job_id:
+                            jm.cancel_job(int(j["id"]))
+                    except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+                        pass
+        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+            pass
         return True
 
     def delete_export_job(self, job_id: str, delete_file: bool = True) -> bool:
@@ -6445,7 +6501,7 @@ class ChatbookService:
                 "total_imports": 0
             }
 
-    # Removed legacy JobQueueShim handlers; Chatbooks uses in-process tasks (core) or PS adapter (prompt_studio).
+    # Removed legacy JobQueueShim handlers; Chatbooks uses core Jobs.
 
     def _create_chatbook_archive(self, work_dir: Path, output_path: Path) -> bool:
         """Create ZIP archive from work directory."""

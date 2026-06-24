@@ -378,15 +378,16 @@ class QuotaManager:
         # Prefer database-backed counts when available
         try:
             if self.db is not None and hasattr(self.db, 'execute_query'):
-                active_statuses = ('pending', 'in_progress')
+                export_active_statuses = ('pending', 'in_progress')
+                import_active_statuses = ('pending', 'validating', 'in_progress')
                 # Count both export and import active jobs
                 c1 = self.db.execute_query(
                     "SELECT COUNT(1) FROM export_jobs WHERE user_id = ? AND status IN (?, ?)",
-                    (self.user_id, *active_statuses)
+                    (self.user_id, *export_active_statuses)
                 )
                 c2 = self.db.execute_query(
-                    "SELECT COUNT(1) FROM import_jobs WHERE user_id = ? AND status IN (?, ?)",
-                    (self.user_id, *active_statuses)
+                    "SELECT COUNT(1) FROM import_jobs WHERE user_id = ? AND status IN (?, ?, ?)",
+                    (self.user_id, *import_active_statuses)
                 )
                 def _to_int(cur):
                     if hasattr(cur, 'fetchone'):
