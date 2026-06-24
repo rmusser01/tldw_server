@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Annotated, Any
+import mimetypes
+from pathlib import Path as FileSystemPath
+from typing import Annotated, Any, Iterator
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
+from fastapi.responses import FileResponse, StreamingResponse
 from starlette import status
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
@@ -54,6 +57,7 @@ from tldw_Server_API.app.core.DB_Management.Collections_DB import (
     CollectionsDatabase,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseError
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Audio_Studio.export import create_audio_studio_export_manifest
 from tldw_Server_API.app.core.Audio_Studio.jobs import (
     AUDIO_STUDIO_DOMAIN,
@@ -69,12 +73,45 @@ from tldw_Server_API.app.core.Audio_Studio.migration import (
 )
 from tldw_Server_API.app.core.Audio_Studio.providers.registry import build_audio_studio_provider_registry
 from tldw_Server_API.app.core.Audio_Studio.render import build_render_plan
+from tldw_Server_API.app.core.exceptions import (
+    InvalidStoragePathError,
+    InvalidStorageUserIdError,
+    StorageUnavailableError,
+)
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 
 router = APIRouter(prefix="/audio-studio", tags=["audio-studio"])
 _AUDIO_STUDIO_ID_PATTERN = r"^[A-Za-z0-9_-]+$"
 AudioStudioIdPath = Annotated[str, Path(min_length=1, max_length=120, pattern=_AUDIO_STUDIO_ID_PATTERN)]
+_PLAYABLE_AUDIO_MIME_TYPES = {
+    "audio/aac",
+    "audio/flac",
+    "audio/m4a",
+    "audio/mp4",
+    "audio/mpeg",
+    "audio/ogg",
+    "audio/wav",
+    "audio/wave",
+    "audio/webm",
+    "audio/x-m4a",
+    "audio/x-wav",
+}
+_AUDIO_MIME_SUFFIXES = {
+    "audio/aac": {".aac"},
+    "audio/flac": {".flac"},
+    "audio/m4a": {".m4a"},
+    "audio/mp4": {".m4a", ".mp4"},
+    "audio/mpeg": {".mp3"},
+    "audio/ogg": {".ogg"},
+    "audio/wav": {".wav"},
+    "audio/wave": {".wav"},
+    "audio/webm": {".webm"},
+    "audio/x-m4a": {".m4a"},
+    "audio/x-wav": {".wav"},
+}
+_AUDIO_ALLOWED_SUFFIXES = {suffix for suffixes in _AUDIO_MIME_SUFFIXES.values() for suffix in suffixes}
+_HASH_HEX_CHARS = set("0123456789abcdefABCDEF")
 
 
 def _new_project_id() -> str:
@@ -371,6 +408,245 @@ def _load_project_or_404(collections_db: CollectionsDatabase, project_id: str) -
         return collections_db.get_audio_studio_project_by_project_id(project_id)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="audio_studio_project_not_found") from exc
+
+
+def _load_audio_studio_artifact_or_404(
+    collections_db: CollectionsDatabase,
+    project: AudioStudioProjectRow,
+    artifact_id: str,
+) -> AudioStudioArtifactRow:
+    rows = collections_db.list_audio_studio_artifacts(
+        project_row_id=project.id,
+        artifact_id=artifact_id,
+        limit=1,
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="audio_studio_artifact_not_found")
+    return rows[0]
+
+
+def _audio_artifact_roots(user_id: int | str) -> list[FileSystemPath]:
+    return [
+        DatabasePaths.get_user_base_directory(user_id) / "outputs",
+        DatabasePaths.get_user_temp_outputs_dir(user_id),
+    ]
+
+
+def _resolve_contained_audio_file(
+    candidate: FileSystemPath,
+    roots: list[FileSystemPath],
+) -> FileSystemPath:
+    try:
+        resolved_file = candidate.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="audio_studio_artifact_file_not_found",
+        ) from exc
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_audio_studio_artifact_path",
+        ) from exc
+    if not resolved_file.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_audio_studio_artifact_path",
+        )
+
+    for root in roots:
+        try:
+            resolved_root = root.resolve(strict=True)
+        except OSError:
+            continue
+        try:
+            resolved_file.relative_to(resolved_root)
+        except ValueError:
+            continue
+        return resolved_file
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="invalid_audio_studio_artifact_path",
+    )
+
+
+def _is_sha256_hex(value: str | None) -> bool:
+    return bool(value and len(value) == 64 and all(char in _HASH_HEX_CHARS for char in value))
+
+
+def _sha256_file(path: FileSystemPath) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file_obj:
+        for chunk in iter(lambda: file_obj.read(64 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _resolve_audio_artifact_media_path(
+    *,
+    collections_db: CollectionsDatabase,
+    current_user: User,
+    artifact: AudioStudioArtifactRow,
+) -> FileSystemPath:
+    raw_storage_path = str(artifact.storage_path or "").strip()
+    if not raw_storage_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_audio_studio_artifact_path",
+        )
+    if "://" in raw_storage_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_audio_studio_artifact_path",
+        )
+
+    roots = _audio_artifact_roots(current_user.id)
+    raw_path = FileSystemPath(raw_storage_path)
+    if raw_path.is_absolute():
+        return _resolve_contained_audio_file(raw_path, roots)
+
+    try:
+        relative_filename = collections_db.resolve_output_storage_path(raw_storage_path)
+    except (InvalidStoragePathError, InvalidStorageUserIdError, StorageUnavailableError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_audio_studio_artifact_path",
+        ) from exc
+
+    candidates: list[FileSystemPath] = []
+    for root in roots:
+        candidate = root / relative_filename
+        if not candidate.exists():
+            continue
+        candidates.append(_resolve_contained_audio_file(candidate, roots))
+
+    unique_candidates: list[FileSystemPath] = []
+    for candidate in candidates:
+        if candidate not in unique_candidates:
+            unique_candidates.append(candidate)
+
+    if not unique_candidates:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="audio_studio_artifact_file_not_found",
+        )
+    if len(unique_candidates) == 1:
+        return unique_candidates[0]
+
+    if not _is_sha256_hex(artifact.content_hash):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="audio_studio_artifact_path_ambiguous",
+        )
+    matching_candidates = [
+        candidate for candidate in unique_candidates if _sha256_file(candidate) == artifact.content_hash.lower()
+    ]
+    if len(matching_candidates) != 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="audio_studio_artifact_path_ambiguous",
+        )
+    return matching_candidates[0]
+
+
+def _normalize_audio_mime(mime_type: str | None, path: FileSystemPath) -> str:
+    normalized_mime = str(mime_type or "").split(";", 1)[0].strip().lower()
+    inferred_mime = str(mimetypes.guess_type(path.name)[0] or "").split(";", 1)[0].strip().lower()
+    if not normalized_mime:
+        normalized_mime = inferred_mime
+    suffix = path.suffix.lower()
+    if (
+        not normalized_mime
+        or normalized_mime not in _PLAYABLE_AUDIO_MIME_TYPES
+        or suffix not in _AUDIO_ALLOWED_SUFFIXES
+        or suffix not in _AUDIO_MIME_SUFFIXES.get(normalized_mime, set())
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="unsupported_audio_studio_artifact_media_type",
+        )
+    return normalized_mime
+
+
+def _safe_audio_artifact_filename(
+    *,
+    artifact: AudioStudioArtifactRow,
+    media_path: FileSystemPath,
+    mime_type: str,
+) -> str:
+    safe_base = "".join(
+        char
+        for char in artifact.artifact_id
+        if char.isascii() and (char.isalnum() or char in "._-") and char not in {'"', "'", "\r", "\n", "/", "\\"}
+    ).strip("._-")
+    if not safe_base:
+        safe_base = "audio-artifact"
+    suffix = media_path.suffix.lower()
+    allowed_suffixes = _AUDIO_MIME_SUFFIXES.get(mime_type, set())
+    if suffix not in allowed_suffixes:
+        suffix = sorted(allowed_suffixes)[0] if allowed_suffixes else ".audio"
+    return f"{safe_base}{suffix}"
+
+
+def _content_disposition(
+    *,
+    artifact: AudioStudioArtifactRow,
+    media_path: FileSystemPath,
+    mime_type: str,
+    download: bool,
+) -> str:
+    disposition = "attachment" if download else "inline"
+    filename = _safe_audio_artifact_filename(artifact=artifact, media_path=media_path, mime_type=mime_type)
+    return f'{disposition}; filename="{filename}"'
+
+
+def _raise_invalid_byte_range(total_size: int) -> None:
+    raise HTTPException(
+        status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE,
+        detail="invalid_range",
+        headers={
+            "Content-Range": f"bytes */{total_size}",
+            "Accept-Ranges": "bytes",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+def _parse_single_byte_range(range_header: str, total_size: int) -> tuple[int, int]:
+    if not range_header.lower().startswith("bytes="):
+        _raise_invalid_byte_range(total_size)
+    range_spec = range_header.split("=", 1)[1].strip()
+    if not range_spec or "," in range_spec or "-" not in range_spec:
+        _raise_invalid_byte_range(total_size)
+    start_text, end_text = range_spec.split("-", 1)
+    try:
+        if not start_text:
+            suffix_length = int(end_text)
+            if suffix_length <= 0 or total_size <= 0:
+                raise ValueError("invalid_suffix_range")
+            start = max(total_size - suffix_length, 0)
+            end = total_size - 1
+        else:
+            start = int(start_text)
+            end = int(end_text) if end_text else total_size - 1
+            if start < 0 or end < start or start >= total_size:
+                raise ValueError("invalid_range")
+            end = min(end, total_size - 1)
+    except (TypeError, ValueError):
+        _raise_invalid_byte_range(total_size)
+    return start, end
+
+
+def _iter_file_range(path: FileSystemPath, *, start: int, length: int) -> Iterator[bytes]:
+    with path.open("rb") as file_obj:
+        file_obj.seek(start)
+        remaining = length
+        while remaining > 0:
+            chunk = file_obj.read(min(64 * 1024, remaining))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+            yield chunk
 
 
 def _raise_conflict_for_stale_base(exc: ValueError) -> None:
@@ -1032,4 +1308,64 @@ async def list_audio_studio_artifacts(
         artifacts=[_artifact_response(row) for row in rows],
         limit=limit,
         offset=offset,
+    )
+
+
+@router.get("/projects/{project_id}/artifacts/{artifact_id}/media", response_model=None)
+async def get_audio_studio_artifact_media(
+    request: Request,
+    project_id: AudioStudioIdPath,
+    artifact_id: AudioStudioIdPath,
+    download: bool = Query(False),
+    current_user: User = Depends(get_request_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
+) -> Response:
+    """Serve an Audio Studio audio artifact for playback or download."""
+
+    project = _load_project_or_404(collections_db, project_id)
+    artifact = _load_audio_studio_artifact_or_404(collections_db, project, artifact_id)
+    media_path = _resolve_audio_artifact_media_path(
+        collections_db=collections_db,
+        current_user=current_user,
+        artifact=artifact,
+    )
+    mime_type = _normalize_audio_mime(artifact.mime_type, media_path)
+    actual_size = media_path.stat().st_size
+    if artifact.size_bytes is not None and artifact.size_bytes != actual_size:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="audio_studio_artifact_size_mismatch",
+        )
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "private, no-store",
+        "Content-Disposition": _content_disposition(
+            artifact=artifact,
+            media_path=media_path,
+            mime_type=mime_type,
+            download=download,
+        ),
+        "X-Content-Type-Options": "nosniff",
+    }
+    range_header = request.headers.get("range")
+    if range_header is not None:
+        start, end = _parse_single_byte_range(range_header, actual_size)
+        content_length = end - start + 1
+        range_headers = {
+            **headers,
+            "Content-Range": f"bytes {start}-{end}/{actual_size}",
+            "Content-Length": str(content_length),
+            "Content-Type": mime_type,
+        }
+        return StreamingResponse(
+            _iter_file_range(media_path, start=start, length=content_length),
+            status_code=status.HTTP_206_PARTIAL_CONTENT,
+            headers=range_headers,
+        )
+
+    return FileResponse(
+        str(media_path),
+        media_type=mime_type,
+        headers=headers,
     )
