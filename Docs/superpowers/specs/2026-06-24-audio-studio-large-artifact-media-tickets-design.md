@@ -98,14 +98,14 @@ Response:
 
 ```json
 {
-  "ticket_url": "/api/v1/audio-studio/media-tickets/{token}",
+  "ticket_path": "/api/v1/audio-studio/media-tickets/{token}",
   "expires_at": "2026-06-24T12:00:00Z",
   "purpose": "playback",
   "artifact_id": "artifact_123"
 }
 ```
 
-The response must not include token hashes, filesystem paths, provider secrets, or storage roots.
+`ticket_path` is the required server-relative redemption path. The backend may also include `ticket_url` only when it has a trusted public base URL, but clients must not depend on it. The frontend helper must return a browser-resolvable absolute URL by using `ticket_url` when present or resolving `ticket_path` with the same deployment/server-origin rules as existing API requests. The response must not include token hashes, filesystem paths, provider secrets, or storage roots.
 
 ### Redeem Ticket
 
@@ -137,7 +137,7 @@ Download tickets:
 
 ## Ticket Storage
 
-Use a DB-backed table available to the API process:
+Use a central DB-backed table available before user-scoped Collections DB lookup. This table must not live only inside a per-user Collections DB, because redemption starts with an unauthenticated token and must recover `user_id` before opening the correct user data context. The AuthNZ/global server database is the preferred first storage location.
 
 - `id`: internal row id.
 - `token_hash`: SHA-256 hash of the raw token, unique.
@@ -155,6 +155,8 @@ Use a DB-backed table available to the API process:
 Generate at least 128 bits of entropy; prefer 256-bit URL-safe tokens. Store only `token_hash`, never the raw token.
 
 Cleanup starts as opportunistic deletion on mint and redemption. Expired, consumed, and revoked rows may be removed after a retention window. A scheduled cleanup task can be added later without changing the ticket API.
+
+Download consumption must be an atomic conditional update against this central ticket table, for example “set `consumed_at` only where `token_hash` matches, `purpose='download'`, `consumed_at is null`, `revoked_at is null`, and `expires_at > now`.” This prevents parallel redemption races.
 
 ## Artifact Eligibility
 
@@ -180,14 +182,14 @@ Download:
 - Use short TTLs: playback 30 minutes, download 10 minutes.
 - Store token hashes only.
 - Redact ticket tokens from application logs and error telemetry.
-- Document that reverse-proxy access-log redaction is an operator responsibility.
 - Return `Cache-Control: private, no-store`.
 - Return `Referrer-Policy: no-referrer`.
 - Return `X-Content-Type-Options: nosniff`.
-- Return `Cross-Origin-Resource-Policy: same-origin` on ticket redemption responses unless a tested WebUI or extension context proves it blocks required same-origin media behavior.
+- Do not set `Cross-Origin-Resource-Policy: same-origin` by default because extension playback/download may load the ticket URL from a browser-extension origin. Add CORP only after testing the WebUI and extension/shared UI surfaces.
 - Do not place API keys, JWTs, provider secrets, raw storage paths, or ticket hashes in responses.
 - Revalidate all important artifact and path checks at redemption.
 - Download tickets must be consumed atomically so parallel redeems cannot double-use the ticket.
+- Redact `/api/v1/audio-studio/media-tickets/{token}` tokens in application request logs. Reverse-proxy access-log redaction remains an operator responsibility and must be documented.
 
 ## Error Handling
 
@@ -208,7 +210,7 @@ Use stable errors where the holder already has a valid-looking ticket and a gene
 Shared service helpers:
 
 - Add a `mintAudioStudioArtifactMediaTicket(projectId, artifactId, purpose)` helper.
-- Return runtime-only ticket URL and expiry metadata.
+- Return runtime-only ticket URL/path and expiry metadata. The helper is responsible for resolving a browser-usable absolute URL in extension/shared UI contexts.
 - Do not persist ticket URLs or raw tokens.
 
 Playback:
@@ -242,6 +244,7 @@ UI states:
 
 Backend tests:
 
+- Ticket rows are stored in a central DB table that can be resolved before opening a user-scoped Collections DB.
 - Mint playback ticket for owned audio artifact.
 - Reject playback ticket for non-audio artifact.
 - Mint download ticket for owned non-audio artifact.
@@ -251,6 +254,8 @@ Backend tests:
 - Expired, revoked, and consumed tickets return stable errors.
 - Redemption revalidates safe roots, symlink escapes, missing files, size/hash mismatch, and dangerous MIME/extension blocks.
 - Raw tokens are not stored in DB rows.
+- Ticket redemption responses do not set `Cross-Origin-Resource-Policy: same-origin` until WebUI and extension playback/download compatibility is verified.
+- Application log redaction covers `/api/v1/audio-studio/media-tickets/{token}` paths.
 
 Frontend tests:
 
@@ -259,7 +264,7 @@ Frontend tests:
 - Large download mints only on click and triggers download with `referrerPolicy`.
 - Unknown, expired, and consumed ticket errors show compact states.
 - Small Blob path remains unchanged.
-- Extension/shared UI path uses the same service helpers.
+- Extension/shared UI path uses the same service helpers and receives a browser-resolvable absolute ticket URL instead of a browser-extension-relative path.
 
 Security verification:
 
