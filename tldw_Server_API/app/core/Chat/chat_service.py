@@ -5481,6 +5481,7 @@ async def execute_non_stream_call(
                 choices=processed_choices,
                 structured_request_context=structured_request_context,
                 validate_structured_response=validate_structured_response,
+                fallback_content=content_to_save,
             )
         except (
             StructuredGenerationCapabilityError,
@@ -5607,6 +5608,7 @@ async def execute_non_stream_call(
                                 choices=processed_choices,
                                 structured_request_context=structured_request_context,
                                 validate_structured_response=validate_structured_response,
+                                fallback_content=content_to_save,
                             )
                         except (
                             StructuredGenerationCapabilityError,
@@ -5675,6 +5677,7 @@ async def execute_non_stream_call(
                 choices=processed_choices,
                 structured_request_context=structured_request_context,
                 validate_structured_response=validate_structured_response,
+                fallback_content=content_to_save,
             )
         except (
             StructuredGenerationCapabilityError,

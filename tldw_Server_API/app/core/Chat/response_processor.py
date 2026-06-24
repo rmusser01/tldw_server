@@ -3,6 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+_EXPECTED_CONTENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    AttributeError,
+    RuntimeError,
+    TypeError,
+    UnicodeDecodeError,
+    ValueError,
+)
+_MISSING = object()
+
 
 @dataclass
 class NonStreamChoice:
@@ -13,6 +22,20 @@ class NonStreamChoice:
     content_text: str
     tool_calls: Any | None
     function_call: Any | None
+
+
+def _safe_getattr(obj: Any, name: str) -> Any | None:
+    try:
+        return getattr(obj, name, None)
+    except _EXPECTED_CONTENT_EXCEPTIONS:
+        return None
+
+
+def _safe_str(content: Any) -> str:
+    try:
+        return str(content)
+    except _EXPECTED_CONTENT_EXCEPTIONS:
+        return ""
 
 
 def extract_text_from_content(content: Any | None) -> str:
@@ -32,8 +55,13 @@ def extract_text_from_content(content: Any | None) -> str:
                     parts.append(item["text"])
             elif isinstance(item, str):
                 parts.append(item)
+            else:
+                item_type = _safe_getattr(item, "type")
+                item_text = _safe_getattr(item, "text")
+                if item_type == "text" and isinstance(item_text, str):
+                    parts.append(item_text)
         return "\n".join(parts)
-    return str(content)
+    return _safe_str(content)
 
 
 def collect_non_stream_choices(llm_response: Any) -> list[NonStreamChoice]:
@@ -91,8 +119,31 @@ def apply_redaction_to_content(content: Any | None, redact_text: Callable[[str],
             elif isinstance(item, str):
                 redacted_items.append(redact_text(item))
             else:
-                redacted_items.append(item)
+                item_type = _safe_getattr(item, "type")
+                item_text = _safe_getattr(item, "text")
+                if item_type == "text" and isinstance(item_text, str):
+                    new_text = redact_text(item_text)
+                    model_copy = _safe_getattr(item, "model_copy")
+                    if callable(model_copy):
+                        try:
+                            redacted_items.append(model_copy(update={"text": new_text}))
+                            continue
+                        except _EXPECTED_CONTENT_EXCEPTIONS:
+                            pass
+                    copy_method = _safe_getattr(item, "copy")
+                    if callable(copy_method):
+                        try:
+                            redacted_items.append(copy_method(update={"text": new_text}))
+                            continue
+                        except _EXPECTED_CONTENT_EXCEPTIONS:
+                            pass
+                    redacted_items.append({"type": "text", "text": new_text})
+                else:
+                    redacted_items.append(item)
         return redacted_items
+    content_text = _safe_str(content)
+    if content_text:
+        return redact_text(content_text)
     return content
 
 
@@ -117,17 +168,34 @@ def validate_structured_choices(
     choices: list[NonStreamChoice],
     structured_request_context: Any,
     validate_structured_response: Callable[..., dict[str, Any] | None],
+    fallback_content: Any = _MISSING,
 ) -> dict[str, Any] | None:
-    metadata_by_choice: list[dict[str, Any]] = []
+    if not choices:
+        if fallback_content is _MISSING:
+            return None
+        return validate_structured_response(
+            raw_text=fallback_content,
+            structured_request_context=structured_request_context,
+        )
+
+    metadata_by_choice: list[tuple[int, dict[str, Any]]] = []
     for choice in choices:
         metadata = validate_structured_response(
             raw_text=choice.content,
             structured_request_context=structured_request_context,
         )
         if metadata is not None:
-            metadata_by_choice.append({"choice_index": choice.index, **metadata})
+            metadata_by_choice.append((choice.index, metadata))
     if not metadata_by_choice:
         return None
+    if len(choices) == 1 and len(metadata_by_choice) == 1:
+        return metadata_by_choice[0][1]
     if len(metadata_by_choice) == 1:
-        return metadata_by_choice[0]
-    return {"choices": metadata_by_choice}
+        choice_index, metadata = metadata_by_choice[0]
+        return {"choice_index": choice_index, **metadata}
+    return {
+        "choices": [
+            {"choice_index": choice_index, **metadata}
+            for choice_index, metadata in metadata_by_choice
+        ]
+    }

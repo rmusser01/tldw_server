@@ -97,10 +97,23 @@ class _KeywordModeration:
         return str(text).replace(self.keyword, "[redacted]")
 
 
+class _ObjectTextPart:
+    type = "text"
+
+    def __init__(self, text: str):
+        self.text = text
+        self.model_copy_updates: list[dict[str, object]] = []
+
+    def model_copy(self, *, update: dict[str, object]):
+        self.model_copy_updates.append(update)
+        copied = _ObjectTextPart(str(update.get("text", self.text)))
+        return copied
+
+
 async def _run_non_stream_content_test(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    llm_response: dict,
+    llm_response: dict | str,
     moderation,
     should_persist: bool = False,
     response_format: dict | None = None,
@@ -415,6 +428,80 @@ async def test_execute_non_stream_call_rejects_invalid_structured_output_before_
 
 
 @pytest.mark.asyncio
+async def test_execute_non_stream_call_rejects_invalid_structured_raw_string_before_persist(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    save_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(chat_service, "should_force_normalize_string_responses", lambda: False)
+
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "answer_schema",
+            "schema": {
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+            },
+        },
+    }
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _run_non_stream_content_test(
+            monkeypatch,
+            llm_response='{"answer":123}',
+            moderation=_NoModeration(),
+            should_persist=True,
+            response_format=response_format,
+            save_calls=save_calls,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == {
+        "code": "structured_output_schema_error",
+        "message": "Model output did not match the requested JSON schema.",
+    }
+    assert save_calls == []
+
+
+@pytest.mark.asyncio
+async def test_execute_non_stream_call_preserves_single_choice_structured_metadata_shape(monkeypatch):
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "answer_schema",
+            "schema": {
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+            },
+        },
+    }
+
+    response, _save_calls, _logged_usage = await _run_non_stream_content_test(
+        monkeypatch,
+        llm_response={
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": '{"answer":"ok"}'},
+                    "finish_reason": "stop",
+                },
+            ]
+        },
+        moderation=_NoModeration(),
+        response_format=response_format,
+    )
+
+    metadata = response["tldw_structured"]
+    assert metadata["validated"] is True
+    assert metadata["validated_payload"] == {"answer": "ok"}
+    assert "mode_used" in metadata
+    assert "fallback_used" in metadata
+    assert "choice_index" not in metadata
+    assert "choices" not in metadata
+
+
+@pytest.mark.asyncio
 async def test_execute_non_stream_call_redacts_all_returned_choices(monkeypatch):
     response, _save_calls, _logged_usage = await _run_non_stream_content_test(
         monkeypatch,
@@ -429,6 +516,28 @@ async def test_execute_non_stream_call_redacts_all_returned_choices(monkeypatch)
 
     assert response["choices"][0]["message"]["content"] == "REDACTED:first secret"
     assert response["choices"][1]["message"]["content"] == "REDACTED:second secret"
+
+
+@pytest.mark.asyncio
+async def test_execute_non_stream_call_redacts_object_style_content_part(monkeypatch):
+    text_part = _ObjectTextPart("secret")
+    response, _save_calls, _logged_usage = await _run_non_stream_content_test(
+        monkeypatch,
+        llm_response={
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": [text_part]},
+                    "finish_reason": "stop",
+                },
+            ]
+        },
+        moderation=_RedactingModeration(),
+    )
+
+    content = response["choices"][0]["message"]["content"]
+    assert content[0]["text"] == "REDACTED:secret"
+    assert text_part.text == "secret"
+    assert text_part.model_copy_updates == [{"text": "REDACTED:secret"}]
 
 
 @pytest.mark.asyncio
