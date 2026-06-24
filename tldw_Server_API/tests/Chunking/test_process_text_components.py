@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import inspect
+import time
 from typing import Any
 
 import pytest
 
 from tldw_Server_API.app.core.Chunking import Chunker
+from tldw_Server_API.app.core.Chunking import chunker as chunker_module
 from tldw_Server_API.app.core.Chunking.constants import FRONTMATTER_SENTINEL_KEY
 from tldw_Server_API.app.core.Chunking.error_policy import CHUNKER_NONCRITICAL_EXCEPTIONS
 from tldw_Server_API.app.core.Chunking.exceptions import (
@@ -15,6 +17,7 @@ from tldw_Server_API.app.core.Chunking.exceptions import (
 )
 from tldw_Server_API.app.core.Chunking.llm_context import _LLM_UNSET, llm_override_scope
 from tldw_Server_API.app.core.Chunking.option_utils import _coerce_bool_option
+from tldw_Server_API.app.core.Chunking.process_text import preparation
 from tldw_Server_API.app.core.Chunking.process_text.preparation import (
     extract_header,
     prepare_frontmatter,
@@ -154,6 +157,14 @@ def test_process_text_models_module_does_not_import_chunker() -> None:
     assert "Chunking.chunker" not in source
 
 
+def test_process_text_preparation_module_does_not_import_chunker() -> None:
+    source = inspect.getsource(preparation)
+
+    assert not hasattr(preparation, "Chunker")
+    assert ".chunker" not in source
+    assert "Chunking.chunker" not in source
+
+
 def test_prepare_frontmatter_extracts_default_sentinel_metadata() -> None:
     text = f'  {{"title": "Example", "{FRONTMATTER_SENTINEL_KEY}": true}}\n\r\nBody text'
 
@@ -262,3 +273,24 @@ def test_prepare_frontmatter_malformed_leading_json_does_not_raise() -> None:
     assert prepared.processed_text == text
     assert prepared.prefix_offset == 0
     assert prepared.json_meta == {}
+
+
+def test_process_text_frontmatter_metric_excludes_option_setup(monkeypatch: pytest.MonkeyPatch) -> None:
+    observed: dict[str, float] = {}
+    real_prepare_options = chunker_module._prepare_frontmatter_options
+
+    def slow_prepare_options(*args: Any, **kwargs: Any) -> Any:
+        time.sleep(0.05)
+        return real_prepare_options(*args, **kwargs)
+
+    def capture_histogram(name: str, value: float, **kwargs: Any) -> None:
+        if name == "chunker_frontmatter_duration_seconds":
+            observed[name] = value
+
+    monkeypatch.setattr(chunker_module, "_prepare_frontmatter_options", slow_prepare_options)
+    monkeypatch.setattr(chunker_module, "observe_histogram", capture_histogram)
+
+    rows = Chunker().process_text("Body text", options={"method": "words", "max_size": 100})
+
+    assert rows[0]["text"] == "Body text"
+    assert observed["chunker_frontmatter_duration_seconds"] < 0.03

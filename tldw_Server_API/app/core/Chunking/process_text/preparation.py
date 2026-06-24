@@ -16,6 +16,24 @@ def prepare_frontmatter(
     *,
     tokenizer_name_or_path: str | None,
 ) -> PreparedText:
+    prepared, frontmatter_enabled, sentinel_key = _prepare_frontmatter_options(
+        text,
+        options,
+        tokenizer_name_or_path=tokenizer_name_or_path,
+    )
+    return _parse_frontmatter(
+        prepared,
+        frontmatter_enabled=frontmatter_enabled,
+        sentinel_key=sentinel_key,
+    )
+
+
+def _prepare_frontmatter_options(
+    text: str,
+    options: dict[str, Any] | None,
+    *,
+    tokenizer_name_or_path: str | None,
+) -> tuple[PreparedText, bool, str]:
     opts = dict(options or {})
     if tokenizer_name_or_path and "tokenizer_name_or_path" not in opts and "tokenizer_name" not in opts:
         opts["tokenizer_name_or_path"] = tokenizer_name_or_path
@@ -25,9 +43,29 @@ def prepare_frontmatter(
     sentinel_key_raw = opts.pop("frontmatter_sentinel_key", FRONTMATTER_SENTINEL_KEY)
     sentinel_key = str(sentinel_key_raw or FRONTMATTER_SENTINEL_KEY)
 
+    return (
+        PreparedText(
+            original_text=text,
+            processed_text=text,
+            prefix_offset=0,
+            json_meta={},
+            header_text="",
+            options=opts,
+        ),
+        frontmatter_enabled,
+        sentinel_key,
+    )
+
+
+def _parse_frontmatter(
+    prepared: PreparedText,
+    *,
+    frontmatter_enabled: bool,
+    sentinel_key: str,
+) -> PreparedText:
     json_meta: dict[str, Any] = {}
-    processed_text = text
-    prefix_offset = 0
+    processed_text = prepared.processed_text
+    prefix_offset = prepared.prefix_offset
     if frontmatter_enabled:
         try:
             stripped = processed_text.lstrip()
@@ -53,13 +91,11 @@ def prepare_frontmatter(
         except CHUNKER_NONCRITICAL_EXCEPTIONS:
             pass
 
-    return PreparedText(
-        original_text=text,
+    return replace(
+        prepared,
         processed_text=processed_text,
         prefix_offset=prefix_offset,
         json_meta=json_meta,
-        header_text="",
-        options=opts,
     )
 
 

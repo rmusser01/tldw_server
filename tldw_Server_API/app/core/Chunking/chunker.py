@@ -26,7 +26,11 @@ from .error_policy import CHUNKER_NONCRITICAL_EXCEPTIONS as _CHUNKER_NONCRITICAL
 from .exceptions import ChunkingError, InvalidChunkingMethodError, InvalidInputError
 from .llm_context import _LLM_UNSET
 from .option_utils import _coerce_bool_option
-from .process_text.preparation import extract_header, prepare_frontmatter
+from .process_text.preparation import (
+    _parse_frontmatter,
+    _prepare_frontmatter_options,
+    extract_header,
+)
 from .security_logger import get_security_logger
 from .strategies.fixed_size import FixedSizeChunkingStrategy
 from .strategies.rolling_summarize import RollingSummarizeStrategy
@@ -2279,11 +2283,16 @@ class Chunker:
         increment_counter("chunker_process_total", labels=labels)
         if text is None or not isinstance(text, str):
             raise InvalidInputError(f"Expected string input, got {type(text).__name__}")
-        fm_start = time.perf_counter()
-        prepared = prepare_frontmatter(
+        prepared, frontmatter_enabled, sentinel_key = _prepare_frontmatter_options(
             text,
             options,
             tokenizer_name_or_path=tokenizer_name_or_path,
+        )
+        fm_start = time.perf_counter()
+        prepared = _parse_frontmatter(
+            prepared,
+            frontmatter_enabled=frontmatter_enabled,
+            sentinel_key=sentinel_key,
         )
         opts = prepared.options
         processed_text = prepared.processed_text
