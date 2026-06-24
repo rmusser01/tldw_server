@@ -72,8 +72,14 @@ describe("WebUI runtime config API", () => {
 
   it.each([
     ["disabled exposure", { TLDW_WEBUI_EXPOSE_RUNTIME_AUTH: "0" }],
+    ["true exposure flag", { TLDW_WEBUI_EXPOSE_RUNTIME_AUTH: "true" }],
+    ["yes exposure flag", { TLDW_WEBUI_EXPOSE_RUNTIME_AUTH: "yes" }],
     ["multi-user auth mode", { AUTH_MODE: "multi_user" }],
+    ["hyphenated single-user auth mode", { AUTH_MODE: "single-user" }],
     ["placeholder key", { SINGLE_USER_API_KEY: "change-me" }],
+    ["repo placeholder key", { SINGLE_USER_API_KEY: "CHANGE_ME_TO_SECURE_API_KEY" }],
+    ["repo placeholder key prefix", { SINGLE_USER_API_KEY: "CHANGE_ME_BEFORE_RUNNING" }],
+    ["whitespace-bearing key", { SINGLE_USER_API_KEY: " runtime-key " }],
     ["blank key", { SINGLE_USER_API_KEY: "   " }]
   ])("returns unavailable for %s", async (_name, envPatch) => {
     Object.assign(process.env, envPatch)

@@ -23,6 +23,7 @@ const FORWARDED_HEADER_NAMES = [
 const PLACEHOLDER_KEYS = new Set([
   "change-me",
   "changeme",
+  "change_me",
   "your-api-key",
   "your_api_key",
   "placeholder",
@@ -32,21 +33,16 @@ const PLACEHOLDER_KEYS = new Set([
 
 const normalizeEnvValue = (value?: string): string => String(value || "").trim()
 
-const isSingleUserMode = (value?: string): boolean => {
-  const normalized = normalizeEnvValue(value).toLowerCase().replace(/-/g, "_")
-  return normalized === "single_user"
-}
+const isSingleUserMode = (value?: string): boolean => value === "single_user"
 
-const isEnabled = (value?: string): boolean => {
-  const normalized = normalizeEnvValue(value).toLowerCase()
-  return normalized === "1" || normalized === "true" || normalized === "yes"
-}
+const isEnabled = (value?: string): boolean => value === "1"
 
 const isUsableApiKey = (value?: string): value is string => {
-  const normalized = normalizeEnvValue(value)
-  if (!normalized) return false
-  if (/\s/.test(normalized)) return false
-  return !PLACEHOLDER_KEYS.has(normalized.toLowerCase())
+  if (!value) return false
+  if (/\s/.test(value)) return false
+  const normalized = value.toLowerCase()
+  if (normalized.startsWith("change_me")) return false
+  return !PLACEHOLDER_KEYS.has(normalized)
 }
 
 const extractHostname = (hostHeader?: string | string[]): string => {
@@ -116,7 +112,7 @@ export default function handler(
     return
   }
 
-  const apiKey = normalizeEnvValue(process.env.SINGLE_USER_API_KEY)
+  const apiKey = process.env.SINGLE_USER_API_KEY
   if (!isUsableApiKey(apiKey)) {
     res.status(200).json(unavailable("api-key"))
     return
