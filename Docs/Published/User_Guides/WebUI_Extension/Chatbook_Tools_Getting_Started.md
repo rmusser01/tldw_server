@@ -71,7 +71,8 @@ injection_mode = system   # or: preface | replace
 commands_rate_limit_user = 10    # per-user per-command RPM
 commands_rate_limit_global = 100 # global per-command RPM
 commands_max_chars = 300         # max injected chars per command result
-require_permissions = false
+# Deprecated compatibility flag; declared command permissions are enforced when commands are enabled.
+# require_permissions = false
 default_location =        # fallback for /weather
 ```
 
