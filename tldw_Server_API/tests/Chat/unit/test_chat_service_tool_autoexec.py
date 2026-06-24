@@ -379,6 +379,39 @@ async def test_tool_autoexec_rejects_multi_choice_before_provider_call(monkeypat
 
 @pytest.mark.asyncio
 @pytest.mark.unit
+async def test_tool_autoexec_allows_multi_choice_when_autoexec_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_log_llm_usage(**_kwargs):
+        return None
+
+    monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
+    monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: False)
+
+    provider_called = False
+
+    def llm_call_func():
+        nonlocal provider_called
+        provider_called = True
+        return _build_llm_response_with_tool_calls()
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-1"
+
+    response = await _run_execute_non_stream_call(
+        llm_call_func=llm_call_func,
+        save_message_fn=save_message_fn,
+        cleaned_args_overrides={
+            "n": 2,
+            "tools": [{"type": "function", "function": {"name": "notes.search", "parameters": {}}}],
+        },
+    )
+
+    assert provider_called is True
+    assert response["choices"][0]["message"]["tool_calls"][0]["function"]["name"] == "notes.search"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_run_first_presented_tools_drive_autoexec_allow_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_log_llm_usage(**_kwargs):
         return None
@@ -1604,6 +1637,60 @@ async def test_non_stream_provider_fallback_refreshes_run_first_metric_context(
     assert metrics.completion_calls[0]["provider"] == "anthropic"
     assert metrics.completion_calls[0]["model"] == "claude-3-7-sonnet"
     assert metrics.completion_calls[0]["cohort"] == "out_of_cohort"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_tool_autoexec_rejects_multi_choice_fallback_args_before_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_log_llm_usage(**_kwargs):
+        return None
+
+    fallback_provider_called = False
+
+    async def fake_fallback_call(**_kwargs):
+        nonlocal fallback_provider_called
+        fallback_provider_called = True
+        return {
+            "choices": [{"message": {"role": "assistant", "content": "Fallback response"}}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        }
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-1"
+
+    monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
+    monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_fallback_call)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _run_execute_non_stream_call(
+            llm_call_func=lambda: (_ for _ in ()).throw(chat_service.ChatAPIError("primary failed")),
+            save_message_fn=save_message_fn,
+            provider_manager=_ProviderManagerStub("anthropic"),
+            enable_provider_fallback=True,
+            refresh_provider_params=lambda fallback_provider: (
+                {
+                    "api_endpoint": fallback_provider,
+                    "api_key": "fallback-key",
+                    "messages_payload": [{"role": "user", "content": "hi"}],
+                    "model": "claude-3-7-sonnet",
+                    "streaming": False,
+                    "n": 2,
+                    "tools": [{"type": "function", "function": {"name": "notes.search", "parameters": {}}}],
+                },
+                "claude-3-7-sonnet",
+            ),
+        )
+
+    assert fallback_provider_called is False
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == {
+        "code": "unsupported_multi_choice_tool_autoexec",
+        "message": "Local tool auto-execution supports one assistant choice per request.",
+    }
 
 
 @pytest.mark.asyncio

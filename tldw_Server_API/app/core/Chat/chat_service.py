@@ -5054,6 +5054,10 @@ async def execute_non_stream_call(
                             cleaned_args=refreshed_args,
                             structured_request_context=structured_request_context,
                         )
+                        ensure_tool_autoexec_supports_request(
+                            cleaned_args=refreshed_args,
+                            should_run_tool_autoexec=should_run_legacy_tool_autoexec,
+                        )
                     except _CHAT_NONCRITICAL_EXCEPTIONS as refresh_error:
                         provider_manager.record_failure(fallback_provider, refresh_error)
                         _emit_chat_run_first_completion_metric(
