@@ -324,7 +324,7 @@ commands_rate_limit = 10
 # env: CHAT_COMMANDS_MAX_CHARS
 commands_max_chars = 300
 
-# Enforce RBAC permissions on commands (env: CHAT_COMMANDS_REQUIRE_PERMISSIONS)
+# Deprecated compatibility flag; declared command permissions are enforced when commands are enabled
 require_permissions = false
 
 # Fallback default location for /weather when no args provided (env: DEFAULT_LOCATION)
