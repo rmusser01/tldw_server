@@ -225,6 +225,49 @@ async def test_stream_tts_to_websocket_drains_queue_when_producer_finishes():
 
 
 @pytest.mark.asyncio
+async def test_stream_tts_to_websocket_observes_consumer_when_both_tasks_done():
+    class OneChunkTTSService:
+        async def generate_speech(self, *_args, **_kwargs):  # noqa: ARG002
+            yield b"first-chunk"
+
+    class FailingWebSocket:
+        async def send_bytes(self, _data: bytes):
+            raise ZeroDivisionError("consumer task failed")
+
+    class DummyRegistry:
+        def increment(self, *_args, **_kwargs):  # noqa: ARG002
+            return None
+
+    async def wait_for_both(tasks, return_when=None):  # noqa: ARG001
+        await asyncio.gather(*tasks, return_exceptions=True)
+        return set(tasks), set()
+
+    fake_asyncio = SimpleNamespace(
+        Queue=asyncio.Queue,
+        QueueFull=asyncio.QueueFull,
+        create_task=asyncio.create_task,
+        wait=wait_for_both,
+        FIRST_COMPLETED=asyncio.FIRST_COMPLETED,
+    )
+
+    with pytest.raises(ZeroDivisionError, match="consumer task failed"):
+        await asyncio.wait_for(
+            streaming_service._stream_tts_to_websocket(
+                websocket=FailingWebSocket(),
+                speech_req=SimpleNamespace(model="test-model"),
+                tts_service=OneChunkTTSService(),
+                provider="test-provider",
+                outer_stream=None,
+                reg=DummyRegistry(),
+                route="audio.stream.tts",
+                component_label="audio_tts_ws",
+                asyncio_module=fake_asyncio,
+            ),
+            timeout=0.5,
+        )
+
+
+@pytest.mark.asyncio
 async def test_stream_tts_to_websocket_cancels_consumer_when_completion_signal_fails():
     consumer_cancelled = asyncio.Event()
 

@@ -3,12 +3,12 @@ id: TASK-2407
 title: Harden audio core review findings
 status: Done
 assignee: []
-created_date: '2026-06-23 18:11'
-updated_date: '2026-06-24 01:43'
+created_date: 2026-06-23 18:11
+updated_date: 2026-06-24 03:31
 labels:
-  - audio
-  - security
-  - review
+- audio
+- security
+- review
 dependencies: []
 priority: high
 ---
@@ -75,3 +75,16 @@ Validated and fixed all reviewed audio-core findings: disabled WebSocket query-t
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+PR review follow-up 2:
+- Verified the completed-consumer observation gap is still present in the producer-done branch of streaming_service.py.
+- Applying the minimal fix to observe consumer_task when it is already in the done set.
+Follow-up verification:
+- py_compile passed for streaming_service.py and test_audio_streaming_service_core.py.
+- Focused audio pytest passed: 9 passed in 1.95s.
+- git diff --check passed.
+- Bandit touched audio scope completed with 0 results and 0 errors (/tmp/bandit_audio_core_2446_observe_consumer.json).
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

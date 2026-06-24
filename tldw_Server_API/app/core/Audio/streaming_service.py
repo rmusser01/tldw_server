@@ -311,6 +311,8 @@ async def _stream_tts_to_websocket(
                     _observe_task_result(consumer_task, "consumer")
                 else:
                     await _cancel_task(consumer_task, "consumer")
+            elif consumer_task in done:
+                _observe_task_result(consumer_task, "consumer")
         elif consumer_task in done:
             _observe_task_result(consumer_task, "consumer")
             if producer_task in pending:
