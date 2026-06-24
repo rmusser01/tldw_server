@@ -60,9 +60,7 @@ class ChatWorkflowsDatabase:
         """Add a missing column to an existing table."""
         if column_name in self._table_columns(table_name):
             return
-        self._conn.execute(
-            f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}"
-        )
+        self._conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
@@ -78,8 +76,7 @@ class ChatWorkflowsDatabase:
 
     def _create_schema(self) -> None:
         with self._lock:
-            self._conn.executescript(
-                """
+            self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS chat_workflow_templates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tenant_id TEXT NOT NULL,
@@ -189,10 +186,9 @@ class ChatWorkflowsDatabase:
             WHERE idempotency_key IS NOT NULL;
 
             CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_workflow_rounds_idempotency
-            ON chat_workflow_rounds(run_id, step_index, idempotency_key)
+            ON chat_workflow_rounds(run_id, idempotency_key)
             WHERE idempotency_key IS NOT NULL;
-            """
-            )
+            """)
             self._ensure_column(
                 "chat_workflow_template_steps",
                 "step_type",
@@ -213,7 +209,30 @@ class ChatWorkflowsDatabase:
                 "step_runtime_state_json",
                 "TEXT NOT NULL DEFAULT '{}'",
             )
+            self._ensure_round_idempotency_index()
             self._conn.commit()
+
+    def _ensure_round_idempotency_index(self) -> None:
+        """Ensure dialogue round idempotency keys are unique within each run."""
+        duplicate = self._conn.execute("""
+            SELECT run_id, COUNT(*) AS duplicate_count
+            FROM chat_workflow_rounds
+            WHERE idempotency_key IS NOT NULL
+            GROUP BY run_id, idempotency_key
+            HAVING COUNT(*) > 1
+            LIMIT 1
+            """).fetchone()
+        if duplicate is not None:
+            raise ValueError(
+                "chat_workflow_rounds contains duplicate idempotency keys within "
+                f"run_id={duplicate['run_id']}; resolve duplicates before startup"
+            )
+        self._conn.execute("DROP INDEX IF EXISTS idx_chat_workflow_rounds_idempotency")
+        self._conn.execute("""
+            CREATE UNIQUE INDEX idx_chat_workflow_rounds_idempotency
+            ON chat_workflow_rounds(run_id, idempotency_key)
+            WHERE idempotency_key IS NOT NULL
+            """)
 
     def close(self) -> None:
         with self._lock:
@@ -398,9 +417,7 @@ class ChatWorkflowsDatabase:
     ) -> str:
         run_identifier = run_id or str(uuid4())
         runtime_state_json = (
-            step_runtime_state
-            if isinstance(step_runtime_state, str)
-            else _json_dumps(step_runtime_state or {})
+            step_runtime_state if isinstance(step_runtime_state, str) else _json_dumps(step_runtime_state or {})
         )
         with self.transaction() as conn:
             conn.execute(
@@ -603,6 +620,49 @@ class ChatWorkflowsDatabase:
             ).fetchone()
         return dict(row) if row is not None else None
 
+    def _restart_failed_dialogue_round(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        run_id: str,
+        step_index: int,
+        round_index: int,
+        user_message: str,
+        now: str,
+    ) -> dict[str, Any] | None:
+        """Reset a failed dialogue round row to pending for the same retry attempt."""
+        conn.execute(
+            """
+            UPDATE chat_workflow_rounds
+            SET user_message = ?,
+                debate_llm_message = NULL,
+                moderator_decision = NULL,
+                moderator_summary = NULL,
+                next_user_prompt = NULL,
+                status = 'pending',
+                updated_at = ?
+            WHERE run_id = ? AND step_index = ? AND round_index = ?
+            """,
+            (
+                user_message,
+                now,
+                run_id,
+                step_index,
+                round_index,
+            ),
+        )
+        round_row = conn.execute(
+            """
+            SELECT id, run_id, step_index, round_index, user_message, debate_llm_message,
+                   moderator_decision, moderator_summary, next_user_prompt, status,
+                   idempotency_key, created_at, updated_at
+            FROM chat_workflow_rounds
+            WHERE run_id = ? AND step_index = ? AND round_index = ?
+            """,
+            (run_id, step_index, round_index),
+        ).fetchone()
+        return dict(round_row) if round_row is not None else None
+
     def begin_dialogue_round(
         self,
         *,
@@ -633,6 +693,41 @@ class ChatWorkflowsDatabase:
             if int(run_row["active_round_index"]) != round_index:
                 return {"outcome": "stale", "run": dict(run_row)}
 
+            if idempotency_key is not None:
+                existing_by_key = conn.execute(
+                    """
+                    SELECT id, run_id, step_index, round_index, user_message, debate_llm_message,
+                           moderator_decision, moderator_summary, next_user_prompt, status,
+                           idempotency_key, created_at, updated_at
+                    FROM chat_workflow_rounds
+                    WHERE run_id = ? AND idempotency_key = ?
+                    """,
+                    (run_id, idempotency_key),
+                ).fetchone()
+                if existing_by_key is not None:
+                    existing_round = dict(existing_by_key)
+                    same_round = (
+                        int(existing_round["step_index"]) == step_index
+                        and int(existing_round["round_index"]) == round_index
+                    )
+                    if not same_round or existing_round.get("user_message") != user_message:
+                        return {"outcome": "conflict", "round": existing_round, "run": dict(run_row)}
+                    existing_status = str(existing_round.get("status") or "").strip().lower()
+                    if existing_status == "failed":
+                        return {
+                            "outcome": "claimed",
+                            "round": self._restart_failed_dialogue_round(
+                                conn,
+                                run_id=run_id,
+                                step_index=step_index,
+                                round_index=round_index,
+                                user_message=user_message,
+                                now=now,
+                            ),
+                            "run": dict(run_row),
+                        }
+                    return {"outcome": "replayed", "round": existing_round, "run": dict(run_row)}
+
             existing = conn.execute(
                 """
                 SELECT id, run_id, step_index, round_index, user_message, debate_llm_message,
@@ -651,42 +746,21 @@ class ChatWorkflowsDatabase:
                     and existing_round.get("user_message") == user_message
                 )
                 if existing_status == "failed" and same_attempt:
-                    conn.execute(
-                        """
-                        UPDATE chat_workflow_rounds
-                        SET user_message = ?,
-                            debate_llm_message = NULL,
-                            moderator_decision = NULL,
-                            moderator_summary = NULL,
-                            next_user_prompt = NULL,
-                            status = 'pending',
-                            updated_at = ?
-                        WHERE run_id = ? AND step_index = ? AND round_index = ?
-                        """,
-                        (
-                            user_message,
-                            now,
-                            run_id,
-                            step_index,
-                            round_index,
-                        ),
-                    )
-                    round_row = conn.execute(
-                        """
-                        SELECT id, run_id, step_index, round_index, user_message, debate_llm_message,
-                               moderator_decision, moderator_summary, next_user_prompt, status,
-                               idempotency_key, created_at, updated_at
-                        FROM chat_workflow_rounds
-                        WHERE run_id = ? AND step_index = ? AND round_index = ?
-                        """,
-                        (run_id, step_index, round_index),
-                    ).fetchone()
                     return {
                         "outcome": "claimed",
-                        "round": dict(round_row) if round_row is not None else None,
+                        "round": self._restart_failed_dialogue_round(
+                            conn,
+                            run_id=run_id,
+                            step_index=step_index,
+                            round_index=round_index,
+                            user_message=user_message,
+                            now=now,
+                        ),
                         "run": dict(run_row),
                     }
                 if idempotency_key is not None and existing_round.get("idempotency_key") == idempotency_key:
+                    if existing_round.get("user_message") != user_message:
+                        return {"outcome": "conflict", "round": existing_round, "run": dict(run_row)}
                     return {"outcome": "replayed", "round": existing_round, "run": dict(run_row)}
                 return {"outcome": "conflict", "round": existing_round, "run": dict(run_row)}
 
@@ -715,6 +789,27 @@ class ChatWorkflowsDatabase:
             "round": dict(round_row) if round_row is not None else None,
             "run": dict(run_row),
         }
+
+    def get_round_by_idempotency_key(
+        self,
+        run_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        """Return a dialogue round previously claimed with a run-level idempotency key."""
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT id, run_id, step_index, round_index, user_message, debate_llm_message,
+                       moderator_decision, moderator_summary, next_user_prompt, status,
+                       idempotency_key, created_at, updated_at
+                FROM chat_workflow_rounds
+                WHERE run_id = ? AND idempotency_key = ?
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (run_id, idempotency_key),
+            ).fetchone()
+        return dict(row) if row is not None else None
 
     def complete_dialogue_round(
         self,
