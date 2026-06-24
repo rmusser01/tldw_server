@@ -30,6 +30,101 @@ def test_metrics_logger_bridge_records_counter():
 
 
 @pytest.mark.unit
+def test_register_metric_is_idempotent_for_compatible_definition() -> None:
+    """Allow duplicate registration only when the definition stays compatible."""
+    registry = get_metrics_registry()
+    registry.reset()
+
+    definition = MetricDefinition(
+        name="duplicate_compatible_total",
+        type=MetricType.COUNTER,
+        description="duplicate compatible test",
+        labels=["source"],
+    )
+
+    assert registry.register_metric(definition) is True
+    assert registry.register_metric(definition) is True
+    assert registry.metrics["duplicate_compatible_total"].type == MetricType.COUNTER
+
+
+@pytest.mark.unit
+def test_register_metric_rejects_duplicate_with_different_description() -> None:
+    """Reject duplicate registration when Prometheus HELP text would drift."""
+    registry = get_metrics_registry()
+    registry.reset()
+
+    metric_name = "duplicate_description_total"
+    registry.register_metric(
+        MetricDefinition(
+            name=metric_name,
+            type=MetricType.COUNTER,
+            description="original duplicate description",
+            labels=["source"],
+        )
+    )
+
+    accepted = registry.register_metric(
+        MetricDefinition(
+            name=metric_name,
+            type=MetricType.COUNTER,
+            description="different duplicate description",
+            labels=["source"],
+        )
+    )
+    registry.increment(metric_name, labels={"source": "test"})
+
+    text = registry.export_prometheus_format()
+    assert accepted is False
+    assert "# HELP duplicate_description_total original duplicate description" in text
+    assert "different duplicate description" not in text
+
+
+@pytest.mark.unit
+def test_metrics_logger_bridge_skips_incompatible_registered_metric_type() -> None:
+    """Skip legacy bridge recordings when the registry type differs."""
+    registry = get_metrics_registry()
+    registry.reset()
+
+    metric_name = "bridge_conflict_metric_total"
+    registry.register_metric(
+        MetricDefinition(
+            name=metric_name,
+            type=MetricType.COUNTER,
+            description="bridge conflict test",
+            labels=["source"],
+        )
+    )
+
+    metrics_logger.log_histogram(metric_name, 0.5, labels={"source": "test"})
+
+    assert registry.metrics[metric_name].type == MetricType.COUNTER
+    assert registry.get_cumulative_counter(metric_name, {"source": "test"}) == 0
+    assert registry.get_metric_stats(metric_name, labels={"source": "test"}) == {}
+
+
+@pytest.mark.unit
+def test_observe_rejects_metric_registered_as_counter() -> None:
+    """Reject histogram helper calls for metrics registered as counters."""
+    registry = get_metrics_registry()
+    registry.reset()
+
+    metric_name = "typed_helper_conflict_total"
+    registry.register_metric(
+        MetricDefinition(
+            name=metric_name,
+            type=MetricType.COUNTER,
+            description="typed helper conflict test",
+            labels=["source"],
+        )
+    )
+
+    registry.observe(metric_name, 0.5, labels={"source": "test"})
+
+    assert registry.get_cumulative_counter(metric_name, {"source": "test"}) == 0
+    assert registry.get_metric_stats(metric_name, labels={"source": "test"}) == {}
+
+
+@pytest.mark.unit
 def test_metrics_logger_bridge_records_histogram():
     registry = get_metrics_registry()
     registry.reset()
