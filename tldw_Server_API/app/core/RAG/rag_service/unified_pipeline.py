@@ -15,6 +15,7 @@ Design Philosophy:
 
 import asyncio
 import calendar
+import copy
 import hashlib
 import inspect
 import os
@@ -96,6 +97,46 @@ def _serialize_result_document(doc: Any) -> dict[str, Any]:
         "score": getattr(doc, "score", 0.0),
         "metadata": metadata,
     }
+
+
+def _clone_cached_document(doc: Any) -> Any:
+    """Return an isolated cache document without duplicating embedding buffers."""
+    if isinstance(doc, Document):
+        return replace(
+            doc,
+            metadata=copy.deepcopy(doc.metadata),
+            citations=copy.deepcopy(doc.citations),
+            source_document_metadata=copy.deepcopy(doc.source_document_metadata),
+            children_ids=list(doc.children_ids),
+            embedding=doc.embedding,
+        )
+
+    if isinstance(doc, dict):
+        cloned = dict(doc)
+        for field_name in ("metadata", "citations", "source_document_metadata"):
+            if field_name in cloned:
+                cloned[field_name] = copy.deepcopy(cloned[field_name])
+        if isinstance(cloned.get("children_ids"), list):
+            cloned["children_ids"] = list(cloned["children_ids"])
+        return cloned
+
+    return copy.deepcopy(doc)
+
+
+def _clone_cached_documents(documents: list[Any]) -> list[Any]:
+    """Return independent document instances for cache store/load boundaries."""
+    return [_clone_cached_document(doc) for doc in documents]
+
+
+def _resolve_security_user_id(user_id: Any, feedback_user_id: Any) -> str:
+    """Resolve the best available user identifier for security filtering."""
+    for candidate in (user_id, feedback_user_id):
+        if candidate is None:
+            continue
+        value = str(candidate).strip()
+        if value:
+            return value
+    return "anonymous"
 
 
 def _resolve_include_rerank_debug_documents(explicit_flag: Any) -> bool:
@@ -3156,12 +3197,12 @@ async def unified_rag_pipeline(
                             result.generated_answer = ans
                         docs = cached_documents.get("documents")
                         if isinstance(docs, list):
-                            result.documents = docs
+                            result.documents = _clone_cached_documents(docs)
                         if cached_documents.get("cached") is True:
                             result.metadata["cached_flag"] = True
                     elif isinstance(cached_documents, list):
                         # Backward compatibility: older cache entries stored document lists directly
-                        result.documents = cached_documents
+                        result.documents = _clone_cached_documents(cached_documents)
                     result.metadata.setdefault("cached_flag", True)
 
             result.timings["cache_check"] = time.time() - cache_start
@@ -4382,7 +4423,7 @@ async def unified_rag_pipeline(
                             ]
                             filtered_payloads = filter_documents(
                                 serialized_docs,
-                                user_id="anonymous",
+                                user_id=_resolve_security_user_id(user_id, feedback_user_id),
                                 max_sensitivity=sensitivity_value,
                                 mask_pii=bool(redact_pii),
                             )
@@ -6960,7 +7001,7 @@ async def unified_rag_pipeline(
                     set_fn = getattr(cache, 'set', None) or getattr(cache, 'add', None)
                     if set_fn:
                         cache_payload = {
-                            "documents": list(result.documents),
+                            "documents": _clone_cached_documents(list(result.documents)),
                             "answer": result.generated_answer,
                             "cached": True,
                         }

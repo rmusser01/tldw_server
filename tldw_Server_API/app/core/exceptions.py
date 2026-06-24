@@ -43,6 +43,10 @@ class BadRequestError(ValueError):
     """Raised when a caller provides invalid arguments for an operation."""
 
 
+class InvalidMetadataOrderKeyError(ValueError):
+    """Raised when a metadata order key cannot be safely used."""
+
+
 class RecipeEnqueueError(RuntimeError):
     """Raised when a recipe run cannot be enqueued into Jobs."""
 
