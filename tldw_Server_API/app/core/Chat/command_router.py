@@ -66,7 +66,7 @@ try:
     from tldw_Server_API.app.core.AuthNZ.rbac import user_has_permission as _user_has_permission
 except ImportError:  # pragma: no cover - fallback if AuthNZ is trimmed in tests
     def _user_has_permission(user_id: int, permission: str) -> bool:  # type: ignore
-        return True
+        return False
 
 
 SLASH_RE = re.compile(r"^/(\w+)(?:\s+(.*))?$")

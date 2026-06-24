@@ -222,6 +222,25 @@ def _sanitize_error_for_client(error_text: str, max_length: int = 100) -> str:
     return error_str or "An error occurred"
 
 
+def _build_command_context(llm_user_identifier: Optional[str]) -> command_router.CommandContext:
+    auth_user_int = None
+    try:
+        if llm_user_identifier is not None:
+            auth_user_int = int(llm_user_identifier)
+    except _CHAT_ORCHESTRATOR_COERCE_EXCEPTIONS:
+        auth_user_int = None
+
+    auth_mode = str(os.getenv("AUTH_MODE", "")).strip().lower() or None
+    return command_router.CommandContext(
+        user_id=llm_user_identifier or "anonymous",
+        auth_user_id=auth_user_int,
+        request_meta={
+            "auth_mode": auth_mode,
+            "is_single_user_owner": auth_mode == "single_user",
+        },
+    )
+
+
 def _get_http_status_from_exception(exc: Exception) -> Optional[int]:
     response = getattr(exc, "response", None)
     if response is not None:
@@ -905,14 +924,7 @@ def _chat_sync_impl(
             parsed = command_router.parse_slash_command(message)
             if parsed:
                 cmd_name, cmd_args = parsed
-                # Build minimal context; user_identifier may be None
-                auth_user_int = None
-                try:
-                    if llm_user_identifier is not None:
-                        auth_user_int = int(llm_user_identifier)  # best-effort parse for RBAC
-                except _CHAT_ORCHESTRATOR_COERCE_EXCEPTIONS:
-                    auth_user_int = None
-                ctx = command_router.CommandContext(user_id=llm_user_identifier or "anonymous", auth_user_id=auth_user_int)
+                ctx = _build_command_context(llm_user_identifier)
                 cmd_res = _run_coro_sync(
                     command_router.async_dispatch_command(ctx, cmd_name, cmd_args)
                 )
@@ -1418,13 +1430,7 @@ async def achat(
             parsed = command_router.parse_slash_command(message)
             if parsed:
                 cmd_name, cmd_args = parsed
-                auth_user_int = None
-                try:
-                    if llm_user_identifier is not None:
-                        auth_user_int = int(llm_user_identifier)
-                except _CHAT_ORCHESTRATOR_COERCE_EXCEPTIONS:
-                    auth_user_int = None
-                ctx = command_router.CommandContext(user_id=llm_user_identifier or "anonymous", auth_user_id=auth_user_int)
+                ctx = _build_command_context(llm_user_identifier)
                 cmd_res = await command_router.async_dispatch_command(ctx, cmd_name, cmd_args)
                 injected_text = command_router.build_injection_text(cmd_name, cmd_res.content)
                 if cmd_res.ok:

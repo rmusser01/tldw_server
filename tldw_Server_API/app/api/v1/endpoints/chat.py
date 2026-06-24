@@ -1588,8 +1588,7 @@ async def _maybe_rg_shadow_chat_decision(
     summary="List available slash commands",
     description=(
         "Returns available chat slash commands with their descriptions."
-        " When permission enforcement is enabled, commands requiring a permission"
-        " are filtered by the current user's privileges in multi-user mode."
+        " Commands requiring a permission are filtered by the current user's privileges."
     ),
     tags=["chat"],
     dependencies=[
