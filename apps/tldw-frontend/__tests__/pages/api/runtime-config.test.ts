@@ -97,6 +97,8 @@ describe("WebUI runtime config API", () => {
     Object.assign(process.env, envPatch)
 
     const res = await callRuntimeConfig()
+    const bodyText = JSON.stringify(res.body)
+    const patchedApiKey = envPatch.SINGLE_USER_API_KEY
 
     expect(res.statusCode).toBe(200)
     expect(res.body).toMatchObject({
@@ -104,7 +106,15 @@ describe("WebUI runtime config API", () => {
         available: false
       }
     })
-    expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
+    expect(res.body).toMatchObject({
+      runtimeAuth: expect.not.objectContaining({
+        apiKey: expect.any(String)
+      })
+    })
+    expect(bodyText).not.toContain("runtime-single-user-key")
+    if (patchedApiKey?.trim()) {
+      expect(bodyText).not.toContain(patchedApiKey)
+    }
   })
 
   it.each([
@@ -169,6 +179,25 @@ describe("WebUI runtime config API", () => {
       runtimeAuth: {
         available: false
       }
+    })
+    expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
+  })
+
+  it("returns unavailable for a loopback peer outside quickstart deployment mode", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "production"
+
+    const res = await callRuntimeConfig({}, "127.0.0.1")
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatchObject({
+      runtimeAuth: {
+        available: false
+      }
+    })
+    expect(res.body).toMatchObject({
+      runtimeAuth: expect.not.objectContaining({
+        apiKey: expect.any(String)
+      })
     })
     expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
   })

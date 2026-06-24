@@ -161,6 +161,11 @@ export default function handler(
 
   const deploymentMode = getDeploymentMode()
 
+  if (deploymentMode !== "quickstart") {
+    res.status(200).json(unavailable("deployment-mode"))
+    return
+  }
+
   if (!isLoopbackHost(req.headers.host)) {
     res.status(200).json(unavailable("host"))
     return
