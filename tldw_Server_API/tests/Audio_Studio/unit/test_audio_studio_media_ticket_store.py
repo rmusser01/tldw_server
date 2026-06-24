@@ -8,11 +8,11 @@ import pytest
 
 from tldw_Server_API.app.core.Audio_Studio.media_tickets import (
     AudioStudioMediaTicketStore,
+    _row_to_ticket,
     hash_media_ticket_token,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-
 
 pytestmark = pytest.mark.unit
 
@@ -27,6 +27,32 @@ def ticket_store(tmp_path):
 
 def _expires(minutes: int) -> datetime:
     return datetime.now(timezone.utc) + timedelta(minutes=minutes)
+
+
+def test_row_to_ticket_normalizes_postgresql_datetime_fields() -> None:
+    row = _row_to_ticket(
+        {
+            "id": 1,
+            "token_hash": "hash-1",
+            "user_id": 7,
+            "project_id": "project-1",
+            "artifact_id": "artifact-1",
+            "purpose": "playback",
+            "expires_at": datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc),
+            "consumed_at": datetime(2026, 1, 2, 2, 4, 5, tzinfo=timezone(timedelta(hours=-1))),
+            "revoked_at": datetime(2026, 1, 2, 4, 4, 5, tzinfo=timezone(timedelta(hours=1))),
+            "created_at": datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc),
+            "created_by_auth_mode": None,
+            "last_redeemed_at": datetime(2026, 1, 1, 19, 4, 5, tzinfo=timezone(timedelta(hours=-8))),
+        }
+    )
+
+    assert row is not None
+    assert row.expires_at == "2026-01-02T03:04:05Z"
+    assert row.consumed_at == "2026-01-02T03:04:05Z"
+    assert row.revoked_at == "2026-01-02T03:04:05Z"
+    assert row.created_at == "2026-01-02T03:04:05Z"
+    assert row.last_redeemed_at == "2026-01-02T03:04:05Z"
 
 
 def test_create_ticket_stores_hash_not_raw_token(ticket_store: AudioStudioMediaTicketStore) -> None:
@@ -51,6 +77,18 @@ def test_create_ticket_stores_hash_not_raw_token(ticket_store: AudioStudioMediaT
     ).one
     assert stored["token_hash"] == row.token_hash
     assert raw_token not in str(stored)
+
+
+def test_create_ticket_rejects_invalid_purpose(ticket_store: AudioStudioMediaTicketStore) -> None:
+    with pytest.raises(ValueError, match="invalid_audio_studio_media_ticket_purpose"):
+        ticket_store.create_ticket(
+            user_id=7,
+            project_id="project-1",
+            artifact_id="artifact-1",
+            purpose="stream",
+            expires_at=_expires(30),
+            created_by_auth_mode=None,
+        )
 
 
 def test_lookup_rejects_unknown_and_returns_existing_ticket(ticket_store: AudioStudioMediaTicketStore) -> None:

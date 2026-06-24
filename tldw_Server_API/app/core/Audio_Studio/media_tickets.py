@@ -39,6 +39,14 @@ def to_db_timestamp(value: datetime) -> str:
     return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def normalize_output_timestamp(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return to_db_timestamp(value)
+    return str(value)
+
+
 def hash_media_ticket_token(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
 
@@ -53,12 +61,12 @@ def _row_to_ticket(row: dict[str, Any] | None) -> AudioStudioMediaTicketRow | No
         project_id=str(row["project_id"]),
         artifact_id=str(row["artifact_id"]),
         purpose=str(row["purpose"]),
-        expires_at=str(row["expires_at"]),
-        consumed_at=row.get("consumed_at"),
-        revoked_at=row.get("revoked_at"),
-        created_at=str(row["created_at"]),
+        expires_at=normalize_output_timestamp(row["expires_at"]) or "",
+        consumed_at=normalize_output_timestamp(row.get("consumed_at")),
+        revoked_at=normalize_output_timestamp(row.get("revoked_at")),
+        created_at=normalize_output_timestamp(row["created_at"]) or "",
         created_by_auth_mode=row.get("created_by_auth_mode"),
-        last_redeemed_at=row.get("last_redeemed_at"),
+        last_redeemed_at=normalize_output_timestamp(row.get("last_redeemed_at")),
     )
 
 
