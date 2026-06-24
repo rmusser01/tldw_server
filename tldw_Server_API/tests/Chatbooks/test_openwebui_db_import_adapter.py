@@ -326,6 +326,20 @@ def test_preview_openwebui_db_lists_users_counts_and_hides_content(tmp_path):
     assert "bob private content" not in json.dumps(data)
 
 
+def test_preview_openwebui_db_rejects_too_many_chats_per_user(tmp_path):
+    db_path = _write_openwebui_db(
+        tmp_path / "too-many-chats.db",
+        users=[{"id": "user-a", "name": "Alice"}],
+        chats=[
+            {"id": "chat-a", "user_id": "user-a", "title": "A", "chat": _message_tree()},
+            {"id": "chat-b", "user_id": "user-a", "title": "B", "chat": _message_tree()},
+        ],
+    )
+
+    with pytest.raises(ValueError, match="too many OpenWebUI chats"):
+        preview_openwebui_db(db_path, max_chats_per_user=1)
+
+
 def test_extract_openwebui_db_user_imports_only_selected_user_and_folder_plan(tmp_path):
     db_path = _standard_db(tmp_path)
 
@@ -350,6 +364,13 @@ def test_extract_openwebui_db_user_imports_only_selected_user_and_folder_plan(tm
     assert folder_plan.source_folder_id == "folder-child"
     assert folder_plan.source_path == ["Research", "Papers"]
     assert any("folder.items" in warning for warning in result.warnings)
+
+
+def test_extract_openwebui_db_user_rejects_too_many_messages(tmp_path):
+    db_path = _standard_db(tmp_path)
+
+    with pytest.raises(ValueError, match="too many OpenWebUI messages"):
+        extract_openwebui_db_user(db_path, selected_user_id="user-a", max_total_messages=2)
 
 
 def test_extract_openwebui_db_user_routes_folder_cycles_to_unfiled(tmp_path):

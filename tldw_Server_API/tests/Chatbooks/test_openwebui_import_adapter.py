@@ -130,6 +130,42 @@ def test_load_openwebui_export_rejects_non_array_root(tmp_path):
         load_openwebui_export(export_path)
 
 
+def test_load_openwebui_export_rejects_too_many_chats(tmp_path):
+    export_path = tmp_path / "too-many-chats.json"
+    payload = _standard_export() + _standard_export()
+    export_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="too many OpenWebUI chats"):
+        load_openwebui_export(export_path, max_chats=1)
+
+
+def test_load_openwebui_export_rejects_too_many_messages(tmp_path):
+    export_path = tmp_path / "too-many-messages.json"
+    export = _standard_export()
+    export[0]["chat"]["history"]["messages"]["extra"] = {
+        "id": "extra",
+        "role": "user",
+        "content": "extra",
+    }
+    export_path.write_text(json.dumps(export), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="too many OpenWebUI messages"):
+        load_openwebui_export(export_path, max_messages_per_chat=3)
+
+
+def test_preview_openwebui_export_truncates_preview_items(tmp_path):
+    export_path = tmp_path / "preview-truncated.json"
+    payload = _standard_export() + _standard_export()
+    payload[1]["id"] = "chat-second"
+    export_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    preview = preview_openwebui_export(export_path, max_preview_items=1)
+
+    assert preview.chat_count == 2
+    assert len(preview.items) == 1
+    assert any("truncated" in warning.lower() for warning in preview.warnings)
+
+
 def test_load_openwebui_export_rejects_non_utf8_json(tmp_path):
     export_path = tmp_path / "bad-encoding.json"
     export_path.write_bytes(b"\xff\xfe")

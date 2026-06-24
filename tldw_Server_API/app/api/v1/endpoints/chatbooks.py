@@ -40,7 +40,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, ge
 from ....core.Chatbooks.chatbook_models import ContentType, ExportJob, ExportStatus
 from ....core.Chatbooks.chatbook_service import ChatbookService
 from ....core.Chatbooks.chatbook_validators import ChatbookValidator
-from ....core.Chatbooks.exceptions import JobError
+from ....core.Chatbooks.exceptions import JobError, QuotaExceededError
 from ....core.Chatbooks.quota_manager import QuotaManager
 from ....core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from ....core.DB_Management.db_path_utils import DatabasePaths
@@ -331,7 +331,7 @@ def get_chatbook_service(
 ) -> ChatbookService:
     """Get chatbook service for the current user."""
     user_int = user.id_int if hasattr(user, "id_int") else None
-    return ChatbookService(user.id, db, user_id_int=user_int)
+    return ChatbookService(user.id, db, user_id_int=user_int, user_tier=getattr(user, "tier", "free"))
 
 
 @router.get("/health", summary="Chatbooks service health")
@@ -514,6 +514,8 @@ async def create_chatbook(
 
     except HTTPException:
         raise
+    except QuotaExceededError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from None
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
         # Log full traceback to aid debugging intermittent 500s in CI
         get_ps_logger(
@@ -894,6 +896,8 @@ async def import_chatbook(
 
     except HTTPException:
         raise
+    except QuotaExceededError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from None
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
         get_ps_logger(
             request_id=ensure_request_id(request),
