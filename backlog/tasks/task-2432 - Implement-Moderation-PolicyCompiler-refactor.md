@@ -18,7 +18,7 @@ modified_files:
 - tldw_Server_API/app/core/Moderation/policy_compiler.py
 - tldw_Server_API/tests/unit/test_moderation_policy_compiler.py
 - backlog/tasks/task-2432 - Implement-Moderation-PolicyCompiler-refactor.md
-updated_date: 2026-06-24 20:57
+updated_date: 2026-06-24 21:15
 ---
 
 ## Description
@@ -42,6 +42,7 @@ Implementation plan reviewed for subagent execution readiness. The plan now dire
 Plan review follow-up made Task 6 regression tests deterministic by monkeypatching service config to temporary blocklist/user/runtime override paths and keeping update_settings persistence disabled.
 Starting subagent-driven implementation. First dispatch target is Task 1 from the plan: add compiler dataclasses, base global compile path, and focused smoke tests.
 Task 1 complete and reviewed. Commit dd259bf1b added policy_compiler.py skeleton and test_moderation_policy_compiler.py smoke tests. Controller verification: focused pytest `2 passed, 16 warnings`; py_compile exit 0; git diff --check HEAD~1..HEAD exit 0. Independent spec review: compliant. Independent quality review: approved with no issues.
+Task 2 complete and reviewed. Commits 63e2bbd82 and a77c4694a moved blocklist parsing/rule compilation into PolicyCompiler and fixed review-found edge cases for empty parsed patterns and raw regex backslash preservation. Controller verification: focused pytest `6 passed, 24 warnings`; py_compile exit 0; git diff --check HEAD~2..HEAD exit 0. Spec re-review: compliant. Quality review: approved with no issues.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
