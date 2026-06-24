@@ -39,6 +39,7 @@ Base path: `/api/v1/audio-studio`
 - `POST /projects/{project_id}/generations`: queue speech or music generation.
 - `GET /projects/{project_id}/generations/{job_id}`: inspect a generation job.
 - `GET /projects/{project_id}/artifacts`: list generated, render, and export artifacts.
+- `GET /projects/{project_id}/artifacts/{artifact_id}/media`: stream one allowed audio artifact.
 - `POST /projects/{project_id}/renders`: queue a render job.
 - `GET /projects/{project_id}/renders/{job_id}`: inspect a render job.
 - `POST /projects/{project_id}/exports`: queue an export job.
@@ -55,6 +56,18 @@ Generation, render, and export requests require a caller-provided `idempotency_k
 The accepted remaining-work roadmap is `Docs/superpowers/specs/2026-06-24-audio-studio-remaining-roadmap-design.md`. It supersedes the earlier MVP timing for first-class music generation and ACE-Step while preserving the adapter-pattern, external HTTP provider, allowlisting, and secret-handling requirements.
 
 The next implementation slice is artifact playback/download. Provider capability metadata is a separate follow-up by default unless code inspection proves it is genuinely tiny and safe to include without blurring the artifact-access review boundary.
+
+## Artifact Media Access
+
+Artifact metadata is listed through `GET /projects/{project_id}/artifacts`. Artifact bytes are served separately through `GET /projects/{project_id}/artifacts/{artifact_id}/media` so clients never receive filesystem paths.
+
+The media endpoint uses the normal Audio Studio auth path, including single-user API key mode and multi-user request scoping. It verifies the artifact belongs to the authenticated user's project before reading bytes. Storage paths must resolve under the user's configured Audio Studio output roots, URL-like paths are rejected, symlink escapes are rejected, and only allowlisted audio MIME/extension pairs are served.
+
+The endpoint supports browser playback and download through authenticated streaming responses, `Range` requests, `Accept-Ranges: bytes`, safe `Content-Disposition`, and `X-Content-Type-Options: nosniff`. The WebUI fetches small selected-clip artifacts as authenticated Blobs through the background proxy and renders only Blob URLs in `<audio>` and download links. It should not put raw `/api/v1/audio-studio/.../media` URLs into DOM attributes.
+
+Large artifact browser transport remains deferred to `TASK-2358`. Until that slice lands, the WebUI keeps a conservative client-side Blob guard and shows a compact unavailable state for oversized artifacts instead of downloading them into memory. Signed URLs are also deferred; the current MVP keeps artifact access behind the standard authenticated API.
+
+The current regression coverage includes single-user API key access, per-user isolation, traversal and symlink rejection, duplicate relative-path disambiguation, range handling, download headers, WebUI Blob URL download/preview, no-artifact and missing-metadata states, fetch failures, and oversized no-fetch behavior.
 
 ## Provider Adapters
 
