@@ -1,7 +1,11 @@
 import pytest
 
 from tldw_Server_API.app.core.Audiobooks.tag_parser import parse_tagged_text
-from tldw_Server_API.app.services.audiobook_jobs_worker import AudiobookJobError, _build_chapter_plan
+from tldw_Server_API.app.services.audiobook_jobs_worker import (
+    AudiobookJobError,
+    _build_chapter_plan,
+    _refresh_tag_marker_metadata,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -53,3 +57,21 @@ def test_build_chapter_plan_rejects_unknown_chapter_id():
     chapter_specs = [{"chapter_id": "ch_999", "include": True}]
     with pytest.raises(AudiobookJobError):
         _build_chapter_plan(tag_result.clean_text, chapter_specs, tag_result=tag_result)
+
+
+def test_refresh_tag_marker_metadata_preserves_chapter_plan_warnings():
+    raw = (
+        "[[chapter:id=ch_002]]\n"
+        "First text.\n"
+        "[[chapter:title=Generated]]\n"
+        "Second text.\n"
+    )
+    tag_result = parse_tagged_text(raw)
+    metadata = {"tag_markers": tag_result.as_metadata()}
+
+    _build_chapter_plan(tag_result.clean_text, None, tag_result=tag_result)
+    assert metadata["tag_markers"]["warnings"] == []
+
+    _refresh_tag_marker_metadata(metadata, tag_result)
+
+    assert metadata["tag_markers"]["warnings"] == ["generated_chapter_id_collision:ch_002"]

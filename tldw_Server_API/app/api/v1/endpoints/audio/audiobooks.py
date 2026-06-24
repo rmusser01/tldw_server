@@ -529,7 +529,11 @@ async def parse_audiobook_source(
 
     chapters: list[ChapterPreview] = []
     if tag_result.chapter_markers:
-        chapters = build_chapters_from_markers(normalized_text, tag_result.chapter_markers)
+        chapters = build_chapters_from_markers(
+            normalized_text,
+            tag_result.chapter_markers,
+            warnings=tag_result.warnings,
+        )
     elif request.detect_chapters:
         try:
             chapters = _detect_chapters(

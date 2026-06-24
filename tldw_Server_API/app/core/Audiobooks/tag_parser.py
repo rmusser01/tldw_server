@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 
@@ -9,6 +10,8 @@ from tldw_Server_API.app.api.v1.schemas.audiobook_schemas import ChapterPreview
 
 _TAG_LINE_RE = re.compile(r"^\[\[(.+)\]\]$")
 _CHAPTER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_MIN_SPEED = 0.25
+_MAX_SPEED = 4.0
 
 
 @dataclass(frozen=True)
@@ -110,6 +113,8 @@ def parse_tagged_text(text: str) -> TagParseResult:
             elif key == "speed":
                 try:
                     speed_value = float(value)
+                    if not math.isfinite(speed_value) or not (_MIN_SPEED <= speed_value <= _MAX_SPEED):
+                        raise ValueError
                     speed_markers.append(SpeedMarker(offset=offset, value=speed_value))
                 except ValueError:
                     warnings.append(f"invalid_speed:{value}")
@@ -151,12 +156,20 @@ def parse_tagged_text(text: str) -> TagParseResult:
     )
 
 
-def build_chapters_from_markers(text: str, markers: list[ChapterMarker]) -> list[ChapterPreview]:
+def build_chapters_from_markers(
+    text: str,
+    markers: list[ChapterMarker],
+    *,
+    warnings: list[str] | None = None,
+) -> list[ChapterPreview]:
+    """Build chapter previews from tag markers while resolving ID collisions."""
     if not markers:
         return []
     length = len(text)
     ordered = sorted(markers, key=lambda m: m.offset)
     chapters: list[ChapterPreview] = []
+    seen_ids: set[str] = set()
+    explicit_ids: set[str] = {marker.chapter_id for marker in ordered if marker.chapter_id}
     for idx, marker in enumerate(ordered):
         start = max(0, min(marker.offset, length))
         next_offset = length
@@ -165,7 +178,10 @@ def build_chapters_from_markers(text: str, markers: list[ChapterMarker]) -> list
         if start >= next_offset:
             continue
         chapter_text = text[start:next_offset]
-        chapter_id = marker.chapter_id or f"ch_{len(chapters) + 1:03d}"
+        if marker.chapter_id:
+            chapter_id = _deduplicate_explicit_chapter_id(marker.chapter_id, seen_ids, warnings)
+        else:
+            chapter_id = _next_generated_chapter_id(len(chapters) + 1, seen_ids, explicit_ids, warnings)
         chapters.append(
             ChapterPreview(
                 chapter_id=chapter_id,
@@ -178,6 +194,43 @@ def build_chapters_from_markers(text: str, markers: list[ChapterMarker]) -> list
     return chapters
 
 
+def _deduplicate_explicit_chapter_id(
+    chapter_id: str,
+    seen_ids: set[str],
+    warnings: list[str] | None,
+) -> str:
+    """Return a unique explicit chapter ID and warn when suffixing duplicates."""
+    if chapter_id not in seen_ids:
+        seen_ids.add(chapter_id)
+        return chapter_id
+    if warnings is not None:
+        warnings.append(f"duplicate_chapter_id:{chapter_id}")
+    suffix = 2
+    while f"{chapter_id}_{suffix}" in seen_ids:
+        suffix += 1
+    resolved = f"{chapter_id}_{suffix}"
+    seen_ids.add(resolved)
+    return resolved
+
+
+def _next_generated_chapter_id(
+    start_number: int,
+    seen_ids: set[str],
+    explicit_ids: set[str],
+    warnings: list[str] | None,
+) -> str:
+    """Return the next generated chapter ID and warn only for explicit-ID skips."""
+    number = max(1, start_number)
+    candidate = f"ch_{number:03d}"
+    while candidate in seen_ids:
+        if candidate in explicit_ids and warnings is not None:
+            warnings.append(f"generated_chapter_id_collision:{candidate}")
+        number += 1
+        candidate = f"ch_{number:03d}"
+    seen_ids.add(candidate)
+    return candidate
+
+
 def _parse_timestamp_ms(value: str) -> int | None:
     match = re.match(r"^(\d{1,2}):(\d{2}):(\d{2})\.(\d{1,3})$", value)
     if not match:
@@ -185,5 +238,7 @@ def _parse_timestamp_ms(value: str) -> int | None:
     hours = int(match.group(1))
     minutes = int(match.group(2))
     seconds = int(match.group(3))
+    if minutes >= 60 or seconds >= 60:
+        return None
     millis = int(match.group(4).ljust(3, "0"))
     return ((hours * 60 + minutes) * 60 + seconds) * 1000 + millis
