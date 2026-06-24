@@ -29,7 +29,10 @@ const configureRuntimeAuth = () => {
   process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
 }
 
-const callRuntimeConfig = async (headers: Record<string, string> = {}) => {
+const callRuntimeConfig = async (
+  headers: Record<string, string> = {},
+  remoteAddress: string | null = "127.0.0.1"
+) => {
   const req = createApiRequest({
     method: "GET",
     url: "/api/_tldw-webui/runtime-config",
@@ -38,6 +41,12 @@ const callRuntimeConfig = async (headers: Record<string, string> = {}) => {
       ...headers
     }
   })
+  if (remoteAddress !== null) {
+    Object.defineProperty(req, "socket", {
+      configurable: true,
+      value: { remoteAddress }
+    })
+  }
   const res = createApiResponse()
   await handler(req, res)
   return res
@@ -79,12 +88,56 @@ describe("WebUI runtime config API", () => {
     ["placeholder key", { SINGLE_USER_API_KEY: "change-me" }],
     ["repo placeholder key", { SINGLE_USER_API_KEY: "CHANGE_ME_TO_SECURE_API_KEY" }],
     ["repo placeholder key prefix", { SINGLE_USER_API_KEY: "CHANGE_ME_BEFORE_RUNNING" }],
+    ["default key", { SINGLE_USER_API_KEY: "default" }],
+    ["test key", { SINGLE_USER_API_KEY: "test-key" }],
+    ["short key", { SINGLE_USER_API_KEY: "short-key" }],
     ["whitespace-bearing key", { SINGLE_USER_API_KEY: " runtime-key " }],
     ["blank key", { SINGLE_USER_API_KEY: "   " }]
   ])("returns unavailable for %s", async (_name, envPatch) => {
     Object.assign(process.env, envPatch)
 
     const res = await callRuntimeConfig()
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatchObject({
+      runtimeAuth: {
+        available: false
+      }
+    })
+    expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
+  })
+
+  it.each([
+    ["127.0.0.1"],
+    ["::1"],
+    ["::ffff:127.0.0.1"]
+  ])("returns runtime single-user auth for loopback peer %s", async (remoteAddress) => {
+    const res = await callRuntimeConfig({}, remoteAddress)
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatchObject({
+      runtimeAuth: {
+        available: true,
+        authMode: "single-user",
+        apiKey: "runtime-single-user-key"
+      }
+    })
+  })
+
+  it("returns unavailable for a spoofed loopback host from a non-loopback peer", async () => {
+    const res = await callRuntimeConfig({ host: "127.0.0.1:8080" }, "203.0.113.10")
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatchObject({
+      runtimeAuth: {
+        available: false
+      }
+    })
+    expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
+  })
+
+  it("returns unavailable when the peer address is absent", async () => {
+    const res = await callRuntimeConfig({}, null)
 
     expect(res.statusCode).toBe(200)
     expect(res.body).toMatchObject({
@@ -108,6 +161,7 @@ describe("WebUI runtime config API", () => {
         available: false
       }
     })
+    expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
   })
 
   it.each([
@@ -125,6 +179,7 @@ describe("WebUI runtime config API", () => {
         available: false
       }
     })
+    expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
   })
 
   it("rejects non-GET methods without exposing auth", async () => {

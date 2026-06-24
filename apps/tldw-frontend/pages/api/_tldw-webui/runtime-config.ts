@@ -24,11 +24,21 @@ const PLACEHOLDER_KEYS = new Set([
   "change-me",
   "changeme",
   "change_me",
+  "default",
+  "test-key",
   "your-api-key",
   "your_api_key",
   "placeholder",
   "replace-me",
   "replace_me"
+])
+
+const MIN_API_KEY_LENGTH = 16
+
+const LOOPBACK_PEER_ADDRESSES = new Set([
+  "127.0.0.1",
+  "::1",
+  "::ffff:127.0.0.1"
 ])
 
 const normalizeEnvValue = (value?: string): string => String(value || "").trim()
@@ -40,6 +50,7 @@ const isEnabled = (value?: string): boolean => value === "1"
 const isUsableApiKey = (value?: string): value is string => {
   if (!value) return false
   if (/\s/.test(value)) return false
+  if (value.length < MIN_API_KEY_LENGTH) return false
   const normalized = value.toLowerCase()
   if (normalized.startsWith("change_me")) return false
   return !PLACEHOLDER_KEYS.has(normalized)
@@ -62,6 +73,9 @@ const isLoopbackHost = (hostHeader?: string | string[]): boolean => {
   const hostname = extractHostname(hostHeader)
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1"
 }
+
+const isLoopbackPeerAddress = (remoteAddress?: string): boolean =>
+  LOOPBACK_PEER_ADDRESSES.has(normalizeEnvValue(remoteAddress).toLowerCase())
 
 const hasForwardingHeaders = (req: NextApiRequest): boolean =>
   FORWARDED_HEADER_NAMES.some((name) =>
@@ -103,6 +117,11 @@ export default function handler(
 
   if (!isLoopbackHost(req.headers.host)) {
     res.status(200).json(unavailable("host"))
+    return
+  }
+
+  if (!isLoopbackPeerAddress(req.socket?.remoteAddress)) {
+    res.status(200).json(unavailable("peer"))
     return
   }
 
