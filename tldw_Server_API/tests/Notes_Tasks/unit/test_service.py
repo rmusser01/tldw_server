@@ -12,6 +12,9 @@ from tldw_Server_API.app.core.Notes_Tasks.models import TaskActor
 from tldw_Server_API.app.core.Notes_Tasks.service import NotesTaskService
 
 
+pytestmark = pytest.mark.unit
+
+
 @pytest.fixture()
 def db(tmp_path: Path) -> CharactersRAGDB:
     database = CharactersRAGDB(str(tmp_path / "notes_task_service.db"), client_id="notes_task_service_test")
@@ -51,6 +54,55 @@ def test_create_task_for_note_rejects_invalid_status_without_rewriting_note(db: 
     assert saved is not None
     assert saved["content"] == "Intro\n"
     assert db.list_tasks(note_id=str(note["id"])) == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Call @priority(high) customer",
+        "Ship @due(2026-06-30)",
+        "Plan @estimate(2h)",
+    ],
+)
+def test_task_text_rejects_parseable_metadata_tokens(text: str) -> None:
+    with pytest.raises(InputError, match="metadata tokens"):
+        NotesTaskService._validate_task_text(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Call @foo(bar) customer",
+        "Call @due(not-a-date) customer",
+        "Call @priority(urgent) customer",
+        "Call @estimate(two-hours) customer",
+    ],
+)
+def test_task_text_allows_unknown_or_malformed_metadata_like_plain_text(text: str) -> None:
+    NotesTaskService._validate_task_text(text)
+
+
+def test_ensure_note_reconciled_preserves_current_warning_state_without_reprocessing(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = NotesTaskService()
+    note = _add_note(db, title="Tasks", content="- [ ] Review @due(not-a-date)\n")
+    first = service.reconcile_note_current(db=db, note_id=str(note["id"]), actor=_actor())
+    assert first.warning_count == 1
+
+    monkeypatch.setattr(
+        service._reconciler,
+        "reconcile_note",
+        lambda **_: pytest.fail("current warning state should not be reconciled again"),
+    )
+
+    cached = service.ensure_note_reconciled(db=db, note_id=str(note["id"]), actor=_actor())
+
+    assert cached is not None
+    assert cached.note_id == str(note["id"])
+    assert cached.note_version == int(note["version"])
+    assert cached.warning_count == 1
 
 
 def test_reconcile_stale_notes_reports_actual_remaining_count(db: CharactersRAGDB) -> None:

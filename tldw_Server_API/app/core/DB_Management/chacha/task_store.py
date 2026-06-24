@@ -28,6 +28,8 @@ class TaskStore:
 
     _TASK_JSON_FIELDS = ("metadata_json",)
     _EVENT_JSON_FIELDS = ("old_value_json", "new_value_json")
+    _CHECKLIST_DISCOVERY_MARKER_PATTERNS = ("%[ ]%", "%[x]%", "%[X]%")
+    _CHECKLIST_DISCOVERY_BULLET_PATTERNS = ("%-%", "%*%", "%+%")
     _TASK_STATUSES = {"open", "done"}
     _PROJECTION_STATUSES = {"live", "unlinked", "deleted", "ambiguous"}
     _MIN_LIMIT = 1
@@ -1472,19 +1474,21 @@ class TaskStore:
                  OR n.content LIKE ?
                )
                AND (
+                    n.content LIKE ?
+                 OR n.content LIKE ?
+                 OR n.content LIKE ?
+               )
+               AND (
                     r.note_id IS NULL
                  OR r.note_version < n.version
-                 OR r.status != ?
                )
              ORDER BY n.last_modified DESC, n.id ASC
              LIMIT ?
             """,
             (
                 self._deleted_value(False),
-                "%- [ ]%",
-                "%- [x]%",
-                "%- [X]%",
-                "clean",
+                *self._CHECKLIST_DISCOVERY_MARKER_PATTERNS,
+                *self._CHECKLIST_DISCOVERY_BULLET_PATTERNS,
                 self._clamp_limit(limit),
             ),
         )
@@ -1494,10 +1498,8 @@ class TaskStore:
         """Count checklist-bearing notes whose task reconciliation is stale or missing."""
         params: list[Any] = [
             self._deleted_value(False),
-            "%- [ ]%",
-            "%- [x]%",
-            "%- [X]%",
-            "clean",
+            *self._CHECKLIST_DISCOVERY_MARKER_PATTERNS,
+            *self._CHECKLIST_DISCOVERY_BULLET_PATTERNS,
         ]
         sql_query = """
             SELECT COUNT(*) AS stale_count
@@ -1510,9 +1512,13 @@ class TaskStore:
                  OR n.content LIKE ?
                )
                AND (
+                    n.content LIKE ?
+                 OR n.content LIKE ?
+                 OR n.content LIKE ?
+               )
+               AND (
                     r.note_id IS NULL
                  OR r.note_version < n.version
-                 OR r.status != ?
                )
         """
         if note_id is not None:

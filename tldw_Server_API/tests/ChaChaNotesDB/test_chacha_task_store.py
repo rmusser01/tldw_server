@@ -1507,3 +1507,45 @@ def test_candidate_notes_for_task_discovery_excludes_currently_reconciled_notes(
 
     assert db.candidate_notes_for_task_discovery(limit=10) == []  # nosec B101
     assert plain_note_id not in {row["id"] for row in candidates}  # nosec B101
+
+
+def test_candidate_notes_for_task_discovery_matches_parser_checkbox_bullets_and_spacing(db: CharactersRAGDB) -> None:
+    dash_note_id = _create_note(db, content="- [ ] Dash task\n")
+    star_note_id = _create_note(db, content="* [x] Star task\n")
+    plus_note_id = _create_note(db, content="+ [X] Plus task\n")
+    tab_note_id = _create_note(db, content="-\t[ ] Tab task\n")
+    spaced_note_id = _create_note(db, content="*   [x] Spaced task\n")
+
+    candidates = db.candidate_notes_for_task_discovery(limit=10)
+
+    assert {row["id"] for row in candidates} == {  # nosec B101
+        dash_note_id,
+        star_note_id,
+        plus_note_id,
+        tab_note_id,
+        spaced_note_id,
+    }
+
+
+def test_candidate_notes_for_task_discovery_excludes_current_warning_state_until_note_changes(
+    db: CharactersRAGDB,
+) -> None:
+    note_id = _create_note(db, content="- [ ] Review @due(not-a-date)\n")
+    db.set_reconciliation_state(
+        note_id=note_id,
+        note_version=1,
+        status="warnings",
+        item_count=1,
+        warning_count=1,
+    )
+
+    assert db.candidate_notes_for_task_discovery(limit=10) == []  # nosec B101
+    assert db.count_candidate_notes_for_task_discovery(note_id=note_id) == 0  # nosec B101
+
+    db.update_note(
+        note_id=note_id,
+        update_data={"content": "- [ ] Review @due(not-a-date)\n- [ ] Follow up\n"},
+        expected_version=1,
+    )
+
+    assert db.count_candidate_notes_for_task_discovery(note_id=note_id) == 1  # nosec B101

@@ -22,7 +22,37 @@ _CHECKLIST_RE = re.compile(
 )
 _METADATA_TOKEN_ORDER = ("due_date", "priority", "estimate")
 _METADATA_TOKEN_NAMES = {"due_date": "due", "priority": "priority", "estimate": "estimate"}
+_TASK_TEXT_METADATA_TOKEN_RE = re.compile(r"@(?P<name>due|priority|estimate)\((?P<value>[^)]*)\)", re.IGNORECASE)
 _TASK_STATUSES = {"open", "done"}
+
+
+def _task_text_contains_parseable_metadata_token(text: str) -> bool:
+    """Return True when literal task text contains metadata syntax the parser would consume."""
+
+    for match in _TASK_TEXT_METADATA_TOKEN_RE.finditer(text):
+        if _is_parseable_task_text_metadata_token(name=match.group("name"), value=match.group("value")):
+            return True
+    return False
+
+
+def _is_parseable_task_text_metadata_token(*, name: str, value: str) -> bool:
+    """Validate one allowlisted task metadata token using the markdown parser's value rules."""
+
+    normalized_name = name.casefold()
+    normalized_value = value.strip()
+    if normalized_name == "due":
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", normalized_value) is None:
+            return False
+        try:
+            date.fromisoformat(normalized_value)
+        except ValueError:
+            return False
+        return True
+    if normalized_name == "priority":
+        return normalized_value.casefold() in {"high", "medium", "low"}
+    if normalized_name == "estimate":
+        return re.fullmatch(r"\d+[mhd]", normalized_value.casefold()) is not None
+    return False
 
 
 @dataclass(frozen=True)
@@ -122,8 +152,15 @@ class NotesTaskService:
     ) -> ReconciliationResult | None:
         note = self._require_note(db, note_id)
         state = db.get_reconciliation_state(note_id)
-        if state is not None and int(state["note_version"]) == int(note["version"]) and state["status"] == "clean":
-            return None
+        if state is not None and int(state["note_version"]) == int(note["version"]):
+            if state["status"] == "clean":
+                return None
+            return ReconciliationResult(
+                note_id=note_id,
+                note_version=int(state["note_version"]),
+                parsed_count=int(state.get("item_count") or 0),
+                warning_count=int(state.get("warning_count") or 0),
+            )
         return self.reconcile_note(
             db=db,
             note_id=note_id,
@@ -498,6 +535,11 @@ class NotesTaskService:
             raise InputError("Task text must be 2000 characters or fewer.")
         if "\n" in text or "\r" in text:
             raise InputError("Task text cannot contain newline characters.")
+        if _task_text_contains_parseable_metadata_token(text):
+            raise InputError(
+                "Task text cannot include parseable metadata tokens; "
+                "pass due_date, priority, or estimate metadata separately."
+            )
 
     @staticmethod
     def _validate_task_status(status: str) -> None:
