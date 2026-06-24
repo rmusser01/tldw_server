@@ -9,6 +9,25 @@ from loguru import logger
 from tldw_Server_API.app.core.Embeddings import redis_pipeline
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.Collections.utils import truncate_text_hard
+
+
+def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        logger.warning("Invalid integer for {}: {!r}; using default={}", name, raw, default)
+        return default
+    if minimum is not None and value < minimum:
+        logger.warning("Out-of-range integer for {}: {}; minimum={}; using default={}", name, value, minimum, default)
+        return default
+    return value
+
+
+EMBEDDING_JOB_CONTENT_MAX_CHARS = _env_int("EMBEDDING_JOB_CONTENT_MAX_CHARS", 200_000, minimum=0)
 
 
 def _jobs_queue() -> str:
@@ -56,15 +75,23 @@ async def enqueue_embeddings_job_for_item(
     text = (content or "").strip()
     if not text:
         return
+    bounded_text, content_truncated, original_len = truncate_text_hard(text, EMBEDDING_JOB_CONTENT_MAX_CHARS)
+    if not bounded_text:
+        return
 
     try:
         jm = _jobs_manager()
         stage_queue = _jobs_queue()
         root_queue = _root_jobs_queue(stage_queue)
+        payload_metadata = dict(metadata or {})
+        if content_truncated:
+            payload_metadata["content_truncated"] = True
+            payload_metadata["content_char_count"] = original_len
+            payload_metadata["content_max_chars"] = EMBEDDING_JOB_CONTENT_MAX_CHARS
         payload = {
             "item_id": int(item_id),
-            "content": text,
-            "metadata": metadata or {},
+            "content": bounded_text,
+            "metadata": payload_metadata,
             "current_stage": "content",
             "request_source": "collections",
         }

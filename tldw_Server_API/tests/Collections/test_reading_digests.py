@@ -17,6 +17,8 @@ from tldw_Server_API.app.core.Collections.reading_digest_jobs import (
     READING_DIGEST_DOMAIN,
     READING_DIGEST_JOB_TYPE,
     _normalize_suggestions_config,
+    _render_default_html,
+    _render_default_markdown,
     _score_suggestion_candidate,
     handle_reading_digest_job,
     reading_digest_queue,
@@ -162,6 +164,18 @@ def test_reading_digest_suggestions_flags_accept_y():
     assert cfg["include_archived"] is True
     assert "read" in cfg["status"]
     assert "archived" in cfg["status"]
+
+
+def test_default_digest_renderers_do_not_link_unsafe_urls():
+    items = [{"title": "Unsafe", "url": "javascript:alert(1)", "summary": "Summary"}]
+
+    html = _render_default_html("Digest", items)
+    markdown = _render_default_markdown("Digest", items)
+
+    assert 'href="javascript:alert(1)"' not in html
+    assert "[Unsafe](javascript:alert(1))" not in markdown
+    assert "Unsafe" in html
+    assert "Unsafe" in markdown
 
 
 def test_reading_digest_schedule_crud(client_with_user):

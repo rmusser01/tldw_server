@@ -12,6 +12,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.Collections.reading_service import ReadingService
+from tldw_Server_API.app.core.Collections.utils import is_supported_reading_url
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.exceptions import ReadingDigestJobError
@@ -321,8 +322,10 @@ def _render_default_markdown(
     lines = [f"# {title}", ""]
     for idx, itm in enumerate(items, 1):
         entry_title = itm.get("title") or f"Item {idx}"
-        url = itm.get("url")
+        url = str(itm.get("url") or "").strip()
         line = f"{idx}. [{entry_title}]({url})" if url else f"{idx}. {entry_title}"
+        if url and not is_supported_reading_url(url):
+            line = f"{idx}. {entry_title}"
         summary = itm.get("summary") or ""
         if summary:
             line += f" - {summary}"
@@ -331,8 +334,10 @@ def _render_default_markdown(
         lines.extend(["", "## Suggested reads", ""])
         for idx, itm in enumerate(suggestions, 1):
             entry_title = itm.get("title") or f"Suggestion {idx}"
-            url = itm.get("url")
+            url = str(itm.get("url") or "").strip()
             line = f"{idx}. [{entry_title}]({url})" if url else f"{idx}. {entry_title}"
+            if url and not is_supported_reading_url(url):
+                line = f"{idx}. {entry_title}"
             summary = itm.get("summary") or ""
             if summary:
                 line += f" - {summary}"
@@ -349,8 +354,8 @@ def _render_default_html(
     for idx, itm in enumerate(items, 1):
         entry_title = escape(itm.get("title") or f"Item {idx}")
         summary = escape(itm.get("summary") or "")
-        url = itm.get("url")
-        entry = f'<li><a href="{escape(url)}">{entry_title}</a>' if url else f"<li>{entry_title}"
+        url = str(itm.get("url") or "").strip()
+        entry = f'<li><a href="{escape(url)}">{entry_title}</a>' if is_supported_reading_url(url) else f"<li>{entry_title}"
         if summary:
             entry += f" - {summary}"
         entry += "</li>"
@@ -361,8 +366,8 @@ def _render_default_html(
         for idx, itm in enumerate(suggestions, 1):
             entry_title = escape(itm.get("title") or f"Suggestion {idx}")
             summary = escape(itm.get("summary") or "")
-            url = itm.get("url")
-            entry = f'<li><a href="{escape(url)}">{entry_title}</a>' if url else f"<li>{entry_title}"
+            url = str(itm.get("url") or "").strip()
+            entry = f'<li><a href="{escape(url)}">{entry_title}</a>' if is_supported_reading_url(url) else f"<li>{entry_title}"
             if summary:
                 entry += f" - {summary}"
             entry += "</li>"
