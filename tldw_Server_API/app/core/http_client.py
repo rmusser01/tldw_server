@@ -867,6 +867,28 @@ def _sanitize_url_for_logs(u: str | Any) -> str:
         return s
 
 
+def _raise_if_json_response_exceeds_limit(
+    *,
+    headers: Any,
+    content: bytes,
+    max_bytes: int | None,
+) -> None:
+    if max_bytes is None:
+        return
+
+    content_length = headers.get("content-length")
+    if content_length:
+        try:
+            declared_length = int(content_length)
+        except (TypeError, ValueError) as exc:
+            raise JSONDecodeError("Invalid content-length header") from exc
+        if declared_length > max_bytes:
+            raise JSONDecodeError("Response exceeds max_bytes limit")  # noqa: TRY003
+
+    if len(content) > max_bytes:
+        raise JSONDecodeError("Response exceeds max_bytes limit")  # noqa: TRY003
+
+
 def _url_parts(u: str | Any) -> tuple[str, str, str]:
     """Return (scheme, host, path) for logging; redacts query by omission."""
     try:
@@ -3335,10 +3357,15 @@ async def afetch_json(
         await r.aclose()
         raise JSONDecodeError("Response is not application/json")  # noqa: TRY003
     if max_bytes is not None:
-        clen = r.headers.get("content-length")
-        if clen and int(clen) > max_bytes:
+        try:
+            _raise_if_json_response_exceeds_limit(
+                headers=r.headers,
+                content=r.content,
+                max_bytes=max_bytes,
+            )
+        except JSONDecodeError:
             await r.aclose()
-            raise JSONDecodeError("Response exceeds max_bytes limit")  # noqa: TRY003
+            raise
     try:
         data = r.json()
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
@@ -3362,10 +3389,15 @@ def fetch_json(
         r.close()
         raise JSONDecodeError("Response is not application/json")  # noqa: TRY003
     if max_bytes is not None:
-        clen = r.headers.get("content-length")
-        if clen and int(clen) > max_bytes:
+        try:
+            _raise_if_json_response_exceeds_limit(
+                headers=r.headers,
+                content=r.content,
+                max_bytes=max_bytes,
+            )
+        except JSONDecodeError:
             r.close()
-            raise JSONDecodeError("Response exceeds max_bytes limit")  # noqa: TRY003
+            raise
     try:
         data = r.json()
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:

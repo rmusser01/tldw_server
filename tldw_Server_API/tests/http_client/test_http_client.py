@@ -199,6 +199,69 @@ def test_json_max_bytes_guard():
 
 
 @requires_httpx
+def test_json_max_bytes_guard_uses_actual_body_despite_short_content_length():
+    import httpx
+    from tldw_Server_API.app.core.http_client import fetch_json, create_client
+    from tldw_Server_API.app.core.exceptions import JSONDecodeError
+
+    content = b"{" + b" \n" * 1024 + b"}"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            content=content,
+            headers={"Content-Type": "application/json", "Content-Length": "2"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = create_client(transport=transport)
+    try:
+        with pytest.raises(JSONDecodeError):
+            fetch_json(
+                method="GET",
+                url="http://93.184.216.34/json",
+                client=client,
+                require_json_ct=True,
+                max_bytes=10,
+            )
+    finally:
+        client.close()
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_async_json_max_bytes_guard_uses_actual_body_despite_short_content_length():
+    import httpx
+    from tldw_Server_API.app.core.http_client import afetch_json, create_async_client
+    from tldw_Server_API.app.core.exceptions import JSONDecodeError
+
+    content = b"{" + b" \n" * 1024 + b"}"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            content=content,
+            headers={"Content-Type": "application/json", "Content-Length": "2"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = create_async_client(transport=transport)
+    try:
+        with pytest.raises(JSONDecodeError):
+            await afetch_json(
+                method="GET",
+                url="http://93.184.216.34/json",
+                client=client,
+                require_json_ct=True,
+                max_bytes=10,
+            )
+    finally:
+        await client.aclose()
+
+
+@requires_httpx
 @pytest.mark.asyncio
 async def test_stream_cancellation_propagates():
     import httpx

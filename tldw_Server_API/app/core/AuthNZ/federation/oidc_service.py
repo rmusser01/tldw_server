@@ -7,7 +7,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from jose import jwt
 from jose.exceptions import JWTError
@@ -53,6 +53,54 @@ _ASYMMETRIC_JWT_ALGS_BY_KTY: dict[str, set[str]] = {
     "OKP": {"EdDSA"},
     "RSA": {"PS256", "PS384", "PS512", "RS256", "RS384", "RS512"},
 }
+OIDC_DISCOVERY_MAX_BYTES = 128 * 1024
+OIDC_TOKEN_RESPONSE_MAX_BYTES = 64 * 1024
+OIDC_JWKS_MAX_BYTES = 256 * 1024
+
+
+def _validate_oidc_provider_url(field_name: str, value: Any) -> str | None:
+    text = _coerce_nonempty_string(value)
+    if not text:
+        return None
+    try:
+        parsed = urlsplit(text)
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"OIDC provider {field_name} is invalid") from exc
+
+    if parsed.scheme.lower() != "https":
+        raise ValueError(f"OIDC provider {field_name} must use https")
+    if not parsed.hostname:
+        raise ValueError(f"OIDC provider {field_name} must include a hostname")
+    if parsed.username or parsed.password:
+        raise ValueError(f"OIDC provider {field_name} must not include credentials")
+    if parsed.fragment:
+        raise ValueError(f"OIDC provider {field_name} must not include a URL fragment")
+
+    return urlunsplit(
+        (
+            parsed.scheme.lower(),
+            parsed.netloc,
+            parsed.path or "/",
+            parsed.query,
+            "",
+        )
+    )
+
+
+def _append_query_params(url: str, params: dict[str, str]) -> str:
+    parsed = urlsplit(url)
+    query_items = parse_qsl(parsed.query, keep_blank_values=True)
+    query_items.extend(params.items())
+    return urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            urlencode(query_items),
+            "",
+        )
+    )
 
 
 def _parse_byok_secret_ref(secret_ref: str) -> tuple[str, int, str] | None:
@@ -168,10 +216,14 @@ class OIDCFederationService:
     state_ttl_seconds: int = 600
 
     async def _fetch_discovery_document(self, provider: dict[str, Any]) -> dict[str, Any]:
-        discovery_url = _coerce_nonempty_string(provider.get("discovery_url"))
+        discovery_url = _validate_oidc_provider_url("discovery_url", provider.get("discovery_url"))
         if not discovery_url:
             return {}
-        discovery = await afetch_json(method="GET", url=discovery_url)
+        discovery = await afetch_json(
+            method="GET",
+            url=discovery_url,
+            max_bytes=OIDC_DISCOVERY_MAX_BYTES,
+        )
         if not isinstance(discovery, dict):
             raise ValueError("OIDC discovery response is invalid")
         explicit_issuer = _coerce_nonempty_string(provider.get("issuer"))
@@ -193,6 +245,8 @@ class OIDCFederationService:
         *,
         touch_secret_refs: bool = True,
     ) -> dict[str, Any]:
+        if _coerce_nonempty_string(provider.get("discovery_url")):
+            _validate_oidc_provider_url("discovery_url", provider.get("discovery_url"))
         discovery = (
             await self._fetch_discovery_document(provider)
             if self._provider_requires_discovery(provider)
@@ -217,6 +271,8 @@ class OIDCFederationService:
                 or _coerce_string_set(discovery.get("id_token_signing_alg_values_supported"))
             ),
         }
+        for field_name in ("authorization_url", "token_url", "jwks_url"):
+            resolved[field_name] = _validate_oidc_provider_url(field_name, resolved.get(field_name))
         return resolved
 
     async def inspect_provider_configuration(
@@ -339,7 +395,7 @@ class OIDCFederationService:
         }
 
         return {
-            "auth_url": f"{authorization_url}?{urlencode(query)}",
+            "auth_url": _append_query_params(str(authorization_url), query),
             "state": state,
             "nonce": nonce,
             "code_verifier": code_verifier,
@@ -381,13 +437,18 @@ class OIDCFederationService:
             method="POST",
             url=token_url,
             data=form_data,
+            max_bytes=OIDC_TOKEN_RESPONSE_MAX_BYTES,
         )
 
         id_token = _coerce_nonempty_string(token_payload.get("id_token"))
         if not id_token:
             raise ValueError("OIDC token response is missing id_token")
 
-        jwks_payload = await afetch_json(method="GET", url=jwks_url)
+        jwks_payload = await afetch_json(
+            method="GET",
+            url=jwks_url,
+            max_bytes=OIDC_JWKS_MAX_BYTES,
+        )
         jwk = self._resolve_jwk_for_token(id_token, jwks_payload)
         allowed_algorithms = self._resolve_allowed_signing_algorithms(
             provider_runtime_config=runtime_config,

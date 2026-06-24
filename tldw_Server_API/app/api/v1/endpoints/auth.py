@@ -14,6 +14,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from importlib import import_module
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 #
 # 3rd-party imports
@@ -206,6 +207,35 @@ async def _resolve_federation_provider(
         owner_scope_type="global",
         owner_scope_id=None,
     )
+
+
+def _build_federation_redirect_uri(request: Request, provider_slug: str) -> str:
+    callback_url = request.url_for("federation_callback", provider_slug=provider_slug)
+    public_web_base_url = str(getattr(get_settings(), "PUBLIC_WEB_BASE_URL", "") or "").strip()
+    if not public_web_base_url:
+        return str(callback_url)
+
+    try:
+        parsed = urlsplit(public_web_base_url)
+        _ = parsed.port
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="PUBLIC_WEB_BASE_URL is invalid",
+        ) from exc
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="PUBLIC_WEB_BASE_URL is invalid",
+        )
+    return f"{public_web_base_url.rstrip('/')}{callback_url.path}"
 
 
 def _get_email_service():
@@ -424,7 +454,7 @@ async def federation_login(
             detail="Identity provider not found",
         )
 
-    redirect_uri = str(request.url_for("federation_callback", provider_slug=provider_slug))
+    redirect_uri = _build_federation_redirect_uri(request, provider_slug)
     oidc_service = get_oidc_federation_service_dep()
     try:
         auth_request = await oidc_service.build_authorization_request(
