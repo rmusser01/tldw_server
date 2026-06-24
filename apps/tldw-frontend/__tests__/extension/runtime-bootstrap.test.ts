@@ -375,6 +375,65 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(readStoredValue("tldwRuntimeAuthMetadata")).toBeNull()
   })
 
+  it("does not mark a matching manual key as runtime-owned without prior metadata", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "single-user",
+        apiKey: "runtime-key",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+    )
+    stubRuntimeConfigFetch("runtime-key")
+
+    await importAndAwaitBootstrap()
+    const { getApiKey } = await import("@web/lib/authStorage")
+
+    let nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
+    expect(getApiKey()).toBe("runtime-key")
+    expect(nextConfig.apiKey).toBe("runtime-key")
+    expect(nextConfig.serverUrl).toBe(window.location.origin)
+    expect(readStoredValue("tldwRuntimeAuthMetadata")).toBeNull()
+
+    vi.resetModules()
+    stubRuntimeConfigFetch("rotated-runtime-key")
+    await importAndAwaitBootstrap()
+
+    const authStorage = await import("@web/lib/authStorage")
+    nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
+    expect(authStorage.getApiKey()).toBe("rotated-runtime-key")
+    expect(nextConfig.apiKey).toBe("runtime-key")
+    expect(readStoredValue("tldwRuntimeAuthMetadata")).toBeNull()
+  })
+
+  it.each(["CHANGE_ME_TO_SECURE_API_KEY", "test-key"])(
+    "replaces persisted placeholder key %s with runtime auth metadata",
+    async (placeholderKey) => {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+      localStorage.setItem(
+        "tldwConfig",
+        JSON.stringify({
+          authMode: "single-user",
+          apiKey: placeholderKey,
+          serverUrl: "http://127.0.0.1:8000"
+        })
+      )
+      stubRuntimeConfigFetch("runtime-key")
+
+      await importAndAwaitBootstrap()
+
+      const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
+      const metadata = readStoredValue("tldwRuntimeAuthMetadata") as Record<string, unknown>
+      expect(nextConfig.apiKey).toBe("runtime-key")
+      expect(metadata).toMatchObject({
+        source: "webui-runtime",
+        version: 1,
+        authMode: "single-user"
+      })
+    }
+  )
+
   it("replaces a previous runtime-owned key when the runtime key changes", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     stubRuntimeConfigFetch("old-runtime-key")

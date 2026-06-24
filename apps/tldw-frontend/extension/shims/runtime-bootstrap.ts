@@ -201,6 +201,20 @@ const DEFAULT_TLDW_SERVER_URL = "http://127.0.0.1:8000"
 const RUNTIME_CONFIG_ENDPOINT = "/api/_tldw-webui/runtime-config"
 const RUNTIME_AUTH_METADATA_KEY = "tldwRuntimeAuthMetadata"
 const RUNTIME_AUTH_METADATA_VERSION = 1
+const PLACEHOLDER_API_KEYS = new Set([
+  "change-me",
+  "changeme",
+  "change_me",
+  "default",
+  "test-key",
+  "your-api-key",
+  "your-api-key-here",
+  "your_api_key",
+  "your_api_key_here",
+  "placeholder",
+  "replace-me",
+  "replace_me"
+])
 
 type RuntimeConfigPayload = {
   runtimeAuth?: {
@@ -307,14 +321,9 @@ const isStoredKeyRuntimeOwned = async (
 
 const isPlaceholderApiKey = (value: string): boolean => {
   const normalized = value.trim().toLowerCase()
-  return (
-    normalized === "change-me" ||
-    normalized === "changeme" ||
-    normalized === "your-api-key" ||
-    normalized === "your_api_key" ||
-    normalized === "your-api-key-here" ||
-    normalized === "your_api_key_here"
-  )
+  if (normalized.startsWith("change_me")) return true
+
+  return PLACEHOLDER_API_KEYS.has(normalized)
 }
 
 const shouldPersistRuntimeKey = async ({
@@ -329,7 +338,6 @@ const shouldPersistRuntimeKey = async ({
   buildTimeKey: string | null
 }): Promise<boolean> => {
   if (!existingKey) return true
-  if (existingKey === runtimeKey) return true
   if (buildTimeKey && existingKey === buildTimeKey) return true
   if (await isStoredKeyRuntimeOwned(existingKey, metadata)) return true
   return isPlaceholderApiKey(existingKey)
