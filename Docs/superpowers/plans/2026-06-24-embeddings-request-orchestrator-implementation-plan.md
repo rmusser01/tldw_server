@@ -438,8 +438,8 @@ Verification:
 
 ### Task 7: Wire The Feature-Flagged Endpoint Path
 
-- [ ] In `embeddings_v5_production_enhanced.py`, extract the current create-handler body into `_create_embedding_legacy` with the same request, body, user, background task, provider header, and response objects.
-- [ ] Keep `create_embedding_endpoint` as the public route and make it choose:
+- [x] In `embeddings_v5_production_enhanced.py`, extract the current create-handler body into `_create_embedding_legacy` with the same request, body, user, background task, provider header, and response objects.
+- [x] Keep `create_embedding_endpoint` as the public route and make it choose:
 
 ```python
 if env_flag_enabled("EMBEDDINGS_ORCHESTRATOR_ENABLED"):
@@ -461,7 +461,7 @@ return await _create_embedding_legacy(
 )
 ```
 
-- [ ] Implement `_create_embedding_with_orchestrator` so endpoint-owned work stays at the boundary:
+- [x] Implement `_create_embedding_with_orchestrator` so endpoint-owned work stays at the boundary:
   - Check `EMBEDDINGS_AVAILABLE`.
   - Increment and decrement `active_embedding_requests`.
   - Run `_check_backpressure_and_quotas`.
@@ -473,7 +473,7 @@ return await _create_embedding_legacy(
   - Log usage through `log_llm_usage`.
   - Apply response headers from `EmbeddingExecutionResult.response_headers`.
   - Build `CreateEmbeddingResponse` using existing `EmbeddingData` and `EmbeddingUsage` schemas.
-- [ ] Implement `_embedding_domain_error_to_http(exc)` mapping:
+- [x] Implement `_embedding_domain_error_to_http(exc)` mapping:
   - Input errors and prefix/dimensions/unknown-provider errors to `400`.
   - Policy deny to `403`.
   - Unsupported provider to `501`.
@@ -481,8 +481,8 @@ return await _create_embedding_legacy(
   - Missing credentials to existing `503` body shape with `error_code: missing_provider_credentials`.
   - Malformed provider response to `502`.
   - Provider unavailable, fallback exhausted, circuit breaker, and internal execution failure to `503`.
-- [ ] Add `tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py`.
-- [ ] Add endpoint tests:
+- [x] Add `tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py`.
+- [x] Add endpoint tests:
   - Flag unset calls legacy path.
   - Flag true calls orchestrator path.
   - Input error maps to current `400` shape.
@@ -490,7 +490,7 @@ return await _create_embedding_legacy(
   - Missing credentials preserves `503` detail dict with `error_code`.
   - Rate-limit error includes `Retry-After`.
   - Response headers from result are applied.
-- [ ] Run:
+- [x] Run:
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -498,6 +498,14 @@ python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_orchestrato
 ```
 
 Expected result after implementation: feature flag tests pass, and the old path remains the default when the flag is unset.
+
+Task 7 completed and reviewed. Added feature-flag routing for the orchestrator path while preserving legacy as the default; extracted `_create_embedding_legacy`; added endpoint orchestrator boundary handling for availability, active request metrics, backpressure, ResourceGovernor token reservation/commit, usage logging, response headers, and response schema construction; added endpoint cache/executor adapters with BYOK, batching, adapter-first execution, credential touch, and legacy HTTP/domain error parity; added endpoint parity coverage. Spec review approved. Quality review initially found cache/credential and adapter provenance risks; fixes added provider preflight before cache reads, post-cache credential touch, adapter-mode cache bypass, adapter provenance propagation, provider HTTP 4xx parity, and fallback missing-credential skip behavior. Quality re-review approved.
+
+Verification:
+- `python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py::test_orchestrator_full_cache_hit_touches_resolved_provider_credentials` -> 1 passed, 58 warnings.
+- `python -m pytest -q tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py` -> 31 passed, 470 warnings.
+- `python -m compileall -q tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py tldw_Server_API/app/core/Embeddings/request_types.py tldw_Server_API/app/core/Embeddings/orchestrator.py tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py` -> passed.
+- `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py tldw_Server_API/app/core/Embeddings/request_types.py tldw_Server_API/app/core/Embeddings/orchestrator.py -f json -o /tmp/bandit_embeddings_task7_after_quality_fixes2.json` -> 0 findings, no errors.
 
 ### Task 8: Add Dual-Path Parity Coverage
 
@@ -622,7 +630,7 @@ Expected result: command exits `0` with no output.
 
 - [ ] After Task 1, review characterization results before extraction. Confirm each behavior is marked as contract or compatibility.
 - [ ] After Task 5, review pure module APIs for over-coupling to FastAPI or endpoint globals.
-- [ ] After Task 7, review endpoint RG/billing ordering. No cache read or provider call should happen before the endpoint reservation decision.
+- [x] After Task 7, review endpoint RG/billing ordering. No cache read or provider call should happen before the endpoint reservation decision.
 - [ ] After Task 8, review parity failures as design feedback, not only test failures. If parity requires behavior changes, split them into a separate design decision.
 
 ## Rollback And Rollout

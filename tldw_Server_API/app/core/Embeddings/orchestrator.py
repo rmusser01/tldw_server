@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
@@ -45,7 +45,7 @@ class EmbeddingExecutor(Protocol):
         provider: str,
         model: str,
         dimensions: int | None,
-    ) -> list[list[float]]:
+    ) -> list[list[float]] | "EmbeddingExecutorOutput":
         raise NotImplementedError
 
 
@@ -54,6 +54,7 @@ TokenCounter = Callable[[str, str], int]
 TokenDecoder = Callable[[list[int] | list[list[int]], str], object]
 BackendIdentityResolver = Callable[[str, str], str | None]
 DimensionAdjustmentRecorder = Callable[[str, str, str], None]
+ProviderPreflight = Callable[[str, str], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +69,12 @@ class PreparedEmbeddingRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class EmbeddingExecutorOutput:
+    vectors: list[list[float]]
+    embeddings_from_adapter: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class _ProviderExecution:
     vectors: list[list[float]]
     provider: str
@@ -76,6 +83,7 @@ class _ProviderExecution:
     cache_hits: int = 0
     cache_misses: int = 0
     complete_response: bool = False
+    embeddings_from_adapter: bool = False
 
 
 class EmbeddingRequestOrchestrator:
@@ -103,6 +111,7 @@ class EmbeddingRequestOrchestrator:
         guess_provider: ProviderGuesser | None = None,
         backend_identity_resolver: BackendIdentityResolver | None = None,
         record_dimension_adjustment: DimensionAdjustmentRecorder | None = None,
+        provider_preflight: ProviderPreflight | None = None,
         cache_namespace: str | None = None,
         batch_size: int | None = None,
         execution_path: Literal["legacy", "adapter"] = "legacy",
@@ -126,6 +135,7 @@ class EmbeddingRequestOrchestrator:
         self._guess_provider = guess_provider
         self._backend_identity_resolver = backend_identity_resolver or _no_backend_identity
         self._record_dimension_adjustment = record_dimension_adjustment
+        self._provider_preflight = provider_preflight or _no_provider_preflight
         self._cache_namespace = cache_namespace
         self._batch_size = batch_size
         self._execution_path = execution_path
@@ -186,16 +196,19 @@ class EmbeddingRequestOrchestrator:
     async def execute(self, prepared: PreparedEmbeddingRequest) -> EmbeddingExecutionResult:
         """Execute a prepared request through cache and provider executor."""
         plan = prepared.execution_plan
+        use_cache = plan.execution_path != "adapter"
         results: list[list[float] | None] = []
         miss_indices: list[int] = []
         miss_texts: list[str] = []
 
+        await self._provider_preflight(plan.provider, plan.model)
         for index, text in enumerate(prepared.normalized_input.texts):
-            key = self._cache_key(text, plan.provider, plan.model, plan.dimensions, plan.backend_identity)
-            cached = await self._cache.get(key)
-            if cached is not None:
-                results.append(_canonical_vector(cached))
-                continue
+            if use_cache:
+                key = self._cache_key(text, plan.provider, plan.model, plan.dimensions, plan.backend_identity)
+                cached = await self._cache.get(key)
+                if cached is not None:
+                    results.append(_canonical_vector(cached))
+                    continue
             results.append(None)
             miss_indices.append(index)
             miss_texts.append(text)
@@ -203,11 +216,13 @@ class EmbeddingRequestOrchestrator:
         actual_provider = plan.provider
         actual_model = plan.model
         fallback_from: str | None = None
+        embeddings_from_adapter = False
         if miss_texts:
             execution = await self._execute_misses(prepared, miss_texts)
             actual_provider = execution.provider
             actual_model = execution.model
             fallback_from = execution.fallback_from
+            embeddings_from_adapter = execution.embeddings_from_adapter
             if execution.complete_response:
                 results = list(execution.vectors)
                 cache_hits = execution.cache_hits
@@ -216,8 +231,9 @@ class EmbeddingRequestOrchestrator:
                 backend_identity = self._backend_identity_resolver(actual_provider, actual_model)
                 for index, text, vector in zip(miss_indices, miss_texts, execution.vectors):
                     results[index] = vector
-                    key = self._cache_key(text, actual_provider, actual_model, plan.dimensions, backend_identity)
-                    await self._cache.set(key, vector)
+                    if not execution.embeddings_from_adapter:
+                        key = self._cache_key(text, actual_provider, actual_model, plan.dimensions, backend_identity)
+                        await self._cache.set(key, vector)
                 cache_hits = len(results) - len(miss_indices)
                 cache_misses = len(miss_indices)
         else:
@@ -241,6 +257,7 @@ class EmbeddingRequestOrchestrator:
             cache_misses=cache_misses,
             fallback_from=fallback_from,
             response_headers=headers,
+            embeddings_from_adapter=embeddings_from_adapter,
         )
 
     async def _execute_misses(
@@ -263,18 +280,21 @@ class EmbeddingRequestOrchestrator:
                 try:
                     return await self._execute_coherent_fallback(prepared, provider, model)
                 except EmbeddingDomainError as exc:
+                    if exc.code == "missing_provider_credentials":
+                        continue
                     errors.append(exc)
                     if not _is_fallback_eligible(exc):
                         raise
                     continue
 
             try:
-                vectors = await self._executor.create(
+                output = await self._executor.create(
                     miss_texts,
                     provider=provider,
                     model=model,
                     dimensions=plan.dimensions,
                 )
+                vectors, embeddings_from_adapter = _coerce_executor_output(output)
             except EmbeddingDomainError as exc:
                 errors.append(exc)
                 if not prepared.policy_decision.fallback_allowed or not _is_fallback_eligible(exc):
@@ -294,6 +314,7 @@ class EmbeddingRequestOrchestrator:
                 provider=provider,
                 model=model,
                 fallback_from=plan.provider if provider != plan.provider else None,
+                embeddings_from_adapter=embeddings_from_adapter,
             )
 
         selected_error = _select_exhausted_error(errors)
@@ -314,28 +335,33 @@ class EmbeddingRequestOrchestrator:
         model: str,
     ) -> _ProviderExecution:
         plan = prepared.execution_plan
+        use_cache = plan.execution_path != "adapter"
         results: list[list[float] | None] = []
         miss_indices: list[int] = []
         miss_texts: list[str] = []
         backend_identity = self._backend_identity_resolver(provider, model)
 
+        await self._provider_preflight(provider, model)
         for index, text in enumerate(prepared.normalized_input.texts):
-            key = self._cache_key(text, provider, model, plan.dimensions, backend_identity)
-            cached = await self._cache.get(key)
-            if cached is not None:
-                results.append(_canonical_vector(cached))
-                continue
+            if use_cache:
+                key = self._cache_key(text, provider, model, plan.dimensions, backend_identity)
+                cached = await self._cache.get(key)
+                if cached is not None:
+                    results.append(_canonical_vector(cached))
+                    continue
             results.append(None)
             miss_indices.append(index)
             miss_texts.append(text)
 
+        embeddings_from_adapter = False
         if miss_texts:
-            vectors = await self._executor.create(
+            output = await self._executor.create(
                 miss_texts,
                 provider=provider,
                 model=model,
                 dimensions=plan.dimensions,
             )
+            vectors, embeddings_from_adapter = _coerce_executor_output(output)
             self._validate_vector_count(vectors, expected=len(miss_texts), provider=provider, model=model)
             canonical_vectors = self._postprocess_vectors(
                 vectors,
@@ -346,8 +372,9 @@ class EmbeddingRequestOrchestrator:
             )
             for index, text, vector in zip(miss_indices, miss_texts, canonical_vectors):
                 results[index] = vector
-                key = self._cache_key(text, provider, model, plan.dimensions, backend_identity)
-                await self._cache.set(key, vector)
+                if not embeddings_from_adapter:
+                    key = self._cache_key(text, provider, model, plan.dimensions, backend_identity)
+                    await self._cache.set(key, vector)
 
         return _ProviderExecution(
             vectors=[_require_vector(vector, index) for index, vector in enumerate(results)],
@@ -357,6 +384,7 @@ class EmbeddingRequestOrchestrator:
             cache_hits=len(results) - len(miss_indices),
             cache_misses=len(miss_indices),
             complete_response=True,
+            embeddings_from_adapter=embeddings_from_adapter,
         )
 
     def _postprocess_vectors(
@@ -444,6 +472,14 @@ def _canonical_vector(vector: object) -> list[float]:
         ) from exc
 
 
+def _coerce_executor_output(
+    output: list[list[float]] | EmbeddingExecutorOutput,
+) -> tuple[list[list[float]], bool]:
+    if isinstance(output, EmbeddingExecutorOutput):
+        return output.vectors, output.embeddings_from_adapter
+    return output, False
+
+
 def _require_vector(vector: list[float] | None, index: int) -> list[float]:
     if vector is None:
         raise EmbeddingExecutionError(
@@ -456,6 +492,10 @@ def _require_vector(vector: list[float] | None, index: int) -> list[float]:
 def _no_backend_identity(provider: str, model: str) -> str | None:
     del provider, model
     return None
+
+
+async def _no_provider_preflight(provider: str, model: str) -> None:
+    del provider, model
 
 
 def _is_fallback_eligible(error: EmbeddingDomainError) -> bool:
@@ -474,6 +514,7 @@ def _select_exhausted_error(errors: list[EmbeddingDomainError]) -> EmbeddingDoma
 
 __all__ = [
     "EmbeddingCache",
+    "EmbeddingExecutorOutput",
     "EmbeddingExecutionResult",
     "EmbeddingExecutor",
     "EmbeddingRequestOrchestrator",

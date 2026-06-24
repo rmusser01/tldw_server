@@ -20,12 +20,13 @@ modified_files:
 - tldw_Server_API/tests/Embeddings/test_embeddings_dimensions_policy.py
 - tldw_Server_API/tests/Embeddings/test_embeddings_policy.py
 - tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py
+- tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py
 - tldw_Server_API/tests/Embeddings_isolated/test_request_types.py
 - tldw_Server_API/tests/Embeddings_isolated/test_input_normalizer.py
 - tldw_Server_API/tests/Embeddings_isolated/test_provider_resolution.py
 - tldw_Server_API/tests/Embeddings_isolated/test_embedding_policy.py
 - tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py
-updated_date: 2026-06-24 21:22
+updated_date: 2026-06-24 22:13
 ---
 
 ## Description
@@ -87,6 +88,41 @@ Task 6 post-review verification:
 - `python -m compileall -q tldw_Server_API/app/core/Embeddings/orchestrator.py tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py` -> passed.
 - `python -m bandit -r tldw_Server_API/app/core/Embeddings/orchestrator.py -f json -o /tmp/bandit_embedding_orchestrator_coord.json` -> 0 findings, no errors.
 - Direct import check: importing `tldw_Server_API.app.core.Embeddings.orchestrator` reported `fastapi` absent from `sys.modules`.
+Task 7 completed: wired `/api/v1/embeddings` through `EMBEDDINGS_ORCHESTRATOR_ENABLED` while preserving the legacy path as the default. Extracted the existing create-handler body to `_create_embedding_legacy`, added `_create_embedding_with_orchestrator` for endpoint-boundary responsibilities, added domain-error-to-HTTP mapping, applied orchestrator response headers, and added endpoint parity tests in `test_embeddings_orchestrator_endpoint_parity.py`.
+
+Task 7 red evidence: initial focused flag-routing red run `python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py -k 'flag_'` failed with 2 failures because the public route still returned the legacy synthetic model (`text-embedding-3-small`) instead of calling the patched legacy/orchestrator seams. An earlier full red run also collected 7 tests and began failing, then was interrupted after a missing seam fell through to slow real provider setup.
+
+Task 7 verification:
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py` -> 7 passed, 262 warnings.
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m compileall -q tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py` -> passed.
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py -f json -o /tmp/bandit_embeddings_orchestrator_endpoint_task7.json` -> 0 findings, no errors.
+Task 7 quality review fixes completed. Preserved legacy BYOK OAuth 401 refresh/retry and final credential `touch_last_used` in `_EndpointEmbeddingExecutor`; preserved provider batching by `MAX_BATCH_SIZE` with combined vector-count validation; restored adapter-first execution when `LLM_EMBEDDINGS_ADAPTERS_ENABLED` is truthy; added `circuit_breaker_open` and `internal_execution_failure` to `EmbeddingErrorCode`; added a route-level real-orchestrator fallback-header parity test.
+
+Task 7 review red evidence: after adding tests, `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py` failed with 3 expected failures: OpenAI OAuth 401 was mapped to `EmbeddingExecutionError` instead of forcing refresh/retry; provider batching sent all five texts in one provider call instead of 2/2/1 with `MAX_BATCH_SIZE=2`; adapter-enabled execution still called `create_embeddings_with_circuit_breaker`.
+
+Task 7 review verification:
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py` -> 13 passed, 306 warnings.
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m compileall -q tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py tldw_Server_API/app/core/Embeddings/request_types.py` -> passed.
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py tldw_Server_API/app/core/Embeddings/request_types.py -f json -o /tmp/bandit_embeddings_orchestrator_endpoint_task7_review.json` -> 0 findings, no errors.
+Task 7 endpoint wiring review loop completed.
+
+Spec review: SPEC APPROVED after feature-flagged endpoint path, legacy handler extraction, ResourceGovernor boundary flow, domain error mapping, response headers, and endpoint parity tests were implemented.
+
+Quality review findings addressed:
+- Added provider preflight before primary and fallback cache reads so required provider credentials cannot be bypassed by full cache hits.
+- Reused endpoint executor credential cache and touched resolved credentials after cached successes.
+- Adapter-enabled orchestrator execution now skips provider-cache reads so adapter execution cannot be bypassed by stale provider cache, and adapter-produced vectors are not written to provider cache.
+- Preserved adapter vector scale via EmbeddingExecutorOutput / embeddings_from_adapter propagation.
+- Preserved non-429 provider HTTP 4xx behavior, including OpenAI OAuth second-401 propagation.
+- Preserved legacy fallback behavior by skipping missing credentials for non-requested fallback providers so later fallback candidates can run.
+
+Quality review: QUALITY APPROVED - prior credential/cache and adapter provenance findings resolved; no new Critical/Important Task 7 issues found.
+
+Fresh verification:
+- /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py::test_orchestrator_full_cache_hit_touches_resolved_provider_credentials -> 1 passed, 58 warnings
+- /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py -> 31 passed, 470 warnings
+- /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m compileall -q touched endpoint/core/test files -> exit 0
+- /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r touched production files -f json -o /tmp/bandit_embeddings_task7_after_quality_fixes2.json -> 0 results, 0 errors
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

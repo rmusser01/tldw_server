@@ -26,6 +26,8 @@ EmbeddingErrorCode = Literal[
     "provider_rate_limited",
     "provider_unavailable",
     "fallback_exhausted",
+    "circuit_breaker_open",
+    "internal_execution_failure",
 ]
 
 _REDACTED = "[redacted]"
@@ -257,6 +259,7 @@ class EmbeddingExecutionResult:
     cache_misses: int
     fallback_from: str | None = None
     response_headers: dict[str, str] = field(default_factory=dict)
+    embeddings_from_adapter: bool = False
 
 
 __all__ = [

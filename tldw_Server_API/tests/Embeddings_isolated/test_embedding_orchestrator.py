@@ -119,6 +119,7 @@ def _orchestrator(
     settings_fallback_chain: dict[str, object] | None = None,
     settings_fallback_model_map: dict[str, object] | None = None,
     dimension_policy: str = "reduce",
+    provider_preflight=None,
 ) -> EmbeddingRequestOrchestrator:
     return EmbeddingRequestOrchestrator(
         count_tokens=_count_tokens,
@@ -137,6 +138,7 @@ def _orchestrator(
         settings_fallback_model_map=settings_fallback_model_map,
         dimension_policy=dimension_policy,
         backend_identity_resolver=lambda provider, model: f"{provider}:{model}:backend",
+        provider_preflight=provider_preflight,
     )
 
 
@@ -306,6 +308,122 @@ async def test_fallback_execution_maps_model_and_returns_fallback_headers():
     assert result.fallback_from == "openai"
     assert result.response_headers["X-Embeddings-Provider"] == "huggingface"
     assert result.response_headers["X-Embeddings-Fallback-From"] == "openai"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_fallback_full_cache_hit_skips_fallback_executor_and_sets_adapter_origin():
+    cache = RecordingCache(
+        {
+            "fallback cached|huggingface|sentence-transformers/all-MiniLM-L6-v2|"
+            "huggingface:sentence-transformers/all-MiniLM-L6-v2:backend": [0.75, 0.25],
+        }
+    )
+    openai_failure = EmbeddingProviderError(
+        "provider_unavailable",
+        "openai unavailable",
+        provider="openai",
+        model="text-embedding-3-small",
+        retryable=True,
+    )
+    executor = RecordingExecutor(failures={"openai": openai_failure})
+    orchestrator = _orchestrator(
+        cache=cache,
+        executor=executor,
+        settings_fallback_chain={"openai": ["huggingface"]},
+        settings_fallback_model_map={
+            "openai:text-embedding-3-small": {
+                "huggingface": "sentence-transformers/all-MiniLM-L6-v2"
+            }
+        },
+    )
+    prepared = orchestrator.prepare(
+        "fallback cached",
+        _context(model="text-embedding-3-small", provider="openai"),
+    )
+
+    result = await orchestrator.execute(prepared)
+
+    assert result.vectors == [[0.75, 0.25]]
+    assert result.provider == "huggingface"
+    assert result.fallback_from == "openai"
+    assert result.embeddings_from_adapter is False
+    assert executor.calls == [
+        {
+            "texts": ["fallback cached"],
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "dimensions": None,
+        }
+    ]
+    assert cache.set_calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_missing_credentials_for_non_requested_fallback_provider_is_skipped():
+    openai_failure = EmbeddingProviderError(
+        "provider_unavailable",
+        "openai unavailable",
+        provider="openai",
+        model="text-embedding-3-small",
+        retryable=True,
+    )
+    executor = RecordingExecutor(
+        failures={"openai": openai_failure},
+        provider_vectors={"huggingface": [[0.5, 0.25]]},
+    )
+    preflight_calls: list[tuple[str, str]] = []
+
+    async def provider_preflight(provider: str, model: str) -> None:
+        preflight_calls.append((provider, model))
+        if provider == "cohere":
+            raise EmbeddingProviderError(
+                "missing_provider_credentials",
+                "Embeddings provider 'cohere' requires an API key.",
+                provider=provider,
+                model=model,
+            )
+
+    orchestrator = _orchestrator(
+        executor=executor,
+        provider_preflight=provider_preflight,
+        settings_fallback_chain={"openai": ["cohere", "huggingface"]},
+        settings_fallback_model_map={
+            "openai:text-embedding-3-small": {
+                "cohere": "embed-english-v3.0",
+                "huggingface": "sentence-transformers/all-MiniLM-L6-v2",
+            }
+        },
+    )
+    prepared = orchestrator.prepare(
+        "fallback after missing creds",
+        _context(model="text-embedding-3-small", provider="openai"),
+    )
+
+    result = await orchestrator.execute(prepared)
+
+    assert result.provider == "huggingface"
+    assert result.vectors == [[0.5, 0.25]]
+    assert preflight_calls == [
+        ("openai", "text-embedding-3-small"),
+        ("cohere", "embed-english-v3.0"),
+        ("huggingface", "sentence-transformers/all-MiniLM-L6-v2"),
+    ]
+    assert executor.calls == [
+        {
+            "texts": ["fallback after missing creds"],
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "dimensions": None,
+        },
+        {
+            "texts": ["fallback after missing creds"],
+            "provider": "huggingface",
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "dimensions": None,
+        },
+    ]
 
 
 @pytest.mark.unit
