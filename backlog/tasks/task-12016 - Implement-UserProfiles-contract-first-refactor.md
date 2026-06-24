@@ -12,9 +12,10 @@ documentation:
 - Docs/superpowers/specs/2026-06-24-userprofiles-contract-first-refactor-design.md
 - Docs/superpowers/plans/2026-06-24-userprofiles-contract-first-refactor-implementation-plan.md
 modified_files:
-- tldw_Server_API/tests/UserProfile/test_user_profile_legacy_contract_characterization.py
-- backlog/tasks/task-12016.1 - Characterize-UserProfiles-legacy-profile-contracts.md
-updated_date: 2026-06-24 22:00
+- tldw_Server_API/app/core/UserProfiles/contracts.py
+- tldw_Server_API/tests/UserProfile/test_profile_contracts.py
+- backlog/tasks/task-12016.2 - Add-UserProfiles-typed-contract-models.md
+updated_date: 2026-06-24 22:25
 ---
 
 ## Description
@@ -36,6 +37,7 @@ Execute the approved UserProfiles contract-first refactor implementation plan wi
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 complete. Commit daf9cbd0b added legacy v1 profile contract characterization tests only. Spec-compliance reviewer approved with no gaps; code-quality reviewer approved with no findings. Controller reran targeted test command on 2026-06-24: 4 passed, 260 warnings.
+Task 2 complete after review loop. Commits 144d82312 and 1a7157899 added typed contracts, hardened immutable payload/rejected handling, and strengthened tests. Spec re-review approved with no gaps; code-quality re-review approved with no findings. Controller reran `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/UserProfile/test_profile_contracts.py -q`: 3 passed, 19 warnings. Controller ran Bandit on contracts.py: 0 findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
