@@ -152,6 +152,147 @@ def test_copy_media_passes_keywords_as_list():
     assert set(keywords_val) == {"alpha", "beta", "gamma"}
 
 
+def test_copy_media_deep_copies_unvectorized_chunks():
+    media_row = {
+        "url": "",
+        "title": "T",
+        "type": "text",
+        "content": "first second",
+        "keywords": "",
+        "prompt": "",
+        "transcription_model": "",
+        "author": "",
+        "ingestion_date": "",
+    }
+    svc, _, _, _, tgt_media = _make_service(
+        src_media_items=media_row,
+        add_result=(1, "u1", "ok"),
+    )
+    source_chunks = [
+        {
+            "chunk_text": "first",
+            "start_char": 0,
+            "end_char": 5,
+            "chunk_type": "text",
+            "uuid": "src-chunk-1",
+        },
+        {
+            "chunk_text": "second",
+            "start_char": 6,
+            "end_char": 12,
+            "chunk_type": "text",
+            "uuid": "src-chunk-2",
+        },
+    ]
+
+    with (
+        patch(
+            "tldw_Server_API.app.core.Sharing.clone_service.get_unvectorized_chunk_count",
+            return_value=2,
+            create=True,
+        ),
+        patch(
+            "tldw_Server_API.app.core.Sharing.clone_service.get_unvectorized_max_chunk_index",
+            return_value=1,
+            create=True,
+        ),
+        patch(
+            "tldw_Server_API.app.core.Sharing.clone_service.get_unvectorized_chunks_in_range",
+            return_value=source_chunks,
+            create=True,
+        ),
+        patch(
+            "tldw_Server_API.app.core.Sharing.clone_service.get_media_transcripts",
+            return_value=[],
+        ),
+    ):
+        new_id = svc._copy_media_item("10")
+
+    assert new_id == "1"
+    call_kwargs = tgt_media.add_media_with_keywords.call_args.kwargs
+    assert call_kwargs["chunks"] == [
+        {
+            "text": "first",
+            "start_char": 0,
+            "end_char": 5,
+            "chunk_type": "text",
+            "metadata": {"source_chunk_uuid": "src-chunk-1"},
+        },
+        {
+            "text": "second",
+            "start_char": 6,
+            "end_char": 12,
+            "chunk_type": "text",
+            "metadata": {"source_chunk_uuid": "src-chunk-2"},
+        },
+    ]
+
+
+def test_copy_media_uses_max_chunk_index_for_sparse_unvectorized_chunks():
+    media_row = {
+        "url": "",
+        "title": "T",
+        "type": "text",
+        "content": "first third",
+        "keywords": "",
+        "prompt": "",
+        "transcription_model": "",
+        "author": "",
+        "ingestion_date": "",
+    }
+    svc, _, _, _, tgt_media = _make_service(
+        src_media_items=media_row,
+        add_result=(1, "u1", "ok"),
+    )
+    source_chunks = [
+        {
+            "chunk_text": "first",
+            "start_char": 0,
+            "end_char": 5,
+            "chunk_type": "text",
+            "uuid": "src-chunk-1",
+        },
+        {
+            "chunk_text": "third",
+            "start_char": 12,
+            "end_char": 17,
+            "chunk_type": "text",
+            "uuid": "src-chunk-3",
+        },
+    ]
+    max_index = MagicMock(return_value=2)
+    range_reader = MagicMock(return_value=source_chunks)
+
+    with (
+        patch(
+            "tldw_Server_API.app.core.Sharing.clone_service.get_unvectorized_chunk_count",
+            return_value=2,
+            create=True,
+        ),
+        patch(
+            "tldw_Server_API.app.core.Sharing.clone_service.get_unvectorized_max_chunk_index",
+            max_index,
+            create=True,
+        ),
+        patch(
+            "tldw_Server_API.app.core.Sharing.clone_service.get_unvectorized_chunks_in_range",
+            range_reader,
+            create=True,
+        ),
+        patch(
+            "tldw_Server_API.app.core.Sharing.clone_service.get_media_transcripts",
+            return_value=[],
+        ),
+    ):
+        new_id = svc._copy_media_item("10")
+
+    assert new_id == "1"
+    max_index.assert_called_once_with(svc._src_media, 10)
+    range_reader.assert_called_once_with(svc._src_media, 10, 0, 2)
+    call_kwargs = tgt_media.add_media_with_keywords.call_args.kwargs
+    assert [chunk["text"] for chunk in call_kwargs["chunks"]] == ["first", "third"]
+
+
 def test_copy_media_deep_copies_transcripts():
     media_row = {
         "url": "",
@@ -277,7 +418,9 @@ def test_clone_skipped_source_log_is_sanitized_when_media_copy_fails():
         result = svc.clone_workspace("ws-1")
 
     logged_text = _logged_text(fake_logger)
-    assert result["sources_copied"] == 1
+    assert result["sources_attempted"] == 1
+    assert result["sources_copied"] == 0
+    assert result["sources_failed"] == 1
     assert result["media_id_map"] == {}
     tgt_chacha.add_workspace_source.assert_not_called()
     assert "Skipping workspace source because media copy failed" in logged_text
@@ -303,7 +446,9 @@ def test_clone_source_failure_log_is_sanitized():
         result = svc.clone_workspace("ws-1")
 
     logged_text = _logged_text(fake_logger)
-    assert result["sources_copied"] == 1
+    assert result["sources_attempted"] == 1
+    assert result["sources_copied"] == 0
+    assert result["sources_failed"] == 1
     assert "Failed to copy workspace source; exception_type=RuntimeError" in logged_text
     _assert_sensitive_markers_absent(logged_text)
 
@@ -320,7 +465,9 @@ def test_clone_note_failure_log_is_sanitized():
         result = svc.clone_workspace("ws-1")
 
     logged_text = _logged_text(fake_logger)
-    assert result["notes_copied"] == 1
+    assert result["notes_attempted"] == 1
+    assert result["notes_copied"] == 0
+    assert result["notes_failed"] == 1
     assert "Failed to copy workspace note; exception_type=ValueError" in logged_text
     _assert_sensitive_markers_absent(logged_text)
 
@@ -337,7 +484,9 @@ def test_clone_artifact_failure_log_is_sanitized():
         result = svc.clone_workspace("ws-1")
 
     logged_text = _logged_text(fake_logger)
-    assert result["artifacts_copied"] == 1
+    assert result["artifacts_attempted"] == 1
+    assert result["artifacts_copied"] == 0
+    assert result["artifacts_failed"] == 1
     assert "Failed to copy workspace artifact; exception_type=PermissionError" in logged_text
     _assert_sensitive_markers_absent(logged_text)
 
@@ -525,7 +674,9 @@ def test_clone_skips_source_when_media_copy_fails():
     ):
         result = svc.clone_workspace("ws-1")
 
-    assert result["sources_copied"] == 1
+    assert result["sources_attempted"] == 1
+    assert result["sources_copied"] == 0
+    assert result["sources_failed"] == 1
     # add_workspace_source should NOT have been called since the media copy failed
     tgt_chacha.add_workspace_source.assert_not_called()
 

@@ -17,6 +17,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from loguru import logger
+from starlette.concurrency import run_in_threadpool
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
@@ -30,6 +31,7 @@ from ..schemas.sharing_schemas import (
     CreateTokenRequest,
     PrototypeLinkExchangeRequest,
     PrototypeLinkExchangeResponse,
+    PublicImportRequest,
     PublicSharePreview,
     ResourceType,
     SharedChatRequest,
@@ -120,6 +122,23 @@ def _get_audit_service():
     if _cached_audit_service is None:
         _cached_audit_service = ShareAuditService()
     return _cached_audit_service
+
+
+def _safe_exception_type(exc: BaseException) -> str:
+    exc_type = exc.__class__.__name__
+    if exc_type and all(char.isalnum() or char == "_" for char in exc_type):
+        return exc_type
+    return "Exception"
+
+
+async def _audit_log_best_effort(audit: Any, event_type: str, **kwargs: Any) -> None:
+    try:
+        await audit.log(event_type, **kwargs)
+    except Exception as exc:
+        logger.warning(
+            f"Sharing audit log failed; event_type={event_type}; "
+            f"exception_type={_safe_exception_type(exc)}"
+        )
 
 
 async def shutdown_sharing_audit_service() -> None:
@@ -307,6 +326,95 @@ async def _verify_workspace_ownership(workspace_id: str, user: User) -> None:
         ) from exc
 
 
+def _chatbook_ownership_exists_sync(
+    *,
+    normalized_id: str,
+    user_id: Any,
+    user_id_int: int | None,
+    db: Any | None,
+) -> bool:
+    """Run sync chatbook ownership checks away from the event loop."""
+    from pathlib import Path
+
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+
+    if db is not None:
+        try:
+            from tldw_Server_API.app.core.Chatbooks.chatbook_models import ExportStatus
+            from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+
+            service = ChatbookService(user_id, db, user_id_int=user_id_int)
+            export_job = service.get_export_job(normalized_id)
+            if export_job and str(export_job.user_id) == str(user_id):
+                job_status = getattr(export_job.status, "value", export_job.status)
+                if job_status == ExportStatus.COMPLETED.value and export_job.output_path:
+                    output_path = Path(export_job.output_path).resolve()
+                    export_dir = Path(service.export_dir).resolve()
+                    try:
+                        output_path.relative_to(export_dir)
+                    except ValueError:
+                        return False
+                    if output_path.is_file():
+                        return True
+        except Exception:
+            logger.debug("Chatbook export job ownership check skipped")
+
+    candidate_names = {Path(normalized_id).name}
+    if not normalized_id.endswith(".chatbook"):
+        candidate_names.add(f"{Path(normalized_id).name}.chatbook")
+
+    for root in (
+        DatabasePaths.get_user_chatbooks_exports_dir(user_id),
+        DatabasePaths.get_user_chatbooks_imports_dir(user_id),
+    ):
+        root_path = root.resolve()
+        for name in candidate_names:
+            candidate = (root_path / name).resolve()
+            try:
+                candidate.relative_to(root_path)
+            except ValueError:
+                continue
+            if candidate.is_file():
+                return True
+
+    return False
+
+
+async def _verify_chatbook_ownership(chatbook_id: str, user: User) -> None:
+    """Verify a chatbook token target resolves to a file owned by this user."""
+    normalized_id = str(chatbook_id or "").strip()
+    if not normalized_id:
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+    user_id_int = user.id_int if hasattr(user, "id_int") else None
+    storage_user_id = user_id_int if user_id_int is not None else user.id
+    try:
+        db_lookup_user_id = int(storage_user_id)
+    except (TypeError, ValueError):
+        db_lookup_user_id = None
+
+    db = None
+    if db_lookup_user_id is not None:
+        try:
+            from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
+
+            db = await get_chacha_db_for_user_id(db_lookup_user_id)
+        except Exception:
+            logger.debug("Chatbook export job ownership check skipped")
+
+    owned = await run_in_threadpool(
+        _chatbook_ownership_exists_sync,
+        normalized_id=normalized_id,
+        user_id=storage_user_id,
+        user_id_int=user_id_int,
+        db=db,
+    )
+    if owned:
+        return
+
+    raise HTTPException(status_code=404, detail="Resource not found")
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Workspace Sharing CRUD
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -351,7 +459,8 @@ async def share_workspace(
             detail="An internal error occurred while creating the share.",
         ) from exc
 
-    await audit.log(
+    await _audit_log_best_effort(
+        audit,
         "share.created",
         resource_type="workspace",
         resource_id=workspace_id,
@@ -409,7 +518,8 @@ async def update_share(
     if not updated:
         raise HTTPException(status_code=404, detail="Share not found")
 
-    await audit.log(
+    await _audit_log_best_effort(
+        audit,
         "share.updated",
         resource_type="workspace",
         resource_id=existing["workspace_id"],
@@ -442,7 +552,8 @@ async def revoke_share(
 
     await repo.revoke_share(share_id)
 
-    await audit.log(
+    await _audit_log_best_effort(
+        audit,
         "share.revoked",
         resource_type="workspace",
         resource_id=existing["workspace_id"],
@@ -586,7 +697,8 @@ async def clone_shared_workspace(
 
     job_id = str(_uuid.uuid4())
 
-    await audit.log(
+    await _audit_log_best_effort(
+        audit,
         "share.cloned",
         resource_type="workspace",
         resource_id=share["workspace_id"],
@@ -787,7 +899,8 @@ async def chat_with_shared_workspace(
                 chacha_db=owner_chacha,
             )
 
-        await audit.log(
+        await _audit_log_best_effort(
+            audit,
             "share.chat",
             resource_type="workspace",
             resource_id=share["workspace_id"],
@@ -826,7 +939,11 @@ async def create_token(
 ):
     svc = await _maybe_await(_get_token_service())
     audit = _get_audit_service()
-    if body.resource_type == ResourceType.PROTOTYPE_WORKSPACE:
+    if body.resource_type == ResourceType.WORKSPACE:
+        await _verify_workspace_ownership(body.resource_id, user)
+    elif body.resource_type == ResourceType.CHATBOOK:
+        await _verify_chatbook_ownership(body.resource_id, user)
+    elif body.resource_type == ResourceType.PROTOTYPE_WORKSPACE:
         await _get_owned_prototype_workspace(
             prototype_workspace_id=body.resource_id,
             owner_user_id=user.id,
@@ -843,7 +960,8 @@ async def create_token(
         expires_at=body.expires_at,
     )
 
-    await audit.log(
+    await _audit_log_best_effort(
+        audit,
         "token.created",
         resource_type=body.resource_type.value,
         resource_id=body.resource_id,
@@ -891,7 +1009,8 @@ async def revoke_token(
     svc = await _maybe_await(_get_token_service())
     await svc.revoke_token(token_id)
 
-    await audit.log(
+    await _audit_log_best_effort(
+        audit,
         "token.revoked",
         resource_type=token["resource_type"],
         resource_id=token["resource_id"],
@@ -955,7 +1074,8 @@ async def public_verify_password(
 
     ok = await svc.verify_password(validated, body.password)
     event = "token.password_verified" if ok else "token.password_failed"
-    await audit.log(
+    await _audit_log_best_effort(
+        audit,
         event,
         resource_type=validated["resource_type"],
         resource_id=validated["resource_id"],
@@ -1026,7 +1146,8 @@ async def public_prototype_session_exchange(
     if validated.get("is_password_protected"):
         if body.password:
             password_ok = await svc.verify_password(validated, body.password)
-            await audit.log(
+            await _audit_log_best_effort(
+                audit,
                 "token.password_verified" if password_ok else "token.password_failed",
                 resource_type=validated["resource_type"],
                 resource_id=validated["resource_id"],
@@ -1119,7 +1240,8 @@ async def public_prototype_session_exchange(
         await svc.release_token_use(validated["id"])
         claim_released = True
     try:
-        await audit.log(
+        await _audit_log_best_effort(
+            audit,
             "token.prototype_session_exchanged",
             resource_type=validated["resource_type"],
             resource_id=validated["resource_id"],
@@ -1165,13 +1287,14 @@ async def public_prototype_session_exchange(
 async def public_import(
     token: str,
     request: Request,
+    body: PublicImportRequest | None = None,
     user: User = Depends(get_request_user),
 ):
     svc = await _maybe_await(_get_token_service())
     audit = _get_audit_service()
 
-    validated = await svc.validate_token(token)
-    if not validated:
+    validated = await svc.validate_token(token, allow_exhausted=True)
+    if not validated or validated.get("is_use_exhausted"):
         raise HTTPException(status_code=404, detail="Resource not found")
 
     if validated.get("resource_type") == ResourceType.PROTOTYPE_WORKSPACE.value:
@@ -1180,17 +1303,35 @@ async def public_import(
             detail="Prototype workspace links must be exchanged via /prototype-session",
         )
 
-    # [CRITICAL FIX #4] Block import on password-protected tokens without verification
     if validated.get("is_password_protected"):
+        if body is None or not body.password:
+            raise HTTPException(
+                status_code=403,
+                detail="Password verification required.",
+            )
+        ok = await svc.verify_password(validated, body.password)
+        await _audit_log_best_effort(
+            audit,
+            "token.password_verified" if ok else "token.password_failed",
+            resource_type=validated["resource_type"],
+            resource_id=validated["resource_id"],
+            owner_user_id=validated["owner_user_id"],
+            token_id=validated["id"],
+            ip_address=_client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+        )
+        if not ok:
+            raise HTTPException(status_code=403, detail="Invalid password")
+
+    claimed = await svc.claim_token_use(validated["id"])
+    if not claimed:
         raise HTTPException(
-            status_code=403,
-            detail="Password verification required. Call /verify first.",
+            status_code=404,
+            detail="Resource not found",
         )
 
-    # Increment use count
-    await svc.use_token(validated["id"])
-
-    await audit.log(
+    await _audit_log_best_effort(
+        audit,
         "token.used",
         resource_type=validated["resource_type"],
         resource_id=validated["resource_id"],

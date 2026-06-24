@@ -137,6 +137,48 @@ async def test_shared_with_me_workspace_name_preload_log_is_sanitized(
 
 
 @pytest.mark.asyncio
+async def test_verify_chatbook_ownership_uses_storage_user_id_for_numeric_users(monkeypatch):
+    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
+    from tldw_Server_API.app.api.v1.endpoints import sharing
+
+    fake_db = object()
+    captured: dict[str, object] = {}
+
+    async def _get_chacha_db_for_user_id(user_id: int):
+        captured["db_user_id"] = user_id
+        return fake_db
+
+    def _owned_sync(
+        *,
+        normalized_id: str,
+        user_id: int | str,
+        user_id_int: int | None,
+        db: object | None,
+    ) -> bool:
+        captured["normalized_id"] = normalized_id
+        captured["helper_user_id"] = user_id
+        captured["helper_user_id_int"] = user_id_int
+        captured["helper_db"] = db
+        return True
+
+    monkeypatch.setattr(chacha_deps, "get_chacha_db_for_user_id", _get_chacha_db_for_user_id)
+    monkeypatch.setattr(sharing, "_chatbook_ownership_exists_sync", _owned_sync)
+
+    await sharing._verify_chatbook_ownership(
+        "export-123",
+        SimpleNamespace(id="1", id_int=1),
+    )
+
+    assert captured == {
+        "db_user_id": 1,
+        "normalized_id": "export-123",
+        "helper_user_id": 1,
+        "helper_user_id_int": 1,
+        "helper_db": fake_db,
+    }
+
+
+@pytest.mark.asyncio
 async def test_shared_with_me_workspace_name_resolution_log_is_sanitized(
     repo,
     test_user,
@@ -407,6 +449,32 @@ class TestWorkspaceSharing:
         assert data["workspace_id"] == "ws-1"
         assert data["access_level"] == "view_chat"
 
+    def test_share_workspace_succeeds_when_audit_write_fails(
+        self,
+        client,
+        mock_repo,
+        monkeypatch,
+    ):
+        class _FailingAuditService:
+            async def log(self, *args, **kwargs):
+                raise RuntimeError("audit backend unavailable")
+
+        monkeypatch.setattr(
+            sharing_endpoints,
+            "_get_audit_service",
+            lambda: _FailingAuditService(),
+        )
+
+        resp = client.post("/api/v1/sharing/workspaces/ws-audit/share", json={
+            "share_scope_type": "team",
+            "share_scope_id": 10,
+            "access_level": "view_chat",
+            "allow_clone": True,
+        })
+
+        assert resp.status_code == 200
+        assert resp.json()["workspace_id"] == "ws-audit"
+
     def test_share_workspace_duplicate(self, client, mock_repo):
         client.post("/api/v1/sharing/workspaces/ws-dup/share", json={
             "share_scope_type": "team",
@@ -610,6 +678,57 @@ class TestShareTokens:
         assert "raw_token" in data
         assert data["resource_type"] == "workspace"
 
+    def test_create_workspace_token_requires_owned_workspace(
+        self,
+        client,
+        mock_repo,
+        monkeypatch,
+    ):
+        calls: list[tuple[str, int]] = []
+
+        async def _record_workspace_ownership(workspace_id: str, user: User):
+            calls.append((workspace_id, user.id))
+
+        monkeypatch.setattr(
+            sharing_endpoints,
+            "_verify_workspace_ownership",
+            _record_workspace_ownership,
+        )
+
+        resp = client.post("/api/v1/sharing/tokens", json={
+            "resource_type": "workspace",
+            "resource_id": "ws-owned",
+        })
+
+        assert resp.status_code == 200
+        assert calls == [("ws-owned", 1)]
+
+    def test_create_chatbook_token_requires_owned_chatbook(
+        self,
+        client,
+        mock_repo,
+        monkeypatch,
+    ):
+        calls: list[tuple[str, int]] = []
+
+        async def _record_chatbook_ownership(chatbook_id: str, user: User):
+            calls.append((chatbook_id, user.id))
+
+        monkeypatch.setattr(
+            sharing_endpoints,
+            "_verify_chatbook_ownership",
+            _record_chatbook_ownership,
+            raising=False,
+        )
+
+        resp = client.post("/api/v1/sharing/tokens", json={
+            "resource_type": "chatbook",
+            "resource_id": "chatbook-1",
+        })
+
+        assert resp.status_code == 200
+        assert calls == [("chatbook-1", 1)]
+
     def test_create_prototype_workspace_token(self, client, mock_repo):
         resp = client.post("/api/v1/sharing/tokens", json={
             "resource_type": "prototype_workspace",
@@ -730,6 +849,16 @@ class TestPublicEndpoints:
         assert resp.status_code == 200
         assert resp.json()["resource_id"] == "ws-1"
 
+    def test_public_import_accepts_empty_json_for_unprotected_token(self, client, mock_repo):
+        create = client.post("/api/v1/sharing/tokens", json={
+            "resource_type": "workspace",
+            "resource_id": "ws-empty-json",
+        })
+        raw_token = create.json()["raw_token"]
+        resp = client.post(f"/api/v1/sharing/public/{raw_token}/import", json={})
+        assert resp.status_code == 200
+        assert resp.json()["resource_id"] == "ws-empty-json"
+
     def test_public_import_blocked_when_password_protected(self, client, mock_repo):
         """Password-protected tokens cannot be imported without verification."""
         create = client.post("/api/v1/sharing/tokens", json={
@@ -741,6 +870,42 @@ class TestPublicEndpoints:
         resp = client.post(f"/api/v1/sharing/public/{raw_token}/import")
         assert resp.status_code == 403
         assert "Password verification required" in resp.json()["detail"]
+
+    def test_public_import_accepts_password_for_protected_token(self, client, mock_repo):
+        create = client.post("/api/v1/sharing/tokens", json={
+            "resource_type": "workspace",
+            "resource_id": "ws-pw-ok",
+            "password": "secret123",
+        })
+        raw_token = create.json()["raw_token"]
+        resp = client.post(
+            f"/api/v1/sharing/public/{raw_token}/import",
+            json={"password": "secret123"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["resource_id"] == "ws-pw-ok"
+
+    def test_public_import_uses_atomic_claim_for_use_limit(
+        self,
+        client,
+        mock_repo,
+        monkeypatch,
+    ):
+        create = client.post("/api/v1/sharing/tokens", json={
+            "resource_type": "workspace",
+            "resource_id": "ws-limit",
+            "max_uses": 1,
+        })
+        raw_token = create.json()["raw_token"]
+
+        async def _claim_lost_race(token_id: int) -> bool:
+            return False
+
+        monkeypatch.setattr(mock_repo, "claim_token_use", _claim_lost_race)
+
+        resp = client.post(f"/api/v1/sharing/public/{raw_token}/import")
+
+        assert resp.status_code == 404
 
     def test_public_import_rejects_prototype_workspace_token(self, client, mock_repo):
         create = client.post("/api/v1/sharing/tokens", json={

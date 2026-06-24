@@ -615,6 +615,40 @@ def get_unvectorized_chunk_count(
     return reader.get_unvectorized_chunk_count(media_id)
 
 
+def get_unvectorized_max_chunk_index(
+    db: MediaDbLike | MediaDbReadLike,
+    media_id: int,
+) -> int | None:
+    """Return the highest active unvectorized chunk index for a media item."""
+    db_instance = unwrap_media_database_like(db)
+    if is_media_database_like(db_instance):
+        try:
+            media_id_int = int(media_id)
+        except (TypeError, ValueError):
+            return None
+
+        try:
+            cursor = db_instance.execute_query(
+                "SELECT MAX(chunk_index) AS max_chunk_index FROM UnvectorizedMediaChunks "
+                "WHERE media_id = ? AND deleted = 0",
+                (media_id_int,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            value = row.get("max_chunk_index") if isinstance(row, dict) else row[0]
+            return int(value) if value is not None else None
+        except Exception as exc:
+            _raise_read_error("get_unvectorized_max_chunk_index", exc)
+
+    reader = _require_read_method(
+        db,
+        "get_unvectorized_max_chunk_index",
+        error_message="db must expose the Media DB read contract.",
+    )
+    return reader.get_unvectorized_max_chunk_index(media_id)
+
+
 def get_unvectorized_anchor_index_for_offset(
     db: MediaDbLike | MediaDbReadLike,
     media_id: int,
@@ -1123,6 +1157,7 @@ __all__ = [
     "get_unvectorized_chunk_count",
     "get_unvectorized_chunk_index_by_uuid",
     "get_unvectorized_chunks_in_range",
+    "get_unvectorized_max_chunk_index",
     "get_paginated_files",
     "get_paginated_trash_files",
     "list_chunking_templates",

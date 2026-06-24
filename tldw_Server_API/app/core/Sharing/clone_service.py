@@ -9,6 +9,9 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_media_transcripts,
+    get_unvectorized_chunk_count,
+    get_unvectorized_chunks_in_range,
+    get_unvectorized_max_chunk_index,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
     upsert_transcript,
@@ -88,6 +91,8 @@ class CloneService:
         # 3. Copy sources
         sources = self._src_chacha.list_workspace_sources(workspace_id)
         total_sources = len(sources)
+        sources_copied = 0
+        sources_failed = 0
         media_id_map: dict[str, str] = {}  # old_media_id -> new_media_id
 
         for i, source in enumerate(sources):
@@ -95,10 +100,11 @@ class CloneService:
             if old_media_id:
                 new_media_id = self._copy_media_item(old_media_id)
                 if new_media_id:
-                    media_id_map[old_media_id] = new_media_id
+                    media_id_map[str(old_media_id)] = new_media_id
                 else:
                     # Media copy failed — skip this source to avoid dangling references
                     logger.warning("Skipping workspace source because media copy failed")
+                    sources_failed += 1
                     if total_sources > 0:
                         _progress("copying_sources", 0.1 + 0.5 * ((i + 1) / total_sources))
                     continue
@@ -106,14 +112,16 @@ class CloneService:
             # Add source to new workspace (use mapped ID, or None for non-media sources)
             source_data = {
                 "id": str(uuid.uuid4()),
-                "media_id": media_id_map.get(old_media_id) if old_media_id else None,
+                "media_id": media_id_map.get(str(old_media_id)) if old_media_id else None,
                 "source_type": source.get("source_type", "media"),
                 "title": source.get("title", ""),
                 "url": source.get("url"),
             }
             try:
                 self._tgt_chacha.add_workspace_source(new_ws_id, source_data)
+                sources_copied += 1
             except Exception as exc:
+                sources_failed += 1
                 logger.warning(
                     f"Failed to copy workspace source; exception_type={_safe_exception_type(exc)}"
                 )
@@ -123,6 +131,8 @@ class CloneService:
 
         # 4. Copy notes
         notes = self._src_chacha.list_workspace_notes(workspace_id)
+        notes_copied = 0
+        notes_failed = 0
         for note in notes:
             note_data = {
                 "title": note.get("title", ""),
@@ -130,7 +140,9 @@ class CloneService:
             }
             try:
                 self._tgt_chacha.add_workspace_note(new_ws_id, note_data)
+                notes_copied += 1
             except Exception as exc:
+                notes_failed += 1
                 logger.warning(
                     f"Failed to copy workspace note; exception_type={_safe_exception_type(exc)}"
                 )
@@ -138,6 +150,8 @@ class CloneService:
 
         # 5. Copy artifacts
         artifacts = self._src_chacha.list_workspace_artifacts(workspace_id)
+        artifacts_copied = 0
+        artifacts_failed = 0
         for artifact in artifacts:
             artifact_data = {
                 "id": str(uuid.uuid4()),
@@ -147,7 +161,9 @@ class CloneService:
             }
             try:
                 self._tgt_chacha.add_workspace_artifact(new_ws_id, artifact_data)
+                artifacts_copied += 1
             except Exception as exc:
+                artifacts_failed += 1
                 logger.warning(
                     f"Failed to copy workspace artifact; exception_type={_safe_exception_type(exc)}"
                 )
@@ -163,11 +179,60 @@ class CloneService:
         return {
             "workspace_id": new_ws_id,
             "name": ws_data["name"],
-            "sources_copied": total_sources,
-            "notes_copied": len(notes),
-            "artifacts_copied": len(artifacts),
+            "sources_copied": sources_copied,
+            "sources_attempted": total_sources,
+            "sources_failed": sources_failed,
+            "notes_copied": notes_copied,
+            "notes_attempted": len(notes),
+            "notes_failed": notes_failed,
+            "artifacts_copied": artifacts_copied,
+            "artifacts_attempted": len(artifacts),
+            "artifacts_failed": artifacts_failed,
             "media_id_map": media_id_map,
         }
+
+    def _copy_unvectorized_chunks(self, source_media_id: int) -> list[dict[str, Any]] | None:
+        """Load chunks from the source media DB in the target insert format."""
+        try:
+            chunk_count = get_unvectorized_chunk_count(self._src_media, source_media_id)
+            if chunk_count is None:
+                return None
+            if chunk_count <= 0:
+                return []
+            max_chunk_index = get_unvectorized_max_chunk_index(self._src_media, source_media_id)
+            if max_chunk_index is None:
+                return []
+
+            rows = get_unvectorized_chunks_in_range(
+                self._src_media,
+                source_media_id,
+                0,
+                max_chunk_index,
+            )
+        except Exception as exc:
+            logger.warning(
+                f"Failed to load media chunks during clone; exception_type={_safe_exception_type(exc)}"
+            )
+            return None
+
+        chunks: list[dict[str, Any]] = []
+        for row in rows:
+            text = row.get("chunk_text")
+            if text is None:
+                continue
+            metadata = {}
+            source_chunk_uuid = row.get("uuid")
+            if source_chunk_uuid:
+                metadata["source_chunk_uuid"] = str(source_chunk_uuid)
+            chunk = {
+                "text": text,
+                "start_char": row.get("start_char"),
+                "end_char": row.get("end_char"),
+                "chunk_type": row.get("chunk_type"),
+                "metadata": metadata,
+            }
+            chunks.append(chunk)
+        return chunks
 
     def _copy_media_item(self, media_id: str) -> str | None:
         """Copy a single media item (with chunks and transcripts) from source to target Media DB."""
@@ -184,9 +249,9 @@ class CloneService:
             else:
                 keywords = list(raw_kw) if raw_kw else []
 
+            chunks = self._copy_unvectorized_chunks(source_media_id)
+
             # Insert media into target; capture actual DB-generated ID
-            # Note: chunks are not separately readable; they'll be re-generated
-            # from content during re-ingestion if needed.
             result = self._tgt_media.add_media_with_keywords(
                 url=media.get("url", ""),
                 title=media.get("title", "Untitled"),
@@ -198,6 +263,7 @@ class CloneService:
                 author=media.get("author", "Unknown"),
                 ingestion_date=media.get("ingestion_date", ""),
                 overwrite=False,
+                chunks=chunks,
             )
             # result is (media_id: int|None, media_uuid: str|None, status_message: str)
             new_media_id = result[0]
