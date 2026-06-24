@@ -1072,7 +1072,12 @@ def process_zip_of_epubs(
                             }]
 
                         member_path = Path(member.filename)
-                        if ".." in member_path.parts:
+                        if (
+                            member_path.is_absolute()
+                            or member_path.drive
+                            or ":" in member.filename
+                            or ".." in member_path.parts
+                        ):
                             logging.error(f"ZIP {zip_file_path} contains path traversal entry: {member.filename}")
                             return [{
                                 "status": "Error", "input_ref": zip_file_path, "media_type": "zip",
@@ -1097,8 +1102,8 @@ def process_zip_of_epubs(
                         if member.is_dir():
                             continue
 
-                        destination = (temp_dir_path_obj / member.filename).resolve()
-                        if not str(destination).startswith(str(temp_dir_path_obj.resolve())):
+                        destination = resolve_safe_local_path(temp_dir_path_obj / member.filename, temp_dir_path_obj)
+                        if destination is None:
                             logging.error(f"ZIP {zip_file_path} contains entry escaping temp dir: {member.filename}")
                             return [{
                                 "status": "Error", "input_ref": zip_file_path, "media_type": "zip",

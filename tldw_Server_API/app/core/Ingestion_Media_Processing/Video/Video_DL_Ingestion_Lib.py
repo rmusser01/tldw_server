@@ -61,6 +61,10 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_number,
     custom_openai_section_name,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import (
+    redact_url_for_log,
+    redact_urls_for_log,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
@@ -162,6 +166,22 @@ _VIDEO_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     ValueError,
 )
+
+
+def _egress_block_private_override() -> Optional[bool]:
+    if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("TESTING"):
+        return False
+    return None
+
+
+def _raise_if_url_blocked(url: str) -> None:
+    policy_result = evaluate_url_policy(
+        url,
+        block_private_override=_egress_block_private_override(),
+    )
+    if not getattr(policy_result, "allowed", False):
+        reason = policy_result.reason or "URL blocked by security policy"
+        raise ValueError(f"URL blocked by security policy: {reason}")
 
 
 def _validate_downloaded_url_video_file(downloaded_path: Path) -> None:
@@ -427,6 +447,7 @@ def normalize_title(title):
     return title
 
 def get_video_info(url: str, *, use_cookies: bool = False, cookies: Optional[dict[str, Any] | str] = None) -> dict:
+    _raise_if_url_blocked(url)
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
@@ -449,6 +470,7 @@ def get_video_info(url: str, *, use_cookies: bool = False, cookies: Optional[dic
 
 
 def get_youtube(video_url: str, *, use_cookies: bool = False, cookies: Optional[dict[str, Any] | str] = None):
+    _raise_if_url_blocked(video_url)
     ydl_opts = {
         'format': 'bestaudio[ext=m4a]',
         'noplaylist': False,
@@ -470,6 +492,7 @@ def get_youtube(video_url: str, *, use_cookies: bool = False, cookies: Optional[
 
 
 def get_playlist_videos(playlist_url: str, *, use_cookies: bool = False, cookies: Optional[dict[str, Any] | str] = None):
+    _raise_if_url_blocked(playlist_url)
     ydl_opts = {
         'extract_flat': True,
         'skip_download': True,
@@ -511,13 +534,7 @@ def download_video(
     When ``download_video_flag`` is True, the best muxed audio+video stream is
     downloaded instead so the original media can be retained.
     """
-    block_override: Optional[bool] = None
-    if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("TESTING"):
-        block_override = False
-    policy_result = evaluate_url_policy(video_url, block_private_override=block_override)
-    if not getattr(policy_result, "allowed", False):
-        reason = policy_result.reason or "URL blocked by security policy"
-        raise ValueError(f"URL blocked by security policy: {reason}")
+    _raise_if_url_blocked(video_url)
     download_dir = Path(download_path)
     download_dir.mkdir(parents=True, exist_ok=True)
 
@@ -611,10 +628,11 @@ def download_video(
         return str(downloaded_path)
 
     except _VIDEO_NONCRITICAL_EXCEPTIONS as exc:
-        logging.exception(f"Failed to download media from {video_url}: {exc}")
+        logging.exception(f"Failed to download media from {redact_url_for_log(video_url)}: {exc}")
         raise
 
 def extract_video_info(url):
+    _raise_if_url_blocked(url)
     try:
         with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -625,32 +643,35 @@ def extract_video_info(url):
                 'duration': info.get('duration'),
                 'upload_date': info.get('upload_date')
             }
-            logging.debug(f"Extracted info for {url}: {log_info}")
+            logging.debug(f"Extracted info for {redact_url_for_log(url)}: {log_info}")
 
             return info
     except _VIDEO_NONCRITICAL_EXCEPTIONS as e:
-        logging.exception(f"Error extracting video info for {url}: {str(e)}")
+        logging.exception(f"Error extracting video info for {redact_url_for_log(url)}: {str(e)}")
         return None
 
 
 def get_youtube_playlist_urls(playlist_id):
+    playlist_url = f'https://www.youtube.com/playlist?list={playlist_id}'
+    _raise_if_url_blocked(playlist_url)
     ydl_opts = {
         'extract_flat': True,
         'quiet': True,
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        result = ydl.extract_info(f'https://www.youtube.com/playlist?list={playlist_id}', download=False)
+        result = ydl.extract_info(playlist_url, download=False)
         return [entry['url'] for entry in result['entries'] if entry.get('url')]
 
 
 def parse_and_expand_urls(urls):
-    logging.info(f"Starting parse_and_expand_urls with input: {urls}")
+    logging.info(f"Starting parse_and_expand_urls with input: {redact_urls_for_log(urls)}")
     expanded_urls = []
 
     for url in urls:
+        safe_url = redact_url_for_log(url)
         try:
-            logging.info(f"Processing URL: {url}")
+            logging.info(f"Processing URL: {safe_url}")
             parsed_url = urlparse(url)
             logging.debug(f"Parsed URL components: {parsed_url}")
 
@@ -678,11 +699,11 @@ def parse_and_expand_urls(urls):
                     playlist_id = playlist_ids[0]
                     logging.info(f"Detected YouTube playlist with ID: {playlist_id}")
                     playlist_urls = get_youtube_playlist_urls(playlist_id)
-                    logging.info(f"Expanded playlist URLs: {playlist_urls}")
+                    logging.info(f"Expanded playlist URLs: {redact_urls_for_log(playlist_urls)}")
                     if playlist_urls:
                         expanded_urls.extend(playlist_urls)
                     else:
-                        logging.warning(f"No entries found for playlist '{url}'. Keeping original URL.")
+                        logging.warning(f"No entries found for playlist '{safe_url}'. Keeping original URL.")
                         expanded_urls.append(url)
                     continue
 
@@ -690,7 +711,7 @@ def parse_and_expand_urls(urls):
             if 'youtu.be' in parsed_url.netloc:
                 video_id = parsed_url.path.lstrip('/')
                 full_url = f'https://www.youtube.com/watch?v={video_id}'
-                logging.info(f"Expanded YouTube short URL to: {full_url}")
+                logging.info(f"Expanded YouTube short URL to: {redact_url_for_log(full_url)}")
                 expanded_urls.append(full_url)
 
             # Vimeo handling
@@ -714,20 +735,20 @@ def parse_and_expand_urls(urls):
                     scheme = 'https'
 
                 full_url = urlunparse((scheme, netloc, normalized_path, '', parsed_url.query, parsed_url.fragment))
-                logging.info(f"Processed Vimeo URL: {full_url}")
+                logging.info(f"Processed Vimeo URL: {redact_url_for_log(full_url)}")
                 expanded_urls.append(full_url)
 
             # Add more platform-specific handling here
 
             else:
-                logging.info(f"URL not recognized as special case, adding as-is: {url}")
+                logging.info(f"URL not recognized as special case, adding as-is: {safe_url}")
                 expanded_urls.append(url)
 
         except _VIDEO_NONCRITICAL_EXCEPTIONS as e:
-            logging.exception(f"Error processing URL {url}: {str(e)}")
+            logging.exception(f"Error processing URL {safe_url}: {str(e)}")
             expanded_urls.append(url)
 
-    logging.info(f"Final expanded URLs: {expanded_urls}")
+    logging.info(f"Final expanded URLs: {redact_urls_for_log(expanded_urls)}")
     return expanded_urls
 
 
@@ -791,6 +812,7 @@ def _cookies_to_header_value(cookies) -> Optional[str]:
 
 
 def extract_metadata(url, use_cookies=False, cookies=None):
+    _raise_if_url_blocked(url)
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
@@ -827,10 +849,10 @@ def extract_metadata(url, use_cookies=False, cookies=None):
                 'uploader': metadata.get('uploader', 'Unknown uploader')
             }
 
-            logging.info(f"Successfully extracted metadata for {url}: {safe_metadata}")
+            logging.info(f"Successfully extracted metadata for {redact_url_for_log(url)}: {safe_metadata}")
             return metadata
         except _VIDEO_NONCRITICAL_EXCEPTIONS as e:
-            logging.exception(f"Error extracting metadata for {url}: {str(e)}")
+            logging.exception(f"Error extracting metadata for {redact_url_for_log(url)}: {str(e)}")
             return None
 
 
@@ -1203,9 +1225,10 @@ def process_videos(
                 confab_results = []
                 user_identifier = str(user_id) if user_id is not None else None
                 for url, transcript in all_transcripts_for_confab.items():
+                    safe_url = redact_url_for_log(url)
                     summary_text = all_summaries_for_confab.get(url)
                     if not summary_text:
-                        logging.warning(f"Confabulation check skipped for {url}: missing summary text.")
+                        logging.warning(f"Confabulation check skipped for {safe_url}: missing summary text.")
                         continue
                     try:
                         pair_result = run_geval(
@@ -1217,7 +1240,7 @@ def process_videos(
                         )
                         confab_results.append(f"URL: {url} - {pair_result}")
                     except _VIDEO_NONCRITICAL_EXCEPTIONS as confab_err:
-                        logging.exception(f"Confabulation check failed for {url}: {confab_err}")
+                        logging.exception(f"Confabulation check failed for {safe_url}: {confab_err}")
                         confab_results.append(f"URL: {url} - Confabulation error: {confab_err}")
 
                 if confab_results:
@@ -1334,7 +1357,7 @@ def process_single_video(
             video_input = f"https://{video_input}"
             parsed_url = urlparse(video_input)
             is_remote = True
-            logger.info(f"Added https:// prefix to URL: {video_input}")
+            logger.info(f"Added https:// prefix to URL: {redact_url_for_log(video_input)}")
             # Update the processing result with the corrected URL
             processing_result["input_ref"] = video_input
             processing_result["processing_source"] = video_input
@@ -1357,7 +1380,7 @@ def process_single_video(
             if not info_dict:
                 raise ValueError(f"Failed to extract metadata for URL: {video_input}")
             processing_result["metadata"] = info_dict
-            logger.debug(f"Metadata extracted for {video_input}")
+            logger.debug(f"Metadata extracted for {redact_url_for_log(video_input)}")
 
             download_target_dir_str = str(processing_temp_dir)
             logger.info(f"Downloading URL to directory: {download_target_dir_str}")

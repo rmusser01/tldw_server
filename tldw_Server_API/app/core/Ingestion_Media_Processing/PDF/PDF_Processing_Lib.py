@@ -1160,6 +1160,7 @@ def process_pdf(
             logging.info(f"Summarization enabled for {len(processed_chunks)} chunks of {filename} using API: {api_name}.")
             log_counter("pdf_summarization_attempt", value=len(processed_chunks), labels={"file_name": filename, "api_name": api_name})
 
+            final_summary: str | None = None
             chunk_summaries = []  # Store summaries of individual chunks
             summarized_chunks_for_result = [] # Store chunk data including the generated analysis
 
