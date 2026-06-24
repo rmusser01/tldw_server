@@ -1,6 +1,6 @@
 # Flashcards UX Fix List
 
-Status: closeout update after Phase 0 through Phase 5 remediation plus F06 task-first split, F12 native sidepanel capture queue, F12 generate-from-selection handoff, native generated-draft batches, native sidepanel template application, and native sidepanel review follow-ups.
+Status: closeout update after Phase 0 through Phase 5 remediation plus F06 task-first split, F12 native sidepanel capture queue, F12 generate-from-selection handoff, native generated-draft batches, native sidepanel template application, native sidepanel review follow-ups, and the PR0-PR5 WebUI closeout slices tracked by TASK-2401 through TASK-2406.
 
 Scope: `/flashcards` plus directly connected WebUI and extension flashcard workflows. This file is the master UX audit and fix-list source referenced by `Docs/superpowers/plans/2026-05-25-flashcards-ux-fixes-implementation-plan.md`.
 
@@ -34,7 +34,7 @@ Test setup assumptions from the original audit:
 
 ## Workflow Map
 
-Actual flow after Phase 0-5 remediation plus the F06 and F12 follow-ups:
+Actual flow after Phase 0-5 remediation plus the F06/F12 follow-ups and PR0-PR5 closeout hardening:
 
 1. Entry point: user opens `/flashcards`.
 2. Empty first-run state lands on Study instead of a dense import utility screen.
@@ -49,6 +49,7 @@ Actual flow after Phase 0-5 remediation plus the F06 and F12 follow-ups:
 11. Generated-card save recovery distinguishes success, partial success, failure, fatal validation errors, and retry state.
 12. Extension sidepanel offers explicit full Flashcards, Review due card, Capture page selection, Generate draft cards, and Generate from selection actions; selected page text can append one captured draft, generate a small editable draft batch natively, or open full Flashcards generation with source context. Native sidepanel drafts include deck picker, Front/Back fields, per-draft template application, per-draft delete, save-one, save-all, partial failure recovery, and page URL provenance. The sidepanel review loop fetches the next due card for the selected deck, supports reveal-first review, submits Again/Hard/Good/Easy ratings, advances/refetches, and keeps the current card visible on rating failure.
 13. Documentation describes the stabilized WebUI/extension capture and handoff behavior using current tab names.
+14. The core WebUI review/setup surfaces now have focused responsive contracts for tab actions, first-run CTAs, review progress rows, and long deck labels so narrow layouts wrap or truncate instead of clipping primary actions.
 
 ## Phase Coverage
 
@@ -70,6 +71,19 @@ Actual flow after Phase 0-5 remediation plus the F06 and F12 follow-ups:
 | F12 follow-up: Native extension generated drafts | TASK-519 | F12 | Completed. Adds native sidepanel generated draft batches from selected page text, preserving edit/save queue behavior and source provenance. Later F12 follow-ups added native template application and compact native review. |
 | F12 follow-up: Native extension template application | TASK-521 | F12 | Completed. Adds native sidepanel template application for captured and generated drafts while preserving selected draft scope, generated tags, model fields, and page provenance. Later F12 follow-up added compact native review. |
 | F12 follow-up: Native extension review loop | TASK-522 | F12 | Completed. Adds compact sidepanel due-card review with selected deck, reveal answer, Again/Hard/Good/Easy ratings, progress status, caught-up guidance, and failure recovery that keeps the current card visible. |
+
+## Supplemental PR Coverage
+
+These PR-sized closeout slices were added after the master Phase 0-5 source restoration to address the remaining checklist items with tighter tests and smaller review units.
+
+| Slice | Task | Commit | Coverage | Result |
+| --- | --- | --- | --- | --- |
+| PR0: Evidence and harness refresh | TASK-2401 | `b536cd7de4` | F05, F20, regression guardrails | Completed. Refreshed Flashcards page-object/e2e helpers and added create/review/import harness coverage for the closeout series. |
+| PR1: First-time setup and IA | TASK-2402 | `c0042977ec` | F03, F04, F06, F14, F15, F17, F18 | Completed. Hardened first-run Study defaults, Create & Import task selection, transfer-limit copy, and empty-state hierarchy. |
+| PR2: Create/import/generate reliability | TASK-2403 | `6ca740bb6a` | F01, F05, F06 support | Completed. Added clearer create/import/generate recovery behavior, large import confirmation, structured draft selection, and image-occlusion deck setup coverage. |
+| PR3: Review comprehension and recovery | TASK-2404 | `b1cd0400ca` | F02, F07, F08, F10, F16, F19, F20 support | Completed. Clarified rating scale, recall-first assistant disclosure, progress copy, completion actions, keyboard shortcut copy, and review recovery tests. |
+| PR4: Errors, empty states, and feedback | TASK-2405 | `b3af85be0e` | F01 support, F02 support, F14 support | Completed. Tightened Manage bulk recovery feedback, selection/reset behavior, conflict guidance, and undo coverage. |
+| PR5: Responsive layout and accessibility hardening | TASK-2406 | `8e8aadfa9f` | F20 support, narrow layout resilience | Completed. Added wrapping/truncation contracts for tab actions, review progress, long deck labels, and first-run review CTAs, with focused responsive tests plus the full Flashcards component suite. |
 
 ## Severity-Ranked Findings
 
@@ -94,7 +108,7 @@ Actual flow after Phase 0-5 remediation plus the F06 and F12 follow-ups:
 | F17 | Low | Global handoff | Test with Quiz was globally visible without context. | Users could leave flashcards without knowing what would be tested. | Cross-surface handoff was global rather than state-aware. | Addressed in TASK-506. |
 | F18 | Low | Density and labeling | Import/Export/LLM naming implied normal import/export was an LLM feature. | Users might miss normal import/export. | Label described implementation capability rather than user task. | Addressed in TASK-506. |
 | F19 | Low | Session resumption | Snapshot/continue labels did not clearly distinguish active vs completed sessions. | Users might not know whether they were resuming or viewing history. | History and active-session states were blurred in copy. | Addressed in TASK-508 and TASK-509. |
-| F20 | Low | A11y and keyboard audit gap | Original pass did not complete keyboard-only create/review/recovery coverage. | Keyboard users could encounter untested traps. | Shortcut features lacked observed keyboard journey coverage. | Addressed for create/review/rate/completion in TASK-477; deeper browser a11y audits can continue separately. |
+| F20 | Low | A11y and keyboard audit gap | Original pass did not complete keyboard-only create/review/recovery coverage. | Keyboard users could encounter untested traps. | Shortcut features lacked observed keyboard journey coverage. | Addressed for create/review/rate/completion in TASK-477 and reinforced by the PR0-PR5 closeout slices. TASK-2406 adds focused responsive layout/a11y contracts; a deeper browser accessibility audit remains separate future work. |
 
 ## First-Time User Assessment
 
@@ -102,11 +116,15 @@ The remediated first-time path is materially stronger than the audited baseline.
 
 Create & Import now separates setup into task-specific workspaces, so first-time users no longer have to parse import, export, generation, study-pack, and image-occlusion controls all at once.
 
+The PR1/PR2 closeout slices reinforce this first-time path by keeping setup state, import warnings, large-file confirmation, structured draft selection, and recovery messages visible in the same task area that triggered them.
+
 ## Power-User Assessment
 
 The strongest power-user improvement is the deck dashboard. It gives experienced users deck-level counts and direct Review/Cram/Edit/Scheduler/Export actions, replacing a card-filter-first starting point for common study decisions. Review recovery and recent-session labels also make repeat review safer and easier to resume.
 
 Remaining weakness: extension review is intentionally compact. Full Flashcards remains the path for richer review controls such as cram, assistant support, analytics, and broader deck management.
+
+The PR3-PR5 closeout slices improve repeat-use confidence by clarifying review progress and rating semantics, making bulk Manage recovery more explicit, and preventing narrow WebUI layouts from hiding tab actions or review progress context.
 
 ## Improvement Backlog
 
@@ -136,12 +154,13 @@ Remaining weakness: extension review is intentionally compact. Full Flashcards r
 - Add native extension generated draft batches from selected page text.
 - Add native sidepanel template application for captured and generated drafts.
 - Add compact native sidepanel review for due cards.
+- Add focused responsive hardening for tab actions, first-run review CTAs, review progress metrics, and long deck labels.
 
 ### Deferred Larger Product Improvements
 
 - Consider richer sidepanel review controls only if future evidence shows users need more than the compact due-card loop in the extension.
 - Add broader import result normalization if future evidence shows unresolved partial/fatal import ambiguity outside generated-card save.
-- Run a full browser accessibility audit beyond the focused keyboard e2e coverage.
+- Run a full browser accessibility audit beyond the focused keyboard e2e and responsive component coverage.
 
 ## Ideal Target Workflow
 
@@ -179,7 +198,7 @@ Remaining weakness: extension review is intentionally compact. Full Flashcards r
 - [x] F02 Visible Undo/Re-rate added after rating.
 - [x] F03 Transfer summary placeholder copy fixed.
 - [x] F05 Manual create drawer submit path verified and failed-create recovery covered.
-- [x] F20 Keyboard-only create/review/rate/completion coverage added for the scoped journey.
+- [x] F20 Keyboard-only create/review/rate/completion coverage added for the scoped journey; focused responsive contracts added for core WebUI tab/review surfaces.
 
 ### First-Time Flow
 
