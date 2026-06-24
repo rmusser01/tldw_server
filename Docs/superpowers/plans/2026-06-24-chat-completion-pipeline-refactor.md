@@ -1396,7 +1396,7 @@ Expected: commit succeeds with only the listed files.
 - Test: `tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py`
 - Test: `tldw_Server_API/tests/Chat_NEW/integration/test_chat_commands_endpoint.py`
 
-- [ ] **Step 1: Add test helper for authorized command contexts**
+- [x] **Step 1: Add test helper for authorized command contexts**
 
 In `test_command_router.py`, add after the autouse fixture:
 
@@ -1419,7 +1419,7 @@ Update command behavior tests that are not authorization tests to use `_authoriz
 ctx = _authorized_ctx("u1", "chat.commands.time")
 ```
 
-- [ ] **Step 2: Add fail-closed command authorization tests**
+- [x] **Step 2: Add fail-closed command authorization tests**
 
 Append:
 
@@ -1475,7 +1475,7 @@ async def test_command_permission_allows_single_user_owner(monkeypatch):
     assert allowed.ok
 ```
 
-- [ ] **Step 3: Create command authorization module**
+- [x] **Step 3: Create command authorization module**
 
 Create `command_authorization.py` with:
 
@@ -1557,7 +1557,7 @@ def authorize_command(
     return CommandAuthorizationDecision(False, {**metadata, "permitted": False})
 ```
 
-- [ ] **Step 4: Use the decision in `command_router.py`**
+- [x] **Step 4: Use the decision in `command_router.py`**
 
 Import:
 
@@ -1593,7 +1593,7 @@ if not decision.allowed:
     )
 ```
 
-- [ ] **Step 5: Filter command listing with the same decision**
+- [x] **Step 5: Filter command listing with the same decision**
 
 In `chat.py`, remove the `require_perms` branch and build a `CommandContext` with request metadata:
 
@@ -1626,7 +1626,7 @@ if decision.allowed:
 
 If the registry cannot be read, return `ChatCommandsListResponse(commands=[])` instead of an unfiltered list.
 
-- [ ] **Step 6: Run command tests**
+- [x] **Step 6: Run command tests**
 
 Run:
 
@@ -1636,7 +1636,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat_NEW/uni
 
 Expected: command router and command listing tests pass.
 
-- [ ] **Step 7: Commit command authorization**
+- [x] **Step 7: Commit command authorization**
 
 Run:
 
@@ -1655,7 +1655,7 @@ Expected: commit succeeds with only the listed files.
 - Modify: `tldw_Server_API/app/core/Chat/document_generator.py`
 - Test: `tldw_Server_API/tests/Chat/unit/test_document_generator.py`
 
-- [ ] **Step 1: Add repeated-save regression test**
+- [x] **Step 1: Add repeated-save regression test**
 
 Append to `TestDocumentGeneratorService` in `test_document_generator.py`:
 
@@ -1692,7 +1692,7 @@ Append to `TestDocumentGeneratorService` in `test_document_generator.py`:
         assert rows[-1]["is_active"] == 1
 ```
 
-- [ ] **Step 2: Verify the test fails against the current unique constraint**
+- [x] **Step 2: Verify the test fails against the current unique constraint**
 
 Run:
 
@@ -1702,7 +1702,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/te
 
 Expected: test fails because repeated inactive rows collide.
 
-- [ ] **Step 3: Add schema repair helper**
+- [x] **Step 3: Add schema repair helper**
 
 In `document_generator.py`, add this method to `DocumentGeneratorService`:
 
@@ -1753,7 +1753,7 @@ In `document_generator.py`, add this method to `DocumentGeneratorService`:
         """)
 ```
 
-- [ ] **Step 4: Use repaired schema during table initialization**
+- [x] **Step 4: Use repaired schema during table initialization**
 
 After the `CREATE TABLE IF NOT EXISTS user_prompts` statement, call:
 
@@ -1763,7 +1763,7 @@ self._repair_user_prompts_schema(conn)
 
 Keep the existing `save_user_prompt_config` update-then-insert flow; the partial unique index permits multiple inactive rows.
 
-- [ ] **Step 5: Run document generator tests**
+- [x] **Step 5: Run document generator tests**
 
 Run:
 
@@ -1773,7 +1773,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/te
 
 Expected: document generator tests pass.
 
-- [ ] **Step 6: Commit document prompt repair**
+- [x] **Step 6: Commit document prompt repair**
 
 Run:
 
