@@ -39,6 +39,25 @@ def test_service_parser_wrappers_delegate_to_policy_compiler():
 
 
 @pytest.mark.unit
+def test_service_parse_rule_line_uses_policy_compiler_instance():
+    svc = ModerationService()
+
+    class FakeCompiler:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def parse_rule_line(self, value: str):
+            self.calls.append(value)
+            return "delegated", "warn", None, {"test"}
+
+    fake = FakeCompiler()
+    svc._policy_compiler = fake
+
+    assert svc._parse_rule_line("raw rule") == ("delegated", "warn", None, {"test"})
+    assert fake.calls == ["raw rule"]
+
+
+@pytest.mark.unit
 def test_parse_regex_with_arrow_inside_pattern():
     svc = ModerationService()
     expr, action, repl, cats = svc._parse_rule_line(r"/a->b/ -> block")

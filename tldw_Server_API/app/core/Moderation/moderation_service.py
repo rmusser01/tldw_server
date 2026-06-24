@@ -140,8 +140,8 @@ class ModerationEvaluationResult:
 class ModerationService:
     """Loads moderation configuration and evaluates content against policies."""
     _UNCATEGORIZED_CATEGORY = "uncategorized"
-    _ALLOWED_REGEX_FLAGS = {"i", "m", "s", "x"}
-    _ALLOWED_ACTIONS = {"block", "redact", "warn"}
+    _ALLOWED_REGEX_FLAGS = set(PolicyCompiler._ALLOWED_REGEX_FLAGS)
+    _ALLOWED_ACTIONS = set(PolicyCompiler._ALLOWED_ACTIONS)
 
     def __init__(self) -> None:
         self._config = load_and_log_configs() or {}
