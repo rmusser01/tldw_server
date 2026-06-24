@@ -2472,6 +2472,7 @@ async def test_export_events_raises_on_read_failure(audit_service, monkeypatch):
 @pytest.mark.asyncio
 async def test_read_methods_propagate_cancellation(audit_service, monkeypatch):
     """Task cancellation should not be wrapped as an audit read/export failure."""
+    original_read_db = audit_service._read_db
 
     @asynccontextmanager
     async def _cancelled_read_db():
@@ -2485,6 +2486,7 @@ async def test_read_methods_propagate_cancellation(audit_service, monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await audit_service.query_events(user_id="cancelled-query-user")
 
+    monkeypatch.setattr(audit_service, "_read_db", original_read_db)
     monkeypatch.setattr(audit_service, "flush", _cancelled_flush)
     with pytest.raises(asyncio.CancelledError):
         await audit_service.count_events(user_id="cancelled-count-user")

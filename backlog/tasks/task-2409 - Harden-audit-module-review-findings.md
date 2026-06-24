@@ -4,7 +4,7 @@ title: Harden audit module review findings
 status: Done
 assignee: []
 created_date: '2026-06-23 18:11'
-updated_date: '2026-06-24 01:06'
+updated_date: '2026-06-24 01:22'
 labels:
   - audit
   - security
@@ -66,6 +66,14 @@ Post-review verification in PR worktree:
 - focused review regression subset: 8 passed, 13 warnings
 - touched audit test files: 106 passed, 1 xfailed, 332 warnings
 - Bandit audit module scan: 0 findings (/tmp/bandit_audit_module_hardening_pr2440.json)
+
+2026-06-24: Rebased PR #2440 onto latest origin/dev (4fb8eafd5) and clarified the cancellation propagation test by restoring the original audit DB reader before forcing count_events/export_events/get_security_summary to raise from flush(). This addresses the remaining Gemini test-isolation comment while preserving the existing count_events flush behavior.
+
+Rebased PR verification:
+- py_compile on touched audit files: passed
+- focused review regression subset: 8 passed, 13 warnings
+- touched audit test files: 106 passed, 1 xfailed, 332 warnings
+- Bandit audit module scan: 0 findings (/tmp/bandit_audit_module_hardening_pr2440_rebased.json)
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
