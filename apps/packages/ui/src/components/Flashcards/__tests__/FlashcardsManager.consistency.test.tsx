@@ -442,11 +442,11 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
   })
 
-  it("documents current zero-deck behavior before first-time IA remediation", async () => {
+  it("documents zero-deck behavior after first-time IA remediation", async () => {
     renderFlashcardsManager({ decks: [] })
 
     expect(await screen.findByText("Import / Export")).toBeInTheDocument()
-    expect(screen.queryByText("Scheduler")).not.toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /scheduler/i })).toBeInTheDocument()
   })
 
   it("still opens Import / Export first for explicit generate and study-pack intents", () => {

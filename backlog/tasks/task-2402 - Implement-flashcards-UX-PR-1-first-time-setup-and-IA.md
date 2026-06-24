@@ -19,6 +19,10 @@ documentation:
     hand off to the Import file task while generate CTAs intentionally open
     Create/generate
   - preserving the public importExport tab key.
+  - >-
+    Review fix requested 2026-06-24: normalize Manage search query
+    whitespace consistently across cache keys, list requests, document-mode
+    queries, and bulk list requests.
 ---
 
 ## Description
@@ -84,6 +88,19 @@ Code-quality review fix verification:
 - `git diff --check` passed.
 - Bandit remains N/A, frontend-only TypeScript/React changes.
 - Temporary ignored `apps/node_modules` symlink was used for Vitest resolution and removed before staging.
+
+Whitespace-query review fix follow-up:
+- Rebased PR #2465 onto latest `origin/dev`.
+- Added a regression test proving `useManageQuery` trims whitespace for both React Query cache keys and `listFlashcards` request params.
+- Normalized Manage search text in `useManageQuery`, document-mode queries, ManageTab filter/query-key inputs, and bulk list requests so whitespace-only search state cannot diverge between UI and backend queries.
+- Updated a stale zero-deck Scheduler assertion to match this PR's Scheduler-discoverability behavior after rebasing.
+
+Whitespace-query review fix verification:
+- Red run: `bunx vitest run src/components/Flashcards/hooks/__tests__/useFlashcardQueries.tag-suggestions.test.tsx` failed because `listFlashcards` received `q: "  mitochondria  "`.
+- Green run: same hook test passed: 1 file, 3 tests.
+- Focused PR slice: `bunx vitest run src/components/Flashcards/hooks/__tests__/useFlashcardQueries.tag-suggestions.test.tsx src/components/Flashcards/hooks/__tests__/useFlashcardDocumentQuery.test.ts src/components/Flashcards/__tests__/FlashcardsManager.consistency.test.tsx src/components/Flashcards/tabs/__tests__/ManageTab.empty-state.test.tsx src/components/Flashcards/tabs/__tests__/ImportExportTab.decomposition.test.tsx src/components/Flashcards/tabs/__tests__/ReviewTab.create-cta.test.tsx` passed: 6 files, 78 tests.
+- `git diff --check` passed.
+- Bandit remains N/A, frontend-only TypeScript/React and Backlog metadata changes.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -471,6 +471,11 @@ export const normalizeManageTags = (
   return normalized
 }
 
+export const normalizeManageQuery = (query?: string | null): string | undefined => {
+  const normalized = String(query ?? "").trim()
+  return normalized || undefined
+}
+
 export const cardHasAllTags = (card: Flashcard, normalizedTags: string[]): boolean => {
   if (normalizedTags.length === 0) return true
   const cardTags = new Set((card.tags || []).map((tag) => String(tag || "").trim().toLowerCase()))
@@ -491,6 +496,7 @@ export function useManageQuery(params: ManageQueryParams, options?: UseFlashcard
     page = 1,
     pageSize = 20
   } = params
+  const normalizedQuery = normalizeManageQuery(query)
   const normalizedTags = normalizeManageTags(tags, tag)
   const primaryTag = normalizedTags[0]
 
@@ -498,7 +504,7 @@ export function useManageQuery(params: ManageQueryParams, options?: UseFlashcard
     queryKey: [
       "flashcards:list",
       deckId,
-      query,
+      normalizedQuery ?? "",
       normalizedTags.join("|"),
       dueStatus,
       sortBy,
@@ -516,7 +522,7 @@ export function useManageQuery(params: ManageQueryParams, options?: UseFlashcard
         while (offset < MAX_SCAN) {
           const chunk = await listFlashcards({
             deck_id: deckId ?? undefined,
-            q: query || undefined,
+            q: normalizedQuery,
             tag: primaryTag,
             due_status: dueStatus,
             limit: PAGE_SCAN_SIZE,
@@ -543,7 +549,7 @@ export function useManageQuery(params: ManageQueryParams, options?: UseFlashcard
 
       const response = await listFlashcards({
         deck_id: deckId ?? undefined,
-        q: query || undefined,
+        q: normalizedQuery,
         tag: primaryTag,
         due_status: dueStatus,
         limit: pageSize,

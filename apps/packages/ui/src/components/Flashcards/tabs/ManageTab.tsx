@@ -286,9 +286,11 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     [mSort]
   )
 
+  const normalizedManageQuery = mQuery.trim()
+
   // Check if any manage filters are active
   const hasActiveFilters = !!(
-    mQuery.trim() ||
+    normalizedManageQuery ||
     mTags.length > 0 ||
     mDue !== "all" ||
     mDeckId != null ||
@@ -443,7 +445,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
 
   const manageQuery = useManageQuery({
     deckId: mDeckId,
-    query: mQuery,
+    query: normalizedManageQuery,
     tags: mTags,
     dueStatus: mDue,
     sortBy: mSort,
@@ -454,7 +456,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const documentQuery = useFlashcardDocumentQuery(
     {
       deckId: mDeckId,
-      query: mQuery,
+      query: normalizedManageQuery,
       tags: mTags,
       dueStatus: mDue,
       sortBy: documentSort,
@@ -468,21 +470,29 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const documentFilterContext = React.useMemo(
     () => ({
       deckId: mDeckId,
-      query: mQuery,
+      query: normalizedManageQuery,
       tags: mTags,
       dueStatus: mDue,
       sortBy: documentSort,
       workspaceId: selectedWorkspaceId,
       includeWorkspaceItems: selectedWorkspaceId == null ? showWorkspaceDecks : false
     }),
-    [documentSort, mDeckId, mDue, mQuery, mTags, selectedWorkspaceId, showWorkspaceDecks]
+    [
+      documentSort,
+      mDeckId,
+      mDue,
+      normalizedManageQuery,
+      mTags,
+      selectedWorkspaceId,
+      showWorkspaceDecks
+    ]
   )
   const documentQueryKey = React.useMemo(
     () =>
       getFlashcardDocumentQueryKey(
         {
           deckId: mDeckId,
-          query: mQuery,
+          query: normalizedManageQuery,
           tags: mTags,
           dueStatus: mDue,
           sortBy: documentSort,
@@ -496,7 +506,15 @@ export const ManageTab: React.FC<ManageTabProps> = ({
           includeWorkspaceItems: selectedWorkspaceId == null ? showWorkspaceDecks : false
         }
       ),
-    [documentSort, mDeckId, mDue, mQuery, mTags, selectedWorkspaceId, showWorkspaceDecks]
+    [
+      documentSort,
+      mDeckId,
+      mDue,
+      normalizedManageQuery,
+      mTags,
+      selectedWorkspaceId,
+      showWorkspaceDecks
+    ]
   )
 
   React.useEffect(() => {
@@ -517,7 +535,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   React.useEffect(() => {
     setSelectedIds(new Set())
     setSelectAllAcross(false)
-  }, [mDeckId, mQuery, mTags, mDue, mSort])
+  }, [mDeckId, normalizedManageQuery, mTags, mDue, mSort])
 
   React.useEffect(() => {
     return () => {
@@ -659,7 +677,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   // Reset focused index when page or filters change
   React.useEffect(() => {
     setFocusedIndex(-1)
-  }, [page, pageSize, listDensity, mDeckId, mQuery, mTags, mDue, mSort])
+  }, [page, pageSize, listDensity, mDeckId, normalizedManageQuery, mTags, mDue, mSort])
 
   async function fetchAllItemsAcrossFilters(): Promise<Flashcard[]> {
     const items: Flashcard[] = []
@@ -683,7 +701,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     ) {
       const res = await listFlashcards({
         deck_id: mDeckId ?? undefined,
-        q: mQuery || undefined,
+        q: normalizedManageQuery || undefined,
         tag: primaryTag,
         due_status: mDue,
         workspace_id: selectedWorkspaceId ?? undefined,
