@@ -594,6 +594,25 @@ async def test_execute_non_stream_call_redacts_all_returned_choices(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_execute_non_stream_call_persists_first_choice_only(monkeypatch):
+    response, save_calls, _logged_usage = await _run_non_stream_content_test(
+        monkeypatch,
+        llm_response={
+            "choices": [
+                {"message": {"role": "assistant", "content": "persist me"}, "finish_reason": "stop"},
+                {"message": {"role": "assistant", "content": "return only"}, "finish_reason": "stop"},
+            ]
+        },
+        moderation=_NoModeration(),
+        should_persist=True,
+    )
+
+    assert len(response["choices"]) == 2
+    assert len(save_calls) == 1
+    assert save_calls[0]["content"] == "persist me"
+
+
+@pytest.mark.asyncio
 async def test_execute_non_stream_call_redacts_object_style_content_part(monkeypatch):
     text_part = _ObjectTextPart("secret")
     response, _save_calls, _logged_usage = await _run_non_stream_content_test(

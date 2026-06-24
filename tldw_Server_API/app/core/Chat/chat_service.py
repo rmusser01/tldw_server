@@ -77,6 +77,11 @@ from tldw_Server_API.app.core.Chat.moderation_pipeline import (
     OutputModerationRuntime,
     apply_output_safety_to_choices,
 )
+from tldw_Server_API.app.core.Chat.persistence_service import (
+    build_assistant_message_payload,
+    save_assistant_message,
+    save_tool_messages,
+)
 from tldw_Server_API.app.core.Chat.request_queue import (
     RequestPriority,
     get_request_queue,
@@ -2425,25 +2430,19 @@ def _build_assistant_message_payload(
     *,
     character_card_for_context: dict[str, Any] | None,
     assistant_parent_message_id: str | None,
-    content: Any,
-    tool_calls: Any,
-    function_call: Any,
+    content: Any | None,
+    tool_calls: Any | None,
+    function_call: Any | None,
 ) -> dict[str, Any]:
-    """Build the persisted assistant message payload for the current turn."""
+    """Compatibility wrapper for tests/imports that use the old local helper."""
 
-    asst_name = sanitize_sender_name(
-        character_card_for_context.get("name") if character_card_for_context else None
+    return build_assistant_message_payload(
+        character_card_for_context=character_card_for_context,
+        assistant_parent_message_id=assistant_parent_message_id,
+        content=content,
+        tool_calls=tool_calls,
+        function_call=function_call,
     )
-    message_payload: dict[str, Any] = {"role": "assistant", "name": asst_name}
-    if assistant_parent_message_id:
-        message_payload["parent_message_id"] = assistant_parent_message_id
-    if content is not None:
-        message_payload["content"] = content
-    if tool_calls is not None:
-        message_payload["tool_calls"] = tool_calls
-    if function_call is not None:
-        message_payload["function_call"] = function_call
-    return message_payload
 
 
 async def write_mandatory_moderation_audit(
@@ -4312,26 +4311,18 @@ async def execute_streaming_call(
         if should_persist and final_conversation_id and not post_stream_blocked and (
             full_reply_to_save or tool_calls or function_call
         ):
-            asst_name = sanitize_sender_name(
-                character_card_for_context.get("name") if character_card_for_context else None
+            message_payload = build_assistant_message_payload(
+                character_card_for_context=character_card_for_context,
+                assistant_parent_message_id=assistant_parent_message_id,
+                content=full_reply_to_save,
+                tool_calls=tool_calls,
+                function_call=function_call,
             )
-            message_payload: dict[str, Any] = {
-                "role": "assistant",
-                "name": asst_name,
-            }
-            if assistant_parent_message_id:
-                message_payload["parent_message_id"] = assistant_parent_message_id
-            if full_reply_to_save is not None:
-                message_payload["content"] = full_reply_to_save
-            if tool_calls:
-                message_payload["tool_calls"] = tool_calls
-            if function_call:
-                message_payload["function_call"] = function_call
-            saved_message_id = await save_message_fn(
-                chat_db,
-                final_conversation_id,
-                message_payload,
-                use_transaction=True,
+            saved_message_id = await save_assistant_message(
+                chat_db=chat_db,
+                conversation_id=final_conversation_id,
+                save_message_fn=save_message_fn,
+                payload=message_payload,
             )
 
         if (
@@ -4361,13 +4352,12 @@ async def execute_streaming_call(
                 tool_execution_payload = autoexec_result.event_payload().get("tool_results", [])
 
                 if should_persist and final_conversation_id:
-                    for tool_message in autoexec_result.tool_messages():
-                        await save_message_fn(
-                            chat_db,
-                            final_conversation_id,
-                            tool_message,
-                            use_transaction=True,
-                        )
+                    await save_tool_messages(
+                        chat_db=chat_db,
+                        conversation_id=final_conversation_id,
+                        save_message_fn=save_message_fn,
+                        tool_messages=autoexec_result.tool_messages(),
+                    )
             except _CHAT_NONCRITICAL_EXCEPTIONS as autoexec_err:
                 logger.warning("Streaming chat tool auto-execution skipped due to error: {}", autoexec_err)
         # Usage logging (estimated) after stream completes
@@ -5367,11 +5357,11 @@ async def execute_non_stream_call(
             tool_calls=tool_calls_to_save,
             function_call=function_call_to_save,
         )
-        assistant_message_id = await save_message_fn(
-            chat_db,
-            final_conversation_id,
-            message_payload,
-            use_transaction=True,
+        assistant_message_id = await save_assistant_message(
+            chat_db=chat_db,
+            conversation_id=final_conversation_id,
+            save_message_fn=save_message_fn,
+            payload=message_payload,
         )
     elif should_save_response and defer_structured_persistence:
         pending_assistant_payload = _build_assistant_message_payload(
@@ -5421,13 +5411,12 @@ async def execute_non_stream_call(
                 if defer_structured_persistence:
                     pending_tool_messages = list(tool_messages)
                 else:
-                    for tool_message in tool_messages:
-                        await save_message_fn(
-                            chat_db,
-                            final_conversation_id,
-                            tool_message,
-                            use_transaction=True,
-                        )
+                    await save_tool_messages(
+                        chat_db=chat_db,
+                        conversation_id=final_conversation_id,
+                        save_message_fn=save_message_fn,
+                        tool_messages=list(tool_messages),
+                    )
 
             if should_auto_continue_tools_once() and tool_messages:
                 tool_auto_continue_meta = {"attempted": True, "succeeded": False}
@@ -5491,21 +5480,20 @@ async def execute_non_stream_call(
                             and (content_to_save or tool_calls_to_save or function_call_to_save)
                         ):
                             if pending_assistant_payload is not None:
-                                assistant_message_id = await save_message_fn(
-                                    chat_db,
-                                    final_conversation_id,
-                                    pending_assistant_payload,
-                                    use_transaction=True,
+                                assistant_message_id = await save_assistant_message(
+                                    chat_db=chat_db,
+                                    conversation_id=final_conversation_id,
+                                    save_message_fn=save_message_fn,
+                                    payload=pending_assistant_payload,
                                 )
                                 pending_assistant_payload = None
                             if pending_tool_messages:
-                                for tool_message in pending_tool_messages:
-                                    await save_message_fn(
-                                        chat_db,
-                                        final_conversation_id,
-                                        tool_message,
-                                        use_transaction=True,
-                                    )
+                                await save_tool_messages(
+                                    chat_db=chat_db,
+                                    conversation_id=final_conversation_id,
+                                    save_message_fn=save_message_fn,
+                                    tool_messages=pending_tool_messages,
+                                )
                                 pending_tool_messages = []
                             continuation_payload = _build_assistant_message_payload(
                                 character_card_for_context=character_card_for_context,
@@ -5514,11 +5502,11 @@ async def execute_non_stream_call(
                                 tool_calls=tool_calls_to_save,
                                 function_call=function_call_to_save,
                             )
-                            continuation_message_id = await save_message_fn(
-                                chat_db,
-                                final_conversation_id,
-                                continuation_payload,
-                                use_transaction=True,
+                            continuation_message_id = await save_assistant_message(
+                                chat_db=chat_db,
+                                conversation_id=final_conversation_id,
+                                save_message_fn=save_message_fn,
+                                payload=continuation_payload,
                             )
                             if continuation_message_id:
                                 assistant_message_id = continuation_message_id
@@ -5553,21 +5541,20 @@ async def execute_non_stream_call(
             raise build_structured_http_exception(structured_exc) from structured_exc
 
     if pending_assistant_payload is not None and should_persist and final_conversation_id:
-        assistant_message_id = await save_message_fn(
-            chat_db,
-            final_conversation_id,
-            pending_assistant_payload,
-            use_transaction=True,
+        assistant_message_id = await save_assistant_message(
+            chat_db=chat_db,
+            conversation_id=final_conversation_id,
+            save_message_fn=save_message_fn,
+            payload=pending_assistant_payload,
         )
         pending_assistant_payload = None
     if pending_tool_messages and should_persist and final_conversation_id:
-        for tool_message in pending_tool_messages:
-            await save_message_fn(
-                chat_db,
-                final_conversation_id,
-                tool_message,
-                use_transaction=True,
-            )
+        await save_tool_messages(
+            chat_db=chat_db,
+            conversation_id=final_conversation_id,
+            save_message_fn=save_message_fn,
+            tool_messages=pending_tool_messages,
+        )
         pending_tool_messages = []
 
     _emit_chat_run_first_tool_path_metrics(
