@@ -112,3 +112,171 @@ async def test_list_sources_sanitizes_search_result_title_fallback_log(monkeypat
         }
     ]
     _assert_sanitized_debug(fake_logger, "Notion connector failed to extract search result title")
+
+
+@pytest.mark.asyncio
+async def test_download_file_escapes_markdown_html_and_unsafe_image_urls(monkeypatch):
+    async def _fake_afetch(**_kwargs):
+        return _Response(
+            {
+                "results": [
+                    {
+                        "object": "block",
+                        "id": "paragraph-1",
+                        "type": "paragraph",
+                        "paragraph": {
+                            "rich_text": [
+                                {
+                                    "plain_text": "hello <script>alert(1)</script> [x](javascript:alert(2))",
+                                    "annotations": {},
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "object": "block",
+                        "id": "toggle-1",
+                        "type": "toggle",
+                        "toggle": {
+                            "rich_text": [
+                                {
+                                    "plain_text": "</summary><script>alert(3)</script>",
+                                    "annotations": {},
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "object": "block",
+                        "id": "code-1",
+                        "type": "code",
+                        "code": {
+                            "language": "py`on<script>",
+                            "rich_text": [
+                                {
+                                    "plain_text": "```\nprint('x')\n```",
+                                    "annotations": {},
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "object": "block",
+                        "id": "image-1",
+                        "type": "image",
+                        "image": {
+                            "type": "external",
+                            "external": {"url": "javascript:alert(4)"},
+                            "caption": [
+                                {
+                                    "plain_text": "<bad alt>",
+                                    "annotations": {},
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "object": "block",
+                        "id": "image-2",
+                        "type": "image",
+                        "image": {
+                            "type": "external",
+                            "external": {"url": "http://[::1"},
+                            "caption": [
+                                {
+                                    "plain_text": "broken",
+                                    "annotations": {},
+                                }
+                            ],
+                        },
+                    },
+                ],
+                "has_more": False,
+                "next_cursor": None,
+            }
+        )
+
+    monkeypatch.setattr(notion_mod, "afetch", _fake_afetch)
+
+    connector = NotionConnector(client_id="client", client_secret="secret", redirect_base="http://localhost")
+    markdown = (await connector.download_file({"access_token": "token"}, "page-1")).decode("utf-8")
+
+    assert "<script" not in markdown.lower()
+    assert "</summary><script" not in markdown.lower()
+    assert "](javascript:" not in markdown.lower()
+    assert "\\[x\\]" in markdown
+    assert "![&lt;bad alt&gt;](javascript:" not in markdown.lower()
+    assert "![broken](http://[::1" not in markdown
+    assert "![broken]" in markdown
+    assert "````" in markdown
+
+
+@pytest.mark.asyncio
+async def test_download_file_preserves_literal_code_block_text(monkeypatch):
+    async def _fake_afetch(**_kwargs):
+        return _Response(
+            {
+                "results": [
+                    {
+                        "object": "block",
+                        "id": "code-1",
+                        "type": "code",
+                        "code": {
+                            "language": "python",
+                            "rich_text": [
+                                {
+                                    "plain_text": "if left < right:\n    url = 'javascript:alert(1)'",
+                                    "annotations": {},
+                                }
+                            ],
+                        },
+                    },
+                ],
+                "has_more": False,
+                "next_cursor": None,
+            }
+        )
+
+    monkeypatch.setattr(notion_mod, "afetch", _fake_afetch)
+
+    connector = NotionConnector(client_id="client", client_secret="secret", redirect_base="http://localhost")
+    markdown = (await connector.download_file({"access_token": "token"}, "page-1")).decode("utf-8")
+
+    assert "if left < right:" in markdown
+    assert "javascript:alert(1)" in markdown
+    assert "&lt;" not in markdown
+    assert "javascript&#58;" not in markdown
+
+
+@pytest.mark.asyncio
+async def test_download_file_uses_collision_free_inline_code_span(monkeypatch):
+    async def _fake_afetch(**_kwargs):
+        return _Response(
+            {
+                "results": [
+                    {
+                        "object": "block",
+                        "id": "paragraph-1",
+                        "type": "paragraph",
+                        "paragraph": {
+                            "rich_text": [
+                                {
+                                    "plain_text": "`tick` [x](javascript:alert(1))",
+                                    "annotations": {"code": True},
+                                }
+                            ],
+                        },
+                    },
+                ],
+                "has_more": False,
+                "next_cursor": None,
+            }
+        )
+
+    monkeypatch.setattr(notion_mod, "afetch", _fake_afetch)
+
+    connector = NotionConnector(client_id="client", client_secret="secret", redirect_base="http://localhost")
+    markdown = (await connector.download_file({"access_token": "token"}, "page-1")).decode("utf-8")
+
+    assert markdown.strip() == "`` `tick` [x](javascript:alert(1)) ``"
+    assert "\\`" not in markdown

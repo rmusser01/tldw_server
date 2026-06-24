@@ -162,6 +162,10 @@ class ReferenceImportError(RuntimeError):
     """Raised when a reference-manager item cannot be persisted correctly."""
 
 
+class ConnectorServiceError(RuntimeError):
+    """Raised when External_Sources connector service operations fail."""
+
+
 class StructuredOutputParseError(ValueError):
     """Base error for structured-output parsing/normalization failures.
 
