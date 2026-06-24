@@ -270,3 +270,54 @@ def test_git_repository_snapshot_marks_oversized_remote_blob_as_failure(monkeypa
     }
     assert "too large" in failures["huge.md"]["error"].lower()
     assert "https://api.github.com/blob-huge" not in seen_calls
+
+
+@pytest.mark.unit
+def test_git_repository_snapshot_marks_oversized_local_file_as_failure(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Sources.git_repository import (
+        build_git_repository_snapshot_with_failures,
+    )
+
+    allowed_root = tmp_path / "allowed"
+    repo_dir = allowed_root / "notes-repo"
+    repo_dir.mkdir(parents=True)
+    subprocess.run(["git", "init", str(repo_dir)], check=True, capture_output=True)
+    (repo_dir / "too-large.md").write_text("12345", encoding="utf-8")
+
+    monkeypatch.setenv("INGESTION_SOURCE_ALLOWED_ROOTS", str(allowed_root))
+    monkeypatch.setenv("INGESTION_SOURCES_LOCAL_FILE_MAX_BYTES", "4")
+
+    items, failures = build_git_repository_snapshot_with_failures(
+        {
+            "mode": "local_repo",
+            "path": str(repo_dir),
+            "respect_gitignore": False,
+        },
+        sink_type="notes",
+    )
+
+    assert items == {}
+    assert set(failures) == {"too-large.md"}
+    assert "exceeds local file size limit" in failures["too-large.md"]["error"]
+
+
+@pytest.mark.unit
+def test_git_ls_files_timeout_is_reported_as_value_error(tmp_path, monkeypatch):
+    import tldw_Server_API.app.core.Ingestion_Sources.git_repository as git_repository
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+
+    def _timeout_run(*args, **kwargs):
+        del args, kwargs
+        raise subprocess.TimeoutExpired(cmd="git ls-files", timeout=1)
+
+    monkeypatch.setenv("INGESTION_SOURCES_GIT_LS_FILES_TIMEOUT_SECONDS", "1")
+    monkeypatch.setattr(git_repository.subprocess, "run", _timeout_run)
+
+    with pytest.raises(ValueError, match="Timed out enumerating git repository files"):
+        git_repository._git_ls_files(  # noqa: SLF001
+            repo_root=repo_dir,
+            root_subpath=None,
+            respect_gitignore=True,
+        )

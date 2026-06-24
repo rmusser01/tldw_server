@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import math
+import os
 import subprocess  # nosec B404
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -26,6 +27,34 @@ _GITHUB_API_BASE = "https://api.github.com"
 _GITHUB_API_READ_CHUNK_BYTES = 64 * 1024
 _MAX_GITHUB_BLOB_BYTES = 5 * 1024 * 1024
 _GITHUB_BLOB_RESPONSE_OVERHEAD_BYTES = 64 * 1024
+_LOCAL_FILE_MAX_BYTES_ENV = "INGESTION_SOURCES_LOCAL_FILE_MAX_BYTES"
+_GIT_LS_FILES_TIMEOUT_SECONDS_ENV = "INGESTION_SOURCES_GIT_LS_FILES_TIMEOUT_SECONDS"
+_DEFAULT_LOCAL_FILE_MAX_BYTES = 50 * 1024 * 1024
+_DEFAULT_GIT_LS_FILES_TIMEOUT_SECONDS = 30
+
+
+def _positive_int_from_env(env_name: str, default: int) -> int:
+    raw_value = os.getenv(env_name)
+    if raw_value is None or raw_value.strip() == "":
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{env_name} must be a positive integer") from exc
+    if value <= 0:
+        raise ValueError(f"{env_name} must be a positive integer")
+    return value
+
+
+def _local_file_max_bytes() -> int:
+    return _positive_int_from_env(_LOCAL_FILE_MAX_BYTES_ENV, _DEFAULT_LOCAL_FILE_MAX_BYTES)
+
+
+def _git_ls_files_timeout_seconds() -> int:
+    return _positive_int_from_env(
+        _GIT_LS_FILES_TIMEOUT_SECONDS_ENV,
+        _DEFAULT_GIT_LS_FILES_TIMEOUT_SECONDS,
+    )
 
 
 def _utc_now_text() -> str:
@@ -249,12 +278,16 @@ def _git_ls_files(
         command.append("--exclude-standard")
     if root_subpath:
         command.extend(["--", root_subpath])
-    completed = subprocess.run(  # nosec B603
-        command,
-        check=False,
-        capture_output=True,
-        text=False,
-    )
+    try:
+        completed = subprocess.run(  # nosec B603
+            command,
+            check=False,
+            capture_output=True,
+            text=False,
+            timeout=_git_ls_files_timeout_seconds(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError(f"Timed out enumerating git repository files for {repo_root}") from exc
     if completed.returncode != 0:
         stderr = completed.stderr.decode("utf-8", errors="ignore").strip()
         raise ValueError(
@@ -463,6 +496,7 @@ def build_git_repository_snapshot_with_failures(
     if mode == "local_repo":
         repo_root = validate_local_git_repository_source(normalized_config)
         scan_root, normalized_root_subpath = _normalize_scan_root(repo_root, root_subpath)
+        max_file_bytes = _local_file_max_bytes()
         candidates = _iter_local_repository_candidates(
             repo_root=repo_root,
             scan_root=scan_root,
@@ -480,6 +514,21 @@ def build_git_repository_snapshot_with_failures(
             ):
                 continue
             stat = file_path.stat()
+            if int(stat.st_size) > max_file_bytes:
+                failed_items[relative_path] = {
+                    "relative_path": relative_path,
+                    "source_format": suffix.lstrip(".") or "unknown",
+                    "size": int(stat.st_size),
+                    "modified_at": datetime.fromtimestamp(
+                        stat.st_mtime,
+                        tz=timezone.utc,
+                    ).strftime("%Y-%m-%d %H:%M:%S"),
+                    "error": (
+                        f"File '{relative_path}' exceeds local file size limit of "
+                        f"{max_file_bytes} bytes"
+                    ),
+                }
+                continue
             try:
                 text = _read_local_text_file(file_path, base_dir=repo_root)
             except (AttributeError, LookupError, OSError, RuntimeError, TimeoutError, TypeError, ValueError) as exc:

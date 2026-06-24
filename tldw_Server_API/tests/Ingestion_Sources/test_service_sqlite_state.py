@@ -65,6 +65,75 @@ async def test_ensure_sqlite_column_rejects_unsafe_identifiers(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.unit
+async def test_ensure_ingestion_sources_schema_creates_query_indexes(tmp_path):
+    from tldw_Server_API.app.core.Ingestion_Sources.service import ensure_ingestion_sources_schema
+
+    db_path = tmp_path / "ingestion_sources.sqlite3"
+    async with aiosqlite.connect(str(db_path)) as db:
+        db.row_factory = aiosqlite.Row
+
+        await ensure_ingestion_sources_schema(db)
+
+        cursor = await db.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'index'
+              AND name LIKE 'idx_ingestion_%'
+            """
+        )
+        rows = await cursor.fetchall()
+
+    index_names = {row["name"] for row in rows}
+    assert {
+        "idx_ingestion_sources_user_id",
+        "idx_ingestion_sources_scheduler",
+        "idx_ingestion_source_state_active_job",
+        "idx_ingestion_source_snapshots_source_status_id",
+        "idx_ingestion_source_artifacts_source_kind_status",
+        "idx_ingestion_item_events_source_item",
+    }.issubset(index_names)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_finish_source_sync_job_raises_when_active_job_fence_mismatches(tmp_path):
+    from tldw_Server_API.app.core.Ingestion_Sources.service import (
+        create_source,
+        ensure_ingestion_sources_schema,
+        finish_source_sync_job,
+        start_source_sync_job,
+    )
+
+    db_path = tmp_path / "ingestion_sources.sqlite3"
+    async with aiosqlite.connect(str(db_path)) as db:
+        db.row_factory = aiosqlite.Row
+
+        await ensure_ingestion_sources_schema(db)
+        row = await create_source(
+            db,
+            user_id=7,
+            payload={
+                "source_type": "local_directory",
+                "sink_type": "media",
+                "policy": "canonical",
+                "config": {"path": "/allowed/project/docs"},
+            },
+        )
+        await start_source_sync_job(db, source_id=int(row["id"]), job_id="job-1")
+
+        with pytest.raises(RuntimeError, match="active sync job"):
+            await finish_source_sync_job(
+                db,
+                source_id=int(row["id"]),
+                job_id="job-2",
+                outcome="success",
+                snapshot_id=1,
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_update_source_delegates_row_update_to_db_management(tmp_path, monkeypatch):
     import tldw_Server_API.app.core.Ingestion_Sources.service as service
 

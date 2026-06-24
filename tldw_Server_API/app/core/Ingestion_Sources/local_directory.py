@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,21 @@ NOTES_SUPPORTED_SUFFIXES: frozenset[str] = frozenset(
 MEDIA_SUPPORTED_SUFFIXES: frozenset[str] = frozenset(
     NOTES_SUPPORTED_SUFFIXES | {".epub", ".pdf"}
 )
+_LOCAL_FILE_MAX_BYTES_ENV = "INGESTION_SOURCES_LOCAL_FILE_MAX_BYTES"
+_DEFAULT_LOCAL_FILE_MAX_BYTES = 50 * 1024 * 1024
+
+
+def _local_file_max_bytes() -> int:
+    raw_value = os.getenv(_LOCAL_FILE_MAX_BYTES_ENV)
+    if raw_value is None or raw_value.strip() == "":
+        return _DEFAULT_LOCAL_FILE_MAX_BYTES
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{_LOCAL_FILE_MAX_BYTES_ENV} must be a positive integer") from exc
+    if value <= 0:
+        raise ValueError(f"{_LOCAL_FILE_MAX_BYTES_ENV} must be a positive integer")
+    return value
 
 
 def process_pdf(
@@ -171,6 +187,7 @@ def build_local_directory_snapshot_with_failures(
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     source_root = validate_local_directory_source(config)
     supported_suffixes = _supported_suffixes_for_sink(sink_type)
+    max_file_bytes = _local_file_max_bytes()
     snapshot_items: dict[str, dict[str, Any]] = {}
     failed_items: dict[str, dict[str, Any]] = {}
 
@@ -186,6 +203,21 @@ def build_local_directory_snapshot_with_failures(
 
         stat = safe_path.stat()
         relative_path = safe_path.relative_to(source_root).as_posix()
+        if int(stat.st_size) > max_file_bytes:
+            failed_items[relative_path] = {
+                "relative_path": relative_path,
+                "source_format": suffix.lstrip(".") or "unknown",
+                "size": int(stat.st_size),
+                "modified_at": datetime.fromtimestamp(
+                    stat.st_mtime,
+                    tz=timezone.utc,
+                ).strftime("%Y-%m-%d %H:%M:%S"),
+                "error": (
+                    f"File '{relative_path}' exceeds local file size limit of "
+                    f"{max_file_bytes} bytes"
+                ),
+            }
+            continue
         try:
             if suffix == ".markdown":
                 text_content = _read_markdown_alias(safe_path, source_root)

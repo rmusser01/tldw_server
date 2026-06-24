@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     normalize_output_storage_filename,
 )
 from tldw_Server_API.app.core.Ingestion_Sources.diffing import normalize_archive_members
+from tldw_Server_API.app.core.Ingestion_Sources.diffing import normalized_archive_member_paths
 from tldw_Server_API.app.core.Ingestion_Sources.local_directory import (
     MEDIA_SUPPORTED_SUFFIXES,
     NOTES_SUPPORTED_SUFFIXES,
@@ -50,6 +51,13 @@ _TAR_ARCHIVE_SUFFIXES: tuple[str, ...] = (
     ".txz",
 )
 ARCHIVE_UPLOAD_SUFFIXES: tuple[str, ...] = _ZIP_ARCHIVE_SUFFIXES + _TAR_ARCHIVE_SUFFIXES
+_ARCHIVE_MAX_MEMBERS_ENV = "INGESTION_SOURCES_ARCHIVE_MAX_MEMBERS"
+_ARCHIVE_MEMBER_MAX_BYTES_ENV = "INGESTION_SOURCES_ARCHIVE_MEMBER_MAX_BYTES"
+_ARCHIVE_TOTAL_MAX_BYTES_ENV = "INGESTION_SOURCES_ARCHIVE_TOTAL_MAX_BYTES"
+_DEFAULT_ARCHIVE_MAX_MEMBERS = 10_000
+_DEFAULT_ARCHIVE_MEMBER_MAX_BYTES = 50 * 1024 * 1024
+_DEFAULT_ARCHIVE_TOTAL_MAX_BYTES = 250 * 1024 * 1024
+_ARCHIVE_READ_CHUNK_BYTES = 64 * 1024
 
 
 @dataclass(frozen=True)
@@ -59,6 +67,43 @@ class _ArchiveMember:
 
 class _ArchiveFormatError(ValueError):
     """Raised when archive bytes do not match the requested container format."""
+
+
+def _archive_limit_int(env_name: str, default: int) -> int:
+    raw_value = os.getenv(env_name)
+    if raw_value is None or raw_value.strip() == "":
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{env_name} must be a positive integer") from exc
+    if value <= 0:
+        raise ValueError(f"{env_name} must be a positive integer")
+    return value
+
+
+def _archive_limits() -> tuple[int, int, int]:
+    return (
+        _archive_limit_int(_ARCHIVE_MAX_MEMBERS_ENV, _DEFAULT_ARCHIVE_MAX_MEMBERS),
+        _archive_limit_int(_ARCHIVE_MEMBER_MAX_BYTES_ENV, _DEFAULT_ARCHIVE_MEMBER_MAX_BYTES),
+        _archive_limit_int(_ARCHIVE_TOTAL_MAX_BYTES_ENV, _DEFAULT_ARCHIVE_TOTAL_MAX_BYTES),
+    )
+
+
+def _read_archive_member_stream_limited(handle: Any, *, member_name: str, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total_read = 0
+    while True:
+        chunk = handle.read(_ARCHIVE_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        total_read += len(chunk)
+        if total_read > max_bytes:
+            raise ValueError(
+                f"Archive member '{member_name}' exceeds archive member size limit of {max_bytes} bytes"
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def process_pdf(file_input, *, filename: str, **kwargs):
@@ -150,9 +195,12 @@ def _validate_zip_archive_members(
     *,
     filename: str,
 ) -> list[tuple[_ArchiveMember, bytes]]:
+    max_members, member_max_bytes, total_max_bytes = _archive_limits()
     try:
         with zipfile.ZipFile(io.BytesIO(archive_bytes), "r") as archive:
             members: list[tuple[_ArchiveMember, bytes]] = []
+            member_count = 0
+            total_uncompressed_bytes = 0
             for member in archive.infolist():
                 if member.is_dir():
                     continue
@@ -163,8 +211,32 @@ def _validate_zip_archive_members(
                 external_type = (member.external_attr >> 16) & 0xFFFF
                 if external_type and stat.S_ISLNK(external_type):
                     raise ValueError(f"Archive contains symbolic link: {member.filename}")
+                member_count += 1
+                if member_count > max_members:
+                    raise ValueError(
+                        f"Archive exceeds archive member count limit of {max_members} files"
+                    )
+                if int(member.file_size) > member_max_bytes:
+                    raise ValueError(
+                        f"Archive member '{member.filename}' exceeds archive member size limit "
+                        f"of {member_max_bytes} bytes"
+                    )
+                total_uncompressed_bytes += int(member.file_size)
+                if total_uncompressed_bytes > total_max_bytes:
+                    raise ValueError(
+                        f"Archive exceeds archive total uncompressed size limit of {total_max_bytes} bytes"
+                    )
                 with archive.open(member, "r") as handle:
-                    members.append((_ArchiveMember(member.filename), handle.read()))
+                    members.append(
+                        (
+                            _ArchiveMember(member.filename),
+                            _read_archive_member_stream_limited(
+                                handle,
+                                member_name=member.filename,
+                                max_bytes=member_max_bytes,
+                            ),
+                        )
+                    )
             return members
     except zipfile.BadZipFile as exc:
         raise _ArchiveFormatError(f"Invalid ZIP archive: {filename}") from exc
@@ -175,10 +247,13 @@ def _validate_tar_archive_members(
     *,
     filename: str,
 ) -> list[tuple[_ArchiveMember, bytes]]:
+    max_members, member_max_bytes, total_max_bytes = _archive_limits()
     try:
         with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:*") as archive:
             members: list[tuple[_ArchiveMember, bytes]] = []
-            for member in archive.getmembers():
+            member_count = 0
+            total_uncompressed_bytes = 0
+            for member in archive:
                 if member.isdir():
                     continue
                 if not _is_safe_archive_member_name(member.name):
@@ -187,11 +262,36 @@ def _validate_tar_archive_members(
                     raise ValueError(f"Archive contains symbolic link: {member.name}")
                 if not member.isfile():
                     raise ValueError(f"Archive contains unsupported member type: {member.name}")
+                member_count += 1
+                if member_count > max_members:
+                    raise ValueError(
+                        f"Archive exceeds archive member count limit of {max_members} files"
+                    )
+                member_size = int(member.size)
+                if member_size > member_max_bytes:
+                    raise ValueError(
+                        f"Archive member '{member.name}' exceeds archive member size limit "
+                        f"of {member_max_bytes} bytes"
+                    )
+                total_uncompressed_bytes += member_size
+                if total_uncompressed_bytes > total_max_bytes:
+                    raise ValueError(
+                        f"Archive exceeds archive total uncompressed size limit of {total_max_bytes} bytes"
+                    )
                 extracted = archive.extractfile(member)
                 if extracted is None:
                     raise ValueError(f"Archive member could not be read: {member.name}")
                 with extracted:
-                    members.append((_ArchiveMember(member.name), extracted.read()))
+                    members.append(
+                        (
+                            _ArchiveMember(member.name),
+                            _read_archive_member_stream_limited(
+                                extracted,
+                                member_name=member.name,
+                                max_bytes=member_max_bytes,
+                            ),
+                        )
+                    )
             return members
     except (tarfile.CompressionError, tarfile.ReadError, EOFError) as exc:
         raise _ArchiveFormatError(f"Invalid TAR archive: {filename}") from exc
@@ -299,10 +399,11 @@ def build_archive_snapshot_with_failures(
         raw_contents[member.filename] = content
         hashes[member.filename] = hashlib.sha256(content).hexdigest()
 
+    member_relative_paths = normalized_archive_member_paths(member_names)
     items = normalize_archive_members(member_names, hashes)
     failed_items: dict[str, dict[str, Any]] = {}
     for member_name in member_names:
-        relative_path = str(items[_normalized_relative_path(items, member_name)]["relative_path"])
+        relative_path = member_relative_paths[member_name]
         try:
             if str(sink_type or "").strip().lower() == "media" and PurePosixPath(member_name).suffix.lower() in {".epub", ".pdf"}:
                 text_content, source_format, raw_metadata = _media_member_content_to_text(
@@ -334,15 +435,6 @@ def build_archive_snapshot_with_failures(
             }
         )
     return items, failed_items
-
-
-def _normalized_relative_path(items: dict[str, dict[str, Any]], member_name: str) -> str:
-    for relative_path, item in items.items():
-        if item.get("relative_path") == relative_path:
-            normalized_member = member_name.replace("\\", "/").strip().strip("/")
-            if normalized_member.endswith(relative_path):
-                return relative_path
-    raise KeyError(member_name)
 
 
 def _member_content_to_text(
