@@ -74,7 +74,8 @@ const resolveManifestDefaultLocale = (extensionPath: string): string => {
 const copyDefaultLocaleCatalog = (
   extensionPath: string,
   stagedPath: string,
-  defaultLocale: string
+  defaultLocale: string,
+  preserveDefaultLocaleCatalog: boolean
 ) => {
   const sourceDefaultLocaleDir = path.join(
     extensionPath,
@@ -83,7 +84,7 @@ const copyDefaultLocaleCatalog = (
   )
   const stagedDefaultLocaleDir = path.join(stagedPath, "_locales", defaultLocale)
 
-  if (fs.existsSync(sourceDefaultLocaleDir)) {
+  if (preserveDefaultLocaleCatalog && fs.existsSync(sourceDefaultLocaleDir)) {
     fs.cpSync(sourceDefaultLocaleDir, stagedDefaultLocaleDir, {
       recursive: true
     })
@@ -124,10 +125,12 @@ export const prepareExtensionLaunchPath = (
       process.env.TLDW_E2E_EXTENSION_MINIMAL_LOCALES ||
         process.env.TLDW_E2E_EXTENSION_LOCALE_MODE
     ),
+    preserveDefaultLocaleCatalog = true,
     rootDir = path.resolve("tmp-playwright-profile", "extension-launch")
   }: {
     deterministicManifestKey?: boolean
     minimalLocales?: boolean
+    preserveDefaultLocaleCatalog?: boolean
     rootDir?: string
   } = {}
 ): string => {
@@ -150,7 +153,8 @@ export const prepareExtensionLaunchPath = (
   copyDefaultLocaleCatalog(
     extensionPath,
     stagedPath,
-    resolveManifestDefaultLocale(extensionPath)
+    resolveManifestDefaultLocale(extensionPath),
+    preserveDefaultLocaleCatalog
   )
 
   return stagedPath

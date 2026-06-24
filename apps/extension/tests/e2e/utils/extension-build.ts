@@ -256,6 +256,7 @@ export async function launchWithBuiltExtension(
   const channel = resolvePlaywrightChannel()
   const headless = resolveExtensionHeadlessMode()
   const launchExtensionPath = prepareExtensionLaunchPath(extensionPath, {
+    preserveDefaultLocaleCatalog: false,
     rootDir: path.join(userDataDir, "extension-launch")
   })
   const context = await chromium.launchPersistentContext(userDataDir, {

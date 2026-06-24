@@ -157,4 +157,34 @@ describe("prioritizeExtensionBuildCandidates", () => {
       )
     ).toEqual({ appName: { message: "tldw Assistant JA" } })
   })
+
+  it("can stage a lightweight default locale stub for built-extension launches", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tldw-extension-paths-"))
+    tempRoots.push(tempRoot)
+    const extensionDir = path.join(tempRoot, "chrome-mv3")
+    fs.mkdirSync(path.join(extensionDir, "_locales", "en"), { recursive: true })
+    fs.writeFileSync(
+      path.join(extensionDir, "manifest.json"),
+      JSON.stringify({ manifest_version: 3, default_locale: "en" }),
+      "utf8"
+    )
+    fs.writeFileSync(
+      path.join(extensionDir, "_locales", "en", "messages.json"),
+      JSON.stringify({ appName: { message: "tldw Assistant" } }),
+      "utf8"
+    )
+
+    const stagedPath = prepareExtensionLaunchPath(extensionDir, {
+      minimalLocales: true,
+      preserveDefaultLocaleCatalog: false,
+      rootDir: path.join(tempRoot, "staged")
+    })
+
+    expect(
+      fs.readFileSync(
+        path.join(stagedPath, "_locales", "en", "messages.json"),
+        "utf8"
+      )
+    ).toBe("{}\n")
+  })
 })
