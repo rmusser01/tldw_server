@@ -4,7 +4,7 @@ title: Fix Meetings module review findings
 status: Done
 assignee: []
 created_date: '2026-06-23 18:40'
-updated_date: '2026-06-24 03:33'
+updated_date: '2026-06-24 03:46'
 labels:
   - meetings
   - review-hardening
@@ -38,6 +38,8 @@ Docs/superpowers/plans/2026-06-23-meetings-review-hardening.md
 Replacement task created after an ID collision caused the original Meetings task file to disappear. Red checks: new SSE, stale-transition, unsupported finalize kind, empty include, and repeated-finalize tests failed against the prior implementation for expected reasons. Green checks: focused Meetings suite passed with --confcutdir=tldw_Server_API/tests/Meetings: 37 passed, 6 warnings in 18.23s. Security: Bandit on touched Meetings/API/DB source wrote /tmp/bandit_meetings_review_hardening.json with results_count=0 and no errors. Known skip: did not run test_meetings_routes_smoke.py because the developer guide calls out environment-specific heavy import crashes for that smoke path; focused endpoint coverage was run instead.
 
 PR: https://github.com/rmusser01/tldw_server/pull/2476
+
+2026-06-24 rebase follow-up: Rebased `codex/meetings-review-hardening` onto latest `origin/dev` (`46595e31c`). PR review triage found no line comments or submitted reviews; issue comments were non-actionable bot status messages (Gemini quota, CodeRabbit skipped draft review). Re-ran focused Meetings suite on the rebased branch: 37 passed, 6 warnings in 2.42s. Re-ran Bandit on touched Meetings/API/DB source: `/tmp/bandit_meetings_review_hardening_worktree_rebase.json`, results empty and no errors.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
