@@ -170,6 +170,16 @@ if (!(globalThis as any).ResizeObserver) {
   }
 }
 
+const renderFlashcardsManager = ({
+  decks = mocks.decks
+}: {
+  decks?: Array<{ id: number; name: string }>
+} = {}) => {
+  mocks.decks = decks
+  window.history.replaceState({}, "", "/flashcards")
+  return render(<FlashcardsManager />)
+}
+
 describe("FlashcardsManager consistency standards", () => {
   mocks.useDecksQuery.mockImplementation(() => ({
     data: mocks.decks,
@@ -420,6 +430,13 @@ describe("FlashcardsManager consistency standards", () => {
     expect(screen.getByText("Templates")).toBeInTheDocument()
     expect(screen.queryByText("Scheduler")).not.toBeInTheDocument()
     expect(screen.queryByTestId("mock-scheduler-tab")).not.toBeInTheDocument()
+  })
+
+  it("documents current zero-deck behavior before first-time IA remediation", async () => {
+    renderFlashcardsManager({ decks: [] })
+
+    expect(await screen.findByText("Import / Export")).toBeInTheDocument()
+    expect(screen.queryByText("Scheduler")).not.toBeInTheDocument()
   })
 
   it("still opens Import / Export first for explicit generate and study-pack intents", () => {

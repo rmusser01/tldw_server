@@ -9,6 +9,7 @@
  *
  * Run: npx playwright test e2e/workflows/tier-2-features/flashcards.spec.ts
  */
+import { type APIRequestContext, type TestInfo } from '@playwright/test';
 import {
   test,
   expect,
@@ -16,7 +17,14 @@ import {
   assertNoCriticalErrors,
 } from '../../utils/fixtures';
 import { expectApiCall } from '../../utils/api-assertions';
-import { FlashcardsPage } from '../../utils/page-objects';
+import {
+  FlashcardsPage,
+  FLASHCARDS_E2E_PREFIX,
+  assertFlashcardsBackendReady,
+  buildFlashcardsSeedRecord,
+  cleanupFlashcardsRunRecords,
+  makeFlashcardsRunId,
+} from '../../utils/page-objects/FlashcardsPage';
 import {
   dispatchKeyboardShortcut,
   seedAuth,
@@ -108,16 +116,47 @@ async function cleanupFlashcardDeck(deck: SeededDeck): Promise<void> {
       }
     );
 
-    expect(
-      response.ok,
-      `Failed to cleanup flashcard deck ${deck.id} at version ${expectedVersion}: ${response.status} ${response.statusText}`
-    ).toBeTruthy();
+    if (!response.ok && response.status !== 404 && response.status !== 409) {
+      console.warn(
+        `Failed to cleanup flashcard deck ${deck.id} at version ${expectedVersion}: ${response.status} ${response.statusText}`
+      );
+    }
   } catch (error) {
     console.error(
       `Failed to cleanup flashcard deck ${deck.id} at version ${expectedVersion} from ${TEST_CONFIG.serverUrl}`,
       error
     );
-    throw error;
+  }
+}
+
+function flashcardsRunIdForTest(testInfo: TestInfo): string {
+  const maybeTitlePath = (
+    testInfo as TestInfo & { titlePath?: string[] | (() => string[]) }
+  ).titlePath;
+  const titlePath = Array.isArray(maybeTitlePath)
+    ? maybeTitlePath
+    : typeof maybeTitlePath === 'function'
+      ? maybeTitlePath()
+      : [testInfo.title];
+
+  return makeFlashcardsRunId(
+    [
+      testInfo.project.name,
+      ...titlePath,
+      `repeat-${testInfo.repeatEachIndex}`,
+      `retry-${testInfo.retry}`,
+    ].join('-')
+  );
+}
+
+async function skipIfFlashcardsBackendUnavailable(
+  request: APIRequestContext
+): Promise<void> {
+  try {
+    await assertFlashcardsBackendReady(request);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    test.skip(true, `Flashcards backend is not available: ${message}`);
   }
 }
 
@@ -127,6 +166,20 @@ test.describe('Flashcards', () => {
   test.beforeEach(async ({ page }) => {
     await seedAuth(page);
     flashcards = new FlashcardsPage(page);
+  });
+
+  test.afterEach(async ({ request }, testInfo) => {
+    const runId = flashcardsRunIdForTest(testInfo);
+    try {
+      await cleanupFlashcardsRunRecords(request, runId);
+    } catch (error) {
+      const message = error instanceof Error ? error.stack ?? error.message : String(error);
+      console.warn(`[flashcards:e2e:cleanup] Cleanup failed for ${runId}`, error);
+      await testInfo.attach('flashcards-cleanup-warning.txt', {
+        body: message,
+        contentType: 'text/plain',
+      });
+    }
   });
 
   // =========================================================================
@@ -196,10 +249,12 @@ test.describe('Flashcards', () => {
 
     test('flashcards Phase 1 evidence: empty first entry stays on Study with setup actions', async ({
       authedPage,
+      request,
       serverInfo,
       diagnostics,
     }) => {
       skipIfServerUnavailable(serverInfo);
+      await skipIfFlashcardsBackendUnavailable(request);
 
       await authedPage.route(/\/api\/v1\/flashcards\/decks(?:\?.*)?$/, async route => {
         if (route.request().method() !== 'GET') return route.fallback();
@@ -296,16 +351,18 @@ test.describe('Flashcards', () => {
 
     test('flashcards Phase 0 evidence: reviews a seeded card with keyboard reveal and rating', async ({
       authedPage,
+      request,
       serverInfo,
       diagnostics,
-    }) => {
+    }, testInfo) => {
       test.setTimeout(120_000);
       skipIfServerUnavailable(serverInfo);
+      await skipIfFlashcardsBackendUnavailable(request);
 
-      const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const deck = await createFlashcardDeck(`E2E Phase0 Review ${runId}`);
-      const front = `Phase 0 front ${runId}`;
-      const back = `Phase 0 back ${runId}`;
+      const seed = buildFlashcardsSeedRecord(flashcardsRunIdForTest(testInfo));
+      const deck = await createFlashcardDeck(seed.deckName);
+      const front = seed.cardFront;
+      const back = seed.cardBack;
 
       await createFlashcardCard({
         deckId: deck.id,
@@ -362,15 +419,17 @@ test.describe('Flashcards', () => {
 
     test('should flip the review prompt side for a selected deck', async ({
       authedPage,
+      request,
       serverInfo,
       diagnostics,
-    }) => {
+    }, testInfo) => {
       skipIfServerUnavailable(serverInfo);
+      await skipIfFlashcardsBackendUnavailable(request);
 
-      const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const deck = await createFlashcardDeck(`E2E Review Orientation ${runId}`);
-      const front = `Front prompt ${runId}`;
-      const back = `Back answer ${runId}`;
+      const seed = buildFlashcardsSeedRecord(flashcardsRunIdForTest(testInfo));
+      const deck = await createFlashcardDeck(seed.deckName);
+      const front = seed.cardFront;
+      const back = seed.cardBack;
 
       await createFlashcardCard({
         deckId: deck.id,
@@ -417,15 +476,17 @@ test.describe('Flashcards', () => {
 
     test('should review a seeded card using only keyboard shortcuts', async ({
       authedPage,
+      request,
       serverInfo,
       diagnostics,
-    }) => {
+    }, testInfo) => {
       skipIfServerUnavailable(serverInfo);
+      await skipIfFlashcardsBackendUnavailable(request);
 
-      const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const deck = await createFlashcardDeck(`E2E Keyboard Review ${runId}`);
-      const front = `Keyboard front ${runId}`;
-      const back = `Keyboard back ${runId}`;
+      const seed = buildFlashcardsSeedRecord(flashcardsRunIdForTest(testInfo));
+      const deck = await createFlashcardDeck(seed.deckName);
+      const front = seed.cardFront;
+      const back = seed.cardBack;
 
       await createFlashcardCard({
         deckId: deck.id,
@@ -550,8 +611,13 @@ test.describe('Flashcards', () => {
   test.describe('Manage Tab', () => {
     test('should show search, deck filter, and FAB create button', async ({
       authedPage,
+      request,
+      serverInfo,
       diagnostics,
     }) => {
+      skipIfServerUnavailable(serverInfo);
+      await skipIfFlashcardsBackendUnavailable(request);
+
       flashcards = new FlashcardsPage(authedPage);
       await flashcards.goto();
       await flashcards.assertPageReady();
@@ -571,10 +637,12 @@ test.describe('Flashcards', () => {
 
     test('should fire flashcards list API when searching', async ({
       authedPage,
+      request,
       serverInfo,
       diagnostics,
     }) => {
       skipIfServerUnavailable(serverInfo);
+      await skipIfFlashcardsBackendUnavailable(request);
 
       flashcards = new FlashcardsPage(authedPage);
       await flashcards.goto();
@@ -613,14 +681,16 @@ test.describe('Flashcards', () => {
 
     test('creates a flashcard from the drawer and shows it in Manage', async ({
       authedPage,
+      request,
       serverInfo,
       diagnostics,
-    }) => {
+    }, testInfo) => {
       skipIfServerUnavailable(serverInfo);
+      await skipIfFlashcardsBackendUnavailable(request);
 
-      const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const front = `Drawer-created front ${runId}`;
-      const back = `Drawer-created back ${runId}`;
+      const seed = buildFlashcardsSeedRecord(flashcardsRunIdForTest(testInfo));
+      const front = seed.cardFront;
+      const back = seed.cardBack;
 
       flashcards = new FlashcardsPage(authedPage);
       await flashcards.gotoPath('/flashcards?tab=manage');
@@ -660,27 +730,29 @@ test.describe('Flashcards', () => {
 
     test('should allow selecting existing tag suggestions in create and edit drawers', async ({
       authedPage,
+      request,
       serverInfo,
       diagnostics,
-    }) => {
+    }, testInfo) => {
       test.setTimeout(120_000);
       skipIfServerUnavailable(serverInfo);
+      await skipIfFlashcardsBackendUnavailable(request);
 
-      const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const deck = await createFlashcardDeck(`E2E Flashcard Tags ${runId}`);
-      const createSuggestionTag = `bio-create-${runId}`;
-      const editSuggestionTag = `bio-edit-${runId}`;
+      const seed = buildFlashcardsSeedRecord(flashcardsRunIdForTest(testInfo));
+      const deck = await createFlashcardDeck(seed.deckName);
+      const createSuggestionTag = `${seed.runId}-bio-create`;
+      const editSuggestionTag = `${seed.runId}-bio-edit`;
 
       await createFlashcardCard({
         deckId: deck.id,
-        front: `Suggestion source ${runId}`,
+        front: `${seed.runId} suggestion source`,
         back: 'Seeds global tag suggestions',
         tags: [createSuggestionTag, editSuggestionTag],
       });
 
       const knownCard = await createFlashcardCard({
         deckId: deck.id,
-        front: `Known card ${runId}`,
+        front: `${seed.runId} known card`,
         back: 'Used for edit drawer verification',
       });
 
@@ -712,7 +784,7 @@ test.describe('Flashcards', () => {
       await createTagOption.click();
       await expect(flashcards.createTagPicker).toContainText(createSuggestionTag);
 
-      await authedPage.getByPlaceholder('Question or prompt...').fill(`Created via UI ${runId}`);
+      await authedPage.getByPlaceholder('Question or prompt...').fill(`${seed.runId} created via UI`);
       await authedPage.getByPlaceholder('Answer...').fill('Created tag suggestion answer');
 
       const createResponsePromise = authedPage.waitForResponse((response) => {
@@ -784,10 +856,12 @@ test.describe('Flashcards', () => {
   test.describe('Export', () => {
     test('should fire GET /api/v1/flashcards/export when Export button is clicked', async ({
       authedPage,
+      request,
       serverInfo,
       diagnostics,
     }) => {
       skipIfServerUnavailable(serverInfo);
+      await skipIfFlashcardsBackendUnavailable(request);
 
       flashcards = new FlashcardsPage(authedPage);
       await flashcards.goto();
@@ -880,15 +954,16 @@ test.describe('Flashcards', () => {
 
     test(
       'flashcards Phase 0 evidence: invalid delimited import does not show zero-card success or get stuck (TASK-537)',
-      async ({ authedPage, serverInfo }) => {
+      async ({ authedPage, request, serverInfo }) => {
         skipIfServerUnavailable(serverInfo);
+        await skipIfFlashcardsBackendUnavailable(request);
 
         flashcards = new FlashcardsPage(authedPage);
         await flashcards.gotoPath('/flashcards?tab=importExport');
         await flashcards.assertPageReady();
 
         await flashcards.openImportTask();
-        await flashcards.importTextarea.fill('Deck\tFront\tBack\nBroken\t\t');
+        await flashcards.importTextarea.fill(`Deck\tFront\tBack\n${FLASHCARDS_E2E_PREFIX}-invalid\t\t`);
         await flashcards.importButton.click();
 
         await expect(flashcards.importResultAlert).toBeVisible({ timeout: 20_000 });
@@ -946,14 +1021,16 @@ test.describe('Flashcards', () => {
   test.describe('Direct Handoffs', () => {
     test('flashcards Phase 0 evidence: quiz handoff preserves selected review deck context', async ({
       authedPage,
+      request,
       serverInfo,
       diagnostics,
-    }) => {
+    }, testInfo) => {
       test.setTimeout(90_000);
       skipIfServerUnavailable(serverInfo);
+      await skipIfFlashcardsBackendUnavailable(request);
 
-      const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const deck = await createFlashcardDeck(`E2E Quiz Handoff ${runId}`);
+      const seed = buildFlashcardsSeedRecord(flashcardsRunIdForTest(testInfo));
+      const deck = await createFlashcardDeck(seed.deckName);
 
       try {
         flashcards = new FlashcardsPage(authedPage);

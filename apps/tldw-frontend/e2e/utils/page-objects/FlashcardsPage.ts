@@ -9,9 +9,233 @@
  *   /api/v1/flashcards        (cards CRUD, review, generate, import, export)
  *   /api/v1/flashcards/decks  (deck CRUD)
  */
-import { type Page, type Locator, expect } from '@playwright/test';
+import { type APIRequestContext, type Page, type Locator, expect } from '@playwright/test';
 import { BasePage, type InteractiveElement } from './BasePage';
-import { waitForAppShell, waitForConnection, dismissConnectionModals } from '../helpers';
+import {
+  waitForAppShell,
+  waitForConnection,
+  dismissConnectionModals,
+  TEST_CONFIG,
+} from '../helpers';
+
+export const FLASHCARDS_E2E_PREFIX = 'codex-flashcards-ux';
+
+function hashFlashcardsRunSeed(seed: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+export function makeFlashcardsRunId(seed: string): string {
+  const normalizedSeed = seed
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+  return `${FLASHCARDS_E2E_PREFIX}-${normalizedSeed || 'run'}-${hashFlashcardsRunSeed(seed)}`;
+}
+
+export type FlashcardsSeedRecord = {
+  runId: string;
+  deckName: string;
+  cardFront: string;
+  cardBack: string;
+};
+
+export function buildFlashcardsSeedRecord(
+  runId: string
+): FlashcardsSeedRecord {
+  return {
+    runId,
+    deckName: `${runId}-deck`,
+    cardFront: `${runId} front`,
+    cardBack: `${runId} back`,
+  };
+}
+
+type FlashcardsCleanupDeck = {
+  id?: number;
+  name?: string;
+  version?: number;
+};
+
+type FlashcardsCleanupCard = {
+  uuid?: string;
+  front?: string | null;
+  back?: string | null;
+  tags?: string[] | null;
+  version?: number;
+};
+
+function flashcardsApiUrl(path: string): string {
+  return `${TEST_CONFIG.serverUrl.replace(/\/$/, '')}${path}`;
+}
+
+function flashcardsApiHeaders(): Record<string, string> {
+  return {
+    'X-API-Key': TEST_CONFIG.apiKey,
+  };
+}
+
+export async function assertFlashcardsBackendReady(
+  request: APIRequestContext
+): Promise<void> {
+  const response = await request.get(flashcardsApiUrl('/api/v1/health'), {
+    headers: flashcardsApiHeaders(),
+  });
+
+  if (!response.ok()) {
+    throw new Error(
+      `Flashcards backend preflight failed: ${response.status()} ${await response.text()}`
+    );
+  }
+
+  const flashcardsResponse = await request.get(
+    flashcardsApiUrl('/api/v1/flashcards/decks?limit=1&include_deleted=false'),
+    { headers: flashcardsApiHeaders() }
+  );
+
+  if (!flashcardsResponse.ok()) {
+    throw new Error(
+      `Flashcards API preflight failed: ${flashcardsResponse.status()} ${await flashcardsResponse.text()}`
+    );
+  }
+}
+
+const startsWithFlashcardsRunId = (value: unknown, runId: string): boolean =>
+  typeof value === 'string' && value.startsWith(runId);
+
+function warnFlashcardsCleanup(message: string, error?: unknown): void {
+  if (error === undefined) {
+    console.warn(`[flashcards:e2e:cleanup] ${message}`);
+    return;
+  }
+  console.warn(`[flashcards:e2e:cleanup] ${message}`, error);
+}
+
+async function cleanupFlashcardCard(
+  request: APIRequestContext,
+  card: FlashcardsCleanupCard
+): Promise<void> {
+  if (!card.uuid || typeof card.version !== 'number') return;
+
+  try {
+    const response = await request.delete(
+      flashcardsApiUrl(
+        `/api/v1/flashcards/${encodeURIComponent(card.uuid)}?expected_version=${card.version}`
+      ),
+      { headers: flashcardsApiHeaders() }
+    );
+
+    if (!response.ok() && response.status() !== 404 && response.status() !== 409) {
+      warnFlashcardsCleanup(
+        `Failed to cleanup flashcard card ${card.uuid}: ${response.status()} ${await response.text()}`
+      );
+    }
+  } catch (error) {
+    warnFlashcardsCleanup(`Failed to cleanup flashcard card ${card.uuid}`, error);
+  }
+}
+
+async function cleanupFlashcardDeck(
+  request: APIRequestContext,
+  deck: FlashcardsCleanupDeck
+): Promise<void> {
+  if (typeof deck.id !== 'number' || typeof deck.version !== 'number') return;
+
+  try {
+    const response = await request.delete(
+      flashcardsApiUrl(
+        `/api/v1/flashcards/decks/${deck.id}?expected_version=${deck.version}`
+      ),
+      { headers: flashcardsApiHeaders() }
+    );
+
+    if (!response.ok() && response.status() !== 404 && response.status() !== 409) {
+      warnFlashcardsCleanup(
+        `Failed to cleanup flashcard deck ${deck.id}: ${response.status()} ${await response.text()}`
+      );
+    }
+  } catch (error) {
+    warnFlashcardsCleanup(`Failed to cleanup flashcard deck ${deck.id}`, error);
+  }
+}
+
+export async function cleanupFlashcardsRunRecords(
+  request: APIRequestContext,
+  runId: string
+): Promise<void> {
+  try {
+    await assertFlashcardsBackendReady(request);
+  } catch (error) {
+    warnFlashcardsCleanup(`Skipping cleanup for ${runId}; backend preflight failed`, error);
+    return;
+  }
+
+  let cardResponse;
+  try {
+    cardResponse = await request.get(
+      flashcardsApiUrl(
+        `/api/v1/flashcards?q=${encodeURIComponent(runId)}&limit=1000&due_status=all`
+      ),
+      { headers: flashcardsApiHeaders() }
+    );
+  } catch (error) {
+    warnFlashcardsCleanup(`Failed to list flashcards for cleanup run ${runId}`, error);
+    return;
+  }
+
+  if (cardResponse.ok()) {
+    const payload = (await cardResponse.json().catch(() => ({}))) as {
+      items?: FlashcardsCleanupCard[];
+    };
+    const cards = Array.isArray(payload.items) ? payload.items : [];
+    await Promise.allSettled(
+      cards
+        .filter(
+          card =>
+            startsWithFlashcardsRunId(card.front, runId) ||
+            startsWithFlashcardsRunId(card.back, runId) ||
+            card.tags?.some(tag => startsWithFlashcardsRunId(tag, runId))
+        )
+        .map(card => cleanupFlashcardCard(request, card))
+    );
+  } else {
+    warnFlashcardsCleanup(
+      `Failed to list flashcards for cleanup run ${runId}: ${cardResponse.status()} ${await cardResponse.text()}`
+    );
+  }
+
+  let deckResponse;
+  try {
+    deckResponse = await request.get(
+      flashcardsApiUrl('/api/v1/flashcards/decks?limit=1000&include_deleted=false'),
+      { headers: flashcardsApiHeaders() }
+    );
+  } catch (error) {
+    warnFlashcardsCleanup(`Failed to list decks for cleanup run ${runId}`, error);
+    return;
+  }
+
+  if (!deckResponse.ok()) {
+    warnFlashcardsCleanup(
+      `Failed to list decks for cleanup run ${runId}: ${deckResponse.status()} ${await deckResponse.text()}`
+    );
+    return;
+  }
+
+  const decks = (await deckResponse.json().catch(() => [])) as FlashcardsCleanupDeck[];
+  if (!Array.isArray(decks)) return;
+
+  await Promise.allSettled(
+    decks
+      .filter(deck => startsWithFlashcardsRunId(deck.name, runId))
+      .map(deck => cleanupFlashcardDeck(request, deck))
+  );
+}
 
 export class FlashcardsPage extends BasePage {
   constructor(page: Page) {
