@@ -1805,7 +1805,10 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                         "Get started by creating cards, importing a deck, or generating flashcards from your content."
                     })}
                   </Text>
-                  <Space>
+                  <div
+                    className="flex flex-wrap justify-center gap-2"
+                    data-testid="flashcards-review-empty-actions"
+                  >
                     <Button
                       type="primary"
                       onClick={onNavigateToCreate}
@@ -1831,7 +1834,7 @@ export const ReviewTab: React.FC<ReviewTabProps> = ({
                         defaultValue: "Generate from text"
                       })}
                     </Button>
-                  </Space>
+                  </div>
                 </>
               ) : (
                 <>

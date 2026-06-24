@@ -70,7 +70,7 @@ export const ReviewProgress: React.FC<ReviewProgressProps> = ({
 
   return (
     <div
-      className="flex items-center gap-4 p-3 rounded-lg bg-surface2 mb-4"
+      className="mb-4 flex max-w-full flex-wrap items-center gap-2 rounded-lg bg-surface2 p-3 sm:gap-4"
       data-testid="flashcards-review-progress"
       role="status"
       aria-live="polite"
@@ -88,14 +88,14 @@ export const ReviewProgress: React.FC<ReviewProgressProps> = ({
           {t("option:flashcards.cardsRemaining", { defaultValue: "cards remaining" })}
         </span>
       </div>
-      <div className="h-8 w-px bg-border" aria-hidden="true" />
+      <div className="hidden h-8 w-px bg-border sm:block" aria-hidden="true" />
       <div className="text-sm text-text-muted" aria-hidden="true">
         <span className="font-medium text-text">{reviewedCount}</span>{" "}
         {t("option:flashcards.reviewed", { defaultValue: "reviewed" })}
       </div>
       {typeof availableNowCount === "number" && (
         <>
-          <div className="h-8 w-px bg-border" aria-hidden="true" />
+          <div className="hidden h-8 w-px bg-border sm:block" aria-hidden="true" />
           <div className="text-sm text-text-muted" aria-hidden="true">
             {t("option:flashcards.availableNowCount", {
               defaultValue: "Available now: {{count}}",
@@ -128,7 +128,7 @@ export const ReviewProgress: React.FC<ReviewProgressProps> = ({
       )}
       {typeof scheduledDueCount === "number" && (
         <>
-          <div className="h-8 w-px bg-border" aria-hidden="true" />
+          <div className="hidden h-8 w-px bg-border sm:block" aria-hidden="true" />
           <div className="text-sm text-text-muted" aria-hidden="true">
             {t("option:flashcards.dueQueueCount", {
               defaultValue: "due: {{count}}",
@@ -139,14 +139,21 @@ export const ReviewProgress: React.FC<ReviewProgressProps> = ({
       )}
       {remaining > 0 && (
         <>
-          <div className="h-8 w-px bg-border" aria-hidden="true" />
+          <div className="hidden h-8 w-px bg-border sm:block" aria-hidden="true" />
           <div className="text-sm text-text-muted" aria-hidden="true">
             ~{estimatedMinutes}{" "}
             {t("option:flashcards.minutesLeft", { defaultValue: "min left" })}
           </div>
         </>
       )}
-      {deckName && <Tag className="ml-auto">{deckName}</Tag>}
+      {deckName && (
+        <Tag
+          className="!m-0 min-w-0 max-w-full truncate sm:ml-auto"
+          data-testid="flashcards-review-progress-deck-name"
+        >
+          {deckName}
+        </Tag>
+      )}
     </div>
   )
 }

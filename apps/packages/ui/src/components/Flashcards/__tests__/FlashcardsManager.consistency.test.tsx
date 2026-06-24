@@ -428,6 +428,19 @@ describe("FlashcardsManager consistency standards", () => {
     expect(mocks.translationKeys).not.toContain("option:flashcards.tabImportExport")
   })
 
+  it("keeps tab actions in a responsive wrapping container", () => {
+    window.history.replaceState({}, "", "/flashcards")
+    render(<FlashcardsManager />)
+
+    expect(screen.getByTestId("flashcards-tabs")).toHaveClass("flashcards-responsive-tabs")
+    expect(screen.getByTestId("flashcards-tab-actions")).toHaveClass(
+      "flex",
+      "flex-wrap",
+      "min-w-0",
+      "max-w-full"
+    )
+  })
+
   it("defaults zero-deck users to Study and keeps Scheduler discoverable", () => {
     mocks.decks = []
     window.history.replaceState({}, "", "/flashcards")

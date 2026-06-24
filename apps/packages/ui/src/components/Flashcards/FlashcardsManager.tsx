@@ -355,10 +355,14 @@ export const FlashcardsManager: React.FC = () => {
     <div className="mx-auto max-w-6xl p-4">
       <Tabs
         data-testid="flashcards-tabs"
+        className="flashcards-responsive-tabs [&_.ant-tabs-extra-content]:min-w-0 [&_.ant-tabs-extra-content]:max-w-full [&_.ant-tabs-nav-list]:min-w-max [&_.ant-tabs-nav-wrap]:min-w-0 [&_.ant-tabs-nav-wrap]:overflow-x-auto"
         activeKey={effectiveActiveTab}
         onChange={handleTabChange}
         tabBarExtraContent={(
-          <Space size={4}>
+          <div
+            className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1 sm:flex-nowrap"
+            data-testid="flashcards-tab-actions"
+          >
             <Tooltip
               title={
                 canOpenQuizCta
@@ -399,7 +403,7 @@ export const FlashcardsManager: React.FC = () => {
                 })}
               />
             </Tooltip>
-          </Space>
+          </div>
         )}
         items={[
           {

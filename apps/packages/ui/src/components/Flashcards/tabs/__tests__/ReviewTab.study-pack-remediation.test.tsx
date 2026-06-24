@@ -323,6 +323,7 @@ describe("ReviewTab study-pack remediation", () => {
       />
     )
 
+    fireEvent.click(screen.getByTestId("flashcards-review-assistant-toggle"))
     fireEvent.click(screen.getByTestId("flashcards-study-assistant-toggle"))
 
     expect(
