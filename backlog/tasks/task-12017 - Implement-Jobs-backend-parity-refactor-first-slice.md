@@ -19,7 +19,7 @@ documentation:
 modified_files:
 - Docs/Design/JOBS_BACKEND_PARITY_INVENTORY_2026_06_24.md
 - backlog/tasks/task-12017 - Implement-Jobs-backend-parity-refactor-first-slice.md
-updated_date: 2026-06-24 21:47
+updated_date: 2026-06-24 21:57
 ---
 
 ## Description
@@ -36,6 +36,7 @@ Execute the first safety-net PR from the Jobs backend parity implementation plan
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 inventory created at Docs/Design/JOBS_BACKEND_PARITY_INVENTORY_2026_06_24.md. It classifies admin direct SQL, read-model SQL, service/worker operational SQL, and first-slice domain mapping coverage.
+Follow-up inventory update added the public admin stale-processing read-model boundary and clarified the Prompt Studio status dashboard first-slice action.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
