@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 import pytest
@@ -18,6 +19,19 @@ from tldw_Server_API.app.core.Evaluations.recipe_runs_service import (
 from tldw_Server_API.app.core.Evaluations.recipes.base import RecipeDefinition
 from tldw_Server_API.app.core.Evaluations.recipes.registry import RecipeRegistry
 from tldw_Server_API.app.core.Evaluations.recipes.dataset_snapshot import build_dataset_content_hash
+
+
+@pytest.fixture
+def recipe_run_config_encryption_key(monkeypatch):
+    """Configure a deterministic BYOK encryption key for recipe-run config tests."""
+
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+    monkeypatch.setenv("BYOK_ENCRYPTION_KEY", base64.b64encode(b"r" * 32).decode("ascii"))
+    monkeypatch.delenv("BYOK_SECONDARY_ENCRYPTION_KEY", raising=False)
+    reset_settings()
+    yield
+    reset_settings()
 
 
 def _inline_dataset() -> list[dict[str, Any]]:
@@ -1163,7 +1177,10 @@ def test_find_latest_completed_run_by_reuse_hash_does_not_refetch_full_record(tm
     assert record.status is RunStatus.COMPLETED
 
 
-def test_recipe_service_redacts_sensitive_run_config_in_public_metadata(tmp_path) -> None:
+def test_recipe_service_redacts_sensitive_run_config_in_public_metadata(
+    tmp_path,
+    recipe_run_config_encryption_key,
+) -> None:
     db, service, _ = _service(tmp_path)
     record = service.create_run(
         "rag_answer_quality",
@@ -1184,10 +1201,24 @@ def test_recipe_service_redacts_sensitive_run_config_in_public_metadata(tmp_path
 
     assert record.metadata["run_config"]["judge_config"]["api_key"] == "[REDACTED]"
     assert "run_config_internal" not in record.metadata
+    assert "run_config_encrypted" not in record.metadata
 
     raw_record = db.get_recipe_run(record.run_id)
     assert raw_record is not None
-    assert raw_record.metadata["run_config_internal"]["judge_config"]["api_key"] == "sk-judge-secret"
+    assert "run_config_internal" not in raw_record.metadata
+    assert "run_config_encrypted" in raw_record.metadata
+    raw_metadata = repr(raw_record.metadata)
+    assert "sk-judge-secret" not in raw_metadata
+    assert "sk-live-secret" not in raw_metadata
+    assert "ollama-local-secret" not in raw_metadata
+
+    from tldw_Server_API.app.core.Evaluations.recipe_runs_jobs_worker import (
+        _run_config_for_execution,
+    )
+
+    execution_config = _run_config_for_execution(raw_record)
+    assert execution_config["judge_config"]["api_key"] == "sk-judge-secret"
+    assert execution_config["candidate_api_keys"]["openai"] == "sk-live-secret"
 
 
 def test_recipe_service_get_run_rejects_other_users_run(tmp_path) -> None:

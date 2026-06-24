@@ -42,6 +42,7 @@ from tldw_Server_API.app.core.Evaluations.recipe_runs_jobs import (
 )
 from tldw_Server_API.app.core.Evaluations.recipe_runs_service import (
     RecipeRunsService,
+    decrypt_recipe_run_config_from_metadata,
     get_recipe_runs_service_for_user,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -113,7 +114,27 @@ def _parse_json_list(value: Any) -> list[Any]:
 
 def _run_config_for_execution(record: Any) -> dict[str, Any]:
     metadata = getattr(record, "metadata", {}) or {}
-    return dict(metadata.get("run_config_internal") or metadata.get("run_config") or {})
+    encrypted_config = decrypt_recipe_run_config_from_metadata(metadata)
+    if encrypted_config is not None:
+        return encrypted_config
+
+    run_config = dict(metadata.get("run_config") or {})
+    if _contains_redacted_value(run_config):
+        raise ValueError(
+            "Recipe run secret-bearing config is encrypted but cannot be decrypted. "
+            "Configure BYOK_ENCRYPTION_KEY for recipe worker execution."
+        )
+    return run_config
+
+
+def _contains_redacted_value(value: Any) -> bool:
+    if value == "[REDACTED]":
+        return True
+    if isinstance(value, dict):
+        return any(_contains_redacted_value(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_redacted_value(item) for item in value)
+    return False
 
 
 def _resolve_embeddings_dataset(record: Any, db: EvaluationsDatabase, user_id: str | None) -> list[dict[str, Any]]:
@@ -1195,7 +1216,6 @@ def handle_recipe_run_job(
             metadata=failed_metadata,
         )
         raise job_error from exc
-
     logger.info("Recipe run job completed: run_id={} job_id={}", run_id, job_id)
     return {
         "status": "completed",

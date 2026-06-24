@@ -54,6 +54,7 @@ from tldw_Server_API.app.core.Evaluations.run_state import (
     can_transition_run_status,
     normalize_run_status,
 )
+from tldw_Server_API.app.core.Evaluations.webhook_security import webhook_validator
 from tldw_Server_API.app.core.RAG.rag_custom_metrics import get_custom_metrics
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 from tldw_Server_API.app.core.RAG.rag_service.vector_stores import (
@@ -1237,7 +1238,8 @@ class EvaluationRunner:
         # Get from evaluation's dataset
         dataset_id = evaluation.get("dataset_id")
         if dataset_id:
-            dataset = self.db.get_dataset(dataset_id)
+            created_by = eval_config.get("created_by") or evaluation.get("created_by")
+            dataset = self.db.get_dataset(dataset_id, created_by=created_by)
             if dataset:
                 return dataset["samples"]
 
@@ -2356,7 +2358,16 @@ class EvaluationRunner:
                 "results_url": f"/api/v1/runs/{run_id}/results",
                 "summary": summary,
             }
-            resp = await afetch(method="POST", url=webhook_url, json=payload, timeout=10, retry=RetryPolicy(attempts=1))
+            delivery_url, host_headers = await webhook_validator.resolve_safe_delivery_target_async(webhook_url)
+            resp = await afetch(
+                method="POST",
+                url=delivery_url,
+                json=payload,
+                headers=host_headers,
+                timeout=10,
+                allow_redirects=False,
+                retry=RetryPolicy(attempts=1),
+            )
             if resp.status_code >= 400:
                 try:
                     resp.raise_for_status()
