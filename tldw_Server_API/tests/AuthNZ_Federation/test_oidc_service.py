@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -15,9 +16,9 @@ pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
 def _install_fetch_json_stub(
     monkeypatch: pytest.MonkeyPatch,
-    responses: dict[tuple[str, str], dict],
+    responses: dict[tuple[str, str], dict[str, Any]],
 ) -> None:
-    async def _fake_afetch_json(*, method: str, url: str, **kwargs) -> dict:  # noqa: ANN003
+    async def _fake_afetch_json(*, method: str, url: str, **kwargs: Any) -> dict[str, Any]:
         return dict(responses[(method.upper(), url)])
 
     monkeypatch.setattr(oidc_module, "afetch_json", _fake_afetch_json, raising=False)
@@ -169,6 +170,31 @@ async def test_build_authorization_request_rejects_unsafe_discovered_authorizati
 
 
 @pytest.mark.asyncio
+async def test_build_authorization_request_replaces_conflicting_authorization_query_params() -> None:
+    auth_request = await OIDCFederationService().build_authorization_request(
+        provider={
+            "issuer": "https://issuer.example.com",
+            "authorization_url": (
+                "https://issuer.example.com/oauth2/authorize?"
+                "prompt=login&client_id=stale-client&redirect_uri=https%3A%2F%2Fstale.example%2Fcallback&state=stale"
+            ),
+            "token_url": "https://issuer.example.com/oauth2/token",
+            "jwks_url": "https://issuer.example.com/.well-known/jwks.json",
+            "client_id": "client-123",
+        },
+        redirect_uri="http://testserver/callback",
+    )
+
+    query = parse_qs(urlparse(auth_request["auth_url"]).query)
+
+    assert query["prompt"] == ["login"]
+    assert query["client_id"] == ["client-123"]
+    assert query["redirect_uri"] == ["http://testserver/callback"]
+    assert query["state"] == [auth_request["state"]]
+    assert all(len(query[key]) == 1 for key in ("client_id", "redirect_uri", "state"))
+
+
+@pytest.mark.asyncio
 async def test_oidc_json_fetches_use_response_size_caps(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -190,7 +216,7 @@ async def test_oidc_json_fetches_use_response_size_caps(
     )
     seen_max_bytes: dict[tuple[str, str], int | None] = {}
 
-    async def _fake_afetch_json(*, method: str, url: str, **kwargs) -> dict:  # noqa: ANN003
+    async def _fake_afetch_json(*, method: str, url: str, **kwargs: Any) -> dict[str, Any]:
         key = (method.upper(), url)
         seen_max_bytes[key] = kwargs.get("max_bytes")
         if key == ("GET", discovery_url):

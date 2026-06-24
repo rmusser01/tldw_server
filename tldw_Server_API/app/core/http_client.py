@@ -873,6 +873,7 @@ def _raise_if_json_response_exceeds_limit(
     content: bytes,
     max_bytes: int | None,
 ) -> None:
+    """Raise when JSON response metadata or actual body exceeds the configured limit."""
     if max_bytes is None:
         return
 

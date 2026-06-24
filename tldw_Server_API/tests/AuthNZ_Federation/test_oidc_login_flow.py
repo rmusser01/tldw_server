@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from starlette.datastructures import URL
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     check_auth_rate_limit,
@@ -31,9 +32,9 @@ def test_build_federation_redirect_uri_uses_public_base_without_request_host(
 
     from tldw_Server_API.app.api.v1.endpoints.auth import _build_federation_redirect_uri
 
-    def _url_for(name: str, *, provider_slug: str):
+    def _url_for(name: str, *, provider_slug: str) -> URL:
         assert name == "federation_callback"
-        return SimpleNamespace(path=f"/api/v1/auth/federation/{provider_slug}/callback")
+        return URL(f"http://attacker.example/api/v1/auth/federation/{provider_slug}/callback")
 
     request = SimpleNamespace(url_for=_url_for)
 

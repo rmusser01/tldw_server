@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from importlib import import_module
 from typing import Any, Optional
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 #
 # 3rd-party imports
@@ -210,6 +210,7 @@ async def _resolve_federation_provider(
 
 
 def _build_federation_redirect_uri(request: Request, provider_slug: str) -> str:
+    """Build the callback redirect URI, replacing request authority with public base when configured."""
     callback_url = request.url_for("federation_callback", provider_slug=provider_slug)
     public_web_base_url = str(getattr(get_settings(), "PUBLIC_WEB_BASE_URL", "") or "").strip()
     if not public_web_base_url:
@@ -235,7 +236,21 @@ def _build_federation_redirect_uri(request: Request, provider_slug: str) -> str:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="PUBLIC_WEB_BASE_URL is invalid",
         )
-    return f"{public_web_base_url.rstrip('/')}{callback_url.path}"
+
+    callback_parsed = urlsplit(str(callback_url))
+    base_path = (parsed.path or "").rstrip("/")
+    callback_path = callback_parsed.path or "/"
+    if base_path and base_path != "/" and callback_path != base_path and not callback_path.startswith(f"{base_path}/"):
+        callback_path = f"{base_path}{callback_path}"
+    return urlunsplit(
+        (
+            parsed.scheme.lower(),
+            parsed.netloc,
+            callback_path,
+            callback_parsed.query,
+            "",
+        )
+    )
 
 
 def _get_email_service():
@@ -549,12 +564,18 @@ async def federation_callback(
             detail="OIDC state provider mismatch",
         )
 
-    redirect_uri = str(state_record.get("redirect_uri") or "").strip()
+    state_redirect_uri = str(state_record.get("redirect_uri") or "").strip()
     code_verifier = str(state_record.get("code_verifier") or "").strip()
-    if not redirect_uri or not code_verifier:
+    if not state_redirect_uri or not code_verifier:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="OIDC state is incomplete",
+        )
+    redirect_uri = _build_federation_redirect_uri(request, provider_slug)
+    if state_redirect_uri != redirect_uri:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="OIDC state redirect_uri mismatch",
         )
 
     oidc_service = get_oidc_federation_service_dep()

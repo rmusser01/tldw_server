@@ -59,6 +59,7 @@ OIDC_JWKS_MAX_BYTES = 256 * 1024
 
 
 def _validate_oidc_provider_url(field_name: str, value: Any) -> str | None:
+    """Validate and normalize trusted OIDC provider endpoint URLs."""
     text = _coerce_nonempty_string(value)
     if not text:
         return None
@@ -89,8 +90,10 @@ def _validate_oidc_provider_url(field_name: str, value: Any) -> str | None:
 
 
 def _append_query_params(url: str, params: dict[str, str]) -> str:
+    """Append query parameters while replacing any existing keys being set."""
     parsed = urlsplit(url)
     query_items = parse_qsl(parsed.query, keep_blank_values=True)
+    query_items = [item for item in query_items if item[0] not in params]
     query_items.extend(params.items())
     return urlunsplit(
         (
