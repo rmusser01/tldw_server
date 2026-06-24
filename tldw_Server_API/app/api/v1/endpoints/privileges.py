@@ -498,7 +498,7 @@ async def create_privilege_snapshot(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     generated_at = datetime.now(timezone.utc)
-    snapshot_id = f"snap-{generated_at.strftime('%Y%m%d-%H%M%S')}"
+    snapshot_id = f"snap-{uuid4()}"
     summary_model = PrivilegeSnapshotSummary(**summary_data)
     detail_items = service.build_snapshot_detail(
         snapshot_users,
