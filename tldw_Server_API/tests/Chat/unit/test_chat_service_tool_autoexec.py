@@ -112,6 +112,7 @@ async def _run_execute_non_stream_call(
     cleaned_args_overrides: dict[str, Any] | None = None,
     metrics: Any | None = None,
     provider_manager: Any | None = None,
+    queue_execution_enabled: bool = False,
     enable_provider_fallback: bool = False,
     refresh_provider_params=None,
     moderation_getter=None,
@@ -151,7 +152,7 @@ async def _run_execute_non_stream_call(
         audit_service=None,
         audit_context=None,
         client_id="client-1",
-        queue_execution_enabled=False,
+        queue_execution_enabled=queue_execution_enabled,
         enable_provider_fallback=enable_provider_fallback,
         llm_call_func=llm_call_func,
         refresh_provider_params=refresh_provider_params or (lambda *_args, **_kwargs: None),
@@ -369,6 +370,54 @@ async def test_tool_autoexec_rejects_multi_choice_before_provider_call(monkeypat
             },
         )
 
+    assert provider_called is False
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == {
+        "code": "unsupported_multi_choice_tool_autoexec",
+        "message": "Local tool auto-execution supports one assistant choice per request.",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_tool_autoexec_rejects_multi_choice_before_queue_admission(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider_called = False
+
+    def llm_call_func():
+        nonlocal provider_called
+        provider_called = True
+        return _build_llm_response_with_tool_calls()
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-1"
+
+    class _FakeActiveQueue:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.enqueued = False
+
+        async def enqueue(self, *_args, **_kwargs):
+            self.enqueued = True
+            return _build_llm_response_with_tool_calls()
+
+    fake_queue = _FakeActiveQueue()
+
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+    monkeypatch.setattr(chat_service, "get_request_queue", lambda: fake_queue)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _run_execute_non_stream_call(
+            llm_call_func=llm_call_func,
+            save_message_fn=save_message_fn,
+            queue_execution_enabled=True,
+            cleaned_args_overrides={
+                "n": 2,
+                "tools": [{"type": "function", "function": {"name": "notes.search", "parameters": {}}}],
+            },
+        )
+
+    assert fake_queue.enqueued is False
     assert provider_called is False
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == {
@@ -1665,11 +1714,13 @@ async def test_tool_autoexec_rejects_multi_choice_fallback_args_before_provider_
     monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
     monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_fallback_call)
 
+    provider_manager = _ProviderManagerStub("anthropic")
+
     with pytest.raises(HTTPException) as exc_info:
         await _run_execute_non_stream_call(
             llm_call_func=lambda: (_ for _ in ()).throw(chat_service.ChatAPIError("primary failed")),
             save_message_fn=save_message_fn,
-            provider_manager=_ProviderManagerStub("anthropic"),
+            provider_manager=provider_manager,
             enable_provider_fallback=True,
             refresh_provider_params=lambda fallback_provider: (
                 {
@@ -1691,6 +1742,7 @@ async def test_tool_autoexec_rejects_multi_choice_fallback_args_before_provider_
         "code": "unsupported_multi_choice_tool_autoexec",
         "message": "Local tool auto-execution supports one assistant choice per request.",
     }
+    assert provider_manager.failures == [("openai", "ChatAPIError")]
 
 
 @pytest.mark.asyncio
