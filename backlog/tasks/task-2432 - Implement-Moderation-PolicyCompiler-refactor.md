@@ -15,10 +15,10 @@ documentation:
 - Docs/superpowers/specs/2026-06-24-moderation-policy-compiler-refactor-design.md
 - Docs/superpowers/plans/2026-06-24-moderation-policy-compiler-refactor-implementation-plan.md
 modified_files:
-- tldw_Server_API/app/core/Moderation/policy_compiler.py
-- tldw_Server_API/tests/unit/test_moderation_policy_compiler.py
+- tldw_Server_API/app/core/Moderation/moderation_service.py
+- tldw_Server_API/tests/unit/test_moderation_blocklist_parse.py
 - backlog/tasks/task-2432 - Implement-Moderation-PolicyCompiler-refactor.md
-updated_date: 2026-06-24 21:15
+updated_date: 2026-06-24 21:31
 ---
 
 ## Description
@@ -43,6 +43,7 @@ Plan review follow-up made Task 6 regression tests deterministic by monkeypatchi
 Starting subagent-driven implementation. First dispatch target is Task 1 from the plan: add compiler dataclasses, base global compile path, and focused smoke tests.
 Task 1 complete and reviewed. Commit dd259bf1b added policy_compiler.py skeleton and test_moderation_policy_compiler.py smoke tests. Controller verification: focused pytest `2 passed, 16 warnings`; py_compile exit 0; git diff --check HEAD~1..HEAD exit 0. Independent spec review: compliant. Independent quality review: approved with no issues.
 Task 2 complete and reviewed. Commits 63e2bbd82 and a77c4694a moved blocklist parsing/rule compilation into PolicyCompiler and fixed review-found edge cases for empty parsed patterns and raw regex backslash preservation. Controller verification: focused pytest `6 passed, 24 warnings`; py_compile exit 0; git diff --check HEAD~2..HEAD exit 0. Spec re-review: compliant. Quality review: approved with no issues.
+Task 3 complete and reviewed. Commits c608d5d1d and 1518d154e wired ModerationService parser helpers to PolicyCompiler, preserved lint response assembly, derived service parser constants from compiler constants, and added direct wrapper-delegation coverage. Controller verification: blocklist parse suite `34 passed, 80 warnings`; py_compile exit 0; git diff --check exit 0. Spec re-review: compliant. Quality re-review: approved with no issues.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
