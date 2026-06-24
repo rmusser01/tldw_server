@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
@@ -54,6 +55,42 @@ def test_class_adapter_initializes_lazily_once_and_is_cached() -> None:
 
     second = registry.get_adapter("lazy")
     assert second is first
+    assert state["init_count"] == 1
+
+
+def test_sync_get_adapter_materializes_once_under_concurrency() -> None:
+    state = {"init_count": 0}
+    state_lock = threading.Lock()
+    start_event = threading.Event()
+    results: list[object | None] = []
+    errors: list[BaseException] = []
+
+    class _SlowAdapter:
+        def __init__(self) -> None:
+            with state_lock:
+                state["init_count"] += 1
+            time.sleep(0.05)
+
+    registry: ProviderRegistryBase[object] = ProviderRegistryBase()
+    registry.register_adapter("slow", _SlowAdapter)
+
+    def _worker() -> None:
+        try:
+            start_event.wait(timeout=1)
+            results.append(registry.get_adapter("slow"))
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_worker) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    start_event.set()
+    for thread in threads:
+        thread.join(timeout=2)
+
+    assert errors == []
+    assert len(results) == 6
+    assert len({id(adapter) for adapter in results}) == 1
     assert state["init_count"] == 1
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -79,3 +80,145 @@ async def test_async_stub_streams_and_scripts():
 
     eval_result = await client.eval(script, 1, "rate:key", 1, 60, time.time())
     assert isinstance(eval_result, list)
+
+
+@pytest.mark.asyncio
+async def test_async_factory_falls_back_when_redis_package_missing(monkeypatch):
+    monkeypatch.setattr(rf, "aioredis", None)
+    monkeypatch.setattr(rf, "_import_error", ImportError("redis missing"))
+
+    client = await rf.create_async_redis_client(
+        fallback_to_fake=True,
+        context="missing_package",
+    )
+
+    assert await client.ping() is True
+    await client.set("missing:async", "ok")
+    assert await client.get("missing:async") == "ok"
+
+
+@pytest.mark.asyncio
+async def test_async_factory_raises_when_redis_package_missing_and_fallback_disabled(monkeypatch):
+    monkeypatch.setattr(rf, "aioredis", None)
+    monkeypatch.setattr(rf, "_import_error", ImportError("redis missing"))
+
+    with pytest.raises(RuntimeError, match="redis\\[asyncio\\] is required"):
+        await rf.create_async_redis_client(
+            fallback_to_fake=False,
+            context="missing_package",
+        )
+
+
+def test_sync_factory_falls_back_when_redis_package_missing(monkeypatch):
+    monkeypatch.setattr(rf, "redis", None)
+    monkeypatch.setattr(rf, "_import_error", ImportError("redis missing"))
+
+    client = rf.create_sync_redis_client(
+        fallback_to_fake=True,
+        context="missing_package",
+    )
+
+    assert client.ping() is True
+    client.set("missing:sync", "ok")
+    assert client.get("missing:sync") == "ok"
+
+
+@pytest.mark.asyncio
+async def test_async_factory_redacts_redis_url_credentials_in_warning(monkeypatch):
+    class _FailingAsyncRedis:
+        async def ping(self):
+            raise OSError("connection refused")
+
+        async def close(self):
+            return None
+
+    captured: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def _capture_warning(*args, **kwargs):
+        captured.append((args, kwargs))
+
+    monkeypatch.setattr(
+        rf,
+        "aioredis",
+        SimpleNamespace(from_url=lambda *args, **kwargs: _FailingAsyncRedis()),
+    )
+    monkeypatch.setattr(rf.logger, "warning", _capture_warning)
+
+    client = await rf.create_async_redis_client(
+        preferred_url="redis://:super-secret@example.com:6379/0",
+        fallback_to_fake=True,
+        context="redaction",
+    )
+
+    assert await client.ping() is True
+    warning_payload = repr(captured)
+    assert "super-secret" not in warning_payload
+    assert "redis://***:***@example.com:6379/0" in warning_payload
+
+
+@pytest.mark.asyncio
+async def test_async_factory_redacts_username_without_password_in_warning(monkeypatch):
+    class _FailingAsyncRedis:
+        async def ping(self):
+            raise OSError("connection refused")
+
+        async def close(self):
+            return None
+
+    captured: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    monkeypatch.setattr(
+        rf,
+        "aioredis",
+        SimpleNamespace(from_url=lambda *args, **kwargs: _FailingAsyncRedis()),
+    )
+    monkeypatch.setattr(
+        rf.logger,
+        "warning",
+        lambda *args, **kwargs: captured.append((args, kwargs)),
+    )
+
+    client = await rf.create_async_redis_client(
+        preferred_url="redis://token-user@example.com:6379/0",
+        fallback_to_fake=True,
+        context="redaction",
+    )
+
+    assert await client.ping() is True
+    warning_payload = repr(captured)
+    assert "token-user" not in warning_payload
+    assert "redis://***@example.com:6379/0" in warning_payload
+
+
+@pytest.mark.asyncio
+async def test_async_factory_handles_malformed_redis_url_in_warning(monkeypatch):
+    class _FailingAsyncRedis:
+        async def ping(self):
+            raise OSError("connection refused")
+
+        async def close(self):
+            return None
+
+    captured: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    monkeypatch.setattr(
+        rf,
+        "aioredis",
+        SimpleNamespace(from_url=lambda *args, **kwargs: _FailingAsyncRedis()),
+    )
+    monkeypatch.setattr(
+        rf.logger,
+        "warning",
+        lambda *args, **kwargs: captured.append((args, kwargs)),
+    )
+
+    client = await rf.create_async_redis_client(
+        preferred_url="redis://:secret@example.com:not-a-port/0",
+        fallback_to_fake=True,
+        context="redaction",
+    )
+
+    assert await client.ping() is True
+    warning_payload = repr(captured)
+    assert "secret" not in warning_payload
+    assert "<invalid-redis-url>" in warning_payload

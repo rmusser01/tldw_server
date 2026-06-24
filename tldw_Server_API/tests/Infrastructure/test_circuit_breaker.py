@@ -792,6 +792,18 @@ class TestRegistry:
         with pytest.raises(CircuitBreakerOpenError):
             cb_b.call(_succeed)
 
+    def test_persistence_rejects_rolling_window_breakers(self, tmp_path):
+        reg = CircuitBreakerRegistry(
+            persistence_enabled=True,
+            db_path=str(tmp_path / "cb_registry_window.db"),
+        )
+
+        with pytest.raises(ValueError, match="rolling-window circuit breakers"):
+            reg.get_or_create(
+                "shared-window",
+                config=CircuitBreakerConfig(window_size=5),
+            )
+
     def test_registry_persistence_opt_in_enabled(self, tmp_path):
         db_path = tmp_path / "cb_registry_enabled.db"
         reg = CircuitBreakerRegistry(
