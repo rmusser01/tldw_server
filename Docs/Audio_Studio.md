@@ -63,11 +63,26 @@ Artifact metadata is listed through `GET /projects/{project_id}/artifacts`. Arti
 
 The media endpoint uses the normal Audio Studio auth path, including single-user API key mode and multi-user request scoping. It verifies the artifact belongs to the authenticated user's project before reading bytes. Storage paths must resolve under the user's configured Audio Studio output roots, URL-like paths are rejected, symlink escapes are rejected, and only allowlisted audio MIME/extension pairs are served.
 
-The endpoint supports browser playback and download through authenticated streaming responses, `Range` requests, `Accept-Ranges: bytes`, safe `Content-Disposition`, and `X-Content-Type-Options: nosniff`. The WebUI fetches small selected-clip artifacts as authenticated Blobs through the background proxy and renders only Blob URLs in `<audio>` and download links. It should not put raw `/api/v1/audio-studio/.../media` URLs into DOM attributes.
+The endpoint supports authenticated streaming responses, `Range` requests, `Accept-Ranges: bytes`, safe `Content-Disposition`, and `X-Content-Type-Options: nosniff`. The WebUI fetches small selected-clip artifacts as authenticated Blobs through the background proxy and renders only Blob URLs in `<audio>` and download links. It does not put raw `/api/v1/audio-studio/.../media` URLs into DOM attributes.
 
-Large artifact browser transport remains deferred to `TASK-2358`. Until that slice lands, the WebUI keeps a conservative client-side Blob guard and shows a compact unavailable state for oversized artifacts instead of downloading them into memory. Signed URLs are also deferred; the current MVP keeps artifact access behind the standard authenticated API.
+## Large Artifact Media Tickets
 
-The current regression coverage includes single-user API key access, per-user isolation, traversal and symlink rejection, duplicate relative-path disambiguation, range handling, download headers, WebUI Blob URL download/preview, no-artifact and missing-metadata states, fetch failures, and oversized no-fetch behavior.
+Audio Studio supports short-lived media tickets for native browser playback and downloads when a Blob fetch would be too large or when the artifact is not audio-previewable.
+
+- Mint endpoint: `POST /api/v1/audio-studio/projects/{project_id}/artifacts/{artifact_id}/tickets`
+- Redeem endpoint: `GET /api/v1/audio-studio/media-tickets/{token}`
+- Playback tickets are audio-only, reusable for 30 minutes, support `Range`, and use `Content-Disposition: inline`.
+- Download tickets are single-use, expire after 10 minutes, ignore browser `Range` headers, and force `Content-Disposition: attachment`.
+- The server stores only the SHA-256 hash of the ticket token.
+- Redemption repeats ownership, artifact existence, safe-root containment, symlink, file size, MIME, and extension checks.
+- Responses use `Cache-Control: private, no-store`, `Referrer-Policy: no-referrer`, and `X-Content-Type-Options: nosniff`.
+- `Cross-Origin-Resource-Policy: same-origin` is intentionally not set for ticket media responses until WebUI and extension/shared UI playback compatibility is verified.
+
+Application access logs redact media ticket tokens. Operators running a reverse proxy should also redact or suppress `/api/v1/audio-studio/media-tickets/{token}` in proxy access logs because the token is a short-lived bearer credential.
+
+The WebUI uses Blob transport for small known-size audio artifacts, playback tickets for oversized or unknown-size audio artifacts, and click-only download tickets for ticket-backed audio and non-audio artifacts. Download ticket URLs are held only long enough to click a temporary hidden anchor.
+
+The current regression coverage includes single-user API key access, per-user isolation, traversal and symlink rejection, duplicate relative-path disambiguation, range handling, download headers, WebUI Blob URL download/preview, media-ticket playback and download flows, no-artifact and missing-metadata states, fetch failures, stale async UI guards, and oversized or unknown-size ticket playback.
 
 ## Provider Adapters
 
