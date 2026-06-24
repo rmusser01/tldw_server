@@ -4,26 +4,17 @@ psycopg = pytest.importorskip("psycopg")
 pytestmark = pytest.mark.pg_jobs
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
+from tldw_Server_API.tests.Jobs.parity.scenarios import (
+    run_idempotent_create_preserves_original_request_ids_scenario,
+    run_idempotent_create_scope_scenario,
+)
 
 
-def test_idempotency_scoped_to_domain_queue_type_postgres(monkeypatch, jobs_pg_dsn):
+def test_idempotency_scoped_to_domain_queue_type_postgres(jobs_pg_dsn):
+    run_idempotent_create_scope_scenario(lambda: JobManager(None, backend="postgres", db_url=jobs_pg_dsn))
 
 
-    monkeypatch.setenv("JOBS_DB_URL", jobs_pg_dsn)
-    ensure_jobs_tables_pg(jobs_pg_dsn)
-    jm = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
-
-    key = "idem-key-123"
-    j1 = jm.create_job(domain="chatbooks", queue="default", job_type="export", payload={}, owner_user_id="1", idempotency_key=key)
-    j2 = jm.create_job(domain="chatbooks", queue="default", job_type="export", payload={}, owner_user_id="1", idempotency_key=key)
-    assert int(j1["id"]) == int(j2["id"])  # same group -> idempotent
-
-    j3 = jm.create_job(domain="chatbooks", queue="high", job_type="export", payload={}, owner_user_id="1", idempotency_key=key)
-    assert int(j3["id"]) != int(j1["id"])  # different queue -> distinct
-
-    j4 = jm.create_job(domain="chatbooks", queue="default", job_type="import", payload={}, owner_user_id="1", idempotency_key=key)
-    assert int(j4["id"]) != int(j1["id"])  # different type -> distinct
-
-    j5 = jm.create_job(domain="other", queue="default", job_type="export", payload={}, owner_user_id="2", idempotency_key=key)
-    assert int(j5["id"]) != int(j1["id"])  # different domain -> distinct
+def test_idempotent_create_preserves_original_request_id_postgres(jobs_pg_dsn):
+    run_idempotent_create_preserves_original_request_ids_scenario(
+        lambda: JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    )
