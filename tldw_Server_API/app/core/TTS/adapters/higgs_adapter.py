@@ -25,7 +25,7 @@ from ..tts_exceptions import (
 )
 from ..tts_resource_manager import get_resource_manager
 from ..tts_validation import validate_tts_request
-from ..utils import parse_bool
+from ..utils import parse_bool, run_tts_blocking_call
 
 #
 # Local Imports
@@ -437,7 +437,10 @@ class HiggsAdapter(TTSAdapter):
             if extras.get("min_new_tokens") is not None:
                 with contextlib.suppress(Exception):
                     gen_kwargs["min_new_tokens"] = int(extras.get("min_new_tokens"))
-            output: HiggsAudioResponse = self.serve_engine.generate(**gen_kwargs)
+            output: HiggsAudioResponse = await run_tts_blocking_call(
+                self.serve_engine.generate,
+                **gen_kwargs,
+            )
 
             # Convert numpy audio to tensor and back to numpy for processing
             audio_array = output.audio

@@ -100,6 +100,52 @@ def test_convert_audio_fallback_log_sanitizes_exception_text(monkeypatch):
     assert all(secret_detail not in message for message in logged_messages)
 
 
+def test_convert_audio_strict_failure_raises_without_returning_original(monkeypatch):
+    processor = audio_utils.AudioProcessor.__new__(audio_utils.AudioProcessor)
+    processor.ffmpeg_available = False
+    processor.librosa_available = True
+    audio_bytes = b"original audio"
+
+    def fail_load(*args, **kwargs):
+        raise RuntimeError("decode failed")
+
+    fake_librosa = types.SimpleNamespace(load=fail_load)
+    fake_soundfile = types.SimpleNamespace(write=lambda *args, **kwargs: None)
+    monkeypatch.setitem(sys.modules, "librosa", fake_librosa)
+    monkeypatch.setitem(sys.modules, "soundfile", fake_soundfile)
+
+    with pytest.raises(RuntimeError, match="Audio conversion failed"):
+        processor.convert_audio(audio_bytes, strict=True)
+
+
+def test_process_voice_reference_uses_strict_conversion(monkeypatch):
+    seen: dict[str, object] = {}
+
+    class FailingConversionProcessor:
+        PROVIDER_REQUIREMENTS = {"higgs": {"sample_rate": 24000}}
+
+        def decode_base64_audio(self, _base64_audio):
+            return b"raw-reference"
+
+        def convert_audio(self, audio_bytes, **kwargs):
+            seen["audio_bytes"] = audio_bytes
+            seen["strict"] = kwargs.get("strict")
+            raise RuntimeError("conversion failed")
+
+    monkeypatch.setattr(audio_utils, "AudioProcessor", FailingConversionProcessor)
+
+    processed, error = audio_utils.process_voice_reference(
+        "cmF3LXJlZmVyZW5jZQ==",
+        "higgs",
+        validate=False,
+        convert=True,
+    )
+
+    assert processed is None
+    assert "conversion failed" in error
+    assert seen == {"audio_bytes": b"raw-reference", "strict": True}
+
+
 def test_check_ffmpeg_fallback_log_sanitizes_exception_text(monkeypatch):
     processor = audio_utils.AudioProcessor.__new__(audio_utils.AudioProcessor)
     processor.ffmpeg_path = None

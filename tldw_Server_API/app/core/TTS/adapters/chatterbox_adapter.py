@@ -30,7 +30,7 @@ from loguru import logger
 from ..tts_exceptions import (
     TTSModelLoadError,
 )
-from ..utils import parse_bool
+from ..utils import parse_bool, run_tts_blocking_call
 from ..chatterbox_catalog import (
     CHATTERBOX_LANGUAGE_CODES,
     ChatterboxModelFamily,
@@ -1073,18 +1073,20 @@ class ChatterboxAdapter(TTSAdapter):
             self._prepare_bf16_runtime(model)
 
             # Generate full waveform tensor (1, N)
-            with self._bf16_autocast_context():
-                if family is ChatterboxModelFamily.MULTILINGUAL:
-                    audio_tensor = model.generate(
+            def _generate_audio_tensor():
+                with self._bf16_autocast_context():
+                    if family is ChatterboxModelFamily.MULTILINGUAL:
+                        return model.generate(
+                            self.preprocess_text(request.text),
+                            language_id=language_id,
+                            **filtered_kwargs,
+                        )
+                    return model.generate(
                         self.preprocess_text(request.text),
-                        language_id=language_id,
                         **filtered_kwargs,
                     )
-                else:
-                    audio_tensor = model.generate(
-                        self.preprocess_text(request.text),
-                        **filtered_kwargs,
-                    )
+
+            audio_tensor = await run_tts_blocking_call(_generate_audio_tensor)
             # Stream using shared waveform streamer
             from tldw_Server_API.app.core.TTS.waveform_streamer import stream_encoded_waveform
             async for chunk in stream_encoded_waveform(
@@ -1176,7 +1178,8 @@ class ChatterboxAdapter(TTSAdapter):
         """Generate a VC waveform and stream encoded audio bytes."""
         model = await self._get_vc_model()
         self.sample_rate = int(getattr(model, "sr", 24000))
-        audio_tensor = model.generate(
+        audio_tensor = await run_tts_blocking_call(
+            model.generate,
             audio=source_audio_path,
             target_voice_path=target_voice_path,
         )

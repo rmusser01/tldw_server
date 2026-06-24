@@ -25,7 +25,7 @@ from ..tts_exceptions import (
 )
 from ..tts_resource_manager import get_resource_manager
 from ..tts_validation import validate_tts_request
-from ..utils import parse_bool
+from ..utils import parse_bool, run_tts_blocking_call
 
 #
 # Local Imports
@@ -431,8 +431,11 @@ class DiaAdapter(TTSAdapter):
                     "Dia generation requires torch, which is unavailable",
                     provider=self.provider_name,
                 )
-            with torch_mod.no_grad():
-                outputs = self.model.generate(**inputs, **gen_kwargs)
+            def _generate_outputs():
+                with torch_mod.no_grad():
+                    return self.model.generate(**inputs, **gen_kwargs)
+
+            outputs = await run_tts_blocking_call(_generate_outputs)
 
             # Decode to audio waveform
             audio_array = self._decode_dia_output(outputs[0])

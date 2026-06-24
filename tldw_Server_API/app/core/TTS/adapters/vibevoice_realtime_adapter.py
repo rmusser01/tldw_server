@@ -7,11 +7,13 @@ import contextlib
 import json
 import os
 from typing import Any, Optional
+from urllib.parse import urlparse, urlunparse
 
 #
 # Third-party Imports
 from loguru import logger
 
+from ...Security.egress import evaluate_url_policy
 from ..realtime_session import RealtimeSessionConfig, RealtimeTTSSession
 from ..tts_exceptions import (
     TTSProviderInitializationError,
@@ -36,6 +38,38 @@ from .base import (
 #######################################################################################################################
 #
 # VibeVoice Realtime Adapter (Skeleton)
+
+
+def _websocket_url_to_policy_url(ws_url: str) -> str:
+    try:
+        parsed = urlparse(ws_url)
+    except (TypeError, ValueError) as exc:
+        raise TTSProviderInitializationError(
+            "Invalid VibeVoice Realtime websocket URL",
+            provider=VibeVoiceRealtimeAdapter.PROVIDER_KEY,
+            details={"error": str(exc)},
+        ) from exc
+
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in {"ws", "wss"}:
+        raise TTSProviderInitializationError(
+            "VibeVoice Realtime websocket URL must use ws:// or wss://",
+            provider=VibeVoiceRealtimeAdapter.PROVIDER_KEY,
+            details={"scheme": scheme or None},
+        )
+    policy_scheme = "https" if scheme == "wss" else "http"
+    return urlunparse(parsed._replace(scheme=policy_scheme))
+
+
+def _validate_websocket_egress(ws_url: str) -> None:
+    policy_url = _websocket_url_to_policy_url(ws_url)
+    result = evaluate_url_policy(policy_url)
+    if not result.allowed:
+        raise TTSProviderInitializationError(
+            f"VibeVoice Realtime websocket URL denied by egress policy: {result.reason}",
+            provider=VibeVoiceRealtimeAdapter.PROVIDER_KEY,
+            details={"reason": result.reason, "url": policy_url},
+        )
 
 
 class VibeVoiceRealtimeAdapter(TTSAdapter):
@@ -212,6 +246,8 @@ class _VibeVoiceRealtimeWebSocketSession(RealtimeTTSSession):
         return self._error
 
     async def start(self) -> None:
+        _validate_websocket_egress(self._ws_url)
+
         try:
             import aiohttp
         except Exception as exc:
@@ -286,7 +322,9 @@ class _VibeVoiceRealtimeWebSocketSession(RealtimeTTSSession):
                 elif msg.type == aiohttp.WSMsgType.TEXT:
                     try:
                         data = json.loads(msg.data)
-                    except Exception:
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        data = None
+                    if not isinstance(data, dict):
                         continue
                     msg_type = str(data.get("type") or "").lower()
                     if msg_type == "error":

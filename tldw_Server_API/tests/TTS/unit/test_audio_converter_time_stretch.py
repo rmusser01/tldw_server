@@ -42,6 +42,46 @@ async def test_time_stretch_builds_ffmpeg_command(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_convert_format_kills_subprocess_on_timeout(monkeypatch, tmp_path):
+    class HangingProcess:
+        def __init__(self):
+            self.returncode = None
+            self.killed = False
+
+        async def communicate(self):
+            await ac_mod.asyncio.sleep(5)
+            return b"", b""
+
+        def kill(self):
+            self.killed = True
+            self.returncode = -9
+
+    process = HangingProcess()
+
+    async def fake_exec(*_cmd, **_kwargs):
+        return process
+
+    monkeypatch.setattr(ac_mod.asyncio, "create_subprocess_exec", fake_exec)
+
+    in_path = tmp_path / "in.wav"
+    in_path.write_bytes(b"audio")
+    out_path = tmp_path / "out.mp3"
+
+    ok = await ac_mod.asyncio.wait_for(
+        ac_mod.AudioConverter.convert_format(
+            in_path,
+            out_path,
+            "mp3",
+            timeout_seconds=0.01,
+        ),
+        timeout=0.2,
+    )
+
+    assert ok is False
+    assert process.killed is True
+
+
+@pytest.mark.asyncio
 async def test_time_stretch_rejects_non_positive_ratio(tmp_path):
     in_path = tmp_path / "in.wav"
     in_path.write_bytes(b"audio")

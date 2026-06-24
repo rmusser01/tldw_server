@@ -8,6 +8,7 @@ Currently includes:
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -16,6 +17,7 @@ import os
 import platform
 import re
 import unicodedata
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from tldw_Server_API.app.core.testing import is_truthy
@@ -59,6 +61,22 @@ def parse_bool(value: Any, default: bool | None = False) -> bool:
         return bool(default) if default is not None else False
     # Fallback for other types
     return bool(value) if default is None else bool(default)
+
+
+async def run_tts_blocking_call(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+    """Run a synchronous local TTS runtime call without blocking the event loop."""
+    return await asyncio.to_thread(func, *args, **kwargs)
+
+
+async def run_tts_blocking_next(iterator: Iterator[Any], sentinel: Any) -> Any:
+    """Fetch the next item from a synchronous iterator without blocking the event loop."""
+    def _next_item() -> Any:
+        try:
+            return next(iterator)
+        except StopIteration:
+            return sentinel
+
+    return await asyncio.to_thread(_next_item)
 
 
 def estimate_max_new_tokens(

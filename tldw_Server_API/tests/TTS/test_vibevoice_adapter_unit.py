@@ -3,6 +3,7 @@ import os
 import pytest
 
 from tldw_Server_API.app.core.TTS.adapters.vibevoice_adapter import VibeVoiceAdapter
+from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSRequest
 
 
 @pytest.mark.unit
@@ -105,3 +106,47 @@ def test_request_overrides_default_for_same_speaker():
     )
 
     assert res == ["/override/one.wav"]
+
+
+@pytest.mark.unit
+def test_vibevoice_adapter_initializes_model_state_lock():
+    adapter = VibeVoiceAdapter({})
+
+    assert isinstance(adapter._model_state_lock, asyncio.Lock)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_generate_complete_forwards_generation_config(monkeypatch):
+    adapter = VibeVoiceAdapter({})
+    request = TTSRequest(text="Speaker 1: hello", voice="speaker_1", format=AudioFormat.WAV)
+    generation_config = {"cfg_scale": 1.7, "speakers_to_voices": {"1": "alice"}}
+    seen: dict[str, object] = {}
+
+    async def fake_stream(
+        request_arg,
+        voice_arg,
+        speaker_id_arg,
+        voice_reference_path=None,
+        gen_config=None,
+    ):
+        seen["request"] = request_arg
+        seen["voice"] = voice_arg
+        seen["speaker_id"] = speaker_id_arg
+        seen["voice_reference_path"] = voice_reference_path
+        seen["gen_config"] = gen_config
+        yield b"chunk"
+
+    monkeypatch.setattr(adapter, "_stream_audio_vibevoice", fake_stream)
+
+    audio = await adapter._generate_complete_vibevoice(
+        request,
+        "speaker_1",
+        1,
+        "/tmp/reference.wav",
+        generation_config,
+    )
+
+    assert audio == b"chunk"
+    assert seen["gen_config"] is generation_config
+    assert seen["voice_reference_path"] == "/tmp/reference.wav"
