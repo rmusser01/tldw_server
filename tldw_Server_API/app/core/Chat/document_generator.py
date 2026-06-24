@@ -22,8 +22,10 @@ Key Adaptations from Single-User:
 - Background job support for long generations
 """
 
+import asyncio
 import base64
 import json
+import sqlite3
 import time
 from datetime import datetime
 from enum import Enum
@@ -48,6 +50,7 @@ _DOCGEN_NONCRITICAL_EXCEPTIONS = (
     ConnectionError,
     TimeoutError,
     json.JSONDecodeError,
+    sqlite3.Error,
     ChatAPIError,
     CharactersRAGDBError,
 )
@@ -439,6 +442,54 @@ class DocumentGeneratorService:
         self._prompt_cache[document_type] = default_config
         return default_config
 
+    def _save_prompt_rows(self, prompt_rows: list[tuple[DocumentType, str, str, float, int]]) -> bool:
+        """Replace prompt rows for document types in one transaction."""
+        if not prompt_rows:
+            return True
+
+        try:
+            with self.db.get_connection() as conn:
+                try:
+                    for document_type, *_ in prompt_rows:
+                        conn.execute(
+                            "DELETE FROM user_prompts WHERE document_type = ?",
+                            (document_type.value,),
+                        )
+
+                    conn.executemany(
+                        """
+                        INSERT INTO user_prompts
+                        (document_type, system_prompt, user_prompt, temperature, max_tokens, is_active)
+                        VALUES (?, ?, ?, ?, ?, 1)
+                        """,
+                        [
+                            (
+                                document_type.value,
+                                system_prompt,
+                                user_prompt,
+                                temperature,
+                                max_tokens,
+                            )
+                            for document_type, system_prompt, user_prompt, temperature, max_tokens
+                            in prompt_rows
+                        ],
+                    )
+                    conn.commit()
+                except _DOCGEN_NONCRITICAL_EXCEPTIONS:
+                    try:
+                        conn.rollback()
+                    except _DOCGEN_NONCRITICAL_EXCEPTIONS as rollback_err:
+                        logger.debug(f"Prompt config rollback failed: {rollback_err}")
+                    raise
+
+            for document_type, *_ in prompt_rows:
+                self._prompt_cache.pop(document_type, None)
+            return True
+
+        except _DOCGEN_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"Failed to save prompt config rows: {e}")
+            return False
+
     def save_user_prompt_config(
         self,
         document_type: DocumentType,
@@ -461,30 +512,23 @@ class DocumentGeneratorService:
             True if saved successfully
         """
         try:
-            with self.db.get_connection() as conn:
-                # Deactivate existing active prompt
-                conn.execute(
-                    "UPDATE user_prompts SET is_active = 0 WHERE document_type = ? AND is_active = 1",
-                    (document_type.value,)
+            normalized_doc_type = (
+                document_type
+                if isinstance(document_type, DocumentType)
+                else DocumentType(str(document_type))
+            )
+            saved = self._save_prompt_rows([
+                (
+                    normalized_doc_type,
+                    str(system_prompt),
+                    str(user_prompt),
+                    float(temperature),
+                    int(max_tokens),
                 )
-
-                # Insert new prompt
-                conn.execute(
-                    """
-                    INSERT INTO user_prompts
-                    (document_type, system_prompt, user_prompt, temperature, max_tokens, is_active)
-                    VALUES (?, ?, ?, ?, ?, 1)
-                    """,
-                    (document_type.value, system_prompt, user_prompt, temperature, max_tokens)
-                )
-                conn.commit()
-
-                # Clear cache
-                if document_type in self._prompt_cache:
-                    del self._prompt_cache[document_type]
-
-                logger.info(f"Saved user prompt config for {document_type.value}")
-                return True
+            ])
+            if saved:
+                logger.info(f"Saved user prompt config for {normalized_doc_type.value}")
+            return saved
 
         except _DOCGEN_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to save user prompt config: {e}")
@@ -1227,22 +1271,21 @@ class DocumentGeneratorService:
             True if saved successfully
         """
         try:
+            prompt_rows_by_type: dict[DocumentType, tuple[DocumentType, str, str, float, int]] = {}
             for doc_type, prompt in config.items():
                 normalized_doc_type = doc_type if isinstance(doc_type, DocumentType) else DocumentType(str(doc_type))
                 default_prompt = self.DEFAULT_PROMPTS.get(
                     normalized_doc_type,
                     self.DEFAULT_PROMPTS[DocumentType.SUMMARY],
                 )
-                saved = self.save_user_prompt_config(
-                    document_type=normalized_doc_type,
-                    system_prompt=str(default_prompt["system"]),
-                    user_prompt=str(prompt),
-                    temperature=float(default_prompt.get("temperature", 0.7)),
-                    max_tokens=int(default_prompt.get("max_tokens", 2000)),
+                prompt_rows_by_type[normalized_doc_type] = (
+                    normalized_doc_type,
+                    str(default_prompt["system"]),
+                    str(prompt),
+                    float(default_prompt.get("temperature", 0.7)),
+                    int(default_prompt.get("max_tokens", 2000)),
                 )
-                if not saved:
-                    return False
-            return True
+            return self._save_prompt_rows(list(prompt_rows_by_type.values()))
 
         except _DOCGEN_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error saving prompt config: {e}")
@@ -1269,7 +1312,10 @@ class DocumentGeneratorService:
                 )
                 row = cursor.fetchone()
                 if row:
-                    return row["user_prompt"] if "user_prompt" in row.keys() else row[0]
+                    try:
+                        return row["user_prompt"]
+                    except (AttributeError, TypeError, KeyError, IndexError):
+                        return row[0]
                 return None
 
         except _DOCGEN_NONCRITICAL_EXCEPTIONS as e:
@@ -1307,7 +1353,8 @@ class DocumentGeneratorService:
         results = []
         for doc_type in document_types:
             normalized_doc_type = doc_type if isinstance(doc_type, DocumentType) else DocumentType(str(doc_type))
-            result = self.generate_document(
+            result = await asyncio.to_thread(
+                self.generate_document,
                 conversation_id,
                 normalized_doc_type,
                 str(effective_provider),

@@ -191,11 +191,11 @@ def is_single_user_mode() -> bool:
             return env_mode == "single_user"
         cp = _cfg()
         if cp and cp.has_section("AuthNZ"):
-            raw_mode = cp.get("AuthNZ", "auth_mode", fallback="single_user")
+            raw_mode = cp.get("AuthNZ", "auth_mode", fallback="multi_user")
             return str(raw_mode).strip().lower() == "single_user"
     except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS:
-        return True
-    return True
+        return False
+    return False
 
 
 def _should_enforce_command_rbac(spec: "CommandSpec") -> bool:

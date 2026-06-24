@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
@@ -55,39 +56,47 @@ class _ActionModeration:
         output_enabled = True
         output_action = "block"
 
-        def to_dict(self):
+        def to_dict(self) -> dict[str, object]:
             return {"enabled": True, "output_enabled": True, "output_action": self.output_action}
 
-    def __init__(self, action: str):
+    def __init__(self, action: str) -> None:
         self.action = action
         self._policy = self._Policy()
         self._policy.output_action = action
 
-    def get_effective_policy(self, *_args, **_kwargs):
+    def get_effective_policy(self, *_args: Any, **_kwargs: Any) -> "_ActionModeration._Policy":
         return self._policy
 
-    def evaluate_action_with_match(self, *_args, **_kwargs):
+    def evaluate_action_with_match(
+        self,
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> tuple[str, str | None, str, str, tuple[int, int]]:
         redacted = "redacted assistant output" if self.action == "redact" else None
         return (self.action, redacted, "secret", "pii", (0, 6))
 
-    def build_sanitized_snippet(self, *_args, **_kwargs):
+    def build_sanitized_snippet(self, *_args: Any, **_kwargs: Any) -> str:
         return "sanitized secret"
 
-    def check_text(self, *_args, **_kwargs):
+    def check_text(self, *_args: Any, **_kwargs: Any) -> tuple[bool, str]:
         return (True, "sanitized secret")
 
-    def redact_text(self, *_args, **_kwargs):
+    def redact_text(self, *_args: Any, **_kwargs: Any) -> str:
         return "redacted assistant output"
 
 
-async def _run_non_stream_moderation_capture_case(monkeypatch, action: str, captured=None):
+async def _run_non_stream_moderation_capture_case(
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+    captured: list[dict[str, Any]] | None = None,
+) -> tuple[Any, list[dict[str, Any]]]:
     if captured is None:
         captured = []
 
-    async def fake_log_llm_usage(**_kwargs):
+    async def fake_log_llm_usage(**_kwargs: Any) -> None:
         return None
 
-    async def fake_capture(**kwargs):
+    async def fake_capture(**kwargs: Any) -> None:
         captured.append(kwargs)
 
     monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
@@ -95,7 +104,7 @@ async def _run_non_stream_moderation_capture_case(monkeypatch, action: str, capt
     monkeypatch.setattr(chat_service, "is_moderation_review_capture_enabled", lambda: True)
     monkeypatch.setattr(chat_service, "_capture_moderation_review_item_safely_async", fake_capture)
 
-    def llm_call_func():
+    def llm_call_func() -> dict[str, Any]:
         return {
             "choices": [
                 {
@@ -108,7 +117,7 @@ async def _run_non_stream_moderation_capture_case(monkeypatch, action: str, capt
             ]
         }
 
-    async def save_message_fn(*_args, **_kwargs):
+    async def save_message_fn(*_args: Any, **_kwargs: Any) -> None:
         return None
 
     request = SimpleNamespace(

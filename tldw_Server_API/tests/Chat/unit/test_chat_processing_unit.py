@@ -90,7 +90,7 @@ class TestChatDictionaryUtilities:
         assert [entry.key_raw for entry in ordered] == ["alpha", "beta", "gamma"]
 
     @pytest.mark.unit
-    def test_chat_dictionary_rejects_unsafe_regex_key_at_runtime(self):
+    def test_chat_dictionary_rejects_unsafe_regex_key_at_runtime(self) -> None:
         with pytest.raises(ValueError, match="Unsafe chat dictionary regex"):
             ChatDictionary(key="/^(a+)+$/", content="unsafe")
 # ========================================================================

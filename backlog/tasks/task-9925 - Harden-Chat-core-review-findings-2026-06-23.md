@@ -4,7 +4,7 @@ title: Harden Chat core review findings 2026-06-23
 status: Done
 assignee: []
 created_date: '2026-06-23 18:46'
-updated_date: '2026-06-23 18:53'
+updated_date: '2026-06-24 01:03'
 labels:
   - chat
   - security
@@ -32,20 +32,23 @@ Validate and address current-code Chat module review findings for streaming mode
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Final verification after the last code change:
-- pytest --confcutdir=tldw_Server_API/tests/Chat/unit tldw_Server_API/tests/Chat/unit/test_streaming_utils.py -q -> 34 passed, 1 skipped
-- pytest --confcutdir=tldw_Server_API/tests/Chat_NEW/unit tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py -q -> 22 passed
-- pytest --confcutdir=tldw_Server_API/tests/Chat/unit tldw_Server_API/tests/Chat/unit/test_chat_processing_unit.py tldw_Server_API/tests/Chat/unit/test_chat_service_content.py -q -> 25 passed
-- pytest --confcutdir=tldw_Server_API/tests/Chat/unit tldw_Server_API/tests/Chat/unit/test_document_generator.py -k "save_custom_prompt_config or get_prompt_config or bulk_generation" -q -> 3 passed
+PR #2437 follow-up:
+- Rebased codex/chat-core-review-fixes-9925 onto latest fetched origin/dev.
+- Addressed validated review comments: command-router ambiguous AuthNZ mode now fails closed; get_prompt_config handles tuple rows; legacy prompt saves validate before writing and replace affected prompt rows atomically; bulk_generate offloads synchronous generation via asyncio.to_thread; explicit bulk_generate overrides are covered; newly added test helpers/cases have type hints.
+Verification after review fixes:
+- pytest --confcutdir=tldw_Server_API/tests/Chat_NEW/unit tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py -q -> 23 passed
+- pytest --confcutdir=tldw_Server_API/tests/Chat/unit tldw_Server_API/tests/Chat/unit/test_document_generator.py -k "save_custom_prompt_config or get_prompt_config or bulk_generation" -q -> 6 passed
+- pytest --confcutdir=tldw_Server_API/tests/Chat/unit tldw_Server_API/tests/Chat/unit/test_streaming_utils.py tldw_Server_API/tests/Chat/unit/test_chat_processing_unit.py tldw_Server_API/tests/Chat/unit/test_chat_service_content.py -q -> 59 passed, 1 skipped
+- git diff --check -> clean
 - python compile check for touched production/test files -> exit 0, no warnings
 - bandit touched production files -> 0 findings
-Known skip/blocker: running selected Chat tests without confcutdir can import full app via Chat parent fixtures and currently hit an unrelated Collections.utils truncate_text_hard import issue.
+Known skip/blocker: broader Chat collection without confcutdir can import full app via Chat parent fixtures and has previously hit an unrelated Collections.utils truncate_text_hard import issue.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed validated Chat core review findings: stream transforms fail closed, multi-user RBAC-marked commands enforce permissions by default, ChatDictionary rejects unsafe regex keys at runtime, non-stream output moderation review capture is reachable for block/redact/warn, document generator legacy prompt/bulk methods use current user_prompts and LLM config paths, the touched-scope Bandit B311 warning was removed with secrets.randbelow, and the stream finalizer no longer emits Python return-in-finally warnings. Broad chat_service decomposition remains a residual architecture risk outside this targeted defect patch.
+Fixed validated Chat core review findings and PR #2437 review comments: stream transforms fail closed, RBAC-marked commands enforce permissions by default and fail closed when AuthNZ mode is ambiguous, ChatDictionary rejects unsafe regex keys, non-stream output moderation review capture is reachable, legacy document prompt APIs use current user_prompts storage with atomic repeated saves and tuple-row-safe reads, and async bulk_generate no longer blocks the event loop while preserving override support. Broad chat_service decomposition remains a residual architecture risk outside this targeted defect patch.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

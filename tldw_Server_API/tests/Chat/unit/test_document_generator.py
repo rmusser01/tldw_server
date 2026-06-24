@@ -17,6 +17,7 @@ import os
 import shutil
 from unittest.mock import patch
 from datetime import datetime
+from typing import Any
 from uuid import uuid4
 
 from tldw_Server_API.app.core.Chat.document_generator import DocumentGeneratorService, DocumentType
@@ -354,7 +355,11 @@ class TestDocumentGeneratorService:
         if not hasattr(service, 'delete_document'):
             pytest.skip("delete_document not implemented")
 
-    def test_save_custom_prompt_config(self, service, real_db):
+    def test_save_custom_prompt_config(
+        self,
+        service: DocumentGeneratorService,
+        real_db: CharactersRAGDB,
+    ) -> None:
 
         """Test saving custom prompt configuration."""
         assert service.save_prompt_config({DocumentType.SUMMARY: "Custom summary prompt"}) is True
@@ -372,27 +377,93 @@ class TestDocumentGeneratorService:
         assert row is not None
         assert row["user_prompt"] == "Custom summary prompt"
 
-    def test_get_prompt_config(self, service, real_db):
+    def test_save_custom_prompt_config_repeated_updates(
+        self,
+        service: DocumentGeneratorService,
+        real_db: CharactersRAGDB,
+    ) -> None:
+        """Repeated prompt edits should replace old rows without unique collisions."""
+        assert service.save_prompt_config({DocumentType.SUMMARY: "First prompt"}) is True
+        assert service.save_prompt_config({DocumentType.SUMMARY: "Second prompt"}) is True
+        assert service.save_prompt_config({DocumentType.SUMMARY: "Third prompt"}) is True
+
+        with real_db.get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_prompt, is_active
+                FROM user_prompts
+                WHERE document_type = ?
+                ORDER BY id
+                """,
+                (DocumentType.SUMMARY.value,),
+            ).fetchall()
+
+        assert [(row["user_prompt"], row["is_active"]) for row in rows] == [("Third prompt", 1)]
+
+    def test_save_custom_prompt_config_validates_batch_before_writing(
+        self,
+        service: DocumentGeneratorService,
+    ) -> None:
+        """Invalid batch entries should not partially overwrite existing prompts."""
+        assert service.save_prompt_config({DocumentType.SUMMARY: "Stable prompt"}) is True
+
+        assert service.save_prompt_config({
+            DocumentType.SUMMARY: "Partial prompt",
+            "not-a-document-type": "Invalid prompt",
+        }) is False
+
+        assert service.get_prompt_config(DocumentType.SUMMARY) == "Stable prompt"
+
+    def test_get_prompt_config(self, service: DocumentGeneratorService, real_db: CharactersRAGDB) -> None:
 
         """Test retrieving custom prompt configuration."""
         assert service.save_prompt_config({DocumentType.SUMMARY: "Saved prompt"}) is True
 
         assert service.get_prompt_config(DocumentType.SUMMARY) == "Saved prompt"
 
+    def test_get_prompt_config_handles_tuple_rows(self, service: DocumentGeneratorService) -> None:
+        """Prompt lookups should tolerate tuple rows from connections without row_factory."""
+        class _Cursor:
+            def fetchone(self) -> tuple[str]:
+                return ("Tuple prompt",)
+
+        class _Connection:
+            def __enter__(self) -> "_Connection":
+                return self
+
+            def __exit__(self, *_args: Any) -> None:
+                return None
+
+            def execute(self, *_args: Any, **_kwargs: Any) -> _Cursor:
+                return _Cursor()
+
+        class _DB:
+            def get_connection(self) -> _Connection:
+                return _Connection()
+
+        service.db = _DB()
+
+        assert service.get_prompt_config(DocumentType.SUMMARY) == "Tuple prompt"
+
     @pytest.mark.asyncio
-    async def test_bulk_generation(self, service, real_db, monkeypatch):
+    async def test_bulk_generation(
+        self,
+        service: DocumentGeneratorService,
+        real_db: CharactersRAGDB,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Test generating multiple document types at once."""
-        calls = []
+        calls: list[tuple[str, DocumentType, str, str, str, dict[str, Any] | None]] = []
 
         def fake_generate_document(
-            conversation_id,
-            document_type,
-            provider,
-            model,
-            api_key,
-            app_config=None,
-            **_kwargs,
-        ):
+            conversation_id: str,
+            document_type: DocumentType,
+            provider: str,
+            model: str,
+            api_key: str,
+            app_config: dict[str, Any] | None = None,
+            **_kwargs: Any,
+        ) -> str:
             calls.append((conversation_id, document_type, provider, model, api_key, app_config))
             return f"{document_type.value} result"
 
@@ -426,6 +497,35 @@ class TestDocumentGeneratorService:
                 "gpt-4o-mini",
                 "test-key",
                 {"timeout": 30},
+            ),
+        ]
+
+        calls.clear()
+        service.llm_config = {
+            "provider": "configured-provider",
+            "model": "configured-model",
+            "api_key": "configured-key",
+            "app_config": {"timeout": 30},
+        }
+
+        override_results = await service.bulk_generate(
+            str(real_db.test_conversation_id),
+            [DocumentType.BRIEFING],
+            provider="override-provider",
+            model="override-model",
+            api_key="override-key",
+            app_config={"timeout": 5},
+        )
+
+        assert override_results == ["briefing result"]
+        assert calls == [
+            (
+                str(real_db.test_conversation_id),
+                DocumentType.BRIEFING,
+                "override-provider",
+                "override-model",
+                "override-key",
+                {"timeout": 5},
             ),
         ]
 
