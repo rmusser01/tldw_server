@@ -76,8 +76,7 @@ def collect_non_stream_choices(llm_response: Any) -> list[NonStreamChoice]:
             continue
         message = raw_choice.get("message")
         if not isinstance(message, dict):
-            message = {}
-            raw_choice["message"] = message
+            continue
         content = message.get("content")
         choices.append(
             NonStreamChoice(

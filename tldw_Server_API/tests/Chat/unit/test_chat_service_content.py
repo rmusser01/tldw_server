@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.chat_service import execute_non_stream_call
+from tldw_Server_API.app.core.Chat.response_processor import collect_non_stream_choices
 
 
 class _DummyMetrics:
@@ -28,6 +29,15 @@ class _CapturingMetrics(_DummyMetrics):
 
     def track_tokens(self, **kwargs):
         self.tokens.update(kwargs)
+
+
+def test_collect_non_stream_choices_skips_unsupported_choices_without_mutation():
+    payload = {"choices": [{"text": "legacy"}]}
+
+    choices = collect_non_stream_choices(payload)
+
+    assert choices == []
+    assert payload == {"choices": [{"text": "legacy"}]}
 
 
 class _RedactingModeration:
