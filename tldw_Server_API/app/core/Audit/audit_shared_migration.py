@@ -743,15 +743,18 @@ async def _migrate_source(
                     last_event_id = None
                     last_timestamp = None
 
-            if last_timestamp:
+            if last_rowid > 0 and last_timestamp:
                 query = (
                     "SELECT rowid, * FROM audit_events "
-                    "WHERE (timestamp > ? OR (timestamp = ? AND event_id > ?)) "
-                    "ORDER BY timestamp, event_id"
+                    "WHERE rowid > ? OR (timestamp > ? OR (timestamp = ? AND event_id > ?)) "
+                    "ORDER BY rowid"
                 )
-                params = (last_timestamp, last_timestamp, last_event_id or "")
+                params = (last_rowid, last_timestamp, last_timestamp, last_event_id or "")
+            elif last_rowid > 0:
+                query = "SELECT rowid, * FROM audit_events WHERE rowid > ? ORDER BY rowid"
+                params = (last_rowid,)
             else:
-                query = "SELECT rowid, * FROM audit_events ORDER BY timestamp, event_id"
+                query = "SELECT rowid, * FROM audit_events ORDER BY rowid"
                 params = ()
 
             async with source_db.execute(query, params) as cur:
