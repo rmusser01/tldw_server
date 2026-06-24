@@ -98,6 +98,17 @@ Line without timing
     assert "Line without timing" in normalized
 
 
+def test_normalize_subtitles_preserves_dialogue_arrow_text():
+    srt_text = """1
+00:00:00,000 --> 00:00:01,000
+Walk A --> B.
+"""
+
+    normalized = _normalize_subtitles(srt_text, "srt")
+
+    assert normalized == "Walk A --> B."
+
+
 def test_detect_chapters_fallback_when_no_markers():
     text = "This is a plain paragraph with no chapter markers."
     chapters = _detect_chapters(text)

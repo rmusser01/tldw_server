@@ -704,7 +704,11 @@ def _build_chapter_plan(
 ) -> list[ChapterPlanItem]:
     detected: list[ChapterPreview]
     if tag_result and tag_result.chapter_markers:
-        detected = build_chapters_from_markers(text, tag_result.chapter_markers)
+        detected = build_chapters_from_markers(
+            text,
+            tag_result.chapter_markers,
+            warnings=tag_result.warnings,
+        )
     else:
         detected = _detect_chapters(text, language=language, custom_pattern=custom_pattern)
     if not detected:

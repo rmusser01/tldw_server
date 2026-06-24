@@ -36,6 +36,7 @@ def apply_alignment_anchors(
 
     adjusted: list[AlignmentWord] = []
     active_delta = 0
+    last_adjusted_end: int | None = None
     next_anchor_idx = 0
     next_word_boundary = len(words)
     if valid_pairs:
@@ -46,7 +47,7 @@ def apply_alignment_anchors(
             anchor, word_index = valid_pairs[next_anchor_idx]
             next_anchor_idx += 1
             next_word_boundary = valid_pairs[next_anchor_idx][1] if next_anchor_idx < len(valid_pairs) else len(words)
-            if i > 0 and anchor.time_ms < words[i - 1].end_ms:
+            if last_adjusted_end is not None and anchor.time_ms < last_adjusted_end:
                 logger.warning("alignment anchor ignored: non-monotonic at {}", anchor.offset)
                 continue
             active_delta = anchor.time_ms - word.start_ms
@@ -58,6 +59,7 @@ def apply_alignment_anchors(
             new_start = max(0, new_start)
             new_end = max(new_start, new_end)
         adjusted.append(word.model_copy(update={"start_ms": new_start, "end_ms": new_end}))
+        last_adjusted_end = new_end
 
     return adjusted
 

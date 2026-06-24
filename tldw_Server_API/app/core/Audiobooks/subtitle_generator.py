@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import html
 import os
+import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
@@ -18,6 +20,10 @@ from tldw_Server_API.app.api.v1.schemas.audiobook_schemas import (
 )
 from tldw_Server_API.app.core.config import get_config_value
 from tldw_Server_API.app.core.Utils.common import parse_boolean
+
+_ASS_OVERRIDE_RE = re.compile(r"\{[^}]*\}")
+_ASS_INLINE_CONTROL_RE = re.compile(r"\\[Nnh]")
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 @dataclass(frozen=True)
@@ -68,15 +74,16 @@ def generate_subtitles(
             raise ValueError("alignment end_ms must be >= start_ms")
         if mode == "highlight":
             word = cue_words[0]
+            safe_word = _sanitize_word_for_format(word.word, format)
             if format == "vtt":
-                text = f"<c.hl>{word.word}</c>"
+                text = f"<c.hl>{safe_word}</c>"
             elif format == "ass":
                 duration_cs = max(1, (end_ms - start_ms) // 10)
-                text = f"{{\\k{duration_cs}}}{word.word}"
+                text = f"{{\\k{duration_cs}}}{safe_word}"
             else:
-                text = word.word
+                text = safe_word
         else:
-            text = _render_text(cue_words, effective_max_chars, max_lines, line_sep)
+            text = _render_text(cue_words, effective_max_chars, max_lines, line_sep, format)
         if mode == "word_count":
             start_ms, end_ms = _clamp_cue_duration(start_ms, end_ms)
         rendered.append(SubtitleCue(index=idx, start_ms=start_ms, end_ms=end_ms, text=text))
@@ -293,8 +300,9 @@ def _render_text(
     max_chars: int | None,
     max_lines: int | None,
     line_sep: str,
+    format: SubtitleFormat,
 ) -> str:
-    tokens = [word.word for word in words]
+    tokens = [_sanitize_word_for_format(word.word, format) for word in words]
     if max_lines is not None and max_lines <= 0:
         raise ValueError("max_lines must be positive")
     if max_chars is not None and max_chars <= 0:
@@ -329,6 +337,28 @@ def _render_text(
         lines = lines[: max_lines - 1] + [merged]
     rendered = line_sep.join(lines).replace("\n\n", "\n").strip() if line_sep == "\n" else line_sep.join(lines).strip()
     return rendered
+
+
+def _sanitize_word_for_format(text: str, format: SubtitleFormat) -> str:
+    clean = _normalize_word_text(text)
+    if format == "vtt":
+        return html.escape(clean, quote=False)
+    if format == "ass":
+        clean = _ASS_OVERRIDE_RE.sub("", clean)
+        clean = _ASS_INLINE_CONTROL_RE.sub(" ", clean)
+        clean = clean.replace("\\", "")
+        clean = clean.replace("{", "(").replace("}", ")")
+        return " ".join(clean.split())
+    return clean.replace("-->", "-- >")
+
+
+def _normalize_word_text(text: str) -> str:
+    clean = str(text)
+    clean = clean.replace("\r\n", "\n").replace("\r", "\n")
+    clean = clean.replace("\u2028", "\n").replace("\u2029", "\n")
+    clean = _CONTROL_CHARS_RE.sub(" ", clean)
+    clean = clean.replace("\n", " ")
+    return " ".join(clean.split())
 
 
 def _format_srt(cues: Iterable[SubtitleCue]) -> str:

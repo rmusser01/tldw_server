@@ -186,6 +186,24 @@ def test_generate_vtt_highlight_adds_class_tag():
     assert "<c.hl>Hello</c>" in content
 
 
+def test_generate_vtt_highlight_escapes_word_markup():
+    alignment = AlignmentPayload(
+        engine="kokoro",
+        sample_rate=24000,
+        words=[AlignmentWord(word="<script&>", start_ms=0, end_ms=400)],
+    )
+
+    content = generate_subtitles(
+        alignment,
+        format="vtt",
+        mode="highlight",
+        variant="wide",
+    )
+
+    assert "<c.hl>&lt;script&amp;&gt;</c>" in content
+    assert "<script&>" not in content
+
+
 def test_generate_ass_highlight_adds_karaoke_tag():
     alignment = AlignmentPayload(
         engine="kokoro",
@@ -199,6 +217,51 @@ def test_generate_ass_highlight_adds_karaoke_tag():
         variant="wide",
     )
     assert "{\\k50}Hello" in content
+
+
+def test_generate_ass_sanitizes_override_tags_in_text():
+    alignment = AlignmentPayload(
+        engine="kokoro",
+        sample_rate=24000,
+        words=[AlignmentWord(word="{\\pos(0,0)}Hello\\Nthere", start_ms=0, end_ms=500)],
+    )
+
+    content = generate_subtitles(
+        alignment,
+        format="ass",
+        mode="word_count",
+        variant="wide",
+        words_per_cue=1,
+    )
+
+    assert "\\pos" not in content
+    assert "Hello there" in content
+
+
+def test_generate_srt_highlight_sanitizes_cue_breaking_text():
+    alignment = AlignmentPayload(
+        engine="kokoro",
+        sample_rate=24000,
+        words=[
+            AlignmentWord(
+                word="Line\n\n2\n00:00:02,000 --> 00:00:03,000",
+                start_ms=0,
+                end_ms=500,
+            )
+        ],
+    )
+
+    content = generate_subtitles(
+        alignment,
+        format="srt",
+        mode="highlight",
+        variant="wide",
+    )
+
+    blocks = [block for block in content.strip().split("\n\n") if block]
+    assert len(blocks) == 1
+    assert "-- >" in blocks[0]
+    assert "00:00:02,000 --> 00:00:03,000" not in blocks[0]
 
 
 def test_generate_rejects_negative_end_times():

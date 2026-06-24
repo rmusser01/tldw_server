@@ -6,6 +6,10 @@ import re
 
 _ASS_DIALOGUE_RE = re.compile(r"^(dialogue|comment):", re.IGNORECASE)
 _ASS_TAG_RE = re.compile(r"\{[^}]*\}")
+_SUBTITLE_TIMESTAMP_RE = r"(?:\d{1,2}:)?\d{2}:\d{2}[,.]\d{1,3}"
+_SRT_VTT_TIMING_RE = re.compile(
+    rf"^{_SUBTITLE_TIMESTAMP_RE}\s+-->\s+{_SUBTITLE_TIMESTAMP_RE}(?:\s+.*)?$"
+)
 
 
 def normalize_subtitle_source(text: str, input_type: str) -> str:
@@ -52,12 +56,12 @@ def _parse_srt_vtt(text: str, *, kind: str) -> str:
             # Skip VTT blocks entirely when not in a cue block.
             skip_block = True
             continue
-        if "-->" in stripped:
+        if _SRT_VTT_TIMING_RE.match(stripped):
             # Timing line, ignore.
             continue
         if not current:
             next_line = _peek_next_non_empty_line(idx + 1)
-            if next_line and "-->" in next_line:
+            if next_line and _SRT_VTT_TIMING_RE.match(next_line):
                 if kind == "vtt":
                     # Cue identifier line for VTT.
                     continue
