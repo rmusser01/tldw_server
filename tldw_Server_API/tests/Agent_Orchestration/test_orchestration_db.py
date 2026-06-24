@@ -1,4 +1,6 @@
 """Tests for Orchestration SQLite persistence."""
+
+import sqlite3
 import tempfile
 
 import pytest
@@ -124,9 +126,7 @@ class TestRunCRUD:
         t = db.create_task(p.id, title="T1")
         run = db.create_run(t.id, agent_type="claude_code", session_id="sess-1")
         assert run.status == RunStatus.RUNNING
-        completed = db.complete_run(
-            run.id, result_summary="done", token_usage={"input_tokens": 100}
-        )
+        completed = db.complete_run(run.id, result_summary="done", token_usage={"input_tokens": 100})
         assert completed.status == RunStatus.COMPLETED
         assert completed.result_summary == "done"
         assert completed.token_usage == {"input_tokens": 100}
@@ -156,6 +156,33 @@ class TestRunCRUD:
         with pytest.raises(InvalidTransitionError, match="running run"):
             db.create_run(t.id)
 
+    def test_running_run_uniqueness_is_enforced_by_database(self, db):
+        p = db.create_project(name="P1")
+        t = db.create_task(p.id, title="T1")
+        db.create_run(t.id, agent_type="codex", session_id="session-1")
+
+        with pytest.raises(sqlite3.IntegrityError):
+            db._get_conn().execute(
+                "INSERT INTO runs (task_id, session_id, status, agent_type, started_at) " "VALUES (?, ?, ?, ?, ?)",
+                (
+                    t.id,
+                    "session-2",
+                    RunStatus.RUNNING.value,
+                    "codex",
+                    "2026-06-24T00:00:00+00:00",
+                ),
+            )
+
+    def test_has_running_run_tracks_active_status(self, db):
+        p = db.create_project(name="P1")
+        t = db.create_task(p.id, title="T1")
+
+        assert db.has_running_run(t.id) is False
+        run = db.create_run(t.id)
+        assert db.has_running_run(t.id) is True
+        db.complete_run(run.id)
+        assert db.has_running_run(t.id) is False
+
     def test_terminal_run_cannot_be_rewritten(self, db):
         p = db.create_project(name="P1")
         t = db.create_task(p.id, title="T1")
@@ -168,6 +195,10 @@ class TestRunCRUD:
     def test_missing_run_update_raises_not_found(self, db):
         with pytest.raises(OrchestrationNotFoundError, match="Run 999 not found"):
             db.complete_run(999)
+
+    def test_missing_run_session_update_raises_not_found(self, db):
+        with pytest.raises(OrchestrationNotFoundError, match="Run 999 not found"):
+            db.update_run_session_id(999, "session-999")
 
 
 class TestReviewerGate:

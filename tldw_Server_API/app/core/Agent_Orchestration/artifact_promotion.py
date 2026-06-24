@@ -1,4 +1,5 @@
 """Promotion helpers for ACP deliverables that become workspace artifacts."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -85,18 +86,14 @@ def promote_acp_completion_artifacts(
     if not completion_signal.artifacts:
         return result
     if len(completion_signal.artifacts) > MAX_COMPLETION_ARTIFACTS:
-        return ACPArtifactPromotionResult(
-            errors=[{"artifact_id": "all", "reason": "too_many_artifacts"}]
-        )
+        return ACPArtifactPromotionResult(errors=[{"artifact_id": "all", "reason": "too_many_artifacts"}])
 
     decision = _promotion_decision(final_status, review_decision)
     target_workspace_id = _target_workspace_id(workspace)
     existing_by_id: dict[str, dict[str, Any]] = {}
     if target_workspace_id and note_db.get_workspace(target_workspace_id):
         existing_by_id = {
-            str(item["id"]): item
-            for item in note_db.list_workspace_artifacts(target_workspace_id)
-            if item.get("id")
+            str(item["id"]): item for item in note_db.list_workspace_artifacts(target_workspace_id) if item.get("id")
         }
 
     for index, raw_artifact in enumerate(completion_signal.artifacts):
@@ -199,24 +196,24 @@ def _target_workspace_id(workspace: ACPWorkspace | None) -> str | None:
 
 def _artifact_identifier(raw_artifact: Any, *, task: AgentTask, run: AgentRun, index: int) -> str:
     if isinstance(raw_artifact, Mapping):
-        artifact_id = (
-            raw_artifact.get("id")
-            or raw_artifact.get("artifact_id")
-            or raw_artifact.get("root_artifact_id")
-        )
+        artifact_id = raw_artifact.get("id") or raw_artifact.get("artifact_id") or raw_artifact.get("root_artifact_id")
         if artifact_id:
             return str(artifact_id)
     return f"acp-task-{task.id}-run-{run.id}-{index + 1}"
 
 
 def _artifact_type(artifact: Mapping[str, Any]) -> str:
-    return str(
-        artifact.get("artifact_type")
-        or artifact.get("type")
-        or artifact.get("kind")
-        or artifact.get("promote_as")
-        or ""
-    ).strip().lower()
+    return (
+        str(
+            artifact.get("artifact_type")
+            or artifact.get("type")
+            or artifact.get("kind")
+            or artifact.get("promote_as")
+            or ""
+        )
+        .strip()
+        .lower()
+    )
 
 
 def _is_promotable_artifact(artifact: Mapping[str, Any]) -> bool:
@@ -224,10 +221,12 @@ def _is_promotable_artifact(artifact: Mapping[str, Any]) -> bool:
 
 
 def _validate_artifact_payload(
-    artifact: Mapping[str, Any],
+    artifact: Any,
     target_workspace_id: str | None,
     note_db: CharactersRAGDB,
 ) -> str | None:
+    if not isinstance(artifact, Mapping):
+        return "invalid_artifact_format"
     if not target_workspace_id:
         return "missing_workspace"
     if note_db.get_workspace(target_workspace_id) is None:
@@ -255,10 +254,7 @@ def _validate_artifact_payload(
     export_refs = artifact.get("export_refs")
     if export_refs is not None and not isinstance(export_refs, (list, tuple)):
         return "invalid_export_refs"
-    if (
-        export_refs is not None
-        and len(export_refs) > MAX_PROMOTED_ARTIFACT_EXPORT_REFS
-    ):
+    if export_refs is not None and len(export_refs) > MAX_PROMOTED_ARTIFACT_EXPORT_REFS:
         return "too_many_export_refs"
     if "schema_version" in artifact:
         try:

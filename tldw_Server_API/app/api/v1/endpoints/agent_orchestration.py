@@ -3,9 +3,11 @@
 Provides project/task management, run dispatch, reviewer gate,
 and workspace CRUD with discovery and health monitoring.
 """
+
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 from collections.abc import Mapping
 from pathlib import Path
@@ -28,7 +30,7 @@ from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
     validate_task_completion_signal,
 )
 from tldw_Server_API.app.core.Agent_Orchestration.db_factory import get_orchestration_db
-from tldw_Server_API.app.core.Agent_Orchestration.models import ACPWorkspace, RunStatus, TaskStatus
+from tldw_Server_API.app.core.Agent_Orchestration.models import ACPWorkspace, TaskStatus
 from tldw_Server_API.app.core.Agent_Orchestration.orchestration_service import (
     CycleDependencyError,
 )
@@ -75,6 +77,21 @@ async def _run_sync(fn: Any) -> Any:
     """Run a synchronous callable in a threadpool to avoid blocking the event loop."""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, fn)
+
+
+async def _close_acp_session_safely(client: Any, session_id: str | None) -> None:
+    """Best-effort cleanup for sessions created before orchestration failure."""
+    if not session_id:
+        return
+    close_session = getattr(client, "close_session", None)
+    if close_session is None:
+        return
+    try:
+        result = close_session(session_id)
+        if inspect.isawaitable(result):
+            await result
+    except Exception:
+        logger.warning("Failed to close orchestration ACP session after dispatch failure")
 
 
 _TASK_COMPLETION_SIGNAL_INSTRUCTIONS = """\
@@ -222,21 +239,12 @@ def _preview_message(message: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 def _message_raw_data(message: dict[str, Any]) -> dict[str, Any]:
-    raw = (
-        message.get("raw_result")
-        or message.get("raw_prompt")
-        or message.get("raw_data")
-        or {}
-    )
+    raw = message.get("raw_result") or message.get("raw_prompt") or message.get("raw_data") or {}
     return raw if isinstance(raw, dict) else {}
 
 
 def _assistant_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        msg
-        for msg in messages
-        if isinstance(msg, dict) and str(msg.get("role") or "").lower() == "assistant"
-    ]
+    return [msg for msg in messages if isinstance(msg, dict) and str(msg.get("role") or "").lower() == "assistant"]
 
 
 def _first_user_message(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -393,11 +401,7 @@ def _review_decision_for_run(run: Any, reviews: list[dict[str, Any]]) -> dict[st
     agent_type = getattr(run, "agent_type", None)
     if not agent_type:
         return None
-    matching = [
-        review
-        for review in reviews
-        if str(review.get("reviewer") or "") == str(agent_type)
-    ]
+    matching = [review for review in reviews if str(review.get("reviewer") or "") == str(agent_type)]
     if not matching:
         return None
     review = matching[-1]
@@ -482,16 +486,8 @@ def _redact_diagnostic_payload(value: Any) -> dict[str, Any]:
         "timestamp": value.get("timestamp"),
         "role": value.get("role"),
         "reason_code": value.get("reason_code"),
-        "message": (
-            _RUN_SUMMARY_REDACTED_VALUE
-            if value.get("message") is not None
-            else value.get("message")
-        ),
-        "diagnostic_uri": (
-            _RUN_SUMMARY_REDACTED_VALUE
-            if value.get("diagnostic_uri")
-            else value.get("diagnostic_uri")
-        ),
+        "message": (_RUN_SUMMARY_REDACTED_VALUE if value.get("message") is not None else value.get("message")),
+        "diagnostic_uri": (_RUN_SUMMARY_REDACTED_VALUE if value.get("diagnostic_uri") else value.get("diagnostic_uri")),
     }
     return redacted
 
@@ -502,10 +498,7 @@ def _redact_run_history_summary(history: dict[str, Any]) -> dict[str, Any]:
     redacted["redacted_fields"] = list(_RUN_HISTORY_REDACTED_FIELDS)
     redacted["prompt"] = _redact_preview_payload(history.get("prompt"))
     redacted["result"] = _redact_preview_payload(history.get("result"))
-    redacted["diagnostics"] = [
-        _redact_diagnostic_payload(item)
-        for item in (history.get("diagnostics") or [])
-    ]
+    redacted["diagnostics"] = [_redact_diagnostic_payload(item) for item in (history.get("diagnostics") or [])]
     return redacted
 
 
@@ -584,11 +577,7 @@ def _coerce_task_review_payload(review: Any) -> dict[str, Any]:
         instance_attrs = vars(review)
     except TypeError:
         instance_attrs = {}
-    filtered_attrs = {
-        key: value
-        for key, value in instance_attrs.items()
-        if not key.startswith("_")
-    }
+    filtered_attrs = {key: value for key, value in instance_attrs.items() if not key.startswith("_")}
     if filtered_attrs:
         return filtered_attrs
 
@@ -694,18 +683,22 @@ def _allowed_workspace_roots() -> tuple[Path, ...]:
     raw_values: list[str] = []
     raw_values.extend(
         entry.strip()
-        for entry in str(get_config_value("ACP-WORKSPACE", "allowed_base_paths", "") or "").replace(
+        for entry in str(get_config_value("ACP-WORKSPACE", "allowed_base_paths", "") or "")
+        .replace(
             os.pathsep,
             ",",
-        ).split(",")
+        )
+        .split(",")
         if entry.strip()
     )
     raw_values.extend(
         entry.strip()
-        for entry in str(os.getenv("ACP_WORKSPACE_ALLOWED_BASE_PATHS", "") or "").replace(
+        for entry in str(os.getenv("ACP_WORKSPACE_ALLOWED_BASE_PATHS", "") or "")
+        .replace(
             os.pathsep,
             ",",
-        ).split(",")
+        )
+        .split(",")
         if entry.strip()
     )
 
@@ -766,8 +759,7 @@ def _validate_workspace_root(root_path: str) -> str:
             detail={
                 "code": "workspace_root_not_allowed",
                 "message": (
-                    "root_path must be under ACP-WORKSPACE.allowed_base_paths "
-                    "or ACP_WORKSPACE_ALLOWED_BASE_PATHS."
+                    "root_path must be under ACP-WORKSPACE.allowed_base_paths " "or ACP_WORKSPACE_ALLOWED_BASE_PATHS."
                 ),
             },
         )
@@ -823,7 +815,9 @@ class ACPWorkspaceCreateRequest(BaseModel):
     description: str = Field(default="", description="Workspace description")
     workspace_type: str = Field(default="manual", description="manual | discovered | monorepo_child")
     parent_workspace_id: int | None = Field(default=None, description="Parent workspace ID for monorepo children")
-    env_vars: dict[str, str] = Field(default_factory=dict, description="Environment variables for sessions (stored as plaintext)")
+    env_vars: dict[str, str] = Field(
+        default_factory=dict, description="Environment variables for sessions (stored as plaintext)"
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("workspace_type")
@@ -853,9 +847,7 @@ class CanonicalWorkspaceBridgeRequest(BaseModel):
         default="",
         description="Optional ACP execution workspace description",
     )
-    canonical_workspace_source: str = Field(
-        default=CANONICAL_WORKSPACE_SOURCE_RESEARCH_WORKSPACE
-    )
+    canonical_workspace_source: str = Field(default=CANONICAL_WORKSPACE_SOURCE_RESEARCH_WORKSPACE)
     env_vars: dict[str, str] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -871,9 +863,7 @@ class CanonicalWorkspaceBridgeRequest(BaseModel):
     @classmethod
     def check_canonical_workspace_source(cls, value: str) -> str:
         if value not in _VALID_CANONICAL_WORKSPACE_SOURCES:
-            raise ValueError(
-                f"canonical_workspace_source must be one of {_VALID_CANONICAL_WORKSPACE_SOURCES}"
-            )
+            raise ValueError(f"canonical_workspace_source must be one of {_VALID_CANONICAL_WORKSPACE_SOURCES}")
         return value
 
 
@@ -1022,8 +1012,7 @@ def _canonical_workspace_link_from_workspace(workspace: Any | None) -> dict[str,
             metadata.get(CANONICAL_WORKSPACE_SOURCE_METADATA_KEY)
         ),
         "link_status": str(
-            metadata.get(CANONICAL_WORKSPACE_LINK_STATUS_METADATA_KEY)
-            or CANONICAL_WORKSPACE_LINKED_STATUS
+            metadata.get(CANONICAL_WORKSPACE_LINK_STATUS_METADATA_KEY) or CANONICAL_WORKSPACE_LINKED_STATUS
         ),
     }
 
@@ -1136,10 +1125,7 @@ def _ensure_canonical_workspace_bridge_sync(
         canonical_workspace,
         payload.canonical_workspace_id,
     )
-    workspace_name = (
-        payload.name
-        or f"ACP: {canonical_name} ({payload.canonical_workspace_id})"
-    )
+    workspace_name = payload.name or f"ACP: {canonical_name} ({payload.canonical_workspace_id})"
     return db.find_or_create_canonical_workspace_bridge(
         canonical_workspace_id=payload.canonical_workspace_id,
         canonical_workspace_source=payload.canonical_workspace_source,
@@ -1160,7 +1146,9 @@ def _ensure_canonical_workspace_bridge_sync(
     "/workspaces",
     response_model=ACPWorkspaceResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))
+    ],
 )
 async def create_workspace(
     payload: ACPWorkspaceCreateRequest,
@@ -1170,15 +1158,17 @@ async def create_workspace(
     validated_path = _validate_workspace_root(payload.root_path)
     db = get_orchestration_db(_user_id_int(user))
     try:
-        ws = await _run_sync(lambda: db.create_workspace(
-            name=payload.name,
-            root_path=validated_path,
-            description=payload.description,
-            workspace_type=payload.workspace_type,
-            parent_workspace_id=payload.parent_workspace_id,
-            env_vars=payload.env_vars,
-            metadata=payload.metadata,
-        ))
+        ws = await _run_sync(
+            lambda: db.create_workspace(
+                name=payload.name,
+                root_path=validated_path,
+                description=payload.description,
+                workspace_type=payload.workspace_type,
+                parent_workspace_id=payload.parent_workspace_id,
+                env_vars=payload.env_vars,
+                metadata=payload.metadata,
+            )
+        )
     except OrchestrationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -1189,7 +1179,9 @@ async def create_workspace(
 @router.get(
     "/workspaces",
     response_model=list[ACPWorkspaceResponse],
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.read"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.read"))
+    ],
 )
 async def list_workspaces(
     workspace_type: str | None = Query(default=None, description="Filter by type"),
@@ -1198,10 +1190,12 @@ async def list_workspaces(
 ) -> list[ACPWorkspaceResponse]:
     """List all workspaces for the current user."""
     db = get_orchestration_db(_user_id_int(user))
-    workspaces = await _run_sync(lambda: db.list_workspaces(
-        workspace_type=workspace_type,
-        health_status=health_status,
-    ))
+    workspaces = await _run_sync(
+        lambda: db.list_workspaces(
+            workspace_type=workspace_type,
+            health_status=health_status,
+        )
+    )
     return [ACPWorkspaceResponse(**_workspace_response_payload(ws)) for ws in workspaces]
 
 
@@ -1209,7 +1203,9 @@ async def list_workspaces(
     "/workspaces/canonical-bridge",
     response_model=ACPWorkspaceResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))
+    ],
 )
 async def ensure_canonical_workspace_bridge(
     payload: CanonicalWorkspaceBridgeRequest,
@@ -1217,9 +1213,7 @@ async def ensure_canonical_workspace_bridge(
     canonical_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> ACPWorkspaceResponse:
     """Find or create an ACP execution workspace linked to a canonical workspace."""
-    canonical_workspace = await _run_sync(
-        lambda: canonical_db.get_workspace(payload.canonical_workspace_id)
-    )
+    canonical_workspace = await _run_sync(lambda: canonical_db.get_workspace(payload.canonical_workspace_id))
     if not canonical_workspace:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
@@ -1246,7 +1240,9 @@ async def ensure_canonical_workspace_bridge(
 @router.get(
     "/workspaces/{workspace_id}",
     response_model=ACPWorkspaceResponse,
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.read"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.read"))
+    ],
 )
 async def get_workspace(
     workspace_id: int,
@@ -1263,10 +1259,7 @@ async def get_workspace(
 
     d = ws.to_dict()
     d["canonical_workspace"] = _canonical_workspace_link_from_workspace(ws)
-    d["children"] = [
-        ACPWorkspaceResponse(**_workspace_response_payload(c)).model_dump()
-        for c in children
-    ]
+    d["children"] = [ACPWorkspaceResponse(**_workspace_response_payload(c)).model_dump() for c in children]
     d["mcp_servers"] = mcp_servers
     return ACPWorkspaceResponse(**d)
 
@@ -1274,7 +1267,9 @@ async def get_workspace(
 @router.put(
     "/workspaces/{workspace_id}",
     response_model=ACPWorkspaceResponse,
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))
+    ],
 )
 async def update_workspace(
     workspace_id: int,
@@ -1300,7 +1295,9 @@ async def update_workspace(
 
 @router.delete(
     "/workspaces/{workspace_id}",
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))
+    ],
 )
 async def delete_workspace(
     workspace_id: int,
@@ -1321,7 +1318,9 @@ async def delete_workspace(
 
 @router.get(
     "/workspaces/{workspace_id}/health",
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.read"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.read"))
+    ],
 )
 async def check_workspace_health(
     workspace_id: int,
@@ -1334,26 +1333,31 @@ async def check_workspace_health(
         raise HTTPException(status_code=404, detail="Workspace not found")
 
     from tldw_Server_API.app.services.workspace_health_service import WorkspaceHealthService
+
     svc = WorkspaceHealthService()
     result = await svc.check_health(ws)
 
     # Persist health update
-    await _run_sync(lambda: db.update_workspace_health(
-        workspace_id=ws.id,
-        health_status=result.health_status,
-        git_remote_url=result.git_remote_url,
-        git_default_branch=result.git_default_branch,
-        git_current_branch=result.git_current_branch,
-        git_is_dirty=result.git_is_dirty,
-        last_health_check=result.checked_at,
-    ))
+    await _run_sync(
+        lambda: db.update_workspace_health(
+            workspace_id=ws.id,
+            health_status=result.health_status,
+            git_remote_url=result.git_remote_url,
+            git_default_branch=result.git_default_branch,
+            git_current_branch=result.git_current_branch,
+            git_is_dirty=result.git_is_dirty,
+            last_health_check=result.checked_at,
+        )
+    )
 
     return result.to_dict()
 
 
 @router.post(
     "/workspaces/health/refresh-all",
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))
+    ],
 )
 async def refresh_all_workspace_health(
     user: User = Depends(get_request_user),
@@ -1362,6 +1366,7 @@ async def refresh_all_workspace_health(
     db = get_orchestration_db(_user_id_int(user))
 
     from tldw_Server_API.app.services.workspace_health_service import WorkspaceHealthService
+
     svc = WorkspaceHealthService()
     results = await svc.refresh_all(db)
     return [r.to_dict() for r in results]
@@ -1374,7 +1379,9 @@ async def refresh_all_workspace_health(
 
 @router.get(
     "/workspaces/{workspace_id}/mcp-servers",
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.read"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.read"))
+    ],
 )
 async def list_workspace_mcp_servers(
     workspace_id: int,
@@ -1392,7 +1399,9 @@ async def list_workspace_mcp_servers(
 @router.post(
     "/workspaces/{workspace_id}/mcp-servers",
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))
+    ],
 )
 async def create_workspace_mcp_server(
     workspace_id: int,
@@ -1402,16 +1411,18 @@ async def create_workspace_mcp_server(
     """Add an MCP server configuration to a workspace."""
     db = get_orchestration_db(_user_id_int(user))
     try:
-        server = await _run_sync(lambda: db.create_workspace_mcp_server(
-            workspace_id=workspace_id,
-            server_name=payload.server_name,
-            server_type=payload.server_type,
-            command=payload.command,
-            args=payload.args,
-            env=payload.env,
-            url=payload.url,
-            enabled=payload.enabled,
-        ))
+        server = await _run_sync(
+            lambda: db.create_workspace_mcp_server(
+                workspace_id=workspace_id,
+                server_name=payload.server_name,
+                server_type=payload.server_type,
+                command=payload.command,
+                args=payload.args,
+                env=payload.env,
+                url=payload.url,
+                enabled=payload.enabled,
+            )
+        )
     except OrchestrationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -1421,7 +1432,9 @@ async def create_workspace_mcp_server(
 
 @router.delete(
     "/workspaces/{workspace_id}/mcp-servers/{server_id}",
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))
+    ],
 )
 async def delete_workspace_mcp_server(
     workspace_id: int,
@@ -1431,9 +1444,7 @@ async def delete_workspace_mcp_server(
     """Remove an MCP server from a workspace."""
     db = get_orchestration_db(_user_id_int(user))
     # Single atomic delete that verifies workspace ownership
-    deleted = await _run_sync(
-        lambda: db.delete_workspace_mcp_server(workspace_id, server_id)
-    )
+    deleted = await _run_sync(lambda: db.delete_workspace_mcp_server(workspace_id, server_id))
     if not deleted:
         raise HTTPException(
             status_code=404,
@@ -1449,7 +1460,9 @@ async def delete_workspace_mcp_server(
 
 @router.post(
     "/workspaces/discover",
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.workspaces.manage"))
+    ],
 )
 async def discover_workspaces(
     payload: WorkspaceDiscoverRequest,
@@ -1466,6 +1479,7 @@ async def discover_workspaces(
 
     # Read config defaults for discovery
     from tldw_Server_API.app.core.config import get_config_value as _gcv
+
     max_depth = payload.max_depth
     patterns = payload.patterns
     if patterns is None:
@@ -1474,6 +1488,7 @@ async def discover_workspaces(
             patterns = [p.strip() for p in config_patterns.split(",") if p.strip()]
 
     from tldw_Server_API.app.services.workspace_discovery_service import WorkspaceDiscoveryService
+
     svc = WorkspaceDiscoveryService()
     candidates = await svc.discover(
         base_path=validated_path,
@@ -1493,7 +1508,9 @@ async def discover_workspaces(
     "/projects",
     response_model=ProjectResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.projects.manage"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.projects.manage"))
+    ],
 )
 async def create_project(
     payload: ProjectCreateRequest,
@@ -1502,12 +1519,14 @@ async def create_project(
     """Create a new agent project."""
     db = get_orchestration_db(_user_id_int(user))
     try:
-        project = await _run_sync(lambda: db.create_project(
-            name=payload.name,
-            description=payload.description,
-            workspace_id=payload.workspace_id,
-            metadata=payload.metadata,
-        ))
+        project = await _run_sync(
+            lambda: db.create_project(
+                name=payload.name,
+                description=payload.description,
+                workspace_id=payload.workspace_id,
+                metadata=payload.metadata,
+            )
+        )
     except OrchestrationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     d = project.to_dict()
@@ -1523,7 +1542,9 @@ async def create_project(
 @router.get(
     "/projects",
     response_model=list[ProjectResponse],
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.projects.read"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.projects.read"))
+    ],
 )
 async def list_projects(
     workspace_id: int | None = Query(default=None, description="Filter by workspace ID (omit for all)"),
@@ -1541,9 +1562,7 @@ async def list_projects(
     """List projects for the current user, optionally filtered by workspace."""
     db = get_orchestration_db(_user_id_int(user))
     canonical_filter_id = str(canonical_workspace_id or "").strip()
-    canonical_filter_source = _normalize_canonical_workspace_filter_source(
-        canonical_workspace_source
-    )
+    canonical_filter_source = _normalize_canonical_workspace_filter_source(canonical_workspace_source)
 
     def _list() -> list[dict[str, Any]]:
         if workspace_id is not None:
@@ -1552,9 +1571,7 @@ async def list_projects(
             projects = db.list_projects(workspace_id=None)
         else:
             projects = db.list_projects()
-        workspaces_by_id = db.get_workspaces_by_ids([
-            p.workspace_id for p in projects if p.workspace_id
-        ])
+        workspaces_by_id = db.get_workspaces_by_ids([p.workspace_id for p in projects if p.workspace_id])
         results = []
         for p in projects:
             d = p.to_dict()
@@ -1584,7 +1601,9 @@ async def list_projects(
 @router.get(
     "/projects/{project_id}",
     response_model=ProjectResponse,
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.projects.read"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.projects.read"))
+    ],
 )
 async def get_project(
     project_id: int,
@@ -1609,7 +1628,9 @@ async def get_project(
 
 @router.delete(
     "/projects/{project_id}",
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.projects.manage"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.projects.manage"))
+    ],
 )
 async def delete_project(
     project_id: int,
@@ -1633,7 +1654,9 @@ async def delete_project(
     "/projects/{project_id}/tasks",
     response_model=TaskResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.manage"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.manage"))
+    ],
 )
 async def create_task(
     project_id: int,
@@ -1646,17 +1669,19 @@ async def create_task(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     try:
-        task = await _run_sync(lambda: db.create_task(
-            project_id=project_id,
-            title=payload.title,
-            description=payload.description,
-            agent_type=payload.agent_type,
-            dependency_id=payload.dependency_id,
-            reviewer_agent_type=payload.reviewer_agent_type,
-            max_review_attempts=payload.max_review_attempts,
-            success_criteria=payload.success_criteria,
-            metadata=payload.metadata,
-        ))
+        task = await _run_sync(
+            lambda: db.create_task(
+                project_id=project_id,
+                title=payload.title,
+                description=payload.description,
+                agent_type=payload.agent_type,
+                dependency_id=payload.dependency_id,
+                reviewer_agent_type=payload.reviewer_agent_type,
+                max_review_attempts=payload.max_review_attempts,
+                success_criteria=payload.success_criteria,
+                metadata=payload.metadata,
+            )
+        )
     except CycleDependencyError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -1672,7 +1697,9 @@ async def create_task(
 @router.get(
     "/projects/{project_id}/tasks",
     response_model=list[TaskResponse],
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.read"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.read"))
+    ],
 )
 async def list_tasks(
     project_id: int,
@@ -1700,7 +1727,9 @@ async def list_tasks(
 @router.get(
     "/tasks/{task_id}",
     response_model=TaskResponse,
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.read"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.read"))
+    ],
 )
 async def get_task(
     task_id: int,
@@ -1727,11 +1756,7 @@ async def get_task(
     if project and project.workspace_id:
         workspace = await _run_sync(lambda: db.get_workspace(project.workspace_id))
         d["canonical_workspace"] = _canonical_workspace_link_from_workspace(workspace)
-    d["reviews"] = (
-        _redact_task_review_payloads(reviews)
-        if run_summary_mode == _RUN_SUMMARY_MODE_REDACTED
-        else reviews
-    )
+    d["reviews"] = _redact_task_review_payloads(reviews) if run_summary_mode == _RUN_SUMMARY_MODE_REDACTED else reviews
     d["runs"] = await _enrich_task_runs(
         runs,
         reviews,
@@ -1748,7 +1773,9 @@ async def get_task(
 
 @router.post(
     "/tasks/{task_id}/run",
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.manage"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.manage"))
+    ],
 )
 async def dispatch_run(
     task_id: int,
@@ -1774,8 +1801,7 @@ async def dispatch_run(
             detail=f"Task dependency {task.dependency_id} is not complete",
         )
 
-    active_runs = await _run_sync(lambda: db.list_runs(task_id))
-    if any(run.status == RunStatus.RUNNING for run in active_runs):
+    if await _run_sync(lambda: db.has_running_run(task_id)):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Task already has a running run",
@@ -1795,9 +1821,7 @@ async def dispatch_run(
     # Gather workspace MCP servers for injection
     workspace_mcp_servers: list[dict[str, Any]] = []
     if workspace:
-        workspace_mcp_servers = await _run_sync(
-            lambda: db.list_workspace_mcp_servers(workspace.id)
-        )
+        workspace_mcp_servers = await _run_sync(lambda: db.list_workspace_mcp_servers(workspace.id))
 
     # Convert workspace MCP servers to create_session format
     mcp_servers_param: list[dict[str, Any]] | None = None
@@ -1820,6 +1844,7 @@ async def dispatch_run(
     session_id: str | None = None
     agent_type = payload.agent_type or task.agent_type
     run = None
+    client = None
     try:
         from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import get_runner_client
         from tldw_Server_API.app.services.admin_acp_sessions_service import get_acp_session_store
@@ -1834,14 +1859,8 @@ async def dispatch_run(
             )
 
         if task.status != TaskStatus.IN_PROGRESS:
-            task = await _run_sync(
-                lambda: db.transition_task(task_id, TaskStatus.IN_PROGRESS)
-            )
+            task = await _run_sync(lambda: db.transition_task(task_id, TaskStatus.IN_PROGRESS))
 
-        run = await _run_sync(lambda: db.create_run(
-            task_id,
-            agent_type=agent_type,
-        ))
         client = await get_runner_client()
         session_id = await client.create_session(
             effective_cwd,
@@ -1850,7 +1869,17 @@ async def dispatch_run(
             user_id=user.id,
             session_env=session_env_param,
         )
-        run = await _run_sync(lambda: db.update_run_session_id(run.id, session_id))
+        try:
+            run = await _run_sync(
+                lambda: db.create_run(
+                    task_id,
+                    agent_type=agent_type,
+                    session_id=session_id,
+                )
+            )
+        except (InvalidTransitionError, OrchestrationNotFoundError):
+            await _close_acp_session_safely(client, session_id)
+            raise
 
         # Register in session store
         try:
@@ -1869,19 +1898,12 @@ async def dispatch_run(
     except OrchestrationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except InvalidTransitionError as exc:
-        status_code = (
-            status.HTTP_409_CONFLICT
-            if "running run" in str(exc)
-            else status.HTTP_400_BAD_REQUEST
-        )
-        detail = (
-            "Task already has a running run"
-            if status_code == status.HTTP_409_CONFLICT
-            else str(exc)
-        )
+        status_code = status.HTTP_409_CONFLICT if "running run" in str(exc) else status.HTTP_400_BAD_REQUEST
+        detail = "Task already has a running run" if status_code == status.HTTP_409_CONFLICT else str(exc)
         raise HTTPException(status_code=status_code, detail=detail) from exc
     except Exception as exc:
         logger.exception("Failed to create ACP session")
+        await _close_acp_session_safely(client, session_id)
         if run is not None:
             await _run_sync(lambda: db.fail_run(run.id, error=SESSION_CREATE_FAILED))
             triaged_task = await _run_sync(lambda: db.transition_task(task_id, TaskStatus.TRIAGE))
@@ -1891,6 +1913,15 @@ async def dispatch_run(
                 task=triaged_task,
                 session_id=session_id,
                 run_id=run.id,
+                metadata={"reason_code": SESSION_CREATE_FAILED},
+            )
+        elif task.status == TaskStatus.IN_PROGRESS:
+            triaged_task = await _run_sync(lambda: db.transition_task(task_id, TaskStatus.TRIAGE))
+            _record_orchestration_audit_event(
+                action="orchestration_task_triaged",
+                user=user,
+                task=triaged_task,
+                session_id=session_id,
                 metadata={"reason_code": SESSION_CREATE_FAILED},
             )
         raise HTTPException(
@@ -1925,6 +1956,7 @@ async def dispatch_run(
             run_id=run.id,
             metadata={"reason_code": PROMPT_FAILED},
         )
+        await _close_acp_session_safely(client, session_id)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="ACP prompt failed",
@@ -1944,16 +1976,19 @@ async def dispatch_run(
             run_id=run.id,
             metadata={"reason_code": COMPLETION_SIGNAL_INVALID, "completion_signal_reason": exc.reason},
         )
+        await _close_acp_session_safely(client, session_id)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="ACP completion signal invalid",
         ) from exc
 
-    await _run_sync(lambda: db.complete_run(
-        run.id,
-        result_summary=completion_signal.summary,
-        token_usage=result.get("usage", {}),
-    ))
+    await _run_sync(
+        lambda: db.complete_run(
+            run.id,
+            result_summary=completion_signal.summary,
+            token_usage=result.get("usage", {}),
+        )
+    )
     task = await _run_sync(lambda: db.transition_task(task_id, TaskStatus.REVIEW))
     _record_orchestration_audit_event(
         action="orchestration_task_completed",
@@ -1991,11 +2026,13 @@ async def dispatch_run(
             except Exception:
                 logger.warning("Failed to register orchestration ACP review session")
 
-            review_run = await _run_sync(lambda: db.create_run(
-                task_id,
-                agent_type=task.reviewer_agent_type,
-                session_id=review_session_id,
-            ))
+            review_run = await _run_sync(
+                lambda: db.create_run(
+                    task_id,
+                    agent_type=task.reviewer_agent_type,
+                    session_id=review_session_id,
+                )
+            )
             _record_orchestration_audit_event(
                 action="orchestration_review_started",
                 user=user,
@@ -2013,18 +2050,22 @@ async def dispatch_run(
             review_error = REVIEW_DECISION_INVALID
             logger.warning("ACP review decision invalid for task {}: {}", task_id, exc)
             if review_run is None:
-                review_run = await _run_sync(lambda: db.create_run(
-                    task_id,
-                    agent_type=task.reviewer_agent_type,
-                    session_id=review_session_id,
-                ))
+                review_run = await _run_sync(
+                    lambda: db.create_run(
+                        task_id,
+                        agent_type=task.reviewer_agent_type,
+                        session_id=review_session_id,
+                    )
+                )
             await _run_sync(lambda: db.fail_run(review_run.id, error=review_error))
-            task = await _run_sync(lambda: db.submit_review(
-                task_id,
-                False,
-                review_error,
-                reviewer=task.reviewer_agent_type,
-            ))
+            task = await _run_sync(
+                lambda: db.submit_review(
+                    task_id,
+                    False,
+                    review_error,
+                    reviewer=task.reviewer_agent_type,
+                )
+            )
             _record_orchestration_audit_event(
                 action="orchestration_review_decision",
                 user=user,
@@ -2043,18 +2084,22 @@ async def dispatch_run(
             review_error = REVIEWER_FAILED
             logger.exception("ACP reviewer failed")
             if review_run is None:
-                review_run = await _run_sync(lambda: db.create_run(
-                    task_id,
-                    agent_type=task.reviewer_agent_type,
-                    session_id=review_session_id,
-                ))
+                review_run = await _run_sync(
+                    lambda: db.create_run(
+                        task_id,
+                        agent_type=task.reviewer_agent_type,
+                        session_id=review_session_id,
+                    )
+                )
             await _run_sync(lambda: db.fail_run(review_run.id, error=review_error))
-            task = await _run_sync(lambda: db.submit_review(
-                task_id,
-                False,
-                review_error,
-                reviewer=task.reviewer_agent_type,
-            ))
+            task = await _run_sync(
+                lambda: db.submit_review(
+                    task_id,
+                    False,
+                    review_error,
+                    reviewer=task.reviewer_agent_type,
+                )
+            )
             _record_orchestration_audit_event(
                 action="orchestration_review_decision",
                 user=user,
@@ -2069,19 +2114,23 @@ async def dispatch_run(
                 },
             )
         else:
-            await _run_sync(lambda: db.complete_run(
-                review_run.id,
-                result_summary=review_decision.feedback,
-                token_usage=review_result.get("usage", {}),
-            ))
+            await _run_sync(
+                lambda: db.complete_run(
+                    review_run.id,
+                    result_summary=review_decision.feedback,
+                    token_usage=review_result.get("usage", {}),
+                )
+            )
             review_decision_for_promotion = review_decision
             review_run_for_promotion = review_run
-            task = await _run_sync(lambda: db.submit_review(
-                task_id,
-                review_decision.approved,
-                review_decision.feedback,
-                reviewer=task.reviewer_agent_type,
-            ))
+            task = await _run_sync(
+                lambda: db.submit_review(
+                    task_id,
+                    review_decision.approved,
+                    review_decision.feedback,
+                    reviewer=task.reviewer_agent_type,
+                )
+            )
             _record_orchestration_audit_event(
                 action="orchestration_review_decision",
                 user=user,
@@ -2192,7 +2241,9 @@ async def dispatch_run(
 @router.post(
     "/tasks/{task_id}/review",
     response_model=TaskResponse,
-    dependencies=[Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.manage"))],
+    dependencies=[
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="agent_orchestration.tasks.manage"))
+    ],
 )
 async def submit_review(
     task_id: int,
@@ -2208,12 +2259,14 @@ async def submit_review(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     try:
-        updated = await _run_sync(lambda: db.submit_review(
-            task_id,
-            payload.approved,
-            payload.feedback,
-            reviewer="manual",
-        ))
+        updated = await _run_sync(
+            lambda: db.submit_review(
+                task_id,
+                payload.approved,
+                payload.feedback,
+                reviewer="manual",
+            )
+        )
         _record_orchestration_audit_event(
             action="orchestration_review_decision",
             user=user,

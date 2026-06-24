@@ -1,9 +1,11 @@
 """Tests for promoting accepted ACP deliverables into workspace artifacts."""
+
 from __future__ import annotations
 
 import pytest
 
 from tldw_Server_API.app.core.Agent_Orchestration.artifact_promotion import (
+    _validate_artifact_payload,
     promote_acp_completion_artifacts,
 )
 from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
@@ -57,14 +59,22 @@ def _brief_payload(**overrides):
         "title": "ACP Research Brief",
         "content": "# Brief\nGrounded finding.",
         "summary": "Grounded finding.",
-        "source_lineage": {
-            "sources": [
-                {"source_id": "src-1", "source_type": "media", "label": "Transcript"}
-            ]
-        },
+        "source_lineage": {"sources": [{"source_id": "src-1", "source_type": "media", "label": "Transcript"}]},
     }
     payload.update(overrides)
     return payload
+
+
+def test_validate_artifact_payload_rejects_non_mapping(tmp_path):
+    note_db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
+    note_db.upsert_workspace("workspace-alpha", "Alpha Workspace")
+
+    try:
+        assert (
+            _validate_artifact_payload(["not", "a", "mapping"], "workspace-alpha", note_db) == "invalid_artifact_format"
+        )
+    finally:
+        note_db.close_all_connections()
 
 
 def test_promotes_accepted_acp_brief_with_traceable_metadata(tmp_path):
@@ -243,9 +253,7 @@ def test_promote_flag_without_allowed_artifact_type_is_not_promoted(tmp_path):
         assert result.created_artifact_ids == []
         assert result.updated_artifact_ids == []
         assert result.skipped == []
-        assert result.errors == [
-            {"artifact_id": "brief-missing-type", "reason": "missing_artifact_type"}
-        ]
+        assert result.errors == [{"artifact_id": "brief-missing-type", "reason": "missing_artifact_type"}]
         assert note_db.list_workspace_artifacts("workspace-alpha") == []
     finally:
         note_db.close_all_connections()
