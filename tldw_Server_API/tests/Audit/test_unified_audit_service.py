@@ -6,9 +6,11 @@ testing the new unified audit service without references to deprecated modules.
 """
 
 import asyncio
+import csv
 import hashlib
 import json
 from contextlib import asynccontextmanager
+from io import StringIO
 import tempfile
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -156,6 +158,42 @@ class TestPIIDetection:
         stringified = json.dumps(red_meta)
         assert api_key not in stringified
         assert card not in stringified
+
+    @pytest.mark.asyncio
+    async def test_recursive_redaction_includes_metadata_keys(self, audit_service):
+        """PII in metadata keys should be redacted before storage/export."""
+        context = AuditContext(user_id="key_redaction_user")
+        await audit_service.log_event(
+            event_type=AuditEventType.DATA_WRITE,
+            context=context,
+            metadata={
+                "owner@example.com": "present in key",
+                "second@example.org": "second value",
+                "nested": {
+                    "(555) 123-4567": "phone key",
+                },
+            },
+        )
+        await audit_service.flush()
+
+        events = await audit_service.query_events(user_id="key_redaction_user")
+        assert events, "No audit events returned"
+        meta_raw = events[0]["metadata"]
+        meta = json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
+        stringified = json.dumps(meta)
+
+        assert "owner@example.com" not in stringified
+        assert "second@example.org" not in stringified
+        assert "(555) 123-4567" not in stringified
+        assert "[EMAIL_REDACTED]" in meta
+        assert "[EMAIL_REDACTED]__2" in meta
+        assert sorted([meta["[EMAIL_REDACTED]"], meta["[EMAIL_REDACTED]__2"]]) == [
+            "present in key",
+            "second value",
+        ]
+        nested_keys = list(meta["nested"])
+        assert all("(555) 123-4567" not in key for key in nested_keys)
+        assert any("[PHONE_REDACTED]" in key for key in nested_keys)
 
     @pytest.mark.asyncio
     async def test_redaction_handles_dataclass_metadata_values(self, audit_service):
@@ -2430,6 +2468,39 @@ async def test_export_events_raises_on_read_failure(audit_service, monkeypatch):
             max_rows=10,
         )
 
+
+@pytest.mark.asyncio
+async def test_read_methods_propagate_cancellation(audit_service, monkeypatch):
+    """Task cancellation should not be wrapped as an audit read/export failure."""
+    original_read_db = audit_service._read_db
+
+    @asynccontextmanager
+    async def _cancelled_read_db():
+        raise asyncio.CancelledError()
+        yield
+
+    async def _cancelled_flush(*_args, **_kwargs):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(audit_service, "_read_db", _cancelled_read_db)
+    with pytest.raises(asyncio.CancelledError):
+        await audit_service.query_events(user_id="cancelled-query-user")
+
+    monkeypatch.setattr(audit_service, "_read_db", original_read_db)
+    monkeypatch.setattr(audit_service, "flush", _cancelled_flush)
+    with pytest.raises(asyncio.CancelledError):
+        await audit_service.count_events(user_id="cancelled-count-user")
+    with pytest.raises(asyncio.CancelledError):
+        await audit_service.export_events(
+            format="json",
+            user_id="cancelled-export-user",
+            stream=False,
+            max_rows=10,
+        )
+    with pytest.raises(asyncio.CancelledError):
+        await audit_service.get_security_summary(hours=1)
+
+
 @pytest.mark.asyncio
 async def test_legacy_migration_allows_new_events_with_chain_hash(tmp_path):
     """A migrated legacy table should accept fresh writes with chain hashes."""
@@ -2763,3 +2834,188 @@ async def test_export_events_flushes_buffered_events(tmp_path):
         assert service.event_buffer == []
     finally:
         await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_query_events_flushes_buffered_events(tmp_path):
+    """Queries should include buffered events without waiting for periodic flush."""
+    db_path = tmp_path / "query_flushes_buffer.db"
+    service = UnifiedAuditService(
+        db_path=str(db_path),
+        enable_pii_detection=False,
+        enable_risk_scoring=False,
+        buffer_size=100,
+        flush_interval=60.0,
+    )
+    await service.initialize(start_background_tasks=False)
+    try:
+        await service.log_event(
+            AuditEventType.DATA_READ,
+            context=AuditContext(user_id="buffered-query-user"),
+            resource_id="query-me",
+        )
+
+        events = await service.query_events(user_id="buffered-query-user")
+
+        assert any(row.get("resource_id") == "query-me" for row in events)
+        assert service.event_buffer == []
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_security_summary_flushes_buffered_events(tmp_path):
+    """Security summaries should include buffered security events."""
+    db_path = tmp_path / "summary_flushes_buffer.db"
+    service = UnifiedAuditService(
+        db_path=str(db_path),
+        enable_pii_detection=False,
+        enable_risk_scoring=False,
+        buffer_size=100,
+        flush_interval=60.0,
+    )
+    await service.initialize(start_background_tasks=False)
+    try:
+        await service.log_event(
+            AuditEventType.SECURITY_VIOLATION,
+            context=AuditContext(user_id="summary-user", ip_address="203.0.113.10"),
+            action="blocked_access",
+            result="failure",
+        )
+        assert len(service.event_buffer) == 1
+
+        summary = await service.get_security_summary(hours=1)
+
+        assert summary["total_events"] == 1
+        assert summary["failure_events"] == 1
+        assert service.event_buffer == []
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_csv_export_neutralizes_spreadsheet_formulas(tmp_path):
+    """CSV exports should neutralize formula-like user-controlled values."""
+    db_path = tmp_path / "csv_formula_export.db"
+    service = UnifiedAuditService(
+        db_path=str(db_path),
+        enable_pii_detection=False,
+        enable_risk_scoring=False,
+        buffer_size=1,
+        flush_interval=60.0,
+    )
+    await service.initialize(start_background_tasks=False)
+    try:
+        await service.log_event(
+            AuditEventType.DATA_EXPORT,
+            context=AuditContext(user_id="csv-formula-user"),
+            resource_type="\n=SUM(1,1)",
+            resource_id="+SUM(1,1)",
+            action="=HYPERLINK(\"http://example.test\",\"x\")",
+        )
+        await service.flush()
+
+        content = await service.export_events(
+            user_id="csv-formula-user",
+            format="csv",
+            stream=False,
+            max_rows=10,
+        )
+        rows = list(csv.DictReader(StringIO(content)))
+        row = next(r for r in rows if r["context_user_id"] == "csv-formula-user")
+        assert row["action"].startswith("'=")
+        assert row["resource_type"].startswith("'\n=")
+        assert row["resource_id"].startswith("'+")
+
+        output_path = tmp_path / "audit_export.csv"
+        written = await service.export_events(
+            user_id="csv-formula-user",
+            format="csv",
+            file_path=output_path,
+            chunk_size=1,
+            max_rows=10,
+        )
+        assert written == 1
+        file_content = await asyncio.to_thread(output_path.read_text, encoding="utf-8")
+        rows = list(csv.DictReader(StringIO(file_content)))
+        row = rows[0]
+        assert row["action"].startswith("'=")
+        assert row["resource_type"].startswith("'\n=")
+        assert row["resource_id"].startswith("'+")
+
+        stream = await service.export_events(
+            user_id="csv-formula-user",
+            format="csv",
+            stream=True,
+            chunk_size=1,
+            max_rows=10,
+        )
+        streamed = "".join([part async for part in stream])
+        rows = list(csv.DictReader(StringIO(streamed)))
+        row = rows[0]
+        assert row["action"].startswith("'=")
+        assert row["resource_type"].startswith("'\n=")
+        assert row["resource_id"].startswith("'+")
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_hash_chain_uses_latest_persisted_head_for_multiple_instances(tmp_path):
+    """Sequential writers with stale in-memory heads should still form one chain."""
+    db_path = tmp_path / "multi_instance_chain.db"
+    service1 = UnifiedAuditService(
+        db_path=str(db_path),
+        enable_pii_detection=False,
+        enable_risk_scoring=False,
+        buffer_size=10,
+        flush_interval=60.0,
+    )
+    service2 = UnifiedAuditService(
+        db_path=str(db_path),
+        enable_pii_detection=False,
+        enable_risk_scoring=False,
+        buffer_size=10,
+        flush_interval=60.0,
+    )
+    await service1.initialize(start_background_tasks=False)
+    await service2.initialize(start_background_tasks=False)
+    try:
+        await service1.log_event(
+            AuditEventType.DATA_READ,
+            context=AuditContext(user_id="multi-chain-user"),
+            action="first_read",
+        )
+        await service1.flush(raise_on_failure=True)
+
+        await service2.log_event(
+            AuditEventType.DATA_READ,
+            context=AuditContext(user_id="multi-chain-user"),
+            action="second_read",
+        )
+        await service2.flush(raise_on_failure=True)
+
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT action, context_user_id, timestamp, event_type, chain_hash "
+                "FROM audit_events WHERE context_user_id = ? ORDER BY rowid ASC",
+                ("multi-chain-user",),
+            ) as cur:
+                rows = [dict(r) for r in await cur.fetchall()]
+
+        assert [row["action"] for row in rows] == ["first_read", "second_read"]
+        result = verify_audit_chain([
+            {
+                "action": row.get("action", ""),
+                "user_id": row.get("context_user_id"),
+                "timestamp": row.get("timestamp", ""),
+                "detail": row.get("event_type", ""),
+                "chain_hash": row.get("chain_hash", ""),
+            }
+            for row in rows
+        ])
+        assert result["valid"] is True, result
+    finally:
+        await service2.stop()
+        await service1.stop()
