@@ -373,7 +373,7 @@ Verification:
 
 ### Task 6: Add Orchestrator Prepare And Execute Phases
 
-- [ ] Add `orchestrator.py` with fakeable protocols:
+- [x] Add `orchestrator.py` with fakeable protocols:
 
 ```python
 from __future__ import annotations
@@ -401,11 +401,11 @@ class EmbeddingExecutor(Protocol):
         raise NotImplementedError
 ```
 
-- [ ] Implement `EmbeddingRequestOrchestrator.prepare(raw_input, context) -> PreparedEmbeddingRequest`.
+- [x] Implement `EmbeddingRequestOrchestrator.prepare(raw_input, context) -> PreparedEmbeddingRequest`.
   - It calls input normalization, provider resolution, policy enforcement, and execution-plan construction.
   - It returns normalized token totals for endpoint RG and billing.
   - It does not call cache or provider execution.
-- [ ] Implement `EmbeddingRequestOrchestrator.execute(prepared) -> EmbeddingExecutionResult`.
+- [x] Implement `EmbeddingRequestOrchestrator.execute(prepared) -> EmbeddingExecutionResult`.
   - It reads cache entries using current `get_cache_key` semantics.
   - A full cache hit skips executor calls.
   - A partial cache hit calls executor only for missed texts and preserves original response order.
@@ -413,13 +413,13 @@ class EmbeddingExecutor(Protocol):
   - It validates provider vector count equals miss count.
   - It applies dimensions postprocessing before cache writeback.
   - It returns headers for fallback provider and dimensions policy.
-- [ ] Preserve raw-text boundaries:
+- [x] Preserve raw-text boundaries:
   - `PreparedEmbeddingRequest` may hold `NormalizedEmbeddingInput`.
   - `EmbeddingExecutionPlan` must not hold `NormalizedEmbeddingInput.texts`.
   - `repr(prepared.execution_plan)` must not contain input text.
-- [ ] Add `tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py`.
-- [ ] Cover prepare-only token accounting, full cache hit, partial cache hit, vector-count mismatch, redacted plan representation, fallback model mapping, and base64-independent cache values.
-- [ ] Run:
+- [x] Add `tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py`.
+- [x] Cover prepare-only token accounting, full cache hit, partial cache hit, vector-count mismatch, redacted plan representation, fallback model mapping, and base64-independent cache values.
+- [x] Run:
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -427,6 +427,14 @@ python -m pytest -q tldw_Server_API/tests/Embeddings_isolated/test_embedding_orc
 ```
 
 Expected result after implementation: orchestrator unit tests pass without importing FastAPI.
+
+Task 6 completed and reviewed. Added regression coverage from quality review for provider/model-coherent fallback after partial cache hits, non-retryable provider errors, rate-limit exhaustion preserving retry-after, base64 dimensions forcing reduction, and malformed vector-container rejection. Spec and quality re-reviews approved after fixes.
+
+Verification:
+- `python -m pytest -q tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py` -> 12 passed, 36 warnings.
+- `python -m compileall -q tldw_Server_API/app/core/Embeddings/orchestrator.py tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py` -> passed.
+- `python -m bandit -r tldw_Server_API/app/core/Embeddings/orchestrator.py -f json -o /tmp/bandit_embedding_orchestrator_coord.json` -> 0 findings, no errors.
+- Direct import check confirmed importing `tldw_Server_API.app.core.Embeddings.orchestrator` leaves `fastapi` absent from `sys.modules`.
 
 ### Task 7: Wire The Feature-Flagged Endpoint Path
 

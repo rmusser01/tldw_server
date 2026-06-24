@@ -14,6 +14,7 @@ modified_files:
 - tldw_Server_API/app/core/Embeddings/input_normalizer.py
 - tldw_Server_API/app/core/Embeddings/provider_resolution.py
 - tldw_Server_API/app/core/Embeddings/embedding_policy.py
+- tldw_Server_API/app/core/Embeddings/orchestrator.py
 - tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py
 - tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_characterization.py
 - tldw_Server_API/tests/Embeddings/test_embeddings_dimensions_policy.py
@@ -23,7 +24,8 @@ modified_files:
 - tldw_Server_API/tests/Embeddings_isolated/test_input_normalizer.py
 - tldw_Server_API/tests/Embeddings_isolated/test_provider_resolution.py
 - tldw_Server_API/tests/Embeddings_isolated/test_embedding_policy.py
-updated_date: 2026-06-24 20:56
+- tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py
+updated_date: 2026-06-24 21:22
 ---
 
 ## Description
@@ -69,6 +71,22 @@ Task 5 verification:
 - Policy suite: `python -m pytest -q tldw_Server_API/tests/Embeddings_isolated/test_embedding_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_dimensions_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback_model_map.py tldw_Server_API/tests/Embeddings/test_l2_normalization_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_batch_dimensions.py tldw_Server_API/tests/Embeddings/test_embeddings_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_policy_toggle.py tldw_Server_API/tests/Embeddings/test_embeddings_policy_strict_mode.py tldw_Server_API/tests/Embeddings/test_embeddings_unsupported_provider.py` -> 45 passed, 754 warnings.
 - Compile: touched policy, endpoint, and test files -> exit 0.
 - Bandit: `python -m bandit -r tldw_Server_API/app/core/Embeddings/embedding_policy.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py -f json -o /tmp/bandit_embeddings_policy_coord.json` -> 0 findings, no errors.
+Task 6 completed: added dependency-light `app/core/Embeddings/orchestrator.py` with EmbeddingCache/EmbeddingExecutor protocols, PreparedEmbeddingRequest, prepare() normalization/provider-resolution/policy/planning, and execute() cache read-through, miss-only executor calls, fallback model mapping, dimension postprocessing before cache writeback, vector-count validation, canonical float cache values, response headers, and redacted execution-plan boundaries. Added isolated orchestrator tests for prepare token accounting, full cache hit, partial cache hit, vector-count mismatch, redacted plan repr, fallback model mapping, and base64-independent cache values.
+
+Task 6 red evidence: initial `python -m pytest -q --tb=short tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py` failed during collection with `ModuleNotFoundError: No module named 'tldw_Server_API.app.core.Embeddings.orchestrator'`.
+
+Task 6 verification:
+- Direct import check: importing `tldw_Server_API.app.core.Embeddings.orchestrator` reported `fastapi` absent from `sys.modules`.
+- Compile: `python -m compileall -q tldw_Server_API/app/core/Embeddings/orchestrator.py tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py` passed.
+- Bandit: `python -m bandit -r tldw_Server_API/app/core/Embeddings/orchestrator.py -f json -o /tmp/bandit_embedding_orchestrator.json` passed with 0 results.
+- Requested test command: `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py` passed with 7 passed, 26 warnings in 8.74s.
+Task 6 quality review fixes completed: fallback after partial primary cache hits now rebuilds a coherent full response under the fallback provider/model; fallback continues only for eligible retryable rate-limit/unavailable domain errors; non-retryable provider errors raise as-is; rate-limit exhaustion preserves the original retry_after; base64 requests with dimensions force effective dimension policy `reduce`; malformed non-list/tuple vector containers are rejected before cache writeback.
+
+Task 6 post-review verification:
+- `python -m pytest -q tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py` -> 12 passed, 36 warnings.
+- `python -m compileall -q tldw_Server_API/app/core/Embeddings/orchestrator.py tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py` -> passed.
+- `python -m bandit -r tldw_Server_API/app/core/Embeddings/orchestrator.py -f json -o /tmp/bandit_embedding_orchestrator_coord.json` -> 0 findings, no errors.
+- Direct import check: importing `tldw_Server_API.app.core.Embeddings.orchestrator` reported `fastapi` absent from `sys.modules`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
