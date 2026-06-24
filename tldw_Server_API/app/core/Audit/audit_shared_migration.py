@@ -743,16 +743,40 @@ async def _migrate_source(
                     last_event_id = None
                     last_timestamp = None
 
-            if last_rowid > 0 and last_timestamp:
-                query = (
-                    "SELECT rowid, * FROM audit_events "
-                    "WHERE rowid > ? OR (timestamp > ? OR (timestamp = ? AND event_id > ?)) "
-                    "ORDER BY rowid"
-                )
-                params = (last_rowid, last_timestamp, last_timestamp, last_event_id or "")
-            elif last_rowid > 0:
+            if last_rowid > 0 and last_event_id:
+                try:
+                    async with source_db.execute(
+                        "SELECT event_id FROM audit_events WHERE rowid = ?",
+                        (last_rowid,),
+                    ) as cur:
+                        checkpoint_row = await cur.fetchone()
+                    if checkpoint_row and str(checkpoint_row["event_id"]) != last_event_id:
+                        # Source rowids were reused or the source was rebuilt; fall back to a full
+                        # scan and rely on event_id de-duplication to preserve correctness.
+                        last_rowid = 0
+                        last_event_id = None
+                        last_timestamp = None
+                    elif checkpoint_row is None:
+                        async with source_db.execute("SELECT MAX(rowid) FROM audit_events") as cur:
+                            max_row = await cur.fetchone()
+                        max_rowid = int(max_row[0]) if max_row and max_row[0] is not None else None
+                        if max_rowid is not None and max_rowid <= last_rowid:
+                            last_rowid = 0
+                            last_event_id = None
+                            last_timestamp = None
+                except _AUDIT_DB_EXCEPTIONS:
+                    pass
+
+            if last_rowid > 0:
                 query = "SELECT rowid, * FROM audit_events WHERE rowid > ? ORDER BY rowid"
                 params = (last_rowid,)
+            elif last_timestamp:
+                query = (
+                    "SELECT rowid, * FROM audit_events "
+                    "WHERE timestamp > ? OR (timestamp = ? AND event_id > ?) "
+                    "ORDER BY timestamp, event_id"
+                )
+                params = (last_timestamp, last_timestamp, last_event_id or "")
             else:
                 query = "SELECT rowid, * FROM audit_events ORDER BY rowid"
                 params = ()

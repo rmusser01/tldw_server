@@ -4,7 +4,7 @@ title: Harden audit module review findings
 status: Done
 assignee: []
 created_date: '2026-06-23 18:11'
-updated_date: '2026-06-23 18:31'
+updated_date: '2026-06-24 01:06'
 labels:
   - audit
   - security
@@ -58,6 +58,14 @@ Verification:
 - source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Audit -f json -o /tmp/bandit_audit_module_hardening.json: 0 findings
 
 Known limitation: running the same focused tests with the repository parent conftest loaded blocked during an unrelated character_chat_sessions FastAPI import before audit test bodies ran. A broader tldw_Server_API/tests/Audit run with parent conftest excluded was interrupted after 19 passing tests because endpoint tests were slow/teardown did not return promptly.
+
+2026-06-24: Addressed PR #2440 automated review comments. Added docstring for _neutralize_csv_row; included newline-prefixed CSV formula neutralization with test coverage; made metadata key redaction collision-safe with stable suffixes; changed normal migration resume to rowid-only with a rowid-reuse/source-reset fallback; added third-pass migration idempotency assertions; added get_security_summary cancellation coverage; made the security-summary flush test keep the event buffered before read; replaced blocking Path.read_text in async test with asyncio.to_thread; wrapped flush and fallback replay chain writes in BEGIN IMMEDIATE transaction boundaries with rollback on failure.
+
+Post-review verification in PR worktree:
+- py_compile on touched audit files: passed
+- focused review regression subset: 8 passed, 13 warnings
+- touched audit test files: 106 passed, 1 xfailed, 332 warnings
+- Bandit audit module scan: 0 findings (/tmp/bandit_audit_module_hardening_pr2440.json)
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

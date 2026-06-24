@@ -120,7 +120,7 @@ _VALID_STORAGE_MODES = {"per_user", "shared"}
 _SYSTEM_TENANT_ID = "system"
 _UNIDENTIFIED_TENANT_ID = "unidentified_user"
 _AUDIT_SHARED_SCHEMA_VERSION = 1
-_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r", "\n")
 
 try:
     import fcntl  # type: ignore
@@ -228,6 +228,7 @@ def _neutralize_csv_formula(value: Any) -> Any:
 
 
 def _neutralize_csv_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Return a CSV-safe copy of a row without mutating caller-owned data."""
     return {key: _neutralize_csv_formula(value) for key, value in row.items()}
 
 
@@ -681,7 +682,12 @@ class PIIDetector:
                 redacted: dict[Any, Any] = {}
                 for key, value in data.items():
                     safe_key = self._redact_value(key, placeholder_format) if isinstance(key, str) else key
-                    redacted[safe_key] = self.redact_obj(value, placeholder_format)
+                    unique_key = safe_key
+                    suffix = 2
+                    while unique_key in redacted:
+                        unique_key = f"{safe_key}__{suffix}"
+                        suffix += 1
+                    redacted[unique_key] = self.redact_obj(value, placeholder_format)
                 return redacted
             if isinstance(data, list):
                 return [self.redact_obj(v, placeholder_format) for v in data]
@@ -1161,6 +1167,20 @@ class UnifiedAuditService:
         if not row:
             return ""
         return str(row[0] or "")
+
+    @asynccontextmanager
+    async def _immediate_write_transaction(self, db: aiosqlite.Connection) -> AsyncGenerator[None, None]:
+        """Hold SQLite's writer lock from chain-head read through commit."""
+        await db.execute("BEGIN IMMEDIATE")
+        committed = False
+        try:
+            yield
+            await db.commit()
+            committed = True
+        finally:
+            if not committed:
+                with suppress(_AUDIT_NONCRITICAL_EXCEPTIONS):
+                    await db.rollback()
 
 
     def _build_event_columns(self) -> list[str]:
@@ -2499,42 +2519,44 @@ class UnifiedAuditService:
                                 db.row_factory = aiosqlite.Row
                             except _AUDIT_NONCRITICAL_EXCEPTIONS:
                                 pass
-                            new_events = await self._filter_new_events(db, events)
-                            if not new_events:
-                                return True
-                            # Prepare batch data
-                            records = [event.to_dict() for event in new_events]
-                            self._ensure_record_tenant_ids(records)
-                            previous_hash = await self._load_last_chain_hash_from_db(db)
-                            committed_chain_hash = self._apply_chain_hashes(
-                                records,
-                                previous_hash=previous_hash,
-                            )
-                            await db.executemany(self._event_insert_sql, records)
-                            await self._update_daily_stats(db, new_events)
-                            await db.commit()
+                            committed_chain_hash = self._last_chain_hash
+                            async with self._immediate_write_transaction(db):
+                                new_events = await self._filter_new_events(db, events)
+                                if not new_events:
+                                    return True
+                                # Prepare batch data
+                                records = [event.to_dict() for event in new_events]
+                                self._ensure_record_tenant_ids(records)
+                                previous_hash = await self._load_last_chain_hash_from_db(db)
+                                committed_chain_hash = self._apply_chain_hashes(
+                                    records,
+                                    previous_hash=previous_hash,
+                                )
+                                await db.executemany(self._event_insert_sql, records)
+                                await self._update_daily_stats(db, new_events)
                             self._last_chain_hash = committed_chain_hash
                     else:
                         db = await self._ensure_db_pool()
                         async with self._db_lock:
-                            new_events = await self._filter_new_events(db, events)
-                            if not new_events:
-                                return True
-                            # Prepare batch data
-                            records = [event.to_dict() for event in new_events]
+                            committed_chain_hash = self._last_chain_hash
+                            async with self._immediate_write_transaction(db):
+                                new_events = await self._filter_new_events(db, events)
+                                if not new_events:
+                                    return True
+                                # Prepare batch data
+                                records = [event.to_dict() for event in new_events]
 
-                            # Batch insert
-                            self._ensure_record_tenant_ids(records)
-                            previous_hash = await self._load_last_chain_hash_from_db(db)
-                            committed_chain_hash = self._apply_chain_hashes(
-                                records,
-                                previous_hash=previous_hash,
-                            )
-                            await db.executemany(self._event_insert_sql, records)
+                                # Batch insert
+                                self._ensure_record_tenant_ids(records)
+                                previous_hash = await self._load_last_chain_hash_from_db(db)
+                                committed_chain_hash = self._apply_chain_hashes(
+                                    records,
+                                    previous_hash=previous_hash,
+                                )
+                                await db.executemany(self._event_insert_sql, records)
 
-                            # Update daily statistics
-                            await self._update_daily_stats(db, new_events)
-                            await db.commit()
+                                # Update daily statistics
+                                await self._update_daily_stats(db, new_events)
                             self._last_chain_hash = committed_chain_hash
 
                     # Success
@@ -2951,48 +2973,49 @@ class UnifiedAuditService:
 
                 async def _do_write() -> int:
                     nonlocal replay_chain_hash
-                    record_ids = [str(r.get("event_id")) for r in records_chunk if r.get("event_id")]
-                    existing_ids = await self._fetch_existing_event_ids(db, record_ids)
-                    seen: set[str] = set()
-                    filtered_records: list[dict[str, Any]] = []
-                    for record in records_chunk:
-                        event_id = record.get("event_id")
-                        if not event_id:
-                            continue
-                        event_id = str(event_id)
-                        if event_id in existing_ids or event_id in seen:
-                            continue
-                        seen.add(event_id)
-                        filtered_records.append(record)
-
-                    if not filtered_records:
-                        return 0
-
-                    for record in filtered_records:
-                        record["pii_detected"] = _coerce_bool(record.get("pii_detected"), False)
-
-                    self._ensure_record_tenant_ids(filtered_records)
-                    previous_hash = await self._load_last_chain_hash_from_db(db)
-                    committed_chain_hash = self._apply_chain_hashes(
-                        filtered_records,
-                        previous_hash=previous_hash,
-                    )
-                    await db.executemany(self._event_insert_sql, filtered_records)
-                    if stats_events:
-                        filtered_stats: list[AuditEvent] = []
-                        stats_seen: set[str] = set()
-                        for ev in stats_events:
-                            if not ev.event_id:
+                    committed_chain_hash = replay_chain_hash
+                    async with self._immediate_write_transaction(db):
+                        record_ids = [str(r.get("event_id")) for r in records_chunk if r.get("event_id")]
+                        existing_ids = await self._fetch_existing_event_ids(db, record_ids)
+                        seen: set[str] = set()
+                        filtered_records: list[dict[str, Any]] = []
+                        for record in records_chunk:
+                            event_id = record.get("event_id")
+                            if not event_id:
                                 continue
-                            if ev.event_id in existing_ids or ev.event_id not in seen:
+                            event_id = str(event_id)
+                            if event_id in existing_ids or event_id in seen:
                                 continue
-                            if ev.event_id in stats_seen:
-                                continue
-                            stats_seen.add(ev.event_id)
-                            filtered_stats.append(ev)
-                        if filtered_stats:
-                            await self._update_daily_stats(db, filtered_stats)
-                    await db.commit()
+                            seen.add(event_id)
+                            filtered_records.append(record)
+
+                        if not filtered_records:
+                            return 0
+
+                        for record in filtered_records:
+                            record["pii_detected"] = _coerce_bool(record.get("pii_detected"), False)
+
+                        self._ensure_record_tenant_ids(filtered_records)
+                        previous_hash = await self._load_last_chain_hash_from_db(db)
+                        committed_chain_hash = self._apply_chain_hashes(
+                            filtered_records,
+                            previous_hash=previous_hash,
+                        )
+                        await db.executemany(self._event_insert_sql, filtered_records)
+                        if stats_events:
+                            filtered_stats: list[AuditEvent] = []
+                            stats_seen: set[str] = set()
+                            for ev in stats_events:
+                                if not ev.event_id:
+                                    continue
+                                if ev.event_id in existing_ids or ev.event_id not in seen:
+                                    continue
+                                if ev.event_id in stats_seen:
+                                    continue
+                                stats_seen.add(ev.event_id)
+                                filtered_stats.append(ev)
+                            if filtered_stats:
+                                await self._update_daily_stats(db, filtered_stats)
                     replay_chain_hash = committed_chain_hash
                     self._last_chain_hash = committed_chain_hash
                     return len(filtered_records)

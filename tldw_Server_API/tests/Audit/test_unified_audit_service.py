@@ -168,6 +168,7 @@ class TestPIIDetection:
             context=context,
             metadata={
                 "owner@example.com": "present in key",
+                "second@example.org": "second value",
                 "nested": {
                     "(555) 123-4567": "phone key",
                 },
@@ -182,8 +183,14 @@ class TestPIIDetection:
         stringified = json.dumps(meta)
 
         assert "owner@example.com" not in stringified
+        assert "second@example.org" not in stringified
         assert "(555) 123-4567" not in stringified
         assert "[EMAIL_REDACTED]" in meta
+        assert "[EMAIL_REDACTED]__2" in meta
+        assert sorted([meta["[EMAIL_REDACTED]"], meta["[EMAIL_REDACTED]__2"]]) == [
+            "present in key",
+            "second value",
+        ]
         nested_keys = list(meta["nested"])
         assert all("(555) 123-4567" not in key for key in nested_keys)
         assert any("[PHONE_REDACTED]" in key for key in nested_keys)
@@ -2488,6 +2495,8 @@ async def test_read_methods_propagate_cancellation(audit_service, monkeypatch):
             stream=False,
             max_rows=10,
         )
+    with pytest.raises(asyncio.CancelledError):
+        await audit_service.get_security_summary(hours=1)
 
 
 @pytest.mark.asyncio
@@ -2859,7 +2868,7 @@ async def test_security_summary_flushes_buffered_events(tmp_path):
     service = UnifiedAuditService(
         db_path=str(db_path),
         enable_pii_detection=False,
-        enable_risk_scoring=True,
+        enable_risk_scoring=False,
         buffer_size=100,
         flush_interval=60.0,
     )
@@ -2871,6 +2880,7 @@ async def test_security_summary_flushes_buffered_events(tmp_path):
             action="blocked_access",
             result="failure",
         )
+        assert len(service.event_buffer) == 1
 
         summary = await service.get_security_summary(hours=1)
 
@@ -2897,7 +2907,7 @@ async def test_csv_export_neutralizes_spreadsheet_formulas(tmp_path):
         await service.log_event(
             AuditEventType.DATA_EXPORT,
             context=AuditContext(user_id="csv-formula-user"),
-            resource_type="sheet",
+            resource_type="\n=SUM(1,1)",
             resource_id="+SUM(1,1)",
             action="=HYPERLINK(\"http://example.test\",\"x\")",
         )
@@ -2912,6 +2922,7 @@ async def test_csv_export_neutralizes_spreadsheet_formulas(tmp_path):
         rows = list(csv.DictReader(StringIO(content)))
         row = next(r for r in rows if r["context_user_id"] == "csv-formula-user")
         assert row["action"].startswith("'=")
+        assert row["resource_type"].startswith("'\n=")
         assert row["resource_id"].startswith("'+")
 
         output_path = tmp_path / "audit_export.csv"
@@ -2923,9 +2934,11 @@ async def test_csv_export_neutralizes_spreadsheet_formulas(tmp_path):
             max_rows=10,
         )
         assert written == 1
-        rows = list(csv.DictReader(StringIO(output_path.read_text(encoding="utf-8"))))
+        file_content = await asyncio.to_thread(output_path.read_text, encoding="utf-8")
+        rows = list(csv.DictReader(StringIO(file_content)))
         row = rows[0]
         assert row["action"].startswith("'=")
+        assert row["resource_type"].startswith("'\n=")
         assert row["resource_id"].startswith("'+")
 
         stream = await service.export_events(
@@ -2939,6 +2952,7 @@ async def test_csv_export_neutralizes_spreadsheet_formulas(tmp_path):
         rows = list(csv.DictReader(StringIO(streamed)))
         row = rows[0]
         assert row["action"].startswith("'=")
+        assert row["resource_type"].startswith("'\n=")
         assert row["resource_id"].startswith("'+")
     finally:
         await service.stop()

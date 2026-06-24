@@ -324,6 +324,17 @@ async def test_migration_resume_includes_late_older_timestamp_rows(tmp_path):
     event_ids = {row["event_id"] for row in rows}
     assert {"evt-first", "evt-second", "evt-late-older"} <= event_ids
 
+    report3 = await migrate_to_shared_audit_db(
+        shared_db_path=shared_db_path,
+        user_db_base_dir=user_base,
+        default_db_path=None,
+        system_tenant_id="system",
+        chunk_size=100,
+    )
+    source_counts3 = next(c for c in report3.sources if c.source.label == f"user:{user_id}")
+    assert source_counts3.events_read == 0
+    assert source_counts3.events_inserted == 0
+
 
 @pytest.mark.asyncio
 async def test_migration_checkpoint_handles_empty_timestamp_resume(tmp_path, monkeypatch):
