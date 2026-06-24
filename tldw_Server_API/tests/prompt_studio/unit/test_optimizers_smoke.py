@@ -15,6 +15,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.optimization_engine import (
     BootstrapOptimizer,
+    MIPROOptimizer,
     TestRunner,
 )
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.optimization_strategies import (
@@ -106,6 +107,34 @@ async def test_bootstrap_optimizer_smoke(temp_ps_db, monkeypatch):
     # Improvement metrics present (may be zero with mocked constant scores)
     assert "initial_score" in result and "final_score" in result and "improvement" in result
     assert isinstance(result["improvement"], (int, float))
+
+
+@pytest.mark.asyncio
+async def test_optimizer_variants_allocate_unique_versions(temp_ps_db):
+    ids = _seed_project_prompt(temp_ps_db)
+    prompt_id = ids["prompt_id"]
+    runner = TestRunner(temp_ps_db)
+
+    mipro = MIPROOptimizer(temp_ps_db, runner)
+    first_mipro_id = await mipro._create_prompt_variant(prompt_id, "Instruction A")
+    second_mipro_id = await mipro._create_prompt_variant(prompt_id, "Instruction B")
+
+    first_mipro = temp_ps_db.get_prompt(first_mipro_id)
+    second_mipro = temp_ps_db.get_prompt(second_mipro_id)
+    assert first_mipro["name"] == "Base (Optimized)"
+    assert second_mipro["name"] == "Base (Optimized)"
+    assert {first_mipro["version_number"], second_mipro["version_number"]} == {2, 3}
+
+    bootstrap = BootstrapOptimizer(temp_ps_db, runner)
+    examples = [{"inputs": {"q": "x"}, "actual_output": {"response": "y"}}]
+    first_bootstrap_id = await bootstrap._create_prompt_with_examples(prompt_id, examples)
+    second_bootstrap_id = await bootstrap._create_prompt_with_examples(prompt_id, examples)
+
+    first_bootstrap = temp_ps_db.get_prompt(first_bootstrap_id)
+    second_bootstrap = temp_ps_db.get_prompt(second_bootstrap_id)
+    assert first_bootstrap["name"] == "Base (Bootstrap)"
+    assert second_bootstrap["name"] == "Base (Bootstrap)"
+    assert {first_bootstrap["version_number"], second_bootstrap["version_number"]} == {2, 3}
 
 
 @pytest.mark.asyncio

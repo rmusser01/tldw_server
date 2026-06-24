@@ -26,6 +26,8 @@ import asyncio
 import contextlib
 import json
 import os
+import threading
+from collections import OrderedDict
 from typing import Any
 
 from loguru import logger
@@ -58,8 +60,11 @@ class PromptStudioJobError(RuntimeError):
             self.backoff_seconds = backoff_seconds
 
 
-_DB_CACHE: dict[str, Any] = {}
-_PROCESSOR_CACHE: dict[str, JobProcessor] = {}
+_DB_CACHE: OrderedDict[str, Any] = OrderedDict()
+_PROCESSOR_CACHE: OrderedDict[str, JobProcessor] = OrderedDict()
+_ACTIVE_USER_COUNTS: dict[str, int] = {}
+_PENDING_CLOSE: dict[str, list[Any]] = {}
+_CACHE_LOCK = threading.RLock()
 
 
 def _jobs_manager() -> JobManager:
@@ -78,10 +83,60 @@ def _coerce_int(value: Any, default: int) -> int:
         return int(default)
 
 
-def _normalize_user_id(value: Any) -> str:
+_MAX_CACHE_ENTRIES = max(1, _coerce_int(os.getenv("PROMPT_STUDIO_JOBS_CACHE_MAX_USERS"), 20))
+
+
+def _normalize_user_id(value: Any, *, allow_default: bool = False) -> str:
     if value is None or str(value).strip() == "":
+        if not allow_default:
+            raise PromptStudioJobError("Missing owner_user_id for prompt studio job", retryable=False)
         return str(DatabasePaths.get_single_user_id())
     return str(value)
+
+
+def _close_db(db: Any, *, user_id: str | None = None) -> None:
+    for method_name in ("close_connection", "close"):
+        method = getattr(db, method_name, None)
+        if callable(method):
+            try:
+                method()
+            except Exception as exc:
+                logger.opt(exception=exc).warning(
+                    "Failed to close Prompt Studio DB for user {} via {}",
+                    user_id or "<unknown>",
+                    method_name,
+                )
+            return
+
+
+def _evict_cache_entries_if_needed() -> None:
+    while len(_DB_CACHE) > _MAX_CACHE_ENTRIES:
+        user_id, db = _DB_CACHE.popitem(last=False)
+        _PROCESSOR_CACHE.pop(user_id, None)
+        if _ACTIVE_USER_COUNTS.get(user_id, 0) > 0:
+            _PENDING_CLOSE.setdefault(user_id, []).append(db)
+            logger.debug("Deferred Prompt Studio DB close for active user {}", user_id)
+            continue
+        _close_db(db, user_id=user_id)
+
+
+@contextlib.contextmanager
+def _active_user_cache_scope(user_id: str):
+    with _CACHE_LOCK:
+        _ACTIVE_USER_COUNTS[user_id] = _ACTIVE_USER_COUNTS.get(user_id, 0) + 1
+    try:
+        yield
+    finally:
+        pending_close: list[Any] = []
+        with _CACHE_LOCK:
+            remaining = _ACTIVE_USER_COUNTS.get(user_id, 0) - 1
+            if remaining > 0:
+                _ACTIVE_USER_COUNTS[user_id] = remaining
+            else:
+                _ACTIVE_USER_COUNTS.pop(user_id, None)
+                pending_close = _PENDING_CLOSE.pop(user_id, [])
+        for db in pending_close:
+            _close_db(db, user_id=user_id)
 
 
 def _normalize_payload(value: Any) -> dict[str, Any]:
@@ -124,29 +179,39 @@ def _build_worker_config(*, worker_id: str, queue: str) -> WorkerConfig:
 
 
 def _get_db(user_id: str):
-    cached = _DB_CACHE.get(user_id)
-    if cached is not None:
-        return cached
-    backend = get_content_backend_instance()
-    db_path = DatabasePaths.get_prompt_studio_db_path(user_id)
-    client_id = f"prompt_studio_jobs_worker:{user_id}"
-    db = create_prompt_studio_database(
-        client_id=client_id,
-        db_path=db_path,
-        backend=backend,
-    )
-    _DB_CACHE[user_id] = db
-    return db
+    with _CACHE_LOCK:
+        cached = _DB_CACHE.get(user_id)
+        if cached is not None:
+            _DB_CACHE.move_to_end(user_id)
+            return cached
+        backend = get_content_backend_instance()
+        db_path = DatabasePaths.get_prompt_studio_db_path(user_id)
+        client_id = f"prompt_studio_jobs_worker:{user_id}"
+        db = create_prompt_studio_database(
+            client_id=client_id,
+            db_path=db_path,
+            backend=backend,
+        )
+        _DB_CACHE[user_id] = db
+        _DB_CACHE.move_to_end(user_id)
+        _evict_cache_entries_if_needed()
+        return db
 
 
 def _get_processor(user_id: str) -> JobProcessor:
-    cached = _PROCESSOR_CACHE.get(user_id)
-    if cached is not None:
-        return cached
-    db = _get_db(user_id)
-    processor = JobProcessor(db)
-    _PROCESSOR_CACHE[user_id] = processor
-    return processor
+    with _CACHE_LOCK:
+        cached = _PROCESSOR_CACHE.get(user_id)
+        if cached is not None:
+            _PROCESSOR_CACHE.move_to_end(user_id)
+            if user_id in _DB_CACHE:
+                _DB_CACHE.move_to_end(user_id, last=True)
+            return cached
+        db = _get_db(user_id)
+        processor = JobProcessor(db)
+        _PROCESSOR_CACHE[user_id] = processor
+        _PROCESSOR_CACHE.move_to_end(user_id)
+        _evict_cache_entries_if_needed()
+        return processor
 
 
 def _resolve_entity_id(job_type: str, payload: dict[str, Any]) -> int:
@@ -180,14 +245,19 @@ async def _handle_job(job: dict[str, Any]) -> dict[str, Any]:
     elif job_type == "generation":
         payload.setdefault("project_id", entity_id)
 
-    user_id = _normalize_user_id(job.get("owner_user_id") or payload.get("user_id"))
-    processor = _get_processor(user_id)
+    owner_user_id = job.get("owner_user_id")
+    owner_missing = owner_user_id is None or str(owner_user_id).strip() == ""
+    if owner_missing and payload.get("user_id") is not None:
+        raise PromptStudioJobError("Missing owner_user_id for prompt studio job", retryable=False)
+    user_id = _normalize_user_id(owner_user_id, allow_default=True)
+    with _active_user_cache_scope(user_id):
+        processor = _get_processor(user_id)
 
-    if job_type == "optimization":
-        return await processor.process_optimization_job(payload, entity_id)
-    if job_type == "evaluation":
-        return await processor.process_evaluation_job(payload, entity_id)
-    return await processor.process_generation_job(payload, entity_id)
+        if job_type == "optimization":
+            return await processor.process_optimization_job(payload, entity_id)
+        if job_type == "evaluation":
+            return await processor.process_evaluation_job(payload, entity_id)
+        return await processor.process_generation_job(payload, entity_id)
 
 
 async def _inflight_quota_guard(job: dict[str, Any], jm: JobManager) -> bool:

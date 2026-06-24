@@ -13,8 +13,6 @@ This module provides comprehensive prompt engineering capabilities including:
 """
 
 # Core managers
-# Security and permissions
-from .auth_permissions import Permission, PermissionManager
 from .bootstrap_manager import BootstrapManager
 from .evaluation_manager import EvaluationManager
 from .evaluation_metrics import EvaluationMetrics
@@ -71,9 +69,6 @@ __all__ = [
     'EventType',
     'PromptStudioMetrics',
 
-    # Security and permissions
-    'PermissionManager',
-    'Permission',
 ]
 
 __version__ = '0.1.0'
