@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Checkbox, Divider, InputNumber, Typography } from "antd";
-import { Pause, Play, Save } from "lucide-react";
+import { Download, Pause, Play, Save } from "lucide-react";
 import { useUpsertAudioStudioClip } from "@/hooks/useAudioStudioProjects";
 import {
   fetchAudioStudioArtifactBlob,
+  mintAudioStudioArtifactMediaTicket,
   type AudioStudioArtifact,
 } from "@/services/audio-studio";
 import {
@@ -173,6 +174,20 @@ const getTimelineEndMs = (clips: AudioStudioClip[]) =>
 const getRevision = (project: AudioStudioProject) =>
   project.current_revision_id ?? project.revision_id;
 
+const triggerBrowserDownload = (url: string, filename?: string | null) => {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.rel = "noreferrer";
+  anchor.referrerPolicy = "no-referrer";
+  if (filename) {
+    anchor.download = filename;
+  }
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+};
+
 export const TimelineEditor: React.FC<TimelineEditorProps> = ({
   artifacts = EMPTY_ARTIFACTS,
 }) => {
@@ -187,7 +202,12 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [isDownloadLoading, setIsDownloadLoading] = useState(false);
   const previewStateKeyRef = useRef<string | null>(null);
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
+  const ticketRetryKeyRef = useRef<string | null>(null);
+  const downloadStateKeyRef = useRef<string | null>(null);
   const upsertClip = useUpsertAudioStudioClip(
     activeProject?.project_id ?? null,
   );
@@ -209,13 +229,14 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
   const selectedArtifactSizeKnown =
     typeof selectedArtifact?.size_bytes === "number" &&
     selectedArtifact.size_bytes >= 0;
-  const selectedArtifactTooLarge =
-    selectedArtifactSizeKnown &&
-    selectedArtifact.size_bytes > MAX_BLOB_PREVIEW_BYTES;
-  const selectedArtifactHasPreviewableSize =
+  const selectedArtifactIsAudio = isAudioArtifact(selectedArtifact);
+  const selectedArtifactCanUseBlob =
+    selectedArtifactIsAudio &&
     selectedArtifactSizeKnown &&
     selectedArtifact.size_bytes <= MAX_BLOB_PREVIEW_BYTES;
-  const selectedArtifactIsAudio = isAudioArtifact(selectedArtifact);
+  const selectedArtifactShouldUseTicketPlayback =
+    selectedArtifactIsAudio && !selectedArtifactCanUseBlob;
+  const selectedArtifactCanDownload = Boolean(selectedArtifact);
   const selectedPreviewKey =
     activeProject && selectedClip && selectedArtifactId
       ? `${activeProject.project_id}:${selectedClip.clip_id}:${selectedArtifactId}`
@@ -226,6 +247,14 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
     previewStateKeyRef.current === selectedPreviewKey ? previewError : null;
   const visiblePreviewLoading =
     previewStateKeyRef.current === selectedPreviewKey && isPreviewLoading;
+  const visibleDownloadError =
+    downloadStateKeyRef.current === selectedPreviewKey ? downloadError : null;
+  const visibleDownloadLoading =
+    downloadStateKeyRef.current === selectedPreviewKey && isDownloadLoading;
+  const downloadFilename =
+    selectedClip && selectedArtifact
+      ? getArtifactDownloadFilename(selectedArtifact, selectedClip)
+      : null;
 
   useEffect(() => {
     if (!selectedClip) {
@@ -238,6 +267,12 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
     }
     setDraft(getClipDraft(selectedClip));
   }, [selectedClip, selectedClipId]);
+
+  useEffect(() => {
+    downloadStateKeyRef.current = selectedPreviewKey;
+    setDownloadError(null);
+    setIsDownloadLoading(false);
+  }, [selectedPreviewKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -253,10 +288,10 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
       !selectedArtifactId ||
       !selectedArtifact ||
       !selectedArtifactIsAudio ||
-      !selectedArtifactHasPreviewableSize ||
       !selectedPreviewKey
     ) {
       previewStateKeyRef.current = null;
+      ticketRetryKeyRef.current = null;
       return () => {
         cancelled = true;
       };
@@ -265,15 +300,32 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
     previewStateKeyRef.current = selectedPreviewKey;
     setIsPreviewLoading(true);
 
-    void fetchAudioStudioArtifactBlob(
-      activeProject.project_id,
-      selectedArtifact,
-    )
-      .then((blob) => {
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
+    const loadPreview = selectedArtifactCanUseBlob
+      ? fetchAudioStudioArtifactBlob(
+          activeProject.project_id,
+          selectedArtifact,
+        ).then((blob) => {
+          if (
+            cancelled ||
+            previewStateKeyRef.current !== selectedPreviewKey
+          ) {
+            return null;
+          }
+          objectUrl = URL.createObjectURL(blob);
+          return objectUrl;
+        })
+      : mintAudioStudioArtifactMediaTicket(
+          activeProject.project_id,
+          selectedArtifact.artifact_id,
+          "playback",
+        ).then((ticket) => ticket.ticket_url);
+
+    void loadPreview
+      .then((url) => {
+        if (!url || cancelled) return;
         previewStateKeyRef.current = selectedPreviewKey;
-        setPreviewUrl(objectUrl);
+        ticketRetryKeyRef.current = null;
+        setPreviewUrl(url);
       })
       .catch(() => {
         if (!cancelled) {
@@ -289,19 +341,17 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
 
     return () => {
       cancelled = true;
-      if (objectUrl) {
+      if (objectUrl?.startsWith("blob:")) {
         URL.revokeObjectURL(objectUrl);
       }
     };
   }, [
-    activeProject,
+    activeProject?.project_id,
     selectedArtifact,
-    selectedArtifactHasPreviewableSize,
+    selectedArtifactCanUseBlob,
     selectedArtifactId,
     selectedArtifactIsAudio,
-    selectedArtifactSizeKnown,
-    selectedArtifactTooLarge,
-    selectedClip,
+    selectedClip?.clip_id,
     selectedPreviewKey,
   ]);
 
@@ -369,14 +419,95 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
     });
   };
 
+  const handleTicketPlaybackError = () => {
+    if (
+      !activeProject ||
+      !selectedArtifact ||
+      !selectedArtifactShouldUseTicketPlayback ||
+      !selectedPreviewKey ||
+      ticketRetryKeyRef.current === selectedPreviewKey
+    ) {
+      return;
+    }
+    ticketRetryKeyRef.current = selectedPreviewKey;
+    const currentTime = audioElementRef.current?.currentTime ?? 0;
+    setIsPreviewLoading(true);
+    void mintAudioStudioArtifactMediaTicket(
+      activeProject.project_id,
+      selectedArtifact.artifact_id,
+      "playback",
+    )
+      .then((ticket) => {
+        if (previewStateKeyRef.current !== selectedPreviewKey) return;
+        const ticketUrl = ticket.ticket_url;
+        setPreviewUrl(ticketUrl);
+        window.setTimeout(() => {
+          const audioElement = audioElementRef.current;
+          if (
+            previewStateKeyRef.current === selectedPreviewKey &&
+            audioElement?.src === ticketUrl &&
+            Number.isFinite(currentTime)
+          ) {
+            audioElement.currentTime = currentTime;
+          }
+        }, 0);
+      })
+      .catch(() => {
+        if (previewStateKeyRef.current === selectedPreviewKey) {
+          setPreviewError("Preview unavailable");
+        }
+      })
+      .finally(() => {
+        if (previewStateKeyRef.current === selectedPreviewKey) {
+          setIsPreviewLoading(false);
+        }
+      });
+  };
+
+  const handleDownloadArtifact = async () => {
+    if (!activeProject || !selectedArtifact || !selectedPreviewKey) return;
+    const downloadStateKey = selectedPreviewKey;
+    downloadStateKeyRef.current = downloadStateKey;
+    setDownloadError(null);
+    setIsDownloadLoading(true);
+    try {
+      const ticket = await mintAudioStudioArtifactMediaTicket(
+        activeProject.project_id,
+        selectedArtifact.artifact_id,
+        "download",
+      );
+      if (downloadStateKeyRef.current !== downloadStateKey) {
+        return;
+      }
+      triggerBrowserDownload(ticket.ticket_url, downloadFilename);
+    } catch {
+      if (downloadStateKeyRef.current === downloadStateKey) {
+        setDownloadError("Download unavailable");
+      }
+    } finally {
+      if (downloadStateKeyRef.current === downloadStateKey) {
+        setIsDownloadLoading(false);
+      }
+    }
+  };
+
   const hasUsableRevision = Boolean(
     activeProject && getRevision(activeProject),
   );
   const canSaveClip = Boolean(selectedClip && draft && hasUsableRevision);
-  const downloadFilename =
-    selectedClip && selectedArtifact
-      ? getArtifactDownloadFilename(selectedArtifact, selectedClip)
-      : null;
+  const ticketDownloadButton =
+    selectedArtifactCanDownload && !selectedArtifactCanUseBlob ? (
+      <Button
+        size="small"
+        icon={<Download className="h-4 w-4" />}
+        onClick={handleDownloadArtifact}
+        loading={visibleDownloadLoading}
+      >
+        {selectedArtifactIsAudio
+          ? "Download selected clip audio"
+          : "Download selected artifact"}
+      </Button>
+    ) : null;
 
   return (
     <section
@@ -573,22 +704,20 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                   Selected clip artifact metadata is unavailable.
                 </Text>
               ) : !selectedArtifactIsAudio ? (
-                <Text type="secondary" className="text-xs">
-                  Selected clip artifact is not audio.
-                </Text>
-              ) : !selectedArtifactSizeKnown ? (
-                <Text type="secondary" className="text-xs">
-                  Artifact size is unavailable for browser preview.
-                </Text>
-              ) : selectedArtifactTooLarge ? (
-                <Text type="secondary" className="text-xs">
-                  Artifact is too large for browser preview.
-                </Text>
+                <div className="flex flex-col items-start gap-2 sm:items-end">
+                  <Text type="secondary" className="text-xs">
+                    Selected clip artifact is download-only.
+                  </Text>
+                  {ticketDownloadButton}
+                </div>
               ) : visiblePreviewError ? (
-                <Text type="danger" className="text-xs">
-                  {visiblePreviewError}
-                </Text>
-              ) : visiblePreviewUrl ? (
+                <div className="flex flex-col items-start gap-2 sm:items-end">
+                  <Text type="danger" className="text-xs">
+                    {visiblePreviewError}
+                  </Text>
+                  {ticketDownloadButton}
+                </div>
+              ) : visiblePreviewUrl && selectedArtifactCanUseBlob ? (
                 <a
                   className="text-xs font-medium text-primary hover:underline"
                   href={visiblePreviewUrl}
@@ -596,6 +725,8 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                 >
                   Download selected clip audio
                 </a>
+              ) : selectedArtifactCanDownload && !selectedArtifactCanUseBlob ? (
+                ticketDownloadButton
               ) : visiblePreviewLoading ? (
                 <Text type="secondary" className="text-xs">
                   Loading audio preview...
@@ -606,12 +737,20 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                 </Text>
               )}
             </div>
+            {visibleDownloadError ? (
+              <Text type="danger" className="mt-2 block text-xs">
+                {visibleDownloadError}
+              </Text>
+            ) : null}
             {visiblePreviewUrl ? (
               <audio
+                ref={audioElementRef}
                 aria-label="Selected clip audio preview"
                 className="mt-3 w-full"
                 controls
+                referrerPolicy="no-referrer"
                 src={visiblePreviewUrl}
+                onError={handleTicketPlaybackError}
               />
             ) : null}
           </div>

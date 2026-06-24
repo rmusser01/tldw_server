@@ -8,6 +8,7 @@ const generationMocks = vi.hoisted(() => ({
 
 const audioStudioServiceMocks = vi.hoisted(() => ({
   fetchAudioStudioArtifactBlob: vi.fn(),
+  mintAudioStudioArtifactMediaTicket: vi.fn(),
 }));
 
 const urlMocks = vi.hoisted(() => ({
@@ -109,6 +110,8 @@ vi.mock("@/services/audio-studio", async (importOriginal) => {
     ...actual,
     fetchAudioStudioArtifactBlob: (...args: unknown[]) =>
       audioStudioServiceMocks.fetchAudioStudioArtifactBlob(...args),
+    mintAudioStudioArtifactMediaTicket: (...args: unknown[]) =>
+      audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket(...args),
   };
 });
 
@@ -166,6 +169,16 @@ const setActiveProject = (overrides: Partial<AudioStudioProject> = {}) => {
   useAudioStudioStore.getState().setActiveProjectId("project-1");
 };
 
+const createDeferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+};
+
 describe("AudioStudioPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -182,6 +195,16 @@ describe("AudioStudioPage", () => {
     urlMocks.createObjectURL.mockReturnValue(SMALL_AUDIO_BLOB_URL);
     audioStudioServiceMocks.fetchAudioStudioArtifactBlob.mockResolvedValue(
       new Blob(["fake audio"], { type: "audio/wav" }),
+    );
+    audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket.mockResolvedValue(
+      {
+        ticket_path: "/api/v1/audio-studio/media-tickets/ticket-playback",
+        ticket_url:
+          "http://127.0.0.1:8000/api/v1/audio-studio/media-tickets/ticket-playback",
+        expires_at: "2026-06-24T12:00:00Z",
+        purpose: "playback",
+        artifact_id: "artifact-host",
+      },
     );
     projectHookMocks.createPending = false;
     projectHookMocks.updatePending = false;
@@ -584,6 +607,59 @@ describe("AudioStudioPage", () => {
     expect(urlMocks.revokeObjectURL).toHaveBeenCalledWith(SMALL_AUDIO_BLOB_URL);
   });
 
+  it("does not create a Blob object URL after the selected clip preview is stale", async () => {
+    const artifact = buildArtifact();
+    const previewBlob = new Blob(["late audio"], { type: "audio/wav" });
+    const previewFetch = createDeferred<Blob>();
+    audioStudioServiceMocks.fetchAudioStudioArtifactBlob.mockReturnValue(
+      previewFetch.promise,
+    );
+    projectHookMocks.useArtifacts.mockReturnValue({
+      data: [artifact],
+      isLoading: false,
+      isError: false,
+    });
+    setActiveProject({
+      workflow: "podcast",
+      tracks: [
+        {
+          track_id: "speech-track-1",
+          name: "Dialogue",
+          kind: "speech",
+          order: 0,
+        },
+      ],
+      clips: [
+        {
+          clip_id: "clip-host",
+          track_id: "speech-track-1",
+          section_id: "section-1",
+          artifact_id: "artifact-host",
+          title: "Host intro",
+          clip_type: "speech",
+          start_ms: 1000,
+          duration_ms: 30000,
+        },
+      ],
+    });
+    useAudioStudioStore.getState().setActiveWorkflow("podcast");
+
+    const { unmount } = render(<AudioStudioPage />);
+
+    await waitFor(() =>
+      expect(
+        audioStudioServiceMocks.fetchAudioStudioArtifactBlob,
+      ).toHaveBeenCalledWith("project-1", artifact),
+    );
+
+    unmount();
+    previewFetch.resolve(previewBlob);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(urlMocks.createObjectURL).not.toHaveBeenCalled();
+  });
+
   it("loads a selected clip artifact when its artifact type is clip audio", async () => {
     const artifact = buildArtifact({
       artifact_type: "clip_audio",
@@ -705,15 +781,138 @@ describe("AudioStudioPage", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("does not fetch or preview a matching non-audio artifact", async () => {
+  it("offers click-only download for non-audio artifacts without rendering an audio element", async () => {
+    const artifact = buildArtifact({
+      artifact_type: "analysis",
+      mime_type: "application/json",
+      size_bytes: null,
+      metadata: { filename: "host-analysis.json" },
+    });
+    audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket.mockResolvedValueOnce(
+      {
+        ticket_path: "/api/v1/audio-studio/media-tickets/ticket-json",
+        ticket_url:
+          "http://127.0.0.1:8000/api/v1/audio-studio/media-tickets/ticket-json",
+        expires_at: "2026-06-24T12:00:00Z",
+        purpose: "download",
+        artifact_id: "artifact-host",
+      },
+    );
     projectHookMocks.useArtifacts.mockReturnValue({
-      data: [
-        buildArtifact({
-          artifact_type: "analysis",
-          mime_type: "application/json",
-          metadata: { filename: "host-analysis.json" },
-        }),
+      data: [artifact],
+      isLoading: false,
+      isError: false,
+    });
+    setActiveProject({
+      workflow: "podcast",
+      tracks: [
+        {
+          track_id: "speech-track-1",
+          name: "Dialogue",
+          kind: "speech",
+          order: 0,
+        },
       ],
+      clips: [
+        {
+          clip_id: "clip-host",
+          track_id: "speech-track-1",
+          artifact_id: "artifact-host",
+          title: "Host intro",
+          clip_type: "speech",
+          start_ms: 1000,
+          duration_ms: 30000,
+        },
+      ],
+    });
+    useAudioStudioStore.getState().setActiveWorkflow("podcast");
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    render(<AudioStudioPage />);
+
+    expect(
+      await screen.findByText("Selected clip artifact is download-only."),
+    ).toBeInTheDocument();
+    expect(
+      audioStudioServiceMocks.fetchAudioStudioArtifactBlob,
+    ).not.toHaveBeenCalled();
+    expect(
+      screen.queryByLabelText("Selected clip audio preview"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Download selected artifact" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket,
+      ).toHaveBeenCalledWith("project-1", "artifact-host", "download"),
+    );
+    expect(anchorClick).toHaveBeenCalled();
+    anchorClick.mockRestore();
+  });
+
+  it("streams an unknown-size selected audio artifact with a playback ticket", async () => {
+    const artifact = buildArtifact({
+      size_bytes: null,
+    });
+    projectHookMocks.useArtifacts.mockReturnValue({
+      data: [artifact],
+      isLoading: false,
+      isError: false,
+    });
+    setActiveProject({
+      workflow: "narration",
+      tracks: [
+        {
+          track_id: "speech-track-1",
+          name: "Narration",
+          kind: "speech",
+          order: 0,
+        },
+      ],
+      clips: [
+        {
+          clip_id: "clip-host",
+          track_id: "speech-track-1",
+          section_id: "section-1",
+          artifact_id: "artifact-host",
+          title: "Narration clip",
+          clip_type: "speech",
+          start_ms: 1000,
+          duration_ms: 30000,
+        },
+      ],
+    });
+    useAudioStudioStore.getState().setActiveWorkflow("narration");
+
+    render(<AudioStudioPage />);
+
+    await waitFor(() =>
+      expect(
+        audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket,
+      ).toHaveBeenCalledWith("project-1", "artifact-host", "playback"),
+    );
+    expect(
+      audioStudioServiceMocks.fetchAudioStudioArtifactBlob,
+    ).not.toHaveBeenCalled();
+    expect(
+      await screen.findByLabelText("Selected clip audio preview"),
+    ).toHaveAttribute(
+      "src",
+      "http://127.0.0.1:8000/api/v1/audio-studio/media-tickets/ticket-playback",
+    );
+  });
+
+  it("streams an oversized selected audio artifact with a playback ticket", async () => {
+    const artifact = buildArtifact({
+      size_bytes: 25 * 1024 * 1024 + 1,
+    });
+    projectHookMocks.useArtifacts.mockReturnValue({
+      data: [artifact],
       isLoading: false,
       isError: false,
     });
@@ -743,26 +942,76 @@ describe("AudioStudioPage", () => {
 
     render(<AudioStudioPage />);
 
-    expect(
-      await screen.findByText("Selected clip artifact is not audio."),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket,
+      ).toHaveBeenCalledWith("project-1", "artifact-host", "playback"),
+    );
     expect(
       audioStudioServiceMocks.fetchAudioStudioArtifactBlob,
     ).not.toHaveBeenCalled();
     expect(
-      screen.queryByLabelText("Selected clip audio preview"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("link", { name: "Download selected clip audio" }),
-    ).not.toBeInTheDocument();
-    expect(document.body.innerHTML).not.toContain("/api/v1/audio-studio");
+      await screen.findByLabelText("Selected clip audio preview"),
+    ).toHaveAttribute(
+      "src",
+      "http://127.0.0.1:8000/api/v1/audio-studio/media-tickets/ticket-playback",
+    );
+    expect(screen.getByLabelText("Selected clip audio preview")).toHaveAttribute(
+      "referrerpolicy",
+      "no-referrer",
+    );
   });
 
-  it("does not fetch or preview artifacts with unknown size", async () => {
+  it("does not restore reminted playback time onto a newly selected artifact", async () => {
+    const hostTicket = {
+      ticket_path: "/api/v1/audio-studio/media-tickets/ticket-host",
+      ticket_url:
+        "http://127.0.0.1:8000/api/v1/audio-studio/media-tickets/ticket-host",
+      expires_at: "2026-06-24T12:00:00Z",
+      purpose: "playback",
+      artifact_id: "artifact-host",
+    };
+    const hostRemintTicket = {
+      ...hostTicket,
+      ticket_path: "/api/v1/audio-studio/media-tickets/ticket-host-remint",
+      ticket_url:
+        "http://127.0.0.1:8000/api/v1/audio-studio/media-tickets/ticket-host-remint",
+    };
+    const guestTicket = {
+      ticket_path: "/api/v1/audio-studio/media-tickets/ticket-guest",
+      ticket_url:
+        "http://127.0.0.1:8000/api/v1/audio-studio/media-tickets/ticket-guest",
+      expires_at: "2026-06-24T12:00:00Z",
+      purpose: "playback",
+      artifact_id: "artifact-guest",
+    };
+    const hostRemint = createDeferred<typeof hostRemintTicket>();
+    let hostPlaybackCalls = 0;
+    audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket.mockImplementation(
+      (
+        _projectId: string,
+        artifactId: string,
+        purpose: "playback" | "download",
+      ) => {
+        if (purpose === "playback" && artifactId === "artifact-host") {
+          hostPlaybackCalls += 1;
+          return hostPlaybackCalls === 1
+            ? Promise.resolve(hostTicket)
+            : hostRemint.promise;
+        }
+        if (purpose === "playback" && artifactId === "artifact-guest") {
+          return Promise.resolve(guestTicket);
+        }
+        return Promise.reject(new Error("unexpected ticket request"));
+      },
+    );
     projectHookMocks.useArtifacts.mockReturnValue({
       data: [
+        buildArtifact({ size_bytes: null }),
         buildArtifact({
+          artifact_id: "artifact-guest",
           size_bytes: null,
+          metadata: { filename: "guest-reply.wav" },
         }),
       ],
       isLoading: false,
@@ -782,11 +1031,22 @@ describe("AudioStudioPage", () => {
         {
           clip_id: "clip-host",
           track_id: "speech-track-1",
+          section_id: "section-1",
           artifact_id: "artifact-host",
           title: "Host intro",
           clip_type: "speech",
           start_ms: 1000,
           duration_ms: 30000,
+        },
+        {
+          clip_id: "clip-guest",
+          track_id: "speech-track-1",
+          section_id: "section-1",
+          artifact_id: "artifact-guest",
+          title: "Guest reply",
+          clip_type: "speech",
+          start_ms: 32000,
+          duration_ms: 15000,
         },
       ],
     });
@@ -794,28 +1054,219 @@ describe("AudioStudioPage", () => {
 
     render(<AudioStudioPage />);
 
-    expect(
-      await screen.findByText(
-        "Artifact size is unavailable for browser preview.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      audioStudioServiceMocks.fetchAudioStudioArtifactBlob,
-    ).not.toHaveBeenCalled();
-    expect(
-      screen.queryByLabelText("Selected clip audio preview"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("link", { name: "Download selected clip audio" }),
-    ).not.toBeInTheDocument();
-    expect(document.body.innerHTML).not.toContain("/api/v1/audio-studio");
+    const hostAudio = (await screen.findByLabelText(
+      "Selected clip audio preview",
+    )) as HTMLAudioElement;
+    await waitFor(() =>
+      expect(hostAudio).toHaveAttribute("src", hostTicket.ticket_url),
+    );
+    hostAudio.currentTime = 12;
+
+    fireEvent.error(hostAudio);
+    await waitFor(() => expect(hostPlaybackCalls).toBe(2));
+
+    const originalSetTimeout = window.setTimeout.bind(window);
+    let restoreCurrentTime: (() => void) | null = null;
+    const timeoutSpy = vi
+      .spyOn(window, "setTimeout")
+      .mockImplementation((handler: TimerHandler, timeout?: number) => {
+        if (
+          !restoreCurrentTime &&
+          timeout === 0 &&
+          typeof handler === "function"
+        ) {
+          restoreCurrentTime = handler as () => void;
+          return 1;
+        }
+        return originalSetTimeout(handler, timeout);
+      });
+
+    try {
+      hostRemint.resolve(hostRemintTicket);
+      await waitFor(() => expect(timeoutSpy).toHaveBeenCalled());
+
+      fireEvent.click(screen.getByRole("button", { name: /Guest reply/ }));
+      await waitFor(() =>
+        expect(
+          audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket,
+        ).toHaveBeenCalledWith("project-1", "artifact-guest", "playback"),
+      );
+      const guestAudio = (await screen.findByLabelText(
+        "Selected clip audio preview",
+      )) as HTMLAudioElement;
+      await waitFor(() =>
+        expect(guestAudio).toHaveAttribute("src", guestTicket.ticket_url),
+      );
+      guestAudio.currentTime = 0;
+
+      restoreCurrentTime?.();
+
+      expect(guestAudio).toHaveAttribute("src", guestTicket.ticket_url);
+      expect(guestAudio.currentTime).toBe(0);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
   });
 
-  it("disables preview and download for artifacts larger than the Blob threshold", async () => {
+  it("keeps a ticket-backed audio download available after playback fails", async () => {
+    const artifact = buildArtifact({ size_bytes: 25 * 1024 * 1024 + 1 });
+    audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket.mockRejectedValue(
+      new Error("playback ticket failed"),
+    );
+    projectHookMocks.useArtifacts.mockReturnValue({
+      data: [artifact],
+      isLoading: false,
+      isError: false,
+    });
+    setActiveProject({
+      workflow: "podcast",
+      tracks: [
+        {
+          track_id: "speech-track-1",
+          name: "Dialogue",
+          kind: "speech",
+          order: 0,
+        },
+      ],
+      clips: [
+        {
+          clip_id: "clip-host",
+          track_id: "speech-track-1",
+          section_id: "section-1",
+          artifact_id: "artifact-host",
+          title: "Host intro",
+          clip_type: "speech",
+          start_ms: 1000,
+          duration_ms: 30000,
+        },
+      ],
+    });
+    useAudioStudioStore.getState().setActiveWorkflow("podcast");
+
+    render(<AudioStudioPage />);
+
+    expect(await screen.findByText("Preview unavailable")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Download selected clip audio" }),
+    ).toBeInTheDocument();
+  });
+
+  it("mints a download ticket only when the user clicks a large audio download", async () => {
+    const artifact = buildArtifact({ size_bytes: 25 * 1024 * 1024 + 1 });
+    audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket
+      .mockResolvedValueOnce({
+        ticket_path: "/api/v1/audio-studio/media-tickets/ticket-playback",
+        ticket_url:
+          "http://127.0.0.1:8000/api/v1/audio-studio/media-tickets/ticket-playback",
+        expires_at: "2026-06-24T12:00:00Z",
+        purpose: "playback",
+        artifact_id: "artifact-host",
+      })
+      .mockResolvedValueOnce({
+        ticket_path: "/api/v1/audio-studio/media-tickets/ticket-download",
+        ticket_url:
+          "http://127.0.0.1:8000/api/v1/audio-studio/media-tickets/ticket-download",
+        expires_at: "2026-06-24T12:00:00Z",
+        purpose: "download",
+        artifact_id: "artifact-host",
+      });
+    projectHookMocks.useArtifacts.mockReturnValue({
+      data: [artifact],
+      isLoading: false,
+      isError: false,
+    });
+    setActiveProject({
+      workflow: "podcast",
+      tracks: [
+        {
+          track_id: "speech-track-1",
+          name: "Dialogue",
+          kind: "speech",
+          order: 0,
+        },
+      ],
+      clips: [
+        {
+          clip_id: "clip-host",
+          track_id: "speech-track-1",
+          section_id: "section-1",
+          artifact_id: "artifact-host",
+          title: "Host intro",
+          clip_type: "speech",
+          start_ms: 1000,
+          duration_ms: 30000,
+        },
+      ],
+    });
+    useAudioStudioStore.getState().setActiveWorkflow("podcast");
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    render(<AudioStudioPage />);
+    const button = await screen.findByRole("button", {
+      name: "Download selected clip audio",
+    });
+    expect(document.body.innerHTML).not.toContain("ticket-download");
+    expect(
+      audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket,
+    ).not.toHaveBeenCalledWith("project-1", "artifact-host", "download");
+
+    fireEvent.click(button);
+
+    await waitFor(() =>
+      expect(
+        audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket,
+      ).toHaveBeenLastCalledWith("project-1", "artifact-host", "download"),
+    );
+    expect(anchorClick).toHaveBeenCalled();
+    expect(document.body.innerHTML).not.toContain("ticket-download");
+    anchorClick.mockRestore();
+  });
+
+  it("does not show a stale download error after selecting another artifact", async () => {
+    const hostTicket = {
+      ticket_path: "/api/v1/audio-studio/media-tickets/ticket-host",
+      ticket_url:
+        "http://127.0.0.1:8000/api/v1/audio-studio/media-tickets/ticket-host",
+      expires_at: "2026-06-24T12:00:00Z",
+      purpose: "playback",
+      artifact_id: "artifact-host",
+    };
+    const guestTicket = {
+      ticket_path: "/api/v1/audio-studio/media-tickets/ticket-guest",
+      ticket_url:
+        "http://127.0.0.1:8000/api/v1/audio-studio/media-tickets/ticket-guest",
+      expires_at: "2026-06-24T12:00:00Z",
+      purpose: "playback",
+      artifact_id: "artifact-guest",
+    };
+    const hostDownload = createDeferred<typeof hostTicket>();
+    audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket.mockImplementation(
+      (
+        _projectId: string,
+        artifactId: string,
+        purpose: "playback" | "download",
+      ) => {
+        if (purpose === "download" && artifactId === "artifact-host") {
+          return hostDownload.promise;
+        }
+        if (purpose === "playback" && artifactId === "artifact-host") {
+          return Promise.resolve(hostTicket);
+        }
+        if (purpose === "playback" && artifactId === "artifact-guest") {
+          return Promise.resolve(guestTicket);
+        }
+        return Promise.reject(new Error("unexpected ticket request"));
+      },
+    );
     projectHookMocks.useArtifacts.mockReturnValue({
       data: [
+        buildArtifact({ size_bytes: null }),
         buildArtifact({
-          size_bytes: 25 * 1024 * 1024 + 1,
+          artifact_id: "artifact-guest",
+          size_bytes: null,
+          metadata: { filename: "guest-reply.wav" },
         }),
       ],
       isLoading: false,
@@ -835,11 +1286,22 @@ describe("AudioStudioPage", () => {
         {
           clip_id: "clip-host",
           track_id: "speech-track-1",
+          section_id: "section-1",
           artifact_id: "artifact-host",
           title: "Host intro",
           clip_type: "speech",
           start_ms: 1000,
           duration_ms: 30000,
+        },
+        {
+          clip_id: "clip-guest",
+          track_id: "speech-track-1",
+          section_id: "section-1",
+          artifact_id: "artifact-guest",
+          title: "Guest reply",
+          clip_type: "speech",
+          start_ms: 32000,
+          duration_ms: 15000,
         },
       ],
     });
@@ -847,20 +1309,142 @@ describe("AudioStudioPage", () => {
 
     render(<AudioStudioPage />);
 
-    expect(
-      await screen.findByText("Artifact is too large for browser preview."),
-    ).toBeInTheDocument();
-    expect(
-      audioStudioServiceMocks.fetchAudioStudioArtifactBlob,
-    ).not.toHaveBeenCalled();
-    expect(
-      screen.queryByLabelText("Selected clip audio preview"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("link", { name: "Download selected clip audio" }),
-    ).not.toBeInTheDocument();
-    expect(document.body.innerHTML).not.toContain("/api/v1/audio-studio");
-    expect(document.body.innerHTML).not.toContain("blob:");
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Download selected clip audio",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Guest reply/ }));
+    await waitFor(() =>
+      expect(
+        audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket,
+      ).toHaveBeenCalledWith("project-1", "artifact-guest", "playback"),
+    );
+
+    hostDownload.reject(new Error("download failed"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(screen.queryByText("Download unavailable")).not.toBeInTheDocument();
+  });
+
+  it("does not trigger a stale successful download after selecting another artifact", async () => {
+    const hostTicket = {
+      ticket_path: "/api/v1/audio-studio/media-tickets/ticket-host",
+      ticket_url:
+        "http://127.0.0.1:8000/api/v1/audio-studio/media-tickets/ticket-host",
+      expires_at: "2026-06-24T12:00:00Z",
+      purpose: "playback",
+      artifact_id: "artifact-host",
+    };
+    const guestTicket = {
+      ticket_path: "/api/v1/audio-studio/media-tickets/ticket-guest",
+      ticket_url:
+        "http://127.0.0.1:8000/api/v1/audio-studio/media-tickets/ticket-guest",
+      expires_at: "2026-06-24T12:00:00Z",
+      purpose: "playback",
+      artifact_id: "artifact-guest",
+    };
+    const hostDownloadTicket = {
+      ticket_path: "/api/v1/audio-studio/media-tickets/ticket-host-download",
+      ticket_url:
+        "http://127.0.0.1:8000/api/v1/audio-studio/media-tickets/ticket-host-download",
+      expires_at: "2026-06-24T12:00:00Z",
+      purpose: "download",
+      artifact_id: "artifact-host",
+    };
+    const hostDownload = createDeferred<typeof hostDownloadTicket>();
+    audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket.mockImplementation(
+      (
+        _projectId: string,
+        artifactId: string,
+        purpose: "playback" | "download",
+      ) => {
+        if (purpose === "download" && artifactId === "artifact-host") {
+          return hostDownload.promise;
+        }
+        if (purpose === "playback" && artifactId === "artifact-host") {
+          return Promise.resolve(hostTicket);
+        }
+        if (purpose === "playback" && artifactId === "artifact-guest") {
+          return Promise.resolve(guestTicket);
+        }
+        return Promise.reject(new Error("unexpected ticket request"));
+      },
+    );
+    projectHookMocks.useArtifacts.mockReturnValue({
+      data: [
+        buildArtifact({ size_bytes: null }),
+        buildArtifact({
+          artifact_id: "artifact-guest",
+          size_bytes: null,
+          metadata: { filename: "guest-reply.wav" },
+        }),
+      ],
+      isLoading: false,
+      isError: false,
+    });
+    setActiveProject({
+      workflow: "podcast",
+      tracks: [
+        {
+          track_id: "speech-track-1",
+          name: "Dialogue",
+          kind: "speech",
+          order: 0,
+        },
+      ],
+      clips: [
+        {
+          clip_id: "clip-host",
+          track_id: "speech-track-1",
+          section_id: "section-1",
+          artifact_id: "artifact-host",
+          title: "Host intro",
+          clip_type: "speech",
+          start_ms: 1000,
+          duration_ms: 30000,
+        },
+        {
+          clip_id: "clip-guest",
+          track_id: "speech-track-1",
+          section_id: "section-1",
+          artifact_id: "artifact-guest",
+          title: "Guest reply",
+          clip_type: "speech",
+          start_ms: 32000,
+          duration_ms: 15000,
+        },
+      ],
+    });
+    useAudioStudioStore.getState().setActiveWorkflow("podcast");
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    try {
+      render(<AudioStudioPage />);
+
+      fireEvent.click(
+        await screen.findByRole("button", {
+          name: "Download selected clip audio",
+        }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: /Guest reply/ }));
+      await waitFor(() =>
+        expect(
+          audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket,
+        ).toHaveBeenCalledWith("project-1", "artifact-guest", "playback"),
+      );
+
+      hostDownload.resolve(hostDownloadTicket);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(anchorClick).not.toHaveBeenCalled();
+    } finally {
+      anchorClick.mockRestore();
+    }
   });
 
   it("shows a compact error state when artifact Blob preview fetch fails", async () => {
