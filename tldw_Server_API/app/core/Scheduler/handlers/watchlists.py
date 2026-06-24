@@ -1,7 +1,9 @@
 """
 Scheduler task handler for Watchlists runs.
 
-Task name: 'watchlist_run'
+Task names:
+- 'watchlist_run'
+- 'watchlists_enrich_output'
 Inputs expected in payload:
   payload = {
     'inputs': { 'watchlist_job_id': <int> },
@@ -20,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from tldw_Server_API.app.core.Scheduler.base.registry import task
+from tldw_Server_API.app.core.Watchlists import output_enrichment_handler
 from tldw_Server_API.app.core.Watchlists.pipeline import run_watchlist_job
 
 
@@ -57,6 +60,42 @@ async def watchlist_run(payload: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         raise ValueError("watchlist_run: user_id must be int-like") from None
 
+    tenant_id = payload.get("tenant_id")
+    if tenant_id is not None:
+        tenant_id = str(tenant_id)
+
     # Execute the real pipeline (handles run row creation, stats, and job history)
-    result = await run_watchlist_job(uid_int, int(job_id))
-    return {"run_id": result.get("run_id"), "status": "succeeded", "items_ingested": int(result.get("items_ingested", 0))}
+    result = await run_watchlist_job(uid_int, int(job_id), tenant_id=tenant_id)
+    status = str(result.get("status") or "succeeded")
+    return {"run_id": result.get("run_id"), "status": status, "items_ingested": int(result.get("items_ingested", 0))}
+
+
+@task(name="watchlists_enrich_output", max_retries=1, timeout=3600, queue="watchlists")
+async def watchlists_enrich_output(payload: dict[str, Any]) -> dict[str, Any]:
+    """Run deferred enrichment for a generated watchlist output."""
+    output_id = payload.get("output_id")
+    if output_id is None:
+        raise ValueError("watchlists_enrich_output: missing output_id")
+    user_id = payload.get("user_id")
+    if user_id is None:
+        raise ValueError("watchlists_enrich_output: missing user_id")
+    try:
+        output_id_int = int(output_id)
+        user_id_int = int(user_id)
+    except Exception:
+        raise ValueError("watchlists_enrich_output: output_id and user_id must be int-like") from None
+
+    grouping_config = payload.get("grouping_config")
+    if grouping_config is not None and not isinstance(grouping_config, dict):
+        raise ValueError("watchlists_enrich_output: grouping_config must be a dict when provided")
+    summary_config = payload.get("summary_config")
+    if summary_config is not None and not isinstance(summary_config, dict):
+        raise ValueError("watchlists_enrich_output: summary_config must be a dict when provided")
+
+    await output_enrichment_handler.enrich_output(
+        output_id=output_id_int,
+        user_id=user_id_int,
+        grouping_config=grouping_config,
+        summary_config=summary_config,
+    )
+    return {"output_id": output_id_int, "status": "completed"}

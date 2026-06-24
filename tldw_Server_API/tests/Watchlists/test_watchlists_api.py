@@ -1366,6 +1366,70 @@ def test_output_deliveries_email_and_chatbook(client_with_user, monkeypatch, tmp
             assert stored_meta.get("origin") == "test"
 
 
+def test_output_creation_schedules_pending_enrichment(client_with_user, monkeypatch):
+    c = client_with_user
+    monkeypatch.setenv("TEST_MODE", "1")
+    scheduled: list[dict[str, object]] = []
+
+    async def fake_schedule_output_enrichment(**kwargs):
+        scheduled.append(kwargs)
+
+    endpoint_mod = import_module("tldw_Server_API.app.api.v1.endpoints.watchlists")
+
+    monkeypatch.setattr(endpoint_mod, "schedule_output_enrichment", fake_schedule_output_enrichment)
+
+    r = c.post(
+        "/api/v1/watchlists/sources",
+        json={
+            "name": "Enrichment Feed",
+            "url": "https://example.com/enrichment-feed.xml",
+            "source_type": "rss",
+            "tags": ["enrichment"],
+        },
+    )
+    assert r.status_code == 200, r.text
+    source_id = r.json()["id"]
+
+    r = c.post(
+        "/api/v1/watchlists/jobs",
+        json={
+            "name": "Enrichment Job",
+            "scope": {"sources": [source_id]},
+            "active": True,
+        },
+    )
+    assert r.status_code == 200, r.text
+    job_id = r.json()["id"]
+
+    r = c.post(f"/api/v1/watchlists/jobs/{job_id}/run")
+    assert r.status_code == 200, r.text
+    run_id = r.json()["id"]
+
+    r = c.post(
+        "/api/v1/watchlists/outputs",
+        json={
+            "run_id": run_id,
+            "title": "Enriched Digest",
+            "briefing_summary": {
+                "enabled": True,
+                "llm_provider": "mock",
+                "llm_model": "mock-model",
+            },
+        },
+    )
+
+    assert r.status_code == 200, r.text
+    output = r.json()
+    metadata = output.get("metadata") or {}
+    assert metadata["enrichment_status"] == "pending"
+    assert metadata["summary_status"] == "pending"
+    assert len(scheduled) == 1
+    assert scheduled[0]["output_id"] == output["id"]
+    assert scheduled[0]["user_id"] == 555
+    assert scheduled[0]["summary_config"].llm_provider == "mock"
+    assert callable(scheduled[0]["fallback_submitter"])
+
+
 def test_outputs_generate_audio_payload_triggers_workflow_and_updates_run_stats(client_with_user, monkeypatch):
 
     c = client_with_user

@@ -1,6 +1,6 @@
 """Async output enrichment handler for watchlist outputs.
 
-Runs as a background task to perform LLM-based enrichment:
+Runs as scheduler-backed background work to perform LLM-based enrichment:
 - Topic-based grouping (LLM classification)
 - Per-group summaries
 - Briefing-level summary
@@ -8,13 +8,171 @@ Runs as a background task to perform LLM-based enrichment:
 """
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+
+
+@dataclass(frozen=True)
+class OutputEnrichmentScheduleResult:
+    """Result from attempting to schedule output enrichment."""
+
+    status: str
+    task_id: str | None = None
+    reason: str | None = None
+
+    @property
+    def submitted(self) -> bool:
+        return self.status == "submitted" and bool(self.task_id)
+
+
+def _dump_config(config: Any) -> dict[str, Any] | None:
+    if config is None:
+        return None
+    if isinstance(config, dict):
+        return dict(config)
+    model_dump = getattr(config, "model_dump", None)
+    if callable(model_dump):
+        try:
+            dumped = model_dump()
+        except (TypeError, ValueError):
+            return None
+        if isinstance(dumped, dict):
+            return dict(dumped)
+    return None
+
+
+def _build_enrichment_payload(
+    *,
+    output_id: int,
+    user_id: int,
+    grouping_config: Any | None,
+    summary_config: Any | None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "output_id": int(output_id),
+        "user_id": int(user_id),
+    }
+    grouping_payload = _dump_config(grouping_config)
+    summary_payload = _dump_config(summary_config)
+    if grouping_payload is not None:
+        payload["grouping_config"] = grouping_payload
+    if summary_payload is not None:
+        payload["summary_config"] = summary_payload
+    return payload
+
+
+def _schedule_enrichment_fallback(
+    *,
+    payload: dict[str, Any],
+    fallback_submitter: Callable[..., Any] | None,
+    reason: str,
+) -> OutputEnrichmentScheduleResult:
+    if fallback_submitter is None:
+        logger.warning(
+            "Output enrichment scheduler unavailable for output {} (reason={})",
+            payload["output_id"],
+            reason,
+        )
+        return OutputEnrichmentScheduleResult(status="queue_unavailable", reason=reason)
+    try:
+        fallback_submitter(enrich_output, **payload)
+    except Exception as exc:
+        logger.warning(
+            "Output enrichment fallback scheduling failed for output {} (error_type={})",
+            payload["output_id"],
+            type(exc).__name__,
+        )
+        return OutputEnrichmentScheduleResult(status="enqueue_failed", reason="fallback_submit_failed")
+    logger.warning(
+        "Output enrichment using in-process fallback for output {} (reason={})",
+        payload["output_id"],
+        reason,
+    )
+    return OutputEnrichmentScheduleResult(status="fallback_scheduled", reason=reason)
+
+
+async def schedule_output_enrichment(
+    *,
+    output_id: int,
+    user_id: int,
+    grouping_config: Any | None = None,
+    summary_config: Any | None = None,
+    scheduler: Any | None = None,
+    fallback_submitter: Callable[..., Any] | None = None,
+) -> OutputEnrichmentScheduleResult:
+    """Submit output enrichment to the durable Scheduler.
+
+    ``fallback_submitter`` is an optional compatibility path, normally
+    FastAPI's ``BackgroundTasks.add_task``. It is used only when Scheduler
+    resolution or submission fails.
+    """
+    payload = _build_enrichment_payload(
+        output_id=output_id,
+        user_id=user_id,
+        grouping_config=grouping_config,
+        summary_config=summary_config,
+    )
+    metadata = {
+        "source": "watchlists_output_enrichment",
+        "watchlist_output_id": payload["output_id"],
+        "user_id": str(payload["user_id"]),
+    }
+
+    try:
+        if scheduler is None:
+            from tldw_Server_API.app.core.Scheduler import get_global_scheduler
+
+            scheduler = await get_global_scheduler()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "Output enrichment scheduler resolution failed for output {} (error_type={})",
+            payload["output_id"],
+            type(exc).__name__,
+        )
+        return _schedule_enrichment_fallback(
+            payload=payload,
+            fallback_submitter=fallback_submitter,
+            reason="scheduler_unavailable",
+        )
+
+    try:
+        task_id = await scheduler.submit(
+            "watchlists_enrich_output",
+            payload=payload,
+            queue_name="watchlists",
+            idempotency_key=f"watchlists-output-enrichment:{payload['user_id']}:{payload['output_id']}",
+            metadata=metadata,
+            max_retries=1,
+        )
+        logger.info(
+            "Output enrichment submitted for output {}, task_id={}",
+            payload["output_id"],
+            task_id,
+        )
+        return OutputEnrichmentScheduleResult(status="submitted", task_id=task_id)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "Output enrichment scheduler submit failed for output {} (error_type={})",
+            payload["output_id"],
+            type(exc).__name__,
+        )
+        return _schedule_enrichment_fallback(
+            payload=payload,
+            fallback_submitter=fallback_submitter,
+            reason="scheduler_submit_failed",
+        )
 
 
 async def enrich_output(

@@ -128,6 +128,78 @@ def test_scraped_items_are_scoped_per_user_in_shared_backend(shared_watchlists_d
     assert int(owner_item_after.queued_for_briefing or 0) == 1
 
 
+def test_source_association_helpers_are_scoped_per_user_in_shared_backend(shared_watchlists_dbs):
+    user1_db, user2_db = shared_watchlists_dbs
+    owner_group = user1_db.create_group(name="owner-group", description="", parent_group_id=None)
+    source = user1_db.create_source(
+        name="owned-source",
+        url="https://example.com/owned-source.xml",
+        source_type="rss",
+        active=True,
+        settings_json=None,
+        tags=["news"],
+        group_ids=[int(owner_group.id)],
+    )
+    user1_db.mark_seen_item(int(source.id), "https://example.com/story-1")
+
+    with pytest.raises(KeyError):
+        user2_db.set_source_tags(int(source.id), ["evil"])
+    with pytest.raises(KeyError):
+        user2_db.set_source_groups(int(source.id), [])
+    with pytest.raises(KeyError):
+        user2_db.get_source_group_ids(int(source.id))
+    assert user2_db.get_source_group_ids_batch([int(source.id)]) == {int(source.id): []}
+
+    with pytest.raises(KeyError):
+        user2_db.has_seen_item(int(source.id), "https://example.com/story-1")
+    with pytest.raises(KeyError):
+        user2_db.mark_seen_item(int(source.id), "https://example.com/story-2")
+    with pytest.raises(KeyError):
+        user2_db.list_seen_item_keys(int(source.id))
+    with pytest.raises(KeyError):
+        user2_db.get_seen_item_stats(int(source.id))
+    with pytest.raises(KeyError):
+        user2_db.clear_seen_items(int(source.id))
+
+    assert user2_db.delete_source(int(source.id)) is False
+
+    owner_source = user1_db.get_source(int(source.id))
+    assert owner_source.tags == ["news"]
+    assert user1_db.get_source_group_ids(int(source.id)) == [int(owner_group.id)]
+    assert user1_db.has_seen_item(int(source.id), "https://example.com/story-1") is True
+    assert user1_db.list_seen_item_keys(int(source.id)) == ["https://example.com/story-1"]
+
+
+def test_source_group_assignment_rejects_foreign_groups(shared_watchlists_dbs):
+    user1_db, user2_db = shared_watchlists_dbs
+    foreign_group = user2_db.create_group(name="foreign-group", description="", parent_group_id=None)
+
+    with pytest.raises(ValueError, match="group_not_found"):
+        user1_db.create_source(
+            name="bad-source",
+            url="https://example.com/bad-source.xml",
+            source_type="rss",
+            active=True,
+            settings_json=None,
+            tags=[],
+            group_ids=[int(foreign_group.id)],
+        )
+
+    source = user1_db.create_source(
+        name="owner-source-no-group",
+        url="https://example.com/owner-source-no-group.xml",
+        source_type="rss",
+        active=True,
+        settings_json=None,
+        tags=[],
+        group_ids=[],
+    )
+    with pytest.raises(ValueError, match="group_not_found"):
+        user1_db.set_source_groups(int(source.id), [int(foreign_group.id)])
+
+    assert user1_db.get_source_group_ids(int(source.id)) == []
+
+
 def test_watchlist_clusters_are_scoped_per_user_in_shared_backend(shared_watchlists_dbs):
     user1_db, user2_db = shared_watchlists_dbs
     user1 = _seed_user_job_run_item(user1_db, label="u1-clusters")

@@ -39,7 +39,6 @@ from tldw_Server_API.app.core.Security.egress import is_url_allowed, is_url_allo
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
 
 _WATCHLISTS_FETCHERS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

@@ -1776,6 +1776,45 @@ class WatchlistsDatabase:
     # ------------------------
     # Sources
     # ------------------------
+    def _ensure_source_owner(self, source_id: int) -> int:
+        source_id = int(source_id)
+        self.get_source(source_id)
+        return source_id
+
+    def _validate_group_ids_for_user(self, group_ids: Iterable[int] | None) -> list[int]:
+        clean_ids: list[int] = []
+        seen: set[int] = set()
+        for gid in group_ids or []:
+            try:
+                val = int(gid)
+            except _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS:
+                continue
+            if val <= 0 or val in seen:
+                continue
+            seen.add(val)
+            clean_ids.append(val)
+        if not clean_ids:
+            return []
+
+        placeholders = ",".join(["?"] * len(clean_ids))
+        # B608 rationale: only placeholder tokens are generated; values are parameter-bound.
+        rows = self.backend.execute(
+            f"SELECT id FROM groups WHERE user_id = ? AND id IN ({placeholders})",  # nosec B608
+            tuple([self.user_id, *clean_ids]),
+        ).rows
+        found_ids: set[int] = set()
+        for row in rows:
+            raw_id = row.get("id")
+            if raw_id is None:
+                continue
+            try:
+                found_ids.add(int(raw_id))
+            except _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS:
+                continue
+        if found_ids != set(clean_ids):
+            raise ValueError("group_not_found")
+        return clean_ids
+
     def create_source(
         self,
         *,
@@ -1789,6 +1828,7 @@ class WatchlistsDatabase:
         watchlist_id: int | None = None,
     ) -> SourceRow:
         now = _utcnow_iso()
+        clean_group_ids = self._validate_group_ids_for_user(group_ids)
         # Try insert; if UNIQUE(user_id,url) violates, fetch existing id and proceed idempotently
         sid: int | None = None
         created_new = False
@@ -1828,8 +1868,8 @@ class WatchlistsDatabase:
                         "INSERT INTO source_tags (source_id, tag_id) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM source_tags WHERE source_id = ? AND tag_id = ?)",
                         (sid, tid, sid, tid),
                     )
-        if group_ids:
-            for gid in group_ids:
+        if clean_group_ids:
+            for gid in clean_group_ids:
                 try:
                     self.backend.execute(
                         "INSERT INTO source_groups (source_id, group_id) VALUES (?, ?) ON CONFLICT(source_id, group_id) DO NOTHING",
@@ -2022,6 +2062,7 @@ class WatchlistsDatabase:
         )
 
     def set_source_tags(self, source_id: int, tag_names: list[str]) -> list[str]:
+        source_id = self._ensure_source_owner(source_id)
         tag_ids = self.ensure_tag_ids(tag_names)
         self.backend.execute("DELETE FROM source_tags WHERE source_id = ?", (source_id,))
         for tid in tag_ids:
@@ -2042,17 +2083,8 @@ class WatchlistsDatabase:
         return [r.get("name") for r in rows if r.get("name")]
 
     def set_source_groups(self, source_id: int, group_ids: list[int]) -> list[int]:
-        clean_ids: list[int] = []
-        seen: set[int] = set()
-        for gid in group_ids or []:
-            try:
-                val = int(gid)
-            except _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS:
-                continue
-            if val in seen:
-                continue
-            seen.add(val)
-            clean_ids.append(val)
+        source_id = self._ensure_source_owner(source_id)
+        clean_ids = self._validate_group_ids_for_user(group_ids)
         self.backend.execute("DELETE FROM source_groups WHERE source_id = ?", (source_id,))
         for gid in clean_ids:
             try:
@@ -2069,6 +2101,7 @@ class WatchlistsDatabase:
 
     def get_source_group_ids(self, source_id: int) -> list[int]:
         """Return group IDs for a single source, ordered."""
+        source_id = self._ensure_source_owner(source_id)
         rows = self.backend.execute(
             "SELECT group_id FROM source_groups WHERE source_id = ? ORDER BY group_id",
             (source_id,),
@@ -2079,12 +2112,43 @@ class WatchlistsDatabase:
         """Return {source_id: [group_ids]} for multiple sources in one query."""
         if not source_ids:
             return {}
-        placeholders = ",".join(["?"] * len(source_ids))
-        rows = self.backend.execute(
-            f"SELECT source_id, group_id FROM source_groups WHERE source_id IN ({placeholders}) ORDER BY source_id, group_id",  # nosec B608
-            tuple(source_ids),
+        clean_source_ids: list[int] = []
+        seen: set[int] = set()
+        for sid in source_ids:
+            try:
+                source_id = int(sid)
+            except _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS:
+                continue
+            if source_id in seen:
+                continue
+            seen.add(source_id)
+            clean_source_ids.append(source_id)
+        if not clean_source_ids:
+            return {}
+        placeholders = ",".join(["?"] * len(clean_source_ids))
+        # B608 rationale: only placeholder tokens are generated; values are parameter-bound.
+        owned_rows = self.backend.execute(
+            f"SELECT id FROM sources WHERE user_id = ? AND id IN ({placeholders})",  # nosec B608
+            tuple([self.user_id, *clean_source_ids]),
         ).rows
-        result: dict[int, list[int]] = {sid: [] for sid in source_ids}
+        owned_ids: set[int] = set()
+        for row in owned_rows:
+            raw_id = row.get("id")
+            if raw_id is None:
+                continue
+            try:
+                owned_ids.add(int(raw_id))
+            except _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS:
+                continue
+        result: dict[int, list[int]] = {sid: [] for sid in clean_source_ids}
+        if not owned_ids:
+            return result
+        owned_placeholders = ",".join(["?"] * len(owned_ids))
+        # B608 rationale: only placeholder tokens for owned IDs are generated; values are parameter-bound.
+        rows = self.backend.execute(
+            f"SELECT source_id, group_id FROM source_groups WHERE source_id IN ({owned_placeholders}) ORDER BY source_id, group_id",  # nosec B608
+            tuple(sorted(owned_ids)),
+        ).rows
         for r in rows:
             sid = int(r.get("source_id"))
             gid = int(r.get("group_id"))
@@ -2093,6 +2157,10 @@ class WatchlistsDatabase:
         return result
 
     def delete_source(self, source_id: int) -> bool:
+        try:
+            source_id = self._ensure_source_owner(source_id)
+        except KeyError:
+            return False
         with self.transaction() as conn:
             self.backend.execute("DELETE FROM source_groups WHERE source_id = ?", (source_id,), connection=conn)
             self.backend.execute("DELETE FROM source_tags WHERE source_id = ?", (source_id,), connection=conn)
@@ -4530,6 +4598,7 @@ class WatchlistsDatabase:
     # RSS item-level dedup helpers
     # ------------------------
     def has_seen_item(self, source_id: int, item_key: str) -> bool:
+        source_id = self._ensure_source_owner(source_id)
         row = self.backend.execute(
             "SELECT 1 FROM source_seen_items WHERE source_id = ? AND item_key = ?",
             (source_id, item_key),
@@ -4545,6 +4614,7 @@ class WatchlistsDatabase:
         last_modified: str | None = None,
         seen_at: str | None = None,
     ) -> None:
+        source_id = self._ensure_source_owner(source_id)
         ts = seen_at or _utcnow_iso()
         # SQLite upsert pattern; backend handles SQL transparently in SQLite/Postgres where available
         try:
@@ -4577,6 +4647,7 @@ class WatchlistsDatabase:
                 )
 
     def list_seen_item_keys(self, source_id: int, *, limit: int | None = None) -> list[str]:
+        source_id = self._ensure_source_owner(source_id)
         sql = "SELECT item_key FROM source_seen_items WHERE source_id = ? ORDER BY last_seen_at DESC"
         params: tuple[Any, ...] = (source_id,)
         if isinstance(limit, int) and limit > 0:
@@ -4591,6 +4662,7 @@ class WatchlistsDatabase:
         return keys
 
     def get_seen_item_stats(self, source_id: int) -> dict[str, Any]:
+        source_id = self._ensure_source_owner(source_id)
         row = self.backend.execute(
             "SELECT COUNT(*) AS seen_count, MAX(last_seen_at) AS latest_seen_at "
             "FROM source_seen_items WHERE source_id = ?",
@@ -4610,6 +4682,7 @@ class WatchlistsDatabase:
         return {"seen_count": count_val, "latest_seen_at": latest_seen_at}
 
     def clear_seen_items(self, source_id: int) -> int:
+        source_id = self._ensure_source_owner(source_id)
         row = self.backend.execute(
             "SELECT COUNT(*) AS cnt FROM source_seen_items WHERE source_id = ?",
             (source_id,),

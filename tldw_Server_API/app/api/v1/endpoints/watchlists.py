@@ -27,6 +27,7 @@ from typing import Any, Literal
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Body,
     Depends,
     File,
@@ -90,6 +91,7 @@ from tldw_Server_API.app.core.Watchlists.fetchers import (
 from tldw_Server_API.app.core.Watchlists.filters import evaluate_filters as _evaluate_filters
 from tldw_Server_API.app.core.Watchlists.filters import normalize_filters as _normalize_job_filters
 from tldw_Server_API.app.core.Watchlists.opml import generate_opml, parse_opml
+from tldw_Server_API.app.core.Watchlists.output_enrichment_handler import schedule_output_enrichment
 from tldw_Server_API.app.core.Watchlists.pipeline import run_watchlist_job
 from tldw_Server_API.app.core.Watchlists.report_evidence import (
     build_legacy_live_only_readiness,
@@ -910,6 +912,10 @@ def _normalize_workflow_tenant_id(value: Any) -> str | None:
     if isinstance(value, (int, float)):
         return str(value)
     return None
+
+
+def _resolve_request_tenant_id(current_user: User) -> str:
+    return _normalize_workflow_tenant_id(getattr(current_user, "tenant_id", None)) or "default"
 
 
 async def _resolve_watchlist_workflow_tenant_id(*, current_user: User, resolved_user_id: int) -> str:
@@ -2199,6 +2205,7 @@ async def check_sources_now(
             run_result = await run_watchlist_job(
                 int(current_user.id),
                 manual_job_id,
+                tenant_id=_resolve_request_tenant_id(current_user),
                 source_ids_override=active_source_ids,
                 capture_companion_activity=True,
                 companion_route="/api/v1/watchlists/sources/check-now",
@@ -2539,6 +2546,7 @@ async def _build_source_preview_response(
     source_type: str,
     settings: dict[str, Any] | None,
     limit: int,
+    tenant_id: str = "default",
     etag: str | None = None,
     last_modified: str | None = None,
 ) -> PreviewResponse:
@@ -2557,7 +2565,7 @@ async def _build_source_preview_response(
                 normalized_url,
                 etag=etag,
                 last_modified=last_modified,
-                tenant_id="default",
+                tenant_id=tenant_id,
             )
             if isinstance(res, dict):
                 status = res.get("status")
@@ -2584,7 +2592,7 @@ async def _build_source_preview_response(
                 items = await fetch_site_items_with_rules(
                     base_url=str(scrape_rules.get("list_url") or normalized_url),
                     rules=scrape_rules,
-                    tenant_id="default",
+                    tenant_id=tenant_id,
                     fetch_diagnostics=fetch_events.append,
                 )
             except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
@@ -2659,7 +2667,7 @@ async def _build_source_preview_response(
 async def test_source_draft(
     payload: SourceTestRequest = Body(...),
     limit: int = Query(20, ge=1, le=200),
-    _current_user: User = Depends(get_request_user),
+    current_user: User = Depends(get_request_user),
     _db=Depends(get_watchlists_db_for_user),
 ):
     return await _build_source_preview_response(
@@ -2668,6 +2676,7 @@ async def test_source_draft(
         source_type=str(payload.source_type),
         settings=payload.settings or {},
         limit=limit,
+        tenant_id=_resolve_request_tenant_id(current_user),
     )
 
 
@@ -2696,6 +2705,7 @@ async def test_source(
         source_type=str(getattr(src, "source_type", "")),
         settings=settings,
         limit=limit,
+        tenant_id=_resolve_request_tenant_id(current_user),
         etag=getattr(src, "etag", None),
         last_modified=getattr(src, "last_modified", None),
     )
@@ -4189,6 +4199,7 @@ async def trigger_run(
         result = await run_watchlist_job(
             int(current_user.id),
             job_id,
+            tenant_id=_resolve_request_tenant_id(current_user),
             capture_companion_activity=True,
             companion_route=f"/api/v1/watchlists/jobs/{job_id}/run",
         )
@@ -6313,6 +6324,7 @@ async def delete_output_preset(
 @router.post("/outputs", response_model=WatchlistOutput, summary="Generate an output from scraped items")
 async def create_output(
     payload: WatchlistOutputCreateRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_request_user),
     db=Depends(get_watchlists_db_for_user),
     collections_db=Depends(get_collections_db_for_user),
@@ -7199,6 +7211,15 @@ async def create_output(
             chatbook_path=chatbook_path_update,
         )
         output = await _row_to_output(updated_row, user_id=user_id)
+
+    if needs_async_enrichment:
+        await schedule_output_enrichment(
+            output_id=int(output.id),
+            user_id=int(user_id),
+            grouping_config=payload.grouping,
+            summary_config=payload.briefing_summary,
+            fallback_submitter=background_tasks.add_task,
+        )
 
     return output
 
