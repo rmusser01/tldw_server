@@ -88,6 +88,65 @@ def test_openweather_exception_path(monkeypatch):
 
 
 @pytest.mark.unit
+def test_openweather_exception_metadata_does_not_expose_raw_details(monkeypatch):
+    client = weather_providers.OpenWeatherClient(api_key="secret-key")
+
+    class RaisingClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        @staticmethod
+        def get(*args, **kwargs):
+            raise httpx.RequestError("failed with appid=secret-key")
+
+    monkeypatch.setattr(weather_providers, "http_client_factory", RaisingClient)
+
+    result = client.get_current(location="Boston")
+    combined = f"{result.summary} {result.metadata}"
+    assert not result.ok
+    assert result.metadata.get("error") == "exception"
+    assert result.metadata.get("exception_type") == "RequestError"
+    assert "details" not in result.metadata
+    assert "secret-key" not in combined
+
+
+@pytest.mark.unit
+def test_openweather_rejects_oversized_location_before_network(monkeypatch):
+    client = weather_providers.OpenWeatherClient(api_key="k")
+
+    class FailingClient:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("network should not be used for invalid input")
+
+    monkeypatch.setattr(weather_providers, "http_client_factory", FailingClient)
+
+    result = client.get_current(location="x" * 300)
+    assert not result.ok
+    assert result.metadata.get("error") == "invalid_location"
+
+
+@pytest.mark.unit
+def test_openweather_rejects_out_of_range_coordinates_before_network(monkeypatch):
+    client = weather_providers.OpenWeatherClient(api_key="k")
+
+    class FailingClient:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("network should not be used for invalid input")
+
+    monkeypatch.setattr(weather_providers, "http_client_factory", FailingClient)
+
+    result = client.get_current(lat=95.0, lon=0.0)
+    assert not result.ok
+    assert result.metadata.get("error") == "invalid_coordinates"
+
+
+@pytest.mark.unit
 def test_openweather_success_response(monkeypatch):
     client = weather_providers.OpenWeatherClient(api_key="k", units="metric")
 

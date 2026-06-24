@@ -1,1 +1,1 @@
-"""Integrations package (stub for Stage 4)."""
+"""Core integration helpers for weather-backed chat commands."""
