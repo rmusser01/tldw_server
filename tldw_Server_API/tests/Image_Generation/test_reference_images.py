@@ -1,11 +1,13 @@
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
 
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.exceptions import FileArtifactsValidationError
+from tldw_Server_API.app.core.Image_Generation import reference_images as reference_images_module
 from tldw_Server_API.app.core.Image_Generation.reference_images import (
     ReferenceImageOperationalError,
     list_reference_image_candidates,
@@ -89,6 +91,14 @@ class ReadFailingStorage:
 
     async def retrieve(self, path: str) -> ReadFailingHandle:
         return ReadFailingHandle()
+
+
+class MustNotReadStorage:
+    async def exists(self, path: str) -> bool:
+        raise AssertionError("oversized reference candidate should not hit storage")
+
+    async def retrieve(self, path: str):
+        raise AssertionError("oversized reference candidate should not hit storage")
 
 
 @pytest.mark.asyncio
@@ -444,3 +454,35 @@ async def test_list_reference_image_candidates_pages_past_newer_invalid_rows(med
     candidates = await list_reference_image_candidates(media_db, user_id="777", limit=1, storage=storage)
 
     assert [(candidate.file_id, candidate.title) for candidate in candidates] == [(1, "Old valid image")]
+
+
+@pytest.mark.asyncio
+async def test_list_reference_image_candidates_skips_oversized_rows_before_storage(
+    monkeypatch,
+    media_db: MediaDatabase,
+) -> None:
+    monkeypatch.setattr(
+        reference_images_module,
+        "get_image_generation_config",
+        lambda: SimpleNamespace(inline_max_bytes=3),
+        raising=False,
+    )
+
+    media_id = _create_test_image_media(
+        media_db,
+        title="Oversized image",
+        content="image content",
+        content_hash="image-hash-oversized",
+    )
+    media_db.insert_media_file(
+        media_id=media_id,
+        file_type="original",
+        storage_path=f"777/media/{media_id}/oversized.png",
+        original_filename="oversized.png",
+        file_size=10,
+        mime_type="image/png",
+    )
+
+    candidates = await list_reference_image_candidates(media_db, user_id="777", storage=MustNotReadStorage())
+
+    assert candidates == []

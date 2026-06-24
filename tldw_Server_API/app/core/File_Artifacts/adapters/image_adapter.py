@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import math
 from contextvars import ContextVar, Token
+from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
@@ -27,6 +28,10 @@ from tldw_Server_API.app.core.Image_Generation.reference_images import (
 from tldw_Server_API.app.core.Image_Generation.prompt_refinement import (
     normalize_prompt_refinement_mode,
     refine_image_prompt,
+)
+from tldw_Server_API.app.core.Image_Generation.request_validation import (
+    allowed_extra_params_for_backend,
+    validate_image_generation_request,
 )
 
 
@@ -155,58 +160,11 @@ class ImageAdapter:
         return structured
 
     def validate(self, structured: dict[str, Any]) -> list[ValidationIssue]:
-        issues: list[ValidationIssue] = []
         config = get_image_generation_config()
-
-        prompt = structured.get("prompt")
-        if isinstance(prompt, str) and len(prompt) > config.max_prompt_length:
-            issues.append(
-                ValidationIssue(
-                    code="image_params_invalid",
-                    message="prompt exceeds max length",
-                    path="prompt",
-                )
-            )
-
-        width = structured.get("width")
-        height = structured.get("height")
-        if width is not None and (width <= 0 or width > config.max_width):
-            issues.append(
-                ValidationIssue(
-                    code="image_params_invalid",
-                    message="width out of range",
-                    path="width",
-                )
-            )
-        if height is not None and (height <= 0 or height > config.max_height):
-            issues.append(
-                ValidationIssue(
-                    code="image_params_invalid",
-                    message="height out of range",
-                    path="height",
-                )
-            )
-        if isinstance(width, int) and isinstance(height, int) and width * height > config.max_pixels:
-            issues.append(
-                ValidationIssue(
-                    code="image_params_invalid",
-                    message="image dimensions exceed max pixels",
-                    path="width,height",
-                )
-            )
-
-        steps = structured.get("steps")
-        if steps is not None and (steps <= 0 or steps > config.max_steps):
-            issues.append(
-                ValidationIssue(
-                    code="image_params_invalid",
-                    message="steps out of range",
-                    path="steps",
-                )
-            )
-
-        self._validate_extra_params(structured, config, issues)
-
+        issues = [
+            ValidationIssue(code=issue.code, message=issue.message, path=issue.path)
+            for issue in validate_image_generation_request(structured, config=config)
+        ]
         return issues
 
     def export(self, structured: dict[str, Any], *, format: str) -> ExportResult:
@@ -333,10 +291,15 @@ class ImageAdapter:
     def _float_or_none(value: Any) -> float | None:
         if value is None:
             return None
+        if isinstance(value, bool):
+            raise FileArtifactsValidationError("image_params_invalid")
         try:
-            return float(value)
+            candidate = float(value)
         except (TypeError, ValueError):
             raise FileArtifactsValidationError("image_params_invalid") from None
+        if not math.isfinite(candidate):
+            raise FileArtifactsValidationError("image_params_invalid")
+        return candidate
 
     @staticmethod
     def _positive_int_or_none(value: Any) -> int | None:
@@ -354,19 +317,7 @@ class ImageAdapter:
 
     @staticmethod
     def _allowed_extra_params(backend: str, config) -> set[str]:
-        if backend == "stable_diffusion_cpp":
-            return set(config.sd_cpp_allowed_extra_params or [])
-        if backend == "swarmui":
-            return set(config.swarmui_allowed_extra_params or [])
-        if backend == "openrouter":
-            return set(config.openrouter_image_allowed_extra_params or [])
-        if backend == "novita":
-            return set(config.novita_image_allowed_extra_params or [])
-        if backend == "together":
-            return set(config.together_image_allowed_extra_params or [])
-        if backend == "modelstudio":
-            return set(config.modelstudio_image_allowed_extra_params or [])
-        return set()
+        return allowed_extra_params_for_backend(backend, config)
 
     def _validate_extra_params(
         self,
@@ -374,44 +325,8 @@ class ImageAdapter:
         config,
         issues: list[ValidationIssue],
     ) -> None:
-        extra_params = structured.get("extra_params") or {}
-        if not extra_params:
-            return
-        backend = str(structured.get("backend") or "").strip()
-        allowlist = self._allowed_extra_params(backend, config)
-        exempt_control_keys: set[str] = set()
-        if backend == "modelstudio":
-            # `mode` is a local backend control knob, not a passthrough upstream parameter.
-            exempt_control_keys.add("mode")
-        keys_to_validate = [key for key in extra_params if key not in exempt_control_keys]
-        if not keys_to_validate:
-            return
-        if not allowlist:
-            for key in keys_to_validate:
-                issues.append(
-                    ValidationIssue(
-                        code="image_params_invalid",
-                        message="extra_params key not allowlisted",
-                        path=f"extra_params.{key}",
-                    )
-                )
-            return
-        for key in keys_to_validate:
-            if key not in allowlist:
-                issues.append(
-                    ValidationIssue(
-                        code="image_params_invalid",
-                        message="extra_params key not allowlisted",
-                        path=f"extra_params.{key}",
-                    )
-                )
-        if "cli_args" in extra_params and "cli_args" in allowlist:
-            cli_args = extra_params.get("cli_args")
-            if not isinstance(cli_args, (list, tuple)):
-                issues.append(
-                    ValidationIssue(
-                        code="image_params_invalid",
-                        message="cli_args must be a list",
-                        path="extra_params.cli_args",
-                    )
-                )
+        issues.extend(
+            ValidationIssue(code=issue.code, message=issue.message, path=issue.path)
+            for issue in validate_image_generation_request(structured, config=config)
+            if issue.path.startswith("extra_params")
+        )
