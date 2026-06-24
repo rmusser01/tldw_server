@@ -3,11 +3,13 @@ import httpx
 import pytest
 
 from tldw_Server_API.app.core.Local_LLM.http_utils import (
+    get_http_status_from_exception,
     request_json,
     redact_cmd_args,
+    redacted_url,
     wait_for_http_ready,
 )
-from tldw_Server_API.app.core.exceptions import JSONDecodeError
+from tldw_Server_API.app.core.exceptions import JSONDecodeError, NetworkError
 
 
 def _build_client(status_codes: list[int], payload: dict | None = None) -> tuple[httpx.AsyncClient, dict[str, int]]:
@@ -98,6 +100,21 @@ def test_redact_cmd_args_non_sensitive_equals():
     args = ["cmd", "--model=gpt-4", "--port=8080"]
     result = redact_cmd_args(args)
     assert result == ["cmd", "--model=gpt-4", "--port=8080"]
+
+
+def test_get_http_status_from_network_error_text():
+    """NetworkError fallback parsing should recognize plain HTTP status text."""
+    assert get_http_status_from_exception(NetworkError("HTTP 503 from local backend")) == 503
+
+
+def test_redacted_url_removes_credentials_and_sensitive_query_values():
+    """URL logging helper should keep useful location context without secrets."""
+    result = redacted_url("https://user:pass@example.com/model.gguf?token=secret&download=1")
+    assert "user" not in result
+    assert "pass" not in result
+    assert "secret" not in result
+    assert "token=" not in result
+    assert "download=1" in result
 
 
 # --- Tests for wait_for_http_ready improvements ---

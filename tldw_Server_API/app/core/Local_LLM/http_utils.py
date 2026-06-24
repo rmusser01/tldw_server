@@ -10,6 +10,7 @@ import asyncio
 import re
 from collections.abc import Iterable
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from loguru import logger
 
@@ -27,6 +28,22 @@ from tldw_Server_API.app.core.http_client import (
 DEFAULT_TIMEOUT: float = 120.0
 DEFAULT_RETRIES: int = 2
 DEFAULT_BACKOFF: float = 0.75
+_SECRET_QUERY_KEYS = {
+    "access_token",
+    "apikey",
+    "api_key",
+    "auth",
+    "authorization",
+    "key",
+    "password",
+    "secret",
+    "sig",
+    "signature",
+    "token",
+    "x-amz-credential",
+    "x-amz-security-token",
+    "x-amz-signature",
+}
 
 
 def _is_httpx_async_client(client: Any) -> bool:
@@ -52,7 +69,7 @@ def get_http_status_from_exception(exc: Exception) -> int | None:
             except (TypeError, ValueError):
                 pass
     if isinstance(exc, NetworkError):
-        match = re.search(r"HTTP\\s+(\\d{3})", str(exc))
+        match = re.search(r"HTTP\s+(\d{3})", str(exc))
         if match:
             try:
                 return int(match.group(1))
@@ -83,6 +100,35 @@ def is_network_error(exc: Exception) -> bool:
     if module.startswith("requests"):
         return "RequestException" in name or "Timeout" in name or "ConnectionError" in name
     return False
+
+
+def redacted_url(url: str) -> str:
+    """Return a log-safe URL string without credentials or sensitive query values."""
+    value = str(url or "").strip()
+    if not value:
+        return ""
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return "<invalid-url>"
+    if not parsed.scheme or not parsed.netloc:
+        return value
+
+    host = parsed.hostname or ""
+    netloc = host
+    if ":" in host and not host.startswith("["):
+        netloc = f"[{host}]"
+    if parsed.port is not None:
+        netloc = f"{netloc}:{parsed.port}"
+    query = urlencode(
+        [
+            (key, val)
+            for key, val in parse_qsl(parsed.query, keep_blank_values=True)
+            if key.strip().lower() not in _SECRET_QUERY_KEYS
+        ],
+        doseq=True,
+    )
+    return urlunsplit((parsed.scheme, netloc, parsed.path, query, ""))
 
 
 def redact_cmd_args(
@@ -247,5 +293,5 @@ async def async_stream_download(
     try:
         await adownload(url=url, dest=dest_path, retry=policy)
     except Exception as e:
-        logger.error(f"Download failed for {url}: {e}")
+        logger.error(f"Download failed for {redacted_url(url)}: {e}")
         raise

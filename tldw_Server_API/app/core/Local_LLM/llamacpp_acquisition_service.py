@@ -13,7 +13,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import SplitResult, parse_qsl, unquote, urlencode, urlsplit, urlunsplit
+from urllib.parse import SplitResult, parse_qsl, unquote, urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
 
@@ -21,6 +21,7 @@ from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppAsset,
     LlamaCppAssetDownloadRequest,
 )
+from tldw_Server_API.app.core import http_client
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.Local_LLM import handler_utils, llamacpp_inventory_service
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
@@ -47,6 +48,7 @@ _SECRET_QUERY_KEYS = {
 _SAFE_JOB_ID_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
 _DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 60.0
 _DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024 * 1024
+_MAX_DOWNLOAD_REDIRECTS = 5
 
 ProgressCallback = Callable[[dict[str, Any]], Awaitable[None] | None]
 CancelCheck = Callable[[], bool]
@@ -108,7 +110,7 @@ def validate_download_payload(
         raise ServerError("Invalid llama.cpp acquisition job payload.")
     config = saved_config if saved_config is not None else _read_saved_config()
     warnings = _string_list(payload.get("warnings"))
-    source_url = _validate_payload_source_url(str(payload.get("source_url") or ""), config)
+    source_url = _validate_source_url(str(payload.get("source_url") or ""), config, warnings)
     destination_raw = str(payload.get("destination_path") or "").strip()
     if not destination_raw:
         raise ServerError("Download destination path is required.")
@@ -319,36 +321,6 @@ def _validate_source_url(url: str, saved_config: dict[str, Any], warnings: list[
     if _is_local_hostname(host) and not allow_private:
         raise ServerError("Download URL host resolves to a local or private network address.")
     _validate_host_addresses(host, allow_private=allow_private, warnings=warnings)
-    return _normalized_source_url(parsed, port=port)
-
-
-def _validate_payload_source_url(url: str, saved_config: dict[str, Any]) -> str:
-    """Validate a queued download URL without DNS lookups and return its sanitized form."""
-
-    raw_url = str(url or "").strip()
-    if not raw_url:
-        raise ServerError("Download URL is required.")
-    try:
-        parsed = urlsplit(raw_url)
-        port = parsed.port
-    except ValueError as exc:
-        raise ServerError("Download URL is invalid.") from exc
-    scheme = parsed.scheme.lower()
-    if scheme not in _DOWNLOAD_SCHEMES:
-        raise ServerError("Download URL scheme must be http or https.")
-    if not parsed.hostname:
-        raise ServerError("Download URL host is required.")
-    if parsed.username is not None or parsed.password is not None:
-        raise ServerError("Download URL credentials are not supported.")
-    if any(_is_secret_query_key(key) for key, _val in parse_qsl(parsed.query, keep_blank_values=True)):
-        raise ServerError("Download URL contains unsupported sensitive query parameters.")
-    allow_private = bool(_config_bool(saved_config.get("allow_private_downloads")))
-    host = parsed.hostname.strip().lower()
-    if _is_local_hostname(host) and not allow_private:
-        raise ServerError("Download URL host resolves to a local or private network address.")
-    literal = _ip_address_or_none(host)
-    if literal is not None:
-        _reject_private_address(literal, allow_private=allow_private)
     return _normalized_source_url(parsed, port=port)
 
 
@@ -638,10 +610,27 @@ class _HttpxDownloadStream:
         self.total_bytes: int | None = None
 
     async def __aenter__(self) -> _HttpxDownloadStream:
-        self._client = httpx.AsyncClient(timeout=self._timeout_seconds, follow_redirects=True)
-        self._response_cm = self._client.stream("GET", self._url)
-        self._response = await self._response_cm.__aenter__()
-        self._response.raise_for_status()
+        self._client = http_client.create_async_client(timeout=self._timeout_seconds)
+        config = await asyncio.to_thread(_read_saved_config)
+        warnings: list[str] = []
+        next_url = self._url
+        for _redirect_count in range(_MAX_DOWNLOAD_REDIRECTS + 1):
+            next_url = await asyncio.to_thread(_validate_source_url, next_url, config, warnings)
+            self._response_cm = self._client.stream("GET", next_url)
+            self._response = await self._response_cm.__aenter__()
+            if self._is_redirect(self._response):
+                location = self._response.headers.get("location")
+                await self._response_cm.__aexit__(None, None, None)
+                self._response_cm = None
+                self._response = None
+                if not location:
+                    raise LlamaCppDownloadError("Download redirect did not include a Location header.")
+                next_url = urljoin(next_url, location)
+                continue
+            self._response.raise_for_status()
+            break
+        else:
+            raise LlamaCppDownloadError("Download exceeded the maximum redirect count.")
         self.total_bytes = _content_length(self._response.headers.get("content-length"))
         return self
 
@@ -657,6 +646,10 @@ class _HttpxDownloadStream:
             raise LlamaCppDownloadError("Download stream was not opened.")
         async for chunk in self._response.aiter_bytes():
             yield chunk
+
+    @staticmethod
+    def _is_redirect(response: httpx.Response) -> bool:
+        return response.status_code in {301, 302, 303, 307, 308}
 
 
 def _content_length(value: str | None) -> int | None:
