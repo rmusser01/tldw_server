@@ -94,6 +94,25 @@ export type AudioStudioProjectListResponse = {
   total?: number
 }
 
+export type AudioStudioArtifact = {
+  artifact_id: string
+  artifact_type: string
+  provider?: string | null
+  mime_type?: string | null
+  size_bytes?: number | null
+  source_resource_kind?: string | null
+  source_resource_id?: string | null
+  source_revision_id?: string | null
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
+export type AudioStudioArtifactListResponse = {
+  artifacts: AudioStudioArtifact[]
+  limit: number
+  offset: number
+}
+
 export type ListAudioStudioProjectsParams = {
   workflow?: AudioStudioWorkflow
   includeArchived?: boolean
@@ -300,6 +319,50 @@ export const listAudioStudioProjects = async (
     method: "GET"
   })
   return response.projects
+}
+
+export const listAudioStudioArtifacts = async (
+  projectId: string
+): Promise<AudioStudioArtifact[]> => {
+  const response = await bgRequest<AudioStudioArtifactListResponse>({
+    path: apiPath(`${projectPath(projectId)}/artifacts`),
+    method: "GET"
+  })
+  return response.artifacts
+}
+
+export const getAudioStudioArtifactMediaPath = (
+  projectId: string,
+  artifactId: string,
+  options: { download?: boolean } = {}
+): string => {
+  const path = `${projectPath(projectId)}/artifacts/${encodeURIComponent(artifactId)}/media`
+  return options.download ? `${path}?download=true` : path
+}
+
+export const fetchAudioStudioArtifactBlob = async (
+  projectId: string,
+  artifact: Pick<AudioStudioArtifact, "artifact_id" | "mime_type">
+): Promise<Blob> => {
+  const response = await bgRequest<{
+    ok: boolean
+    status: number
+    data?: ArrayBuffer
+    error?: string
+    headers?: Record<string, string>
+  }>({
+    path: apiPath(getAudioStudioArtifactMediaPath(projectId, artifact.artifact_id)),
+    method: "GET",
+    responseType: "arrayBuffer",
+    returnResponse: true
+  })
+  if (!response?.ok) {
+    throw new Error(response?.error || `Audio Studio artifact fetch failed: ${response?.status ?? "unknown"}`)
+  }
+  const headers = new Headers(response.headers || {})
+  return new Blob([response.data ?? new Uint8Array()], {
+    type: headers.get("content-type") || artifact.mime_type || "application/octet-stream"
+  })
 }
 
 export const createAudioStudioProject = async (

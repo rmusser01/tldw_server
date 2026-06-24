@@ -14,6 +14,9 @@ import {
   createAudioStudioGeneration,
   createAudioStudioProject,
   createAudioStudioRender,
+  fetchAudioStudioArtifactBlob,
+  getAudioStudioArtifactMediaPath,
+  listAudioStudioArtifacts,
   listAudioStudioProjects,
   listAudioStudioWorkflows,
   previewAudiobookMigration,
@@ -86,6 +89,85 @@ describe("audio-studio service", () => {
         status: "draft"
       }
     ])
+  })
+
+  it("lists project artifacts through the encoded project endpoint", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      artifacts: [
+        {
+          artifact_id: "artifact-1",
+          artifact_type: "speech",
+          provider: "kokoro",
+          mime_type: "audio/wav",
+          size_bytes: 123,
+          source_resource_kind: "section",
+          source_resource_id: "section-1",
+          source_revision_id: "revision-1",
+          metadata: { take: 1 },
+          created_at: "2026-01-01T00:00:00Z"
+        }
+      ],
+      limit: 50,
+      offset: 0
+    })
+
+    const artifacts = await listAudioStudioArtifacts("project 1")
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/audio-studio/projects/project%201/artifacts",
+      method: "GET"
+    })
+    expect(artifacts).toEqual([
+      {
+        artifact_id: "artifact-1",
+        artifact_type: "speech",
+        provider: "kokoro",
+        mime_type: "audio/wav",
+        size_bytes: 123,
+        source_resource_kind: "section",
+        source_resource_id: "section-1",
+        source_revision_id: "revision-1",
+        metadata: { take: 1 },
+        created_at: "2026-01-01T00:00:00Z"
+      }
+    ])
+  })
+
+  it("builds encoded artifact media paths", () => {
+    expect(getAudioStudioArtifactMediaPath("p 1", "a/1")).toBe(
+      "/api/v1/audio-studio/projects/p%201/artifacts/a%2F1/media"
+    )
+  })
+
+  it("adds a download flag only when requested for artifact media paths", () => {
+    expect(
+      getAudioStudioArtifactMediaPath("p1", "a1", { download: true })
+    ).toBe("/api/v1/audio-studio/projects/p1/artifacts/a1/media?download=true")
+  })
+
+  it("fetches artifact media as a blob using the response MIME type", async () => {
+    const buffer = new Uint8Array([1, 2, 3]).buffer
+    mocks.bgRequest.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: buffer,
+      headers: { "content-type": "audio/wav" }
+    })
+
+    const blob = await fetchAudioStudioArtifactBlob("p1", {
+      artifact_id: "a1",
+      mime_type: "audio/mpeg"
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/audio-studio/projects/p1/artifacts/a1/media",
+      method: "GET",
+      responseType: "arrayBuffer",
+      returnResponse: true
+    })
+    expect(blob).toBeInstanceOf(Blob)
+    expect(blob.type).toBe("audio/wav")
+    expect(blob.size).toBe(3)
   })
 
   it("creates and updates projects without accepting client secrets", async () => {
