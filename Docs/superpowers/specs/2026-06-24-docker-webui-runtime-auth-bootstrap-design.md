@@ -96,6 +96,7 @@ Runtime auth is available only when all guards pass:
 - `SINGLE_USER_API_KEY` exists and is not a placeholder value such as `change-me`
 - the browser request `Host` is loopback/local, including `localhost`, `127.0.0.1`, `[::1]`, and `::1`
 - the Docker WebUI port remains bound to loopback in the default compose overlay, currently `127.0.0.1:8080:3000`
+- forwarding headers such as `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, or `X-Real-IP` are absent
 
 The route must ignore forwarded host headers for the exposure decision. A reverse proxy can opt into a different deployment later, but the default Docker path must not trust `X-Forwarded-Host` for deciding whether to reveal the single-user API key.
 
@@ -126,9 +127,11 @@ Update `runtime-bootstrap.ts` so WebUI startup fetches `/api/_tldw-webui/runtime
 - `credentials: "same-origin"`
 - `cache: "no-store"`
 
-The bootstrap should export a promise that completes before `_app.tsx` calls `getConfiguredAuthState()`. This avoids an initial unauthenticated render when runtime auth is available but has not yet seeded storage.
+The bootstrap should export a named promise, for example `runtimeBootstrapReady`, that completes before `_app.tsx` calls `getConfiguredAuthState()`. `_app.tsx` should import that promise instead of importing bootstrap only for side effects, and `refreshAuthState()` should await it before reading configured auth state. This avoids an initial unauthenticated render when runtime auth is available but has not yet seeded storage.
 
 The bootstrap should continue if the endpoint is missing, disabled, or fails. Existing manual config and build-time public env fallbacks remain usable.
+
+When runtime auth wins, the bootstrap should also call the existing in-memory auth helper, for example `setRuntimeApiKey(runtimeKey)`, so shared request helpers prefer runtime auth over any stale `NEXT_PUBLIC_X_API_KEY` compiled into the bundle. The current auth helper already checks the in-memory runtime API key before build-time public env values; the implementation must make use of that precedence.
 
 ### 3. Track runtime-owned keys outside `TldwConfig`
 
@@ -154,10 +157,12 @@ Write rules:
 
 - if no API key is configured, write the runtime key and metadata
 - if the existing key has matching runtime metadata, replace it when the runtime key changes
+- if the existing key has no runtime metadata but matches the compiled `NEXT_PUBLIC_X_API_KEY` value or a known placeholder, treat it as bootstrap-owned and replace it with the runtime key
+- if the existing key already equals the runtime key but lacks metadata, add runtime metadata without changing the key
 - if an existing key has no runtime metadata, treat it as user-managed and do not overwrite it
 - if runtime auth becomes unavailable, leave manual config alone and do not delete user-managed keys
 
-After writing storage, dispatch `tldw:config-updated`.
+After writing storage, dispatch `tldw:config-updated`. The implementation must update both `tldwConfig` and `tldwServerUrl` consistently when it changes server URL state, matching the existing bootstrap behavior.
 
 ### 4. Wire Docker runtime environment explicitly
 
@@ -221,6 +226,7 @@ The exposure boundary is therefore:
 - explicit `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1`
 - single-user mode only
 - no forwarded-host trust
+- no forwarded request headers on the default runtime-auth path
 - no response caching
 - default Docker compose binds the WebUI host port to loopback, not `0.0.0.0`
 
@@ -233,11 +239,14 @@ The Host-header guard is not a substitute for keeping the quickstart port loopba
 ### Unit tests
 
 - runtime-config route returns unavailable when disabled, non-single-user, placeholder key, or non-loopback Host
+- runtime-config route returns unavailable when forwarding headers are present
 - runtime-config route returns available with `Cache-Control: no-store` for loopback Host and valid single-user env
 - bootstrap writes runtime key only when no manual key exists
 - bootstrap replaces a previous runtime-owned key when the runtime key changes
+- bootstrap replaces a stale key that was seeded from `NEXT_PUBLIC_X_API_KEY`
 - bootstrap does not replace user-managed keys
-- `_app.tsx` waits for runtime bootstrap before first auth-state calculation
+- bootstrap calls the in-memory runtime auth setter so runtime auth outranks stale build-time public env auth
+- `_app.tsx` awaits the named runtime bootstrap promise before first auth-state calculation
 
 ### Integration or focused build tests
 

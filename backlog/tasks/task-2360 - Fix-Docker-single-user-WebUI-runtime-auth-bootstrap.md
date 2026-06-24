@@ -22,6 +22,14 @@ Address Docker single-user startup/auth issues by designing and implementing a r
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [ ] #1 Runtime-auth WebUI bootstrap works without requiring Docker users to bake `NEXT_PUBLIC_X_API_KEY` into the WebUI image.
+- [ ] #2 Runtime auth takes precedence over stale build-time public env auth and does not overwrite user-managed credentials.
+- [ ] #3 Docker single-user compose enables authenticated setup writes from the WebUI container via `TLDW_SETUP_ALLOW_REMOTE=1`.
+- [ ] #4 Docker WebUI compose passes runtime auth env to the WebUI service while preserving loopback host port binding.
+- [ ] #5 Setup onboarding write calls remain authenticated; no unauthenticated `noAuth` regression is introduced.
+- [ ] #6 Docs clarify runtime auth bootstrap as the Docker quickstart default and `NEXT_PUBLIC_X_API_KEY` as advanced/static-build compatibility.
+- [ ] #7 Stale root `mcp_unified` Docker guidance is handled with branch-accurate verification rather than an unconditional nonexistent package copy.
+- [ ] #8 Focused tests or verification cover runtime endpoint guards, bootstrap precedence, compose wiring, and active MCP package/import shape.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -33,7 +41,7 @@ Design first under Docs/superpowers/specs, then wait for explicit user review be
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+2026-06-24 design review follow-up: tightened the design so runtime auth explicitly outranks stale build-time `NEXT_PUBLIC_X_API_KEY`, `_app.tsx` awaits a named bootstrap promise before auth-state checks, forwarded request headers disable default runtime-auth exposure, and the task has concrete acceptance criteria after the MCP edit helper did not populate the AC block.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
