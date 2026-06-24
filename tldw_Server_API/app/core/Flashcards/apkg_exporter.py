@@ -1,11 +1,14 @@
 # apkg_exporter.py
 #
 # Imports
+import base64
+import binascii
 import contextlib
 import io
 import json
 import mimetypes
 import os
+import re
 import sqlite3
 import tempfile
 import time
@@ -17,6 +20,8 @@ from typing import Optional
 from loguru import logger
 
 from tldw_Server_API.app.core.Flashcards.asset_refs import replace_markdown_asset_refs_for_export
+
+DEFAULT_MAX_TOTAL_MEDIA_BYTES = 256 * 1024 * 1024
 
 #
 ########################################################################################################################
@@ -248,9 +253,6 @@ def _compute_card_sched(model_type: str, ef: float, interval_days: int, repetiti
     return (2, 2, days_since_crt, ivl_days, factor, reps_val, lapses_val)
 
 
-import re
-
-
 def _extract_media_from_html(
     html: str,
     media_accum: list[tuple[str, bytes]],
@@ -265,43 +267,9 @@ def _extract_media_from_html(
     media_map: filename -> index assigned
     Returns modified HTML.
     """
-    def repl(match):
-        tag = match.group(0)
-        src = match.group(1)
-        if not src.startswith('data:'):
-            return tag
-        # data URI: data:<mime>;base64,<data>
-        try:
-            header, b64data = src.split(',', 1)
-            mime = header.split(';')[0][5:]
-            ext = 'bin'
-            if '/' in mime:
-                ext = mime.split('/')[-1].split('+')[0]
-                if ext == 'jpeg':
-                    ext = 'jpg'
-            import base64
-            content = base64.b64decode(b64data)
-            if media_total_bytes is not None:
-                media_total_bytes[0] += len(content)
-                if max_total_media_bytes is not None and media_total_bytes[0] > max_total_media_bytes:
-                    raise ValueError(f"APKG media exceeds max total size of {max_total_media_bytes} bytes")
-            # filename
-            fname_base = f"media_{uuid.uuid4().hex[:8]}.{ext}"
-            # avoid collision
-            filename = fname_base
-            idx = len(media_accum)
-            media_map[filename] = idx
-            media_accum.append((filename, content))
-            return tag.replace(src, filename)
-        except Exception:
-            return tag
-
-    # Replace img and audio src
-    re.compile(r'(?:<img[^>]+src\s*=\s*["\"])([^"\"]+)(?:["\"][^>]*>)|(?:<audio[^>]+src\s*=\s*["\"])([^"\"]+)(?:["\"][^>]*>)', re.IGNORECASE)
-    # We need to handle both capturing groups; easier: custom parser for img/src and audio/src separately
     def replace_tag_src(tag_name: str, s: str) -> str:
         # Match src with either single or double quotes
-        rgx = re.compile(rf'<{tag_name}[^>]*?\s+src\s*=\s*([\'"\"])\s*(.*?)\1', re.IGNORECASE)
+        rgx = re.compile(rf'<{tag_name}[^>]*?\s+src\s*=\s*([\'"\"])\s*(.*?)\1', re.IGNORECASE | re.DOTALL)
         return rgx.sub(lambda m: m.group(0).replace(m.group(2), _handle_src(m.group(2))), s)
 
     def _handle_src(src: str) -> str:
@@ -315,19 +283,32 @@ def _extract_media_from_html(
                 ext = mime.split('/')[-1].split('+')[0]
                 if ext == 'jpeg':
                     ext = 'jpg'
-            import base64
-            content = base64.b64decode(b64data)
-            if media_total_bytes is not None:
-                media_total_bytes[0] += len(content)
-                if max_total_media_bytes is not None and media_total_bytes[0] > max_total_media_bytes:
-                    raise ValueError(f"APKG media exceeds max total size of {max_total_media_bytes} bytes")
-            filename = f"media_{uuid.uuid4().hex[:8]}.{ext}"
-            idx = len(media_accum)
-            media_map[filename] = idx
-            media_accum.append((filename, content))
-            return filename
-        except Exception:
+            normalized_b64 = "".join(b64data.split())
+        except ValueError:
             return src
+        if (
+            media_total_bytes is not None
+            and max_total_media_bytes is not None
+            and normalized_b64
+        ):
+            padding = len(normalized_b64) - len(normalized_b64.rstrip("="))
+            estimated_size = (len(normalized_b64) * 3 // 4) - padding
+            remaining_bytes = max_total_media_bytes - media_total_bytes[0]
+            if estimated_size > remaining_bytes:
+                raise ValueError(f"APKG media exceeds max total size of {max_total_media_bytes} bytes")
+        try:
+            content = base64.b64decode(normalized_b64, validate=True)
+        except binascii.Error:
+            return src
+        if media_total_bytes is not None:
+            media_total_bytes[0] += len(content)
+            if max_total_media_bytes is not None and media_total_bytes[0] > max_total_media_bytes:
+                raise ValueError(f"APKG media exceeds max total size of {max_total_media_bytes} bytes")
+        filename = f"media_{uuid.uuid4().hex[:8]}.{ext}"
+        idx = len(media_accum)
+        media_map[filename] = idx
+        media_accum.append((filename, content))
+        return filename
 
     html = replace_tag_src('img', html)
     html = replace_tag_src('audio', html)
@@ -340,12 +321,15 @@ def export_apkg_from_rows(
     include_reverse: bool = False,
     *,
     asset_loader=None,
-    max_total_media_bytes: int | None = None,
+    max_total_media_bytes: int | None = DEFAULT_MAX_TOTAL_MEDIA_BYTES,
 ) -> bytes:
     """
     Build an APKG bytes object from flashcard rows returned by list_flashcards().
     Each row should contain: deck_name, front, back, notes, extra, model_type, ef, interval_days, repetitions, lapses, due_at.
     """
+    if not rows:
+        raise ValueError("No flashcards to export")
+
     # Prepare deck ids
     unique_decks = sorted({r.get("deck_name") or default_deck_name for r in rows})
     base_id = _now_millis()

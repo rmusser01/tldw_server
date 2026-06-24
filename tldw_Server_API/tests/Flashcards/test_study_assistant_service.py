@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from tldw_Server_API.app.api.v1.schemas.flashcards import (
@@ -7,6 +9,7 @@ from tldw_Server_API.app.api.v1.schemas.flashcards import (
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 from tldw_Server_API.app.core.Flashcards.study_assistant import (
     build_flashcard_assistant_context,
+    build_study_assistant_prompt_package,
     build_quiz_attempt_question_context,
     normalize_fact_check_payload,
 )
@@ -167,3 +170,57 @@ def test_build_flashcard_assistant_context_limits_recent_history_and_field_lengt
     assert [message["structured_payload"]["index"] for message in context["history"]] == [3, 4]
     assert len(context["flashcard"]["notes"]) == 50
     assert context["flashcard"]["notes"].endswith("...")
+
+
+@pytest.mark.unit
+def test_study_assistant_prompt_includes_bounded_flashcard_context(chacha_db: CharactersRAGDB) -> None:
+    flashcard_uuid = _create_flashcard(chacha_db)
+    thread = chacha_db.get_or_create_study_assistant_thread(
+        context_type="flashcard",
+        flashcard_uuid=flashcard_uuid,
+    )
+    chacha_db.append_study_assistant_message(
+        thread_id=thread["id"],
+        role="assistant",
+        action_type="explain",
+        input_modality="text",
+        content="The nephron filters and processes fluid.",
+        structured_payload={},
+        context_snapshot={"flashcard_uuid": flashcard_uuid},
+    )
+
+    context = build_flashcard_assistant_context(chacha_db, flashcard_uuid)
+    prompt = build_study_assistant_prompt_package(
+        action="fact_check",
+        context=context,
+        user_message="The nephron is a kidney unit.",
+    )
+
+    assert "The functional unit of the kidney." in prompt["user_prompt"]
+    assert "Renal physiology" in prompt["user_prompt"]
+    assert "Associated with urine formation." in prompt["user_prompt"]
+    assert "The nephron filters and processes fluid." in prompt["user_prompt"]
+
+
+@pytest.mark.unit
+def test_study_assistant_prompt_context_remains_valid_json_when_bounded() -> None:
+    prompt = build_study_assistant_prompt_package(
+        action="explain",
+        context={
+            "context_type": "flashcard",
+            "flashcard": {
+                "front": "What is the nephron?",
+                "back": "A" * 10_000,
+            },
+            "history": [{"role": "user", "content": "B" * 10_000}],
+        },
+    )
+    context_json = (
+        prompt["user_prompt"]
+        .split("Study context JSON:\n", 1)[1]
+        .split("\nLearner message:", 1)[0]
+    )
+
+    parsed = json.loads(context_json)
+
+    assert parsed["context_type"] == "flashcard"
