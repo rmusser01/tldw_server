@@ -171,6 +171,30 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     },
     [message]
   )
+  const formatCardCount = React.useCallback(
+    (count: number) => {
+      const noun =
+        count === 1
+          ? t("option:flashcards.cardLowercase", { defaultValue: "card" })
+          : t("option:flashcards.cardsLowercase", { defaultValue: "cards" })
+      return `${count} ${noun}`
+    },
+    [t]
+  )
+  const warnBulkPartialFailure = React.useCallback(
+    (verb: string, successCount: number, failedCount: number) => {
+      message.warning(
+        t("option:flashcards.bulkPartialFailure", {
+          defaultValue:
+            "{{verb}} {{successLabel}}; {{failed}} failed. Failed cards remain selected so you can retry.",
+          verb,
+          successLabel: formatCardCount(successCount),
+          failed: failedCount
+        })
+      )
+    },
+    [formatCardCount, message, t]
+  )
 
   // Track pending deletions for soft-delete with undo + trash view
   const [pendingDeletions, setPendingDeletions] = React.useState<Record<string, PendingDeletion>>({})
@@ -405,6 +429,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set())
   const [previewOpen, setPreviewOpen] = React.useState<Set<string>>(new Set())
   const [selectAllAcross, setSelectAllAcross] = React.useState<boolean>(false)
+  const [selectedIdsMaySpanPages, setSelectedIdsMaySpanPages] = React.useState(false)
 
   const updatePendingDeletions = React.useCallback(
     (updater: (prev: Record<string, PendingDeletion>) => Record<string, PendingDeletion>) => {
@@ -527,15 +552,24 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   }, [mQueryInput, mQuery])
 
   React.useEffect(() => {
-    if (!selectAllAcross) {
+    if (!selectAllAcross && !selectedIdsMaySpanPages) {
       setSelectedIds(new Set())
     }
-  }, [page, pageSize, selectAllAcross])
+  }, [page, pageSize, selectAllAcross, selectedIdsMaySpanPages])
 
   React.useEffect(() => {
     setSelectedIds(new Set())
     setSelectAllAcross(false)
-  }, [mDeckId, normalizedManageQuery, mTags, mDue, mSort])
+    setSelectedIdsMaySpanPages(false)
+  }, [
+    mDeckId,
+    normalizedManageQuery,
+    mTags,
+    mDue,
+    mSort,
+    selectedWorkspaceId,
+    showWorkspaceDecks
+  ])
 
   React.useEffect(() => {
     return () => {
@@ -548,28 +582,34 @@ export const ManageTab: React.FC<ManageTabProps> = ({
 
   const toggleSelect = (uuid: string, checked: boolean) => {
     if (selectAllAcross) return
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (checked) next.add(uuid)
-      else next.delete(uuid)
-      return next
-    })
+    const next = new Set(selectedIds)
+    if (checked) next.add(uuid)
+    else next.delete(uuid)
+    const selectedVisibleCount = visibleItems.reduce(
+      (count, item) => count + (next.has(item.uuid) ? 1 : 0),
+      0
+    )
+    setSelectedIdsMaySpanPages(next.size > selectedVisibleCount)
+    setSelectedIds(next)
   }
 
   const selectAllOnPage = () => {
     const ids = visibleItems.map((i) => i.uuid)
     setSelectAllAcross(false)
-    setSelectedIds(new Set([...(selectedIds || new Set()), ...ids]))
+    setSelectedIdsMaySpanPages(false)
+    setSelectedIds(new Set(ids))
   }
 
   const clearSelection = React.useCallback(() => {
     setSelectedIds(new Set())
     setSelectAllAcross(false)
+    setSelectedIdsMaySpanPages(false)
   }, [])
 
   const selectAllAcrossResults = () => {
     if (selectAllAcrossDisabled) return
     setSelectAllAcross(true)
+    setSelectedIdsMaySpanPages(false)
     setSelectedIds(new Set())
   }
 
@@ -606,6 +646,24 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const allOnPageSelected = pageCount > 0 && selectedOnPageCount === pageCount
   const someOnPageSelected = selectedOnPageCount > 0 && selectedOnPageCount < pageCount
   const selectAllAcrossDisabled = isDocumentMode && documentQuery.isTruncated
+  const selectionScopeLabel = selectedIdsMaySpanPages
+    ? t("option:flashcards.selectedFailedForRetry", {
+        defaultValue: "failed cards selected for retry"
+      })
+    : selectAllAcross
+      ? t("option:flashcards.selectedAcrossAll", {
+          defaultValue: "selected across all results"
+        })
+      : t("option:flashcards.selectedOnPage", {
+          defaultValue: "selected on this page"
+        })
+  const selectionBadgeTitle = selectedIdsMaySpanPages
+    ? t("option:flashcards.failedCardsForRetry", {
+        defaultValue: "Failed cards selected for retry"
+      })
+    : selectAllAcross
+      ? t("option:flashcards.allResults", { defaultValue: "All results" })
+      : t("option:flashcards.thisPage", { defaultValue: "This page" })
   const isNoCardFirstRun =
     viewMode === "cards" &&
     !isDocumentMode &&
@@ -733,7 +791,21 @@ export const ManageTab: React.FC<ManageTabProps> = ({
 
   async function getSelectedItems(): Promise<Flashcard[]> {
     if (!selectAllAcross) {
-      return visibleItems.filter((i) => selectedIds.has(i.uuid))
+      const selectedVisibleItems = visibleItems.filter((i) => selectedIds.has(i.uuid))
+      if (!selectedIdsMaySpanPages || selectedVisibleItems.length === selectedIds.size) {
+        return selectedVisibleItems
+      }
+      const selectedItemsByUuid = new Map(
+        selectedVisibleItems.map((item) => [item.uuid, item])
+      )
+      const missingIds = [...selectedIds].filter((uuid) => !selectedItemsByUuid.has(uuid))
+      await processInChunks(missingIds, BULK_MUTATION_CHUNK_SIZE, async (chunk) => {
+        const results = await Promise.all(chunk.map((uuid) => getFlashcard(uuid)))
+        results.forEach((item) => {
+          selectedItemsByUuid.set(item.uuid, item)
+        })
+      })
+      return [...selectedItemsByUuid.values()]
     }
     const all = await fetchAllItemsAcrossFilters()
     return all
@@ -837,6 +909,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
       }
 
       let changedCount = 0
+      const failedIds = new Set<string>()
       await processInChunks(
         selectedItems,
         BULK_MUTATION_CHUNK_SIZE,
@@ -867,17 +940,37 @@ export const ManageTab: React.FC<ManageTabProps> = ({
               changedCount += 1
             })
           )
-          const failures = results.filter((result) => result.status === "rejected")
-          if (failures.length > 0) {
-            console.warn(`${failures.length} bulk tag updates failed in chunk`)
+          let chunkFailures = 0
+          results.forEach((result, index) => {
+            if (result.status === "rejected") {
+              failedIds.add(chunk[index].uuid)
+              chunkFailures += 1
+            }
+          })
+          if (chunkFailures > 0) {
+            console.warn(`${chunkFailures} bulk tag updates failed in chunk`)
           }
         }
       )
 
-      clearSelection()
       setBulkTagOpen(false)
       setBulkTagInput("")
       await qc.invalidateQueries({ queryKey: ["flashcards:list"] })
+
+      const failedCount = failedIds.size
+      if (failedCount > 0) {
+        setSelectAllAcross(false)
+        setSelectedIdsMaySpanPages(true)
+        setSelectedIds(new Set(failedIds))
+        warnBulkPartialFailure(
+          t("option:flashcards.bulkPartialUpdated", { defaultValue: "Updated" }),
+          changedCount,
+          failedCount
+        )
+        return
+      }
+
+      clearSelection()
 
       if (changedCount === 0) {
         message.info(
@@ -1275,6 +1368,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     try {
       const undoSnapshots: MoveUndoSnapshot[] = []
       let movedCount = 0
+      let failedCount = 0
       if (moveCard) {
         const full = await getFlashcard(moveCard.uuid)
         const previousDeckId = full.deck_id ?? null
@@ -1291,6 +1385,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
           movedCount += 1
         }
       } else {
+        const failedIds = new Set<string>()
         if (moveDeckId == null) {
           message.error(
             t("option:flashcards.bulkMoveSelectDeck", {
@@ -1323,20 +1418,41 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                   movedCount += 1
                 })
               )
-              const failures = results.filter((r) => r.status === "rejected")
-              if (failures.length > 0) {
-                console.warn(`${failures.length} move updates failed in chunk`)
+              let chunkFailures = 0
+              results.forEach((result, index) => {
+                if (result.status === "rejected") {
+                  failedIds.add(chunk[index].uuid)
+                  chunkFailures += 1
+                }
+              })
+              if (chunkFailures > 0) {
+                console.warn(`${chunkFailures} move updates failed in chunk`)
               }
             }
           )
         }
-        clearSelection()
+        if (failedIds.size > 0) {
+          setSelectAllAcross(false)
+          setSelectedIdsMaySpanPages(true)
+          setSelectedIds(new Set(failedIds))
+        } else {
+          clearSelection()
+        }
+        failedCount = failedIds.size
       }
       setMoveOpen(false)
       setMoveCard(null)
       setMoveDeckId(null)
       await qc.invalidateQueries({ queryKey: ["flashcards:list"] })
       if (movedCount === 0) {
+        if (failedCount > 0) {
+          warnBulkPartialFailure(
+            t("option:flashcards.bulkPartialMoved", { defaultValue: "Moved" }),
+            0,
+            failedCount
+          )
+          return
+        }
         message.info(
           t("option:flashcards.bulkMoveNoChanges", {
             defaultValue: "No cards needed moving."
@@ -1385,7 +1501,15 @@ export const ManageTab: React.FC<ManageTabProps> = ({
           await qc.invalidateQueries({ queryKey: ["flashcards:list"] })
         }
       })
-      message.success(t("common:updated", { defaultValue: "Updated" }))
+      if (failedCount > 0) {
+        warnBulkPartialFailure(
+          t("option:flashcards.bulkPartialMoved", { defaultValue: "Moved" }),
+          movedCount,
+          failedCount
+        )
+      } else {
+        message.success(t("common:updated", { defaultValue: "Updated" }))
+      }
     } catch (e: unknown) {
       reportUiError(
         e,
@@ -2028,16 +2152,10 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                   showZero={false}
                   className="mr-1"
                   style={{ backgroundColor: selectAllAcross ? "rgb(var(--color-primary))" : "rgb(var(--color-success))" }}
-                  title={selectAllAcross ? t("option:flashcards.allResults", { defaultValue: "All results" }) : t("option:flashcards.thisPage", { defaultValue: "This page" })}
+                  title={selectionBadgeTitle}
                 />
                 <span className="text-text-muted flex items-center gap-1">
-                  {selectAllAcross
-                    ? t("option:flashcards.selectedAcrossAll", {
-                        defaultValue: "selected across all results"
-                      })
-                    : t("option:flashcards.selectedOnPage", {
-                        defaultValue: "selected on this page"
-                      })}
+                  {selectionScopeLabel}
                 </span>
                 {!selectAllAcross && selectedCount > 0 && totalCount > selectedCount && (
                   <button
@@ -2503,9 +2621,15 @@ export const ManageTab: React.FC<ManageTabProps> = ({
             style={{ backgroundColor: selectAllAcross ? "rgb(var(--color-primary))" : "rgb(var(--color-success))" }}
           />
           <span className="text-sm text-text-muted">
-            {selectAllAcross
-              ? t("option:flashcards.selectedAcrossAll", { defaultValue: "selected across all results" })
-              : t("option:flashcards.selected", { defaultValue: "selected" })}
+            {selectedIdsMaySpanPages
+              ? t("option:flashcards.selectedFailedForRetry", {
+                  defaultValue: "failed cards selected for retry"
+                })
+              : selectAllAcross
+                ? t("option:flashcards.selectedAcrossAll", {
+                    defaultValue: "selected across all results"
+                  })
+                : t("option:flashcards.selected", { defaultValue: "selected" })}
           </span>
           <div className="h-4 w-px bg-border" />
           <Space>
@@ -2534,6 +2658,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
 
       <Modal
         open={bulkTagOpen}
+        destroyOnHidden
         title={
           bulkTagMode === "add"
             ? t("option:flashcards.bulkAddTagTitle", {
