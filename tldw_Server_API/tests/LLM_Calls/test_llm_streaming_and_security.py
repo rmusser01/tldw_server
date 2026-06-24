@@ -1,4 +1,7 @@
+import asyncio
 import json
+
+import pytest
 
 
 def test_google_stream_emits_done_once(monkeypatch):
@@ -119,3 +122,90 @@ def test_huggingface_headers_are_masked(monkeypatch):
     assert "HuggingFace headers:" in joined
     assert secret not in joined
     assert "***" in joined
+
+
+def test_http_400_logging_omits_prompt_and_request_body(monkeypatch):
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+    from tldw_Server_API.app.core.LLM_Calls import error_utils
+
+    secret_prompt = "SECRET_PROMPT_CONTENT"
+    secret_key = "sk-secret-should-not-log"
+    body = {
+        "error": {
+            "message": f"Invalid request for prompt {secret_prompt}",
+            "type": "invalid_request_error",
+            "code": "bad_request",
+        },
+        "messages": [{"role": "user", "content": secret_prompt}],
+        "api_key": secret_key,
+    }
+
+    class _Resp:
+        status_code = 400
+        text = json.dumps(body)
+
+        def json(self):
+            return body
+
+    class _Exc(Exception):
+        response = _Resp()
+
+    warnings = []
+    errors = []
+
+    class _Logger:
+        def warning(self, msg):
+            warnings.append(str(msg))
+
+        def error(self, msg):
+            errors.append(str(msg))
+
+    monkeypatch.setattr(error_utils, "logger", _Logger())
+
+    exc = _Exc("upstream 400")
+    error_utils.log_http_400_body("openai", exc)
+    with pytest.raises(ChatBadRequestError):
+        error_utils.raise_chat_error_from_http("openai", exc)
+
+    rendered_logs = "\n".join(warnings + errors)
+    assert secret_prompt not in rendered_logs
+    assert secret_key not in rendered_logs
+    assert "messages" not in rendered_logs
+    assert "invalid_request_error" in rendered_logs
+
+
+@pytest.mark.asyncio
+async def test_wrap_sync_stream_applies_backpressure_and_closes_on_cancel():
+    from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
+
+    class _FastIterator:
+        def __init__(self):
+            self.yielded = 0
+            self.closed = False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self.closed:
+                raise StopIteration
+            self.yielded += 1
+            return f"chunk-{self.yielded}"
+
+        def close(self):
+            self.closed = True
+
+    source = _FastIterator()
+    stream = wrap_sync_stream(source, max_queue_size=1)
+
+    assert await stream.__anext__() == "chunk-1"
+    await asyncio.sleep(0.1)
+
+    assert source.yielded <= 3
+    await stream.aclose()
+    await asyncio.sleep(0.1)
+
+    yielded_after_close = source.yielded
+    assert source.closed is True
+    await asyncio.sleep(0.1)
+    assert source.yielded == yielded_after_close

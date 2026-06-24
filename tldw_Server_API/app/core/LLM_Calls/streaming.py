@@ -9,6 +9,7 @@ final sentinel using sse_done()/finalize_stream to avoid duplicates.
 
 import asyncio
 import os
+import queue as thread_queue
 import threading
 from collections.abc import AsyncIterator, Iterable, Iterator
 from typing import Any, Callable, Optional
@@ -17,6 +18,10 @@ from tldw_Server_API.app.core.http_client import RetryPolicy, astream_sse
 from tldw_Server_API.app.core.LLM_Calls.error_utils import is_chunked_encoding_error
 
 from .sse import is_done_line, normalize_provider_line, sse_data
+
+
+_DEFAULT_SYNC_STREAM_QUEUE_SIZE = 16
+_SYNC_STREAM_QUEUE_TIMEOUT_SECONDS = 0.05
 
 
 def iter_sse_lines_requests(
@@ -104,36 +109,85 @@ async def aiter_sse_lines_httpx(
         yield sse_data({"error": {"message": f"Stream iteration error: {str(e_stream)}", "type": f"{provider}_stream_error"}})
 
 
-async def wrap_sync_stream(sync_iter: Iterable[str]) -> AsyncIterator[str]:
+async def wrap_sync_stream(
+    sync_iter: Iterable[str],
+    *,
+    max_queue_size: int = _DEFAULT_SYNC_STREAM_QUEUE_SIZE,
+) -> AsyncIterator[str]:
     """Bridge a sync generator into an async iterator without blocking the event loop."""
-    loop = asyncio.get_running_loop()
-    queue: asyncio.Queue[Any] = asyncio.Queue()
+    max_queue_size = max(1, int(max_queue_size or _DEFAULT_SYNC_STREAM_QUEUE_SIZE))
+    queue: thread_queue.Queue[Any] = thread_queue.Queue(maxsize=max_queue_size)
     sentinel = object()
     stop_event = threading.Event()
+    close_lock = threading.Lock()
+    closed = False
+
+    def _close_sync_iter() -> None:
+        nonlocal closed
+        with close_lock:
+            if closed:
+                return
+            closed = True
+        try:
+            close_fn = getattr(sync_iter, "close", None)
+            if callable(close_fn):
+                close_fn()
+        except Exception as close_error:
+            _ = close_error
+
+    def _put_item(item: Any) -> bool:
+        while not stop_event.is_set():
+            try:
+                queue.put(item, timeout=_SYNC_STREAM_QUEUE_TIMEOUT_SECONDS)
+                return True
+            except thread_queue.Full:
+                continue
+        return False
+
+    def _put_sentinel() -> None:
+        while True:
+            try:
+                queue.put(sentinel, timeout=_SYNC_STREAM_QUEUE_TIMEOUT_SECONDS)
+                return
+            except thread_queue.Full:
+                if stop_event.is_set():
+                    try:
+                        queue.get_nowait()
+                    except thread_queue.Empty:
+                        pass
 
     def _worker() -> None:
         try:
             for item in sync_iter:
                 if stop_event.is_set():
                     break
-                loop.call_soon_threadsafe(queue.put_nowait, item)
+                if not _put_item(item):
+                    break
         except Exception as exc:
-            loop.call_soon_threadsafe(queue.put_nowait, exc)
+            _put_item(exc)
         finally:
-            try:
-                close_fn = getattr(sync_iter, "close", None)
-                if callable(close_fn):
-                    close_fn()
-            except Exception as close_error:
-                _ = close_error  # best-effort sync iterator close before final sentinel
-            loop.call_soon_threadsafe(queue.put_nowait, sentinel)
+            _close_sync_iter()
+            _put_sentinel()
 
     thread = threading.Thread(target=_worker, daemon=True)
     thread.start()
 
+    def _get_next_item() -> Any:
+        while True:
+            if stop_event.is_set():
+                try:
+                    return queue.get_nowait()
+                except thread_queue.Empty:
+                    return sentinel
+            try:
+                return queue.get(timeout=_SYNC_STREAM_QUEUE_TIMEOUT_SECONDS)
+            except thread_queue.Empty:
+                if not thread.is_alive():
+                    return sentinel
+
     try:
         while True:
-            item = await queue.get()
+            item = await asyncio.to_thread(_get_next_item)
             if item is sentinel:
                 break
             if isinstance(item, Exception):
@@ -141,6 +195,7 @@ async def wrap_sync_stream(sync_iter: Iterable[str]) -> AsyncIterator[str]:
             yield item
     finally:
         stop_event.set()
+        _close_sync_iter()
 
 
 async def aiter_normalized_sse(

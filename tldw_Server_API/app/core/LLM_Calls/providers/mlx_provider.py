@@ -138,6 +138,7 @@ class MLXSessionRegistry:
         self._session: MLXSession | None = None
         self._inflight: int = 0
         self._metrics_registered = False
+        self._load_generation: int = 0
 
     def _set_concurrency(self, max_concurrent: int) -> None:
         max_concurrent = max(1, int(max_concurrent))
@@ -216,8 +217,11 @@ class MLXSessionRegistry:
                     settings[k] = v
 
         prev_session: MLXSession | None = None
+        load_generation: int
         with self._lock:
             prev_session = self._session
+            self._load_generation += 1
+            load_generation = self._load_generation
 
         mlx_mod = self._import_mlx()
         load_fn = getattr(mlx_mod, "load", None)
@@ -264,8 +268,9 @@ class MLXSessionRegistry:
                     raise
 
             with self._lock:
-                self._session = session
-                self._set_concurrency(settings.get("max_concurrent", 1))
+                if load_generation == self._load_generation:
+                    self._session = session
+                    self._set_concurrency(settings.get("max_concurrent", 1))
             try:
                 duration = time.time() - start
                 observe_histogram(
@@ -283,7 +288,8 @@ class MLXSessionRegistry:
         except Exception as exc:
             # Restore prior session on failure
             with self._lock:
-                self._session = prev_session
+                if load_generation == self._load_generation:
+                    self._session = prev_session
             try:
                 duration = time.time() - start
                 observe_histogram(

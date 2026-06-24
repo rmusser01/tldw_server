@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import types
 
 import pytest
@@ -107,6 +108,52 @@ def test_load_reports_unapplied_runtime_overrides(monkeypatch):
     unapplied = status.get("config", {}).get("unapplied_runtime_overrides", {})
     assert unapplied.get("quantization") == "4bit"
     assert unapplied.get("max_kv_cache_size") == 4096
+
+
+def test_failed_older_load_does_not_restore_over_newer_success(monkeypatch):
+    started = threading.Event()
+    release_failure = threading.Event()
+
+    class FakeTokenizer:
+        pass
+
+    def load(model_path, **kwargs):
+        if model_path == "slow-fail":
+            started.set()
+            assert release_failure.wait(timeout=2)
+            raise RuntimeError("load failed")
+        return (f"model:{model_path}", FakeTokenizer())
+
+    fake = types.SimpleNamespace(
+        load=load,
+        generate=lambda *args, **kwargs: "ok",
+        generate_stream=lambda *args, **kwargs: iter(["ok"]),
+        embed=lambda *args, **kwargs: [1.0],
+    )
+    monkeypatch.setattr(mp.MLXSessionRegistry, "_import_mlx", lambda self: fake)
+
+    reg = mp.MLXSessionRegistry()
+    load_overrides = {"max_concurrent": 1, "warmup": False, "compile": False}
+    reg.load(model_path="old", overrides=load_overrides)
+
+    errors = []
+
+    def load_slow_failure():
+        try:
+            reg.load(model_path="slow-fail", overrides=load_overrides)
+        except Exception as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=load_slow_failure)
+    worker.start()
+    assert started.wait(timeout=2)
+
+    reg.load(model_path="new", overrides=load_overrides)
+    release_failure.set()
+    worker.join(timeout=2)
+
+    assert errors
+    assert reg.status()["model"] == "new"
 
 
 def test_embeddings_response_uses_active_session_model(monkeypatch):

@@ -766,6 +766,29 @@ class TestHuggingFaceAPI:
             assert progress_calls[-1] == (1000, 1000)
 
     @pytest.mark.asyncio
+    async def test_download_gguf_model_rejects_path_component_filename(self, monkeypatch, tmp_path):
+        calls = []
+
+        async def fake_download_file(self, **kwargs):
+            calls.append(kwargs)
+            return True
+
+        monkeypatch.setattr(HuggingFaceAPI, "download_file", fake_download_file)
+
+        with pytest.raises(ValueError):
+            await download_gguf_model("TheBloke/Test-GGUF", "../evil.gguf", tmp_path)
+        with pytest.raises(ValueError):
+            await download_gguf_model("TheBloke/Test-GGUF", "nested/model.gguf", tmp_path)
+        with pytest.raises(ValueError):
+            await download_gguf_model("TheBloke/Test-GGUF", "model.bin", tmp_path)
+
+        assert calls == []
+
+        assert await download_gguf_model("TheBloke/Test-GGUF", "model.Q4_K_M.gguf", tmp_path)
+        assert calls[0]["filename"] == "model.Q4_K_M.gguf"
+        assert calls[0]["destination"] == tmp_path / "model.Q4_K_M.gguf"
+
+    @pytest.mark.asyncio
     async def test_find_best_gguf_model(self):
         """Test finding best GGUF model utility."""
         mock_models = [

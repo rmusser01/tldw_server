@@ -47,6 +47,20 @@ _HF_API_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
 ) + _HF_HTTP_EXCEPTIONS
 
 
+def _validate_gguf_model_filename(model_file: str) -> str:
+    filename = str(model_file or "").strip()
+    if (
+        not filename
+        or "/" in filename
+        or "\\" in filename
+        or "\x00" in filename
+        or Path(filename).name != filename
+        or not filename.lower().endswith(".gguf")
+    ):
+        raise ValueError("model_file must be a GGUF filename without path components")
+    return filename
+
+
 async def _async_retry_sleep(delay: float, attempt: int) -> None:
     if delay > 0:
         await asyncio.sleep(delay * (attempt + 1))
@@ -520,7 +534,11 @@ async def download_gguf_model(
     """
     api = HuggingFaceAPI()
 
-    destination = destination_dir / model_file
+    model_file = _validate_gguf_model_filename(model_file)
+    destination_root = Path(destination_dir).resolve()
+    destination = (destination_root / model_file).resolve()
+    if destination.parent != destination_root:
+        raise ValueError("model_file destination must remain inside destination_dir")
 
     last_pct = {"v": -10.0}
 
