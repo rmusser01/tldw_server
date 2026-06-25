@@ -111,6 +111,14 @@ def _is_audiobook_output_type(type_value: str | None) -> bool:
     return str(type_value).startswith("audiobook_")
 
 
+AUDIO_STUDIO_PROJECT_STATUSES = frozenset({"draft", "active", "archived", "error"})
+
+
+def _validate_audio_studio_project_status(status: str | None) -> None:
+    if status is not None and status not in AUDIO_STUDIO_PROJECT_STATUSES:
+        raise ValueError("audio_studio_invalid_project_status")
+
+
 def _resolve_output_size_bytes(user_id: str, storage_path: str | None) -> int | None:
     if not storage_path:
         return None
@@ -458,6 +466,148 @@ class AudiobookArtifactRow:
     metadata_json: str | None
 
 
+@dataclass
+class AudioStudioProjectRow:
+    id: int
+    user_id: str
+    project_id: str
+    title: str
+    workflow: str
+    status: str
+    settings_json: str
+    current_revision_id: str | None
+    created_at: str
+    updated_at: str
+    archived_at: str | None
+    deleted: int
+    deleted_at: str | None
+    retention_until: str | None
+
+
+@dataclass
+class AudioStudioRevisionRow:
+    revision_id: str
+    project_row_id: int
+    user_id: str
+    parent_revision_id: str | None
+    mutation_kind: str
+    resource_kind: str
+    resource_id: str
+    content_hash: str
+    payload_json: str
+    created_at: str
+
+
+@dataclass
+class AudioStudioSectionRow:
+    id: int
+    project_row_id: int
+    section_id: str
+    workflow: str
+    title: str | None
+    body_text: str | None
+    speaker_id: str | None
+    order_index: int
+    settings_json: str
+    current_revision_id: str | None
+    archived_at: str | None
+    deleted: int
+    deleted_at: str | None
+
+
+@dataclass
+class AudioStudioTrackRow:
+    id: int
+    project_row_id: int
+    track_id: str
+    name: str
+    kind: str
+    order_index: int
+    muted: int
+    solo: int
+    volume: float
+    settings_json: str
+    current_revision_id: str | None
+    archived_at: str | None
+    deleted: int
+    deleted_at: str | None
+
+
+@dataclass
+class AudioStudioClipRow:
+    id: int
+    project_row_id: int
+    clip_id: str
+    section_id: str | None
+    track_id: str
+    title: str | None
+    clip_type: str
+    start_ms: int
+    duration_ms: int | None
+    volume: float
+    fade_in_ms: int
+    fade_out_ms: int
+    muted: int
+    artifact_id: str | None
+    settings_json: str
+    current_revision_id: str | None
+    archived_at: str | None
+    deleted: int
+    deleted_at: str | None
+
+
+@dataclass
+class AudioStudioArtifactRow:
+    id: int
+    project_row_id: int
+    artifact_id: str
+    artifact_type: str
+    provider: str | None
+    output_id: int | None
+    storage_path: str | None
+    mime_type: str | None
+    size_bytes: int | None
+    source_resource_kind: str | None
+    source_resource_id: str | None
+    source_revision_id: str | None
+    content_hash: str
+    metadata_json: str
+    created_at: str
+    archived_at: str | None
+    deleted: int
+    deleted_at: str | None
+
+
+@dataclass
+class AudioStudioGenerationJobRow:
+    id: int
+    project_row_id: int
+    job_id: str
+    provider: str
+    operation: str
+    target_resource_kind: str
+    target_resource_id: str
+    target_revision_id: str
+    idempotency_key: str | None
+    status: str
+    request_json: str
+    result_json: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass
+class AudioStudioIdempotencyRecordRow:
+    namespace: str
+    key: str
+    user_id: str
+    project_row_id: int | None
+    request_hash: str
+    response_json: str
+    created_at: str
+    updated_at: str
+
+
 def _pin_collections_public_operation(method):
     @functools.wraps(method)
     def wrapper(self: "CollectionsDatabase", *args: Any, **kwargs: Any):
@@ -675,7 +825,7 @@ class CollectionsDatabase:
             else:
                 self._local.backend_pin = previous_backend
 
-    def _execute_insert(self, query: str, params: tuple[Any, ...]) -> Any:
+    def _execute_insert(self, query: str, params: tuple[Any, ...], connection: Any | None = None) -> Any:
         if self.backend.backend_type == BackendType.POSTGRESQL:
             prepared_query, prepared_params = prepare_backend_statement(
                 BackendType.POSTGRESQL,
@@ -684,8 +834,8 @@ class CollectionsDatabase:
                 apply_default_transform=True,
                 ensure_returning=True,
             )
-            return self.backend.execute(prepared_query, prepared_params)
-        return self.backend.execute(query, params)
+            return self.backend.execute(prepared_query, prepared_params, connection=connection)
+        return self.backend.execute(query, params, connection=connection)
 
     @staticmethod
     def _extract_lastrowid(result: Any) -> int | None:
@@ -1051,6 +1201,162 @@ class CollectionsDatabase:
                 used_bytes BIGINT NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS audio_studio_projects (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                workflow TEXT NOT NULL,
+                status TEXT NOT NULL,
+                settings_json TEXT NOT NULL DEFAULT '{}',
+                current_revision_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                archived_at TEXT,
+                deleted BOOLEAN NOT NULL DEFAULT FALSE,
+                deleted_at TEXT,
+                retention_until TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_studio_projects_user_project_id
+                ON audio_studio_projects(user_id, project_id);
+            CREATE INDEX IF NOT EXISTS idx_audio_studio_projects_user_updated
+                ON audio_studio_projects(user_id, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS audio_studio_project_revisions (
+                id BIGSERIAL PRIMARY KEY,
+                revision_id TEXT NOT NULL,
+                project_row_id BIGINT NOT NULL,
+                user_id TEXT NOT NULL,
+                parent_revision_id TEXT,
+                mutation_kind TEXT NOT NULL,
+                resource_kind TEXT NOT NULL,
+                resource_id TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_studio_revisions_user_revision_id
+                ON audio_studio_project_revisions(user_id, revision_id);
+            CREATE INDEX IF NOT EXISTS idx_audio_studio_revisions_project
+                ON audio_studio_project_revisions(project_row_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS audio_studio_sections (
+                id BIGSERIAL PRIMARY KEY,
+                project_row_id BIGINT NOT NULL,
+                section_id TEXT NOT NULL,
+                workflow TEXT NOT NULL,
+                title TEXT,
+                body_text TEXT,
+                speaker_id TEXT,
+                order_index INTEGER NOT NULL,
+                settings_json TEXT NOT NULL DEFAULT '{}',
+                current_revision_id TEXT,
+                archived_at TEXT,
+                deleted BOOLEAN NOT NULL DEFAULT FALSE,
+                deleted_at TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_studio_sections_project_section
+                ON audio_studio_sections(project_row_id, section_id);
+
+            CREATE TABLE IF NOT EXISTS audio_studio_tracks (
+                id BIGSERIAL PRIMARY KEY,
+                project_row_id BIGINT NOT NULL,
+                track_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                order_index INTEGER NOT NULL,
+                muted BOOLEAN NOT NULL DEFAULT FALSE,
+                solo BOOLEAN NOT NULL DEFAULT FALSE,
+                volume DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+                settings_json TEXT NOT NULL DEFAULT '{}',
+                current_revision_id TEXT,
+                archived_at TEXT,
+                deleted BOOLEAN NOT NULL DEFAULT FALSE,
+                deleted_at TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_studio_tracks_project_track
+                ON audio_studio_tracks(project_row_id, track_id);
+
+            CREATE TABLE IF NOT EXISTS audio_studio_clips (
+                id BIGSERIAL PRIMARY KEY,
+                project_row_id BIGINT NOT NULL,
+                clip_id TEXT NOT NULL,
+                section_id TEXT,
+                track_id TEXT NOT NULL,
+                title TEXT,
+                clip_type TEXT NOT NULL,
+                start_ms BIGINT NOT NULL DEFAULT 0,
+                duration_ms BIGINT,
+                volume DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+                fade_in_ms BIGINT NOT NULL DEFAULT 0,
+                fade_out_ms BIGINT NOT NULL DEFAULT 0,
+                muted BOOLEAN NOT NULL DEFAULT FALSE,
+                artifact_id TEXT,
+                settings_json TEXT NOT NULL DEFAULT '{}',
+                current_revision_id TEXT,
+                archived_at TEXT,
+                deleted BOOLEAN NOT NULL DEFAULT FALSE,
+                deleted_at TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_studio_clips_project_clip
+                ON audio_studio_clips(project_row_id, clip_id);
+
+            CREATE TABLE IF NOT EXISTS audio_studio_artifacts (
+                id BIGSERIAL PRIMARY KEY,
+                project_row_id BIGINT NOT NULL,
+                artifact_id TEXT NOT NULL,
+                artifact_type TEXT NOT NULL,
+                provider TEXT,
+                output_id BIGINT,
+                storage_path TEXT,
+                mime_type TEXT,
+                size_bytes BIGINT,
+                source_resource_kind TEXT,
+                source_resource_id TEXT,
+                source_revision_id TEXT,
+                content_hash TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                archived_at TEXT,
+                deleted BOOLEAN NOT NULL DEFAULT FALSE,
+                deleted_at TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_studio_artifacts_project_artifact
+                ON audio_studio_artifacts(project_row_id, artifact_id);
+
+            CREATE TABLE IF NOT EXISTS audio_studio_generation_jobs (
+                id BIGSERIAL PRIMARY KEY,
+                project_row_id BIGINT NOT NULL,
+                job_id TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                target_resource_kind TEXT NOT NULL,
+                target_resource_id TEXT NOT NULL,
+                target_revision_id TEXT NOT NULL,
+                idempotency_key TEXT,
+                status TEXT NOT NULL,
+                request_json TEXT NOT NULL,
+                result_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_studio_generation_jobs_project_job
+                ON audio_studio_generation_jobs(project_row_id, job_id);
+            CREATE INDEX IF NOT EXISTS idx_audio_studio_generation_jobs_project_status
+                ON audio_studio_generation_jobs(project_row_id, status);
+
+            CREATE TABLE IF NOT EXISTS audio_studio_idempotency_keys (
+                namespace TEXT NOT NULL,
+                key TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                project_row_id BIGINT,
+                request_hash TEXT NOT NULL,
+                response_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (namespace, key, user_id)
+            );
             """
         else:
             ddl = """
@@ -1303,6 +1609,162 @@ class CollectionsDatabase:
                 user_id TEXT PRIMARY KEY,
                 used_bytes INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS audio_studio_projects (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                workflow TEXT NOT NULL,
+                status TEXT NOT NULL,
+                settings_json TEXT NOT NULL DEFAULT '{}',
+                current_revision_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                archived_at TEXT,
+                deleted INTEGER NOT NULL DEFAULT 0,
+                deleted_at TEXT,
+                retention_until TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_studio_projects_user_project_id
+                ON audio_studio_projects(user_id, project_id);
+            CREATE INDEX IF NOT EXISTS idx_audio_studio_projects_user_updated
+                ON audio_studio_projects(user_id, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS audio_studio_project_revisions (
+                id INTEGER PRIMARY KEY,
+                revision_id TEXT NOT NULL,
+                project_row_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                parent_revision_id TEXT,
+                mutation_kind TEXT NOT NULL,
+                resource_kind TEXT NOT NULL,
+                resource_id TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_studio_revisions_user_revision_id
+                ON audio_studio_project_revisions(user_id, revision_id);
+            CREATE INDEX IF NOT EXISTS idx_audio_studio_revisions_project
+                ON audio_studio_project_revisions(project_row_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS audio_studio_sections (
+                id INTEGER PRIMARY KEY,
+                project_row_id INTEGER NOT NULL,
+                section_id TEXT NOT NULL,
+                workflow TEXT NOT NULL,
+                title TEXT,
+                body_text TEXT,
+                speaker_id TEXT,
+                order_index INTEGER NOT NULL,
+                settings_json TEXT NOT NULL DEFAULT '{}',
+                current_revision_id TEXT,
+                archived_at TEXT,
+                deleted INTEGER NOT NULL DEFAULT 0,
+                deleted_at TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_studio_sections_project_section
+                ON audio_studio_sections(project_row_id, section_id);
+
+            CREATE TABLE IF NOT EXISTS audio_studio_tracks (
+                id INTEGER PRIMARY KEY,
+                project_row_id INTEGER NOT NULL,
+                track_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                order_index INTEGER NOT NULL,
+                muted INTEGER NOT NULL DEFAULT 0,
+                solo INTEGER NOT NULL DEFAULT 0,
+                volume REAL NOT NULL DEFAULT 1.0,
+                settings_json TEXT NOT NULL DEFAULT '{}',
+                current_revision_id TEXT,
+                archived_at TEXT,
+                deleted INTEGER NOT NULL DEFAULT 0,
+                deleted_at TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_studio_tracks_project_track
+                ON audio_studio_tracks(project_row_id, track_id);
+
+            CREATE TABLE IF NOT EXISTS audio_studio_clips (
+                id INTEGER PRIMARY KEY,
+                project_row_id INTEGER NOT NULL,
+                clip_id TEXT NOT NULL,
+                section_id TEXT,
+                track_id TEXT NOT NULL,
+                title TEXT,
+                clip_type TEXT NOT NULL,
+                start_ms INTEGER NOT NULL DEFAULT 0,
+                duration_ms INTEGER,
+                volume REAL NOT NULL DEFAULT 1.0,
+                fade_in_ms INTEGER NOT NULL DEFAULT 0,
+                fade_out_ms INTEGER NOT NULL DEFAULT 0,
+                muted INTEGER NOT NULL DEFAULT 0,
+                artifact_id TEXT,
+                settings_json TEXT NOT NULL DEFAULT '{}',
+                current_revision_id TEXT,
+                archived_at TEXT,
+                deleted INTEGER NOT NULL DEFAULT 0,
+                deleted_at TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_studio_clips_project_clip
+                ON audio_studio_clips(project_row_id, clip_id);
+
+            CREATE TABLE IF NOT EXISTS audio_studio_artifacts (
+                id INTEGER PRIMARY KEY,
+                project_row_id INTEGER NOT NULL,
+                artifact_id TEXT NOT NULL,
+                artifact_type TEXT NOT NULL,
+                provider TEXT,
+                output_id INTEGER,
+                storage_path TEXT,
+                mime_type TEXT,
+                size_bytes INTEGER,
+                source_resource_kind TEXT,
+                source_resource_id TEXT,
+                source_revision_id TEXT,
+                content_hash TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                archived_at TEXT,
+                deleted INTEGER NOT NULL DEFAULT 0,
+                deleted_at TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_studio_artifacts_project_artifact
+                ON audio_studio_artifacts(project_row_id, artifact_id);
+
+            CREATE TABLE IF NOT EXISTS audio_studio_generation_jobs (
+                id INTEGER PRIMARY KEY,
+                project_row_id INTEGER NOT NULL,
+                job_id TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                target_resource_kind TEXT NOT NULL,
+                target_resource_id TEXT NOT NULL,
+                target_revision_id TEXT NOT NULL,
+                idempotency_key TEXT,
+                status TEXT NOT NULL,
+                request_json TEXT NOT NULL,
+                result_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_studio_generation_jobs_project_job
+                ON audio_studio_generation_jobs(project_row_id, job_id);
+            CREATE INDEX IF NOT EXISTS idx_audio_studio_generation_jobs_project_status
+                ON audio_studio_generation_jobs(project_row_id, status);
+
+            CREATE TABLE IF NOT EXISTS audio_studio_idempotency_keys (
+                namespace TEXT NOT NULL,
+                key TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                project_row_id INTEGER,
+                request_hash TEXT NOT NULL,
+                response_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (namespace, key, user_id)
             );
             """
         try:
@@ -4761,6 +5223,1123 @@ class CollectionsDatabase:
         )
         rows = self.backend.execute(q, (project_id, limit, offset)).rows
         return [AudiobookArtifactRow(**row) for row in rows]
+
+    # ------------------------
+    # Audio Studio projects API
+    # ------------------------
+    def _insert_audio_studio_project_row(
+        self,
+        *,
+        project_id: str,
+        title: str,
+        workflow: str,
+        status: str = "draft",
+        settings_json: str | None = None,
+    ) -> AudioStudioProjectRow:
+        _validate_audio_studio_project_status(status)
+        now = _utcnow_iso()
+        q = (
+            "INSERT INTO audio_studio_projects "
+            "(user_id, project_id, title, workflow, status, settings_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        params = (
+            self.user_id,
+            project_id,
+            title,
+            workflow,
+            status,
+            settings_json or "{}",
+            now,
+            now,
+        )
+        res = self._execute_insert(q, params)
+        row_id = self._extract_lastrowid(res)
+        if row_id is None:
+            raise DatabaseError("audio_studio_project_insert_failed")
+        return self.get_audio_studio_project(row_id, include_archived=True)
+
+    def create_audio_studio_project(
+        self,
+        *,
+        project_id: str,
+        title: str,
+        workflow: str,
+        revision_id: str,
+        mutation_kind: str,
+        resource_kind: str,
+        resource_id: str,
+        content_hash: str,
+        payload_json: str,
+        status: str = "draft",
+        settings_json: str | None = None,
+    ) -> AudioStudioProjectRow:
+        _validate_audio_studio_project_status(status)
+        now = _utcnow_iso()
+        with self.transaction() as conn:
+            res = self._execute_insert(
+                "INSERT INTO audio_studio_projects "
+                "(user_id, project_id, title, workflow, status, settings_json, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    self.user_id,
+                    project_id,
+                    title,
+                    workflow,
+                    status,
+                    settings_json or "{}",
+                    now,
+                    now,
+                ),
+                connection=conn,
+            )
+            row_id = self._extract_lastrowid(res)
+            if row_id is None:
+                raise DatabaseError("audio_studio_project_insert_failed")
+            self._insert_audio_studio_revision(
+                project_row_id=row_id,
+                revision_id=revision_id,
+                parent_revision_id=None,
+                mutation_kind=mutation_kind,
+                resource_kind=resource_kind,
+                resource_id=resource_id,
+                content_hash=content_hash,
+                payload_json=payload_json,
+                connection=conn,
+            )
+            res = self.backend.execute(
+                "UPDATE audio_studio_projects SET current_revision_id = ?, updated_at = ? "
+                "WHERE id = ? AND user_id = ? AND deleted = ?",
+                (
+                    revision_id,
+                    now,
+                    row_id,
+                    self.user_id,
+                    self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
+                ),
+                connection=conn,
+            )
+            if res.rowcount <= 0:
+                raise DatabaseError("audio_studio_project_revision_advance_failed")
+            return self._get_audio_studio_project(project_row_id=row_id, include_archived=True, connection=conn)
+
+    def create_audio_studio_project_with_revision(self, **kwargs: Any) -> AudioStudioProjectRow:
+        return self.create_audio_studio_project(**kwargs)
+
+    def _get_audio_studio_project(
+        self,
+        *,
+        project_row_id: int,
+        include_archived: bool = False,
+        connection: Any | None = None,
+    ) -> AudioStudioProjectRow:
+        q = (
+            "SELECT id, user_id, project_id, title, workflow, status, settings_json, current_revision_id, "
+            "created_at, updated_at, archived_at, deleted, deleted_at, retention_until "
+            "FROM audio_studio_projects WHERE id = ? AND user_id = ? AND deleted = ?"
+        )
+        row = self.backend.execute(
+            q,
+            (
+                project_row_id,
+                self.user_id,
+                self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
+            ),
+            connection=connection,
+        ).first
+        if not row or (not include_archived and row.get("archived_at")):
+            raise KeyError("audio_studio_project_not_found")
+        return AudioStudioProjectRow(**row)
+
+    def get_audio_studio_project(
+        self,
+        project_row_id: int,
+        *,
+        include_archived: bool = False,
+    ) -> AudioStudioProjectRow:
+        return self._get_audio_studio_project(project_row_id=project_row_id, include_archived=include_archived)
+
+    def get_audio_studio_project_by_project_id(
+        self,
+        project_id: str,
+        *,
+        include_archived: bool = False,
+    ) -> AudioStudioProjectRow:
+        q = (
+            "SELECT id, user_id, project_id, title, workflow, status, settings_json, current_revision_id, "
+            "created_at, updated_at, archived_at, deleted, deleted_at, retention_until "
+            "FROM audio_studio_projects WHERE user_id = ? AND project_id = ? AND deleted = ?"
+        )
+        row = self.backend.execute(
+            q,
+            (
+                self.user_id,
+                project_id,
+                self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
+            ),
+        ).first
+        if not row or (not include_archived and row.get("archived_at")):
+            raise KeyError("audio_studio_project_not_found")
+        return AudioStudioProjectRow(**row)
+
+    def list_audio_studio_projects(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        include_archived: bool = False,
+        workflow: str | None = None,
+    ) -> list[AudioStudioProjectRow]:
+        clauses = ["user_id = ?", "deleted = ?"]
+        params: list[Any] = [
+            self.user_id,
+            self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
+        ]
+        if workflow:
+            clauses.append("workflow = ?")
+            params.append(str(workflow))
+        if not include_archived:
+            clauses.append("archived_at IS NULL")
+        params.extend([limit, offset])
+        q = (
+            "SELECT id, user_id, project_id, title, workflow, status, settings_json, current_revision_id, "
+            "created_at, updated_at, archived_at, deleted, deleted_at, retention_until "
+            f"FROM audio_studio_projects WHERE {' AND '.join(clauses)} "  # nosec B608
+            "ORDER BY updated_at DESC LIMIT ? OFFSET ?"
+        )
+        rows = self.backend.execute(q, tuple(params)).rows
+        return [AudioStudioProjectRow(**row) for row in rows]
+
+    def _update_audio_studio_project_row(
+        self,
+        project_row_id: int,
+        *,
+        title: str | None = None,
+        status: str | None = None,
+        settings_json: str | None = None,
+        current_revision_id: str | None = None,
+    ) -> AudioStudioProjectRow:
+        _validate_audio_studio_project_status(status)
+        self.get_audio_studio_project(project_row_id, include_archived=True)
+        fields = ["updated_at = ?"]
+        params: list[Any] = [_utcnow_iso()]
+        if title is not None:
+            fields.append("title = ?")
+            params.append(title)
+        if status is not None:
+            fields.append("status = ?")
+            params.append(status)
+        if settings_json is not None:
+            fields.append("settings_json = ?")
+            params.append(settings_json)
+        if current_revision_id is not None:
+            fields.append("current_revision_id = ?")
+            params.append(current_revision_id)
+        params.extend([project_row_id, self.user_id])
+        q = f"UPDATE audio_studio_projects SET {', '.join(fields)} WHERE id = ? AND user_id = ?"  # nosec B608
+        res = self.backend.execute(q, tuple(params))
+        if res.rowcount <= 0:
+            raise KeyError("audio_studio_project_not_found")
+        return self.get_audio_studio_project(project_row_id, include_archived=True)
+
+    def _archive_audio_studio_project_row(self, project_row_id: int) -> AudioStudioProjectRow:
+        now = _utcnow_iso()
+        res = self.backend.execute(
+            "UPDATE audio_studio_projects SET status = ?, archived_at = ?, updated_at = ? "
+            "WHERE id = ? AND user_id = ? AND deleted = ?",
+            (
+                "archived",
+                now,
+                now,
+                project_row_id,
+                self.user_id,
+                self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
+            ),
+        )
+        if res.rowcount <= 0:
+            raise KeyError("audio_studio_project_not_found")
+        return self.get_audio_studio_project(project_row_id, include_archived=True)
+
+    def _insert_audio_studio_revision(
+        self,
+        *,
+        project_row_id: int,
+        revision_id: str,
+        parent_revision_id: str | None,
+        mutation_kind: str,
+        resource_kind: str,
+        resource_id: str,
+        content_hash: str,
+        payload_json: str,
+        connection: Any | None = None,
+    ) -> None:
+        now = _utcnow_iso()
+        self.backend.execute(
+            "INSERT INTO audio_studio_project_revisions "
+            "(revision_id, project_row_id, user_id, parent_revision_id, mutation_kind, resource_kind, "
+            "resource_id, content_hash, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                revision_id,
+                project_row_id,
+                self.user_id,
+                parent_revision_id,
+                mutation_kind,
+                resource_kind,
+                resource_id,
+                content_hash,
+                payload_json,
+                now,
+            ),
+            connection=connection,
+        )
+
+    def get_audio_studio_revision(self, revision_id: str) -> AudioStudioRevisionRow:
+        row = self.backend.execute(
+            "SELECT revision_id, project_row_id, user_id, parent_revision_id, mutation_kind, resource_kind, "
+            "resource_id, content_hash, payload_json, created_at "
+            "FROM audio_studio_project_revisions WHERE revision_id = ? AND user_id = ?",
+            (revision_id, self.user_id),
+        ).first
+        if not row:
+            raise KeyError("audio_studio_revision_not_found")
+        return AudioStudioRevisionRow(**row)
+
+    def create_audio_studio_revision(
+        self,
+        *,
+        project_row_id: int,
+        revision_id: str,
+        parent_revision_id: str | None,
+        mutation_kind: str,
+        resource_kind: str,
+        resource_id: str,
+        content_hash: str,
+        payload_json: str,
+    ) -> AudioStudioRevisionRow:
+        """Create a standalone revision only when its parent is the current project revision."""
+        if parent_revision_id is None:
+            raise ValueError("stale_base_revision")
+        with self.transaction() as conn:
+            self._conditionally_mutate_audio_studio_project(
+                project_row_id=project_row_id,
+                base_revision_id=parent_revision_id,
+                revision_id=revision_id,
+                fields=[],
+                connection=conn,
+            )
+            self._insert_audio_studio_revision(
+                project_row_id=project_row_id,
+                revision_id=revision_id,
+                parent_revision_id=parent_revision_id,
+                mutation_kind=mutation_kind,
+                resource_kind=resource_kind,
+                resource_id=resource_id,
+                content_hash=content_hash,
+                payload_json=payload_json,
+                connection=conn,
+            )
+            row = self.backend.execute(
+                "SELECT revision_id, project_row_id, user_id, parent_revision_id, mutation_kind, resource_kind, "
+                "resource_id, content_hash, payload_json, created_at "
+                "FROM audio_studio_project_revisions WHERE revision_id = ? AND user_id = ?",
+                (revision_id, self.user_id),
+                connection=conn,
+            ).first
+        if not row:
+            raise DatabaseError("audio_studio_revision_insert_failed")
+        return AudioStudioRevisionRow(**row)
+
+    def _raise_audio_studio_missing_or_stale(
+        self,
+        *,
+        project_row_id: int,
+        connection: Any,
+    ) -> None:
+        try:
+            self._get_audio_studio_project(project_row_id=project_row_id, include_archived=False, connection=connection)
+        except KeyError:
+            raise KeyError("audio_studio_project_not_found") from None
+        raise ValueError("stale_base_revision")
+
+    def _conditionally_mutate_audio_studio_project(
+        self,
+        *,
+        project_row_id: int,
+        base_revision_id: str,
+        revision_id: str,
+        fields: list[tuple[str, Any]],
+        connection: Any,
+    ) -> None:
+        now = _utcnow_iso()
+        assignments = ["current_revision_id = ?", "updated_at = ?"]
+        params: list[Any] = [revision_id, now]
+        for column, value in fields:
+            assignments.append(f"{column} = ?")
+            params.append(value)
+        params.extend(
+            [
+                project_row_id,
+                self.user_id,
+                self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
+                base_revision_id,
+            ]
+        )
+        q = (
+            f"UPDATE audio_studio_projects SET {', '.join(assignments)} "  # nosec B608
+            "WHERE id = ? AND user_id = ? AND deleted = ? AND archived_at IS NULL AND current_revision_id = ?"
+        )
+        res = self.backend.execute(q, tuple(params), connection=connection)
+        if res.rowcount <= 0:
+            self._raise_audio_studio_missing_or_stale(project_row_id=project_row_id, connection=connection)
+
+    def mutate_audio_studio_project(
+        self,
+        *,
+        project_row_id: int,
+        base_revision_id: str,
+        revision_id: str,
+        mutation_kind: str,
+        resource_kind: str,
+        resource_id: str,
+        content_hash: str,
+        payload_json: str,
+        title: str | None = None,
+        status: str | None = None,
+        settings_json: str | None = None,
+    ) -> AudioStudioProjectRow:
+        _validate_audio_studio_project_status(status)
+        fields: list[tuple[str, Any]] = []
+        if title is not None:
+            fields.append(("title", title))
+        if status is not None:
+            fields.append(("status", status))
+        if settings_json is not None:
+            fields.append(("settings_json", settings_json))
+        with self.transaction() as conn:
+            self._conditionally_mutate_audio_studio_project(
+                project_row_id=project_row_id,
+                base_revision_id=base_revision_id,
+                revision_id=revision_id,
+                fields=fields,
+                connection=conn,
+            )
+            self._insert_audio_studio_revision(
+                project_row_id=project_row_id,
+                revision_id=revision_id,
+                parent_revision_id=base_revision_id,
+                mutation_kind=mutation_kind,
+                resource_kind=resource_kind,
+                resource_id=resource_id,
+                content_hash=content_hash,
+                payload_json=payload_json,
+                connection=conn,
+            )
+            return self._get_audio_studio_project(project_row_id=project_row_id, include_archived=True, connection=conn)
+
+    def archive_audio_studio_project(
+        self,
+        *,
+        project_row_id: int,
+        base_revision_id: str,
+        revision_id: str,
+        content_hash: str,
+        payload_json: str,
+    ) -> AudioStudioProjectRow:
+        with self.transaction() as conn:
+            self._conditionally_mutate_audio_studio_project(
+                project_row_id=project_row_id,
+                base_revision_id=base_revision_id,
+                revision_id=revision_id,
+                fields=[("status", "archived"), ("archived_at", _utcnow_iso())],
+                connection=conn,
+            )
+            project = self._get_audio_studio_project(project_row_id=project_row_id, include_archived=True, connection=conn)
+            self._insert_audio_studio_revision(
+                project_row_id=project_row_id,
+                revision_id=revision_id,
+                parent_revision_id=base_revision_id,
+                mutation_kind="project.archive",
+                resource_kind="project",
+                resource_id=project.project_id,
+                content_hash=content_hash,
+                payload_json=payload_json,
+                connection=conn,
+            )
+            return self._get_audio_studio_project(project_row_id=project_row_id, include_archived=True, connection=conn)
+
+    def archive_audio_studio_project_with_revision(self, **kwargs: Any) -> AudioStudioProjectRow:
+        return self.archive_audio_studio_project(**kwargs)
+
+    def _require_audio_studio_resource(
+        self,
+        *,
+        table: str,
+        id_column: str,
+        id_value: str,
+        project_row_id: int,
+        error: str,
+        connection: Any,
+    ) -> None:
+        deleted = self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL)
+        q = (
+            f"SELECT 1 FROM {table} "  # nosec B608
+            f"WHERE project_row_id = ? AND {id_column} = ? AND deleted = ? AND archived_at IS NULL"
+        )
+        row = self.backend.execute(q, (project_row_id, id_value, deleted), connection=connection).first
+        if not row:
+            raise ValueError(error)
+
+    def _assert_audio_studio_base_revision(self, project_row_id: int, base_revision_id: str) -> AudioStudioProjectRow:
+        project = self.get_audio_studio_project(project_row_id, include_archived=True)
+        if project.current_revision_id != base_revision_id:
+            raise ValueError("stale_base_revision")
+        return project
+
+    def _upsert_audio_studio_section_row(
+        self,
+        *,
+        project_row_id: int,
+        section_id: str,
+        base_revision_id: str,
+        workflow: str,
+        title: str | None,
+        body_text: str | None,
+        speaker_id: str | None,
+        order_index: int,
+        settings_json: str,
+        current_revision_id: str,
+    ) -> AudioStudioSectionRow:
+        self._assert_audio_studio_base_revision(project_row_id, base_revision_id)
+        self.backend.execute(
+            "INSERT INTO audio_studio_sections "
+            "(project_row_id, section_id, workflow, title, body_text, speaker_id, order_index, settings_json, current_revision_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(project_row_id, section_id) DO UPDATE SET "
+            "workflow = excluded.workflow, title = excluded.title, body_text = excluded.body_text, "
+            "speaker_id = excluded.speaker_id, order_index = excluded.order_index, settings_json = excluded.settings_json, "
+            "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?, deleted_at = NULL",
+            (
+                project_row_id,
+                section_id,
+                workflow,
+                title,
+                body_text,
+                speaker_id,
+                order_index,
+                settings_json or "{}",
+                current_revision_id,
+                self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
+            ),
+        )
+        self._update_audio_studio_project_row(project_row_id, current_revision_id=current_revision_id)
+        row = self.backend.execute(
+            "SELECT id, project_row_id, section_id, workflow, title, body_text, speaker_id, order_index, "
+            "settings_json, current_revision_id, archived_at, deleted, deleted_at "
+            "FROM audio_studio_sections WHERE project_row_id = ? AND section_id = ?",
+            (project_row_id, section_id),
+        ).first
+        if not row:
+            raise DatabaseError("audio_studio_section_upsert_failed")
+        return AudioStudioSectionRow(**row)
+
+    def _upsert_audio_studio_track_row(
+        self,
+        *,
+        project_row_id: int,
+        track_id: str,
+        base_revision_id: str,
+        name: str,
+        kind: str,
+        order_index: int,
+        muted: bool,
+        solo: bool,
+        volume: float,
+        settings_json: str,
+        current_revision_id: str,
+    ) -> AudioStudioTrackRow:
+        self._assert_audio_studio_base_revision(project_row_id, base_revision_id)
+        postgres = self.backend.backend_type == BackendType.POSTGRESQL
+        self.backend.execute(
+            "INSERT INTO audio_studio_tracks "
+            "(project_row_id, track_id, name, kind, order_index, muted, solo, volume, settings_json, current_revision_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(project_row_id, track_id) DO UPDATE SET "
+            "name = excluded.name, kind = excluded.kind, order_index = excluded.order_index, muted = excluded.muted, "
+            "solo = excluded.solo, volume = excluded.volume, settings_json = excluded.settings_json, "
+            "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?, deleted_at = NULL",
+            (
+                project_row_id,
+                track_id,
+                name,
+                kind,
+                order_index,
+                self._coerce_bool_flag(muted, postgres=postgres),
+                self._coerce_bool_flag(solo, postgres=postgres),
+                volume,
+                settings_json or "{}",
+                current_revision_id,
+                self._coerce_bool_flag(False, postgres=postgres),
+            ),
+        )
+        self._update_audio_studio_project_row(project_row_id, current_revision_id=current_revision_id)
+        row = self.backend.execute(
+            "SELECT id, project_row_id, track_id, name, kind, order_index, muted, solo, volume, "
+            "settings_json, current_revision_id, archived_at, deleted, deleted_at "
+            "FROM audio_studio_tracks WHERE project_row_id = ? AND track_id = ?",
+            (project_row_id, track_id),
+        ).first
+        if not row:
+            raise DatabaseError("audio_studio_track_upsert_failed")
+        return AudioStudioTrackRow(**row)
+
+    def _upsert_audio_studio_clip_row(
+        self,
+        *,
+        project_row_id: int,
+        clip_id: str,
+        base_revision_id: str,
+        section_id: str | None,
+        track_id: str,
+        title: str | None,
+        clip_type: str,
+        start_ms: int,
+        duration_ms: int | None,
+        volume: float,
+        fade_in_ms: int,
+        fade_out_ms: int,
+        muted: bool,
+        artifact_id: str | None,
+        settings_json: str,
+        current_revision_id: str,
+    ) -> AudioStudioClipRow:
+        self._assert_audio_studio_base_revision(project_row_id, base_revision_id)
+        postgres = self.backend.backend_type == BackendType.POSTGRESQL
+        self.backend.execute(
+            "INSERT INTO audio_studio_clips "
+            "(project_row_id, clip_id, section_id, track_id, title, clip_type, start_ms, duration_ms, volume, "
+            "fade_in_ms, fade_out_ms, muted, artifact_id, settings_json, current_revision_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(project_row_id, clip_id) DO UPDATE SET "
+            "section_id = excluded.section_id, track_id = excluded.track_id, title = excluded.title, "
+            "clip_type = excluded.clip_type, start_ms = excluded.start_ms, duration_ms = excluded.duration_ms, "
+            "volume = excluded.volume, fade_in_ms = excluded.fade_in_ms, fade_out_ms = excluded.fade_out_ms, "
+            "muted = excluded.muted, artifact_id = excluded.artifact_id, settings_json = excluded.settings_json, "
+            "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?, deleted_at = NULL",
+            (
+                project_row_id,
+                clip_id,
+                section_id,
+                track_id,
+                title,
+                clip_type,
+                start_ms,
+                duration_ms,
+                volume,
+                fade_in_ms,
+                fade_out_ms,
+                self._coerce_bool_flag(muted, postgres=postgres),
+                artifact_id,
+                settings_json or "{}",
+                current_revision_id,
+                self._coerce_bool_flag(False, postgres=postgres),
+            ),
+        )
+        self._update_audio_studio_project_row(project_row_id, current_revision_id=current_revision_id)
+        row = self.backend.execute(
+            "SELECT id, project_row_id, clip_id, section_id, track_id, title, clip_type, start_ms, duration_ms, "
+            "volume, fade_in_ms, fade_out_ms, muted, artifact_id, settings_json, current_revision_id, "
+            "archived_at, deleted, deleted_at FROM audio_studio_clips WHERE project_row_id = ? AND clip_id = ?",
+            (project_row_id, clip_id),
+        ).first
+        if not row:
+            raise DatabaseError("audio_studio_clip_upsert_failed")
+        return AudioStudioClipRow(**row)
+
+    def upsert_audio_studio_section(
+        self,
+        *,
+        project_row_id: int,
+        section_id: str,
+        base_revision_id: str,
+        revision_id: str,
+        workflow: str,
+        title: str | None,
+        body_text: str | None,
+        speaker_id: str | None,
+        order_index: int,
+        settings_json: str,
+        content_hash: str,
+        payload_json: str,
+    ) -> AudioStudioSectionRow:
+        with self.transaction() as conn:
+            self._conditionally_mutate_audio_studio_project(
+                project_row_id=project_row_id,
+                base_revision_id=base_revision_id,
+                revision_id=revision_id,
+                fields=[],
+                connection=conn,
+            )
+            deleted = self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL)
+            self.backend.execute(
+                "INSERT INTO audio_studio_sections "
+                "(project_row_id, section_id, workflow, title, body_text, speaker_id, order_index, settings_json, current_revision_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(project_row_id, section_id) DO UPDATE SET "
+                "workflow = excluded.workflow, title = excluded.title, body_text = excluded.body_text, "
+                "speaker_id = excluded.speaker_id, order_index = excluded.order_index, settings_json = excluded.settings_json, "
+                "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?, deleted_at = NULL",
+                (
+                    project_row_id,
+                    section_id,
+                    workflow,
+                    title,
+                    body_text,
+                    speaker_id,
+                    order_index,
+                    settings_json or "{}",
+                    revision_id,
+                    deleted,
+                ),
+                connection=conn,
+            )
+            self._insert_audio_studio_revision(
+                project_row_id=project_row_id,
+                revision_id=revision_id,
+                parent_revision_id=base_revision_id,
+                mutation_kind="section.upsert",
+                resource_kind="section",
+                resource_id=section_id,
+                content_hash=content_hash,
+                payload_json=payload_json,
+                connection=conn,
+            )
+            row = self.backend.execute(
+                "SELECT id, project_row_id, section_id, workflow, title, body_text, speaker_id, order_index, "
+                "settings_json, current_revision_id, archived_at, deleted, deleted_at "
+                "FROM audio_studio_sections WHERE project_row_id = ? AND section_id = ?",
+                (project_row_id, section_id),
+                connection=conn,
+            ).first
+            if not row:
+                raise DatabaseError("audio_studio_section_upsert_failed")
+            return AudioStudioSectionRow(**row)
+
+    def upsert_audio_studio_section_with_revision(self, **kwargs: Any) -> AudioStudioSectionRow:
+        return self.upsert_audio_studio_section(**kwargs)
+
+    def upsert_audio_studio_track(
+        self,
+        *,
+        project_row_id: int,
+        track_id: str,
+        base_revision_id: str,
+        revision_id: str,
+        name: str,
+        kind: str,
+        order_index: int,
+        muted: bool,
+        solo: bool,
+        volume: float,
+        settings_json: str,
+        content_hash: str,
+        payload_json: str,
+    ) -> AudioStudioTrackRow:
+        with self.transaction() as conn:
+            self._conditionally_mutate_audio_studio_project(
+                project_row_id=project_row_id,
+                base_revision_id=base_revision_id,
+                revision_id=revision_id,
+                fields=[],
+                connection=conn,
+            )
+            postgres = self.backend.backend_type == BackendType.POSTGRESQL
+            deleted = self._coerce_bool_flag(False, postgres=postgres)
+            self.backend.execute(
+                "INSERT INTO audio_studio_tracks "
+                "(project_row_id, track_id, name, kind, order_index, muted, solo, volume, settings_json, current_revision_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(project_row_id, track_id) DO UPDATE SET "
+                "name = excluded.name, kind = excluded.kind, order_index = excluded.order_index, muted = excluded.muted, "
+                "solo = excluded.solo, volume = excluded.volume, settings_json = excluded.settings_json, "
+                "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?, deleted_at = NULL",
+                (
+                    project_row_id,
+                    track_id,
+                    name,
+                    kind,
+                    order_index,
+                    self._coerce_bool_flag(muted, postgres=postgres),
+                    self._coerce_bool_flag(solo, postgres=postgres),
+                    volume,
+                    settings_json or "{}",
+                    revision_id,
+                    deleted,
+                ),
+                connection=conn,
+            )
+            self._insert_audio_studio_revision(
+                project_row_id=project_row_id,
+                revision_id=revision_id,
+                parent_revision_id=base_revision_id,
+                mutation_kind="track.upsert",
+                resource_kind="track",
+                resource_id=track_id,
+                content_hash=content_hash,
+                payload_json=payload_json,
+                connection=conn,
+            )
+            row = self.backend.execute(
+                "SELECT id, project_row_id, track_id, name, kind, order_index, muted, solo, volume, "
+                "settings_json, current_revision_id, archived_at, deleted, deleted_at "
+                "FROM audio_studio_tracks WHERE project_row_id = ? AND track_id = ?",
+                (project_row_id, track_id),
+                connection=conn,
+            ).first
+            if not row:
+                raise DatabaseError("audio_studio_track_upsert_failed")
+            return AudioStudioTrackRow(**row)
+
+    def upsert_audio_studio_track_with_revision(self, **kwargs: Any) -> AudioStudioTrackRow:
+        return self.upsert_audio_studio_track(**kwargs)
+
+    def upsert_audio_studio_clip(
+        self,
+        *,
+        project_row_id: int,
+        clip_id: str,
+        base_revision_id: str,
+        revision_id: str,
+        section_id: str | None,
+        track_id: str,
+        title: str | None,
+        clip_type: str,
+        start_ms: int,
+        duration_ms: int | None,
+        volume: float,
+        fade_in_ms: int,
+        fade_out_ms: int,
+        muted: bool,
+        artifact_id: str | None,
+        settings_json: str,
+        content_hash: str,
+        payload_json: str,
+    ) -> AudioStudioClipRow:
+        with self.transaction() as conn:
+            self._conditionally_mutate_audio_studio_project(
+                project_row_id=project_row_id,
+                base_revision_id=base_revision_id,
+                revision_id=revision_id,
+                fields=[],
+                connection=conn,
+            )
+            self._require_audio_studio_resource(
+                table="audio_studio_tracks",
+                id_column="track_id",
+                id_value=track_id,
+                project_row_id=project_row_id,
+                error="audio_studio_track_not_found",
+                connection=conn,
+            )
+            if section_id is not None:
+                self._require_audio_studio_resource(
+                    table="audio_studio_sections",
+                    id_column="section_id",
+                    id_value=section_id,
+                    project_row_id=project_row_id,
+                    error="audio_studio_section_not_found",
+                    connection=conn,
+                )
+            if artifact_id is not None:
+                self._require_audio_studio_resource(
+                    table="audio_studio_artifacts",
+                    id_column="artifact_id",
+                    id_value=artifact_id,
+                    project_row_id=project_row_id,
+                    error="audio_studio_artifact_not_found",
+                    connection=conn,
+                )
+            postgres = self.backend.backend_type == BackendType.POSTGRESQL
+            deleted = self._coerce_bool_flag(False, postgres=postgres)
+            self.backend.execute(
+                "INSERT INTO audio_studio_clips "
+                "(project_row_id, clip_id, section_id, track_id, title, clip_type, start_ms, duration_ms, volume, "
+                "fade_in_ms, fade_out_ms, muted, artifact_id, settings_json, current_revision_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(project_row_id, clip_id) DO UPDATE SET "
+                "section_id = excluded.section_id, track_id = excluded.track_id, title = excluded.title, "
+                "clip_type = excluded.clip_type, start_ms = excluded.start_ms, duration_ms = excluded.duration_ms, "
+                "volume = excluded.volume, fade_in_ms = excluded.fade_in_ms, fade_out_ms = excluded.fade_out_ms, "
+                "muted = excluded.muted, artifact_id = excluded.artifact_id, settings_json = excluded.settings_json, "
+                "current_revision_id = excluded.current_revision_id, archived_at = NULL, deleted = ?, deleted_at = NULL",
+                (
+                    project_row_id,
+                    clip_id,
+                    section_id,
+                    track_id,
+                    title,
+                    clip_type,
+                    start_ms,
+                    duration_ms,
+                    volume,
+                    fade_in_ms,
+                    fade_out_ms,
+                    self._coerce_bool_flag(muted, postgres=postgres),
+                    artifact_id,
+                    settings_json or "{}",
+                    revision_id,
+                    deleted,
+                ),
+                connection=conn,
+            )
+            self._insert_audio_studio_revision(
+                project_row_id=project_row_id,
+                revision_id=revision_id,
+                parent_revision_id=base_revision_id,
+                mutation_kind="clip.upsert",
+                resource_kind="clip",
+                resource_id=clip_id,
+                content_hash=content_hash,
+                payload_json=payload_json,
+                connection=conn,
+            )
+            row = self.backend.execute(
+                "SELECT id, project_row_id, clip_id, section_id, track_id, title, clip_type, start_ms, duration_ms, "
+                "volume, fade_in_ms, fade_out_ms, muted, artifact_id, settings_json, current_revision_id, "
+                "archived_at, deleted, deleted_at FROM audio_studio_clips WHERE project_row_id = ? AND clip_id = ?",
+                (project_row_id, clip_id),
+                connection=conn,
+            ).first
+            if not row:
+                raise DatabaseError("audio_studio_clip_upsert_failed")
+            return AudioStudioClipRow(**row)
+
+    def upsert_audio_studio_clip_with_revision(self, **kwargs: Any) -> AudioStudioClipRow:
+        return self.upsert_audio_studio_clip(**kwargs)
+
+    def create_audio_studio_artifact(
+        self,
+        *,
+        project_row_id: int,
+        artifact_id: str,
+        artifact_type: str,
+        provider: str | None,
+        output_id: int | None,
+        storage_path: str | None,
+        mime_type: str | None,
+        size_bytes: int | None,
+        source_resource_kind: str | None,
+        source_resource_id: str | None,
+        source_revision_id: str | None,
+        content_hash: str,
+        metadata_json: str,
+    ) -> AudioStudioArtifactRow:
+        self.get_audio_studio_project(project_row_id, include_archived=True)
+        now = _utcnow_iso()
+        self.backend.execute(
+            "INSERT INTO audio_studio_artifacts "
+            "(project_row_id, artifact_id, artifact_type, provider, output_id, storage_path, mime_type, size_bytes, "
+            "source_resource_kind, source_resource_id, source_revision_id, content_hash, metadata_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                project_row_id,
+                artifact_id,
+                artifact_type,
+                provider,
+                output_id,
+                storage_path,
+                mime_type,
+                size_bytes,
+                source_resource_kind,
+                source_resource_id,
+                source_revision_id,
+                content_hash,
+                metadata_json or "{}",
+                now,
+            ),
+        )
+        rows = self.list_audio_studio_artifacts(project_row_id=project_row_id, limit=1, artifact_id=artifact_id)
+        if not rows:
+            raise DatabaseError("audio_studio_artifact_insert_failed")
+        return rows[0]
+
+    def list_audio_studio_artifacts(
+        self,
+        *,
+        project_row_id: int,
+        limit: int = 100,
+        offset: int = 0,
+        artifact_id: str | None = None,
+    ) -> list[AudioStudioArtifactRow]:
+        self.get_audio_studio_project(project_row_id, include_archived=True)
+        clauses = ["project_row_id = ?", "deleted = ?"]
+        params: list[Any] = [
+            project_row_id,
+            self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
+        ]
+        if artifact_id is not None:
+            clauses.append("artifact_id = ?")
+            params.append(artifact_id)
+        params.extend([limit, offset])
+        q = (
+            "SELECT id, project_row_id, artifact_id, artifact_type, provider, output_id, storage_path, mime_type, "
+            "size_bytes, source_resource_kind, source_resource_id, source_revision_id, content_hash, metadata_json, "
+            "created_at, archived_at, deleted, deleted_at "
+            f"FROM audio_studio_artifacts WHERE {' AND '.join(clauses)} "  # nosec B608
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        )
+        rows = self.backend.execute(q, tuple(params)).rows
+        return [AudioStudioArtifactRow(**row) for row in rows]
+
+    def record_audio_studio_generation_job(
+        self,
+        *,
+        project_row_id: int,
+        job_id: str,
+        provider: str,
+        operation: str,
+        target_resource_kind: str,
+        target_resource_id: str,
+        target_revision_id: str,
+        idempotency_key: str | None,
+        status: str,
+        request_json: str,
+        result_json: str | None,
+    ) -> AudioStudioGenerationJobRow:
+        self.get_audio_studio_project(project_row_id, include_archived=True)
+        now = _utcnow_iso()
+        self.backend.execute(
+            "INSERT INTO audio_studio_generation_jobs "
+            "(project_row_id, job_id, provider, operation, target_resource_kind, target_resource_id, "
+            "target_revision_id, idempotency_key, status, request_json, result_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                project_row_id,
+                job_id,
+                provider,
+                operation,
+                target_resource_kind,
+                target_resource_id,
+                target_revision_id,
+                idempotency_key,
+                status,
+                request_json,
+                result_json,
+                now,
+                now,
+            ),
+        )
+        row = self.backend.execute(
+            "SELECT id, project_row_id, job_id, provider, operation, target_resource_kind, target_resource_id, "
+            "target_revision_id, idempotency_key, status, request_json, result_json, created_at, updated_at "
+            "FROM audio_studio_generation_jobs WHERE project_row_id = ? AND job_id = ?",
+            (project_row_id, job_id),
+        ).first
+        if not row:
+            raise DatabaseError("audio_studio_generation_job_insert_failed")
+        return AudioStudioGenerationJobRow(**row)
+
+    def get_audio_studio_generation_job(
+        self,
+        *,
+        project_row_id: int,
+        job_id: str,
+    ) -> AudioStudioGenerationJobRow:
+        self.get_audio_studio_project(project_row_id, include_archived=True)
+        row = self.backend.execute(
+            "SELECT id, project_row_id, job_id, provider, operation, target_resource_kind, target_resource_id, "
+            "target_revision_id, idempotency_key, status, request_json, result_json, created_at, updated_at "
+            "FROM audio_studio_generation_jobs WHERE project_row_id = ? AND job_id = ?",
+            (project_row_id, job_id),
+        ).first
+        if not row:
+            raise KeyError("audio_studio_generation_job_not_found")
+        return AudioStudioGenerationJobRow(**row)
+
+    def list_audio_studio_generation_jobs(
+        self,
+        *,
+        project_row_id: int,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[AudioStudioGenerationJobRow]:
+        self.get_audio_studio_project(project_row_id, include_archived=True)
+        rows = self.backend.execute(
+            "SELECT id, project_row_id, job_id, provider, operation, target_resource_kind, target_resource_id, "
+            "target_revision_id, idempotency_key, status, request_json, result_json, created_at, updated_at "
+            "FROM audio_studio_generation_jobs WHERE project_row_id = ? "
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (project_row_id, limit, offset),
+        ).rows
+        return [AudioStudioGenerationJobRow(**row) for row in rows]
+
+    def update_audio_studio_generation_job(
+        self,
+        *,
+        project_row_id: int,
+        job_id: str,
+        status: str,
+        result_json: str | None,
+    ) -> AudioStudioGenerationJobRow:
+        self.get_audio_studio_project(project_row_id, include_archived=True)
+        now = _utcnow_iso()
+        self.backend.execute(
+            "UPDATE audio_studio_generation_jobs SET status = ?, result_json = ?, updated_at = ? "
+            "WHERE project_row_id = ? AND job_id = ?",
+            (status, result_json, now, project_row_id, job_id),
+        )
+        return self.get_audio_studio_generation_job(project_row_id=project_row_id, job_id=job_id)
+
+    def _get_audio_studio_idempotency_record(
+        self,
+        namespace: str,
+        key: str,
+        *,
+        connection: Any | None = None,
+    ) -> AudioStudioIdempotencyRecordRow | None:
+        row = self.backend.execute(
+            "SELECT namespace, key, user_id, project_row_id, request_hash, response_json, created_at, updated_at "
+            "FROM audio_studio_idempotency_keys WHERE namespace = ? AND key = ? AND user_id = ?",
+            (namespace, key, self.user_id),
+            connection=connection,
+        ).first
+        return AudioStudioIdempotencyRecordRow(**row) if row else None
+
+    def get_audio_studio_idempotency_record(
+        self,
+        namespace: str,
+        key: str,
+    ) -> AudioStudioIdempotencyRecordRow | None:
+        return self._get_audio_studio_idempotency_record(namespace, key)
+
+    def put_audio_studio_idempotency_record(
+        self,
+        *,
+        namespace: str,
+        key: str,
+        project_row_id: int | None,
+        request_hash: str,
+        response_json: str,
+    ) -> AudioStudioIdempotencyRecordRow:
+        now = _utcnow_iso()
+        with self.transaction() as conn:
+            if project_row_id is not None:
+                self._get_audio_studio_project(project_row_id=project_row_id, include_archived=True, connection=conn)
+            self.backend.execute(
+                "INSERT INTO audio_studio_idempotency_keys "
+                "(namespace, key, user_id, project_row_id, request_hash, response_json, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(namespace, key, user_id) DO NOTHING",
+                (namespace, key, self.user_id, project_row_id, request_hash, response_json, now, now),
+                connection=conn,
+            )
+            record = self._get_audio_studio_idempotency_record(namespace, key, connection=conn)
+        if record is None:
+            raise DatabaseError("audio_studio_idempotency_record_upsert_failed")
+        if record.request_hash != request_hash:
+            raise ValueError("audio_studio_idempotency_conflict")
+        if record.project_row_id != project_row_id:
+            raise ValueError("audio_studio_idempotency_conflict")
+        return record
 
     def create_voice_profile(
         self,

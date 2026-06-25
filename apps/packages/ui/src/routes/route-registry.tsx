@@ -162,6 +162,7 @@ const OptionSources = lazy(() => import("./option-sources"))
 const OptionSourcesNew = lazy(() => import("./option-sources-new"))
 const OptionSourcesDetail = lazy(() => import("./option-sources-detail"))
 const OptionAdminSources = lazy(() => import("./option-admin-sources"))
+const OptionAudioStudio = lazy(() => import("./option-audio-studio"))
 const OptionAudiobookStudio = lazy(() => import("./option-audiobook-studio"))
 const OptionPresentationStudio = lazy(() => import("./option-presentation-studio"))
 const OptionPresentationStudioNew = lazy(() => import("./option-presentation-studio-new"))
@@ -417,6 +418,11 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   { kind: "options", path: "/stt", element: <OptionStt /> },
   { kind: "options", path: "/speech", element: <OptionSpeech /> },
   { kind: "options", path: "/evaluations", element: <OptionEvaluations /> },
+  {
+    kind: "options",
+    path: "/audio-studio",
+    element: <OptionAudioStudio />,
+  },
   {
     kind: "options",
     path: "/audiobook-studio",

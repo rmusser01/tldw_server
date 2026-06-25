@@ -45,6 +45,7 @@ import { HEADER_SHORTCUT_IDS } from "@/services/settings/ui-settings"
 export { HEADER_SHORTCUT_IDS }
 import type { UserPersona } from "@/types/connection"
 import {
+  AUDIO_STUDIO_PATH,
   CHAT_WORKSPACE_PATH,
   DOCUMENT_WORKSPACE_PATH,
   MODERATION_REVIEW_PATH,
@@ -367,10 +368,10 @@ const BASE_HEADER_SHORTCUT_GROUPS: HeaderShortcutGroup[] = [
       },
       {
         id: "audiobook-studio",
-        to: "/audiobook-studio",
+        to: AUDIO_STUDIO_PATH,
         icon: Headphones,
-        labelKey: "option:header.audiobookStudio",
-        labelDefault: "Audiobook Studio"
+        labelKey: "option:header.audioStudio",
+        labelDefault: "Audio Studio"
       },
       {
         id: "presentation-studio",

@@ -184,6 +184,22 @@ CREATE TABLE IF NOT EXISTS email_verification_tokens (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- Audio Studio scoped media tickets
+CREATE TABLE IF NOT EXISTS audio_studio_media_tickets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash TEXT UNIQUE NOT NULL,
+    user_id INTEGER NOT NULL,
+    project_id TEXT NOT NULL,
+    artifact_id TEXT NOT NULL,
+    purpose TEXT NOT NULL CHECK (purpose IN ('playback', 'download')),
+    expires_at TEXT NOT NULL,
+    consumed_at TEXT,
+    revoked_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by_auth_mode TEXT,
+    last_redeemed_at TEXT
+);
+
 -- Indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -209,6 +225,9 @@ CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token ON password_reset_tok
 CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at ON password_reset_tokens(expires_at);
 CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_token ON email_verification_tokens(token);
 CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_expires_at ON email_verification_tokens(expires_at);
+CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_hash ON audio_studio_media_tickets(token_hash);
+CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_expiry ON audio_studio_media_tickets(expires_at);
+CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_artifact ON audio_studio_media_tickets(user_id, project_id, artifact_id);
 
 -- Update trigger for users table
 CREATE TRIGGER IF NOT EXISTS update_users_timestamp

@@ -421,7 +421,16 @@ class InterceptHandler(logging.Handler):
                 frame = frame.f_back
                 continue
             break
-        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+        message = record.getMessage()
+        try:
+            from tldw_Server_API.app.core.Logging.access_log_middleware import (
+                redact_access_log_message as _redact_access_log_message,
+            )
+
+            message = _redact_access_log_message(message)
+        except _LOGGING_SETUP_EXCEPTIONS:
+            pass
+        logger.opt(depth=depth, exception=record.exc_info).log(level, message)
 
 
 class _SafeExtra(dict):

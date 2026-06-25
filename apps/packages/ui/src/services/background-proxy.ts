@@ -46,6 +46,9 @@ const normalizeKnownPathQuirks = <P extends PathOrUrl>(rawPath: P): P => {
     .replace("/api/v1/files/?", "/api/v1/files?") as P
 }
 
+const isAudioStudioArtifactMediaPath = (path: string): boolean =>
+  /\/api\/v1\/audio-studio\/projects\/[^/?#]+\/artifacts\/[^/?#]+\/media(?:[?#]|$)/.test(path)
+
 const parseHttpOrigin = (value: unknown): string | null => {
   const raw = String(value || "").trim()
   if (!raw) return null
@@ -523,7 +526,8 @@ async function bgRequestImpl<
   const shouldBypassBackground =
     responseType === "arrayBuffer" &&
     typeof path === "string" &&
-    path.includes("/api/v1/audio/")
+    (path.includes("/api/v1/audio/") ||
+      isAudioStudioArtifactMediaPath(path))
   const isArrayBufferLike = (value: unknown): boolean => {
     if (!value) return false
     if (value instanceof ArrayBuffer) return true

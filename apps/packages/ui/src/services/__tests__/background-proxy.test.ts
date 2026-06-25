@@ -255,6 +255,63 @@ describe("background proxy fallback safety", () => {
     expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
   })
 
+  it("bypasses extension messaging for audio-studio artifact media arrayBuffer requests", async () => {
+    const buffer = new Uint8Array([1, 2, 3]).buffer
+    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { via: "runtime" } })
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: buffer
+    })
+
+    const { bgRequest } = await importProxy()
+
+    await expect(
+      bgRequest({
+        path: "/api/v1/audio-studio/projects/p1/artifacts/a1/media",
+        method: "GET",
+        responseType: "arrayBuffer"
+      })
+    ).resolves.toBe(buffer)
+
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.tldwRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/audio-studio/projects/p1/artifacts/a1/media",
+        method: "GET",
+        responseType: "arrayBuffer"
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it("does not bypass extension messaging for unrelated audio-studio arrayBuffer requests", async () => {
+    const buffer = new Uint8Array([4, 5, 6]).buffer
+    mocks.sendMessage.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: buffer
+    })
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { via: "direct" }
+    })
+
+    const { bgRequest } = await importProxy()
+
+    await expect(
+      bgRequest({
+        path: "/api/v1/audio-studio/projects/p1/artifacts",
+        method: "GET",
+        responseType: "arrayBuffer"
+      })
+    ).resolves.toBe(buffer)
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
   it("does not fall back to direct request on POST extension timeout", async () => {
     vi.useFakeTimers()
     mocks.sendMessage.mockImplementation(() => new Promise(() => undefined))

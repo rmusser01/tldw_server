@@ -179,6 +179,17 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     else:
         logger.info("Skipping audio router imports in pytest (set MINIMAL_TEST_INCLUDE_AUDIO=1 to enable)")
 
+    append_imported_router_spec(
+        specs,
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.audio.audio_studio",
+            log_name="audio_studio",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("audio-studio",),
+            route_key="audio-studio",
+        ),
+    )
+
     # Chunking, vector stores, and prompt operations
     for processing_spec in (
         ImportedRouterSpec(

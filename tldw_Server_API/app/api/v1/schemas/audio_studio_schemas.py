@@ -1,0 +1,512 @@
+"""Pydantic schemas for Audio Studio APIs."""
+
+from __future__ import annotations
+
+import re
+from enum import Enum
+from typing import Any
+from urllib.parse import urlparse
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+class AudioStudioWorkflow(str, Enum):
+    """Supported Audio Studio workflow types."""
+
+    NARRATION = "narration"
+    PODCAST = "podcast"
+    BRIEFING = "briefing"
+    MUSIC = "music"
+
+
+class AudioStudioProjectStatus(str, Enum):
+    """Allowed lifecycle states for Audio Studio projects."""
+
+    DRAFT = "draft"
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+    ERROR = "error"
+
+
+class AudioStudioResourceKind(str, Enum):
+    """Project resource kinds that can participate in revisions and jobs."""
+
+    SECTION = "section"
+    TRACK = "track"
+    CLIP = "clip"
+    ARTIFACT = "artifact"
+    RENDER = "render"
+    EXPORT = "export"
+
+
+class AudioStudioTrackKind(str, Enum):
+    """Timeline track categories."""
+
+    SPEECH = "speech"
+    MUSIC = "music"
+    SFX = "sfx"
+    AMBIENCE = "ambience"
+    MIXED = "mixed"
+
+
+class AudioStudioClipType(str, Enum):
+    """Timeline clip categories."""
+
+    SPEECH = "speech"
+    MUSIC = "music"
+    SFX = "sfx"
+    AMBIENCE = "ambience"
+    IMPORTED = "imported"
+    RENDER = "render"
+
+
+_FORBIDDEN_CLIENT_KEYS = {
+    "api_key",
+    "apikey",
+    "authorization",
+    "bearer_token",
+    "client_secret",
+    "external_url",
+    "password",
+    "secret",
+    "token",
+}
+
+
+_FORBIDDEN_URL_KEYS = {
+    "base_url",
+    "endpoint",
+    "endpoint_url",
+    "provider_base_url",
+    "url",
+}
+_FORBIDDEN_EXACT_KEYS = _FORBIDDEN_CLIENT_KEYS | {
+    "access_token",
+    "credentials",
+    "credential",
+    "id_token",
+    "private_key",
+    "refresh_token",
+    "session_token",
+}
+_FORBIDDEN_COMPONENTS = {"authorization", "credential", "credentials", "password", "secret"}
+_FORBIDDEN_URL_COMPONENTS = {"callback", "endpoint", "uri", "url", "webhook"}
+_TOKEN_QUALIFIERS = {"access", "auth", "bearer", "client", "id", "refresh", "session"}
+_KEY_QUALIFIERS = {"api", "auth", "client", "private", "secret"}
+_FORBIDDEN_URL_SCHEMES = {
+    "data",
+    "file",
+    "ftp",
+    "ftps",
+    "gopher",
+    "http",
+    "https",
+    "ldap",
+    "ldaps",
+    "mailto",
+    "nfs",
+    "sftp",
+    "smb",
+    "ssh",
+    "ws",
+    "wss",
+}
+
+
+def _normalize_client_key(key: object) -> str:
+    raw = str(key)
+    with_separators = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", raw)
+    return re.sub(r"[^a-zA-Z0-9]+", "_", with_separators).strip("_").lower()
+
+
+def _is_forbidden_client_key(key: object) -> bool:
+    normalized = _normalize_client_key(key)
+    if normalized in _FORBIDDEN_EXACT_KEYS or normalized in _FORBIDDEN_URL_KEYS or normalized.endswith("_secret"):
+        return True
+    parts = [part for part in normalized.split("_") if part]
+    if any(part in _FORBIDDEN_COMPONENTS for part in parts):
+        return True
+    if any(part in _FORBIDDEN_URL_COMPONENTS for part in parts):
+        return True
+    if "token" in parts and (normalized == "token" or any(part in _TOKEN_QUALIFIERS for part in parts)):
+        return True
+    return "key" in parts and any(part in _KEY_QUALIFIERS for part in parts)
+
+
+def _is_forbidden_url_value(value: str) -> bool:
+    stripped = value.strip()
+    if not stripped:
+        return False
+    parsed = urlparse(stripped)
+    if parsed.netloc:
+        return True
+    return parsed.scheme.lower() in _FORBIDDEN_URL_SCHEMES
+
+
+def _reject_secret_payload(value: Any, *, path: str = "payload") -> None:
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if _is_forbidden_client_key(key):
+                raise ValueError(f"{path} must not include secret, credential, external_url, or external URL fields")
+            _reject_secret_payload(nested, path=f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, nested in enumerate(value):
+            _reject_secret_payload(nested, path=f"{path}[{index}]")
+    elif isinstance(value, str) and _is_forbidden_url_value(value):
+        raise ValueError(f"{path} must not include external URL values")
+
+
+class _BaseAudioStudioModel(BaseModel):
+    model_config = {"use_enum_values": False, "extra": "forbid"}
+
+
+class _SecretFreePayloadMixin(_BaseAudioStudioModel):
+    @field_validator("provider", "options", "settings", mode="after", check_fields=False)
+    @classmethod
+    def _validate_secret_free_payload(cls, value: Any) -> Any:
+        _reject_secret_payload(value)
+        return value
+
+    @model_validator(mode="after")
+    def _validate_no_forbidden_client_payload(self):
+        _reject_secret_payload(self.model_dump(mode="python"))
+        return self
+
+
+class AudioStudioProjectCreate(_SecretFreePayloadMixin):
+    """Create a server-backed Audio Studio project."""
+
+    title: str = Field(..., min_length=1, max_length=200)
+    workflow: AudioStudioWorkflow
+    description: str | None = Field(None, max_length=2000)
+    settings: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AudioStudioProjectUpdate(_SecretFreePayloadMixin):
+    """Update project metadata/settings with optimistic concurrency."""
+
+    base_revision_id: str = Field(..., min_length=1, max_length=120)
+    title: str | None = Field(None, min_length=1, max_length=200)
+    description: str | None = Field(None, max_length=2000)
+    status: AudioStudioProjectStatus | None = None
+    settings: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
+
+    @field_validator("status")
+    @classmethod
+    def _reject_archived_status(
+        cls,
+        value: AudioStudioProjectStatus | None,
+    ) -> AudioStudioProjectStatus | None:
+        if value == AudioStudioProjectStatus.ARCHIVED:
+            raise ValueError("Use the archive endpoint to archive Audio Studio projects.")
+        return value
+
+
+class AudioStudioProjectArchiveRequest(_BaseAudioStudioModel):
+    """Archive a project with optimistic concurrency."""
+
+    base_revision_id: str = Field(..., min_length=1, max_length=120)
+
+
+class AudioStudioProjectResponse(_BaseAudioStudioModel):
+    """Project response returned by Audio Studio endpoints."""
+
+    project_id: str
+    title: str
+    description: str | None = None
+    workflow: AudioStudioWorkflow
+    status: AudioStudioProjectStatus
+    settings: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    current_revision_id: str | None = None
+    created_at: str
+    updated_at: str
+    archived_at: str | None = None
+
+
+class AudioStudioProjectListResponse(_BaseAudioStudioModel):
+    """List of visible Audio Studio projects."""
+
+    projects: list[AudioStudioProjectResponse]
+    limit: int
+    offset: int
+
+
+class AudioStudioSectionUpsert(_SecretFreePayloadMixin):
+    """Create or update a workflow section."""
+
+    base_revision_id: str = Field(..., min_length=1, max_length=120)
+    title: str | None = Field(None, max_length=200)
+    body_text: str | None = None
+    speaker_id: str | None = Field(None, max_length=120)
+    order_index: int = Field(0, ge=0)
+    settings: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AudioStudioSectionResponse(_BaseAudioStudioModel):
+    section_id: str
+    workflow: AudioStudioWorkflow
+    title: str | None
+    body_text: str | None
+    speaker_id: str | None
+    order_index: int
+    settings: dict[str, Any] = Field(default_factory=dict)
+    current_revision_id: str | None = None
+    archived_at: str | None = None
+
+
+class AudioStudioTrackUpsert(_SecretFreePayloadMixin):
+    """Create or update a timeline track."""
+
+    base_revision_id: str = Field(..., min_length=1, max_length=120)
+    name: str = Field(..., min_length=1, max_length=160)
+    kind: AudioStudioTrackKind
+    order_index: int = Field(0, ge=0)
+    muted: bool = False
+    solo: bool = False
+    volume: float = Field(1.0, ge=0.0, le=4.0)
+    settings: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AudioStudioTrackResponse(_BaseAudioStudioModel):
+    track_id: str
+    name: str
+    kind: AudioStudioTrackKind
+    order_index: int
+    muted: bool
+    solo: bool
+    volume: float
+    settings: dict[str, Any] = Field(default_factory=dict)
+    current_revision_id: str | None = None
+    archived_at: str | None = None
+
+
+class AudioStudioClipUpsert(_SecretFreePayloadMixin):
+    """Create or update a timeline clip."""
+
+    base_revision_id: str = Field(..., min_length=1, max_length=120)
+    section_id: str | None = Field(None, max_length=120)
+    track_id: str = Field(..., min_length=1, max_length=120)
+    title: str | None = Field(None, max_length=200)
+    clip_type: AudioStudioClipType
+    start_ms: int = Field(0, ge=0)
+    duration_ms: int | None = Field(None, ge=0)
+    volume: float = Field(1.0, ge=0.0, le=4.0)
+    fade_in_ms: int = Field(0, ge=0)
+    fade_out_ms: int = Field(0, ge=0)
+    muted: bool = False
+    artifact_id: str | None = Field(None, max_length=120)
+    settings: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AudioStudioClipResponse(_BaseAudioStudioModel):
+    clip_id: str
+    section_id: str | None
+    track_id: str
+    title: str | None
+    clip_type: AudioStudioClipType
+    start_ms: int
+    duration_ms: int | None
+    volume: float
+    fade_in_ms: int
+    fade_out_ms: int
+    muted: bool
+    artifact_id: str | None
+    settings: dict[str, Any] = Field(default_factory=dict)
+    current_revision_id: str | None = None
+    archived_at: str | None = None
+
+
+class _AudioStudioJobCreate(_SecretFreePayloadMixin):
+    idempotency_key: str = Field(..., min_length=16, max_length=200)
+    target_resource_kind: AudioStudioResourceKind
+    target_resource_id: str = Field(..., min_length=1, max_length=120)
+    target_revision_id: str = Field(..., min_length=1, max_length=120)
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
+class AudioStudioGenerationCreate(_AudioStudioJobCreate):
+    """Schema-only contract for future generation job creation."""
+
+    kind: str = Field(..., min_length=1, max_length=80)
+    provider: str | dict[str, Any] = Field(..., min_length=1)
+
+
+class AudioStudioProviderResponse(_BaseAudioStudioModel):
+    """Secret-free provider catalog entry."""
+
+    provider_id: str
+    supported_kinds: list[str]
+
+
+class AudioStudioProviderListResponse(_BaseAudioStudioModel):
+    """Configured Audio Studio provider catalog."""
+
+    providers: list[AudioStudioProviderResponse]
+
+
+class AudioStudioGenerationJobResponse(_BaseAudioStudioModel):
+    """Audio Studio generation Jobs state."""
+
+    job_id: str
+    project_id: str
+    provider: str
+    kind: str
+    status: str
+    target_resource_kind: AudioStudioResourceKind
+    target_resource_id: str
+    target_revision_id: str
+    result: dict[str, Any] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class AudioStudioArtifactResponse(_BaseAudioStudioModel):
+    """Audio Studio artifact index response."""
+
+    artifact_id: str
+    artifact_type: str
+    provider: str | None = None
+    mime_type: str | None = None
+    size_bytes: int | None = None
+    source_resource_kind: AudioStudioResourceKind | None = None
+    source_resource_id: str | None = None
+    source_revision_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class AudioStudioArtifactListResponse(_BaseAudioStudioModel):
+    """Audio Studio artifact list response."""
+
+    artifacts: list[AudioStudioArtifactResponse]
+    limit: int
+    offset: int
+
+
+class AudioStudioMediaTicketPurpose(str, Enum):
+    """Allowed short-lived artifact media ticket purposes."""
+
+    PLAYBACK = "playback"
+    DOWNLOAD = "download"
+
+
+class AudioStudioMediaTicketCreate(_BaseAudioStudioModel):
+    """Request body for minting an Audio Studio artifact media ticket."""
+
+    purpose: AudioStudioMediaTicketPurpose
+
+
+class AudioStudioMediaTicketResponse(_BaseAudioStudioModel):
+    """Short-lived Audio Studio artifact media ticket response."""
+
+    ticket_path: str
+    ticket_url: str | None = None
+    expires_at: str
+    purpose: AudioStudioMediaTicketPurpose
+    artifact_id: str
+
+
+class AudioStudioRenderCreate(_AudioStudioJobCreate):
+    """Schema-only contract for future render job creation."""
+
+    render_type: str = Field(..., min_length=1, max_length=80)
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class AudioStudioExportCreate(_AudioStudioJobCreate):
+    """Schema-only contract for future export job creation."""
+
+    export_type: str = Field(..., min_length=1, max_length=80)
+    source_render_id: str | None = Field(None, max_length=120)
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class AudioStudioRenderJobResponse(_BaseAudioStudioModel):
+    """Audio Studio render Jobs state plus revision-pinned manifest."""
+
+    job_id: str
+    project_id: str
+    job_type: str
+    render_id: str
+    render_type: str
+    status: str
+    target_resource_kind: AudioStudioResourceKind
+    target_resource_id: str
+    target_revision_id: str
+    manifest: dict[str, Any] = Field(default_factory=dict)
+    result: dict[str, Any] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class AudioStudioExportJobResponse(_BaseAudioStudioModel):
+    """Audio Studio export Jobs state plus revision-pinned manifest."""
+
+    job_id: str
+    project_id: str
+    job_type: str
+    export_id: str
+    export_type: str
+    status: str
+    target_resource_kind: AudioStudioResourceKind
+    target_resource_id: str
+    target_revision_id: str
+    source_render_id: str | None = None
+    manifest: dict[str, Any] = Field(default_factory=dict)
+    result: dict[str, Any] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class AudioStudioMigrationPreview(_SecretFreePayloadMixin):
+    """Schema-only contract for legacy Audiobook Studio migration preview."""
+
+    legacy_project_id: str | None = Field(None, max_length=200)
+    project_payload: dict[str, Any] = Field(default_factory=dict)
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
+class AudioStudioMigrationCommit(_SecretFreePayloadMixin):
+    """Schema-only contract for legacy Audiobook Studio migration commit."""
+
+    idempotency_key: str | None = Field(None, min_length=16, max_length=200)
+    preview_id: str | None = Field(None, max_length=200)
+    base_revision_id: str | None = Field(None, max_length=120)
+    project_payload: dict[str, Any] = Field(default_factory=dict)
+    options: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_commit_target(self) -> AudioStudioMigrationCommit:
+        if not self.preview_id and not self.project_payload:
+            raise ValueError("migration commit requires preview_id or project_payload")
+        return self
+
+
+class AudioStudioMigrationPreviewResponse(_BaseAudioStudioModel):
+    """Preview response for legacy Audiobook Studio migration."""
+
+    preview_id: str
+    fingerprint: str
+    workflow: AudioStudioWorkflow
+    project_count: int
+    section_count: int
+    audio_reference_count: int
+    needs_regeneration_count: int
+    warnings: list[str] = Field(default_factory=list)
+
+
+class AudioStudioMigrationCommitResponse(_BaseAudioStudioModel):
+    """Commit response for legacy Audiobook Studio migration."""
+
+    project: AudioStudioProjectResponse
+    imported_section_count: int
+    audio_reference_count: int
+    needs_regeneration_count: int
+    fingerprint: str
+    replayed: bool

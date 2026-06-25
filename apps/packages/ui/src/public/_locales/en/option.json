@@ -3413,6 +3413,9 @@
   "header_audiobookStudio": {
     "message": "Audiobook Studio"
   },
+  "header_audioStudio": {
+    "message": "Audio Studio"
+  },
   "header_chatWorkflows": {
     "message": "Chat Workflows"
   },

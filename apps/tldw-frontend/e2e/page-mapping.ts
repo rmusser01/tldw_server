@@ -820,18 +820,33 @@ export const EXTENSION_ONLY_PAGES: PageMapping[] = [
     ]
   },
   {
-    name: "Audiobook Studio",
+    name: "Audio Studio",
     category: "audio",
-    webuiPath: null,
-    extensionOptionsPath: "/audiobook-studio",
+    webuiPath: "/audio-studio",
+    extensionOptionsPath: "/audio-studio",
     extensionSidepanelPath: null,
-    sharedComponent: "OptionAudiobookStudio",
+    sharedComponent: "OptionAudioStudio",
     session: 7,
     checklistItems: [
       "Studio interface loads",
-      "Can import content",
-      "Voice options available",
-      "Preview/generate works"
+      "Narration workflow available",
+      "Podcast workflow available",
+      "Briefing workflow available",
+      "Music workflow available"
+    ]
+  },
+  {
+    name: "Audiobook Studio",
+    category: "audio",
+    webuiPath: "/audiobook-studio",
+    extensionOptionsPath: "/audiobook-studio",
+    extensionSidepanelPath: null,
+    sharedComponent: "OptionAudiobookStudioCompatibility",
+    session: 7,
+    checklistItems: [
+      "Compatibility route loads",
+      "Redirects to Audio Studio Narration",
+      "Legacy local migration check runs"
     ]
   },
   {

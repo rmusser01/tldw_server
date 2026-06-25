@@ -12,7 +12,6 @@ import {
   seedAuth,
   getCriticalIssues,
   classifySmokeIssues,
-  type DiagnosticsData,
 } from "../smoke/smoke.setup"
 import { dismissModals, waitForVisualSettle } from "../utils/helpers"
 
@@ -23,6 +22,7 @@ const EXTRA_ROUTES: PageEntry[] = [
   { path: "/research-workspace", name: "Research Workspace", category: "workspace" },
   { path: "/document-workspace", name: "Document Workspace", category: "workspace" },
   { path: "/workflow-editor", name: "Workflow Editor", category: "workspace" },
+  { path: "/audio-studio", name: "Audio Studio", category: "audio" },
   { path: "/audiobook-studio", name: "Audiobook Studio", category: "audio" },
   { path: "/model-playground", name: "Model Playground", category: "workspace" },
   { path: "/writing-playground", name: "Writing Playground", category: "workspace" },

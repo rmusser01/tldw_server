@@ -1377,6 +1377,11 @@ TTS_VOICE_STRICT_DURATION = false
 
 # Alternatively, place the same setting in [Audio] section if you prefer (optional; env var takes precedence)
 
+# Audio Studio provider configuration is environment-variable only in the MVP.
+# Use .env for AUDIO_STUDIO_EXTERNAL_ENDPOINT_ALLOWLIST,
+# AUDIO_STUDIO_ALLOW_HTTP_ENDPOINTS, AUDIO_STUDIO_ACE_STEP_BASE_URL,
+# AUDIO_STUDIO_ACE_STEP_TIMEOUT_SECONDS, and AUDIO_STUDIO_ACE_STEP_API_KEY.
+
 # ---------------------------------------------
 # API Route Toggles (optional)
 # ---------------------------------------------

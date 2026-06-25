@@ -56,6 +56,21 @@ CREATE TABLE IF NOT EXISTS teams (
     UNIQUE (org_id, name)
 );
 
+CREATE TABLE IF NOT EXISTS audio_studio_media_tickets (
+    id BIGSERIAL PRIMARY KEY,
+    token_hash TEXT UNIQUE NOT NULL,
+    user_id BIGINT NOT NULL,
+    project_id TEXT NOT NULL,
+    artifact_id TEXT NOT NULL,
+    purpose TEXT NOT NULL CHECK (purpose IN ('playback', 'download')),
+    expires_at TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by_auth_mode TEXT,
+    last_redeemed_at TIMESTAMPTZ
+);
+
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_uuid ON users(uuid);
@@ -63,3 +78,6 @@ CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
 CREATE INDEX IF NOT EXISTS idx_orgs_owner ON organizations(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_teams_org ON teams(org_id);
+CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_hash ON audio_studio_media_tickets(token_hash);
+CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_expiry ON audio_studio_media_tickets(expires_at);
+CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_artifact ON audio_studio_media_tickets(user_id, project_id, artifact_id);
