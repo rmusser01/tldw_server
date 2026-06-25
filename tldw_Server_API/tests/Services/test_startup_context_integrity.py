@@ -338,6 +338,7 @@ def test_discover_user_skill_roots_uses_existing_user_database_tree(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from tldw_Server_API.app.core.DB_Management import db_path_utils
     from tldw_Server_API.app.services import startup_context_integrity
 
     base_dir = tmp_path / "user_databases"
@@ -345,20 +346,42 @@ def test_discover_user_skill_roots_uses_existing_user_database_tree(
     (base_dir / "2" / "skills").mkdir(parents=True)
     (base_dir / "not-a-user" / "skills").mkdir(parents=True)
     (base_dir / "3").mkdir()
-    calls: list[bool] = []
-
-    def _fake_base_dir(*, allow_legacy_alias: bool = False) -> Path:
-        calls.append(allow_legacy_alias)
-        return base_dir
 
     monkeypatch.setattr(
-        startup_context_integrity.DatabasePaths,
-        "get_user_db_base_dir",
-        staticmethod(_fake_base_dir),
+        db_path_utils,
+        "settings",
+        {
+            "USER_DB_BASE_DIR": None,
+            "USER_DB_BASE": None,
+        },
     )
+    monkeypatch.delenv("USER_DB_BASE_DIR", raising=False)
+    monkeypatch.setenv("USER_DB_BASE", str(base_dir))
 
     assert startup_context_integrity._discover_user_skill_roots() == [
         (1, base_dir / "1" / "skills"),
         (2, base_dir / "2" / "skills"),
     ]
-    assert calls == [True]
+
+
+def test_discover_user_skill_roots_does_not_create_missing_user_database_base(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management import db_path_utils
+    from tldw_Server_API.app.services import startup_context_integrity
+
+    missing_base = tmp_path / "missing_user_databases"
+    monkeypatch.setattr(
+        db_path_utils,
+        "settings",
+        {
+            "USER_DB_BASE_DIR": None,
+            "USER_DB_BASE": None,
+        },
+    )
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(missing_base))
+    monkeypatch.delenv("USER_DB_BASE", raising=False)
+
+    assert startup_context_integrity._discover_user_skill_roots() == []
+    assert not missing_base.exists()

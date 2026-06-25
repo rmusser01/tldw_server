@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping
 import json
 import os
 from pathlib import Path
+import tempfile
 from typing import Any
 
 from loguru import logger
@@ -32,7 +33,7 @@ from tldw_Server_API.app.core.Context_Integrity.resolver import (
     set_global_context_integrity_resolver,
 )
 from tldw_Server_API.app.core.Context_Integrity.verifier import verify_inventory
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management import db_path_utils
 from tldw_Server_API.app.services.startup_warning_models import StartupWarningRecord
 from tldw_Server_API.app.services.startup_warning_registry import (
     StartupWarningRegistry,
@@ -135,10 +136,81 @@ def _load_startup_manifest_from_env() -> tuple[
     )
 
 
+def _settings_value(name: str) -> Any:
+    try:
+        return db_path_utils.settings.get(name)
+    except Exception:
+        return None
+
+
+def _resolve_candidate_like_database_paths(
+    raw_path: str | Path | None,
+    *,
+    project_root: Path,
+) -> Path | None:
+    if not raw_path:
+        return None
+    try:
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            return (project_root / candidate).resolve()
+        return candidate.resolve()
+    except Exception:
+        return None
+
+
+def _resolve_user_db_base_dir_for_discovery() -> Path:
+    """Resolve the user DB base path for read-only discovery without creating it."""
+    env_user_db_base = os.getenv("USER_DB_BASE_DIR")
+    settings_user_db_base = _settings_value("USER_DB_BASE_DIR")
+    project_root = Path(db_path_utils.get_project_root())
+    default_base = (project_root / "Databases" / "user_databases").resolve()
+    user_db_base = settings_user_db_base or env_user_db_base
+
+    if db_path_utils._is_test_context() and env_user_db_base:
+        settings_candidate = _resolve_candidate_like_database_paths(
+            settings_user_db_base,
+            project_root=project_root,
+        )
+        if settings_candidate is None or settings_candidate == default_base:
+            user_db_base = env_user_db_base
+
+    if db_path_utils._is_test_context() and not env_user_db_base:
+        settings_candidate = _resolve_candidate_like_database_paths(
+            settings_user_db_base,
+            project_root=project_root,
+        )
+        if settings_candidate is None or settings_candidate == default_base:
+            user_db_base = None
+
+    if not user_db_base:
+        legacy_base = os.getenv("USER_DB_BASE") or _settings_value("USER_DB_BASE")
+        if legacy_base:
+            logger.warning(
+                "USER_DB_BASE is deprecated; use USER_DB_BASE_DIR instead. "
+                "Context Integrity discovery will stop honoring USER_DB_BASE "
+                "in a future release."
+            )
+            user_db_base = legacy_base
+
+    if not user_db_base:
+        if db_path_utils._is_test_context():
+            run_tag = db_path_utils._get_test_fallback_run_tag()
+            safe_run_tag = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in str(run_tag))
+            return (Path(tempfile.gettempdir()) / "tldw_user_databases_test" / safe_run_tag).resolve()
+        logger.warning(
+            "USER_DB_BASE_DIR not configured, using fallback for Context Integrity " "discovery: {}",
+            default_base,
+        )
+        return default_base
+
+    return db_path_utils._normalize_user_db_base_dir(Path(user_db_base))
+
+
 def _discover_user_skill_roots() -> list[tuple[int, Path]]:
     """Discover existing per-user skill roots without creating skill folders."""
     try:
-        base_dir = DatabasePaths.get_user_db_base_dir(allow_legacy_alias=True)
+        base_dir = _resolve_user_db_base_dir_for_discovery()
     except Exception as exc:  # pragma: no cover - defensive startup guard
         logger.warning("Context Integrity could not discover user skill roots: {}", exc)
         return []
