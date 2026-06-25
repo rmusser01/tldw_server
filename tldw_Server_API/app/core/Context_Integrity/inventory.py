@@ -469,7 +469,7 @@ def _open_root_fd_or_result(
         )
 
     try:
-        return _open_dir_no_follow_fd(root), None
+        return _open_directory_path_no_follow_fd(root), None
     except OSError as exc:
         return (
             None,

@@ -173,6 +173,30 @@ def test_inventory_user_skill_symlinked_root_reports_error_without_hashing_targe
     assert first.findings[0].asset_id == "skill:user:1"
 
 
+def test_inventory_user_skill_symlinked_root_parent_reports_error_without_hashing_target(
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import (
+        inventory_user_skills_with_findings,
+    )
+
+    outside_parent = tmp_path / "outside_parent"
+    skill_dir = outside_parent / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: demo\n---\nBody", encoding="utf-8")
+    linked_parent = tmp_path / "linked_parent"
+    _symlink_or_skip(linked_parent, outside_parent, target_is_directory=True)
+    skills_root = linked_parent / "skills"
+
+    first = inventory_user_skills_with_findings(user_id=1, skills_root=skills_root)
+    (skill_dir / "SKILL.md").write_text("changed outside skill", encoding="utf-8")
+    second = inventory_user_skills_with_findings(user_id=1, skills_root=skills_root)
+
+    assert first.assets == second.assets == ()
+    assert [finding.state for finding in first.findings] == ["verification_error"]
+    assert first.findings[0].asset_id == "skill:user:1"
+
+
 def test_inventory_user_skill_broken_symlink_root_reports_error(tmp_path) -> None:
     from tldw_Server_API.app.core.Context_Integrity.inventory import (
         inventory_user_skills_with_findings,
@@ -209,9 +233,12 @@ def test_inventory_user_skill_reports_no_follow_open_error(monkeypatch, tmp_path
     skill_dir = tmp_path / "skills" / "demo"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("---\nname: demo\n---\nBody", encoding="utf-8")
+    original_open_child_dir = inventory._open_child_dir_no_follow_fd
 
-    def raise_open_error(*args: object, **kwargs: object) -> int:
-        raise OSError("simulated no-follow failure")
+    def raise_open_error(dir_fd: int, name: str, path: Path) -> int:
+        if path == skill_dir:
+            raise OSError("simulated no-follow failure")
+        return original_open_child_dir(dir_fd, name, path)
 
     monkeypatch.setattr(inventory, "_open_child_dir_no_follow_fd", raise_open_error, raising=False)
 
@@ -416,6 +443,30 @@ def test_inventory_prompt_files_symlinked_root_reports_error_without_hashing_tar
     (outside_prompts / "root.md").write_text("outside prompt", encoding="utf-8")
     prompts = tmp_path / "Prompts"
     _symlink_or_skip(prompts, outside_prompts, target_is_directory=True)
+
+    first = inventory_prompt_files_with_findings(prompts_dir=prompts)
+    (outside_prompts / "root.md").write_text("changed outside prompt", encoding="utf-8")
+    second = inventory_prompt_files_with_findings(prompts_dir=prompts)
+
+    assert first.assets == second.assets == ()
+    assert [finding.state for finding in first.findings] == ["verification_error"]
+    assert first.findings[0].asset_id == "prompt_file:Prompts"
+
+
+def test_inventory_prompt_files_symlinked_root_parent_reports_error_without_hashing_target(
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import (
+        inventory_prompt_files_with_findings,
+    )
+
+    outside_parent = tmp_path / "outside_parent"
+    outside_prompts = outside_parent / "Prompts"
+    outside_prompts.mkdir(parents=True)
+    (outside_prompts / "root.md").write_text("outside prompt", encoding="utf-8")
+    linked_parent = tmp_path / "linked_parent"
+    _symlink_or_skip(linked_parent, outside_parent, target_is_directory=True)
+    prompts = linked_parent / "Prompts"
 
     first = inventory_prompt_files_with_findings(prompts_dir=prompts)
     (outside_prompts / "root.md").write_text("changed outside prompt", encoding="utf-8")
