@@ -35,6 +35,18 @@ class JSONDecodeError(Exception):
     """Raised when a response expected to be JSON cannot be decoded or is invalid."""
 
 
+class ThirdPartyHTTPStatusError(RuntimeError):
+    """Raised when a Third_Party provider returns an HTTP error status."""
+
+    def __init__(self, status_code: int, reason: str | None = None) -> None:
+        self.status_code = int(status_code)
+        self.reason = reason or ""
+        message = f"HTTP Error: {self.status_code}"
+        if self.reason:
+            message = f"{message} - {self.reason}"
+        super().__init__(message)
+
+
 class TokenizerUnavailable(Exception):
     """Raised when tokenizer support is unavailable."""
 
