@@ -57,7 +57,7 @@ def test_rebuild_claims_jobs_pg_enqueue_failure_returns_503(monkeypatch):
     assert exc_info.value.detail == "Claims rebuild job enqueue failed"
 
 
-def test_rebuild_helper_falls_back_to_legacy_when_jobs_owner_missing(monkeypatch):
+def test_rebuild_helper_skips_when_jobs_owner_missing(monkeypatch):
     submissions: list[tuple[int, str]] = []
 
     class _FakeSvc:
@@ -78,7 +78,7 @@ def test_rebuild_helper_falls_back_to_legacy_when_jobs_owner_missing(monkeypatch
         owner_user_id=None,
     )
 
-    assert submissions == [(42, "/tmp/user-1/Media_DB_v2.db")]
+    assert submissions == []
 
 
 def test_rebuild_all_media_uses_jobs_when_enabled(monkeypatch):
@@ -122,8 +122,57 @@ def test_rebuild_all_media_uses_jobs_when_enabled(monkeypatch):
         db.close_connection()
 
     assert result == {"status": "accepted", "enqueued": 1, "policy": "missing"}
-    assert enqueued == [{"media_id": media_id, "owner_user_id": "1"}]
+    assert enqueued == [{"media_id": media_id, "owner_user_id": "1", "idempotency_scope": "rebuild_all:missing"}]
     assert legacy_submissions == []
+
+
+def test_rebuild_all_media_jobs_retry_uses_stable_idempotency_scope(monkeypatch):
+    enqueued: list[dict[str, object]] = []
+    seen_keys: set[tuple[int, str, str]] = set()
+
+    class _User:
+        id = 1
+        is_admin = True
+
+    class _Db:
+        db_path_str = "/tmp/user-1/Media_DB_v2.db"
+
+    class _FakeSvc:
+        def submit(self, media_id: int, db_path: str):
+            raise AssertionError(f"legacy submit should not run for {media_id} at {db_path}")
+
+    def _enqueue(**kwargs):
+        media_id = int(kwargs["media_id"])
+        if media_id == 22:
+            raise RuntimeError("second media enqueue failed")
+        scope = str(kwargs.get("idempotency_scope") or "")
+        key = (media_id, str(kwargs["owner_user_id"]), scope)
+        if scope and key in seen_keys:
+            return {"id": 100}
+        seen_keys.add(key)
+        enqueued.append(kwargs)
+        return {"id": 100}
+
+    monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(claims_service.claims_jobs, "enqueue_claims_rebuild_media", _enqueue)
+    monkeypatch.setattr(claims_service, "get_claims_rebuild_service", lambda: _FakeSvc())
+    monkeypatch.setattr(
+        claims_service,
+        "list_claims_rebuild_media_ids",
+        lambda *_args, **_kwargs: [11, 22],
+    )
+
+    for _attempt in range(2):
+        with pytest.raises(HTTPException) as exc_info:
+            claims_service.rebuild_all_media(
+                policy="missing",
+                user_id=None,
+                current_user=_User(),
+                db=_Db(),
+            )
+        assert exc_info.value.status_code == 503
+
+    assert enqueued == [{"media_id": 11, "owner_user_id": "1", "idempotency_scope": "rebuild_all:missing"}]
 
 
 def test_rebuild_all_stale_policy_enqueues_expected_media(monkeypatch):

@@ -594,13 +594,13 @@ def _enqueue_claim_rebuild_if_needed(*, media_id: int, db_path: str, owner_user_
     try:
         if claims_jobs.claims_jobs_enabled():
             if not owner_user_id:
-                logger.debug("Claims rebuild Jobs enqueue skipped: missing owner_user_id; falling back to legacy service")
-            else:
-                claims_jobs.enqueue_claims_rebuild_media(
-                    media_id=int(media_id),
-                    owner_user_id=str(owner_user_id),
-                )
+                logger.debug("Claims rebuild Jobs enqueue skipped: missing owner_user_id")
                 return
+            claims_jobs.enqueue_claims_rebuild_media(
+                media_id=int(media_id),
+                owner_user_id=str(owner_user_id),
+            )
+            return
         svc = get_claims_rebuild_service()
         svc.submit(media_id=int(media_id), db_path=str(db_path))
     except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
@@ -759,7 +759,11 @@ def _enqueue_claims_alert_delivery_jobs(
 ) -> None:
     """Best-effort enqueue of alert delivery jobs for Jobs-owned Claims queues."""
     channels = _normalize_channels(config_row.get("channels_json") or config_row.get("channels"))
-    alert_id = int(config_row.get("id") or 0)
+    try:
+        alert_id = int(config_row.get("id") or 0)
+    except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("Failed to enqueue claims alert delivery job: {}", exc)
+        return
     for channel in ("slack", "webhook"):
         if not channels.get(channel):
             continue
@@ -2567,6 +2571,7 @@ def _evaluate_claims_alerts_for_user(
                 severity="warning",
                 payload_json=json.dumps(payload),
             )
+            event_row = event_row or {}
             if claims_jobs.claims_jobs_enabled() and event_row.get("id"):
                 _enqueue_claims_alert_delivery_jobs(
                     config_row=dict(cfg),
@@ -4236,7 +4241,11 @@ def rebuild_all_media(
             enqueued = 0
             try:
                 for mid in mids:
-                    claims_jobs.enqueue_claims_rebuild_media(media_id=int(mid), owner_user_id=owner_user_id)
+                    claims_jobs.enqueue_claims_rebuild_media(
+                        media_id=int(mid),
+                        owner_user_id=owner_user_id,
+                        idempotency_scope=f"rebuild_all:{normalized_policy}",
+                    )
                     enqueued += 1
             except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
                 raise HTTPException(status_code=503, detail="Claims rebuild job enqueue failed") from exc
