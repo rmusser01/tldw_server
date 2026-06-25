@@ -1914,7 +1914,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/te
 
 Expected: chat history multi-image tests pass.
 
-- [ ] **Step 5: Commit atomic history replacement**
+- [x] **Step 5: Commit atomic history replacement**
 
 Run:
 
@@ -1935,7 +1935,7 @@ Expected: commit succeeds with only the listed files.
 - Test: `tldw_Server_API/tests/Chat/unit/test_streaming_utils.py`
 - Test: `tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py`
 
-- [ ] **Step 1: Create streaming pipeline wrapper**
+- [x] **Step 1: Create streaming pipeline wrapper**
 
 Create `streaming_pipeline.py` with:
 
@@ -1973,7 +1973,7 @@ def create_chat_streaming_response(
     )
 ```
 
-- [ ] **Step 2: Route streaming construction through the wrapper**
+- [x] **Step 2: Route streaming construction through the wrapper**
 
 In `chat_service.py`, import:
 
@@ -2003,7 +2003,7 @@ return create_chat_streaming_response(
 
 Keep `create_streaming_response_with_timeout` imported or assigned in `chat_service.py` so existing tests that monkeypatch `chat_service.create_streaming_response_with_timeout` continue to work.
 
-- [ ] **Step 3: Run streaming tests**
+- [x] **Step 3: Run streaming tests**
 
 Run:
 
@@ -2013,7 +2013,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/te
 
 Expected: streaming utility and fallback tests pass.
 
-- [ ] **Step 4: Commit streaming wrapper**
+- [x] **Step 4: Commit streaming wrapper**
 
 Run:
 
@@ -2023,6 +2023,13 @@ git commit --only tldw_Server_API/app/core/Chat/streaming_pipeline.py tldw_Serve
 ```
 
 Expected: commit succeeds with only the listed files.
+
+Review follow-up: added `test_create_chat_streaming_response_preserves_factory_defaults`
+and updated the wrapper to omit unset optional kwargs so future direct wrapper callers
+preserve the underlying stream factory defaults. Verification: the new regression test
+failed before the wrapper fix, then passed; `test_streaming_utils.py` plus
+`test_chat_service_fallback.py` passed with 43 passed and 1 skipped; Bandit on
+`chat_service.py` and `streaming_pipeline.py` reported 0 findings.
 
 ---
 

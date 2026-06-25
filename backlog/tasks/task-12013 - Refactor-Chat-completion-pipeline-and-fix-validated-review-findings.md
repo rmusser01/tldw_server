@@ -25,6 +25,7 @@ modified_files:
 - tldw_Server_API/app/core/Chat/tool_execution_service.py
 - tldw_Server_API/app/core/Chat/persistence_service.py
 - tldw_Server_API/app/core/Chat/chat_logging.py
+- tldw_Server_API/app/core/Chat/streaming_pipeline.py
 - tldw_Server_API/app/core/Chat/chat_service.py
 - tldw_Server_API/app/core/Chat/chat_orchestrator.py
 - tldw_Server_API/tests/Chat/unit/test_chat_service_content.py
@@ -32,7 +33,8 @@ modified_files:
 - tldw_Server_API/tests/Chat/unit/test_chat_service_streaming_tool_autoexec.py
 - tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py
 - tldw_Server_API/tests/Chat/unit/test_chat_service_system_messages.py
-updated_date: 2026-06-25 02:00
+- tldw_Server_API/tests/Chat/unit/test_streaming_utils.py
+updated_date: 2026-06-25 02:14
 ---
 
 ## Description
@@ -79,6 +81,7 @@ Task 5 and Task 6 progress update 2026-06-24: First-choice persistence is extrac
 Task 8 document prompt versioning completed in commit a2f598003. Added regression coverage for repeated prompt saves and legacy schema repair; replaced the legacy UNIQUE(document_type, is_active) table constraint with a partial unique index on active prompts only, preserving inactive history while enforcing one active prompt per document_type. Verification: targeted red test failed before fix with sqlite3.IntegrityError; focused prompt tests passed (2 passed); full document generator unit file passed (23 passed); Bandit on tldw_Server_API/app/core/Chat/document_generator.py reported 0 findings; focused review approved with no P0-P3 findings.
 Task 7 command authorization completed across commits 3e961e15d, 601295701, 5893b0f92, 00cefdf1d, and e72e2901f. Centralized slash command authorization in command_authorization.py, wired both command dispatch and /chat/commands listing through the same fail-closed authorization decision, preserved direct orchestrator slash command compatibility in single-user owner mode, and updated docs/config references so CHAT_COMMANDS_REQUIRE_PERMISSIONS / require_permissions are documented as deprecated compatibility flags rather than security toggles. Verification: command router + command endpoint + injection focused tests passed earlier (35 passed); Bandit on touched command authorization scope reported 0 findings; final focused review approved with no P0-P3 findings after the guide snippet follow-up.
 Task 9 legacy history replacement completed across commits 4c2c07489, 93a0ad866, and a74fd93dd. Added transaction-recording regression coverage, moved existing-conversation validation plus active message fetch/delete into the same transaction as replacement insertion, added rollback coverage for insert failure after soft-delete, and preserved empty-history target validation for existing conversations. Verification: initial regression failed with delete transaction [1] versus insert transaction [2]; focused tests passed after fixes; full chat history multi-image unit file passed (4 passed); Bandit on tldw_Server_API/app/core/Chat/chat_history.py reported 0 findings; final focused review approved with no P0-P3 findings.
+Task 10 streaming pipeline extraction completed across commits 417f6e5611 and 698a17b415. Added `streaming_pipeline.py` as a thin assembly boundary around the existing streaming handler, routed the `chat_service.py` streaming call through it while preserving the `chat_service.create_streaming_response_with_timeout` monkeypatch surface, and added forwarding/default-preservation tests. Review finding addressed: unset optional wrapper fields now omit kwargs instead of overriding underlying factory defaults with `None`. Verification: default-preservation test failed before fix and passed after; `tldw_Server_API/tests/Chat/unit/test_streaming_utils.py` + `tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py` passed (43 passed, 1 skipped); Bandit on `tldw_Server_API/app/core/Chat/chat_service.py` and `tldw_Server_API/app/core/Chat/streaming_pipeline.py` reported 0 findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
