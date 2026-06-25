@@ -394,7 +394,7 @@ def _normalize_notification_ids(notification_ids: list[int]) -> list[int]:
             continue
         try:
             notif_id = int(raw_id)
-        except (TypeError, ValueError):
+        except (OverflowError, TypeError, ValueError):
             continue
         if notif_id > 0:
             normalized.add(notif_id)

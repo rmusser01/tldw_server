@@ -369,7 +369,7 @@ def test_deliver_claim_review_notifications_now_ignores_invalid_notification_ids
     result = claims_notifications.deliver_claim_review_notifications_now(
         db_path=str(tmp_path / "claims-review.db"),
         owner_user_id="1",
-        notification_ids=[True, False, "invalid", -2, 0, None],
+        notification_ids=[True, False, "invalid", float("inf"), -2, 0, None],
     )
 
     assert result == {"outcome": "skipped", "reason": "no_notification_ids", "notification_ids": []}
