@@ -127,4 +127,5 @@ async def test_run_worker_uses_writing_config_and_handler(monkeypatch: pytest.Mo
     assert cfg.queue == "writing-review"
     assert cfg.worker_id == "worker-1"
     assert captured["run_kwargs"]["handler"] is worker.handle_writing_annotation_review_job
+    assert captured["run_kwargs"]["job_type"] == "writing_scene_annotation_review"
     assert captured["stopped"] is True

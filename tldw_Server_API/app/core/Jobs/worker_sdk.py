@@ -147,6 +147,7 @@ class WorkerSDK:
         progress_cb: Callable[[], dict[str, Any]] | None = None,
         acquire_guard: Callable[[dict[str, Any]], Awaitable[bool]] | None = None,
         owner_user_id: str | None = None,
+        job_type: str | None = None,
     ) -> None:
         """Run the worker loop until stop() is called.
 
@@ -163,6 +164,7 @@ class WorkerSDK:
                     lease_seconds=self.cfg.lease_seconds,
                     worker_id=self.cfg.worker_id,
                     owner_user_id=owner_user_id,
+                    job_type=job_type,
                 )
             except _WORKER_SDK_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"Acquire error: {e}")

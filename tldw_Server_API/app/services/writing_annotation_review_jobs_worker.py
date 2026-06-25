@@ -262,6 +262,7 @@ async def run_writing_annotation_review_jobs_worker(stop_event: asyncio.Event | 
         await sdk.run(
             handler=handle_writing_annotation_review_job,
             cancel_check=lambda job_row: _should_cancel(job_row, job_manager=jm),
+            job_type=WRITING_SCENE_ANNOTATION_REVIEW_JOB_TYPE,
         )
     finally:
         if stop_watcher_task is not None and not stop_watcher_task.done():
