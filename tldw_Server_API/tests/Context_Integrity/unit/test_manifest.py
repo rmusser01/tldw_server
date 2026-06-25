@@ -63,6 +63,19 @@ def test_manifest_tamper_is_rejected() -> None:
         verify_signed_manifest(signed, signer=signer)
 
 
+def test_manifest_rejects_non_mapping_signed_manifest() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.manifest import (
+        HmacManifestSigner,
+        ManifestSignatureError,
+        verify_signed_manifest,
+    )
+
+    signer = HmacManifestSigner(key_id="test-key", secret=b"secret")
+
+    with pytest.raises(ManifestSignatureError):
+        verify_signed_manifest(None, signer=signer)
+
+
 def test_manifest_rejects_unsupported_signature_algorithm() -> None:
     from tldw_Server_API.app.core.Context_Integrity.manifest import (
         HmacManifestSigner,
@@ -79,6 +92,14 @@ def test_manifest_rejects_unsupported_signature_algorithm() -> None:
         verify_signed_manifest(signed, signer=signer)
 
 
+def test_signer_verify_returns_false_for_non_string_signature() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.manifest import HmacManifestSigner
+
+    signer = HmacManifestSigner(key_id="test-key", secret=b"secret")
+
+    assert signer.verify(b"payload", None) is False
+
+
 def test_manifest_rejects_non_ascii_signature_value() -> None:
     from tldw_Server_API.app.core.Context_Integrity.manifest import (
         HmacManifestSigner,
@@ -90,6 +111,32 @@ def test_manifest_rejects_non_ascii_signature_value() -> None:
     signer = HmacManifestSigner(key_id="test-key", secret=b"secret")
     signed = create_signed_manifest(sequence=1, entries=[_entry("skill:user:1/demo")], signer=signer)
     signed["signature"]["value"] = "not-ascii-\u00e9"
+
+    with pytest.raises(ManifestSignatureError):
+        verify_signed_manifest(signed, signer=signer)
+
+
+def test_manifest_converts_uncanonicalizable_payload_to_signature_error() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.manifest import (
+        HmacManifestSigner,
+        ManifestSignatureError,
+        verify_signed_manifest,
+    )
+
+    signer = HmacManifestSigner(key_id="test-key", secret=b"secret")
+    signed = {
+        "manifest": {
+            "schema_version": 1,
+            "sequence": 1,
+            "entries": [{1: "non-string key"}],
+        },
+        "signature": {
+            "alg": "hmac-sha256",
+            "key_id": signer.key_id,
+            "value": "invalid",
+        },
+        "manifest_digest": "sha256:invalid",
+    }
 
     with pytest.raises(ManifestSignatureError):
         verify_signed_manifest(signed, signer=signer)

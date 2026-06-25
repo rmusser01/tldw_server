@@ -59,7 +59,9 @@ class HmacManifestSigner:
         digest = hmac.new(self._secret, payload, hashlib.sha256).digest()
         return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
-    def verify(self, payload: bytes, signature: str) -> bool:
+    def verify(self, payload: bytes, signature: object) -> bool:
+        if not isinstance(signature, str):
+            return False
         try:
             signature.encode("ascii")
         except UnicodeEncodeError:
@@ -137,6 +139,9 @@ def verify_signed_manifest(
     signer: HmacManifestSigner,
     anti_rollback_anchor: AntiRollbackAnchor | None = None,
 ) -> VerifiedManifest:
+    if not isinstance(signed_manifest, Mapping):
+        raise ManifestSignatureError("signed manifest is malformed")
+
     manifest = signed_manifest.get("manifest")
     signature = signed_manifest.get("signature")
     if not isinstance(manifest, dict) or not isinstance(signature, dict):
@@ -146,7 +151,10 @@ def verify_signed_manifest(
     if signature.get("key_id") != signer.key_id:
         raise ManifestSignatureError("manifest key id mismatch")
 
-    payload = _stable_json(manifest)
+    try:
+        payload = _stable_json(manifest)
+    except (TypeError, ValueError) as exc:
+        raise ManifestSignatureError("manifest payload is not canonicalizable") from exc
     expected_digest = _manifest_digest(payload)
     if signed_manifest.get("manifest_digest") != expected_digest:
         raise ManifestSignatureError("manifest digest mismatch")
