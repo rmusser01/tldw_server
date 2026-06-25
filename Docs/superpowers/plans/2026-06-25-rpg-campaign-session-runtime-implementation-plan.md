@@ -105,7 +105,7 @@ These amendments supersede any later snippet that conflicts with them.
 - Create: `tldw_Server_API/app/core/RPG/rules/adapters.py`
 - Test: `tldw_Server_API/tests/RPG/test_rules_adapters.py`
 
-- [ ] **Step 1: Write failing adapter contract tests**
+- [x] **Step 1: Write failing adapter contract tests**
 
 ```python
 from tldw_Server_API.app.core.RPG.rules.adapters import build_default_adapter_registry
@@ -139,13 +139,13 @@ def test_fate_adapter_does_not_require_d20_fields():
     assert fate.mechanics_tags["resolution_family"] == "fate"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rules_adapters.py -v`
 
 Expected: FAIL because `tldw_Server_API.app.core.RPG` does not exist.
 
-- [ ] **Step 3: Add core constants, errors, and dataclasses**
+- [x] **Step 3: Add core constants, errors, and dataclasses**
 
 ```python
 # tldw_Server_API/app/core/RPG/constants.py
@@ -307,7 +307,7 @@ class RPGSnapshotState:
     unresolved_rulings: dict[str, dict[str, Any]] = field(default_factory=dict)
 ```
 
-- [ ] **Step 4: Add the adapter protocol and bundled registry**
+- [x] **Step 4: Add the adapter protocol and bundled registry**
 
 ```python
 # tldw_Server_API/app/core/RPG/rules/adapters.py
@@ -496,7 +496,7 @@ def build_default_adapter_registry() -> RuleAdapterRegistry:
     )
 ```
 
-- [ ] **Step 5: Export the public package symbols**
+- [x] **Step 5: Export the public package symbols**
 
 ```python
 # tldw_Server_API/app/core/RPG/__init__.py
@@ -507,13 +507,13 @@ __all__ = ["RPGCampaign", "RPGSession", "RPGSessionEvent", "RPGSnapshotState"]
 
 Task 5 adds `RPGService` to these exports after `service.py` exists.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rules_adapters.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/RPG tldw_Server_API/tests/RPG/test_rules_adapters.py
@@ -526,7 +526,7 @@ git commit -m "feat: add RPG rules adapter registry"
 - Create: `tldw_Server_API/app/core/DB_Management/RPG_DB.py`
 - Test: `tldw_Server_API/tests/RPG/test_rpg_db.py`
 
-- [ ] **Step 1: Write failing repository tests**
+- [x] **Step 1: Write failing repository tests**
 
 ```python
 import pytest
@@ -678,13 +678,13 @@ def test_commit_events_rejects_stale_expected_sequence():
         repo.commit_events_and_snapshot(42, session.id, 7, 0, payload, {"notes": []}, {}, "stale-key", "hash-a", "fate", "1.0.0", None)
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_db.py -v`
 
 Expected: FAIL because `RPGRepository` does not exist.
 
-- [ ] **Step 3: Implement schema initialization and row mapping**
+- [x] **Step 3: Implement schema initialization and row mapping**
 
 ```python
 # tldw_Server_API/app/core/DB_Management/RPG_DB.py
@@ -885,7 +885,7 @@ def get_latest_snapshot(self, owner_user_id: int, session_id: int) -> RPGSnapsho
     raise NotImplementedError
 ```
 
-- [ ] **Step 4: Add idempotent atomic event/snapshot commit behavior**
+- [x] **Step 4: Add idempotent atomic event/snapshot commit behavior**
 
 ```python
 def commit_events_and_snapshot(
@@ -1050,13 +1050,13 @@ def commit_events_and_snapshot(
 
 The implementation must keep idempotency in `rpg_idempotency_records`, not as a uniqueness constraint on `rpg_session_events`; a single idempotent request can append multiple events. `operation_scope` distinguishes campaign creation, session creation, event recording, proposal apply, and proposal reject operations so all mutating REST and MCP calls can be idempotent. Idempotent replay returns the stored response payload/event IDs and must not re-run the reducer or insert another snapshot.
 
-- [ ] **Step 5: Run focused repository tests**
+- [x] **Step 5: Run focused repository tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_db.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/DB_Management/RPG_DB.py tldw_Server_API/tests/RPG/test_rpg_db.py
@@ -1071,7 +1071,7 @@ git commit -m "feat: add RPG session repository"
 - Modify: `tldw_Server_API/app/core/RPG/models.py`
 - Test: `tldw_Server_API/tests/RPG/test_rpg_events_reducer.py`
 
-- [ ] **Step 1: Write failing event and reducer tests**
+- [x] **Step 1: Write failing event and reducer tests**
 
 ```python
 import pytest
@@ -1129,13 +1129,13 @@ def test_reducer_rebuilds_same_snapshot_from_same_events():
     assert first.rolls[0]["roll_id"] == "roll-1"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_events_reducer.py -v`
 
 Expected: FAIL because event validation and reducer modules do not exist.
 
-- [ ] **Step 3: Implement canonical hashes and payload validators**
+- [x] **Step 3: Implement canonical hashes and payload validators**
 
 ```python
 # tldw_Server_API/app/core/RPG/events.py
@@ -1195,7 +1195,7 @@ def validate_event_envelope(event: dict[str, Any]) -> dict[str, Any]:
     return normalized
 ```
 
-- [ ] **Step 4: Implement pure reducer functions**
+- [x] **Step 4: Implement pure reducer functions**
 
 ```python
 # tldw_Server_API/app/core/RPG/reducer.py
@@ -1264,13 +1264,13 @@ def reduce_events(snapshot: RPGSnapshotState, events: list[dict[str, Any]]) -> R
     return current
 ```
 
-- [ ] **Step 5: Run focused reducer tests**
+- [x] **Step 5: Run focused reducer tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_events_reducer.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/RPG/events.py tldw_Server_API/app/core/RPG/reducer.py tldw_Server_API/app/core/RPG/models.py tldw_Server_API/tests/RPG/test_rpg_events_reducer.py
@@ -1285,7 +1285,7 @@ git commit -m "feat: add RPG event reducer"
 - Modify: `tldw_Server_API/app/core/RPG/models.py`
 - Test: `tldw_Server_API/tests/RPG/test_rpg_dice_checks.py`
 
-- [ ] **Step 1: Write failing dice and check tests**
+- [x] **Step 1: Write failing dice and check tests**
 
 ```python
 from tldw_Server_API.app.core.RPG.checks import resolve_check
@@ -1331,13 +1331,13 @@ def test_fate_check_uses_fate_dice_total_against_ladder_target():
     assert result.outcome == "tie"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_dice_checks.py -v`
 
 Expected: FAIL because dice and check modules do not exist.
 
-- [ ] **Step 3: Add dice result dataclass and roller**
+- [x] **Step 3: Add dice result dataclass and roller**
 
 ```python
 # tldw_Server_API/app/core/RPG/models.py
@@ -1403,7 +1403,7 @@ class DiceRoller:
         return [self._randbelow(3) - 1 for _ in range(4)]
 ```
 
-- [ ] **Step 4: Add adapter-aware check resolver**
+- [x] **Step 4: Add adapter-aware check resolver**
 
 ```python
 # tldw_Server_API/app/core/RPG/checks.py
@@ -1422,13 +1422,13 @@ def resolve_check(adapter: RuleAdapter, roller: DiceRoller, payload: dict[str, A
 
 Implement the actual D20 and Fate resolution helpers on the bundled adapter classes or resolver callbacks registered by `StaticRuleAdapter`; core check orchestration must not branch on `mechanics_tags["resolution_family"]`.
 
-- [ ] **Step 5: Run focused dice/check tests**
+- [x] **Step 5: Run focused dice/check tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_dice_checks.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/RPG/dice.py tldw_Server_API/app/core/RPG/checks.py tldw_Server_API/app/core/RPG/models.py tldw_Server_API/tests/RPG/test_rpg_dice_checks.py

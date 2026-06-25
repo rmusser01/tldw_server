@@ -30,6 +30,28 @@ class RuleAdapterInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class DiceRollResult:
+    expression: str
+    values: list[int]
+    modifier: int
+    total: int
+    dice_count: int
+    sides: int | None
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class CheckResult:
+    check_label: str
+    mechanics: str
+    roll: DiceRollResult
+    target: int | None
+    success: bool | None
+    margin: int | None
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
 class RPGCampaign:
     id: int
     owner_user_id: int

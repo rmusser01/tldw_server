@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -10,8 +11,8 @@ from tldw_Server_API.app.core.RPG.constants import (
     RPG_ADAPTER_PF2E,
     RPG_ADAPTER_VERSION_V1,
 )
-from tldw_Server_API.app.core.RPG.errors import RPGNotFoundError
-from tldw_Server_API.app.core.RPG.models import RuleAdapterInfo, RuleLicenseSummary
+from tldw_Server_API.app.core.RPG.errors import RPGNotFoundError, RPGValidationError
+from tldw_Server_API.app.core.RPG.models import CheckResult, DiceRollResult, RuleAdapterInfo, RuleLicenseSummary
 
 
 class RuleAdapter(Protocol):
@@ -36,7 +37,7 @@ class RuleAdapter(Protocol):
     def validate_actor(self, actor_payload: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
-    def resolve_check(self, roller: Any, payload: dict[str, Any]) -> Any:
+    def resolve_check(self, roller: Any, payload: dict[str, Any]) -> CheckResult:
         raise NotImplementedError
 
     def content_pack_refs(self) -> list[dict[str, Any]]:
@@ -76,6 +77,7 @@ class StaticRuleAdapter:
     mechanics_tags: dict[str, str]
     _actor_schema: dict[str, Any]
     _check_schema: dict[str, Any]
+    _check_resolver: Callable[[Any, dict[str, Any]], CheckResult]
 
     def actor_schema(self) -> dict[str, Any]:
         return deepcopy(self._actor_schema)
@@ -89,8 +91,8 @@ class StaticRuleAdapter:
     def validate_actor(self, actor_payload: dict[str, Any]) -> dict[str, Any]:
         return dict(actor_payload)
 
-    def resolve_check(self, roller: Any, payload: dict[str, Any]) -> Any:
-        raise NotImplementedError("adapter check resolution is implemented in the dice/check slice")
+    def resolve_check(self, roller: Any, payload: dict[str, Any]) -> CheckResult:
+        return self._check_resolver(roller, payload)
 
     def content_pack_refs(self) -> list[dict[str, Any]]:
         return []
@@ -163,6 +165,91 @@ def _fate_check_schema() -> dict[str, Any]:
     }
 
 
+def _required_label(payload: dict[str, Any]) -> str:
+    value = payload.get("check_label")
+    if not isinstance(value, str) or not value.strip():
+        raise RPGValidationError("check_label is required")
+    return value.strip()
+
+
+def _bounded_int(payload: dict[str, Any], key: str, *, default: int, minimum: int, maximum: int) -> int:
+    value = payload.get(key, default)
+    if type(value) is not int:
+        raise RPGValidationError(f"{key} must be an integer")
+    if not minimum <= value <= maximum:
+        raise RPGValidationError(f"{key} must be between {minimum} and {maximum}")
+    return value
+
+
+def _optional_bounded_int(payload: dict[str, Any], key: str, *, minimum: int, maximum: int) -> int | None:
+    if key not in payload or payload[key] is None:
+        return None
+    return _bounded_int(payload, key, default=0, minimum=minimum, maximum=maximum)
+
+
+def _roll_with_extra_modifier(roller: Any, expression: str, modifier: int) -> DiceRollResult:
+    roll = roller.roll(expression)
+    if modifier == 0:
+        return roll
+
+    combined_modifier = roll.modifier + modifier
+    expression_prefix = f"{roll.dice_count}d{roll.sides}"
+    combined_expression = f"{expression_prefix}{combined_modifier:+d}" if combined_modifier else expression_prefix
+
+    return DiceRollResult(
+        expression=combined_expression,
+        values=list(roll.values),
+        modifier=combined_modifier,
+        total=sum(roll.values) + combined_modifier,
+        dice_count=roll.dice_count,
+        sides=roll.sides,
+        details={"base_expression": roll.expression, "payload_modifier": modifier},
+    )
+
+
+def _resolve_d20_check(roller: Any, payload: dict[str, Any]) -> CheckResult:
+    check_label = _required_label(payload)
+    roll_expression = payload.get("roll_expression", "1d20")
+    if not isinstance(roll_expression, str):
+        raise RPGValidationError("roll_expression must be a string")
+
+    modifier = _bounded_int(payload, "modifier", default=0, minimum=-100, maximum=100)
+    dc = _optional_bounded_int(payload, "dc", minimum=0, maximum=100)
+    roll = _roll_with_extra_modifier(roller, roll_expression, modifier)
+    margin = roll.total - dc if dc is not None else None
+
+    return CheckResult(
+        check_label=check_label,
+        mechanics="d20",
+        roll=roll,
+        target=dc,
+        success=roll.total >= dc if dc is not None else None,
+        margin=margin,
+        details={"roll_expression": roll_expression, "modifier": modifier},
+    )
+
+
+def _resolve_fate_check(roller: Any, payload: dict[str, Any]) -> CheckResult:
+    check_label = _required_label(payload)
+    skill_bonus = _bounded_int(payload, "skill_bonus", default=0, minimum=-8, maximum=12)
+    target = _optional_bounded_int(payload, "ladder_target", minimum=-4, maximum=12)
+    if target is None:
+        raise RPGValidationError("ladder_target is required")
+
+    roll = roller.roll_fate(modifier=skill_bonus)
+    margin = roll.total - target
+
+    return CheckResult(
+        check_label=check_label,
+        mechanics="fate",
+        roll=roll,
+        target=target,
+        success=roll.total >= target,
+        margin=margin,
+        details={"skill_bonus": skill_bonus},
+    )
+
+
 def build_default_adapter_registry() -> RuleAdapterRegistry:
     return RuleAdapterRegistry(
         [
@@ -184,6 +271,7 @@ def build_default_adapter_registry() -> RuleAdapterRegistry:
                 mechanics_tags={"resolution_family": "d20", "dice": "d20", "genre": "fantasy"},
                 _actor_schema=_base_actor_schema(),
                 _check_schema=_d20_check_schema(),
+                _check_resolver=_resolve_d20_check,
             ),
             StaticRuleAdapter(
                 adapter_key=RPG_ADAPTER_FATE,
@@ -203,6 +291,7 @@ def build_default_adapter_registry() -> RuleAdapterRegistry:
                 mechanics_tags={"resolution_family": "fate", "dice": "fate", "genre": "generic"},
                 _actor_schema=_base_actor_schema(),
                 _check_schema=_fate_check_schema(),
+                _check_resolver=_resolve_fate_check,
             ),
             StaticRuleAdapter(
                 adapter_key=RPG_ADAPTER_PF2E,
@@ -222,6 +311,7 @@ def build_default_adapter_registry() -> RuleAdapterRegistry:
                 mechanics_tags={"resolution_family": "d20", "dice": "d20", "genre": "fantasy"},
                 _actor_schema=_base_actor_schema(),
                 _check_schema=_d20_check_schema(),
+                _check_resolver=_resolve_d20_check,
             ),
         ]
     )
