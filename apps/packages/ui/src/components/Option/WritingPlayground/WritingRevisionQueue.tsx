@@ -12,6 +12,7 @@ export type WritingRevisionQueueProps = {
   onReject: (proposal: WritingRevisionProposal) => void
   onCopy: (proposal: WritingRevisionProposal) => void
   onRegenerate: (proposal: WritingRevisionProposal) => void
+  actionsDisabled?: boolean
 }
 
 const STATUS_COLORS: Record<WritingRevisionStatus, string> = {
@@ -62,7 +63,8 @@ export function WritingRevisionQueue({
   onApply,
   onReject,
   onCopy,
-  onRegenerate
+  onRegenerate,
+  actionsDisabled = false
 }: WritingRevisionQueueProps) {
   return (
     <section
@@ -126,6 +128,7 @@ export function WritingRevisionQueue({
                 size="small"
                 type="primary"
                 icon={<Check size={14} />}
+                disabled={actionsDisabled}
                 onClick={() => onApply(proposal)}
               >
                 Apply
@@ -136,12 +139,18 @@ export function WritingRevisionQueue({
             </Button>
             {showStandardActions(proposal) ? (
               <>
-                <Button size="small" icon={<X size={14} />} onClick={() => onReject(proposal)}>
+                <Button
+                  size="small"
+                  icon={<X size={14} />}
+                  disabled={actionsDisabled}
+                  onClick={() => onReject(proposal)}
+                >
                   Reject
                 </Button>
                 <Button
                   size="small"
                   icon={<RefreshCw size={14} />}
+                  disabled={actionsDisabled}
                   onClick={() => onRegenerate(proposal)}
                 >
                   Regenerate

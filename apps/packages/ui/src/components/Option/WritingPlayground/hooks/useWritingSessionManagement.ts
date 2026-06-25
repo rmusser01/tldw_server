@@ -164,6 +164,7 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
   const lastSavedThemeNameRef = React.useRef<Record<string, string | null>>({})
   const lastSavedChatModeRef = React.useRef<Record<string, boolean>>({})
   const editorPromptRichRef = React.useRef<JSONContent | null>(null)
+  const promptSyncSuspendedRef = React.useRef(suspendEditorPromptSync)
 
   // --- Queries ---
   const {
@@ -567,6 +568,8 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
   ])
 
   React.useEffect(() => {
+    const wasPromptSyncSuspended = promptSyncSuspendedRef.current
+    promptSyncSuspendedRef.current = suspendEditorPromptSync
     if (!activeSessionDetail) {
       if (lastLoadedSessionIdRef.current === null) {
         editorPromptRichRef.current = null
@@ -644,6 +647,17 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       }
       lastLoadedSessionIdRef.current = activeSessionDetail.id
       return
+    }
+    if (wasPromptSyncSuspended && !suspendEditorPromptSync) {
+      const sessionPromptPayload =
+        pendingSaveMapRef.current[activeSessionDetail.id] ??
+        activeSessionDetail.payload
+      const sessionPrompt = getPromptFromPayload(sessionPromptPayload)
+      const sessionPromptRich = getPromptRichFromPayload(sessionPromptPayload)
+      if (editorText !== sessionPrompt) {
+        setEditorText(sessionPrompt)
+      }
+      editorPromptRichRef.current = sessionPromptRich
     }
     if (!isDirty) {
       if (!suspendEditorPromptSync && editorText !== nextPrompt) {

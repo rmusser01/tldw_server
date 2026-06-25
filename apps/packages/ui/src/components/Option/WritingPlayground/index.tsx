@@ -3183,12 +3183,15 @@ export const WritingPlayground = () => {
                     )}
                     <WritingRevisionQueue
                       proposals={revisionState.revisions}
-                      onApply={(proposal) =>
+                      actionsDisabled={isSceneEditorPending}
+                      onApply={(proposal) => {
+                        if (isSceneEditorPending) return
                         revisionState.applyRevision(proposal.id)
-                      }
-                      onReject={(proposal) =>
+                      }}
+                      onReject={(proposal) => {
+                        if (isSceneEditorPending) return
                         revisionState.rejectRevision(proposal.id)
-                      }
+                      }}
                       onCopy={(proposal) => {
                         void handleCopyRevision(proposal)
                       }}

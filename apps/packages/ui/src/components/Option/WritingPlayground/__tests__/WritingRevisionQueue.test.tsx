@@ -5,7 +5,9 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest"
 import { WritingRevisionQueue } from "../WritingRevisionQueue"
 import type { WritingRevisionProposal } from "../writing-revision-types"
 
-const dom = new JSDOM("<!doctype html><html><body></body></html>")
+const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+  url: "http://localhost/"
+})
 const requestAnimationFrame = (callback: FrameRequestCallback) =>
   dom.window.setTimeout(() => callback(Date.now()), 0)
 const cancelAnimationFrame = (id: number) => {
@@ -184,6 +186,44 @@ describe("WritingRevisionQueue", () => {
 
     fireEvent.click(view.getByRole("button", { name: /copy/i }))
 
+    expect(onCopy).toHaveBeenCalledWith(expect.objectContaining({ id: "revision-1" }))
+  })
+
+  it("disables mutating actions while the queue is locked", () => {
+    const onApply = vi.fn()
+    const onReject = vi.fn()
+    const onCopy = vi.fn()
+    const onRegenerate = vi.fn()
+
+    const view = render(
+      <WritingRevisionQueue
+        proposals={[buildProposal()]}
+        actionsDisabled
+        onApply={onApply}
+        onReject={onReject}
+        onCopy={onCopy}
+        onRegenerate={onRegenerate}
+      />
+    )
+
+    const apply = view.getByRole("button", { name: /apply/i })
+    const reject = view.getByRole("button", { name: /reject/i })
+    const copy = view.getByRole("button", { name: /copy/i })
+    const regenerate = view.getByRole("button", { name: /regenerate/i })
+
+    expect(apply).toBeDisabled()
+    expect(reject).toBeDisabled()
+    expect(copy).not.toBeDisabled()
+    expect(regenerate).toBeDisabled()
+
+    fireEvent.click(apply)
+    fireEvent.click(reject)
+    fireEvent.click(regenerate)
+    fireEvent.click(copy)
+
+    expect(onApply).not.toHaveBeenCalled()
+    expect(onReject).not.toHaveBeenCalled()
+    expect(onRegenerate).not.toHaveBeenCalled()
     expect(onCopy).toHaveBeenCalledWith(expect.objectContaining({ id: "revision-1" }))
   })
 })

@@ -760,6 +760,54 @@ describe("WritingPlayground phase1 baseline", () => {
     expect(updatePayload?.payload?.prompt).not.toBe("Scene body should not leak")
   })
 
+  it("restores the session prompt after leaving a scene during a settings autosave", async () => {
+    seedWritingSession({ prompt: "Session draft should return" })
+    useWritingPlaygroundStore.setState({
+      activeProjectId: "project-1",
+      activeNodeId: "scene-1",
+      activeNodeType: "scene"
+    })
+    mockState.queryData.set(mockState.queryKey(["manuscript-scene", "scene-1"]), {
+      id: "scene-1",
+      chapter_id: "chapter-1",
+      project_id: "project-1",
+      title: "Scene 1",
+      sort_order: 1,
+      content: sceneRichContent("Scene body should not leak"),
+      content_plain: "Scene body should not leak",
+      synopsis: null,
+      word_count: 5,
+      pov_character_id: null,
+      status: "draft",
+      created_at: "2026-06-23T12:00:00Z",
+      last_modified: "2026-06-23T12:00:00Z",
+      deleted: false,
+      client_id: "test-client",
+      version: 3
+    })
+
+    render(<WritingPlayground />)
+
+    await waitFor(() => {
+      expect(getEditor()).toHaveValue("Scene body should not leak")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle settings" }))
+    const streamingToggle = await screen.findByLabelText("Streaming")
+    fireEvent.click(streamingToggle)
+
+    act(() => {
+      useWritingPlaygroundStore.setState({
+        activeNodeId: "chapter-1",
+        activeNodeType: "chapter"
+      })
+    })
+
+    await waitFor(() => {
+      expect(getEditor()).toHaveValue("Session draft should return")
+    })
+  })
+
   it("blocks generation while a selected scene is still binding", async () => {
     mockState.storageValues.set("selectedModel", "mock-model")
     seedWritingSession({ prompt: "Session draft should not generate" })
@@ -780,6 +828,39 @@ describe("WritingPlayground phase1 baseline", () => {
 
     expect(mockState.sendCalls).toHaveLength(0)
     expect(mockState.streamCalls).toHaveLength(0)
+  })
+
+  it("blocks revision queue mutations while a selected scene is still binding", async () => {
+    mockState.storageValues.set("selectedModel", "mock-model")
+    mockState.sendResponses.push(structuredReplacement("The sharper sentence."))
+    seedWritingSession({ prompt: "Intro. The old sentence. Outro." })
+
+    render(<WritingPlayground />)
+    const editor = getEditor()
+    selectEditorText(editor, "The old sentence.")
+
+    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText("The sharper sentence.")).toBeInTheDocument()
+    })
+
+    act(() => {
+      useWritingPlaygroundStore.setState({
+        activeProjectId: "project-1",
+        activeNodeId: "scene-1",
+        activeNodeType: "scene"
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /apply/i })).toBeDisabled()
+    })
+    expect(screen.getByRole("button", { name: /reject/i })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /regenerate/i })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole("button", { name: /apply/i }))
+    expect(getEditor()).toHaveValue("Intro. The old sentence. Outro.")
   })
 
   it("initializes the workflow preset from the active session payload", async () => {
