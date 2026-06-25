@@ -119,12 +119,19 @@ export function useActiveManuscriptScene({
     staleTime: 30_000
   })
 
-  const isSceneDirty = isBindingDirty(binding, editorText, tipTapContent)
+  const bindingMatchesActiveScene =
+    activeNodeType === "scene" &&
+    Boolean(activeNodeId) &&
+    binding?.scene.id === activeNodeId
+  const isSceneDirty = bindingMatchesActiveScene
+    ? isBindingDirty(binding, editorText, tipTapContent)
+    : false
 
   React.useEffect(() => {
-    if (activeNodeType === "scene" || !binding || isSceneDirty) return
+    if (activeNodeType === "scene" || !binding) return
+    if (isBindingDirty(binding, editorText, tipTapContent)) return
     setBinding(null)
-  }, [activeNodeType, binding, isSceneDirty])
+  }, [activeNodeType, binding, editorText, tipTapContent])
 
   React.useEffect(() => {
     const scene = sceneQuery.data ?? null
@@ -140,7 +147,7 @@ export function useActiveManuscriptScene({
       binding.savedContentSignature === nextBinding.savedContentSignature
     if (isSameSavedScene) return
 
-    if (binding && isSceneDirty) return
+    if (binding?.scene.id === scene.id && isSceneDirty) return
 
     setEditorText(nextBinding.savedPlainText)
     setTipTapContent(nextBinding.savedContent)
@@ -157,6 +164,13 @@ export function useActiveManuscriptScene({
 
   const saveScene = React.useCallback(async () => {
     if (!binding) return null
+    if (
+      activeNodeType !== "scene" ||
+      !activeNodeId ||
+      binding.scene.id !== activeNodeId
+    ) {
+      return null
+    }
 
     const content = resolveSaveContent(binding, editorText, tipTapContent)
     const savedScene = (await updateManuscriptScene(
@@ -180,13 +194,25 @@ export function useActiveManuscriptScene({
     setTipTapContent(nextBinding.savedContent)
     setBinding(nextBinding)
     return savedScene
-  }, [binding, editorText, queryClient, setEditorText, setTipTapContent, tipTapContent])
+  }, [
+    activeNodeId,
+    activeNodeType,
+    binding,
+    editorText,
+    queryClient,
+    setEditorText,
+    setTipTapContent,
+    tipTapContent
+  ])
 
   const reloadScene = React.useCallback(() => {
     const targetSceneId =
-      binding?.scene.id ??
-      (activeNodeType === "scene" ? activeNodeId : null)
-    if (binding) {
+      bindingMatchesActiveScene && binding
+        ? binding.scene.id
+        : activeNodeType === "scene"
+          ? activeNodeId
+          : null
+    if (bindingMatchesActiveScene && binding) {
       setEditorText(binding.savedPlainText)
       setTipTapContent(binding.savedContent)
     }
@@ -199,19 +225,21 @@ export function useActiveManuscriptScene({
     activeNodeId,
     activeNodeType,
     binding,
+    bindingMatchesActiveScene,
     queryClient,
     setEditorText,
     setTipTapContent
   ])
+  const exposedBinding = bindingMatchesActiveScene ? binding : null
 
   return {
-    scene: binding?.scene ?? null,
-    sceneId: binding?.scene.id ?? null,
-    sceneVersion: binding?.scene.version ?? null,
-    isSceneBound: Boolean(binding),
+    scene: exposedBinding?.scene ?? null,
+    sceneId: exposedBinding?.scene.id ?? null,
+    sceneVersion: exposedBinding?.scene.version ?? null,
+    isSceneBound: Boolean(exposedBinding),
     isSceneLoading: sceneQuery.isLoading || sceneQuery.isFetching,
     isSceneDirty,
-    canCreateRangeAnnotation: Boolean(binding) && !isSceneDirty,
+    canCreateRangeAnnotation: Boolean(exposedBinding) && !isSceneDirty,
     saveScene,
     reloadScene
   }

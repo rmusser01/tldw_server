@@ -306,8 +306,74 @@ describe("useActiveManuscriptScene", () => {
     })
 
     expect(result.current.editorText).toBe("Unsaved scene one")
-    expect(result.current.binding.sceneId).toBe("scene-1")
-    expect(result.current.binding.sceneVersion).toBe(3)
-    expect(result.current.binding.isSceneDirty).toBe(true)
+    expect(result.current.binding.isSceneBound).toBe(false)
+    expect(result.current.binding.sceneId).toBeNull()
+    expect(result.current.binding.sceneVersion).toBeNull()
+    expect(result.current.binding.isSceneDirty).toBe(false)
+    expect(result.current.binding.canCreateRangeAnnotation).toBe(false)
+  })
+
+  it("does not expose or save the previous scene while a new scene selection is loading", async () => {
+    let resolveSecondScene:
+      | ((scene: ManuscriptSceneResponse) => void)
+      | null = null
+    vi.mocked(getManuscriptScene).mockImplementation((sceneId) => {
+      if (sceneId === "scene-2") {
+        return new Promise<ManuscriptSceneResponse>((resolve) => {
+          resolveSecondScene = resolve
+        })
+      }
+      return Promise.resolve(makeScene())
+    })
+    vi.mocked(updateManuscriptScene).mockResolvedValue(makeScene({ version: 4 }))
+
+    const { result, rerender } = renderActiveSceneHook({
+      activeNodeId: "scene-1",
+      activeNodeType: "scene"
+    })
+
+    await waitFor(() => {
+      expect(result.current.binding.sceneId).toBe("scene-1")
+    })
+
+    rerender({
+      activeNodeId: "scene-2",
+      activeNodeType: "scene"
+    })
+
+    await waitFor(() => {
+      expect(getManuscriptScene).toHaveBeenCalledWith("scene-2")
+    })
+
+    expect(result.current.binding.isSceneBound).toBe(false)
+    expect(result.current.binding.sceneId).toBeNull()
+    expect(result.current.binding.canCreateRangeAnnotation).toBe(false)
+
+    act(() => {
+      result.current.setEditorText("Edit during transition")
+    })
+
+    await act(async () => {
+      await result.current.binding.saveScene()
+    })
+
+    expect(updateManuscriptScene).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveSecondScene?.(
+        makeScene({
+          id: "scene-2",
+          title: "Scene 2",
+          content: sceneContent("Second saved scene") as Record<string, unknown>,
+          content_plain: "Second saved scene",
+          version: 8
+        })
+      )
+    })
+
+    await waitFor(() => {
+      expect(result.current.binding.sceneId).toBe("scene-2")
+    })
+    expect(result.current.editorText).toBe("Second saved scene")
   })
 })

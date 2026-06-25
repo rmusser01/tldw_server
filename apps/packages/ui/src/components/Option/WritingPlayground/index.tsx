@@ -412,10 +412,14 @@ export const WritingPlayground = () => {
     isSceneDirty,
     saveScene: saveActiveScene
   } = activeManuscriptScene
+  const isSceneNodeSelected =
+    activeNodeType === "scene" && Boolean(activeNodeId)
+  const isSceneEditorPending = isSceneNodeSelected && !isSceneBound
+  const isEditorLocked = isGenerating || isSceneEditorPending
 
   const applyEditorValue = React.useCallback(
     (nextValue: string, options?: EditorValueUpdateOptions) => {
-      if (!isSceneBound) {
+      if (!isSceneNodeSelected) {
         return applyPromptValue(nextValue, options)
       }
       const selection = getEditorSelection(options)
@@ -428,7 +432,7 @@ export const WritingPlayground = () => {
       setTipTapContent(promptRich)
       return selection
     },
-    [applyPromptValue, isSceneBound, setEditorText, setTipTapContent]
+    [applyPromptValue, isSceneNodeSelected, setEditorText, setTipTapContent]
   )
 
   const textareaEditorAdapter = React.useMemo(
@@ -3094,7 +3098,7 @@ export const WritingPlayground = () => {
                             setActiveEditorAdapter(adapter)
                           }}
                           onSelectionChange={updateRevisionSelection}
-                          editable={!isGenerating}
+                          editable={!isEditorLocked}
                           placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")}
                           className={cn("flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}
                         />
@@ -3102,7 +3106,7 @@ export const WritingPlayground = () => {
                     ) : (
                       <Dropdown menu={{ items: editorMenuItems }} trigger={["contextMenu"]}>
                         <div className={cn("flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}>
-                            <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onClick={refreshRevisionSelection} onKeyUp={refreshRevisionSelection} onSelect={refreshRevisionSelection} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isGenerating} className="!resize-y" />
+                            <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onClick={refreshRevisionSelection} onKeyUp={refreshRevisionSelection} onSelect={refreshRevisionSelection} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isEditorLocked} className="!resize-y" />
                         </div>
                       </Dropdown>
                     )
@@ -3128,7 +3132,7 @@ export const WritingPlayground = () => {
                                   setActiveEditorAdapter(adapter)
                                 }}
                                 onSelectionChange={updateRevisionSelection}
-                                editable={!isGenerating}
+                                editable={!isEditorLocked}
                                 placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")}
                                 className={cn("flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}
                               />
@@ -3136,7 +3140,7 @@ export const WritingPlayground = () => {
                           ) : (
                             <Dropdown menu={{ items: editorMenuItems }} trigger={["contextMenu"]}>
                               <div>
-                                <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onClick={refreshRevisionSelection} onKeyUp={refreshRevisionSelection} onSelect={refreshRevisionSelection} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isGenerating} className="!resize-y" />
+                                <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onClick={refreshRevisionSelection} onKeyUp={refreshRevisionSelection} onSelect={refreshRevisionSelection} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isEditorLocked} className="!resize-y" />
                               </div>
                             </Dropdown>
                           )}
