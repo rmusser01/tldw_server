@@ -268,6 +268,37 @@ class AdminStartupWarningsResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AdminContextIntegrityFinding(BaseModel):
+    """One current-process Context Integrity finding."""
+
+    asset_id: str
+    state: str
+    severity: str
+    summary: str
+    remediation: str
+    source_type: str
+    current_digest: str | None = None
+    approved_digest: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+    detected_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminContextIntegrityResponse(BaseModel):
+    """Current-process Context Integrity state for admin inspection."""
+
+    scope: Literal["current_process"] = "current_process"
+    mode: str
+    degraded: bool
+    manifest_sequence: int | None = None
+    manifest_digest: str | None = None
+    findings_present: bool
+    findings: list[AdminContextIntegrityFinding] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 #######################################################################################################################
 #
 # Registration Code Schemas

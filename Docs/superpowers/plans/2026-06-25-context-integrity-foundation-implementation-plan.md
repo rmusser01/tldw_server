@@ -2362,6 +2362,14 @@ git commit -m "feat: enforce context integrity for prompt loader"
 
 ## Task 8: Admin Status And Findings Endpoint
 
+**Status**: Complete. Added current-process admin status/finding inspection endpoint.
+
+**Verification**:
+- RED run: `.venv/bin/python -m pytest tldw_Server_API/tests/AuthNZ_SQLite/test_admin_context_integrity_sqlite.py -q` failed before implementation with 404 responses.
+- Focused Task 8 suite: `.venv/bin/python -m pytest tldw_Server_API/tests/AuthNZ_SQLite/test_admin_context_integrity_sqlite.py tldw_Server_API/tests/AuthNZ_SQLite/test_admin_startup_warnings_sqlite.py -q` passed with `5 passed, 7 warnings`.
+- Bandit: `.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/admin/context_integrity.py tldw_Server_API/app/api/v1/schemas/admin_schemas.py -f json -o /tmp/bandit_context_integrity_task8.json` exited 0 with zero findings.
+- Formatter/whitespace: `.venv/bin/python -m black ...` completed for new endpoint/test files; unrelated schema formatting was reverted; `git diff --check` clean.
+
 **Files:**
 - Create: `tldw_Server_API/app/api/v1/endpoints/admin/context_integrity.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/admin/__init__.py`

@@ -29,6 +29,10 @@ modified_files:
 - tldw_Server_API/app/core/Utils/prompt_loader.py
 - tldw_Server_API/tests/Utils/test_prompt_loader_paths.py
 - tldw_Server_API/tests/Utils/test_prompt_loader_env_overrides.py
+- tldw_Server_API/app/api/v1/endpoints/admin/context_integrity.py
+- tldw_Server_API/app/api/v1/endpoints/admin/__init__.py
+- tldw_Server_API/app/api/v1/schemas/admin_schemas.py
+- tldw_Server_API/tests/AuthNZ_SQLite/test_admin_context_integrity_sqlite.py
 ---
 
 ## Description
@@ -84,6 +88,14 @@ Verification recorded for Task 7:
 - Focused Task 7 suite: `.venv/bin/python -m pytest tldw_Server_API/tests/Utils/test_prompt_loader_paths.py tldw_Server_API/tests/Utils/test_prompt_loader_env_overrides.py -q` passed with `10 passed, 6 warnings`.
 - Bandit: `.venv/bin/python -m bandit -r tldw_Server_API/app/core/Utils/prompt_loader.py -f json -o /tmp/bandit_context_integrity_task7.json` exited 0 with zero findings.
 - Formatter/whitespace: `.venv/bin/python -m black ...` completed; `git diff --check` clean.
+
+Task 8 slice added admin inspection for current-process Context Integrity state. The admin router now exposes `GET /api/v1/admin/context-integrity`, returning boot mode, degraded state, manifest sequence/digest, and content-free finding metadata from `app.state.context_integrity_boot_state`; non-admin callers receive the existing admin-router 403. Response schemas live beside startup-warning admin schemas.
+
+Verification recorded for Task 8:
+- RED run: `.venv/bin/python -m pytest tldw_Server_API/tests/AuthNZ_SQLite/test_admin_context_integrity_sqlite.py -q` failed before implementation with 404 responses.
+- Focused Task 8 suite: `.venv/bin/python -m pytest tldw_Server_API/tests/AuthNZ_SQLite/test_admin_context_integrity_sqlite.py tldw_Server_API/tests/AuthNZ_SQLite/test_admin_startup_warnings_sqlite.py -q` passed with `5 passed, 7 warnings`.
+- Bandit: `.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/admin/context_integrity.py tldw_Server_API/app/api/v1/schemas/admin_schemas.py -f json -o /tmp/bandit_context_integrity_task8.json` exited 0 with zero findings.
+- Formatter/whitespace: `.venv/bin/python -m black ...` completed for new endpoint/test files; unrelated schema formatting was reverted; `git diff --check` clean.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
