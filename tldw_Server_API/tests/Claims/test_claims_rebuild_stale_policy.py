@@ -110,6 +110,7 @@ def test_rebuild_all_media_uses_jobs_when_enabled(monkeypatch):
         lambda **kwargs: enqueued.append(kwargs) or {"id": 100},
     )
     monkeypatch.setattr(claims_service, "get_claims_rebuild_service", lambda: _FakeSvc())
+    monkeypatch.setattr(claims_service.time, "time", lambda: 600.0)
 
     try:
         result = claims_service.rebuild_all_media(
@@ -122,13 +123,18 @@ def test_rebuild_all_media_uses_jobs_when_enabled(monkeypatch):
         db.close_connection()
 
     assert result == {"status": "accepted", "enqueued": 1, "policy": "missing"}
-    assert enqueued == [{"media_id": media_id, "owner_user_id": "1", "idempotency_scope": "rebuild_all:missing"}]
+    assert enqueued[0] == {
+        "media_id": media_id,
+        "owner_user_id": "1",
+        "idempotency_scope": "rebuild_all:missing:2",
+    }
     assert legacy_submissions == []
 
 
-def test_rebuild_all_media_jobs_retry_uses_stable_idempotency_scope(monkeypatch):
+def test_rebuild_all_media_jobs_retry_uses_bounded_idempotency_scope(monkeypatch):
     enqueued: list[dict[str, object]] = []
     seen_keys: set[tuple[int, str, str]] = set()
+    now_seconds = 600.0
 
     class _User:
         id = 1
@@ -161,6 +167,7 @@ def test_rebuild_all_media_jobs_retry_uses_stable_idempotency_scope(monkeypatch)
         "list_claims_rebuild_media_ids",
         lambda *_args, **_kwargs: [11, 22],
     )
+    monkeypatch.setattr(claims_service.time, "time", lambda: now_seconds)
 
     for _attempt in range(2):
         with pytest.raises(HTTPException) as exc_info:
@@ -172,7 +179,18 @@ def test_rebuild_all_media_jobs_retry_uses_stable_idempotency_scope(monkeypatch)
             )
         assert exc_info.value.status_code == 503
 
-    assert enqueued == [{"media_id": 11, "owner_user_id": "1", "idempotency_scope": "rebuild_all:missing"}]
+    assert enqueued == [{"media_id": 11, "owner_user_id": "1", "idempotency_scope": "rebuild_all:missing:2"}]
+
+    now_seconds = 901.0
+    with pytest.raises(HTTPException) as exc_info:
+        claims_service.rebuild_all_media(
+            policy="missing",
+            user_id=None,
+            current_user=_User(),
+            db=_Db(),
+        )
+    assert exc_info.value.status_code == 503
+    assert enqueued[-1] == {"media_id": 11, "owner_user_id": "1", "idempotency_scope": "rebuild_all:missing:3"}
 
 
 def test_rebuild_all_stale_policy_enqueues_expected_media(monkeypatch):

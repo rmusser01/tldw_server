@@ -100,6 +100,8 @@ _CLAIMS_NONCRITICAL_EXCEPTIONS = (
     RetryExhaustedError,
 ) + _CLAIMS_PG_EXCEPTIONS
 
+_CLAIMS_REBUILD_ALL_IDEMPOTENCY_SCOPE_WINDOW_SEC = 300
+
 _ROLE_HIERARCHY = {
     "owner": 4,
     "admin": 3,
@@ -4216,6 +4218,13 @@ def rebuild_claims(
     return {"status": "accepted", "media_id": media_id}
 
 
+def _claims_rebuild_all_idempotency_scope(policy: str) -> str:
+    normalized_policy = str(policy or "missing").lower()
+    window_sec = max(1, int(_CLAIMS_REBUILD_ALL_IDEMPOTENCY_SCOPE_WINDOW_SEC))
+    bucket = int(time.time() // window_sec)
+    return f"rebuild_all:{normalized_policy}:{bucket}"
+
+
 def rebuild_all_media(
     *,
     policy: str,
@@ -4239,12 +4248,13 @@ def rebuild_all_media(
         )
         if claims_jobs.claims_jobs_enabled():
             enqueued = 0
+            idempotency_scope = _claims_rebuild_all_idempotency_scope(normalized_policy)
             try:
                 for mid in mids:
                     claims_jobs.enqueue_claims_rebuild_media(
                         media_id=int(mid),
                         owner_user_id=owner_user_id,
-                        idempotency_scope=f"rebuild_all:{normalized_policy}",
+                        idempotency_scope=idempotency_scope,
                     )
                     enqueued += 1
             except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
