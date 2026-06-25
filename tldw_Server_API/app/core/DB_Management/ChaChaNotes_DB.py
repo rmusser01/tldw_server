@@ -16224,6 +16224,90 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"Database error deleting skill '{name}': {exc}")
             raise
 
+    def restore_skill_registry(
+        self,
+        name: str,
+        update_data: dict[str, Any] | None,
+        expected_version: int,
+    ) -> bool:
+        """Restore a soft-deleted skill registry row using optimistic locking."""
+        self._ensure_skill_registry_table()
+        now = self._get_current_utc_timestamp_iso()
+        allowed_fields = {
+            "description",
+            "argument_hint",
+            "disable_model_invocation",
+            "user_invocable",
+            "allowed_tools",
+            "model",
+            "context",
+            "directory_path",
+            "file_hash",
+        }
+
+        set_parts: list[str] = []
+        params: list[Any] = []
+        for key, value in (update_data or {}).items():
+            if key not in allowed_fields:
+                continue
+            if key == "allowed_tools":
+                params.append(self._ensure_json_string(value))
+                set_parts.append("allowed_tools = ?")
+            elif key in {"disable_model_invocation", "user_invocable"}:
+                params.append(self._skill_bool_value(bool(value)))
+                set_parts.append(f"{key} = ?")
+            else:
+                params.append(value)
+                set_parts.append(f"{key} = ?")
+
+        set_parts.extend(["deleted = ?", "last_modified = ?", "version = version + 1"])
+        params.extend([self._skill_bool_value(False), now, name, expected_version])
+        query = (
+            f"UPDATE skill_registry SET {', '.join(set_parts)} "  # nosec B608
+            "WHERE name = ? AND version = ? AND deleted = ?"
+        )
+        params.append(self._skill_bool_value(True))
+
+        try:
+            with self.transaction() as conn:
+                row = conn.execute(
+                    "SELECT version, deleted FROM skill_registry WHERE name = ?",
+                    (name,),
+                ).fetchone()
+                if not row:
+                    raise ConflictError(
+                        f"Skill '{name}' restore target was not found.",
+                        entity="skill_registry",
+                        entity_id=name,
+                    )
+
+                current_db_version = int(row["version"])
+                if current_db_version != expected_version:
+                    raise ConflictError(
+                        f"Skill '{name}' version mismatch (db has {current_db_version}, expected {expected_version}).",
+                        entity="skill_registry",
+                        entity_id=name,
+                    )
+
+                if not row["deleted"]:
+                    logger.info("Skill '{}' already active; restore is idempotent.", name)
+                    return True
+
+                prepared_query, prepared_params = self._prepare_backend_statement(query, tuple(params))
+                cursor = conn.execute(prepared_query, prepared_params)
+                if cursor.rowcount == 0:
+                    raise ConflictError(
+                        f"Skill '{name}' restore affected 0 rows.",
+                        entity="skill_registry",
+                        entity_id=name,
+                    )
+                return True
+        except ConflictError:
+            raise
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error restoring skill '{name}': {exc}")
+            raise
+
     def _deserialize_row_fields(self, row: sqlite3.Row, json_fields: list[str]) -> dict[str, Any] | None:
         """
         Converts a sqlite3.Row object to a dictionary, deserializing specified JSON fields.

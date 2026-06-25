@@ -51,6 +51,8 @@ SUPPORTING_FILE_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$')
 MAX_SUPPORTING_FILES_COUNT = 20
 MAX_SUPPORTING_FILE_BYTES = 500000
 MAX_SUPPORTING_FILES_TOTAL_BYTES = 5 * 1024 * 1024  # 5MB
+MAX_SKILL_MD_BYTES = 500000
+MAX_ZIP_IMPORT_ENTRIES = 100
 
 
 class SkillMetadata:
@@ -393,10 +395,9 @@ class SkillsService:
                         "context": parsed.frontmatter.context,
                         "directory_path": str(item),
                         "file_hash": parsed.content_hash,
-                        "deleted": 0,
                     }
                     try:
-                        db.update_skill_registry(item.name, update_data, expected_version=existing.get("version", 1))
+                        db.restore_skill_registry(item.name, update_data, expected_version=existing.get("version", 1))
                         logger.info(f"Restored deleted skill '{item.name}' from disk")
                     except ConflictError as e:
                         logger.warning(f"Conflict restoring skill '{item.name}': {e}")
@@ -687,12 +688,38 @@ class SkillsService:
             )
 
         skill_dir = self._get_skill_dir(name)
-        if not skill_dir.exists():
+        if not await asyncio.to_thread(skill_dir.exists):
             with contextlib.suppress(Exception):
                 db.mark_skill_registry_deleted(name, expected_version=current_version)
             raise SkillNotFoundError(name, detail="Skill directory not found")
 
         update_data: dict[str, Any] = {}
+        touched_files: dict[Path, Optional[str]] = {}
+
+        async def snapshot_file(file_path: Path) -> None:
+            """Capture a file's current text content before mutating it."""
+            if file_path in touched_files:
+                return
+            try:
+                if await asyncio.to_thread(file_path.exists):
+                    touched_files[file_path] = await asyncio.to_thread(file_path.read_text, encoding="utf-8")
+                else:
+                    touched_files[file_path] = None
+            except OSError as e:
+                raise SkillStorageError(f"Failed to read existing file before update: {e}", path=str(file_path)) from e
+
+        async def restore_touched_files() -> None:
+            """Restore files captured by snapshot_file after a failed update."""
+            for file_path, original_content in touched_files.items():
+                try:
+                    if original_content is None:
+                        await asyncio.to_thread(file_path.unlink, missing_ok=True)
+                    else:
+                        await asyncio.to_thread(file_path.parent.mkdir, parents=True, exist_ok=True)
+                        await asyncio.to_thread(file_path.write_text, original_content, encoding="utf-8")
+                except OSError as e:
+                    logger.error(f"Failed to restore skill file {file_path}: {e}")
+
         if content is not None:
             try:
                 parsed = self._parser.parse_content(content, default_name=name)
@@ -701,8 +728,13 @@ class SkillsService:
 
             skill_file = skill_dir / "SKILL.md"
             try:
-                skill_file.write_text(content, encoding="utf-8")
+                await snapshot_file(skill_file)
+                await asyncio.to_thread(skill_file.write_text, content, encoding="utf-8")
+            except SkillStorageError:
+                await restore_touched_files()
+                raise
             except OSError as e:
+                await restore_touched_files()
                 raise SkillStorageError(f"Failed to write SKILL.md: {e}", path=str(skill_file)) from e
 
             update_data.update(
@@ -728,24 +760,57 @@ class SkillsService:
             for filename, file_content in normalized_supporting_files.items():
                 file_path = self._safe_supporting_path(skill_dir, filename)
                 if file_content is None:
-                    if file_path.exists():
+                    if await asyncio.to_thread(file_path.exists):
                         try:
-                            file_path.unlink()
+                            await snapshot_file(file_path)
+                            await asyncio.to_thread(file_path.unlink, missing_ok=True)
+                        except SkillStorageError:
+                            await restore_touched_files()
+                            raise
                         except OSError as e:
-                            logger.warning(f"Failed to delete supporting file {filename}: {e}")
+                            await restore_touched_files()
+                            raise SkillStorageError(
+                                f"Failed to delete supporting file '{filename}': {e}",
+                                path=str(file_path),
+                            ) from e
                 else:
                     try:
-                        file_path.write_text(file_content, encoding="utf-8")
+                        await snapshot_file(file_path)
+                        await asyncio.to_thread(file_path.write_text, file_content, encoding="utf-8")
+                    except SkillStorageError:
+                        await restore_touched_files()
+                        raise
                     except OSError as e:
-                        logger.warning(f"Failed to write supporting file {filename}: {e}")
+                        await restore_touched_files()
+                        raise SkillStorageError(
+                            f"Failed to write supporting file '{filename}': {e}",
+                            path=str(file_path),
+                        ) from e
+
+            if normalized_supporting_files and not update_data:
+                parsed = await asyncio.to_thread(self._parse_skill_file, skill_dir)
+                if not parsed:
+                    await restore_touched_files()
+                    raise SkillsError(f"Failed to parse skill '{name}' after supporting file update")
+                update_data.update(
+                    {
+                        "directory_path": str(skill_dir),
+                        "file_hash": parsed.content_hash,
+                    }
+                )
 
         if update_data:
             try:
                 db.update_skill_registry(name, update_data, expected_version=current_version)
             except ConflictError as e:
+                await restore_touched_files()
                 raise SkillConflictError(str(e), skill_name=name) from e
             except (CharactersRAGDBError, InputError) as e:
+                await restore_touched_files()
                 raise SkillsError(f"Failed to update skill '{name}' in registry: {e}") from e
+            except Exception as e:
+                await restore_touched_files()
+                raise SkillsError(f"Unexpected error updating skill '{name}' in registry: {e}") from e
 
         logger.info(f"Updated skill '{name}' for user {self.user_id}")
 
@@ -780,14 +845,6 @@ class SkillsService:
                 actual_version=current_version,
             )
 
-        # Delete skill directory
-        skill_dir = self._get_skill_dir(name)
-        if skill_dir.exists():
-            try:
-                shutil.rmtree(skill_dir)
-            except OSError as e:
-                raise SkillStorageError(f"Failed to delete skill directory: {e}", path=str(skill_dir)) from e
-
         if not row.get("deleted"):
             try:
                 db.mark_skill_registry_deleted(name, expected_version=current_version)
@@ -795,6 +852,23 @@ class SkillsService:
                 raise SkillConflictError(str(e), skill_name=name) from e
             except CharactersRAGDBError as e:
                 raise SkillsError(f"Failed to delete skill '{name}' in registry: {e}") from e
+
+        # Delete skill directory after the registry accepts the versioned delete.
+        skill_dir = self._get_skill_dir(name)
+        if await asyncio.to_thread(skill_dir.exists):
+            try:
+                await asyncio.to_thread(shutil.rmtree, skill_dir)
+            except OSError as e:
+                if not row.get("deleted"):
+                    try:
+                        db.restore_skill_registry(
+                            name,
+                            {"directory_path": str(skill_dir)},
+                            expected_version=current_version + 1,
+                        )
+                    except Exception as restore_error:
+                        logger.error(f"Failed to restore skill registry after delete failure: {restore_error}")
+                raise SkillStorageError(f"Failed to delete skill directory: {e}", path=str(skill_dir)) from e
 
         logger.info(f"Deleted skill '{name}' for user {self.user_id}")
 
@@ -948,25 +1022,34 @@ class SkillsService:
         """Extract SKILL.md content, name, and supporting files from zip bytes."""
         try:
             with zipfile.ZipFile(BytesIO(zip_data), "r") as zf:
+                entries = zf.infolist()
+                if len(entries) > MAX_ZIP_IMPORT_ENTRIES:
+                    raise SkillValidationError(
+                        f"Zip file contains too many entries: maximum {MAX_ZIP_IMPORT_ENTRIES} allowed"
+                    )
                 # Find SKILL.md
-                skill_md_path = None
+                skill_md_info = None
                 base_dir = ""
 
-                for name in zf.namelist():
+                for info in entries:
+                    name = info.filename
                     if name.endswith("SKILL.md"):
-                        skill_md_path = name
+                        skill_md_info = info
                         # Get the base directory
                         parts = name.split("/")
                         if len(parts) > 1:
                             base_dir = "/".join(parts[:-1]) + "/"
                         break
 
-                if not skill_md_path:
+                if not skill_md_info:
                     raise SkillValidationError("Zip file does not contain SKILL.md")
 
+                skill_md_path = skill_md_info.filename
                 skill_md_posix_path = PurePosixPath(skill_md_path)
                 if skill_md_posix_path.is_absolute() or ".." in skill_md_posix_path.parts:
                     raise SkillValidationError(f"Invalid SKILL.md path in zip: '{skill_md_path}'")
+                if skill_md_info.file_size > MAX_SKILL_MD_BYTES:
+                    raise SkillValidationError("SKILL.md exceeds 500KB limit")
 
                 # Read SKILL.md
                 try:
@@ -976,10 +1059,13 @@ class SkillsService:
 
                 # Read supporting files
                 supporting_files: dict[str, str] = {}
-                for name in zf.namelist():
+                supporting_count = 0
+                supporting_total_bytes = 0
+                for info in entries:
+                    name = info.filename
                     if name == skill_md_path:
                         continue
-                    if name.startswith(base_dir) and not name.endswith("/"):
+                    if name.startswith(base_dir) and not info.is_dir():
                         relative_name = name[len(base_dir) :]
                         if not relative_name:
                             continue
@@ -995,6 +1081,24 @@ class SkillsService:
                             continue
 
                         safe_filename = self._validate_supporting_filename(relative_name)
+                        supporting_count += 1
+                        if supporting_count > MAX_SUPPORTING_FILES_COUNT:
+                            raise SkillValidationError(
+                                f"Too many supporting files: maximum {MAX_SUPPORTING_FILES_COUNT} allowed",
+                                field="supporting_files",
+                            )
+                        if info.file_size > MAX_SUPPORTING_FILE_BYTES:
+                            raise SkillValidationError(
+                                f"Supporting file '{safe_filename}' exceeds 500KB limit",
+                                field="supporting_files",
+                            )
+                        supporting_total_bytes += info.file_size
+                        if supporting_total_bytes > MAX_SUPPORTING_FILES_TOTAL_BYTES:
+                            raise SkillValidationError(
+                                "Supporting files exceed "
+                                f"{MAX_SUPPORTING_FILES_TOTAL_BYTES // (1024 * 1024)}MB limit",
+                                field="supporting_files",
+                            )
                         try:
                             file_content = zf.read(name).decode("utf-8")
                             supporting_files[safe_filename] = file_content

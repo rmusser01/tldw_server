@@ -94,3 +94,22 @@ def test_skill_registry_rejects_unapproved_sort_fields(skills_db: CharactersRAGD
 
     with pytest.raises(InputError, match="Unsupported skill registry sort field"):
         skills_db.list_skill_registry(sort="directory_path")
+
+
+def test_restore_skill_registry_reactivates_soft_deleted_row(skills_db: CharactersRAGDB) -> None:
+    _insert_skill(skills_db, "restorable", description="Before")
+
+    skills_db.mark_skill_registry_deleted("restorable", expected_version=1)
+    assert skills_db.get_skill_registry("restorable", include_deleted=False) is None
+
+    skills_db.restore_skill_registry(
+        "restorable",
+        {"description": "After"},
+        expected_version=2,
+    )
+
+    restored = skills_db.get_skill_registry("restorable", include_deleted=False)
+    assert restored is not None
+    assert restored["description"] == "After"
+    assert not restored["deleted"]
+    assert restored["version"] == 3

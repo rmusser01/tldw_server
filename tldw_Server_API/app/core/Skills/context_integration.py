@@ -45,6 +45,22 @@ def get_skills_context_text(user_id: int, base_path: Path, db: Any | None = None
         return ""
 
 
+async def get_skills_context_text_async(user_id: int, base_path: Path, db: Any | None = None) -> str:
+    """
+    Async variant of get_skills_context_text for request handlers.
+
+    Uses the service's thread-offloaded context loading path so chat endpoints do
+    not perform filesystem scans directly on the event loop.
+    """
+    try:
+        service = SkillsService(user_id=user_id, base_path=base_path, db=db)
+        payload = await service.get_context_payload_async()
+        return payload.get("context_text", "")
+    except Exception as e:
+        logger.warning(f"Failed to get skills context for user {user_id}: {e}")
+        return ""
+
+
 def build_system_message_with_skills(
     base_system_message: Optional[str],
     user_id: int,
@@ -63,6 +79,24 @@ def build_system_message_with_skills(
         System message with skills context appended
     """
     skills_context = get_skills_context_text(user_id, base_path, db=db)
+
+    parts = []
+    if base_system_message:
+        parts.append(base_system_message)
+    if skills_context:
+        parts.append(skills_context)
+
+    return "\n\n".join(parts) if parts else ""
+
+
+async def build_system_message_with_skills_async(
+    base_system_message: Optional[str],
+    user_id: int,
+    base_path: Path,
+    db: Any | None = None,
+) -> str:
+    """Async variant of build_system_message_with_skills."""
+    skills_context = await get_skills_context_text_async(user_id, base_path, db=db)
 
     parts = []
     if base_system_message:
@@ -164,6 +198,37 @@ def add_skill_tool_to_tools_list(
         skills = service.get_context_payload().get("available_skills", [])
         if skills:
             # Add Skill tool if not already present
+            skill_tool = get_skill_tool_definition()
+            tool_names = []
+            for tool in result:
+                if not isinstance(tool, dict):
+                    continue
+                func = tool.get("function")
+                if isinstance(func, dict) and func.get("name"):
+                    tool_names.append(func.get("name"))
+                elif tool.get("name"):
+                    tool_names.append(tool.get("name"))
+            if "Skill" not in tool_names:
+                result.append(skill_tool)
+    except Exception as e:
+        logger.warning(f"Failed to check skills for user {user_id}: {e}")
+
+    return result
+
+
+async def add_skill_tool_to_tools_list_async(
+    tools: Optional[list[dict[str, Any]]],
+    user_id: int,
+    base_path: Path,
+    db: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Async variant of add_skill_tool_to_tools_list."""
+    result = list(tools) if tools else []
+
+    try:
+        service = SkillsService(user_id=user_id, base_path=base_path, db=db)
+        skills = (await service.get_context_payload_async()).get("available_skills", [])
+        if skills:
             skill_tool = get_skill_tool_definition()
             tool_names = []
             for tool in result:
