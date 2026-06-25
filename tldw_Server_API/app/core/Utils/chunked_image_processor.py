@@ -55,12 +55,22 @@ async def process_image_chunked(
     try:
         # Load image with PIL for processing
         image = Image.open(io.BytesIO(image_data))
+        original_width, original_height = image.width, image.height
+        original_pixels = original_width * original_height
+
+        # Check pixel count before any resize so decompression work is bounded by
+        # the original payload, not the thumbnail result.
+        if original_pixels > MAX_IMAGE_PIXELS:
+            raise ValueError(f"Image too large: {original_pixels} pixels")
 
         # Validate image dimensions
         if image.width > MAX_IMAGE_DIMENSION or image.height > MAX_IMAGE_DIMENSION:
             # Resize if too large
             image.thumbnail((MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION), Image.Resampling.LANCZOS)
-            logger.info(f"Resized large image from {image.width}x{image.height}")
+            logger.info(
+                f"Resized large image from {original_width}x{original_height} "
+                f"to {image.width}x{image.height}"
+            )
 
         # Check pixel count
         if image.width * image.height > MAX_IMAGE_PIXELS:
@@ -321,6 +331,7 @@ class StreamingImageProcessor:
         semaphore = asyncio.Semaphore(max_concurrent)
 
         async def process_with_limit(url):
+            """Process one image URL while respecting the shared concurrency limit."""
             async with semaphore:
                 return await self.process_image_url(url, max_size_bytes)
 

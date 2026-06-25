@@ -16,6 +16,9 @@ from tldw_Server_API.app.core.Utils.image_validation import (
     MAX_BASE64_STRING_LENGTH,
 )
 
+PNG_BASE64_1X1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+BROKEN_PNG_BASE64_1X1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII="
+
 
 class TestValidateMimeType:
     """Test MIME type validation."""
@@ -81,13 +84,12 @@ class TestValidateDataUri:
     def test_valid_png_data_uri(self):
         """Test validation of valid PNG data URI."""
         # Small valid PNG base64
-        png_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
-        data_uri = f"data:image/png;base64,{png_base64}"
+        data_uri = f"data:image/png;base64,{PNG_BASE64_1X1}"
 
         is_valid, mime_type, base64_data = validate_data_uri(data_uri)
         assert is_valid is True
         assert mime_type == "image/png"
-        assert base64_data == png_base64
+        assert base64_data == PNG_BASE64_1X1
 
     def test_valid_jpeg_data_uri(self):
         """Test validation of valid JPEG data URI."""
@@ -152,12 +154,31 @@ class TestSafeDecodeBase64Image:
     """Test safe base64 image decoding."""
 
     def test_valid_base64_decode(self):
-        """Test successful decoding of valid base64."""
-        test_data = b"Hello, World!"
-        base64_data = base64.b64encode(test_data).decode('utf-8')
+        """Test successful decoding of valid image base64."""
+        test_data = base64.b64decode(PNG_BASE64_1X1)
+
+        decoded = safe_decode_base64_image(PNG_BASE64_1X1, "image/png")
+        assert decoded == test_data
+
+    def test_rejects_non_image_payload_for_allowed_mime_type(self):
+        """Valid base64 bytes must still be a parseable image."""
+        base64_data = base64.b64encode(b"Hello, World!").decode('utf-8')
 
         decoded = safe_decode_base64_image(base64_data, "image/png")
-        assert decoded == test_data
+
+        assert decoded is None
+
+    def test_rejects_broken_image_payload_without_raising(self):
+        """Corrupt image bytes should fail validation instead of escaping parser errors."""
+        decoded = safe_decode_base64_image(BROKEN_PNG_BASE64_1X1, "image/png")
+
+        assert decoded is None
+
+    def test_rejects_image_payload_that_does_not_match_declared_mime_type(self):
+        """Declared MIME type must match the decoded image format."""
+        decoded = safe_decode_base64_image(PNG_BASE64_1X1, "image/jpeg")
+
+        assert decoded is None
 
     def test_invalid_mime_type_decode(self):
         """Test that invalid MIME type prevents decoding."""
@@ -187,12 +208,10 @@ class TestSafeDecodeBase64Image:
             mock_logger.warning.assert_called()
 
     def test_valid_size_data(self):
-        """Test acceptance of data within size limits."""
-        # Create data just under the limit
-        valid_data = b"A" * (MAX_BASE64_BYTES - 100)
-        base64_data = base64.b64encode(valid_data).decode('utf-8')
+        """Test acceptance of valid image data within size limits."""
+        valid_data = base64.b64decode(PNG_BASE64_1X1)
 
-        decoded = safe_decode_base64_image(base64_data, "image/png")
+        decoded = safe_decode_base64_image(PNG_BASE64_1X1, "image/png")
         assert decoded == valid_data
 
     def test_base64_with_validation_flag(self):
@@ -210,9 +229,8 @@ class TestValidateImageUrl:
 
     def test_valid_data_uri(self):
         """Test validation of valid data URI."""
-        test_data = b"Test image data"
-        base64_data = base64.b64encode(test_data).decode('utf-8')
-        data_uri = f"data:image/png;base64,{base64_data}"
+        test_data = base64.b64decode(PNG_BASE64_1X1)
+        data_uri = f"data:image/png;base64,{PNG_BASE64_1X1}"
 
         is_valid, mime_type, decoded_bytes = validate_image_url(data_uri)
         assert is_valid is True
@@ -249,6 +267,42 @@ class TestValidateImageUrl:
             assert mime_type is None
             assert decoded_bytes is None
             mock_logger.warning.assert_called()
+
+    def test_external_url_logs_without_sensitive_query_values(self):
+        """Rejected external URLs should not leak query strings into logs."""
+        url = "https://example.com/image.png?token=secret-value"
+
+        with patch('tldw_Server_API.app.core.Utils.image_validation.logger') as mock_logger:
+            is_valid, mime_type, decoded_bytes = validate_image_url(url)
+
+        assert is_valid is False
+        assert mime_type is None
+        assert decoded_bytes is None
+        logged = " ".join(
+            " ".join(str(arg) for arg in call.args)
+            for call in mock_logger.warning.call_args_list
+        )
+        assert "secret-value" not in logged
+        assert "token=" not in logged
+
+    def test_external_url_logs_without_userinfo_credentials(self):
+        """Rejected external URLs should not leak username/password userinfo."""
+        url = "https://user:secret-pass@example.com:8443/image.png"
+
+        with patch('tldw_Server_API.app.core.Utils.image_validation.logger') as mock_logger:
+            is_valid, mime_type, decoded_bytes = validate_image_url(url)
+
+        assert is_valid is False
+        assert mime_type is None
+        assert decoded_bytes is None
+        logged = " ".join(
+            " ".join(str(arg) for arg in call.args)
+            for call in mock_logger.warning.call_args_list
+        )
+        assert "user" not in logged
+        assert "secret-pass" not in logged
+        assert "@" not in logged
+        assert "example.com:8443" in logged
 
     def test_file_url_not_supported(self):
         """Test that file URLs are not supported."""
@@ -316,10 +370,8 @@ class TestIntegration:
 
     def test_full_validation_workflow_success(self):
         """Test successful validation of a complete data URI."""
-        # Create a small valid "image"
-        image_data = b"fake image content"
-        base64_data = base64.b64encode(image_data).decode('utf-8')
-        data_uri = f"data:image/png;base64,{base64_data}"
+        image_data = base64.b64decode(PNG_BASE64_1X1)
+        data_uri = f"data:image/png;base64,{PNG_BASE64_1X1}"
 
         # Full validation workflow
         is_valid, mime_type, decoded = validate_image_url(data_uri)

@@ -88,6 +88,52 @@ def test_extract_text_from_segments_rounds_timestamps_to_hundredths():
     assert result == "0.84s - 1.1s | What?"
 
 
+def test_extract_text_from_segments_trace_logs_shape_not_raw_text(monkeypatch):
+    trace_messages = []
+
+    class Recorder:
+        def trace(self, message):
+            trace_messages.append(str(message))
+
+        def error(self, *_args, **_kwargs):
+            pass
+
+    monkeypatch.setattr(Utils, "logger", Recorder())
+
+    result = Utils.extract_text_from_segments(
+        [{"Time_Start": 0, "Time_End": 1, "Text": "private transcript"}],
+        include_timestamps=False,
+    )
+
+    assert result == "private transcript"
+    assert trace_messages
+    assert all("private transcript" not in message for message in trace_messages)
+
+
+def test_extract_text_from_segments_error_logs_shape_not_raw_text(monkeypatch):
+    error_messages = []
+
+    class Recorder:
+        def trace(self, *_args, **_kwargs):
+            pass
+
+        def error(self, message):
+            error_messages.append(str(message))
+
+    recorder = Recorder()
+    monkeypatch.setattr(Utils, "logger", recorder)
+    monkeypatch.setattr(Utils, "logging", recorder)
+
+    result = Utils.extract_text_from_segments(
+        [{"Caption": "private transcript"}],
+        include_timestamps=False,
+    )
+
+    assert result == "Error: Unable to extract transcription"
+    assert error_messages
+    assert all("private transcript" not in message for message in error_messages)
+
+
 def test_save_temp_file_normalizes_and_preserves_content(monkeypatch):
     class DummyUpload:
         def __init__(self, name, data):
@@ -205,7 +251,7 @@ def test_check_ffmpeg_handles_unknown_os(monkeypatch):
     assert result is False
 
 
-def test_cuda_check_uses_direct_subprocess_invocation(monkeypatch):
+def test_cuda_check_uses_resolved_direct_subprocess_invocation(monkeypatch):
     System_Checks_Lib.processing_choice = "cpu"
     recorded = {}
 
@@ -214,14 +260,37 @@ def test_cuda_check_uses_direct_subprocess_invocation(monkeypatch):
         recorded["kwargs"] = kwargs
         return "GPU info line\nCUDA Version: 12.4\n"
 
+    monkeypatch.setattr(
+        System_Checks_Lib.shutil,
+        "which",
+        lambda name: "/usr/bin/nvidia-smi" if name == "nvidia-smi" else None,
+    )
     monkeypatch.setattr(System_Checks_Lib.subprocess, "check_output", _fake_check_output)
 
     result = System_Checks_Lib.cuda_check()
 
     assert result is True
     assert System_Checks_Lib.processing_choice == "cuda"
-    assert recorded["cmd"] == ["nvidia-smi"]
+    assert recorded["cmd"] == ["/usr/bin/nvidia-smi"]
     assert "shell" not in recorded["kwargs"]
+
+
+def test_download_ffmpeg_does_not_download_unverified_binary(monkeypatch):
+    calls = []
+
+    def fake_download(**_kwargs):
+        calls.append("download")
+        raise AssertionError("download should not be called")
+
+    monkeypatch.setattr(System_Checks_Lib, "input", lambda *_args, **_kwargs: "y", raising=False)
+    monkeypatch.setattr(System_Checks_Lib, "download", fake_download, raising=False)
+
+    assert System_Checks_Lib.download_ffmpeg() is False
+    assert calls == []
+
+
+def test_utils_no_user_database_path_placeholder():
+    assert not hasattr(Utils, "get_user_database_path")
 
 
 def _raise_eof(*_args, **_kwargs):

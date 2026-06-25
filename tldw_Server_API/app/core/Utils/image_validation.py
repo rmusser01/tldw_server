@@ -7,6 +7,7 @@ import io
 import os
 import re
 from typing import Optional
+from urllib.parse import urlparse
 
 from loguru import logger
 from PIL import Image
@@ -19,6 +20,7 @@ _IMAGE_VALIDATION_NONCRITICAL_EXCEPTIONS = (
     TypeError,
     ValueError,
 )
+_IMAGE_INTEGRITY_EXCEPTIONS = _IMAGE_VALIDATION_NONCRITICAL_EXCEPTIONS + (SyntaxError,)
 
 #######################################################################################################################
 #
@@ -176,8 +178,9 @@ def safe_decode_base64_image(base64_data: str, mime_type: str) -> Optional[bytes
         Decoded bytes if valid, None otherwise
     """
     try:
+        normalized_mime = str(mime_type or "").lower().strip()
         # Final validation of MIME type
-        if not validate_mime_type(mime_type):
+        if not validate_mime_type(normalized_mime):
             logger.warning(f"Invalid MIME type for decoding: {mime_type}")
             return None
 
@@ -188,6 +191,22 @@ def safe_decode_base64_image(base64_data: str, mime_type: str) -> Optional[bytes
         max_bytes = get_max_base64_bytes()
         if len(decoded_data) > max_bytes:
             logger.warning(f"Decoded image too large: {len(decoded_data)} > {max_bytes}")
+            return None
+
+        try:
+            with Image.open(io.BytesIO(decoded_data)) as img:
+                detected_mime = Image.MIME.get(img.format or "")
+                img.verify()
+        except _IMAGE_INTEGRITY_EXCEPTIONS as exc:
+            logger.warning("Decoded image failed integrity validation: {}", exc)
+            return None
+
+        if detected_mime and detected_mime.lower() != normalized_mime:
+            logger.warning(
+                "Decoded image MIME mismatch: expected {}, detected {}",
+                normalized_mime,
+                detected_mime.lower(),
+            )
             return None
 
         # TODO: Add optional virus/malware scanning here
@@ -229,7 +248,18 @@ def validate_image_url(url: str) -> tuple[bool, Optional[str], Optional[bytes]]:
         return True, mime_type, decoded_bytes
     else:
         # For now, we don't support external URLs for security reasons
-        logger.warning(f"External image URLs not supported: {url[:100]}")
+        try:
+            parsed = urlparse(str(url or ""))
+            host = parsed.hostname or "unknown"
+            if parsed.port is not None:
+                host = f"{host}:{parsed.port}"
+            logger.warning(
+                "External image URLs not supported: scheme={}, host={}",
+                parsed.scheme or "unknown",
+                host,
+            )
+        except (TypeError, ValueError, AttributeError):
+            logger.warning("External image URLs not supported: unparsable URL")
         return False, None, None
 
 
@@ -251,7 +281,7 @@ def validate_uploaded_image_bytes(
             width, height = img.size
             detected_mime = Image.MIME.get(img.format or "")
             img.verify()
-    except _IMAGE_VALIDATION_NONCRITICAL_EXCEPTIONS as exc:
+    except _IMAGE_INTEGRITY_EXCEPTIONS as exc:
         logger.warning("Uploaded image failed integrity validation: {}", exc)
         return False, "Uploaded image failed integrity validation", None, None
 

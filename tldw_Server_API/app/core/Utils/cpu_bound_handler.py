@@ -45,12 +45,14 @@ CPU_THREAD_POOL: Optional[ThreadPoolExecutor] = None
 
 
 def _create_cpu_thread_pool() -> ThreadPoolExecutor:
+    """Create and register the shared CPU thread pool."""
     pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="cpu_worker")
     register_executor("cpu_thread_pool", pool)
     return pool
 
 
 def get_cpu_thread_pool() -> ThreadPoolExecutor:
+    """Return a reusable thread pool for CPU-bound fallback execution."""
     global CPU_THREAD_POOL
     if CPU_THREAD_POOL is None or getattr(CPU_THREAD_POOL, "_shutdown", False):
         CPU_THREAD_POOL = _create_cpu_thread_pool()
@@ -58,10 +60,12 @@ def get_cpu_thread_pool() -> ThreadPoolExecutor:
 
 
 def _env_flag_true(name: str) -> bool:
+    """Return whether an environment flag is enabled."""
     return env_flag_enabled(name)
 
 
 def _get_worker_count(default: int = 4) -> int:
+    """Read the configured CPU process-pool worker count."""
     try:
         return int(os.getenv("TLDR_CPU_PROCPOOL_WORKERS", default))
     except Exception:
@@ -69,6 +73,7 @@ def _get_worker_count(default: int = 4) -> int:
 
 
 def _process_pool_disabled() -> bool:
+    """Return whether CPU process-pool creation should be skipped."""
     # Disable if explicit flag set or generic TESTING=true
     return _env_flag_true("TLDR_DISABLE_CPU_PROCPOOL") or _env_flag_true("TESTING")
 
@@ -221,6 +226,7 @@ async def process_large_json_async(data: Any) -> str:
         JSON string
     """
     def _json_dump(payload: Any) -> str:
+        """Serialize JSON compactly while preserving unicode characters."""
         return json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
 
     # For small payloads, process inline
@@ -332,7 +338,6 @@ class CPUBoundBatcher:
                 finally:
                     self._batch_task = None
             await self._process_batch(delay=False)
-            self._batch_task = None
 
         return await future
 
@@ -357,14 +362,23 @@ class CPUBoundBatcher:
             )
             tasks.append((task, future))
 
-        # Wait for all to complete
-        for task, future in tasks:
-            try:
-                result = await task
-                future.set_result(result)
-            except Exception as e:
-                future.set_exception(e)
-        self._batch_task = None
+        try:
+            # Wait for all to complete
+            for task, future in tasks:
+                try:
+                    result = await task
+                    if not future.done():
+                        future.set_result(result)
+                except Exception as e:
+                    if not future.done():
+                        future.set_exception(e)
+        finally:
+            current_task = asyncio.current_task()
+            if self._batch_task is current_task or (self._batch_task is not None and self._batch_task.done()):
+                self._batch_task = None
+            if self.pending_operations and (self._batch_task is None or self._batch_task.done()):
+                delay_next = len(self.pending_operations) < self.batch_size
+                self._batch_task = asyncio.create_task(self._process_batch(delay=delay_next))
 
 
 # Global batcher instance
