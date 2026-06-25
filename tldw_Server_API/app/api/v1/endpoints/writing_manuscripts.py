@@ -9,6 +9,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, get_request_user, RateLimiter, rbac_rate_limit, User
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.writing_manuscript_schemas import (
     AnnotationAnchorStatus,
@@ -54,6 +55,8 @@ from tldw_Server_API.app.api.v1.schemas.writing_manuscript_schemas import (
     ManuscriptResearchResponse,
     ManuscriptRestoredEntityResponse,
     ManuscriptSceneCreate,
+    ManuscriptSceneAnnotationReviewJobResponse,
+    ManuscriptSceneAnnotationReviewRequest,
     ManuscriptSceneResponse,
     ManuscriptSceneUpdate,
     ManuscriptSearchResponse,
@@ -77,6 +80,11 @@ from tldw_Server_API.app.api.v1.schemas.writing_manuscript_schemas import (
     CHARACTER_ROLES,
     WORLD_INFO_KINDS,
 )
+from tldw_Server_API.app.core.Writing.manuscript_annotation_jobs import (
+    WRITING_SCENE_ANNOTATION_REVIEW_JOB_TYPE,
+    WritingAnnotationReviewEnqueueError,
+    enqueue_scene_annotation_review_job,
+)
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.Chat.chat_service import is_model_known_for_provider
 from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
@@ -87,6 +95,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 from tldw_Server_API.app.core.DB_Management.ManuscriptDB import ManuscriptDBHelper
+from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import PROVIDER_CAPABILITIES
 
 router = APIRouter()
@@ -2247,6 +2256,73 @@ async def review_selected_text_annotation(
         return _annotation_response(annotation)
     except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
         _handle_db_errors(exc, "selected-text annotation review")
+
+
+@router.post(
+    "/scenes/{scene_id}/annotations/review-scene",
+    response_model=ManuscriptSceneAnnotationReviewJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Queue full-scene manuscript annotation review",
+    tags=["manuscripts"],
+)
+async def review_scene_annotations(
+    scene_id: str,
+    payload: ManuscriptSceneAnnotationReviewRequest,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    job_manager: JobManager = Depends(get_job_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
+    current_user: User = Depends(get_request_user),
+    _: None = Depends(rbac_rate_limit("writing.manuscripts.annotations.review")),
+) -> ManuscriptSceneAnnotationReviewJobResponse:
+    """Queue a Jobs-backed full-scene review that creates anchored annotations."""
+    try:
+        await _enforce_rate_limit(
+            rate_limiter,
+            int(current_user.id),
+            "writing.manuscripts.annotations.review",
+        )
+        provider_override, model_override = _validate_analysis_overrides(
+            provider=payload.provider,
+            model=payload.model,
+        )
+        helper = _get_helper(db)
+        scene = helper.get_scene(scene_id)
+        if not scene:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scene not found")
+        if int(payload.scene_version) != int(scene["version"]):
+            raise ConflictError("Annotation scene version does not match the saved scene version.")
+
+        try:
+            job = enqueue_scene_annotation_review_job(
+                job_manager=job_manager,
+                owner_user_id=str(current_user.id),
+                project_id=scene["project_id"],
+                scene_id=scene_id,
+                scene_version=payload.scene_version,
+                provider=provider_override or payload.provider,
+                model=model_override or payload.model,
+                max_comments=payload.max_comments,
+                category_filters=list(payload.category_filters),
+                review_focus=payload.review_focus,
+            )
+        except WritingAnnotationReviewEnqueueError as exc:
+            logger.error("Manuscript scene annotation review enqueue failed")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Manuscript scene annotation review queue unavailable",
+            ) from exc
+
+        return ManuscriptSceneAnnotationReviewJobResponse(
+            job_id=int(job["id"]),
+            job_uuid=job.get("uuid"),
+            status=str(job.get("status") or "queued"),
+            job_type=WRITING_SCENE_ANNOTATION_REVIEW_JOB_TYPE,
+            project_id=scene["project_id"],
+            scene_id=scene_id,
+            scene_version=int(payload.scene_version),
+        )
+    except _MANUSCRIPT_NONCRITICAL_EXCEPTIONS as exc:
+        _handle_db_errors(exc, "scene annotation review job")
 
 
 @router.get(

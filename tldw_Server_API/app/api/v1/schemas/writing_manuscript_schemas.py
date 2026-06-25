@@ -710,6 +710,52 @@ class ManuscriptSelectedTextAnnotationReviewRequest(BaseModel):
         return self
 
 
+class ManuscriptSceneAnnotationReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(..., min_length=1, description="LLM provider override")
+    model: str = Field(..., min_length=1, description="Model override")
+    scene_version: int = Field(..., ge=0, description="Scene version being reviewed")
+    max_comments: int = Field(
+        5,
+        ge=1,
+        le=10,
+        description="Maximum scene-level annotations to create",
+    )
+    category_filters: list[AnnotationCategory] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Optional annotation categories to request",
+    )
+    review_focus: str | None = Field(None, max_length=4000, description="Optional scene-review focus")
+
+    @field_validator("provider", "model")
+    @classmethod
+    def validate_required_override(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("provider and model must be non-empty")
+        return normalized
+
+    @field_validator("review_focus")
+    @classmethod
+    def normalize_review_focus(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class ManuscriptSceneAnnotationReviewJobResponse(BaseModel):
+    job_id: int
+    job_uuid: str | None = None
+    status: str
+    job_type: str
+    project_id: str
+    scene_id: str
+    scene_version: int
+
+
 class ManuscriptAnnotationUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

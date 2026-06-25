@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.ManuscriptDB import ManuscriptDBHelper
@@ -116,6 +117,19 @@ def _review_payload(scene: dict, selection_text: str, **overrides) -> dict:
     return payload
 
 
+def _scene_review_payload(scene: dict, **overrides) -> dict:
+    payload = {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "scene_version": scene["version"],
+        "max_comments": 3,
+        "category_filters": ["clarity", "pacing"],
+        "review_focus": "Review scene-level craft issues.",
+    }
+    payload.update(overrides)
+    return payload
+
+
 def _list_scene_annotations(client: TestClient, project_id: str, scene_id: str) -> list[dict]:
     response = client.get(
         f"{PREFIX}/projects/{project_id}/annotations",
@@ -123,6 +137,25 @@ def _list_scene_annotations(client: TestClient, project_id: str, scene_id: str) 
     )
     assert response.status_code == 200, response.text
     return response.json()["annotations"]
+
+
+class _RecordingReviewJobs:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.created_jobs: list[dict] = []
+
+    def create_job(self, **kwargs):
+        if self.fail:
+            raise RuntimeError("jobs backend exploded with internal detail")
+        job_id = len(self.created_jobs) + 300
+        row = {
+            "id": job_id,
+            "uuid": f"job-{job_id}",
+            "status": "queued",
+            **kwargs,
+        }
+        self.created_jobs.append(row)
+        return row
 
 
 def test_post_annotations_creates_manual_scene_range_annotation(api_context):
@@ -629,3 +662,113 @@ def test_review_selection_unparseable_output_returns_diagnostics_without_persist
     assert "diagnostics" in detail
     assert "valid JSON" in " ".join(detail["diagnostics"])
     assert _list_scene_annotations(client, project["id"], scene["id"]) == []
+
+
+def test_review_scene_requires_provider_and_model_fields(api_context):
+    client, _db = api_context
+    _project, _chapter, scene = _create_scene_manuscript(client)
+
+    response = client.post(
+        f"{PREFIX}/scenes/{scene['id']}/annotations/review-scene",
+        json={
+            "api_provider": "openai",
+            "api_model": "gpt-4o-mini",
+            "scene_version": scene["version"],
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    body = response.json()
+    missing_fields = {error["loc"][-1] for error in body["detail"] if error["type"] == "missing"}
+    assert {"provider", "model"}.issubset(missing_fields)
+
+
+def test_review_scene_rejects_bad_scene_version_before_enqueue(api_context):
+    client, _db = api_context
+    project, _chapter, scene = _create_scene_manuscript(client)
+    jobs = _RecordingReviewJobs()
+    client.app.dependency_overrides[get_job_manager] = lambda: jobs
+
+    response = client.post(
+        f"{PREFIX}/scenes/{scene['id']}/annotations/review-scene",
+        json=_scene_review_payload(scene, scene_version=scene["version"] + 1),
+    )
+
+    assert response.status_code == 409, response.text
+    assert "version" in response.json()["detail"].lower()
+    assert jobs.created_jobs == []
+    assert _list_scene_annotations(client, project["id"], scene["id"]) == []
+
+
+def test_review_scene_rejects_too_many_comments(api_context):
+    client, _db = api_context
+    _project, _chapter, scene = _create_scene_manuscript(client)
+
+    response = client.post(
+        f"{PREFIX}/scenes/{scene['id']}/annotations/review-scene",
+        json=_scene_review_payload(scene, max_comments=11),
+    )
+
+    assert response.status_code == 422, response.text
+
+
+def test_review_scene_returns_job_response_and_passes_owner_metadata(api_context, monkeypatch):
+    client, _db = api_context
+    project, _chapter, scene = _create_scene_manuscript(client)
+    jobs = _RecordingReviewJobs()
+    client.app.dependency_overrides[get_job_manager] = lambda: jobs
+    import tldw_Server_API.app.api.v1.endpoints.writing_manuscripts as writing_endpoint
+
+    monkeypatch.setattr(
+        writing_endpoint,
+        "get_provider_manager",
+        lambda: SimpleNamespace(providers=["openai"], primary_provider="openai"),
+    )
+    monkeypatch.setattr(writing_endpoint, "is_model_known_for_provider", lambda *_args, **_kwargs: True)
+
+    response = client.post(
+        f"{PREFIX}/scenes/{scene['id']}/annotations/review-scene",
+        json=_scene_review_payload(scene),
+    )
+
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body == {
+        "job_id": 300,
+        "job_uuid": "job-300",
+        "status": "queued",
+        "job_type": "writing_scene_annotation_review",
+        "project_id": project["id"],
+        "scene_id": scene["id"],
+        "scene_version": scene["version"],
+    }
+    created = jobs.created_jobs[0]
+    assert created["owner_user_id"] == "1"
+    assert "owner_user_id" not in created["payload"]
+    assert created["payload"]["scene_id"] == scene["id"]
+    assert "content_plain" not in created["payload"]
+    assert "selected_text" not in created["payload"]
+    assert "raw_model_output" not in created["payload"]
+
+
+def test_review_scene_returns_sanitized_error_when_jobs_unavailable(api_context, monkeypatch):
+    client, _db = api_context
+    _project, _chapter, scene = _create_scene_manuscript(client)
+    client.app.dependency_overrides[get_job_manager] = lambda: _RecordingReviewJobs(fail=True)
+    import tldw_Server_API.app.api.v1.endpoints.writing_manuscripts as writing_endpoint
+
+    monkeypatch.setattr(
+        writing_endpoint,
+        "get_provider_manager",
+        lambda: SimpleNamespace(providers=["openai"], primary_provider="openai"),
+    )
+    monkeypatch.setattr(writing_endpoint, "is_model_known_for_provider", lambda *_args, **_kwargs: True)
+
+    response = client.post(
+        f"{PREFIX}/scenes/{scene['id']}/annotations/review-scene",
+        json=_scene_review_payload(scene),
+    )
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == "Manuscript scene annotation review queue unavailable"
+    assert "exploded" not in response.text

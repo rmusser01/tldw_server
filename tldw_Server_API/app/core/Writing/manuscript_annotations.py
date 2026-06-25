@@ -25,6 +25,9 @@ ANCHOR_CONTEXT_CHARS = 240
 _SELECTED_TEXT_REVIEW_SYSTEM_MESSAGE = (
     "You are a focused manuscript editor. Respond only with valid JSON for one annotation."
 )
+_SCENE_REVIEW_SYSTEM_MESSAGE = (
+    "You are a focused manuscript editor. Respond only with valid JSON for scene annotations."
+)
 
 
 def create_document_fingerprint(text: str) -> str:
@@ -62,6 +65,39 @@ def build_selected_text_review_prompt(
     ]
 
 
+def build_scene_review_prompt(
+    *,
+    scene_text: str,
+    category_filters: list[str],
+    max_comments: int,
+    review_focus: str | None,
+) -> list[dict[str, str]]:
+    """Build a prompt for reviewing a saved manuscript scene."""
+    bounded_max = max(1, min(int(max_comments), 10))
+    allowed_categories = ", ".join(VALID_ANNOTATION_CATEGORIES)
+    filters = [category for category in category_filters if category in VALID_ANNOTATION_CATEGORIES]
+    filter_text = ", ".join(filters) if filters else "Choose the best allowed categories."
+    focus_text = review_focus.strip() if review_focus and review_focus.strip() else "No additional focus."
+    user_prompt = (
+        "Review the whole saved scene and return only actionable annotations anchored to exact text.\n\n"
+        f"Allowed categories: {allowed_categories}\n"
+        f"Category filters: {filter_text}\n"
+        f"Maximum annotations: {bounded_max}\n"
+        f"Review focus: {focus_text[:2000]}\n\n"
+        "Return a JSON object with an \"annotations\" array. Each item must include:\n"
+        '- "category": one allowed category\n'
+        '- "quote": an exact, short quote copied from the scene text\n'
+        '- "body": concise reviewer note under 2000 characters\n'
+        '- "suggested_fix": optional concrete rewrite under 8000 characters\n'
+        '- "start" and "end": optional character offsets when the quote appears more than once\n\n'
+        f"Scene text:\n{scene_text[:12000]}"
+    )
+    return [
+        {"role": "system", "content": _SCENE_REVIEW_SYSTEM_MESSAGE},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
 def parse_annotation_review_response(raw_text: str) -> list[dict[str, str]]:
     """Parse and validate one selected-text annotation from model output."""
     content = _strip_markdown_fences(raw_text)
@@ -78,6 +114,22 @@ def parse_annotation_review_response(raw_text: str) -> list[dict[str, str]]:
         raise ValueError("Selected-text review must return exactly one annotation.")
 
     return [_validate_review_annotation(annotation_payload[0])]
+
+
+def parse_scene_review_response(raw_text: str, *, max_comments: int) -> list[dict[str, object]]:
+    """Parse and validate bounded scene-review annotations from model output."""
+    content = _strip_markdown_fences(raw_text)
+    if not content:
+        raise ValueError("Model response must contain valid JSON.")
+
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Model response must contain valid JSON.") from exc
+
+    annotation_payload = _coerce_annotation_payload(payload)
+    bounded_max = max(1, min(int(max_comments), 10))
+    return [_validate_scene_review_annotation(annotation) for annotation in annotation_payload[:bounded_max]]
 
 
 def build_scene_anchor(text: str, *, start: int, end: int, scene_version: int) -> dict[str, object]:
@@ -180,6 +232,32 @@ def _validate_review_annotation(annotation: object) -> dict[str, str]:
             raise ValueError("Annotation suggested_fix must be under 8000 characters.")
         if normalized_fix:
             parsed["suggested_fix"] = normalized_fix
+    return parsed
+
+
+def _validate_scene_review_annotation(annotation: object) -> dict[str, object]:
+    if not isinstance(annotation, dict):
+        raise ValueError("Annotation entry must be a JSON object.")
+    parsed: dict[str, object] = _validate_review_annotation(annotation)
+    quote = annotation.get("quote")
+    if quote is None:
+        quote = annotation.get("selected_text")
+    if not isinstance(quote, str) or not quote.strip():
+        raise ValueError("Scene review annotation quote must be a non-empty string.")
+    normalized_quote = quote.strip()
+    if len(normalized_quote) >= 12000:
+        raise ValueError("Scene review annotation quote must be under 12000 characters.")
+    parsed["quote"] = normalized_quote
+
+    start = annotation.get("start")
+    end = annotation.get("end")
+    if start is not None or end is not None:
+        if not isinstance(start, int) or not isinstance(end, int):
+            raise ValueError("Scene review annotation offsets must be integers when provided.")
+        if start < 0 or end <= start:
+            raise ValueError("Scene review annotation end must be greater than start.")
+        parsed["start"] = start
+        parsed["end"] = end
     return parsed
 
 
