@@ -357,7 +357,12 @@ class ImprovedWorker:
                     return False
 
                 # Acknowledge success
-                await self.backend.ack(task.id, result)
+                await self.backend.ack(
+                    task.id,
+                    result,
+                    lease_id=task.lease_id,
+                    worker_id=self.worker_id,
+                )
 
                 # Update metrics
                 processing_time = asyncio.get_event_loop().time() - start_time
@@ -379,7 +384,12 @@ class ImprovedWorker:
 
                 # Don't acknowledge if we're stopping
                 if not self._stop_event.is_set():
-                    await self.backend.nack(task.id, error)
+                    await self.backend.nack(
+                        task.id,
+                        error,
+                        lease_id=task.lease_id,
+                        worker_id=self.worker_id,
+                    )
                 return False
 
         except asyncio.CancelledError:
@@ -394,7 +404,12 @@ class ImprovedWorker:
             # Don't acknowledge if we're stopping
             if not self._stop_event.is_set():
                 try:
-                    await self.backend.nack(task.id, error)
+                    await self.backend.nack(
+                        task.id,
+                        error,
+                        lease_id=task.lease_id,
+                        worker_id=self.worker_id,
+                    )
                 except Exception as nack_error:
                     logger.error(f"Failed to nack task {task.id}: {nack_error}")
 
@@ -421,8 +436,13 @@ class ImprovedWorker:
         logger.warning(f"Force stopping task {self.current_task.id}")
 
         try:
-            # Release the task back to queue
-            await self.backend.release_task(self.current_task.id)
+            await self.backend.nack(
+                self.current_task.id,
+                "Worker stopped before task completion",
+                retry=True,
+                lease_id=self.current_task.lease_id,
+                worker_id=self.worker_id,
+            )
         except Exception as e:
             logger.error(f"Failed to release task {self.current_task.id}: {e}")
 

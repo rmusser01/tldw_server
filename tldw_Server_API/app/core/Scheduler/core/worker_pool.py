@@ -206,20 +206,35 @@ class Worker:
             )
 
             # Acknowledge success
-            await self.backend.ack(task.id, result)
+            await self.backend.ack(
+                task.id,
+                result,
+                lease_id=task.lease_id,
+                worker_id=self.worker_id,
+            )
             logger.info(f"Task {task.id} completed successfully")
             return True
 
         except asyncio.TimeoutError:
             error = f"Task timeout after {timeout} seconds"
             logger.error(f"Task {task.id} failed: {error}")
-            await self.backend.nack(task.id, error)
+            await self.backend.nack(
+                task.id,
+                error,
+                lease_id=task.lease_id,
+                worker_id=self.worker_id,
+            )
             return False
 
         except Exception as e:
             error = str(e)
             logger.error(f"Task {task.id} failed: {error}")
-            await self.backend.nack(task.id, error)
+            await self.backend.nack(
+                task.id,
+                error,
+                lease_id=task.lease_id,
+                worker_id=self.worker_id,
+            )
             return False
 
         finally:

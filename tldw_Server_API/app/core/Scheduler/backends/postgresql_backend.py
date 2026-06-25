@@ -262,7 +262,7 @@ class PostgreSQLBackend(QueueBackend):
                     RETURNING id
                 """,
                     task.id, task.handler, json.dumps(payload_data) if payload_data else None,
-                    payload_ref, task.status.value, task.priority,
+                    payload_ref, TaskStatus.QUEUED.value, task.priority,
                     task.queue_name or self.config.default_queue_name,
                     task.scheduled_at, task.depends_on, task.idempotency_key,
                     task.max_retries, task.retry_delay, task.timeout,
@@ -303,7 +303,7 @@ class PostgreSQLBackend(QueueBackend):
                 values.append((
                     task.id, task.handler,
                     json.dumps(payload_data) if payload_data else None,
-                    payload_ref, task.status.value, task.priority,
+                    payload_ref, TaskStatus.QUEUED.value, task.priority,
                     task.queue_name or self.config.default_queue_name,
                     task.scheduled_at, task.depends_on, task.idempotency_key,
                     task.max_retries, task.retry_delay, task.timeout,
@@ -374,7 +374,14 @@ class PostgreSQLBackend(QueueBackend):
             # Convert to Task object
             return await self._row_to_task(conn, row)
 
-    async def ack(self, task_id: str, result: Optional[Any] = None) -> bool:
+    async def ack(
+        self,
+        task_id: str,
+        result: Optional[Any] = None,
+        *,
+        lease_id: Optional[str] = None,
+        worker_id: Optional[str] = None,
+    ) -> bool:
         """
         Acknowledge task completion.
         """
@@ -384,14 +391,25 @@ class PostgreSQLBackend(QueueBackend):
                 SET status = 'completed',
                     completed_at = NOW(),
                     result = $1,
+                    worker_id = NULL,
                     lease_id = NULL,
                     lease_expires_at = NULL
                 WHERE id = $2 AND status = 'running'
-            """, json.dumps(result) if result else None, task_id)
+                  AND ($3::text IS NULL OR lease_id = $3)
+                  AND ($4::text IS NULL OR worker_id = $4)
+            """, json.dumps(result) if result is not None else None, task_id, lease_id, worker_id)
 
             return affected != "UPDATE 0"
 
-    async def nack(self, task_id: str, error: Optional[str] = None, retry: bool = True) -> bool:
+    async def nack(
+        self,
+        task_id: str,
+        error: Optional[str] = None,
+        retry: bool = True,
+        *,
+        lease_id: Optional[str] = None,
+        worker_id: Optional[str] = None,
+    ) -> bool:
         """
         Negative acknowledge - task failed but may be retried.
         """
@@ -413,8 +431,10 @@ class PostgreSQLBackend(QueueBackend):
                         ELSE NULL
                     END
                 WHERE id = $2 AND status = 'running'
+                  AND ($4::text IS NULL OR lease_id = $4)
+                  AND ($5::text IS NULL OR worker_id = $5)
                 RETURNING status, queue_name
-            """, error, task_id, retry)
+            """, error, task_id, retry, lease_id, worker_id)
 
             if row and row['status'] == 'queued':
                 # Notify queue for retry
@@ -858,7 +878,7 @@ class PostgreSQLBackend(QueueBackend):
         """
         Send NOTIFY for queue updates.
         """
-        await conn.execute(f"NOTIFY queue_update, '{queue_name}'")
+        await conn.execute("SELECT pg_notify('queue_update', $1)", queue_name)
 
     async def _listen_for_notifications(self) -> None:
         """

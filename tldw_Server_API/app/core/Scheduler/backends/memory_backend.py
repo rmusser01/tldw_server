@@ -133,7 +133,14 @@ class MemoryBackend(QueueBackend):
 
             return None
 
-    async def ack(self, task_id: str, result: Optional[Any] = None) -> bool:
+    async def ack(
+        self,
+        task_id: str,
+        result: Optional[Any] = None,
+        *,
+        lease_id: Optional[str] = None,
+        worker_id: Optional[str] = None,
+    ) -> bool:
         """Acknowledge task completion."""
         async with self._lock:
             if task_id not in self.tasks:
@@ -142,16 +149,29 @@ class MemoryBackend(QueueBackend):
             task = self.tasks[task_id]
             if task.status != TaskStatus.RUNNING:
                 return False
+            if lease_id is not None and task.lease_id != lease_id:
+                return False
+            if worker_id is not None and task.worker_id != worker_id:
+                return False
 
             task.status = TaskStatus.COMPLETED
             task.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
             task.result = result
             task.lease_id = None
             task.lease_expires_at = None
+            task.worker_id = None
 
             return True
 
-    async def nack(self, task_id: str, error: Optional[str] = None, retry: bool = True) -> bool:
+    async def nack(
+        self,
+        task_id: str,
+        error: Optional[str] = None,
+        retry: bool = True,
+        *,
+        lease_id: Optional[str] = None,
+        worker_id: Optional[str] = None,
+    ) -> bool:
         """Negative acknowledge."""
         async with self._lock:
             if task_id not in self.tasks:
@@ -159,6 +179,10 @@ class MemoryBackend(QueueBackend):
 
             task = self.tasks[task_id]
             if task.status != TaskStatus.RUNNING:
+                return False
+            if lease_id is not None and task.lease_id != lease_id:
+                return False
+            if worker_id is not None and task.worker_id != worker_id:
                 return False
 
             task.error = error
