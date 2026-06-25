@@ -11,6 +11,14 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatBadRequestError,
+    ChatConfigurationError,
+    ChatProviderError,
+    ChatRateLimitError,
+)
 from tldw_Server_API.app.core.DB_Management.ManuscriptDB import ManuscriptDBHelper
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
@@ -199,7 +207,25 @@ def _is_retryable_runtime_error(exc: Exception) -> bool:
     explicit = getattr(exc, "retryable", None)
     if explicit is not None:
         return bool(explicit)
+    if isinstance(exc, ChatRateLimitError):
+        return True
+    if isinstance(exc, (ChatAuthenticationError, ChatBadRequestError, ChatConfigurationError)):
+        return False
+    status_code = _exception_status_code(exc)
+    if status_code is not None:
+        return status_code in {408, 429} or 500 <= status_code < 600
     return isinstance(exc, (ConnectionError, TimeoutError))
+
+
+def _exception_status_code(exc: Exception) -> int | None:
+    if isinstance(exc, (ChatProviderError, ChatAPIError)):
+        value = getattr(exc, "status_code", None)
+    else:
+        value = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 async def _should_cancel(job: dict[str, Any], *, job_manager: JobManager) -> bool:

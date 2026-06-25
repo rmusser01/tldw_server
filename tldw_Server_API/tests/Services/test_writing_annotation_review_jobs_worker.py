@@ -95,6 +95,64 @@ async def test_handle_writing_annotation_review_job_rejects_unknown_job_type() -
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("processor_error", "expected_retryable"),
+    [
+        pytest.param(
+            "rate_limit",
+            True,
+            id="rate-limit",
+        ),
+        pytest.param(
+            "provider_503",
+            True,
+            id="provider-503",
+        ),
+        pytest.param(
+            "bad_request",
+            False,
+            id="bad-request",
+        ),
+        pytest.param(
+            "configuration",
+            False,
+            id="configuration",
+        ),
+    ],
+)
+async def test_handle_writing_annotation_review_job_classifies_chat_runtime_retryability(
+    processor_error: str,
+    expected_retryable: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.Chat.Chat_Deps import (
+        ChatBadRequestError,
+        ChatConfigurationError,
+        ChatProviderError,
+        ChatRateLimitError,
+    )
+    import tldw_Server_API.app.services.writing_annotation_review_jobs_worker as worker
+
+    errors = {
+        "rate_limit": ChatRateLimitError("rate limited", provider="openai"),
+        "provider_503": ChatProviderError("provider unavailable", status_code=503, provider="openai"),
+        "bad_request": ChatBadRequestError("bad request", provider="openai"),
+        "configuration": ChatConfigurationError("missing key", provider="openai"),
+    }
+
+    async def _process(**_kwargs: Any) -> dict[str, Any]:
+        raise errors[processor_error]
+
+    monkeypatch.setattr(worker, "process_scene_annotation_review_job", _process)
+
+    with pytest.raises(worker.WritingAnnotationReviewJobError) as excinfo:
+        await worker.handle_writing_annotation_review_job(_job(), manuscript_db=object())
+
+    assert excinfo.value.retryable is expected_retryable
+    assert excinfo.value.failure_code == "writing_annotation_review_runtime_failed"
+
+
+@pytest.mark.asyncio
 async def test_run_worker_uses_writing_config_and_handler(monkeypatch: pytest.MonkeyPatch) -> None:
     import tldw_Server_API.app.services.writing_annotation_review_jobs_worker as worker
 
