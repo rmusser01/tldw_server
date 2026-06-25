@@ -302,6 +302,8 @@ WATCHLISTS_DELETE_RESTORE_WINDOW_SECONDS = max(
 _TEMPLATE_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
 _WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES = max(1, int(os.getenv("WATCHLIST_MIN_SCHEDULE_INTERVAL_MINUTES", "5") or 5))
 _EMAIL_RECIPIENT_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+_EMAIL_ATTACHMENT_FILENAME_MAX_LENGTH = 255
+_EMAIL_ATTACHMENT_UNSAFE_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
 
 _WATCHLISTS_UX_BASELINE = {
     "uc1_f1_first_source_setup_percent": 92.96,
@@ -1274,6 +1276,25 @@ def _build_report_snapshot_filename(output_title: str, ts: str) -> str:
     filename = _build_output_filename(output_title, "evidence", ts, "md")
     stem = filename.rsplit(".", 1)[0]
     return f"{stem}.json"
+
+
+def _build_watchlist_email_attachment_filename(
+    title: str | None,
+    output_id: int | None,
+    ext: str,
+) -> str:
+    safe_ext = re.sub(r"[^A-Za-z0-9]+", "", str(ext or "md").lower()) or "md"
+    fallback = f"watchlist-output-{output_id or 'unknown'}"
+    safe_base = _EMAIL_ATTACHMENT_UNSAFE_FILENAME_RE.sub(
+        "_",
+        str(title or fallback),
+    ).strip(" ._")
+    if not safe_base:
+        safe_base = fallback
+
+    max_base_length = max(1, _EMAIL_ATTACHMENT_FILENAME_MAX_LENGTH - len(safe_ext) - 1)
+    safe_base = safe_base[:max_base_length].rstrip(" ._") or fallback[:max_base_length]
+    return f"{safe_base}.{safe_ext}"
 
 
 async def _write_report_snapshot_for_user(user_id: int, filename: str, snapshot: dict[str, Any]) -> None:
@@ -5246,10 +5267,9 @@ async def retry_run_delivery(
         attachments = None
         if email_cfg.get("attach_file", True) and output.content:
             ext = "html" if output_format == "html" else "md"
-            safe_base = title.replace("/", "_")
             attachments = [
                 {
-                    "filename": f"{safe_base}.{ext}",
+                    "filename": _build_watchlist_email_attachment_filename(title, output.id, ext),
                     "content": (output.content or "").encode("utf-8"),
                 }
             ]
@@ -7136,10 +7156,9 @@ async def create_output(
             attachments = None
             if email_cfg.get("attach_file", True) and output.content:
                 ext = "html" if (output.format or output_format) == "html" else "md"
-                safe_base = (title or f"watchlist-output-{output.id}").replace("/", "_")
                 attachments = [
                     {
-                        "filename": f"{safe_base}.{ext}",
+                        "filename": _build_watchlist_email_attachment_filename(title, output.id, ext),
                         "content": (output.content or "").encode("utf-8"),
                     }
                 ]

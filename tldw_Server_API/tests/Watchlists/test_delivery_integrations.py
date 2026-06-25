@@ -38,6 +38,23 @@ def client_with_user(monkeypatch, tmp_path):
     app.dependency_overrides.clear()
 
 
+def test_watchlist_email_attachment_filename_sanitizes_separators_and_length():
+    from tldw_Server_API.app.api.v1.endpoints import watchlists
+
+    title = "Daily / Digest \\ Briefing " + ("x" * 300)
+    filename = watchlists._build_watchlist_email_attachment_filename(title, 55, "md")
+
+    assert filename.endswith(".md")
+    assert "/" not in filename
+    assert "\\" not in filename
+    assert "\r" not in filename
+    assert "\n" not in filename
+    assert len(filename) <= 255
+
+    fallback_filename = watchlists._build_watchlist_email_attachment_filename("/\\", 55, "md")
+    assert fallback_filename == "watchlist-output-55.md"
+
+
 def test_output_deliveries_email_and_chatbook(client_with_user: TestClient):
     c = client_with_user
 

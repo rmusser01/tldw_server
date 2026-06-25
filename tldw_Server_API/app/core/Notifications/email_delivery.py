@@ -1,10 +1,11 @@
 """
 Email Notification Delivery
 
-Sends notification emails via SMTP. Configured through environment variables:
+Formats notification emails and delegates delivery to the AuthNZ email service.
+The legacy SMTP config helper still recognizes:
 - SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD
 - EMAIL_FROM (sender email)
-- SMTP_USE_TLS (default: true)
+- SMTP_USE_TLS (default: true), SMTP_TIMEOUT (default: 10)
 
 Usage:
     from tldw_Server_API.app.core.Notifications.email_delivery import send_notification_email
@@ -19,17 +20,13 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 import html
 import os
-import smtplib
-import ssl
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from urllib.parse import urlparse, urlunparse
-from uuid import uuid4
 
 from loguru import logger
+
+from tldw_Server_API.app.core.AuthNZ.email_service import get_email_service
 
 
 def _read_env_text(*names: str, default: str = "") -> str:
@@ -42,7 +39,7 @@ def _read_env_text(*names: str, default: str = "") -> str:
     return default
 
 
-def _get_smtp_config() -> dict[str, str | int | bool] | None:
+def _get_smtp_config() -> dict[str, str | int | bool | float] | None:
     """Read SMTP config from environment. Returns None if not configured."""
     host = os.environ.get("SMTP_HOST", "").strip()
     if not host:
@@ -60,6 +57,16 @@ def _get_smtp_config() -> dict[str, str | int | bool] | None:
         )
         return None
 
+    raw_timeout = os.environ.get("SMTP_TIMEOUT", "10").strip()
+    try:
+        timeout = float(raw_timeout)
+    except ValueError:
+        logger.warning("SMTP_TIMEOUT is invalid; email delivery disabled")
+        return None
+    if timeout <= 0:
+        logger.warning("SMTP_TIMEOUT must be positive; email delivery disabled")
+        return None
+
     return {
         "host": host,
         "port": port,
@@ -72,11 +79,12 @@ def _get_smtp_config() -> dict[str, str | int | bool] | None:
         ),
         "use_tls": os.environ.get("SMTP_USE_TLS", "true").lower()
         in ("true", "1", "yes"),
+        "timeout": timeout,
     }
 
 
 def is_email_delivery_configured() -> bool:
-    """Check if SMTP is configured for email delivery."""
+    """Check if legacy SMTP environment settings are configured."""
     return _get_smtp_config() is not None
 
 
@@ -88,12 +96,13 @@ def _mask_email_address(address: str) -> str:
     return f"{prefix}***@{domain}"
 
 
-def _redact_log_text(value: object, *sensitive_values: str) -> str:
-    redacted = str(value)
-    for sensitive_value in sensitive_values:
-        if sensitive_value:
-            redacted = redacted.replace(sensitive_value, "[redacted]")
-    return redacted
+def _plain_text_to_html(body_text: str) -> str:
+    escaped = html.escape(body_text)
+    return f"<pre>{escaped}</pre>"
+
+
+def _redacted_exception_for_log(exc: BaseException) -> RuntimeError:
+    return RuntimeError(f"{type(exc).__name__}: redacted").with_traceback(exc.__traceback__)
 
 
 async def send_notification_email(
@@ -102,62 +111,24 @@ async def send_notification_email(
     body_text: str,
     body_html: str | None = None,
 ) -> bool:
-    """Send a notification email via SMTP.
+    """Send a notification email through the AuthNZ email service.
 
     Returns True on success, False on failure (logged, not raised).
     """
-    return await asyncio.to_thread(
-        _send_notification_email_sync,
-        to,
-        subject,
-        body_text,
-        body_html,
-    )
-
-
-def _send_notification_email_sync(
-    to: str,
-    subject: str,
-    body_text: str,
-    body_html: str | None = None,
-) -> bool:
-    config = _get_smtp_config()
-    if not config:
-        logger.debug("Email delivery not configured (SMTP_HOST not set)")
-        return False
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = str(config["from_address"])
-    msg["To"] = to
-
-    msg.attach(MIMEText(body_text, "plain"))
-    if body_html:
-        msg.attach(MIMEText(body_html, "html"))
-
-    notification_id = uuid4().hex[:12]
-    masked_to = _mask_email_address(to)
     try:
-        with smtplib.SMTP(str(config["host"]), int(config["port"])) as server:
-            if config["use_tls"]:
-                context = ssl.create_default_context()
-                server.starttls(context=context)
-            if config["user"] and config["password"]:
-                server.login(str(config["user"]), str(config["password"]))
-            server.sendmail(str(config["from_address"]), to, msg.as_string())
-
-        logger.info(
-            "Notification email sent (id={}, recipient={})",
-            notification_id,
-            masked_to,
+        return await get_email_service().send_email(
+            to_email=to,
+            subject=subject,
+            html_body=body_html or _plain_text_to_html(body_text),
+            text_body=body_text,
         )
-        return True
     except Exception as exc:
-        logger.error(
-            "Failed to send notification email (id={}, recipient={}): {}",
-            notification_id,
-            masked_to,
-            _redact_log_text(exc, to, subject),
+        logger.bind(
+            operation="notifications.send_notification_email",
+            recipient=_mask_email_address(to),
+            exception_type=type(exc).__name__,
+        ).opt(exception=_redacted_exception_for_log(exc)).error(
+            "Failed to send notification email"
         )
         return False
 
