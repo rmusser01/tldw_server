@@ -221,6 +221,31 @@ def test_slides_db_search_rejects_malformed_fts_query(tmp_path):
     db.close_connection()
 
 
+def test_slides_db_search_rejects_unknown_fts_column(tmp_path):
+    db_path = tmp_path / "Slides.db"
+    db = SlidesDatabase(db_path=db_path, client_id="tester")
+    db.create_presentation(
+        presentation_id=None,
+        title="Search Deck",
+        description=None,
+        theme="black",
+        marp_theme=None,
+        settings=None,
+        studio_data=None,
+        slides=_sample_slides(),
+        slides_text="alpha beta gamma",
+        source_type="manual",
+        source_ref=None,
+        source_query=None,
+        custom_css=None,
+    )
+
+    with pytest.raises(InputError):
+        db.search_presentations(query="unknown_column:alpha", limit=10, offset=0, include_deleted=False)
+
+    db.close_connection()
+
+
 def test_slides_db_search_does_not_map_non_fts_operational_errors(tmp_path, monkeypatch):
     db_path = tmp_path / "Slides.db"
     db = SlidesDatabase(db_path=db_path, client_id="tester")
@@ -322,8 +347,9 @@ def test_slides_db_schema_initialization_serializes_column_migrations(tmp_path, 
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join()
+        thread.join(timeout=5)
 
+    assert all(not thread.is_alive() for thread in threads)
     assert errors == []
 
 

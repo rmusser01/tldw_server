@@ -364,6 +364,7 @@ class SlidesDatabase:
                 "fts5: syntax error",
                 "fts5 syntax error",
                 "malformed match",
+                "no such column:",
                 "unterminated string",
                 "syntax error near",
             )

@@ -35,12 +35,14 @@ GREEN verification: `source .venv/bin/activate && python -m pytest tldw_Server_A
 Security verification: Bandit on touched production files wrote /tmp/bandit_slides_review_fixes.json and reported 0 results, 0 errors, and zero high/medium/low severity findings. `git diff --check` on touched files exited 0.
 PR follow-up 2026-06-24: rebased branch onto origin/dev at 2618c4b70. Qodo review reported four actionable issues: broad/silent optional import catches, silent generator setting fallback, negative chunk size bypass, and overbroad FTS OperationalError mapping. Reopening task for review-comment remediation.
 PR follow-up completed 2026-06-24: addressed Qodo review comments after rebase onto origin/dev 2618c4b70. Fixed optional bleach/CSSSanitizer imports to only catch ImportError, made invalid generator integer settings visible via warnings while propagating unexpected settings backend failures, rejected non-positive chunk_size_tokens before LLM calls, and narrowed FTS OperationalError mapping so non-query database errors propagate. Added regression tests for each behavior and stabilized the Slides ordering property test health check.
+PR follow-up 2026-06-24: rebased again onto origin/dev e664332b68. New CodeRabbit comments report missing FTS no-such-column classification and unbounded thread joins in the schema lock regression test. Reopening task for remediation.
+Second PR follow-up completed 2026-06-24: addressed CodeRabbit comments after rebase onto origin/dev e664332b68. Added no-such-column FTS query classification for invalid fielded search terms and bounded the schema initialization thread joins with an alive-thread assertion.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Slides hardening PR rebased onto latest dev and review comments remediated. Verification: python -m pytest tldw_Server_API/tests/Slides -q -> 176 passed; python -m bandit -r touched Slides production files -f json -> 0 findings; git diff --check -> clean.
+Slides hardening PR rebased onto latest dev again and all known Qodo/CodeRabbit comments remediated. Verification: focused DB review tests -> 3 passed; python -m pytest tldw_Server_API/tests/Slides -q -> 177 passed; Bandit on touched Slides production files -> 0 findings; git diff --check -> clean.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
