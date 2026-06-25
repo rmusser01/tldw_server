@@ -11,6 +11,7 @@ from fastapi import HTTPException, status
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     SpeechChatRequest,
     SpeechChatLLMConfig,
+    SpeechChatSTTConfig,
 )
 from tldw_Server_API.app.core.Streaming.speech_chat_service import run_speech_chat_turn
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
@@ -110,6 +111,28 @@ class _RecordingTTSService:
 class _NoAdapterRegistry:
     def get_adapter(self, _name: str):
         return None
+
+
+class _RecordingAdapter:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, Any]] = []
+
+    async def achat(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.requests.append(request)
+        return {
+            "choices": [
+                {"message": {"role": "assistant", "content": "adapter assistant reply"}}
+            ],
+            "usage": {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5},
+        }
+
+
+class _RecordingAdapterRegistry:
+    def __init__(self, adapter: _RecordingAdapter) -> None:
+        self.adapter = adapter
+
+    def get_adapter(self, _name: str):
+        return self.adapter
 
 
 class _DummyActionModule(BaseModule):
@@ -328,6 +351,7 @@ async def test_execute_action_sanitizes_lookup_failure_warning(monkeypatch):
 
     logger_stub = _LoggerStub()
     monkeypatch.setattr(speech_chat_service, "logger", logger_stub, raising=True)
+    monkeypatch.setenv("AUDIO_CHAT_ALLOWED_ACTIONS", "action-/private-token")
 
     class _FailingLookupRegistry:
         async def find_module_for_tool(self, _action_name):
@@ -360,6 +384,7 @@ async def test_execute_action_sanitizes_execution_failure_warning(monkeypatch):
 
     logger_stub = _LoggerStub()
     monkeypatch.setattr(speech_chat_service, "logger", logger_stub, raising=True)
+    monkeypatch.setenv("AUDIO_CHAT_ALLOWED_ACTIONS", "action-/private-token")
 
     class _FailingActionModule:
         async def execute_tool(self, _action_name, arguments, context=None):
@@ -413,14 +438,14 @@ def test_map_tts_exception_sanitizes_mapping_logs(monkeypatch):
             logger_stub.warning_calls,
             "TTS voice reference error in speech chat",
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "voice exploded at /private/tmp/voice.wav",
+            "Invalid TTS voice reference",
         ),
         (
             TTSValidationError("validation exploded at /private/tmp/request.json"),
             logger_stub.warning_calls,
             "TTS validation error in speech chat",
             status.HTTP_400_BAD_REQUEST,
-            "validation exploded at /private/tmp/request.json",
+            "Invalid TTS request",
         ),
         (
             TTSProviderNotConfiguredError("provider exploded at /private/tmp/config.json"),
@@ -471,11 +496,179 @@ def test_map_tts_exception_sanitizes_mapping_logs(monkeypatch):
 
         assert mapped.status_code == expected_status
         assert mapped.detail == expected_detail
+        assert "/private/" not in str(mapped.detail)
+        assert "tts-secret" not in str(mapped.detail)
         _assert_log_sanitized(
             calls,
             expected_log,
             forbidden_terms=("tts-secret", "voice.wav", "request.json", "provider.log"),
         )
+
+
+@pytest.mark.asyncio
+async def test_execute_action_requires_explicit_allowlist_before_registry_lookup(monkeypatch):
+    from tldw_Server_API.app.core.Streaming import speech_chat_service
+
+    monkeypatch.delenv("AUDIO_CHAT_ALLOWED_ACTIONS", raising=False)
+
+    class _RegistryShouldNotBeUsed:
+        async def find_module_for_tool(self, _action_name):
+            pytest.fail("registry lookup should not run without an action allowlist")
+
+    monkeypatch.setattr(
+        speech_chat_service,
+        "get_module_registry",
+        lambda: _RegistryShouldNotBeUsed(),
+    )
+
+    result = await speech_chat_service._execute_action(
+        "play_music",
+        "transcript",
+        _StubUser(),
+    )
+
+    assert result["status"] == "not_allowed"
+    assert result["message"] == "Action not allowed"
+
+
+@pytest.mark.asyncio
+async def test_run_speech_chat_turn_rejects_unsupported_format_before_decoding(monkeypatch):
+    from tldw_Server_API.app.core.Streaming import speech_chat_service
+
+    monkeypatch.setattr(
+        speech_chat_service,
+        "_decode_base64_audio",
+        lambda *_args, **_kwargs: pytest.fail("base64 decode should not run for unsupported formats"),
+    )
+
+    req = SpeechChatRequest(
+        session_id=None,
+        input_audio="not-read",
+        input_audio_format="application/x-msdownload",
+        llm_config=SpeechChatLLMConfig(model="gpt-4o-mini", api_provider="openai"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await run_speech_chat_turn(
+            request_data=req,
+            current_user=_StubUser(),
+            chat_db=_StubChatDB(),
+            tts_service=_StubTTSService(),
+        )
+
+    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert "Unsupported input_audio_format" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_run_speech_chat_turn_rejects_large_audio_before_soundfile_parse(monkeypatch):
+    from tldw_Server_API.app.core.Streaming import speech_chat_service
+
+    monkeypatch.setenv("AUDIO_CHAT_MAX_BYTES", "4")
+    monkeypatch.setattr(
+        speech_chat_service,
+        "_load_audio_to_mono_np",
+        lambda *_args, **_kwargs: pytest.fail("soundfile parse should not run for oversized audio"),
+    )
+
+    req = SpeechChatRequest(
+        session_id=None,
+        input_audio=base64.b64encode(b"too-large").decode("ascii"),
+        input_audio_format="wav",
+        llm_config=SpeechChatLLMConfig(model="gpt-4o-mini", api_provider="openai"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await run_speech_chat_turn(
+            request_data=req,
+            current_user=_StubUser(),
+            chat_db=_StubChatDB(),
+            tts_service=_StubTTSService(),
+        )
+
+    assert exc_info.value.status_code == status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+
+
+@pytest.mark.asyncio
+async def test_run_speech_chat_turn_passes_stt_model_to_transcriber(monkeypatch):
+    from tldw_Server_API.app.core.Streaming import speech_chat_service
+
+    _patch_speech_chat_success_path(monkeypatch, speech_chat_service)
+    recorded_kwargs: dict[str, Any] = {}
+
+    def _recording_transcribe_audio(*_args, **kwargs):
+        recorded_kwargs.update(kwargs)
+        return "hello from audio"
+
+    monkeypatch.setattr(speech_chat_service, "transcribe_audio", _recording_transcribe_audio)
+
+    req = SpeechChatRequest(
+        session_id=None,
+        input_audio=_encode_silence_base64(),
+        input_audio_format="wav",
+        stt_config=SpeechChatSTTConfig(
+            provider="faster-whisper",
+            model="tiny.en",
+            language="en",
+            extra_params={"whisper_model": "base.en"},
+        ),
+        llm_config=SpeechChatLLMConfig(model="gpt-4o-mini", api_provider="openai"),
+    )
+
+    await run_speech_chat_turn(
+        request_data=req,
+        current_user=_StubUser(),
+        chat_db=_StubChatDB(),
+        tts_service=_StubTTSService(),
+    )
+
+    assert recorded_kwargs["transcription_provider"] == "faster-whisper"
+    assert recorded_kwargs["speaker_lang"] == "en"
+    assert recorded_kwargs["whisper_model"] == "tiny.en"
+
+
+@pytest.mark.asyncio
+async def test_run_speech_chat_turn_passes_llm_extra_params_to_adapter(monkeypatch):
+    from tldw_Server_API.app.core.Streaming import speech_chat_service
+
+    _patch_speech_chat_success_path(monkeypatch, speech_chat_service)
+    adapter = _RecordingAdapter()
+    monkeypatch.setattr(
+        speech_chat_service,
+        "get_registry",
+        lambda: _RecordingAdapterRegistry(adapter),
+        raising=True,
+    )
+
+    req = SpeechChatRequest(
+        session_id=None,
+        input_audio=_encode_silence_base64(),
+        input_audio_format="wav",
+        llm_config=SpeechChatLLMConfig(
+            model="gpt-4o-mini",
+            api_provider="openai",
+            extra_params={
+                "top_p": 0.25,
+                "seed": 123,
+                "action": "play_music",
+                "api_key": "client-supplied-key",
+            },
+        ),
+    )
+
+    resp = await run_speech_chat_turn(
+        request_data=req,
+        current_user=_StubUser(),
+        chat_db=_StubChatDB(),
+        tts_service=_StubTTSService(),
+    )
+
+    assert resp.assistant_text == "adapter assistant reply"
+    assert len(adapter.requests) == 1
+    assert adapter.requests[0]["top_p"] == 0.25
+    assert adapter.requests[0]["seed"] == 123
+    assert "action" not in adapter.requests[0]
+    assert adapter.requests[0]["api_key"] != "client-supplied-key"
 
 
 @pytest.mark.asyncio

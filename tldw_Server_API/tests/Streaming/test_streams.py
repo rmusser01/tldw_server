@@ -145,7 +145,7 @@ async def test_sse_stream_max_duration_triggers_error_then_done():
 
 @pytest.mark.asyncio
 async def test_sse_stream_send_json_and_raw_line():
-    stream = SSEStream(heartbeat_interval_s=0.5)
+    stream = SSEStream(heartbeat_interval_s=0.5, provider_control_passthru=True)
 
     async def producer():
         await stream.send_json({"hello": "world"})
@@ -166,6 +166,68 @@ async def test_sse_stream_send_json_and_raw_line():
     assert any(x.startswith("event: summary") for x in out)
     assert any("data: {\"summary\": true}" in x.lower() for x in out)
     assert out[-1].strip().lower() == "data: [done]"
+
+
+@pytest.mark.asyncio
+async def test_sse_stream_drops_provider_control_lines_by_default():
+    stream = SSEStream(heartbeat_interval_s=10.0)
+
+    async def producer():
+        await stream.send_raw_sse_line("event: provider-event")
+        await stream.send_raw_sse_line("id: provider-id")
+        await stream.send_raw_sse_line("retry: 1000")
+        await stream.send_raw_sse_line(": provider heartbeat")
+        await stream.send_raw_sse_line("data: {\"ok\": true}")
+        await stream.done()
+
+    out = []
+
+    async def consumer():
+        async for ln in stream.iter_sse():
+            out.append(ln)
+
+    await asyncio.gather(producer(), consumer())
+
+    assert not any(x.startswith("event:") for x in out)
+    assert not any(x.startswith("id:") for x in out)
+    assert not any(x.startswith("retry:") for x in out)
+    assert not any(x.startswith(":") for x in out)
+    assert any(x.startswith("data: {\"ok\": true}") for x in out)
+    assert out[-1].strip().lower() == "data: [done]"
+
+
+@pytest.mark.asyncio
+async def test_sse_stream_applies_control_filter_when_passthru_enabled():
+    def control_filter(name: str, value: str):
+        if name.lower() == "event":
+            return ("event", f"mapped-{value}")
+        if name.lower() == "id":
+            return None
+        return (name, value)
+
+    stream = SSEStream(
+        heartbeat_interval_s=10.0,
+        provider_control_passthru=True,
+        control_filter=control_filter,
+    )
+
+    async def producer():
+        await stream.send_raw_sse_line("event: original")
+        await stream.send_raw_sse_line("id: hidden")
+        await stream.send_raw_sse_line("data: {\"ok\": true}")
+        await stream.done()
+
+    out = []
+
+    async def consumer():
+        async for ln in stream.iter_sse():
+            out.append(ln)
+
+    await asyncio.gather(producer(), consumer())
+
+    assert any(x.startswith("event: mapped-original") for x in out)
+    assert not any(x.startswith("id: hidden") for x in out)
+    assert any(x.startswith("data: {\"ok\": true}") for x in out)
 
 
 @pytest.mark.asyncio
@@ -353,20 +415,28 @@ class _StubWebSocket:
         self.close_code = code
 
 
+class _AcceptFailWebSocket(_StubWebSocket):
+    async def accept(self):
+        raise RuntimeError("accept failed")
+
+
 @pytest.mark.asyncio
 async def test_ws_stream_send_done_and_ping_metrics():
     ws = _StubWebSocket()
     reg = get_metrics_registry()
     stream = WebSocketStream(ws, heartbeat_interval_s=0.05, labels={"component": "test", "endpoint": "ws"})
     await stream.start()
+    # Let the ping loop run at least once before the stream reaches a terminal state.
+    await asyncio.sleep(0.07)
     await stream.send_json({"hello": "world"})
     await stream.done()
-    # Allow a couple of pings
+    sent_after_done = len(ws.sent)
     await asyncio.sleep(0.12)
-    await stream.stop()
 
     assert ws.accepted is True
     assert any(msg.get("type") == "done" for msg in ws.sent)
+    assert len(ws.sent) == sent_after_done
+    assert stream._running is False
 
     # Metrics assertions
     ws_latency_stats = reg.get_metric_stats("ws_send_latency_ms")
@@ -375,6 +445,19 @@ async def test_ws_stream_send_done_and_ping_metrics():
     assert pings_stats.get("count", 0) >= 1
     ping_fail_stats = reg.get_metric_stats("ws_ping_failures_total")
     assert ping_fail_stats.get("count", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_ws_stream_accept_failure_propagates_and_does_not_start_background_tasks():
+    ws = _AcceptFailWebSocket()
+    stream = WebSocketStream(ws, heartbeat_interval_s=0.05, idle_timeout_s=0.05)
+
+    with pytest.raises(RuntimeError, match="accept failed"):
+        await stream.start()
+
+    assert stream._running is False
+    assert stream._ping_task is None
+    assert stream._idle_task is None
 
 
 @pytest.mark.asyncio
