@@ -4,8 +4,9 @@
 # This interface allows for pluggable storage backends (filesystem, S3, etc.)
 # while maintaining a consistent API for storing and retrieving media files.
 
-from abc import ABC, abstractmethod
+import asyncio
 import contextlib
+from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import BinaryIO, Optional, Union
 
@@ -94,7 +95,7 @@ class StorageBackend(ABC):
         file_obj = await self.retrieve(path)
         try:
             while True:
-                chunk = file_obj.read(chunk_size)
+                chunk = await asyncio.to_thread(file_obj.read, chunk_size)
                 if not chunk:
                     break
                 yield chunk
@@ -102,7 +103,7 @@ class StorageBackend(ABC):
             close = getattr(file_obj, "close", None)
             if callable(close):
                 with contextlib.suppress(Exception):
-                    close()
+                    await asyncio.to_thread(close)
 
     @abstractmethod
     async def delete(self, path: str) -> bool:

@@ -52,7 +52,9 @@ async def guard_storage_quota(
     Behaviour:
     * Disabled in single-user profile mode (local / desktop).
     * Disabled when ``STORAGE_QUOTA_ENFORCEMENT=0``.
-    * Fail-open: if the quota check itself errors, the request proceeds.
+    * Quota backend errors fail closed by default; set
+      ``STORAGE_QUOTA_FAIL_OPEN=1`` to explicitly allow fail-open writes.
+    * Dependency/setup errors in this guard are logged and allowed.
     * Adds ``X-Storage-Warning`` header when the soft limit is reached.
     * Returns HTTP 413 when the hard limit is reached or remaining quota is 0.
     """

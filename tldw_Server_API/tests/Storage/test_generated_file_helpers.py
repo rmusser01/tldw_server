@@ -1,5 +1,6 @@
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError as AuthNZStorageError
 from tldw_Server_API.app.core.Storage import generated_file_helpers
 
 
@@ -9,6 +10,13 @@ def test_generate_filename_sanitizes_prefix_and_extension():
     assert "\\" not in filename
     assert " " not in filename
     assert filename.endswith(".mp3")
+
+
+def test_generated_file_size_guard_uses_authnz_storage_error():
+    with pytest.raises(AuthNZStorageError, match="exceeds maximum allowed size"):
+        generated_file_helpers._validate_generated_file_size(
+            generated_file_helpers.MAX_GENERATED_FILE_SIZE_BYTES + 1
+        )
 
 
 @pytest.mark.asyncio

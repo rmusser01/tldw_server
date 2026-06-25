@@ -4,6 +4,8 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
+from tldw_Server_API.app.core.exceptions import ValidationError
+
 
 BACKUP_SCHEDULE_DOMAIN = "admin_backups"
 BACKUP_SCHEDULE_JOB_TYPE = "scheduled_backup"
@@ -62,16 +64,25 @@ def parse_backup_schedule_job_payload(payload: dict[str, Any]) -> dict[str, Any]
     run_id = str(payload.get("run_id") or "").strip()
     dataset = str(payload.get("dataset") or "").strip().lower()
     if not schedule_id:
-        raise ValueError("missing_schedule_id")
+        raise ValidationError("missing_schedule_id")
     if not run_id:
-        raise ValueError("missing_run_id")
+        raise ValidationError("missing_run_id")
     if not dataset:
-        raise ValueError("missing_dataset")
-    scheduled_for = normalize_backup_schedule_slot(payload.get("scheduled_for"))
+        raise ValidationError("missing_dataset")
+    try:
+        scheduled_for = normalize_backup_schedule_slot(payload.get("scheduled_for"))
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("invalid_scheduled_for") from exc
     target_user_id = payload.get("target_user_id")
     if target_user_id is not None:
-        target_user_id = int(target_user_id)
-    retention_count = int(payload.get("retention_count") or 0)
+        try:
+            target_user_id = int(target_user_id)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("invalid_target_user_id") from exc
+    try:
+        retention_count = int(payload.get("retention_count") or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("invalid_retention_count") from exc
     return {
         "schedule_id": schedule_id,
         "run_id": run_id,

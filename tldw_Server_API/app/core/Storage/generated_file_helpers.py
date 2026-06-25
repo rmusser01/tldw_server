@@ -38,6 +38,7 @@ from typing import Any
 import aiofiles
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError as AuthNZStorageError
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import (
     FILE_CATEGORY_IMAGE,
     FILE_CATEGORY_MINDMAP,
@@ -52,7 +53,6 @@ from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import (
     SOURCE_FEATURE_VOICE_STUDIO,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Storage.storage_interface import StorageError
 from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
 from tldw_Server_API.app.services.storage_quota_service import get_storage_service
 
@@ -141,7 +141,7 @@ async def _save_file(
 def _validate_generated_file_size(file_size_bytes: int) -> None:
     """Reject generated files above the storage service's per-file maximum."""
     if file_size_bytes > MAX_GENERATED_FILE_SIZE_BYTES:
-        raise StorageError(
+        raise AuthNZStorageError(
             f"File size {file_size_bytes / (1024 * 1024 * 1024):.2f} GB exceeds "
             f"maximum allowed size of {MAX_GENERATED_FILE_SIZE_BYTES / (1024 * 1024 * 1024):.0f} GB"
         )
