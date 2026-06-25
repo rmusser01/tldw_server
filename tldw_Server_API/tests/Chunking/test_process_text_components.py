@@ -5,6 +5,7 @@ import json
 import time
 from collections import UserDict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -60,7 +61,7 @@ def _assert_no_chunker_imports(module: Any) -> None:
             assert module_name != "tldw_Server_API.app.core.Chunking.chunker"
             assert not module_name.endswith(".chunker")
             assert not (node.level and module_name == "chunker")
-            assert all(alias.name != "Chunker" for alias in node.names)
+            assert all(alias.name not in {"Chunker", "chunker"} for alias in node.names)
 
 
 def _resolved_for_dispatch(**overrides: Any) -> ResolvedProcessOptions:
@@ -213,6 +214,25 @@ def test_process_text_options_module_does_not_import_chunker() -> None:
 
 def test_process_text_dispatch_module_does_not_import_chunker() -> None:
     _assert_no_chunker_imports(process_dispatch)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from tldw_Server_API.app.core.Chunking import chunker\n",
+        "from .. import chunker\n",
+    ],
+)
+def test_process_text_import_boundary_rejects_chunker_import_alias(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    module_path = tmp_path / "candidate.py"
+    module_path.write_text(source, encoding="utf-8")
+    module = SimpleNamespace(__file__=str(module_path))
+
+    with pytest.raises(AssertionError):
+        _assert_no_chunker_imports(module)
 
 
 def test_resolve_process_options_rejects_invalid_max_size() -> None:
@@ -602,6 +622,24 @@ def test_dispatch_chunks_normal_path_preserves_mapping_like_metadata(
             metadata={"start_offset": 1, "end_offset": 5, "source": "mapping"},
         )
     ]
+
+
+def test_dispatch_chunks_normal_path_propagates_unexpected_metadata_conversion_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunker = Chunker()
+
+    class BrokenMetadata:
+        def __iter__(self):
+            raise RuntimeError("strategy metadata conversion failed")
+
+    def fake_chunk_text(*args: Any, **kwargs: Any) -> list[Any]:
+        return [{"text": "beta", "metadata": BrokenMetadata()}]
+
+    monkeypatch.setattr(chunker, "chunk_text", fake_chunk_text)
+
+    with pytest.raises(RuntimeError, match="strategy metadata conversion failed"):
+        dispatch_chunks(chunker, "alpha beta", _resolved_for_dispatch())
 
 
 def test_dispatch_chunks_hierarchical_path_uses_context_method(

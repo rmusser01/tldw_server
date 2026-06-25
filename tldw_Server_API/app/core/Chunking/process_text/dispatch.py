@@ -232,6 +232,6 @@ def _metadata_to_dict(metadata_obj: Any) -> dict[str, Any]:
         return dict(metadata_obj)
     try:
         return dict(metadata_obj)
-    except CHUNKER_NONCRITICAL_EXCEPTIONS:
+    except (TypeError, ValueError, KeyError):
         pass
     return {}
