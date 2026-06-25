@@ -9,12 +9,10 @@ import hashlib
 import json
 import re
 import threading
-import time
 import unicodedata
 from collections import OrderedDict
 from collections.abc import Generator
 from contextlib import nullcontext, suppress
-from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -24,20 +22,9 @@ from tldw_Server_API.app.core.testing import is_test_mode
 from .base import ChunkerConfig, ChunkingMethod, ChunkResult
 from .error_policy import CHUNKER_NONCRITICAL_EXCEPTIONS as _CHUNKER_NONCRITICAL_EXCEPTIONS
 from .exceptions import ChunkingError, InvalidChunkingMethodError, InvalidInputError
-from .llm_context import _LLM_UNSET, llm_override_scope
+from .llm_context import _LLM_UNSET
 from .option_utils import _coerce_bool_option
-from .process_text.dispatch import dispatch_chunks
-from .process_text.metadata import (
-    copy_chunks_for_finalization,
-    finalize_chunks,
-    restore_prefix_offsets_for_finalization,
-)
-from .process_text.preparation import (
-    _parse_frontmatter,
-    _prepare_frontmatter_options,
-    extract_header,
-)
-from .process_text.options import resolve_process_options
+from .process_text import ProcessTextPipeline, TelemetryHooks
 from .security_logger import get_security_logger
 from .strategies.fixed_size import FixedSizeChunkingStrategy
 from .strategies.rolling_summarize import RollingSummarizeStrategy
@@ -185,6 +172,18 @@ def _ensure_chunker_metrics_registered() -> None:
 
 
 _ensure_chunker_metrics_registered()
+
+
+def _process_text_telemetry_hooks() -> TelemetryHooks:
+    return TelemetryHooks(
+        increment_counter=increment_counter,
+        observe_histogram=observe_histogram,
+        set_gauge=set_gauge,
+        start_span=start_span,
+        set_span_attribute=set_span_attribute,
+        add_span_event=add_span_event,
+        record_span_exception=record_span_exception,
+    )
 
 
 class LRUCache:
@@ -2285,85 +2284,13 @@ class Chunker:
 
         Returns a list of chunks as dicts with consistent metadata fields.
         """
-        overall_start = time.perf_counter()
-        labels = {"component": "chunker", "op": "process_text"}
-        increment_counter("chunker_process_total", labels=labels)
-        if text is None or not isinstance(text, str):
-            raise InvalidInputError(f"Expected string input, got {type(text).__name__}")
-        prepared, frontmatter_enabled, sentinel_key = _prepare_frontmatter_options(
+        return ProcessTextPipeline(self, _process_text_telemetry_hooks()).run(
             text,
             options,
             tokenizer_name_or_path=tokenizer_name_or_path,
+            llm_call_func=llm_call_func,
+            llm_config=llm_config,
         )
-        fm_start = time.perf_counter()
-        prepared = _parse_frontmatter(
-            prepared,
-            frontmatter_enabled=frontmatter_enabled,
-            sentinel_key=sentinel_key,
-        )
-        opts = prepared.options
-        processed_text = prepared.processed_text
-        observe_histogram("chunker_frontmatter_duration_seconds", time.perf_counter() - fm_start, labels=labels)
-
-        # Recheck size constraints after optional trimming
-        self._enforce_text_size(processed_text, source="process_text")
-
-        # Optional header text extraction (legacy heuristic)
-        hdr_start = time.perf_counter()
-        prepared = extract_header(prepared)
-        opts = prepared.options
-        processed_text = prepared.processed_text
-        observe_histogram("chunker_header_extract_seconds", time.perf_counter() - hdr_start, labels=labels)
-
-        # Resolve main parameters
-        resolved = resolve_process_options(self, processed_text, opts)
-        method = resolved.method
-        language = resolved.language
-        hierarchical = resolved.hierarchical
-        hier_template = resolved.hier_template
-        multi_level = resolved.multi_level
-
-        chunk_start = time.perf_counter()
-        with llm_override_scope(self, llm_call_func, llm_config):
-            dispatched_chunks = dispatch_chunks(self, processed_text, resolved)
-        finalization_chunks = copy_chunks_for_finalization(dispatched_chunks)
-        observe_histogram("chunker_chunking_duration_seconds", time.perf_counter() - chunk_start, labels=labels)
-
-        prepared_for_finalization = prepared
-        if prepared.prefix_offset:
-            finalization_chunks = restore_prefix_offsets_for_finalization(
-                finalization_chunks,
-                prepared.prefix_offset,
-            )
-            prepared_for_finalization = replace(prepared, prefix_offset=0)
-
-        norm_start = time.perf_counter()
-        out = finalize_chunks(
-            original_text=text,
-            chunks=finalization_chunks,
-            prepared=prepared_for_finalization,
-            resolved=resolved,
-        )
-        observe_histogram("chunker_normalization_seconds", time.perf_counter() - norm_start, labels=labels)
-        # Output metrics
-        total_bytes = sum(len(c['text']) for c in out)
-        set_gauge("chunker_last_chunk_count", float(len(out)), labels=labels)
-        observe_histogram("chunker_output_bytes", float(total_bytes), labels=labels)
-        observe_histogram("chunker_input_bytes", float(len(text)), labels=labels)
-        observe_histogram("chunker_process_total_seconds", time.perf_counter() - overall_start, labels={**labels, "method": method, "hierarchical": str(bool(hierarchical or hier_template)).lower()})
-        try:
-            with start_span("chunker.process_text"):
-                set_span_attribute("chunk.method", method)
-                set_span_attribute("chunk.lang", language)
-                set_span_attribute("chunk.hierarchical", bool(hierarchical or hier_template))
-                set_span_attribute("chunk.multi_level", multi_level)
-                set_span_attribute("chunk.count", len(out))
-                add_span_event("chunker.completed")
-        except _CHUNKER_NONCRITICAL_EXCEPTIONS as e:
-            with suppress(_CHUNKER_NONCRITICAL_EXCEPTIONS):
-                record_span_exception(e, escaped=False)
-
-        return out
 
     # Backwards-compatible alias to tolerate triple-s typo in requests
     def processs_text(self, *args, **kwargs):

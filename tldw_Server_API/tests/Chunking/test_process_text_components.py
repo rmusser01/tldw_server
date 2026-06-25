@@ -40,6 +40,7 @@ from tldw_Server_API.app.core.Chunking.process_text.metadata import (
     finalize_chunks,
     restore_prefix_offsets_for_finalization,
 )
+from tldw_Server_API.app.core.Chunking.process_text import pipeline as process_pipeline
 from tldw_Server_API.app.core.Chunking.process_text import models
 from tldw_Server_API.app.core.Chunking.process_text.models import (
     NormalizedChunk,
@@ -237,6 +238,10 @@ def test_process_text_dispatch_module_does_not_import_chunker() -> None:
 
 def test_process_text_metadata_module_does_not_import_chunker() -> None:
     _assert_no_chunker_imports(process_metadata)
+
+
+def test_process_text_pipeline_module_does_not_import_chunker() -> None:
+    _assert_no_chunker_imports(process_pipeline)
 
 
 @pytest.mark.parametrize(
@@ -547,7 +552,7 @@ def test_prepare_frontmatter_malformed_leading_json_does_not_raise() -> None:
 
 def test_process_text_frontmatter_metric_excludes_option_setup(monkeypatch: pytest.MonkeyPatch) -> None:
     observed: dict[str, float] = {}
-    real_prepare_options = chunker_module._prepare_frontmatter_options
+    real_prepare_options = process_pipeline._prepare_frontmatter_options
 
     def slow_prepare_options(*args: Any, **kwargs: Any) -> Any:
         time.sleep(0.05)
@@ -557,7 +562,7 @@ def test_process_text_frontmatter_metric_excludes_option_setup(monkeypatch: pyte
         if name == "chunker_frontmatter_duration_seconds":
             observed[name] = value
 
-    monkeypatch.setattr(chunker_module, "_prepare_frontmatter_options", slow_prepare_options)
+    monkeypatch.setattr(process_pipeline, "_prepare_frontmatter_options", slow_prepare_options)
     monkeypatch.setattr(chunker_module, "observe_histogram", capture_histogram)
 
     rows = Chunker().process_text("Body text", options={"method": "words", "max_size": 100})
@@ -835,8 +840,8 @@ def test_restore_prefix_offsets_for_finalization_does_not_mutate_input() -> None
 def test_process_text_restores_prefix_before_normalization_metric(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    real_restore = chunker_module.restore_prefix_offsets_for_finalization
-    real_finalize = chunker_module.finalize_chunks
+    real_restore = process_pipeline.restore_prefix_offsets_for_finalization
+    real_finalize = process_pipeline.finalize_chunks
     events: list[Any] = []
 
     def tracking_restore(*args: Any, **kwargs: Any) -> Any:
@@ -853,8 +858,8 @@ def test_process_text_restores_prefix_before_normalization_metric(
         if name in {"chunker_chunking_duration_seconds", "chunker_normalization_seconds"}:
             events.append(name)
 
-    monkeypatch.setattr(chunker_module, "restore_prefix_offsets_for_finalization", tracking_restore)
-    monkeypatch.setattr(chunker_module, "finalize_chunks", tracking_finalize)
+    monkeypatch.setattr(process_pipeline, "restore_prefix_offsets_for_finalization", tracking_restore)
+    monkeypatch.setattr(process_pipeline, "finalize_chunks", tracking_finalize)
     monkeypatch.setattr(chunker_module, "observe_histogram", capture_histogram)
 
     body = "Body text."

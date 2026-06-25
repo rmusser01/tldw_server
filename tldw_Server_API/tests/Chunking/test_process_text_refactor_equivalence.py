@@ -288,3 +288,57 @@ def test_process_text_invalid_input_increments_process_counter(monkeypatch: pyte
         Chunker().process_text(None)
 
     assert ("chunker_process_total", {"component": "chunker", "op": "process_text"}) in calls
+
+
+def test_process_text_wrapper_delegates_to_pipeline_with_chunker_telemetry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tldw_Server_API.app.core.Chunking.chunker as chunker_module
+
+    chunker = Chunker()
+    telemetry = object()
+    options = {"method": "words"}
+    llm_config = {"model": "test"}
+    calls: list[tuple] = []
+
+    class FakePipeline:
+        def __init__(self, context, telemetry_hooks):
+            calls.append(("init", context, telemetry_hooks))
+
+        def run(
+            self,
+            text,
+            options_arg=None,
+            *,
+            tokenizer_name_or_path=None,
+            llm_call_func=None,
+            llm_config=None,
+        ):
+            calls.append(
+                (
+                    "run",
+                    text,
+                    options_arg,
+                    tokenizer_name_or_path,
+                    llm_call_func,
+                    llm_config,
+                )
+            )
+            return [{"text": "delegated", "metadata": {"source": "fake"}}]
+
+    monkeypatch.setattr(chunker_module, "_process_text_telemetry_hooks", lambda: telemetry)
+    monkeypatch.setattr(chunker_module, "ProcessTextPipeline", FakePipeline)
+
+    rows = chunker.process_text(
+        "alpha beta",
+        options=options,
+        tokenizer_name_or_path="tokenizer",
+        llm_call_func="llm-call",
+        llm_config=llm_config,
+    )
+
+    assert rows == [{"text": "delegated", "metadata": {"source": "fake"}}]
+    assert calls == [
+        ("init", chunker, telemetry),
+        ("run", "alpha beta", options, "tokenizer", "llm-call", llm_config),
+    ]

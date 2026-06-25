@@ -22,10 +22,11 @@ modified_files:
 - tldw_Server_API/app/core/Chunking/process_text/options.py
 - tldw_Server_API/app/core/Chunking/process_text/dispatch.py
 - tldw_Server_API/app/core/Chunking/process_text/metadata.py
+- tldw_Server_API/app/core/Chunking/process_text/pipeline.py
 - tldw_Server_API/tests/Chunking/test_process_text_components.py
 - Docs/superpowers/plans/2026-06-24-chunker-process-text-refactor.md
 - backlog/tasks/task-9937 - Implement-Chunker-process-text-refactor.md
-updated_date: 2026-06-25 03:06
+updated_date: 2026-06-25 03:16
 ---
 
 ## Description
@@ -69,6 +70,9 @@ Task 6 review fix: restored pre-extraction metric boundaries by copying dispatch
 Task 6 test-quality follow-up: replaced the wall-clock based normalization metric boundary assertion with a deterministic call-order test that verifies chunking histogram, prefix restoration, prefix-neutral finalization, and normalization histogram ordering without sleeping.
 Task 6 test-quality follow-up verification: focused Task 6 pytest suite passed (77 passed, 166 warnings), compileall for touched files exited 0, and Bandit on `chunker.py` plus `process_text/metadata.py` reported 0 results and 0 errors in `/tmp/bandit_chunker_process_text_task6_review_fix2_controller.json`.
 Task 6 final test-quality fix: added an explicit assertion that prefix-neutral `finalize_chunks` runs before the normalization histogram is recorded. Verification: targeted metric-boundary test passed (1 passed, 14 warnings); focused Task 6 suite passed (77 passed, 166 warnings); compileall exited 0; Bandit reported 0 results and 0 errors in `/tmp/bandit_chunker_process_text_task6_review_fix3_controller.json`.
+Task 7 started in worktree `/Users/appledev/Documents/GitHub/tldw_server/.worktrees/chunker-process-text-refactor-design` on branch `codex/chunker-process-text-refactor` at `0d3994750c`. Pre-edit `git status --short` was clean. Next step: add pipeline import-boundary and wrapper tests first, then record the expected red check for missing `process_text.pipeline`.
+Task 7 red check: added pipeline import-boundary and thin-wrapper tests before production implementation. `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chunking/test_process_text_components.py -q` exited 2 during collection because `tldw_Server_API.app.core.Chunking.process_text.pipeline` did not exist. Direct import check `source .venv/bin/activate && python -c "import tldw_Server_API.app.core.Chunking.process_text.pipeline"` exited 1 with `ModuleNotFoundError: No module named 'tldw_Server_API.app.core.Chunking.process_text.pipeline'`.
+Task 7 implementation: added `process_text/pipeline.py` with `ProcessTextPipeline`, moved `Chunker.process_text` orchestration into `ProcessTextPipeline.run`, exported the pipeline, added `_process_text_telemetry_hooks()` in `chunker.py`, and replaced `Chunker.process_text` with the thin wrapper. Non-telemetry helper monkeypatch coverage now targets `process_text.pipeline`; telemetry monkeypatch coverage remains on `chunker.py` through the hook factory. Verification: requested focused pytest command exited 0 with 81 passed and 174 warnings; compileall requested files exited 0; Bandit requested production files exited 0 with 0 results and 0 errors in `/tmp/bandit_chunker_process_text_task7.json`; `git diff --check` exited 0.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

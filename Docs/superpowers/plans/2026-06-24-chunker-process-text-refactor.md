@@ -828,7 +828,7 @@ passed
 - Modify `tldw_Server_API/app/core/Chunking/chunker.py`
 - Modify `tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py`
 
-- [ ] **Step 1: Add `ProcessTextPipeline`**
+- [x] **Step 1: Add `ProcessTextPipeline`**
 
 Create:
 
@@ -877,7 +877,7 @@ Keep metric names:
 - `chunker_input_bytes`
 - `chunker_process_total_seconds`
 
-- [ ] **Step 2: Add telemetry bundle factory in `chunker.py`**
+- [x] **Step 2: Add telemetry bundle factory in `chunker.py`**
 
 Keep telemetry functions in `chunker.py` for the first implementation PR and pass them into the pipeline:
 
@@ -896,7 +896,7 @@ def _process_text_telemetry_hooks() -> TelemetryHooks:
 
 This preserves existing monkeypatch tests that patch `tldw_Server_API.app.core.Chunking.chunker.increment_counter` before calling `process_text(...)`.
 
-- [ ] **Step 3: Replace `Chunker.process_text` with the wrapper**
+- [x] **Step 3: Replace `Chunker.process_text` with the wrapper**
 
 Use:
 
@@ -927,7 +927,7 @@ def processs_text(self, *args, **kwargs):
     return self.process_text(*args, **kwargs)
 ```
 
-- [ ] **Step 4: Run focused checks**
+- [x] **Step 4: Run focused checks**
 
 Command:
 
