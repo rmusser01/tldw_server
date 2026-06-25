@@ -406,7 +406,7 @@ async def test_log_llm_usage_failure_log_is_sanitized(monkeypatch):
         request_id="raw-request-id",
     )
 
-    assert logger_stub.debugs == ["LLM usage logging skipped/failed"]
+    assert logger_stub.debugs == ["LLM usage logging skipped/failed; exception_type=RuntimeError"]
     assert "usage DB failed" not in str(logger_stub.debugs)
     assert "/private/llm-usage.db" not in str(logger_stub.debugs)
     assert "raw-request-id" not in str(logger_stub.debugs)
@@ -450,7 +450,7 @@ async def test_log_llm_usage_repo_backend_error_is_best_effort(monkeypatch):
         request_id="raw-request-id",
     )
 
-    assert logger_stub.debugs == ["LLM usage logging skipped/failed"]
+    assert logger_stub.debugs == ["LLM usage logging skipped/failed; exception_type=Exception"]
     assert "postgres usage insert failed" not in str(logger_stub.debugs)
     assert "/private/usage-db" not in str(logger_stub.debugs)
 

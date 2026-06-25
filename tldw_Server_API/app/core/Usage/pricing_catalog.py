@@ -45,6 +45,7 @@ UNKNOWN_BILLABLE_RATE = {"prompt": 0.01, "completion": 0.03}
 
 
 def _unknown_billable_rate() -> dict[str, float]:
+    """Return a fresh copy of the conservative unknown billable rate sentinel."""
     return dict(UNKNOWN_BILLABLE_RATE)
 
 
