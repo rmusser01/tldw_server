@@ -34,6 +34,14 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
+    canonical_filesystem_digest,
+)
+from tldw_Server_API.app.core.Context_Integrity.resolver import (
+    ContextIntegrityBlocked,
+    ContextIntegrityResolver,
+    get_global_context_integrity_resolver,
+)
 from tldw_Server_API.app.core.Skills.exceptions import (
     SkillConflictError,
     SkillNotFoundError,
@@ -45,14 +53,15 @@ from tldw_Server_API.app.core.Skills.exceptions import (
 from tldw_Server_API.app.core.Skills.skill_parser import SkillFrontmatter, SkillParser
 
 # Skill name validation pattern (same as in schemas)
-SKILL_NAME_PATTERN = re.compile(r'^[a-z][a-z0-9-]{0,63}$')
+SKILL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 # Supporting file name validation pattern (same as in schemas)
-SUPPORTING_FILE_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$')
+SUPPORTING_FILE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$")
 MAX_SUPPORTING_FILES_COUNT = 20
 MAX_SUPPORTING_FILE_BYTES = 500000
 MAX_SUPPORTING_FILES_TOTAL_BYTES = 5 * 1024 * 1024  # 5MB
 MAX_SKILL_MD_BYTES = 500000
 MAX_ZIP_IMPORT_ENTRIES = 100
+SKILL_INTEGRITY_TEXT_SUFFIXES = {".md", ".txt", ".json", ".yaml", ".yml", ".py", ".sh"}
 
 
 class SkillMetadata:
@@ -145,6 +154,7 @@ class SkillsService:
         base_path: Path,
         db: CharactersRAGDB | None = None,
         sync_interval: float = 5.0,
+        integrity_resolver: ContextIntegrityResolver | None = None,
     ):
         """
         Initialize the SkillsService.
@@ -162,6 +172,9 @@ class SkillsService:
         self._parser = SkillParser()
         self._sync_interval = sync_interval
         self._last_sync_time: float = 0.0
+        self.integrity_resolver = (
+            integrity_resolver if integrity_resolver is not None else get_global_context_integrity_resolver()
+        )
         self._ensure_skills_directory()
         self._ensure_registry_ready()
 
@@ -192,6 +205,119 @@ class SkillsService:
     def _get_skill_dir(self, name: str) -> Path:
         """Get the directory path for a skill."""
         return self.skills_dir / name
+
+    def _skill_asset_id(self, name: str) -> str:
+        """Return the Context Integrity asset id for a user skill."""
+        return f"skill:user:{self.user_id}/{name}"
+
+    def _read_skill_file_map(self, skill_dir: Path) -> dict[str, bytes]:
+        """Read prompt-bearing skill files without following symlinks."""
+        if skill_dir.is_symlink():
+            raise OSError(f"Symlinked skill directory is not allowed: {skill_dir}")
+
+        files: dict[str, bytes] = {}
+
+        def _walk(directory: Path, relative_prefix: str = "") -> None:
+            for path in sorted(directory.iterdir(), key=lambda item: item.name):
+                if path.is_symlink():
+                    raise OSError(f"Symlinked skill path is not allowed: {path}")
+
+                relative_path = f"{relative_prefix}{path.name}"
+                if path.is_dir():
+                    _walk(path, f"{relative_path}/")
+                    continue
+
+                if not path.is_file():
+                    continue
+                if path.suffix.lower() not in SKILL_INTEGRITY_TEXT_SUFFIXES:
+                    continue
+                files[relative_path] = path.read_bytes()
+
+        _walk(skill_dir)
+        return files
+
+    def _skill_digest(self, name: str, files: dict[str, bytes]) -> str:
+        """Compute the same canonical digest used by startup skill inventory."""
+        return canonical_filesystem_digest(
+            source_type="skill_file",
+            asset_id=self._skill_asset_id(name),
+            files=files,
+            metadata={"skill_name": name},
+        )
+
+    def _is_skill_allowed(self, name: str, *, purpose: str) -> bool:
+        """Return whether a skill can be advertised for a model-facing purpose."""
+        if self.integrity_resolver is None:
+            return True
+
+        try:
+            skill_dir = self._get_skill_dir(name)
+            files = self._read_skill_file_map(skill_dir)
+            if "SKILL.md" not in files:
+                return False
+            current_digest = self._skill_digest(name, files)
+            self.integrity_resolver.require_digest_allowed(
+                self._skill_asset_id(name),
+                current_digest=current_digest,
+                purpose=purpose,
+            )
+            return True
+        except (ContextIntegrityBlocked, OSError, UnicodeDecodeError):
+            return False
+
+    def _require_skill_allowed(
+        self,
+        name: str,
+        *,
+        purpose: str,
+        current_digest: str | None = None,
+    ) -> None:
+        """Raise when a skill is not allowed by the current integrity resolver."""
+        if self.integrity_resolver is None:
+            return
+
+        asset_id = self._skill_asset_id(name)
+        if current_digest is None:
+            self.integrity_resolver.require_allowed(asset_id, purpose=purpose)
+            return
+
+        self.integrity_resolver.require_digest_allowed(
+            asset_id,
+            current_digest=current_digest,
+            purpose=purpose,
+        )
+
+    def _parse_unchecked_skill_directory(
+        self,
+        name: str,
+        skill_dir: Path,
+        *,
+        files: dict[str, bytes] | None = None,
+    ) -> Any:
+        """Parse a skill from an already-read file map without integrity checks."""
+        files = files if files is not None else self._read_skill_file_map(skill_dir)
+        raw_skill = files.get("SKILL.md")
+        if raw_skill is None:
+            raise SkillNotFoundError(name, detail="SKILL.md not found")
+
+        parsed = self._parser.parse_content(raw_skill.decode("utf-8"), default_name=name)
+        parsed.supporting_files = {
+            relative_path: content.decode("utf-8")
+            for relative_path, content in files.items()
+            if relative_path != "SKILL.md"
+        }
+        return parsed
+
+    def _parse_verified_skill_directory(self, name: str, skill_dir: Path) -> Any:
+        """Read, verify, and parse a skill using one file snapshot."""
+        files = self._read_skill_file_map(skill_dir)
+        current_digest = self._skill_digest(name, files)
+        self._require_skill_allowed(
+            name,
+            purpose="skill_read",
+            current_digest=current_digest,
+        )
+        return self._parse_unchecked_skill_directory(name, skill_dir, files=files)
 
     def _normalize_and_validate_skill_name(self, name: str, *, source: str = "skill name") -> str:
         """Normalize and validate a skill name."""
@@ -350,6 +476,9 @@ class SkillsService:
         disk_names: set[str] = set()
         if self.skills_dir.exists():
             for item in self.skills_dir.iterdir():
+                if item.is_symlink():
+                    logger.warning("Skipping symlinked skill directory '{}'", item)
+                    continue
                 if not item.is_dir():
                     continue
                 if not (item / "SKILL.md").exists():
@@ -488,9 +617,13 @@ class SkillsService:
             limit=limit,
             offset=offset,
         )
-        return [self._metadata_from_row(row) for row in rows]
+        return [
+            self._metadata_from_row(row)
+            for row in rows
+            if self._is_skill_allowed(str(row.get("name") or ""), purpose="skill_discovery")
+        ]
 
-    async def get_skill(self, name: str) -> dict[str, Any]:
+    async def get_skill(self, name: str, *, enforce_integrity: bool = True) -> dict[str, Any]:
         """
         Get full skill content.
 
@@ -519,7 +652,12 @@ class SkillsService:
             raise SkillNotFoundError(name, detail="Skill directory not found")
 
         try:
-            parsed = self._parser.parse_directory(skill_dir)
+            if enforce_integrity:
+                parsed = self._parse_verified_skill_directory(name, skill_dir)
+            else:
+                parsed = self._parse_unchecked_skill_directory(name, skill_dir)
+        except ContextIntegrityBlocked:
+            raise
         except Exception as e:
             raise SkillsError(f"Failed to parse skill: {e}") from e
 
@@ -534,6 +672,7 @@ class SkillsService:
             "model": parsed.frontmatter.model,
             "context": parsed.frontmatter.context,
             "content": parsed.content,
+            "raw_content": parsed.raw_content,
             "supporting_files": parsed.supporting_files,
             "directory_path": str(skill_dir),
             "created_at": metadata.created_at,
@@ -645,7 +784,7 @@ class SkillsService:
 
         logger.info(f"Created skill '{name}' for user {self.user_id}")
 
-        return await self.get_skill(name)
+        return await self.get_skill(name, enforce_integrity=False)
 
     async def update_skill(
         self,
@@ -814,7 +953,7 @@ class SkillsService:
 
         logger.info(f"Updated skill '{name}' for user {self.user_id}")
 
-        return await self.get_skill(name)
+        return await self.get_skill(name, enforce_integrity=False)
 
     async def delete_skill(self, name: str, expected_version: Optional[int] = None) -> None:
         """
@@ -909,10 +1048,14 @@ class SkillsService:
             raise SkillValidationError("Skill name must be specified in frontmatter or as parameter")
 
         skill_name = self._normalize_and_validate_skill_name(skill_name)
-        normalized_supporting_files = self._normalize_supporting_files(
-            supporting_files,
-            allow_deletes=False,
-        ) if supporting_files else None
+        normalized_supporting_files = (
+            self._normalize_supporting_files(
+                supporting_files,
+                allow_deletes=False,
+            )
+            if supporting_files
+            else None
+        )
 
         await self._sync_registry_async(force=True)
         db = self._get_db()
@@ -1072,9 +1215,7 @@ class SkillsService:
 
                         relative_path = PurePosixPath(relative_name)
                         if relative_path.is_absolute() or ".." in relative_path.parts:
-                            raise SkillValidationError(
-                                f"Zip contains path traversal entry: '{name}'"
-                            )
+                            raise SkillValidationError(f"Zip contains path traversal entry: '{name}'")
 
                         # Ignore nested directories; supporting files are top-level only.
                         if relative_path.name != relative_name:
@@ -1180,11 +1321,8 @@ class SkillsService:
         buffer = BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
             # Write SKILL.md with full content (including frontmatter)
-            skill_dir = self._get_skill_dir(name)
-            skill_file = skill_dir / "SKILL.md"
-            if skill_file.exists():
-                full_content = skill_file.read_text(encoding="utf-8")
-            else:
+            full_content = skill_data.get("raw_content")
+            if not isinstance(full_content, str):
                 # Reconstruct from parsed data
                 fm = SkillFrontmatter(
                     name=skill_data["name"],
@@ -1210,8 +1348,11 @@ class SkillsService:
     def _build_context_payload(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
         """Build a context payload from skill registry rows."""
         skills = [
-            row for row in rows
-            if row.get("user_invocable") and not row.get("disable_model_invocation")
+            row
+            for row in rows
+            if row.get("user_invocable")
+            and not row.get("disable_model_invocation")
+            and self._is_skill_allowed(str(row.get("name") or ""), purpose="skill_context")
         ]
 
         if not skills:

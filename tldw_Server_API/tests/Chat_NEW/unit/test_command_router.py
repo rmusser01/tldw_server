@@ -317,6 +317,21 @@ async def test_skill_command_reports_not_found(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_skill_command_reports_context_integrity_block(monkeypatch):
+    async def fake_exec(ctx, skill_name, skill_args):
+        return {"success": False, "error": "context_integrity_blocked"}
+
+    monkeypatch.setattr(command_router, "_execute_skill", fake_exec)
+    ctx = command_router.CommandContext(user_id="u1", auth_user_id=1)
+
+    res = await command_router.async_dispatch_command(ctx, "skill", "blocked-skill x")
+
+    assert not res.ok
+    assert "quarantined pending admin review" in res.content
+    assert res.metadata["error"] == "context_integrity_blocked"
+
+
+@pytest.mark.asyncio
 async def test_skill_command_handles_runtime_resolution_exception(monkeypatch):
     async def fake_resolve(ctx):
         raise Exception("resolver exploded")

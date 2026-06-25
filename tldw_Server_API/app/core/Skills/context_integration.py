@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Context_Integrity.resolver import ContextIntegrityBlocked
 from tldw_Server_API.app.core.Skills.skill_executor import (
     SKILL_TOOL_DEFINITION,
     RequestContext,
@@ -164,6 +165,12 @@ async def handle_skill_tool_call(
         return {
             "success": False,
             "error": f"Skill '{skill_name}' not found",
+        }
+    except ContextIntegrityBlocked:
+        logger.warning("Blocked quarantined skill invocation: {}", skill_name)
+        return {
+            "success": False,
+            "error": "context_integrity_blocked",
         }
     except SkillsError:
         logger.error("Error executing skill '{}'", skill_name)

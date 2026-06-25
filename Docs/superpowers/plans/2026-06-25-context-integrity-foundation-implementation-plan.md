@@ -1243,6 +1243,8 @@ git commit -m "feat: add context integrity filesystem inventory"
 
 ## Task 5: Startup Verification Producer
 
+**Status**: Complete. Implemented in `9727db3f28` with no-create discovery review fix in `a14388fd51`.
+
 **Files:**
 - Create: `tldw_Server_API/app/services/startup_context_integrity.py`
 - Modify: `tldw_Server_API/app/services/lifespan_startup_sequence.py`
@@ -1616,6 +1618,14 @@ git commit -m "feat: wire context integrity startup checks"
 ```
 
 ## Task 6: Skills Enforcement
+
+**Status**: Complete. Implemented with an additional manual review correction: default `SkillsService` instances now honor degraded global resolver state, and symlinked skill directories are skipped/rejected at runtime.
+
+**Verification**:
+- RED run for review regressions: `.venv/bin/python -m pytest tldw_Server_API/tests/Skills/unit/test_skills_service.py::TestSkillsService::test_degraded_global_resolver_blocks_default_service tldw_Server_API/tests/Skills/unit/test_skills_service.py::TestSkillsService::test_symlinked_skill_directory_is_not_read_without_resolver -q` failed before the correction with both tests failing.
+- Focused Task 6 suite: `.venv/bin/python -m pytest tldw_Server_API/tests/Skills/unit/test_skills_service.py tldw_Server_API/tests/Skills/integration/test_skills_api.py tldw_Server_API/tests/Skills/integration/test_skill_mcp_integration.py tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py -q` passed with `133 passed, 6 warnings`.
+- Bandit: `.venv/bin/python -m bandit -r tldw_Server_API/app/core/Skills/skills_service.py tldw_Server_API/app/core/Skills/context_integration.py tldw_Server_API/app/core/Chat/command_router.py tldw_Server_API/app/api/v1/endpoints/skills.py -f json -o /tmp/bandit_context_integrity_task6.json` exited 0 with zero findings.
+- Formatter/whitespace: `.venv/bin/python -m black ...` completed; `git diff --check` clean.
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Skills/skills_service.py`

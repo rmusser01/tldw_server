@@ -42,16 +42,21 @@ def temp_env():
 def env_with_skills(temp_env):
     """Provide temp env with 2 skills already created."""
     import asyncio
+
     service = temp_env["service"]
     loop = asyncio.new_event_loop()
-    loop.run_until_complete(service.create_skill(
-        "summarize",
-        "---\ndescription: Summarize text\nargument-hint: \"[text]\"\n---\nSummarize: $ARGUMENTS",
-    ))
-    loop.run_until_complete(service.create_skill(
-        "review",
-        "---\ndescription: Code review\n---\nReview the code:\n$ARGUMENTS",
-    ))
+    loop.run_until_complete(
+        service.create_skill(
+            "summarize",
+            '---\ndescription: Summarize text\nargument-hint: "[text]"\n---\nSummarize: $ARGUMENTS',
+        )
+    )
+    loop.run_until_complete(
+        service.create_skill(
+            "review",
+            "---\ndescription: Code review\n---\nReview the code:\n$ARGUMENTS",
+        )
+    )
     loop.close()
     return temp_env
 
@@ -188,13 +193,68 @@ class TestHandleSkillToolCall:
 
         assert result == {"success": False, "error": "skill_execution_failed"}
 
+    @pytest.mark.asyncio
+    async def test_returns_content_free_integrity_error(self, temp_env):
+        from tldw_Server_API.app.core.Context_Integrity.models import (
+            ContextIntegrityBootState,
+            ContextIntegrityFinding,
+        )
+        from tldw_Server_API.app.core.Context_Integrity.resolver import (
+            ContextIntegrityResolver,
+            clear_global_context_integrity_resolver,
+            set_global_context_integrity_resolver,
+        )
+
+        env = temp_env
+        await env["service"].create_skill(
+            "blocked-skill",
+            "---\ndescription: Blocked\n---\nBody",
+        )
+        resolver = ContextIntegrityResolver(
+            ContextIntegrityBootState(
+                mode="enforce",
+                degraded=False,
+                manifest_sequence=1,
+                manifest_digest="sha256:manifest",
+                findings=(
+                    ContextIntegrityFinding(
+                        asset_id="skill:user:1/blocked-skill",
+                        state="changed_approved_executable",
+                        severity="error",
+                        summary="changed",
+                        remediation="review",
+                        source_type="skill_file",
+                    ),
+                ),
+            )
+        )
+        set_global_context_integrity_resolver(resolver)
+        try:
+            result = await handle_skill_tool_call(
+                skill_name="blocked-skill",
+                args="",
+                user_id=env["user_id"],
+                base_path=env["base_path"],
+                db=env["db"],
+            )
+        finally:
+            clear_global_context_integrity_resolver()
+
+        assert result == {
+            "success": False,
+            "error": "context_integrity_blocked",
+        }
+
 
 class TestAddSkillToolToToolsList:
     def test_adds_when_skills_exist(self, env_with_skills):
         env = env_with_skills
         tools = [{"type": "function", "function": {"name": "Read"}}]
         result = add_skill_tool_to_tools_list(
-            tools, env["user_id"], env["base_path"], db=env["db"],
+            tools,
+            env["user_id"],
+            env["base_path"],
+            db=env["db"],
         )
 
         tool_names = []
@@ -212,7 +272,10 @@ class TestAddSkillToolToToolsList:
         env = temp_env
         tools = [{"type": "function", "function": {"name": "Read"}}]
         result = add_skill_tool_to_tools_list(
-            tools, env["user_id"], env["base_path"], db=env["db"],
+            tools,
+            env["user_id"],
+            env["base_path"],
+            db=env["db"],
         )
 
         # Skill tool should NOT be added since no skills exist

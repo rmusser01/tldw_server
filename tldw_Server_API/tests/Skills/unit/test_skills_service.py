@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
 from tldw_Server_API.app.core.Skills.exceptions import (
     SkillConflictError,
+    SkillsError,
     SkillNotFoundError,
     SkillParseError,
     SkillsError,
@@ -191,16 +192,22 @@ Skill content here.
     async def test_list_skills_filters_hidden(self, service):
         """Test that hidden skills are filtered by default."""
         # Create a visible skill
-        await service.create_skill("visible", """---
+        await service.create_skill(
+            "visible",
+            """---
 user-invocable: true
 ---
-Content""")
+Content""",
+        )
 
         # Create a hidden skill
-        await service.create_skill("hidden", """---
+        await service.create_skill(
+            "hidden",
+            """---
 user-invocable: false
 ---
-Content""")
+Content""",
+        )
 
         # Default should filter hidden
         skills = await service.list_skills()
@@ -750,16 +757,22 @@ Content here.
     @pytest.mark.asyncio
     async def test_get_context_payload_with_skills(self, service):
         """Test context payload with skills."""
-        await service.create_skill("skill-a", """---
+        await service.create_skill(
+            "skill-a",
+            """---
 description: Skill A does things
 argument-hint: "[arg]"
 ---
-Content A""")
+Content A""",
+        )
 
-        await service.create_skill("skill-b", """---
+        await service.create_skill(
+            "skill-b",
+            """---
 description: Skill B does other things
 ---
-Content B""")
+Content B""",
+        )
 
         payload = service.get_context_payload()
 
@@ -801,21 +814,302 @@ Body""",
     @pytest.mark.asyncio
     async def test_get_context_payload_excludes_model_invocation_disabled(self, service):
         """Test that skills with disable_model_invocation are excluded from context."""
-        await service.create_skill("visible", """---
+        await service.create_skill(
+            "visible",
+            """---
 disable-model-invocation: false
 ---
-Content""")
+Content""",
+        )
 
-        await service.create_skill("hidden", """---
+        await service.create_skill(
+            "hidden",
+            """---
 disable-model-invocation: true
 ---
-Content""")
+Content""",
+        )
 
         payload = service.get_context_payload()
 
         names = [s["name"] for s in payload["available_skills"]]
         assert "visible" in names
         assert "hidden" not in names
+
+    @pytest.mark.asyncio
+    async def test_quarantined_skill_is_filtered_from_context(self, service):
+        """Context payload generation must not advertise quarantined skills."""
+        from tldw_Server_API.app.core.Context_Integrity.models import (
+            ContextIntegrityBootState,
+            ContextIntegrityFinding,
+        )
+        from tldw_Server_API.app.core.Context_Integrity.resolver import (
+            ContextIntegrityResolver,
+        )
+
+        await service.create_skill(
+            "blocked-skill",
+            """---
+description: Blocked
+---
+Body""",
+        )
+        service.integrity_resolver = ContextIntegrityResolver(
+            ContextIntegrityBootState(
+                mode="enforce",
+                degraded=False,
+                manifest_sequence=1,
+                manifest_digest="sha256:manifest",
+                findings=(
+                    ContextIntegrityFinding(
+                        asset_id="skill:user:1/blocked-skill",
+                        state="changed_approved_executable",
+                        severity="error",
+                        summary="changed",
+                        remediation="review",
+                        source_type="skill_file",
+                    ),
+                ),
+            )
+        )
+
+        payload = service.get_context_payload()
+
+        assert payload["available_skills"] == []
+        assert "blocked-skill" not in payload["context_text"]
+
+    @pytest.mark.asyncio
+    async def test_quarantined_skill_get_is_blocked(self, service):
+        """Direct skill reads must fail closed for quarantined assets."""
+        from tldw_Server_API.app.core.Context_Integrity.models import (
+            ContextIntegrityBootState,
+            ContextIntegrityFinding,
+        )
+        from tldw_Server_API.app.core.Context_Integrity.resolver import (
+            ContextIntegrityBlocked,
+            ContextIntegrityResolver,
+        )
+
+        await service.create_skill(
+            "blocked-skill",
+            """---
+description: Blocked
+---
+Body""",
+        )
+        service.integrity_resolver = ContextIntegrityResolver(
+            ContextIntegrityBootState(
+                mode="enforce",
+                degraded=False,
+                manifest_sequence=1,
+                manifest_digest="sha256:manifest",
+                findings=(
+                    ContextIntegrityFinding(
+                        asset_id="skill:user:1/blocked-skill",
+                        state="changed_approved_executable",
+                        severity="error",
+                        summary="changed",
+                        remediation="review",
+                        source_type="skill_file",
+                    ),
+                ),
+            )
+        )
+
+        with pytest.raises(ContextIntegrityBlocked):
+            await service.get_skill("blocked-skill")
+
+    @pytest.mark.asyncio
+    async def test_live_skill_edit_after_boot_is_blocked(self, service):
+        """A skill edited after boot must not be read under an old approval digest."""
+        from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
+            canonical_filesystem_digest,
+        )
+        from tldw_Server_API.app.core.Context_Integrity.models import (
+            ContextIntegrityBootState,
+        )
+        from tldw_Server_API.app.core.Context_Integrity.resolver import (
+            ContextIntegrityBlocked,
+            ContextIntegrityResolver,
+        )
+
+        initial_content = """---
+description: Live
+---
+Approved body"""
+        await service.create_skill("live-skill", initial_content)
+        asset_id = "skill:user:1/live-skill"
+        approved_digest = canonical_filesystem_digest(
+            source_type="skill_file",
+            asset_id=asset_id,
+            files={"SKILL.md": initial_content.encode("utf-8")},
+            metadata={"skill_name": "live-skill"},
+        )
+        service.integrity_resolver = ContextIntegrityResolver(
+            ContextIntegrityBootState(
+                mode="enforce",
+                degraded=False,
+                manifest_sequence=1,
+                manifest_digest="sha256:manifest",
+                approved_digests_by_asset_id={asset_id: approved_digest},
+            )
+        )
+        (service.skills_dir / "live-skill" / "SKILL.md").write_text(
+            "---\ndescription: Live\n---\nModified body",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ContextIntegrityBlocked):
+            await service.get_skill("live-skill")
+
+    @pytest.mark.asyncio
+    async def test_live_skill_edit_after_boot_is_filtered_from_context(self, service):
+        """Context payload must omit a skill whose live digest no longer matches approval."""
+        from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
+            canonical_filesystem_digest,
+        )
+        from tldw_Server_API.app.core.Context_Integrity.models import (
+            ContextIntegrityBootState,
+        )
+        from tldw_Server_API.app.core.Context_Integrity.resolver import (
+            ContextIntegrityResolver,
+        )
+
+        initial_content = """---
+description: Live
+---
+Approved body"""
+        await service.create_skill("live-skill", initial_content)
+        asset_id = "skill:user:1/live-skill"
+        approved_digest = canonical_filesystem_digest(
+            source_type="skill_file",
+            asset_id=asset_id,
+            files={"SKILL.md": initial_content.encode("utf-8")},
+            metadata={"skill_name": "live-skill"},
+        )
+        service.integrity_resolver = ContextIntegrityResolver(
+            ContextIntegrityBootState(
+                mode="enforce",
+                degraded=False,
+                manifest_sequence=1,
+                manifest_digest="sha256:manifest",
+                approved_digests_by_asset_id={asset_id: approved_digest},
+            )
+        )
+        (service.skills_dir / "live-skill" / "SKILL.md").write_text(
+            "---\ndescription: Live\n---\nModified body",
+            encoding="utf-8",
+        )
+
+        payload = service.get_context_payload()
+
+        assert payload["available_skills"] == []
+        assert "live-skill" not in payload["context_text"]
+
+    @pytest.mark.asyncio
+    async def test_create_skill_returns_write_response_under_enforce(self, service):
+        """Write APIs can return the newly written skill without approving it for reads."""
+        from tldw_Server_API.app.core.Context_Integrity.models import (
+            ContextIntegrityBootState,
+        )
+        from tldw_Server_API.app.core.Context_Integrity.resolver import (
+            ContextIntegrityBlocked,
+            ContextIntegrityResolver,
+        )
+
+        service.integrity_resolver = ContextIntegrityResolver(
+            ContextIntegrityBootState(
+                mode="enforce",
+                degraded=False,
+                manifest_sequence=1,
+                manifest_digest="sha256:manifest",
+                approved_digests_by_asset_id={},
+            )
+        )
+
+        created = await service.create_skill("pending-skill", "---\ndescription: Pending\n---\nBody")
+
+        assert created["name"] == "pending-skill"
+        assert created["description"] == "Pending"
+        with pytest.raises(ContextIntegrityBlocked):
+            await service.get_skill("pending-skill")
+
+    @pytest.mark.asyncio
+    async def test_degraded_global_resolver_blocks_default_service(
+        self,
+        temp_base_path,
+    ):
+        """Degraded boot state from the global resolver must fail closed by default."""
+        from tldw_Server_API.app.core.Context_Integrity.models import (
+            ContextIntegrityBootState,
+            ContextIntegrityFinding,
+        )
+        from tldw_Server_API.app.core.Context_Integrity.resolver import (
+            ContextIntegrityBlocked,
+            ContextIntegrityResolver,
+            clear_global_context_integrity_resolver,
+            set_global_context_integrity_resolver,
+        )
+
+        chacha_db = CharactersRAGDB(
+            db_path=temp_base_path / "ChaChaNotes.db",
+            client_id="test_client",
+        )
+        set_global_context_integrity_resolver(
+            ContextIntegrityResolver(
+                ContextIntegrityBootState(
+                    mode="enforce",
+                    degraded=True,
+                    manifest_sequence=None,
+                    manifest_digest=None,
+                    findings=(
+                        ContextIntegrityFinding(
+                            asset_id="manifest:env",
+                            state="signature_invalid",
+                            severity="error",
+                            summary="bad signature",
+                            remediation="fix manifest",
+                            source_type="manifest",
+                        ),
+                    ),
+                )
+            )
+        )
+        try:
+            service = SkillsService(user_id=1, base_path=temp_base_path, db=chacha_db)
+            created = await service.create_skill(
+                "degraded-global",
+                "---\ndescription: Degraded global\n---\nBody",
+            )
+            with pytest.raises(ContextIntegrityBlocked):
+                await service.get_skill("degraded-global")
+        finally:
+            clear_global_context_integrity_resolver()
+            chacha_db.close_connection()
+
+        assert created["name"] == "degraded-global"
+
+    @pytest.mark.asyncio
+    async def test_symlinked_skill_directory_is_not_read_without_resolver(
+        self,
+        service,
+        temp_base_path,
+    ):
+        """Runtime skill reads must not follow a symlinked skill directory."""
+        outside_skill = temp_base_path / "outside-skill"
+        outside_skill.mkdir()
+        (outside_skill / "SKILL.md").write_text(
+            "---\ndescription: Outside\n---\nOutside body",
+            encoding="utf-8",
+        )
+        skill_link = service.skills_dir / "linked-skill"
+        try:
+            skill_link.symlink_to(outside_skill, target_is_directory=True)
+        except (NotImplementedError, OSError):
+            pytest.skip("symlink creation is unavailable on this platform")
+
+        with pytest.raises(SkillsError):
+            await service.get_skill("linked-skill")
 
     @pytest.mark.asyncio
     async def test_get_total_count(self, service):
@@ -833,11 +1127,13 @@ Content""")
         # Create a skill directly on disk (bypassing service)
         skills_dir = temp_base_path / "skills" / "manual-skill"
         skills_dir.mkdir(parents=True)
-        (skills_dir / "SKILL.md").write_text("""---
+        (skills_dir / "SKILL.md").write_text(
+            """---
 name: manual-skill
 description: Manually created
 ---
-Content""")
+Content"""
+        )
 
         # List should discover it
         skills = await service.list_skills()
@@ -861,6 +1157,7 @@ Content""")
                 original_sync(self_inner, force=force)
 
             import types
+
             service._sync_registry = types.MethodType(counting_sync, service)
 
             # First call triggers sync
