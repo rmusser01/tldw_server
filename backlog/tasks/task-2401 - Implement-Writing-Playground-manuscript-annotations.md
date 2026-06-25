@@ -121,6 +121,24 @@ Review evidence:
 Security/static checks:
 - Bandit on Task 5 touched app files wrote `/tmp/bandit_task_2401_task5_after_filter_fix.json`, `/tmp/bandit_task_2401_task5_hardening_uncommitted.json`, and `/tmp/bandit_task_2401_task5_retry_classification.json` with empty results.
 - `git diff --check 83293fb52a1bbb6f3464386ac028d848d8070c6e..HEAD` passed after the final Task 5 fix.
+
+Task 6 complete: added frontend manuscript annotation service types and client methods.
+
+TDD and verification evidence:
+- Root requested Vitest command could not discover files in this `.worktrees` checkout because the active parent Vitest config excludes `.worktrees/**` and filters to unrelated calendar tests.
+- Package-local red run failed as expected before implementation because the new service methods were undefined.
+- Review-fix red run failed as expected on the source guard because `ManuscriptAnnotationUpdateInput` still allowed null for backend-rejected `status`, `category`, and `body`.
+- Final package-local green run: `cd apps/packages/ui && bunx vitest run src/services/__tests__/writing-playground.annotations.test.ts src/components/Option/WritingPlayground/__tests__/WritingPlayground.manuscript-api-shapes.guard.test.ts` -> 2 files passed, 13 tests passed.
+
+Review evidence:
+- Spec review approved the seven service methods, exact endpoint paths, provider/model review payloads, explicit annotation contracts, and expected-version header usage.
+- Code-quality review found `ManuscriptAnnotationUpdateInput` allowed null for fields the backend rejects and noted the annotation source guard was broader than needed.
+- Fix commit `6520b5194b` made `status`, `category`, and `body` optional non-null fields while preserving nullable clearable fields, and narrowed the guard to individual exported type declarations.
+- Code-quality re-review approved with no remaining Critical or Important issues.
+
+Security/static checks:
+- Bandit was skipped for Task 6 because the slice changed TypeScript/TS test files only and no Python files.
+- `git diff --check HEAD~1..HEAD` passed after the Task 6 review fix.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
