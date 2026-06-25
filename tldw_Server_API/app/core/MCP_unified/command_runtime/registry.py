@@ -65,8 +65,8 @@ _DEFAULT_COMMANDS: Final[tuple[CommandDescriptor, ...]] = (
     ),
     CommandDescriptor(
         name="write",
-        summary="Write a UTF-8 text file in the current workspace scope.",
-        backend_tools=("fs.write_text",),
+        summary="Create a UTF-8 text file in the current workspace scope.",
+        backend_tools=("fs.write",),
     ),
     CommandDescriptor(
         name="write-create",

@@ -42,7 +42,7 @@ def test_registry_exposes_phase_one_mappings():
 
     assert registry.get_command("ls").backend_tools == ("fs.list",)
     assert registry.get_command("cat").backend_tools == ("fs.read", "fs.read_text")
-    assert registry.get_command("write").backend_tools == ("fs.write_text",)
+    assert registry.get_command("write").backend_tools == ("fs.write",)
     assert registry.get_command("write-create").backend_tools == ("fs.write",)
     assert registry.get_command("knowledge").backend_tools == ("knowledge.search", "knowledge.get")
     assert registry.get_command("media").backend_tools == ("media.search", "media.get")
@@ -72,8 +72,12 @@ def test_registry_filters_visible_backend_tools_for_multi_backend_commands() -> 
     assert visible["cat"].backend_tools == ("fs.read_text",)
 
     visible = registry.visible_commands(allowed_tools={"fs.write"})
+    assert "write" in visible
     assert "write-create" in visible
+
+    visible = registry.visible_commands(allowed_tools={"fs.write_text"})
     assert "write" not in visible
+    assert "write-create" not in visible
 
 
 def test_registry_filters_visible_backend_tools_for_mcp_catalogs() -> None:

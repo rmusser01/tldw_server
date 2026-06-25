@@ -22,8 +22,14 @@ from tldw_Server_API.app.core.MCP_unified.protocol import (
     RequestContext,
 )
 
-
 LEAKED_DETAIL = "backend exploded /tmp/mcp-secret-token token=sk-mcp-secret"
+
+
+def test_protocol_hash_arguments_supports_class_level_compatibility_call() -> None:
+    actual = MCPProtocol._hash_arguments({"query": "safe"})
+    expected = "4fdcf0050a6fe4924da3ffad2b978fcc6683b329fba85041e1b7ce687b5a4a23"
+    if actual != expected:
+        pytest.fail(f"Expected legacy class-level hash {expected}, got {actual}")
 
 
 def _assert_safe_text(value: object) -> None:

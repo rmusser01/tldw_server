@@ -12,7 +12,7 @@ import pytest
 
 MCP_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = Path(__file__).resolve().parents[5]
-STANDALONE_MCP_ROOT = REPO_ROOT / "mcp_unified"
+STANDALONE_MCP_ROOT = REPO_ROOT / "apps" / "mcp-unified" / "src" / "mcp_unified"
 MCP_PACKAGE = "tldw_Server_API.app.core.MCP_unified"
 EXPECTED_INTERFACE_FILES = {"runtime.py", "policy.py", "storage.py"}
 
@@ -991,3 +991,73 @@ def test_protocol_instances_do_not_share_prepared_call_secrets() -> None:
     second = MCPProtocol()
     assert first is not second
     assert first._prepared_call_secret != second._prepared_call_secret  # noqa: SLF001
+
+
+def test_protocol_reexports_tool_execution_shared_symbols() -> None:
+    from tldw_Server_API.app.core.MCP_unified import protocol
+    from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule
+
+    expected = {
+        "RequestContext",
+        "PreparedToolCall",
+        "InvalidParamsException",
+        "GovernanceDeniedError",
+        "ApprovalRequiredError",
+        "IdempotencyManager",
+        "_trusted_compat_claims_metadata",
+    }
+
+    missing = sorted(name for name in expected if not hasattr(protocol, name))
+    assert missing == []
+
+    hints = get_type_hints(protocol.PreparedToolCall)
+    assert hints["module"] is BaseModule
+
+
+def test_tool_execution_package_does_not_import_protocol_facade() -> None:
+    package_dir = MCP_ROOT / "tool_execution"
+    assert package_dir.is_dir()
+    forbidden = {
+        f"{MCP_PACKAGE}.protocol",
+        "tldw_Server_API.app.core.MCP_unified.protocol",
+    }
+    offenders: dict[str, list[str]] = {}
+
+    def package_for(path: Path) -> str:
+        relative_parent = path.relative_to(MCP_ROOT).parent
+        return ".".join((MCP_PACKAGE, *relative_parent.parts))
+
+    for path in package_dir.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        current_package = package_for(path)
+        imports = _resolved_import_sources_for(path, current_package)
+        bad_imports = [
+            source
+            for source in imports
+            if source in forbidden
+            or source.endswith(".MCP_unified.protocol")
+        ]
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                source = _resolve_import_from_source(current_package, node.module, node.level)
+                if source == MCP_PACKAGE and any(alias.name == "protocol" for alias in node.names):
+                    bad_imports.append(f"{source}.protocol")
+        if bad_imports:
+            offenders[str(path.relative_to(MCP_ROOT))] = bad_imports
+
+        uses_facade = [
+            "MCPProtocol"
+            for node in ast.walk(tree)
+            if (
+                isinstance(node, ast.Name)
+                and node.id == "MCPProtocol"
+            )
+            or (
+                isinstance(node, ast.Attribute)
+                and node.attr == "MCPProtocol"
+            )
+        ]
+        if uses_facade:
+            offenders.setdefault(str(path.relative_to(MCP_ROOT)), []).append("MCPProtocol")
+
+    assert offenders == {}

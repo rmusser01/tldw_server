@@ -298,8 +298,8 @@ class PhaseOneCommandAdapters:
             if isinstance(path, _UsageError):
                 return path
             return _GovernedCallPlan(
-                tool_name="fs.write_text",
-                arguments={"path": path, "content": " ".join(argv[2:])},
+                tool_name="fs.write",
+                arguments={"path": path, "content": " ".join(argv[2:]), "mode": "create"},
                 renderer=self._render_write,
             )
         if command == "write-create":

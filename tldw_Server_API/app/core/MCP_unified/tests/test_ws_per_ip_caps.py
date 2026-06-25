@@ -3,12 +3,14 @@ Tests for per-IP WebSocket connection caps in MCP Unified.
 """
 
 import os
-import pytest
 import os as _os
+from datetime import datetime, timedelta, timezone
 
+import pytest
 from starlette.websockets import WebSocketDisconnect
 
 from tldw_Server_API.app.core.MCP_unified import get_mcp_server, reset_mcp_server
+from tldw_Server_API.app.core.MCP_unified.server import WebSocketConnection
 
 # Minimize startup side-effects for tests
 _os.environ.setdefault("TEST_MODE", "true")
@@ -33,6 +35,7 @@ async def test_ws_per_ip_cap_enforced(monkeypatch):
         _ = None
 
     from fastapi.testclient import TestClient
+
     from tldw_Server_API.app.main import app
 
     await reset_mcp_server()
@@ -74,3 +77,35 @@ async def test_ws_per_ip_cap_enforced(monkeypatch):
     else:
         assert internal["ws_rejection"]["type"] == "counter"
         assert internal["ws_rejection"]["value"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_stale_connection_cleanup_decrements_per_ip_count():
+    await reset_mcp_server()
+    server = get_mcp_server()
+    server.connections.clear()
+    server._ip_connection_counts.clear()
+
+    class _CloseOnlyWebSocket:
+        def __init__(self) -> None:
+            self.close_calls: list[tuple[int, str]] = []
+
+        async def close(self, code: int = 1000, reason: str = "") -> None:
+            self.close_calls.append((code, reason))
+
+    websocket = _CloseOnlyWebSocket()
+    connection = WebSocketConnection(
+        websocket=websocket,  # type: ignore[arg-type]
+        connection_id="stale-1",
+        client_id="c1",
+        metadata={"client_ip": "127.0.0.1"},
+    )
+    connection.last_activity = datetime.now(timezone.utc) - timedelta(seconds=301)
+    server.connections[connection.connection_id] = connection
+    server._ip_connection_counts["127.0.0.1"] = 1
+
+    await server._cleanup_stale_connections()
+
+    assert connection.connection_id not in server.connections
+    assert websocket.close_calls == [(1001, "Connection timeout")]
+    assert server._ip_connection_counts == {}

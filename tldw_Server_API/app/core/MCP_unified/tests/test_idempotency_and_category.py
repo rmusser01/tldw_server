@@ -2,6 +2,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.MCP_unified import protocol as protocol_module
 from tldw_Server_API.app.core.MCP_unified.command_runtime.adapters import (
     derive_step_idempotency_key,
 )
@@ -54,6 +55,22 @@ class _CountingWriteModule(BaseModule):
         return f"count:{self.counter}:{arguments.get('x')}"
 
 
+class _ProbeIdempotencyManager:
+    def __init__(self) -> None:
+        self.bound_keys: list[str] = []
+        self.run_keys: list[str] = []
+
+    async def bind_arguments(self, key: str, arguments_hash: str, *, ttl: int, max_size: int) -> bool:
+        del arguments_hash, ttl, max_size
+        self.bound_keys.append(key)
+        return True
+
+    async def run(self, key: str, execute, *, ttl: int, max_size: int, lock_ttl: int):
+        del ttl, max_size, lock_ttl
+        self.run_keys.append(key)
+        return await execute(), False
+
+
 @pytest.mark.asyncio
 async def test_idempotency_dedupes_write_calls():
     registry = get_module_registry()
@@ -92,6 +109,34 @@ async def test_idempotency_dedupes_write_calls():
     misses = metrics._metrics.get("idempotency_miss")
     assert hits and any(getattr(e, "labels", {}).get("tool") == "write_count" for e in hits)
     assert misses and any(getattr(e, "labels", {}).get("tool") == "write_count" for e in misses)
+
+
+@pytest.mark.asyncio
+async def test_replaced_idempotency_manager_is_used_by_runtime():
+    registry = get_module_registry()
+    await registry.register_module(
+        "counting_write_replaced_idempotency",
+        _CountingWriteModule,
+        ModuleConfig(name="counting_write_replaced_idempotency"),
+    )
+
+    proto = MCPProtocol()
+    proto.rbac_policy = AllowAllRBAC()
+    probe = _ProbeIdempotencyManager()
+    proto._idempotency = probe
+
+    ctx = RequestContext(request_id="id-replaced", user_id="u1", client_id="c1")
+    req = MCPRequest(method="tools/call", params={
+        "name": "write_count",
+        "arguments": {"x": "A"},
+        "idempotencyKey": "k-replaced",
+    }, id="r-replaced")
+
+    resp = await proto.process_request(req, ctx)
+
+    assert resp.error is None
+    assert probe.bound_keys
+    assert probe.run_keys == probe.bound_keys
 
 
 @pytest.mark.asyncio
@@ -194,6 +239,66 @@ class _CategoryModule(BaseModule):
         return arguments.get("m")
 
 
+class _MetadataCategoryModule(BaseModule):
+    async def on_initialize(self) -> None:
+        return None
+
+    async def on_shutdown(self) -> None:
+        return None
+
+    async def check_health(self) -> dict[str, bool]:
+        return {"ok": True}
+
+    async def get_tools(self) -> list[dict[str, Any]]:
+        category = str(self.config.settings["category"])
+        metadata = {"category": category}
+        if self.config.settings.get("uses_network"):
+            metadata["uses_network"] = True
+        return [
+            create_tool_definition(
+                name=f"echo_meta_{category}",
+                description="echo",
+                parameters={"properties": {"m": {"type": "string"}}, "required": ["m"]},
+                metadata=metadata,
+            )
+        ]
+
+    def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]):
+        if "m" not in arguments:
+            raise ValueError("m required")
+
+    async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context=None):
+        return arguments.get("m")
+
+
+class _ConfigMappedCategoryModule(BaseModule):
+    async def on_initialize(self) -> None:
+        return None
+
+    async def on_shutdown(self) -> None:
+        return None
+
+    async def check_health(self) -> dict[str, bool]:
+        return {"ok": True}
+
+    async def get_tools(self) -> list[dict[str, Any]]:
+        return [
+            create_tool_definition(
+                name="echo_config_mapped",
+                description="echo",
+                parameters={"properties": {"m": {"type": "string"}}, "required": ["m"]},
+                metadata={},
+            )
+        ]
+
+    def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]):
+        if "m" not in arguments:
+            raise ValueError("m required")
+
+    async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context=None):
+        return arguments.get("m")
+
+
 @pytest.mark.asyncio
 async def test_category_prefers_metadata_over_config_mapping(monkeypatch):
     registry = get_module_registry()
@@ -212,6 +317,77 @@ async def test_category_prefers_metadata_over_config_mapping(monkeypatch):
     assert resp.error is None
     # The category should be 'ingestion' from metadata
     assert probe.last_category == "ingestion"
+
+
+@pytest.mark.asyncio
+async def test_runtime_config_provider_observes_post_construction_get_config_patch(monkeypatch):
+    registry = get_module_registry()
+    await registry.register_module(
+        "category_config_patch",
+        _ConfigMappedCategoryModule,
+        ModuleConfig(name="category_config_patch"),
+    )
+
+    proto = MCPProtocol()
+    proto.rbac_policy = AllowAllRBAC()
+    probe = _CategoryProbeLimiter()
+    proto.rate_limiter = probe
+
+    class _Config:
+        tool_category_map = {"echo_config_mapped": "management"}
+
+    monkeypatch.setattr(protocol_module, "get_config", lambda: _Config())
+
+    ctx = RequestContext(request_id="cx-config-patch", user_id="u1", client_id="c1")
+    req = MCPRequest(
+        method="tools/call",
+        params={"name": "echo_config_mapped", "arguments": {"m": "ok"}},
+        id="cx-config-patch",
+    )
+    resp = await proto.process_request(req, ctx)
+
+    assert resp.error is None
+    assert probe.last_category == "management"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("metadata_category", "uses_network", "expected_category"),
+    [
+        ("web", True, "network"),
+        ("utility", False, "utility"),
+    ],
+)
+async def test_category_preserves_non_legacy_metadata_categories(
+    metadata_category: str,
+    uses_network: bool,
+    expected_category: str,
+) -> None:
+    registry = get_module_registry()
+    await registry.register_module(
+        f"category_probe_{metadata_category}",
+        _MetadataCategoryModule,
+        ModuleConfig(
+            name=f"category_probe_{metadata_category}",
+            settings={"category": metadata_category, "uses_network": uses_network},
+        ),
+    )
+
+    proto = MCPProtocol()
+    proto.rbac_policy = AllowAllRBAC()
+    probe = _CategoryProbeLimiter()
+    proto.rate_limiter = probe
+
+    ctx = RequestContext(request_id=f"cx-{metadata_category}", user_id="u1", client_id="c1")
+    req = MCPRequest(
+        method="tools/call",
+        params={"name": f"echo_meta_{metadata_category}", "arguments": {"m": "ok"}},
+        id=f"cx-{metadata_category}",
+    )
+    resp = await proto.process_request(req, ctx)
+
+    assert resp.error is None
+    assert probe.last_category == expected_category
 
 
 @pytest.mark.asyncio
@@ -330,7 +506,7 @@ async def test_protocol_idempotency_key_is_forwarded_to_run_nested_steps(monkeyp
             self.prepare_calls: list[_PreparedCall] = []
 
         async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
-            return {"tools": [{"name": "fs.write_text", "module": "filesystem", "canExecute": True}]}
+            return {"tools": [{"name": "fs.write", "module": "filesystem", "canExecute": True}]}
 
         async def prepare_tool_call(
             self,

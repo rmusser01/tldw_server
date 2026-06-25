@@ -156,8 +156,6 @@ class RBACPolicy:
                 # Can view conversations
                 Permission(Resource.CONVERSATION, Action.READ),
                 Permission(Resource.CONVERSATION, Action.DELETE),
-                # Can execute tools
-                Permission(Resource.TOOL, Action.EXECUTE),
             },
             inherits_from={UserRole.USER.value}
         )
@@ -167,8 +165,10 @@ class RBACPolicy:
             name=UserRole.USER.value,
             description="Standard user with read/write access to own content",
             permissions={
-                # Can execute most tools
-                Permission(Resource.TOOL, Action.EXECUTE),
+                # Can execute explicitly safe tools
+                Permission(Resource.TOOL, Action.EXECUTE, "search_media"),
+                Permission(Resource.TOOL, Action.EXECUTE, "get_transcript"),
+                Permission(Resource.TOOL, Action.EXECUTE, "chat_completion"),
                 # Can read resources
                 Permission(Resource.RESOURCE, Action.READ),
                 # Can use prompts

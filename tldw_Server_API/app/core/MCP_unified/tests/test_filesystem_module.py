@@ -1978,6 +1978,26 @@ async def test_filesystem_write_replace_requires_preimage(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_filesystem_write_text_replace_requires_preimage(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "story.txt"
+    target.write_text("old\n", encoding="utf-8")
+    resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(request_id="req-fs-write-text-preimage", user_id="1", metadata={})
+
+    with pytest.raises(ValueError, match="write_preimage_required"):
+        await mod.execute_tool(
+            "fs.write_text",
+            {"path": "story.txt", "content": "new\n"},
+            context=context,
+        )
+
+    assert target.read_text(encoding="utf-8") == "old\n"  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_filesystem_write_replace_rejects_large_preimage_before_reading(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
@@ -2639,11 +2659,9 @@ async def test_filesystem_glob_marks_file_size_unavailable(
         metadata={"workspace_id": "workspace-1"},
     )
     original_stat = Path.stat
-    stat_calls_by_path: dict[Path, int] = {}
 
     def _raise_for_source_file(self: Path, *args: Any, **kwargs: Any):
-        stat_calls_by_path[self] = stat_calls_by_path.get(self, 0) + 1
-        if self == source_file and stat_calls_by_path[self] > 1:
+        if self == source_file and kwargs.get("follow_symlinks") is False:
             raise OSError("metadata unavailable")
         return original_stat(self, *args, **kwargs)
 
