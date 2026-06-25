@@ -2042,7 +2042,7 @@ failed before the wrapper fix, then passed; `test_streaming_utils.py` plus
 - Test: `tldw_Server_API/tests/Chat/unit/test_chat_service_tool_autoexec.py`
 - Test: `tldw_Server_API/tests/Chat/unit/test_streaming_utils.py`
 
-- [ ] **Step 1: Create coordinator object**
+- [x] **Step 1: Create coordinator object**
 
 Create `completion_pipeline.py` with:
 
@@ -2065,7 +2065,7 @@ class ChatCompletionPipeline:
         return self.streaming_executor(**kwargs)
 ```
 
-- [ ] **Step 2: Add a default pipeline factory in `chat_service.py`**
+- [x] **Step 2: Add a default pipeline factory in `chat_service.py`**
 
 Import:
 
@@ -2092,7 +2092,7 @@ async def execute_non_stream_call(**kwargs: Any) -> dict[str, Any]:
 
 The wrapper keeps the existing import path for tests and callers while making the pipeline object the orchestration entry point.
 
-- [ ] **Step 3: Run core Chat tests touched by the coordinator**
+- [x] **Step 3: Run core Chat tests touched by the coordinator**
 
 Run:
 
@@ -2102,7 +2102,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/te
 
 Expected: all three test files pass.
 
-- [ ] **Step 4: Commit coordinator**
+- [x] **Step 4: Commit coordinator**
 
 Run:
 
@@ -2112,6 +2112,13 @@ git commit --only tldw_Server_API/app/core/Chat/completion_pipeline.py tldw_Serv
 ```
 
 Expected: commit succeeds with only the listed files.
+
+Verification: coordinator tests were added with red coverage for the missing module
+and the non-stream facade bypassing the pipeline. Final checks passed:
+`test_chat_service_content.py`, `test_chat_service_tool_autoexec.py`,
+`test_streaming_utils.py`, and `test_chat_service_fallback.py` with 91 passed
+and 1 skipped; Bandit on `completion_pipeline.py`, `chat_service.py`, and
+`streaming_pipeline.py` reported 0 findings.
 
 ---
 
