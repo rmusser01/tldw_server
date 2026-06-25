@@ -40,7 +40,11 @@ modified_files:
 - tldw_Server_API/tests/Claims/test_claims_rebuild_stale_policy.py
 - tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
 - tldw_Server_API/tests/Claims/test_ingestion_claims_sql.py
-updated_date: 2026-06-25 07:06
+- tldw_Server_API/app/services/claims_jobs_worker.py
+- tldw_Server_API/app/services/startup_worker_groups.py
+- tldw_Server_API/tests/Services/test_claims_jobs_worker.py
+- tldw_Server_API/tests/Services/test_startup_worker_groups.py
+updated_date: 2026-06-25 07:17
 ---
 
 ## Description
@@ -58,7 +62,7 @@ Execute the hardened Claims Jobs Stage 1 plan with subagent-driven TDD: contract
 - [x] #5 Task 5 review notification delivery seam implemented with tests.
 - [x] #6 Task 6 Claims job handlers implemented with tests.
 - [x] #7 Task 7 Claims service routing to Jobs implemented with tests.
-- [ ] #8 Task 8 Claims Jobs worker lifecycle registration implemented with tests.
+- [x] #8 Task 8 Claims Jobs worker lifecycle registration implemented with tests.
 - [ ] #9 Task 9 integration verification and Bandit security sweep complete.
 <!-- AC:END -->
 
@@ -72,6 +76,7 @@ Task 4 complete. Updated Claims monitoring event DB helpers so insert_claims_mon
 Task 5 complete. Extracted deliver_claim_review_notifications_now as a synchronous review-notification delivery seam with small result dictionaries, kept legacy dispatch on bounded submission, and preserved legacy DB initialization by having dispatch pass initialize=True while the Jobs-facing helper defaults to initialize=False. Review loop fixed mixed delivered/pending batches to mark only pending IDs and hardened ID normalization for bool, invalid, and overflow inputs. Verification: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/Claims/test_claims_review_notifications.py -q => 10 passed, 32 warnings. Spec review: compliant under accepted legacy-dispatch initialization refinement. Code-quality review: ready to proceed. Commits: ae7c6047c2, 3a7b559cdd, 2eeb96a272.
 Task 6 complete. Added Claims job handlers for rebuild, review notification, and alert-delivery jobs using the Claims domain seams while keeping queue/lifecycle mechanics in Jobs. Review loop hardened owner scoping by canonicalizing owner IDs before comparison/DB path derivation, filtering review notification rows by owner before delivery/marking, and adding regression coverage for alert event owner mismatch, alert owner mismatch, already-delivered skip, and retryable webhook failure. Verification: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/Claims/test_claims_jobs_handlers.py tldw_Server_API/tests/Claims/test_claims_webhook_delivery.py tldw_Server_API/tests/Claims/test_claims_review_notifications.py -q => 25 passed, 62 warnings; /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/Claims/test_claims_rebuild_service_failure.py -q => 7 passed, 26 warnings; /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m ruff check touched Task 6 files => all checks passed; Bandit touched Task 6 production scope => 0 findings. Spec re-review: compliant. Code-quality re-review: PASS. Commits: 1ec28befe3, e2e39f1e39.
 Task 7 complete. Routed Claims service-facing background work through the Jobs module without adding Claims-side queue controls: explicit rebuild and rebuild-all enqueue Claims rebuild Jobs when enabled, review and assignment notifications enqueue review notification Jobs best-effort, alert delivery enqueues Jobs for valid persisted event IDs, and dashboard analytics exposes a read-only Claims Jobs summary. Review loop fixed Jobs enqueue failure handling for PostgreSQL/storage exceptions, ownerless rebuild fallback behavior, alert delivery malformed event-row handling, and rebuild-all idempotency by using a bounded scope that dedupes immediate retries while allowing future operations. Verification: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/Claims/test_ingestion_claims_sql.py tldw_Server_API/tests/Claims/test_claims_review_api.py tldw_Server_API/tests/Claims/test_claims_rebuild_stale_policy.py tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py -q => 22 passed, 209 warnings; Ruff touched Task 7 files => all checks passed; Bandit touched Task 7 production scope => 0 findings. Spec re-review: PASS. Code-quality re-review: PASS. Commits: 2a9030339d, da4f03421b, f87000d57e, 3fb9238a7a, 2d6718ae5b, 0dec33cc8c, d424091f0b.
+Task 8 complete. Added a lifecycle-managed Claims Jobs worker that builds a WorkerSDK config from existing Claims Jobs helpers, runs process_claims_job without an owner_user_id filter so Claims jobs are acquired across all owners in the Claims domain/queue, and stops through the lifecycle stop event. Registered the Claims Jobs provider before the legacy Claims rebuild provider and updated service tests to document provider order and the real spec graph. Red verification: the new worker test initially failed with ImportError for missing claims_jobs_worker, and the startup graph test failed because claims_jobs_task was absent. Green verification: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/Services/test_claims_jobs_worker.py tldw_Server_API/tests/Services/test_startup_worker_groups.py -q => 5 passed, 22 warnings. Ruff touched Task 8 files => all checks passed. Bandit touched Task 8 production files => 0 findings in /tmp/bandit_claims_task8.json.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
