@@ -234,6 +234,74 @@ async def test_command_service_generic_preflight_skip_stays_legacy_invalid() -> 
 
 
 @pytest.mark.asyncio
+async def test_command_service_team_not_found_skip_maps_without_executor() -> None:
+    executor = _Executor()
+    command_service = ProfileCommandService(
+        db_pool=object(),
+        profile_service=_ProfileService(),
+        planner=_Planner(
+            UpdateResult(
+                skipped=[
+                    {"key": "memberships.teams.role", "message": "team_not_found"}
+                ],
+            )
+        ),
+        executor=executor,
+    )
+    command = ProfileUpdateCommand(
+        actor_user_id=7,
+        target_user_id=9,
+        updates=(("memberships.teams.role", {"team_id": 42, "role": "member"}),),
+        roles=frozenset({"admin"}),
+        dry_run=False,
+    )
+
+    result = await command_service.apply(command, db_conn=object(), scope=None)
+
+    assert result.status_code == 404
+    assert result.error_code == "profile_update_not_found"
+    assert result.detail == "Target resource not found"
+    assert result.skipped == (
+        {"key": "memberships.teams.role", "message": "team_not_found"},
+    )
+    assert executor.called is False
+
+
+@pytest.mark.asyncio
+async def test_command_service_invalid_payload_skip_maps_without_executor() -> None:
+    executor = _Executor()
+    command_service = ProfileCommandService(
+        db_pool=object(),
+        profile_service=_ProfileService(),
+        planner=_Planner(
+            UpdateResult(
+                skipped=[
+                    {"key": "memberships.teams.role", "message": "invalid_payload"}
+                ],
+            )
+        ),
+        executor=executor,
+    )
+    command = ProfileUpdateCommand(
+        actor_user_id=7,
+        target_user_id=9,
+        updates=(("memberships.teams.role", "not-a-payload"),),
+        roles=frozenset({"admin"}),
+        dry_run=False,
+    )
+
+    result = await command_service.apply(command, db_conn=object(), scope=None)
+
+    assert result.status_code == 400
+    assert result.error_code == "profile_update_invalid"
+    assert result.detail == "Invalid profile update payload"
+    assert result.skipped == (
+        {"key": "memberships.teams.role", "message": "invalid_payload"},
+    )
+    assert executor.called is False
+
+
+@pytest.mark.asyncio
 async def test_command_service_dry_run_rejects_stale_version_before_planning() -> None:
     profile_service = _ProfileService()
     planner = _Planner()

@@ -8,6 +8,9 @@ from typing import Any
 
 from tldw_Server_API.app.core.UserProfiles.contracts import ProfileUpdateCommand
 from tldw_Server_API.app.core.UserProfiles.effects import ProfileEffectDispatcher
+from tldw_Server_API.app.core.UserProfiles.error_mapping import (
+    classify_legacy_profile_update_skips,
+)
 from tldw_Server_API.app.core.UserProfiles.planner import ProfileUpdatePlanner
 from tldw_Server_API.app.core.UserProfiles.response_mappers import LegacyProfileCommandResult
 from tldw_Server_API.app.core.UserProfiles.service import UserProfileService
@@ -15,43 +18,6 @@ from tldw_Server_API.app.core.UserProfiles.update_service import (
     ProfileUpdateScope,
     UserProfileUpdateService,
 )
-
-_FORBIDDEN_SKIP_MESSAGES = {
-    "forbidden",
-    "forbidden_scope",
-    "forbidden_role_escalation",
-    "owner_required",
-    "org_membership_required",
-}
-_UNKNOWN_SKIP_MESSAGES = {
-    "unknown_key",
-    "unsupported_key",
-    "unsupported_type",
-}
-_NOT_FOUND_SKIP_MESSAGES = {
-    "user_not_found",
-}
-
-
-def _classify_legacy_preflight_skips(
-    skipped: tuple[dict[str, str], ...],
-) -> tuple[int, str, str]:
-    messages = {str(item.get("message") or "") for item in skipped}
-    if messages & _NOT_FOUND_SKIP_MESSAGES:
-        return 404, "profile_update_not_found", "Target user not found"
-    if messages & _FORBIDDEN_SKIP_MESSAGES:
-        return (
-            403,
-            "profile_update_forbidden",
-            "Caller cannot edit one or more fields",
-        )
-    if messages & _UNKNOWN_SKIP_MESSAGES:
-        return (
-            400,
-            "profile_update_unknown_key",
-            "One or more keys are not recognized",
-        )
-    return 422, "profile_update_invalid", "One or more updates failed validation"
 
 
 class ProfileCommandService:
@@ -96,15 +62,17 @@ class ProfileCommandService:
 
         preflight = await self._planner.plan(command, db_conn=db_conn, scope=scope)
         if preflight.skipped:
-            status_code, error_code, detail = _classify_legacy_preflight_skips(
-                tuple(preflight.skipped)
-            )
+            mapped = classify_legacy_profile_update_skips(tuple(preflight.skipped))
+            if mapped is None:
+                raise RuntimeError(
+                    "preflight skipped result could not be classified"
+                )
             return LegacyProfileCommandResult(
-                status_code=status_code,
+                status_code=mapped.status_code,
                 applied=tuple(preflight.applied),
                 skipped=tuple(preflight.skipped),
-                error_code=error_code,
-                detail=detail,
+                error_code=mapped.error_code,
+                detail=mapped.detail,
             )
 
         if current_version is None:

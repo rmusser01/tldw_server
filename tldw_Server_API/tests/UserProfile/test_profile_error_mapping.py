@@ -142,3 +142,114 @@ def test_not_found_details_diverge_for_direct_and_legacy_user_mapping() -> None:
     assert legacy_status == status.HTTP_404_NOT_FOUND
     assert legacy_error_code == "profile_update_not_found"
     assert legacy_detail == "Target user not found"
+
+
+def test_core_legacy_skip_classifier_preserves_compatibility_buckets() -> None:
+    from tldw_Server_API.app.core.UserProfiles.error_mapping import (
+        classify_legacy_profile_update_skips,
+    )
+
+    assert classify_legacy_profile_update_skips([]) is None
+
+    unsupported_type = classify_legacy_profile_update_skips(
+        [{"key": "preferences.ui.theme", "message": "unsupported_type"}]
+    )
+    assert unsupported_type is not None
+    assert unsupported_type.status_code == status.HTTP_400_BAD_REQUEST
+    assert unsupported_type.error_code == "profile_update_unknown_key"
+    assert unsupported_type.detail == "One or more keys are not recognized"
+
+    user_not_found = classify_legacy_profile_update_skips(
+        [{"key": "user_id", "message": "user_not_found"}]
+    )
+    assert user_not_found is not None
+    assert user_not_found.status_code == status.HTTP_404_NOT_FOUND
+    assert user_not_found.error_code == "profile_update_not_found"
+    assert user_not_found.detail == "Target user not found"
+
+
+def test_core_legacy_skip_classifier_uses_domain_precedence() -> None:
+    from tldw_Server_API.app.core.UserProfiles.error_mapping import (
+        classify_legacy_profile_update_skips,
+    )
+
+    team_not_found = classify_legacy_profile_update_skips(
+        [
+            {"key": "memberships.teams.role", "message": "team_not_found"},
+            {"key": "profile_type", "message": "type_mismatch"},
+        ]
+    )
+    assert team_not_found is not None
+    assert team_not_found.status_code == status.HTTP_404_NOT_FOUND
+    assert team_not_found.error_code == "profile_update_not_found"
+    assert team_not_found.detail == "Target resource not found"
+
+    invalid_payload = classify_legacy_profile_update_skips(
+        [{"key": "memberships.teams.role", "message": "invalid_payload"}]
+    )
+    assert invalid_payload is not None
+    assert invalid_payload.status_code == status.HTTP_400_BAD_REQUEST
+    assert invalid_payload.error_code == "profile_update_invalid"
+    assert invalid_payload.detail == "Invalid profile update payload"
+
+
+@pytest.mark.parametrize(
+    ("message", "expected_status", "expected_error", "expected_detail"),
+    [
+        (
+            "team_not_found",
+            status.HTTP_404_NOT_FOUND,
+            "profile_update_not_found",
+            "Target resource not found",
+        ),
+        (
+            "invalid_payload",
+            status.HTTP_400_BAD_REQUEST,
+            "profile_update_invalid",
+            "Invalid profile update payload",
+        ),
+        (
+            "unsupported_type",
+            status.HTTP_400_BAD_REQUEST,
+            "profile_update_unknown_key",
+            "One or more keys are not recognized",
+        ),
+        (
+            "user_not_found",
+            status.HTTP_404_NOT_FOUND,
+            "profile_update_not_found",
+            "Target user not found",
+        ),
+    ],
+)
+def test_api_profile_skip_adapter_matches_core_legacy_classifier(
+    message: str,
+    expected_status: int,
+    expected_error: str,
+    expected_detail: str,
+) -> None:
+    from tldw_Server_API.app.core.UserProfiles.error_mapping import (
+        classify_legacy_profile_update_skips,
+    )
+
+    skipped = [{"key": "some.key", "message": message}]
+
+    core_mapping = classify_legacy_profile_update_skips(skipped)
+    api_mapping = classify_profile_update_skips(skipped)
+
+    assert core_mapping is not None
+    assert (core_mapping.status_code, core_mapping.error_code, core_mapping.detail) == (
+        expected_status,
+        expected_error,
+        expected_detail,
+    )
+    assert api_mapping is not None
+    api_status, api_error, api_detail, api_errors = api_mapping
+    assert (api_status, api_error, api_detail) == (
+        core_mapping.status_code,
+        core_mapping.error_code,
+        core_mapping.detail,
+    )
+    assert [(error.key, error.message) for error in api_errors] == [
+        ("some.key", message)
+    ]

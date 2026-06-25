@@ -4,6 +4,7 @@ Stable error taxonomy for UserProfiles update failures.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 
@@ -95,13 +96,85 @@ _PROFILE_ERROR_MAPPINGS = {
     ProfileErrorCode.VERSION_MISMATCH: _VERSION_MISMATCH_MAPPING,
 }
 
+_FORBIDDEN_SKIP_MESSAGES = {
+    "forbidden",
+    "forbidden_scope",
+    "forbidden_role_escalation",
+    "owner_required",
+    "org_membership_required",
+}
+_UNKNOWN_SKIP_MESSAGES = {
+    "unknown_key",
+    "unsupported_key",
+    "unsupported_type",
+}
+_LEGACY_USER_NOT_FOUND_MESSAGES = {
+    "user_not_found",
+}
+_LEGACY_USER_NOT_FOUND_MAPPING = ProfileErrorMapping(
+    status_code=status.HTTP_404_NOT_FOUND,
+    error_code="profile_update_not_found",
+    detail="Target user not found",
+)
+_DOMAIN_CODE_PRECEDENCE = (
+    ProfileErrorCode.TEAM_NOT_FOUND,
+    ProfileErrorCode.ORG_NOT_FOUND,
+    ProfileErrorCode.TARGET_NOT_FOUND,
+    ProfileErrorCode.VERSION_MISMATCH,
+    ProfileErrorCode.FORBIDDEN_KEY,
+    ProfileErrorCode.FORBIDDEN_SCOPE,
+    ProfileErrorCode.FORBIDDEN_ROLE_ESCALATION,
+    ProfileErrorCode.UNKNOWN_KEY,
+    ProfileErrorCode.UNSUPPORTED_KEY,
+    ProfileErrorCode.INVALID_PAYLOAD,
+    ProfileErrorCode.INVALID_ACTION,
+    ProfileErrorCode.MEMBERSHIP_NOT_FOUND,
+    ProfileErrorCode.INVALID_VALUE,
+    ProfileErrorCode.TYPE_MISMATCH,
+    ProfileErrorCode.ENUM_VIOLATION,
+    ProfileErrorCode.MIN_VIOLATION,
+    ProfileErrorCode.MAX_VIOLATION,
+    ProfileErrorCode.INVALID_ROLE,
+)
+
 
 def map_profile_error_code(code: ProfileErrorCode | str) -> ProfileErrorMapping:
     profile_code = ProfileErrorCode(code)
     return _PROFILE_ERROR_MAPPINGS[profile_code]
 
 
+def _first_matching_domain_code(messages: set[str]) -> ProfileErrorCode | None:
+    for code in _DOMAIN_CODE_PRECEDENCE:
+        if code.value in messages:
+            return code
+    return None
+
+
+def classify_legacy_profile_update_skips(
+    skipped: Iterable[Mapping[str, str]],
+) -> ProfileErrorMapping | None:
+    """Map legacy per-key skip reasons into the shared update error envelope."""
+    skipped_list = list(skipped)
+    if not skipped_list:
+        return None
+
+    messages = {str(item.get("message") or "") for item in skipped_list}
+    if messages & _LEGACY_USER_NOT_FOUND_MESSAGES:
+        return _LEGACY_USER_NOT_FOUND_MAPPING
+    if messages & _FORBIDDEN_SKIP_MESSAGES:
+        return _FORBIDDEN_MAPPING
+    if messages & _UNKNOWN_SKIP_MESSAGES:
+        return _UNKNOWN_KEY_MAPPING
+
+    mapped_code = _first_matching_domain_code(messages)
+    if mapped_code is not None:
+        return map_profile_error_code(mapped_code)
+
+    return _INVALID_MAPPING
+
+
 __all__ = [
+    "classify_legacy_profile_update_skips",
     "ProfileErrorCode",
     "ProfileErrorMapping",
     "map_profile_error_code",

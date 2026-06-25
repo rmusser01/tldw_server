@@ -6,61 +6,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from fastapi import status
-
 from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
     UserProfileErrorDetail,
 )
 from tldw_Server_API.app.core.UserProfiles.error_mapping import (
-    ProfileErrorCode,
-    map_profile_error_code,
+    classify_legacy_profile_update_skips,
 )
-
-_FORBIDDEN_MESSAGES = {
-    "forbidden",
-    "forbidden_scope",
-    "forbidden_role_escalation",
-    "owner_required",
-    "org_membership_required",
-}
-
-_UNKNOWN_MESSAGES = {
-    "unknown_key",
-    "unsupported_key",
-    "unsupported_type",
-}
-
-_NOT_FOUND_MESSAGES = {
-    "user_not_found",
-}
-
-_DOMAIN_CODE_PRECEDENCE = (
-    ProfileErrorCode.TEAM_NOT_FOUND,
-    ProfileErrorCode.ORG_NOT_FOUND,
-    ProfileErrorCode.TARGET_NOT_FOUND,
-    ProfileErrorCode.VERSION_MISMATCH,
-    ProfileErrorCode.FORBIDDEN_KEY,
-    ProfileErrorCode.FORBIDDEN_SCOPE,
-    ProfileErrorCode.FORBIDDEN_ROLE_ESCALATION,
-    ProfileErrorCode.UNKNOWN_KEY,
-    ProfileErrorCode.UNSUPPORTED_KEY,
-    ProfileErrorCode.INVALID_PAYLOAD,
-    ProfileErrorCode.INVALID_ACTION,
-    ProfileErrorCode.MEMBERSHIP_NOT_FOUND,
-    ProfileErrorCode.INVALID_VALUE,
-    ProfileErrorCode.TYPE_MISMATCH,
-    ProfileErrorCode.ENUM_VIOLATION,
-    ProfileErrorCode.MIN_VIOLATION,
-    ProfileErrorCode.MAX_VIOLATION,
-    ProfileErrorCode.INVALID_ROLE,
-)
-
-
-def _first_matching_code(messages: set[str]) -> ProfileErrorCode | None:
-    for code in _DOMAIN_CODE_PRECEDENCE:
-        if code.value in messages:
-            return code
-    return None
 
 
 def classify_profile_update_skips(
@@ -71,7 +22,6 @@ def classify_profile_update_skips(
     if not skipped_list:
         return None
 
-    messages = {str(item.get("message") or "") for item in skipped_list}
     errors = [
         UserProfileErrorDetail(
             key=str(item.get("key") or ""),
@@ -79,43 +29,13 @@ def classify_profile_update_skips(
         )
         for item in skipped_list
     ]
-
-    if messages & _NOT_FOUND_MESSAGES:
-        return (
-            status.HTTP_404_NOT_FOUND,
-            "profile_update_not_found",
-            "Target user not found",
-            errors,
-        )
-    if messages & _FORBIDDEN_MESSAGES:
-        return (
-            status.HTTP_403_FORBIDDEN,
-            "profile_update_forbidden",
-            "Caller cannot edit one or more fields",
-            errors,
-        )
-    if messages & _UNKNOWN_MESSAGES:
-        return (
-            status.HTTP_400_BAD_REQUEST,
-            "profile_update_unknown_key",
-            "One or more keys are not recognized",
-            errors,
-        )
-
-    mapped_code = _first_matching_code(messages)
-    if mapped_code is not None:
-        mapped = map_profile_error_code(mapped_code)
-        return (
-            mapped.status_code,
-            mapped.error_code,
-            mapped.detail,
-            errors,
-        )
-
+    mapped = classify_legacy_profile_update_skips(skipped_list)
+    if mapped is None:
+        return None
     return (
-        status.HTTP_422_UNPROCESSABLE_ENTITY,
-        "profile_update_invalid",
-        "One or more updates failed validation",
+        mapped.status_code,
+        mapped.error_code,
+        mapped.detail,
         errors,
     )
 
