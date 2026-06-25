@@ -14,6 +14,7 @@ This design adds a shared Context Integrity subsystem for prompt-bearing assets 
 - config prompt YAML/Markdown files
 - repo prompt-skill files such as `Docs/Prompts/Skills/*`
 - DB-backed prompt records and specific prompt versions that can be injected into model context
+- persona, character, voice-command, profile-default, and other prompt sources when they can enter model context or tool instructions
 
 The subsystem compares current asset digests against an approved signed manifest. The server continues booting when unexpected changes are detected, but affected assets are quarantined and cannot be injected, exposed through MCP, or executed until an operator approves a new manifest version.
 
@@ -46,7 +47,11 @@ This design does not claim to detect full filesystem compromise when the only tr
 
 The protected unit is a prompt-bearing asset: any file or DB version that can be injected into model context, alter prompt assembly, appear through MCP prompt discovery, or drive skill execution.
 
+The inclusion rule is capability-based: if an asset can affect system/user/developer instructions, prompt assembly, tool instructions, MCP prompt discovery, or skill execution, it must be treated as protected once that source is wired into Context Integrity. The first implementation can stage adapters, but new prompt-bearing surfaces should default to protected rather than relying on per-feature opt-in.
+
 The subsystem stores approved asset state in a signed trust manifest. The manifest records canonical hashes, asset IDs, source type, owner scope, trust tier, signer/key ID, approval event, manifest schema version, and manifest sequence number. Runtime code compares current assets against the latest approved manifest. It never treats the live filesystem or app DB as automatically trusted.
+
+Manifest signatures protect manifest contents, but they do not by themselves prevent rollback to an older valid manifest. The latest accepted manifest sequence number and digest must be anchored outside mutable app DB state. Acceptable anchors include OS/hardware-backed key storage metadata, an external/admin-held manifest ledger, or hardened-mode external verification. If no anti-rollback anchor is available, the system must report degraded integrity and avoid claiming rollback protection.
 
 The default trust anchor is an OS/hardware-backed signing key. If that is unavailable, the server must either use an admin-held manifest or run in clearly labeled degraded integrity mode. Hardened deployments require an external/admin-held manifest or external key. Full filesystem compromise is only detectable with that external trust anchor.
 
@@ -77,7 +82,11 @@ Filesystem assets include:
 - support-file bytes when a skill is directory-backed
 - metadata that affects model context or execution behavior
 
-DB prompt assets use stable JSON over fields that affect context, such as prompt UUID, prompt version, name, system content, user content, structured fields, model/tool-affecting metadata, and deleted state when it affects availability. The hash approves a specific version/content digest, not all future edits to a prompt UUID.
+Filesystem hashing defaults to raw file bytes, sorted by normalized POSIX-style relative path for directory-backed assets. This intentionally detects comment-only and formatting-only edits in protected files. Any source-specific semantic hash may be added for review display, but enforcement must use the raw canonical asset digest unless a source explicitly defines a safer canonical form.
+
+DB prompt assets use stable JSON over fields that affect context, such as prompt UUID, prompt version, name, system content, user content, structured fields, model/tool-affecting metadata, and deleted state when it affects availability. DB canonical JSON must use deterministic field ordering, Unicode NFC normalization for text fields, and LF line endings for text values before hashing. The hash approves a specific version/content digest, not all future edits to a prompt UUID.
+
+YAML/Markdown prompt-file review may show parsed semantic diffs, but enforcement still hashes the canonical file payload. This avoids a parser bug or comment channel becoming a place to hide unapproved instructions.
 
 ### Trust Manifest Store
 
@@ -88,6 +97,7 @@ Required behavior:
 - verify manifest signatures before using manifest contents
 - select the newest valid manifest
 - fall back to the newest prior valid manifest if the latest manifest signature is invalid
+- reject rollback to an older valid manifest when the external anti-rollback anchor says a newer accepted manifest exists
 - export admin-held manifests for hardened deployments
 - import external/admin-held manifests
 - enter degraded integrity mode when no strong trust anchor is available
@@ -109,7 +119,9 @@ The verifier compares current inventory to approved manifest entries and emits a
 
 The runtime resolver is the centralized enforcement point. Skills, prompt loaders, MCP prompt catalog code, DB prompt access, and chat slash skill invocation must ask the resolver before returning or using protected content.
 
-The resolver either verifies the current digest at use time or serves content from a boot-verified immutable snapshot. This avoids trusting a startup-only scan after files change while the server is running.
+The resolver derives enforcement from verified in-memory boot state, a boot-verified immutable snapshot, or signed state. It must not trust mutable app DB quarantine flags as the source of enforcement truth; DB flags are operational metadata only.
+
+The resolver either verifies the current digest at use time or serves content from a boot-verified immutable snapshot. This avoids trusting a startup-only scan after files change while the server is running. At-use verification must hash the exact bytes or DB row version that will be injected or executed. Filesystem at-use mode therefore needs single-read semantics, such as reading bytes once and passing those bytes onward after digest verification. DB at-use mode needs transaction or version discipline so the verified row version is the row version used. Implementations that cannot guarantee this should use immutable snapshots.
 
 ### Admin And Audit Surfaces
 
@@ -130,12 +142,13 @@ Review UI and API responses must not render untrusted prompt content as rich HTM
 
 1. Build current inventory from filesystem skills, prompt files, and DB prompt versions.
 2. Load and verify the latest approved signed manifest before trusting any manifest content.
-3. Fall back to the newest prior valid manifest if the newest manifest is invalid.
-4. Compare current assets to approved digests.
-5. Record current-boot verification state and signed/hash-chained audit events for material findings.
-6. Register startup warnings for changed, missing, unapproved, signature-invalid, or degraded assets.
-7. Quarantine unsafe assets.
-8. Continue booting with unsafe assets unavailable.
+3. Validate the manifest sequence and digest against the external anti-rollback anchor when one is configured.
+4. Fall back to the newest prior valid manifest if the newest manifest is invalid and rollback policy permits that fallback.
+5. Compare current assets to approved digests.
+6. Record current-boot verification state and signed/hash-chained audit events for material findings.
+7. Register startup warnings for changed, missing, unapproved, signature-invalid, rollback, or degraded assets.
+8. Quarantine unsafe assets.
+9. Continue booting with unsafe assets unavailable.
 
 ### Runtime Use
 
@@ -145,6 +158,7 @@ Every context-injection or execution path asks the integrity resolver before usi
 - quarantined, signature-invalid, changed, missing, and unapproved assets are hidden from discovery and blocked from injection/execution.
 - degraded mode defaults to blocking executable and context-injection use.
 - unsafe read-only visibility requires an explicit break-glass config and must never allow injection or execution.
+- at-use verification must pass through the verified content bytes or verified DB row version, not re-open or re-fetch content after the check.
 
 ### Edit And Import
 
@@ -183,6 +197,7 @@ Default policy is **server boots, context use fails closed**. Suspicious assets 
 Actions:
 
 - `signature_invalid`: try the newest prior valid manifest. If none exists, quarantine the protected scope and enter degraded integrity. Requires key or manifest recovery.
+- `manifest_rollback_detected`: high severity, quarantine the protected scope unless an operator imports a valid external manifest or resolves the anchor mismatch. A locally valid older signature is not sufficient.
 - `changed_approved_executable`: high severity, quarantine immediately.
 - `changed_approved_non_executable`: medium or high severity based on source tier, quarantine for injection.
 - `new_unapproved`: pending review, not usable for injection or execution.
@@ -195,6 +210,7 @@ Runtime errors are stable and content-free:
 
 - `Asset is quarantined pending admin review.`
 - `Integrity manifest signature is invalid.`
+- `Integrity manifest rollback detected.`
 - `Asset version is not approved for execution.`
 - `Asset changed during review; reload before approving.`
 
@@ -233,10 +249,13 @@ Backend unit tests should cover:
 
 - deterministic canonical hashing for filesystem and DB prompt-version assets
 - manifest signing and signature verification
+- manifest anti-rollback anchor verification
 - invalid-latest-manifest fallback to prior valid manifest
+- rollback detection when a valid older manifest conflicts with the anti-rollback anchor
 - changed, missing, new, restored, degraded, and verification-error outcomes
 - approval race locking on manifest version and current digest
-- runtime resolver enforcement for trusted versus quarantined assets
+- runtime resolver enforcement from verified in-memory or signed state, not mutable DB flags
+- at-use verification using the exact bytes or row version consumed by the caller
 - degraded mode blocking injection and execution
 - tamper-evident audit chain verification
 
@@ -250,6 +269,7 @@ Integration tests should cover:
 - MCP prompt catalog hiding quarantined prompts
 - external manifest import trusting matching assets
 - invalid latest manifest falling back to prior valid manifest
+- older valid manifest replay being rejected when the anti-rollback anchor records a newer accepted manifest
 
 Performance tests should cover:
 

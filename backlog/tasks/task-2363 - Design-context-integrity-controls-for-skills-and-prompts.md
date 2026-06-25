@@ -36,7 +36,7 @@ Brainstorming approved architecture, components, data flow, policy, testing, and
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created Docs/superpowers/specs/2026-06-25-context-integrity-skills-prompts-design.md covering shared context integrity controls for skills, prompt-bearing files, and DB prompt versions. The spec defines the threat model, signed trust manifest, OS/external trust anchors, quarantine policy, startup/runtime flows, initial enrollment, rollout modes, and verification strategy. Verification: searched the spec for TBD/TODO/FIXME/placeholder markers and self-reviewed for contradictions, ambiguity, and scope. Bandit skipped: documentation-only design change.
+Created and amended Docs/superpowers/specs/2026-06-25-context-integrity-skills-prompts-design.md covering shared context integrity controls for skills, prompt-bearing files, and DB prompt versions. The spec defines the threat model, signed trust manifest, OS/external trust anchors, anti-rollback anchoring, TOCTOU-safe runtime resolver requirements, quarantine policy, startup/runtime flows, initial enrollment, rollout modes, and verification strategy. Verification: searched the spec for TBD/TODO/FIXME/placeholder markers and self-reviewed for contradictions, ambiguity, and scope. Bandit skipped: documentation-only design change.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
