@@ -4,7 +4,7 @@ title: Implement Writing Playground manuscript annotations
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-25 03:42'
+updated_date: '2026-06-25 04:18'
 labels:
   - implementation
   - webui
@@ -193,6 +193,34 @@ Review evidence:
 
 Security/static checks:
 - Bandit skipped for Task 9 because this slice changed TypeScript/TSX/frontend E2E files only and no Python files.
+
+Task 10 complete: wired selected-text review, scene-review job feedback, and suggested-fix handoff into the existing revision queue.
+
+TDD evidence:
+- Red run from `apps/packages/ui`: `bunx vitest run src/components/Option/WritingPlayground/__tests__/useWritingAnnotations.test.tsx src/components/Option/WritingPlayground/__tests__/WritingAnnotationsTab.test.tsx src/components/Option/WritingPlayground/__tests__/WritingAnnotationMarginRail.test.tsx` -> failed as expected with 7 failures for the old two-argument review hook API, missing scene-review job status display, and missing suggested-fix create-revision/manual-copy actions.
+- Code-quality review-fix red run failed as expected for trimmed suggested-fix text in the annotation-to-revision handoff.
+- Scene-review version reset red run failed as expected for stale queued job display after the scene version changed.
+- Async scene-review race red run failed as expected for stale job display after an in-flight older-version job resolved.
+- Final focused green run from `apps/packages/ui`: `bunx vitest run src/components/Option/WritingPlayground/__tests__/useWritingAnnotations.test.tsx src/components/Option/WritingPlayground/__tests__/WritingAnnotationsTab.test.tsx src/components/Option/WritingPlayground/__tests__/WritingAnnotationMarginRail.test.tsx` -> 3 files passed, 29 tests passed.
+- Final baseline green run from `apps/packages/ui`: `NODE_OPTIONS=--max-old-space-size=8192 bunx vitest run src/components/Option/WritingPlayground/__tests__/WritingPlayground.phase1-baseline.test.tsx` -> 1 file passed, 32 tests passed.
+- Route parity guard from `apps/tldw-frontend`: `bunx vitest run extension/__tests__/writing-playground-route-parity.guard.test.ts` -> 1 file passed, 1 test passed.
+
+Implementation notes:
+- `useWritingAnnotations` now exposes `reviewSelection(input)` and `reviewScene(input)` with `sceneId` inside the input object and forwards provider/model without defaults.
+- `WritingAnnotationsTab` disables review actions while the scene is dirty, sends provider/model/scene version/range/selected text, displays queued scene-review job id/status, clears stale job state on scene version changes, and ignores older in-flight job responses after scene/version changes.
+- Margin annotation suggested fixes now show `Create revision` for attached/reattached anchors and `Copy fix manually` for `needs_review` anchors.
+- `index.tsx` bridges stable suggested fixes into `useWritingRevisions` by creating a pending replacement proposal from saved scene text/current editor text without mutating the editor, preserving suggested-fix leading/trailing whitespace exactly while using trimming only as an empty guard.
+
+Review evidence:
+- Spec review approved selected-text payloads, dirty-scene disablement, scene-review job display, suggested-fix revision/manual-copy routing, and extension parity.
+- Code-quality review found exact suggested-fix whitespace preservation and missing integration coverage for annotation-to-revision handoff; both were fixed with regression coverage.
+- Code-quality re-review approved with no Critical or Important issues.
+- Final sanity review approved the async stale-job guard as non-blocking; the implementation was further hardened by updating the current scene/version ref synchronously during render.
+
+Security/static checks:
+- Bandit skipped because Task 10 touched TypeScript/TSX/frontend test files only and no Python files.
+- `git diff --check` passed.
+- `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still fails only on existing unrelated package errors in Notes, AudioStudio, ScheduledTasks, Setup, Dexie audiobook migration, background, scheduled-tasks control-plane, and voice-cloning files. No touched Task 10 Writing Playground files were reported.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

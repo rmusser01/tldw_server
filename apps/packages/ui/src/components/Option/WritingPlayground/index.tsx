@@ -52,6 +52,7 @@ import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { TldwChatService } from "@/services/tldw/TldwChat"
 import {
   getWritingCapabilities,
+  type ManuscriptAnnotationResponse,
   type WritingSessionListItem,
   type WritingTemplateResponse,
   type WritingThemeResponse
@@ -121,6 +122,7 @@ import {
   parseRevisionModelResponse
 } from "./writing-revision-prompt-utils"
 import {
+  buildInsertionAnchor,
   confirmRevisionTarget,
   countWords,
   resolveRevisionTarget
@@ -247,6 +249,69 @@ const sanitizeRevisionValue = (value: unknown): unknown => {
       .filter(([key]) => !SECRET_FIELD_PATTERN.test(key))
       .map(([key, entryValue]) => [key, sanitizeRevisionValue(entryValue)])
   )
+}
+
+const codePointOffsetToUtf16Offset = (
+  text: string,
+  codePointOffset: number
+): number => {
+  if (!Number.isFinite(codePointOffset)) return 0
+  const safeOffset = Math.max(0, Math.floor(codePointOffset))
+  return Array.from(text).slice(0, safeOffset).join("").length
+}
+
+const resolveAnnotationRevisionRange = (
+  annotation: ManuscriptAnnotationResponse,
+  text: string
+): { start: number; end: number; beforeText: string } | null => {
+  if (
+    annotation.anchor_status !== "attached" &&
+    annotation.anchor_status !== "reattached"
+  ) {
+    return null
+  }
+
+  const codePointStart =
+    annotation.anchor_status === "reattached" &&
+    annotation.derived_start !== null &&
+    annotation.derived_start !== undefined
+      ? annotation.derived_start
+      : annotation.anchor_start
+  const codePointEnd =
+    annotation.anchor_status === "reattached" &&
+    annotation.derived_end !== null &&
+    annotation.derived_end !== undefined
+      ? annotation.derived_end
+      : annotation.anchor_end
+
+  if (
+    codePointStart === null ||
+    codePointStart === undefined ||
+    codePointEnd === null ||
+    codePointEnd === undefined
+  ) {
+    return null
+  }
+
+  const start = codePointOffsetToUtf16Offset(text, codePointStart)
+  const end = codePointOffsetToUtf16Offset(text, codePointEnd)
+  const normalizedStart = Math.min(start, end)
+  const normalizedEnd = Math.max(start, end)
+  if (normalizedEnd <= normalizedStart) return null
+
+  return {
+    start: normalizedStart,
+    end: normalizedEnd,
+    beforeText: text.slice(normalizedStart, normalizedEnd)
+  }
+}
+
+const buildAnnotationRevisionId = (annotationId: string): string => {
+  const randomId =
+    typeof globalThis.crypto?.randomUUID === "function"
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return `annotation-${annotationId}-revision-${randomId}`
 }
 
 const LazyWritingPlaygroundModalHost = React.lazy(() =>
@@ -715,15 +780,6 @@ export const WritingPlayground = () => {
     targetContext: activeAnnotationTargetContext,
     enabled: isOnline && Boolean(activeProjectId)
   })
-  const annotationMarginRail = (
-    <WritingAnnotationMarginRail
-      annotations={annotations.annotations}
-      adapter={editorMode === "tiptap" && editorView !== "preview" ? annotationRailAdapter : null}
-      activeAnnotationId={activeAnnotationId}
-      measurementVersion={annotationRailMeasurementVersion}
-      onActiveAnnotationChange={setActiveAnnotationId}
-    />
-  )
 
   React.useEffect(() => {
     const modelId = selectedModel?.trim()
@@ -1805,6 +1861,98 @@ export const WritingPlayground = () => {
       }
     },
     [t]
+  )
+
+  const handleAnnotationSuggestedFix = React.useCallback(
+    (annotation: ManuscriptAnnotationResponse) => {
+      const suggestedFix = annotation.suggested_fix
+      if (!suggestedFix?.trim()) return
+      if (!activeSessionId) {
+        message.info(
+          t("option:writingPlayground.selectSession", "Select a session to begin.")
+        )
+        return
+      }
+
+      const sourceText = activeScene?.content_plain ?? editorText
+      const range = resolveAnnotationRevisionRange(annotation, sourceText)
+      if (!range || !range.beforeText.trim()) {
+        message.info(
+          t(
+            "option:writingPlayground.annotationFixManual",
+            "Copy the suggested fix and apply it manually."
+          )
+        )
+        return
+      }
+
+      const proposal: WritingRevisionProposal = {
+        id: buildAnnotationRevisionId(annotation.id),
+        sessionId: activeSessionId,
+        action: "rewrite",
+        operation: "replace",
+        instruction: `Apply suggested fix from annotation ${annotation.id}.`,
+        target: {
+          mode: "selection",
+          start: range.start,
+          end: range.end,
+          beforeText: range.beforeText,
+          anchor: buildInsertionAnchor(sourceText, range.start),
+          label: `annotation ${annotation.id}`,
+          requiresConfirmation: false
+        },
+        replacementText: suggestedFix,
+        rationale: annotation.body,
+        title: `Suggested fix: ${annotation.category}`,
+        notes: [`Created from annotation ${annotation.id}`],
+        createdAt: new Date().toISOString(),
+        status: "pending"
+      }
+      revisionState.addRevision(proposal)
+    },
+    [
+      activeScene?.content_plain,
+      activeSessionId,
+      editorText,
+      revisionState,
+      t
+    ]
+  )
+
+  const handleCopyAnnotationSuggestedFix = React.useCallback(
+    async (annotation: ManuscriptAnnotationResponse) => {
+      const suggestedFix = annotation.suggested_fix
+      if (!suggestedFix?.trim()) return
+      try {
+        if (!navigator.clipboard) {
+          throw new Error("Clipboard unavailable.")
+        }
+        await navigator.clipboard.writeText(suggestedFix)
+        message.success(
+          t("option:writingPlayground.annotationFixCopied", "Suggested fix copied.")
+        )
+      } catch {
+        message.info(
+          t(
+            "option:writingPlayground.annotationFixManual",
+            "Copy the suggested fix and apply it manually."
+          )
+        )
+      }
+    },
+    [t]
+  )
+
+  const annotationMarginRail = (
+    <WritingAnnotationMarginRail
+      annotations={annotations.annotations}
+      adapter={editorMode === "tiptap" && editorView !== "preview" ? annotationRailAdapter : null}
+      activeAnnotationId={activeAnnotationId}
+      measurementVersion={annotationRailMeasurementVersion}
+      onActiveAnnotationChange={setActiveAnnotationId}
+      onReviewSuggestedFix={handleAnnotationSuggestedFix}
+      onCopySuggestedFix={handleCopyAnnotationSuggestedFix}
+    />
   )
 
   const handleUndoGeneration = React.useCallback(() => {

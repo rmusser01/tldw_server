@@ -200,7 +200,45 @@ describe("WritingAnnotationMarginRail", () => {
     expect(screen.getByText("open")).toBeInTheDocument()
     expect(screen.getByText("attached")).toBeInTheDocument()
     expect(screen.getByText(/Follow-up: Check the scene transition/)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Review suggested fix" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Create revision" })).toBeInTheDocument()
+  })
+
+  it("hands stable suggested fixes to the revision callback", () => {
+    const onReviewSuggestedFix = vi.fn()
+    const annotation = makeAnnotation({
+      id: "fix-card",
+      suggested_fix: "Use a sharper verb here."
+    })
+    renderRail({
+      activeAnnotationId: "fix-card",
+      annotations: [annotation],
+      onReviewSuggestedFix
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Create revision" }))
+
+    expect(onReviewSuggestedFix).toHaveBeenCalledWith(annotation)
+  })
+
+  it("falls back to manual copy guidance when suggested-fix anchors need review", () => {
+    const onReviewSuggestedFix = vi.fn()
+    const onCopySuggestedFix = vi.fn()
+    const annotation = makeAnnotation({
+      id: "manual-card",
+      anchor_status: "needs_review",
+      suggested_fix: "Use a sharper verb here."
+    })
+    renderRail({
+      activeAnnotationId: "manual-card",
+      annotations: [annotation],
+      onReviewSuggestedFix,
+      onCopySuggestedFix
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy fix manually" }))
+
+    expect(onReviewSuggestedFix).not.toHaveBeenCalled()
+    expect(onCopySuggestedFix).toHaveBeenCalledWith(annotation)
   })
 
   it("links margin cards to inspector rows with stable ids", () => {

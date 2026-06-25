@@ -24,6 +24,8 @@ export type WritingAnnotationMarginRailProps = {
   adapter: WritingEditorAdapter | null
   activeAnnotationId?: string | null
   onActiveAnnotationChange?: (annotationId: string | null) => void
+  onReviewSuggestedFix?: (annotation: ManuscriptAnnotationResponse) => void
+  onCopySuggestedFix?: (annotation: ManuscriptAnnotationResponse) => void
   includeResolved?: boolean
   measurementVersion?: number
   className?: string
@@ -78,6 +80,8 @@ export function WritingAnnotationMarginRail({
   adapter,
   activeAnnotationId = null,
   onActiveAnnotationChange,
+  onReviewSuggestedFix,
+  onCopySuggestedFix,
   includeResolved = false,
   measurementVersion = 0,
   className
@@ -197,6 +201,8 @@ export function WritingAnnotationMarginRail({
                 adapter?.focus()
                 adapter?.setSelection(selection)
               }}
+              onReviewSuggestedFix={onReviewSuggestedFix}
+              onCopySuggestedFix={onCopySuggestedFix}
             />
           </div>
         )

@@ -202,6 +202,11 @@ vi.mock("../WritingTipTapEditor", () => ({
       setSelection: (selection: { start: number; end: number }) => void
       getSelectedText: (currentValue: string) => string
       focus: () => void
+      measureRange?: (selection: { start: number; end: number }) => {
+        top: number
+        bottom: number
+        height: number
+      } | null
     }) => void
     onSelectionChange?: (selection: { start: number; end: number }) => void
     onContentChange: (json: Record<string, unknown>, plain: string) => void
@@ -209,6 +214,20 @@ vi.mock("../WritingTipTapEditor", () => ({
   }) => {
     const [selection, setSelection] = React.useState({ start: 0, end: 0 })
     const [value, setValue] = React.useState("")
+    const adapter = React.useMemo(
+      () => ({
+        getSelection: () => selection,
+        setSelection,
+        getSelectedText: (currentValue: string) =>
+          currentValue.slice(selection.start, selection.end),
+        focus: () => {},
+        measureRange: (range: { start: number; end: number }) =>
+          range.end > range.start
+            ? { top: 40 + range.start, bottom: 56 + range.start, height: 16 }
+            : null
+      }),
+      [selection]
+    )
 
     React.useEffect(() => {
       const text =
@@ -223,14 +242,8 @@ vi.mock("../WritingTipTapEditor", () => ({
     }, [content])
 
     React.useEffect(() => {
-      onAdapterReady({
-        getSelection: () => selection,
-        setSelection,
-        getSelectedText: (currentValue: string) =>
-          currentValue.slice(selection.start, selection.end),
-        focus: () => {}
-      })
-    }, [onAdapterReady, selection])
+      onAdapterReady(adapter)
+    }, [adapter, onAdapterReady])
 
     return (
       <textarea
@@ -258,10 +271,14 @@ vi.mock("../WritingTipTapEditor", () => ({
 }))
 
 import { WritingPlayground } from "../index"
+import { buildWritingAnnotationsQueryKey } from "../hooks/useWritingAnnotations"
 import { WRITING_REVISION_PRESETS } from "../writing-revision-presets"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useWritingPlaygroundStore } from "@/store/writing-playground"
-import { updateWritingSession } from "@/services/writing-playground"
+import {
+  updateWritingSession,
+  type ManuscriptAnnotationResponse
+} from "@/services/writing-playground"
 
 const DEFAULT_WRITING_CAPABILITIES = {
   server: {
@@ -387,6 +404,81 @@ const seedManuscriptStructure = () => {
           ]
         }
       ]
+    }
+  )
+}
+
+const seedManuscriptScene = (
+  text: string,
+  overrides: Record<string, unknown> = {}
+) => {
+  mockState.queryData.set(mockState.queryKey(["manuscript-scene", "scene-1"]), {
+    id: "scene-1",
+    chapter_id: "chapter-1",
+    project_id: "project-1",
+    title: "Scene 1",
+    sort_order: 1,
+    content: sceneRichContent(text),
+    content_plain: text,
+    synopsis: null,
+    word_count: text.trim().split(/\s+/).filter(Boolean).length,
+    pov_character_id: null,
+    status: "draft",
+    created_at: "2026-06-23T12:00:00Z",
+    last_modified: "2026-06-23T12:00:00Z",
+    deleted: false,
+    client_id: "test-client",
+    version: 3,
+    ...overrides
+  })
+}
+
+const makeManuscriptAnnotation = (
+  overrides: Partial<ManuscriptAnnotationResponse> = {}
+): ManuscriptAnnotationResponse => ({
+  id: "annotation-1",
+  project_id: "project-1",
+  target_type: "scene",
+  target_id: "scene-1",
+  status: "open",
+  category: "clarity",
+  tags: [],
+  source: "user",
+  body: "Tighten this sentence.",
+  suggested_fix: null,
+  followup_note: null,
+  metadata: {},
+  scene_version: 3,
+  anchor_start: 0,
+  anchor_end: 6,
+  selected_text: "target",
+  anchor_status: "attached",
+  derived_start: null,
+  derived_end: null,
+  scene_level: false,
+  created_at: "2026-06-25T00:00:00Z",
+  last_modified: "2026-06-25T00:00:00Z",
+  deleted: false,
+  client_id: "test-client",
+  version: 1,
+  ...overrides
+})
+
+const seedManuscriptAnnotations = (
+  annotations: ManuscriptAnnotationResponse[]
+) => {
+  mockState.queryData.set(
+    mockState.queryKey(
+      buildWritingAnnotationsQueryKey({
+        projectId: "project-1",
+        targetContext: { targetType: "scene", targetId: "scene-1" }
+      })
+    ),
+    {
+      annotations,
+      total: annotations.length,
+      limit: 50,
+      offset: 0
     }
   )
 }
@@ -1076,6 +1168,59 @@ describe("WritingPlayground phase1 baseline", () => {
     await waitFor(() => {
       expect(editor.value).toBe("Intro. The sharper sentence. Outro.")
     })
+  })
+
+  it("creates an annotation suggested-fix proposal without mutating editor text", async () => {
+    const sceneText = "Lead 😀 target tail"
+    const annotatedPrefix = "Lead 😀 "
+    const replacement = "  revised target\n"
+    mockState.storageValues.set("selectedModel", "mock-model")
+    useWritingPlaygroundStore.setState({
+      activeProjectId: "project-1",
+      activeNodeId: "scene-1",
+      activeNodeType: "scene",
+      editorMode: "tiptap"
+    })
+    seedWritingSession({ prompt: "Session draft should not win." })
+    seedManuscriptScene(sceneText)
+    seedManuscriptAnnotations([
+      makeManuscriptAnnotation({
+        id: "annotation-fix",
+        body: "Replace the weak noun.",
+        suggested_fix: replacement,
+        selected_text: "target",
+        anchor_start: Array.from(annotatedPrefix).length,
+        anchor_end: Array.from(`${annotatedPrefix}target`).length
+      })
+    ])
+
+    render(<WritingPlayground />)
+    const richEditor = await screen.findByLabelText("Mock rich editor")
+
+    await waitFor(() => {
+      expect(richEditor).toHaveValue(sceneText)
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Focus annotation annotation-fix" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Create revision" }))
+
+    const queue = screen.getByTestId("writing-revision-queue")
+    await waitFor(() => {
+      expect(within(queue).getByText("Suggested fix: clarity")).toBeInTheDocument()
+    })
+    expect(richEditor).toHaveValue(sceneText)
+    expect(screen.getByTestId("writing-revision-pending-count")).toHaveTextContent(
+      "1 pending"
+    )
+    expect(
+      within(queue).getByText((_, element) =>
+        element?.tagName === "PRE" && element.textContent === "target"
+      )
+    ).toBeInTheDocument()
+    expect(
+      within(queue).getByText((_, element) =>
+        element?.tagName === "PRE" && element.textContent === replacement
+      )
+    ).toBeInTheDocument()
   })
 
   it("continues from the selected text end and applies an insertion", async () => {

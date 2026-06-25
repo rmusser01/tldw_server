@@ -17,7 +17,10 @@ import {
 import {
   WritingAnnotationList
 } from "./WritingAnnotationList"
-import type { UseWritingAnnotationsResult } from "./hooks/useWritingAnnotations"
+import type {
+  ManuscriptAnnotationReviewJobResponse,
+  UseWritingAnnotationsResult
+} from "./hooks/useWritingAnnotations"
 
 const { TextArea } = Input
 const { Text } = Typography
@@ -87,6 +90,19 @@ export function WritingAnnotationsTab({
   const [category, setCategory] =
     React.useState<ManuscriptAnnotationCategory>("other")
   const [body, setBody] = React.useState("")
+  const [sceneReviewJob, setSceneReviewJob] =
+    React.useState<ManuscriptAnnotationReviewJobResponse | null>(null)
+  const sceneReviewContextRef = React.useRef<{
+    sceneId: string | null
+    sceneVersion: number | null
+  }>({
+    sceneId: activeSceneId ?? null,
+    sceneVersion: activeSceneVersion ?? null
+  })
+  sceneReviewContextRef.current = {
+    sceneId: activeSceneId ?? null,
+    sceneVersion: activeSceneVersion ?? null
+  }
   const defaultTargetType = resolveDefaultTargetType({
     projectId,
     activeChapterId,
@@ -123,6 +139,10 @@ export function WritingAnnotationsTab({
     activeSceneId
   })
   const noteDisabled = !trimmedBody || !noteTargetId
+
+  React.useEffect(() => {
+    setSceneReviewJob(null)
+  }, [activeSceneId, activeSceneVersion])
 
   React.useEffect(() => {
     const context = resolveWritingAnnotationTargetContext({
@@ -178,7 +198,8 @@ export function WritingAnnotationsTab({
       category,
       body: "AI selection review"
     })
-    await annotationsHook.reviewSelection(activeSceneId, {
+    await annotationsHook.reviewSelection({
+      sceneId: activeSceneId,
       provider: provider!,
       model: model!,
       scene_version: activeSceneVersion!,
@@ -191,13 +212,24 @@ export function WritingAnnotationsTab({
 
   const reviewScene = async () => {
     if (aiReviewDisabled || !activeSceneId) return
-    await annotationsHook.reviewScene(activeSceneId, {
+    const requestedSceneId = activeSceneId
+    const requestedSceneVersion = activeSceneVersion!
+    const job = await annotationsHook.reviewScene({
+      sceneId: requestedSceneId,
       provider: provider!,
       model: model!,
-      scene_version: activeSceneVersion!,
+      scene_version: requestedSceneVersion,
       max_comments: 8,
       category_filters: [category]
     })
+    const currentContext = sceneReviewContextRef.current
+    if (
+      currentContext.sceneId !== requestedSceneId ||
+      currentContext.sceneVersion !== requestedSceneVersion
+    ) {
+      return
+    }
+    setSceneReviewJob(job)
   }
 
   return (
@@ -278,6 +310,11 @@ export function WritingAnnotationsTab({
             Review scene with AI
           </Button>
         </div>
+        {sceneReviewJob ? (
+          <Text type="secondary" className="text-xs">
+            Scene review job {sceneReviewJob.job_id} {sceneReviewJob.status}
+          </Text>
+        ) : null}
       </div>
       <WritingAnnotationList
         annotations={annotationsHook.annotations}

@@ -13,6 +13,7 @@ export type WritingAnnotationCardProps = {
   inspectorRowId: string
   onFocus: () => void
   onReviewSuggestedFix?: (annotation: ManuscriptAnnotationResponse) => void
+  onCopySuggestedFix?: (annotation: ManuscriptAnnotationResponse) => void
 }
 
 export function WritingAnnotationCard({
@@ -23,9 +24,11 @@ export function WritingAnnotationCard({
   describedById,
   inspectorRowId,
   onFocus,
-  onReviewSuggestedFix
+  onReviewSuggestedFix,
+  onCopySuggestedFix
 }: WritingAnnotationCardProps) {
   const anchorStateLabel = annotation.anchor_status.replace("_", " ")
+  const requiresManualFix = annotation.anchor_status === "needs_review"
 
   return (
     <article
@@ -86,6 +89,14 @@ export function WritingAnnotationCard({
           type="link"
           className="!h-auto !justify-start !p-0 !text-[10px]"
           onClick={() => {
+            if (requiresManualFix) {
+              if (onCopySuggestedFix) {
+                onCopySuggestedFix(annotation)
+                return
+              }
+              onFocus()
+              return
+            }
             if (onReviewSuggestedFix) {
               onReviewSuggestedFix(annotation)
               return
@@ -93,7 +104,7 @@ export function WritingAnnotationCard({
             onFocus()
           }}
         >
-          Review suggested fix
+          {requiresManualFix ? "Copy fix manually" : "Create revision"}
         </Button>
       ) : null}
     </article>

@@ -19,6 +19,17 @@ import type { WritingAnnotationTargetContext } from "../writing-annotation-types
 
 const DEFAULT_LIMIT = 50
 
+export type ReviewSelectionInput = {
+  sceneId: string
+} & ManuscriptSelectedTextAnnotationReviewRequest
+
+export type ReviewSceneInput = {
+  sceneId: string
+} & ManuscriptSceneAnnotationReviewRequest
+
+export type ManuscriptAnnotationReviewJobResponse =
+  ManuscriptSceneAnnotationReviewJobResponse
+
 type UseWritingAnnotationsProps = {
   projectId?: string | null
   targetContext?: WritingAnnotationTargetContext | null
@@ -77,14 +88,8 @@ export type UseWritingAnnotationsResult = {
     version: number
   ) => Promise<ManuscriptAnnotationResponse>
   deleteAnnotation: (annotationId: string, version: number) => Promise<void>
-  reviewSelection: (
-    sceneId: string,
-    input: ManuscriptSelectedTextAnnotationReviewRequest
-  ) => Promise<ManuscriptAnnotationResponse>
-  reviewScene: (
-    sceneId: string,
-    input: ManuscriptSceneAnnotationReviewRequest
-  ) => Promise<ManuscriptSceneAnnotationReviewJobResponse>
+  reviewSelection: (input: ReviewSelectionInput) => Promise<ManuscriptAnnotationResponse>
+  reviewScene: (input: ReviewSceneInput) => Promise<ManuscriptAnnotationReviewJobResponse>
   isCreating: boolean
   isUpdating: boolean
   isDeleting: boolean
@@ -154,24 +159,14 @@ export function useWritingAnnotations({
   })
 
   const reviewSelectionMutation = useMutation({
-    mutationFn: ({
-      sceneId,
-      input
-    }: {
-      sceneId: string
-      input: ManuscriptSelectedTextAnnotationReviewRequest
-    }) => reviewManuscriptSelection(sceneId, input),
+    mutationFn: ({ sceneId, ...input }: ReviewSelectionInput) =>
+      reviewManuscriptSelection(sceneId, input),
     onSuccess: invalidateActiveAnnotations
   })
 
   const reviewSceneMutation = useMutation({
-    mutationFn: ({
-      sceneId,
-      input
-    }: {
-      sceneId: string
-      input: ManuscriptSceneAnnotationReviewRequest
-    }) => reviewManuscriptScene(sceneId, input),
+    mutationFn: ({ sceneId, ...input }: ReviewSceneInput) =>
+      reviewManuscriptScene(sceneId, input),
     onSuccess: invalidateActiveAnnotations
   })
 
@@ -185,10 +180,8 @@ export function useWritingAnnotations({
       updateMutation.mutateAsync({ annotationId, input, version }),
     deleteAnnotation: (annotationId, version) =>
       deleteMutation.mutateAsync({ annotationId, version }),
-    reviewSelection: (sceneId, input) =>
-      reviewSelectionMutation.mutateAsync({ sceneId, input }),
-    reviewScene: (sceneId, input) =>
-      reviewSceneMutation.mutateAsync({ sceneId, input }),
+    reviewSelection: reviewSelectionMutation.mutateAsync,
+    reviewScene: reviewSceneMutation.mutateAsync,
     isCreating: createMutation.isPending,
     isUpdating: updateMutation.isPending,
     isDeleting: deleteMutation.isPending,

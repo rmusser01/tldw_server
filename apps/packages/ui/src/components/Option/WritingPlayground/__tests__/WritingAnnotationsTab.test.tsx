@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { WritingAnnotationsTab } from "../WritingAnnotationsTab"
@@ -195,6 +195,17 @@ describe("WritingAnnotationsTab", () => {
     ).toBeDisabled()
   })
 
+  it("keeps selected-text AI review disabled while the scene has unsaved edits", () => {
+    renderTab({ isSceneDirty: true })
+
+    expect(
+      screen.getByRole("button", { name: "Review selection with AI" })
+    ).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: "Review scene with AI" })
+    ).toBeDisabled()
+  })
+
   it("keeps AI selected-text review disabled for invalid selections", () => {
     renderTab({
       selection: { start: 0, end: 0 },
@@ -205,5 +216,122 @@ describe("WritingAnnotationsTab", () => {
     expect(
       screen.getByRole("button", { name: "Review selection with AI" })
     ).toBeDisabled()
+  })
+
+  it("reviews selected text with provider, model, scene version, offsets, and text", async () => {
+    renderTab({
+      activeSceneText: "Opening 😀 line",
+      selection: { start: 0, end: 10 },
+      selectedModel: "gpt-test",
+      apiProvider: "openai",
+      activeSceneVersion: 4
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Review selection with AI" }))
+
+    await waitFor(() => {
+      expect(callbacks.reviewSelection).toHaveBeenCalledWith({
+        sceneId: "scene-1",
+        provider: "openai",
+        model: "gpt-test",
+        scene_version: 4,
+        start: 0,
+        end: 9,
+        selected_text: "Opening 😀",
+        category_hints: ["other"]
+      })
+    })
+  })
+
+  it("shows the queued scene review job id and status", async () => {
+    callbacks.reviewScene.mockResolvedValue({ job_id: 77, status: "queued" })
+    renderTab({
+      selectedModel: "gpt-test",
+      apiProvider: "openai",
+      activeSceneVersion: 4
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Review scene with AI" }))
+
+    await waitFor(() => {
+      expect(callbacks.reviewScene).toHaveBeenCalledWith({
+        sceneId: "scene-1",
+        provider: "openai",
+        model: "gpt-test",
+        scene_version: 4,
+        max_comments: 8,
+        category_filters: ["other"]
+      })
+    })
+    expect(screen.getByText("Scene review job 77 queued")).toBeInTheDocument()
+  })
+
+  it("clears queued scene review job state when the scene version changes", async () => {
+    callbacks.reviewScene.mockResolvedValue({ job_id: 88, status: "queued" })
+    const view = renderTab({
+      selectedModel: "gpt-test",
+      apiProvider: "openai",
+      activeSceneVersion: 4
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Review scene with AI" }))
+
+    await waitFor(() => {
+      expect(screen.getByText("Scene review job 88 queued")).toBeInTheDocument()
+    })
+    view.rerender(
+      <WritingAnnotationsTab
+        annotationsHook={baseHookResult()}
+        projectId="project-1"
+        activeChapterId="chapter-1"
+        activeSceneId="scene-1"
+        activeSceneVersion={5}
+        activeSceneText="Opening 😀 line"
+        selectedModel="gpt-test"
+        apiProvider="openai"
+        selection={{ start: 0, end: 10 }}
+        canCreateRangeAnnotation
+        isSceneDirty={false}
+      />
+    )
+
+    expect(screen.queryByText("Scene review job 88 queued")).not.toBeInTheDocument()
+  })
+
+  it("ignores queued scene review jobs that resolve after the scene version changes", async () => {
+    let resolveReview: (job: { job_id: number; status: "queued" }) => void = () => {}
+    callbacks.reviewScene.mockReturnValue(
+      new Promise((resolve) => {
+        resolveReview = resolve
+      })
+    )
+    const view = renderTab({
+      selectedModel: "gpt-test",
+      apiProvider: "openai",
+      activeSceneVersion: 4
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Review scene with AI" }))
+    view.rerender(
+      <WritingAnnotationsTab
+        annotationsHook={baseHookResult()}
+        projectId="project-1"
+        activeChapterId="chapter-1"
+        activeSceneId="scene-1"
+        activeSceneVersion={5}
+        activeSceneText="Opening 😀 line"
+        selectedModel="gpt-test"
+        apiProvider="openai"
+        selection={{ start: 0, end: 10 }}
+        canCreateRangeAnnotation
+        isSceneDirty={false}
+      />
+    )
+
+    await act(async () => {
+      resolveReview({ job_id: 99, status: "queued" })
+    })
+
+    expect(screen.queryByText("Scene review job 99 queued")).not.toBeInTheDocument()
   })
 })

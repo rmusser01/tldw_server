@@ -7,7 +7,10 @@ import {
   createManuscriptAnnotation,
   deleteManuscriptAnnotation,
   listManuscriptAnnotations,
+  reviewManuscriptScene,
+  reviewManuscriptSelection,
   updateManuscriptAnnotation,
+  type ManuscriptAnnotationResponse,
   type ManuscriptAnnotationListResponse
 } from "@/services/writing-playground"
 import {
@@ -42,6 +45,29 @@ const emptyList: ManuscriptAnnotationListResponse = {
   }
 }
 
+const makeAnnotation = (
+  overrides: Partial<ManuscriptAnnotationResponse> = {}
+): ManuscriptAnnotationResponse => ({
+  id: "annotation-1",
+  project_id: "project-1",
+  target_type: "scene",
+  target_id: "scene-1",
+  status: "open",
+  category: "other",
+  tags: [],
+  source: "user",
+  body: "Created",
+  metadata: {},
+  anchor_status: "scene_level",
+  scene_level: true,
+  created_at: "2026-06-25T00:00:00Z",
+  last_modified: "2026-06-25T00:00:00Z",
+  deleted: false,
+  client_id: "test",
+  version: 1,
+  ...overrides
+})
+
 const createQueryClient = () =>
   new QueryClient({
     defaultOptions: {
@@ -72,45 +98,23 @@ function renderAnnotationsHook(
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(listManuscriptAnnotations).mockResolvedValue(emptyList)
-  vi.mocked(createManuscriptAnnotation).mockResolvedValue({
-    id: "annotation-1",
-    project_id: "project-1",
-    target_type: "scene",
-    target_id: "scene-1",
-    status: "open",
-    category: "other",
-    tags: [],
-    source: "user",
-    body: "Created",
-    metadata: {},
-    anchor_status: "scene_level",
-    scene_level: true,
-    created_at: "2026-06-25T00:00:00Z",
-    last_modified: "2026-06-25T00:00:00Z",
-    deleted: false,
-    client_id: "test",
-    version: 1
-  })
-  vi.mocked(updateManuscriptAnnotation).mockResolvedValue({
-    id: "annotation-1",
-    project_id: "project-1",
-    target_type: "scene",
-    target_id: "scene-1",
-    status: "resolved",
-    category: "other",
-    tags: [],
-    source: "user",
-    body: "Updated",
-    metadata: {},
-    anchor_status: "scene_level",
-    scene_level: true,
-    created_at: "2026-06-25T00:00:00Z",
-    last_modified: "2026-06-25T00:00:00Z",
-    deleted: false,
-    client_id: "test",
-    version: 2
-  })
+  vi.mocked(createManuscriptAnnotation).mockResolvedValue(makeAnnotation())
+  vi.mocked(updateManuscriptAnnotation).mockResolvedValue(
+    makeAnnotation({ status: "resolved", body: "Updated", version: 2 })
+  )
   vi.mocked(deleteManuscriptAnnotation).mockResolvedValue()
+  vi.mocked(reviewManuscriptSelection).mockResolvedValue(
+    makeAnnotation({ source: "ai_selected_text" })
+  )
+  vi.mocked(reviewManuscriptScene).mockResolvedValue({
+    job_id: 42,
+    job_uuid: "job-42",
+    status: "queued",
+    job_type: "writing_scene_annotation_review",
+    project_id: "project-1",
+    scene_id: "scene-1",
+    scene_version: 4
+  })
 })
 
 describe("useWritingAnnotations", () => {
@@ -199,5 +203,77 @@ describe("useWritingAnnotations", () => {
 
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: expectedKey })
     expect(invalidateSpy).toHaveBeenCalledTimes(3)
+  })
+
+  it("reviews selected text from a single input object and invalidates annotations", async () => {
+    const queryClient = createQueryClient()
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries")
+    const props = {
+      projectId: "project-1",
+      targetContext: { targetType: "scene" as const, targetId: "scene-1" },
+      filters: { status: "open" as const }
+    }
+    const { result } = renderAnnotationsHook(props, queryClient)
+
+    await act(async () => {
+      await result.current.reviewSelection({
+        sceneId: "scene-1",
+        provider: "openai",
+        model: "gpt-test",
+        scene_version: 4,
+        start: 0,
+        end: 12,
+        selected_text: "Opening line",
+        category_hints: ["clarity"]
+      })
+    })
+
+    expect(reviewManuscriptSelection).toHaveBeenCalledWith("scene-1", {
+      provider: "openai",
+      model: "gpt-test",
+      scene_version: 4,
+      start: 0,
+      end: 12,
+      selected_text: "Opening line",
+      category_hints: ["clarity"]
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: buildWritingAnnotationsQueryKey(props)
+    })
+  })
+
+  it("reviews a scene from a single input object and returns the queued job", async () => {
+    const { result } = renderAnnotationsHook({
+      projectId: "project-1",
+      targetContext: { targetType: "scene", targetId: "scene-1" }
+    })
+
+    const job = await act(async () =>
+      result.current.reviewScene({
+        sceneId: "scene-1",
+        provider: "openai",
+        model: "gpt-test",
+        scene_version: 4,
+        max_comments: 8,
+        category_filters: ["clarity"]
+      })
+    )
+
+    expect(reviewManuscriptScene).toHaveBeenCalledWith("scene-1", {
+      provider: "openai",
+      model: "gpt-test",
+      scene_version: 4,
+      max_comments: 8,
+      category_filters: ["clarity"]
+    })
+    expect(job).toEqual({
+      job_id: 42,
+      job_uuid: "job-42",
+      status: "queued",
+      job_type: "writing_scene_annotation_review",
+      project_id: "project-1",
+      scene_id: "scene-1",
+      scene_version: 4
+    })
   })
 })

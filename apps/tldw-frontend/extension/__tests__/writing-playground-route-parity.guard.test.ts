@@ -26,6 +26,8 @@ describe("writing playground route parity", () => {
     expect(extRoute).toContain("<WritingPlayground />")
     expect(sharedWritingPlayground).toContain("<WritingActionBar")
     expect(sharedWritingPlayground).toContain("<WritingRevisionQueue")
+    expect(sharedWritingPlayground).toContain("handleAnnotationSuggestedFix")
+    expect(sharedWritingPlayground).toContain("onReviewSuggestedFix={handleAnnotationSuggestedFix}")
     expect(sharedWritingPlayground).toContain('data-testid="writing-revision-pending-count"')
     expect(sharedWritingPlayground).toContain('data-testid="writing-status-word-count"')
     expect(sharedWritingPlayground).toContain('data-testid="writing-status-selected-word-count"')
