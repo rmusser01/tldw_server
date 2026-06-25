@@ -4,7 +4,7 @@ title: Verify and remediate MCP Unified review findings
 status: Done
 assignee: []
 created_date: 2026-06-23 18:27
-updated_date: 2026-06-25 02:08
+updated_date: 2026-06-25 02:22
 labels:
 - review
 - mcp
@@ -47,6 +47,8 @@ modified_files:
 - tldw_Server_API/tests/MCP_unified/test_mcp_config_sanitization.py
 - tldw_Server_API/tests/MCP_unified/test_mcp_protocol_path_scope.py
 - tldw_Server_API/tests/MCP_unified/test_phase3_3_small_core_sanitizers.py
+references:
+- https://github.com/rmusser01/tldw_server/pull/2513
 ---
 
 ## Description
@@ -104,6 +106,7 @@ Task 11 complete: extracted prepared-call runtime execution into ToolExecutionRu
 Task 12 complete: ToolExecutionReporter now owns tool-use reporting internals, process-request failure recording, event construction helpers, and audit logging; protocol.py keeps compatibility wrappers and constructs/syncs the reporter. Review follow-ups fixed runtime audit boundary so runtime calls reporter.audit_tool_event, synced _tool_name_re into ToolExecutionSecurity after regex replacement, added regressions for event-builder restoration and regex sync, and cleaned Bandit B110 fallback pass sites in security.py with sanitized debug logging. Verification: 63 selected MCP Unified reporting/runtime tests passed; py_compile passed; ruff F,I,UP passed; production Bandit passed with 0 findings; git diff --check passed. Reviewer rechecks approved.
 Task 13 cleanup/final review complete. Usage search found the remaining protocol.py wrapper methods are still used by in-repo callers, compatibility imports, or monkeypatch seams, so no additional wrappers were removed. Compatibility exports were verified, the plan ledger was updated to a final empty active state with resolved history, and all plan checklist stages were marked complete. Final review follow-ups fixed two validated issues: ToolExecutionSecurity now delegates governance rollout mode resolution through the shared server config resolver with fallback, and ToolExecutionHooks no longer exposes raw hook decision messages or arbitrary hook metadata in caller-facing denial/approval responses while preserving sanitized hook reporting metadata. Additional final-contract fixes removed a direct AuthNZ exception import from server.py and corrected the standalone MCP extraction-contract root path. Final verification passed: py_compile for touched MCP modules, focused pytest slice 217 passed, Ruff F/I/UP passed, Bandit touched implementation scope reported 0 findings, and git diff --check passed. Final quality reviewer approved with no remaining Critical/Important/Minor findings.
 Integration cleanup before commit: expanded the verification scope to include the earlier validated MCP Unified fixes and the protocol.py refactor together. Fixed a brittle fs.glob size-unavailable test shim so it raises on the intended follow_symlinks=False metadata read, and applied Ruff import/type cleanup in the expanded MCP touched test scope. Verification passed after cleanup: py_compile for touched MCP implementation files, expanded pytest slice 384 passed, Ruff F/I/UP passed, and Bandit commit-scope scan wrote /tmp/bandit_mcp_unified_final_commit_scope.json with no command-level failures.
+PR opened against dev: https://github.com/rmusser01/tldw_server/pull/2513
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
