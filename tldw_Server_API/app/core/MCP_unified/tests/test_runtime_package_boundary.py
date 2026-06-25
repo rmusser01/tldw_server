@@ -1095,18 +1095,22 @@ def test_mcp_unified_publish_workflow_is_manual_and_gated() -> None:
 
     plan_job = jobs["publish-plan"]
     assert plan_job["permissions"] == {"contents": "read"}  # nosec B101
-    for job_name, environment_name, token_secret in (
-        ("publish-testpypi", "testpypi", "MCP_UNIFIED_TESTPYPI_API_TOKEN"),
-        ("publish-pypi", "pypi", "MCP_UNIFIED_PYPI_API_TOKEN"),
+    for job_name, environment_name, permissions in (
+        ("publish-testpypi", "testpypi", {"contents": "read"}),
+        ("publish-pypi", "pypi", {"contents": "read", "id-token": "write"}),
     ):
         job = jobs[job_name]
         assert job["needs"] == "publish-plan"  # nosec B101
         assert "inputs.confirm_publish == 'MCP_UNIFIED_PUBLISH'" in job["if"]  # nosec B101
-        assert job["permissions"] == {"contents": "read"}  # nosec B101
+        assert job["permissions"] == permissions  # nosec B101
         assert job["environment"]["name"] == environment_name  # nosec B101
-        job_text = yaml.safe_dump(job, sort_keys=True)
-        assert token_secret in job_text  # nosec B101
-        assert "TWINE_USERNAME: __token__" in job_text  # nosec B101
+    testpypi_job_text = yaml.safe_dump(jobs["publish-testpypi"], sort_keys=True)
+    pypi_job_text = yaml.safe_dump(jobs["publish-pypi"], sort_keys=True)
+    assert "MCP_UNIFIED_TESTPYPI_API_TOKEN" in testpypi_job_text  # nosec B101
+    assert "TWINE_USERNAME: __token__" in testpypi_job_text  # nosec B101
+    assert "MCP_UNIFIED_PYPI_API_TOKEN" not in pypi_job_text  # nosec B101
+    assert "TWINE_USERNAME: __token__" not in pypi_job_text  # nosec B101
+    assert "pypa/gh-action-pypi-publish" in pypi_job_text  # nosec B101
 
 
 def test_mcp_unified_make_targets_do_not_call_root_pypi_check() -> None:
@@ -1181,6 +1185,27 @@ def test_root_pypi_publish_workflow_is_labeled_for_tldw_server() -> None:
     assert workflow["name"] == "Publish tldw-server PyPI Package"  # nosec B101
     assert "mcp-unified" not in serialized_workflow  # nosec B101
     assert "tldw-server-pypi-dist" in serialized_workflow  # nosec B101
+
+
+def test_mcp_unified_publish_workflow_uses_trusted_publishing_for_pypi() -> None:
+    """Production MCP Unified publishing must use the configured PyPI OIDC publisher."""
+
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "mcp-unified-publish.yml"
+    workflow = _load_workflow(workflow_path)
+
+    testpypi_job = workflow["jobs"]["publish-testpypi"]
+    pypi_job = workflow["jobs"]["publish-pypi"]
+    pypi_serialized = yaml.safe_dump(pypi_job, sort_keys=True)
+    pypi_uses_steps = [step.get("uses") for step in pypi_job["steps"] if "uses" in step]
+
+    assert testpypi_job["env"]["TWINE_USERNAME"] == "__token__"  # nosec B101
+    assert "MCP_UNIFIED_TESTPYPI_API_TOKEN" in testpypi_job["env"]["TWINE_PASSWORD"]  # nosec B101
+    assert pypi_job["environment"]["name"] == "pypi"  # nosec B101
+    assert pypi_job["permissions"] == {"contents": "read", "id-token": "write"}  # nosec B101
+    assert "MCP_UNIFIED_PYPI_API_TOKEN" not in pypi_serialized  # nosec B101
+    assert "TWINE_PASSWORD" not in pypi_serialized  # nosec B101
+    assert any("pypa/gh-action-pypi-publish" in str(step) for step in pypi_uses_steps)  # nosec B101
+    assert ".artifacts/mcp-unified-rc/dist/" in pypi_serialized  # nosec B101
 
 
 @pytest.mark.smoke

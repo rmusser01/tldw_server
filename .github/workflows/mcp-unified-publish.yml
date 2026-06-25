@@ -105,11 +105,9 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+      id-token: write
     environment:
       name: pypi
-    env:
-      TWINE_USERNAME: __token__
-      TWINE_PASSWORD: ${{ secrets.MCP_UNIFIED_PYPI_API_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -127,7 +125,10 @@ jobs:
           python -m pip install build twine setuptools wheel pytest pytest-asyncio bandit
           python -m pip install "pydantic>=2.0.0" "loguru>=0.7.0" "PyYAML>=6.0.0" "httpx>=0.24.0" "websockets>=12.0"
 
-      - name: Build and upload to PyPI
-        run: |
-          python Helper_Scripts/mcp_unified_rc.py build
-          MCP_UNIFIED_ALLOW_PUBLISH=1 python Helper_Scripts/mcp_unified_rc.py publish-plan --target pypi --execute
+      - name: Build MCP Unified distributions
+        run: python Helper_Scripts/mcp_unified_rc.py build
+
+      - name: Publish MCP Unified to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.13.0
+        with:
+          packages-dir: .artifacts/mcp-unified-rc/dist/
