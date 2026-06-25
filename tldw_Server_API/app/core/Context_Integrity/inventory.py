@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import errno
 import os
 from pathlib import Path
+import stat
 
 from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
     canonical_filesystem_digest,
@@ -81,6 +83,102 @@ def _symlink_finding(
     )
 
 
+def _validate_inventory_root(
+    *,
+    root: Path,
+    asset_id: str,
+    source_type: ContextAssetSource,
+) -> tuple[bool, ContextIntegrityFinding | None]:
+    try:
+        root_stat = root.lstat()
+    except FileNotFoundError:
+        return False, None
+    except OSError as exc:
+        return (
+            False,
+            _verification_error(
+                asset_id=asset_id,
+                source_type=source_type,
+                summary=f"Unable to inspect context inventory root: {exc.__class__.__name__}.",
+                path=root,
+                details={"error": str(exc)},
+            ),
+        )
+
+    if stat.S_ISLNK(root_stat.st_mode):
+        return (
+            False,
+            _verification_error(
+                asset_id=asset_id,
+                source_type=source_type,
+                summary="Context inventory root is a symlink and was skipped.",
+                path=root,
+            ),
+        )
+    if not stat.S_ISDIR(root_stat.st_mode):
+        return (
+            False,
+            _verification_error(
+                asset_id=asset_id,
+                source_type=source_type,
+                summary="Context inventory root is not a directory and was skipped.",
+                path=root,
+            ),
+        )
+    return True, None
+
+
+def _not_regular_error(path: Path) -> OSError:
+    return OSError(errno.EINVAL, "Path is not a regular file", str(path))
+
+
+def _path_changed_error(path: Path) -> OSError:
+    return OSError(errno.ELOOP, "Path changed while opening", str(path))
+
+
+def _open_no_follow(path: Path) -> int:
+    flags = os.O_RDONLY
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is not None:
+        return os.open(path, flags | nofollow)
+
+    initial_stat = path.lstat()
+    if not stat.S_ISREG(initial_stat.st_mode):
+        raise _not_regular_error(path)
+
+    fd = os.open(path, flags)
+    opened_successfully = False
+    try:
+        opened_stat = os.fstat(fd)
+        if (opened_stat.st_dev, opened_stat.st_ino) != (
+            initial_stat.st_dev,
+            initial_stat.st_ino,
+        ):
+            raise _path_changed_error(path)
+        opened_successfully = True
+        return fd
+    finally:
+        if not opened_successfully:
+            os.close(fd)
+
+
+def _read_no_follow_bytes(path: Path) -> bytes:
+    fd = _open_no_follow(path)
+    try:
+        opened_stat = os.fstat(fd)
+        if not stat.S_ISREG(opened_stat.st_mode):
+            raise _not_regular_error(path)
+
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+    finally:
+        os.close(fd)
+
+
 def _read_regular_file(
     *,
     path: Path,
@@ -88,29 +186,8 @@ def _read_regular_file(
     source_type: ContextAssetSource,
     findings: list[ContextIntegrityFinding],
 ) -> bytes | None:
-    if path.is_symlink():
-        findings.append(
-            _symlink_finding(
-                asset_id=asset_id,
-                source_type=source_type,
-                path=path,
-                root=None,
-            )
-        )
-        return None
-
     try:
-        if not path.is_file():
-            findings.append(
-                _verification_error(
-                    asset_id=asset_id,
-                    source_type=source_type,
-                    summary="Configured context file is missing or is not a regular file.",
-                    path=path,
-                )
-            )
-            return None
-        return path.read_bytes()
+        return _read_no_follow_bytes(path)
     except OSError as exc:
         findings.append(
             _verification_error(
@@ -191,26 +268,30 @@ def _read_skill_file_map(
                     )
                 )
                 continue
-            try:
-                files[relative] = path.read_bytes()
-            except OSError as exc:
-                findings.append(
-                    _verification_error(
-                        asset_id=asset_id,
-                        source_type="skill_file",
-                        summary=f"Unable to read skill file: {exc.__class__.__name__}.",
-                        path=path,
-                        details={"error": str(exc)},
-                    )
-                )
+            content = _read_regular_file(
+                path=path,
+                asset_id=asset_id,
+                source_type="skill_file",
+                findings=findings,
+            )
+            if content is not None:
+                files[relative] = content
 
     return files
 
 
 def inventory_user_skills_with_findings(*, user_id: int, skills_root: Path) -> InventoryResult:
     """Inventory per-user skill directories with non-fatal discovery findings."""
-    if not skills_root.exists():
-        return InventoryResult(assets=())
+    root_ok, root_finding = _validate_inventory_root(
+        root=skills_root,
+        asset_id=f"skill:user:{user_id}",
+        source_type="skill_file",
+    )
+    if not root_ok:
+        return InventoryResult(
+            assets=(),
+            findings=(root_finding,) if root_finding is not None else (),
+        )
 
     assets: list[ContextAssetDescriptor] = []
     findings: list[ContextIntegrityFinding] = []
@@ -311,8 +392,16 @@ def inventory_user_skills(user_id: int, skills_root: Path) -> list[ContextAssetD
 
 def inventory_prompt_files_with_findings(*, prompts_dir: Path) -> InventoryResult:
     """Inventory config prompt files under a Prompts directory with findings."""
-    if not prompts_dir.exists():
-        return InventoryResult(assets=())
+    root_ok, root_finding = _validate_inventory_root(
+        root=prompts_dir,
+        asset_id=f"prompt_file:{prompts_dir.name}",
+        source_type="prompt_file",
+    )
+    if not root_ok:
+        return InventoryResult(
+            assets=(),
+            findings=(root_finding,) if root_finding is not None else (),
+        )
 
     assets: list[ContextAssetDescriptor] = []
     findings: list[ContextIntegrityFinding] = []
