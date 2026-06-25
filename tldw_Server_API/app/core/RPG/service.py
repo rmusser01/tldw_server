@@ -5,6 +5,8 @@ from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
 from tldw_Server_API.app.core.RPG.authority import decide_authority
+from tldw_Server_API.app.core.RPG.constants import MAX_RPG_CONTEXT_CHARS
+from tldw_Server_API.app.core.RPG.context import SessionContext, SessionContextBuilder
 from tldw_Server_API.app.core.RPG.errors import RPGConflictError
 from tldw_Server_API.app.core.RPG.events import canonical_request_hash, validate_event_envelope
 from tldw_Server_API.app.core.RPG.models import (
@@ -15,6 +17,8 @@ from tldw_Server_API.app.core.RPG.models import (
 )
 from tldw_Server_API.app.core.RPG.reducer import reduce_events
 from tldw_Server_API.app.core.RPG.rules.adapters import RuleAdapterRegistry, build_default_adapter_registry
+from tldw_Server_API.app.core.RPG.rules.content_packs import RuleLookupResult
+from tldw_Server_API.app.core.RPG.rules.lookup import RulesLookupService
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,6 +272,31 @@ class RPGService:
             last_event_sequence=record.last_event_sequence,
             snapshot=RPGSnapshotState(**record.snapshot_json),
             diagnostics=record.diagnostics_json,
+        )
+
+    def lookup_rules(self, session_id: int, query: str) -> RuleLookupResult:
+        session = self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
+        return RulesLookupService().lookup(
+            adapter_key=session.adapter_key,
+            query=query,
+            linked_rules_pack_refs=session.active_rules_pack_refs,
+        )
+
+    def build_context(
+        self,
+        session_id: int,
+        query: str | None = None,
+        max_chars: int = MAX_RPG_CONTEXT_CHARS,
+    ) -> SessionContext:
+        bounded_max_chars = min(max(int(max_chars), 1000), MAX_RPG_CONTEXT_CHARS)
+        session = self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
+        snapshot = self.get_snapshot(session_id).snapshot
+        rules_results = self.lookup_rules(session_id, query).results if query and query.strip() else []
+        return SessionContextBuilder(max_chars=bounded_max_chars).build(
+            adapter_key=session.adapter_key,
+            session_title=session.title,
+            snapshot=snapshot,
+            rules_results=rules_results,
         )
 
     def _commit_validated_events(

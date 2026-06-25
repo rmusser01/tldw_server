@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -59,6 +59,65 @@ class RPGRecordEventsRequest(BaseModel):
 class RPGRecordEventsResponse(BaseModel):
     committed_events: list[dict[str, Any]]
     proposal: dict[str, Any] | None
+
+
+class RPGRulesLookupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=1, max_length=500)
+
+
+class RPGRuleCitationResponse(BaseModel):
+    adapter_key: str
+    source_title: str
+    source_url: str
+    license: str
+    license_url: str | None
+    attribution: str
+    trust_level: str
+    content_hash: str
+    snippet_id: str
+    source_version: str
+    content_pack_version: str
+
+
+class RPGRuleLookupItemResponse(BaseModel):
+    text: str
+    citation: RPGRuleCitationResponse
+    score: float
+
+
+class RPGRulesLookupDiagnostics(BaseModel):
+    bundled_policy: Literal["citations_only", "no_match"]
+    result_mode: Literal["citation_index"]
+    linked_rules_pack_count: int
+
+
+class RPGRulesLookupResponse(BaseModel):
+    query: str
+    results: list[RPGRuleLookupItemResponse]
+    diagnostics: RPGRulesLookupDiagnostics
+
+
+class RPGContextBuildRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str | None = Field(default=None, max_length=500)
+    max_chars: int = Field(default=24_000, ge=1000, le=24_000)
+
+
+class RPGContextDiagnostics(BaseModel):
+    truncated: bool
+    max_chars: int
+    original_chars: int
+    returned_chars: int
+    rules_result_count: int
+    omitted_sections: list[str]
+
+
+class RPGContextResponse(BaseModel):
+    text: str
+    diagnostics: RPGContextDiagnostics
 
 
 class RPGProposalApplyRequest(BaseModel):

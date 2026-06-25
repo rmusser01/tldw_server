@@ -1891,6 +1891,8 @@ Before endpoint code is written, create a route matrix in the task notes and kee
 | `POST` | `/api/v1/rpg/sessions/{session_id}/rules/lookup` | `rpg.rules.read` | `rpg.rules.read` | no | no |
 | `POST` | `/api/v1/rpg/sessions/{session_id}/context` | `rpg.sessions.read` | `rpg.sessions.read` | no | no |
 
+The global `/api/v1/rpg/rules/lookup` route remains deferred; the current implementation uses session-scoped lookup so it can respect the active adapter and linked rule pack refs.
+
 - [x] **Step 1: Write failing API tests**
 
 ```python
@@ -2373,7 +2375,7 @@ git commit -m "feat: register RPG privileges"
 - Modify: `tldw_Server_API/app/core/RPG/service.py`
 - Test: `tldw_Server_API/tests/RPG/test_rpg_rules_context.py`
 
-- [ ] **Step 1: Write failing rules lookup and context tests**
+- [x] **Step 1: Write failing rules lookup and context tests**
 
 ```python
 from tldw_Server_API.app.core.RPG.context import SessionContextBuilder
@@ -2413,13 +2415,13 @@ def test_context_builder_includes_snapshot_and_rule_citations_with_budget():
     assert context.diagnostics["rules_result_count"] == 0
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_rules_context.py -v`
 
 Expected: FAIL because lookup and context modules do not exist.
 
-- [ ] **Step 3: Implement content pack citations and lookup result types**
+- [x] **Step 3: Implement content pack citations and lookup result types**
 
 ```python
 # tldw_Server_API/app/core/RPG/rules/content_packs.py
@@ -2483,7 +2485,7 @@ class RulesLookupService:
         )
 ```
 
-- [ ] **Step 4: Implement bounded context builder**
+- [x] **Step 4: Implement bounded context builder**
 
 ```python
 # tldw_Server_API/app/core/RPG/context.py
@@ -2534,7 +2536,7 @@ class SessionContextBuilder:
         )
 ```
 
-- [ ] **Step 5: Wire lookup and context methods into service**
+- [x] **Step 5: Wire lookup and context methods into service**
 
 Add these methods to `RPGService`:
 
@@ -2561,13 +2563,15 @@ def build_context(self, session_id: int, query: str | None = None, max_chars: in
     )
 ```
 
-- [ ] **Step 6: Run focused rules/context tests**
+Also expose the session-scoped lookup/context behavior through the REST router and regenerate the privilege route registry snapshot, so AuthNZ metadata includes `/api/v1/rpg/sessions/{session_id}/rules/lookup` and `/api/v1/rpg/sessions/{session_id}/context`.
+
+- [x] **Step 6: Run focused rules/context tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_rules_context.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/RPG/rules/content_packs.py tldw_Server_API/app/core/RPG/rules/lookup.py tldw_Server_API/app/core/RPG/context.py tldw_Server_API/app/core/RPG/service.py tldw_Server_API/tests/RPG/test_rpg_rules_context.py

@@ -17,10 +17,14 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 from tldw_Server_API.app.api.v1.schemas.rpg_schemas import (
     RPGCampaignCreateRequest,
     RPGCampaignResponse,
+    RPGContextBuildRequest,
+    RPGContextResponse,
     RPGProposalApplyRequest,
     RPGProposalRejectRequest,
     RPGRecordEventsRequest,
     RPGRecordEventsResponse,
+    RPGRulesLookupRequest,
+    RPGRulesLookupResponse,
     RPGSessionCreateRequest,
     RPGSessionResponse,
 )
@@ -33,6 +37,7 @@ router = APIRouter(prefix="/rpg", tags=["rpg"])
 
 RPG_RULES_READ = "rpg.rules.read"
 RPG_CAMPAIGNS_MANAGE = "rpg.campaigns.manage"
+RPG_SESSIONS_READ = "rpg.sessions.read"
 RPG_SESSIONS_MANAGE = "rpg.sessions.manage"
 RPG_PROPOSALS_REVIEW = "rpg.proposals.review"
 
@@ -170,6 +175,50 @@ def record_events(
         return RPGRecordEventsResponse(
             committed_events=[_event_payload(event) for event in result.committed_events],
             proposal=_proposal_payload(result.proposal),
+        )
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/rules/lookup",
+    response_model=RPGRulesLookupResponse,
+    dependencies=_read_dependencies(RPG_RULES_READ),
+)
+def lookup_rules(
+    session_id: int,
+    request: RPGRulesLookupRequest,
+    service: RPGService = Depends(_service),
+) -> RPGRulesLookupResponse:
+    try:
+        return RPGRulesLookupResponse.model_validate(
+            jsonable_encoder(asdict(service.lookup_rules(session_id=session_id, query=request.query)))
+        )
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/context",
+    response_model=RPGContextResponse,
+    dependencies=_read_dependencies(RPG_SESSIONS_READ),
+)
+def build_context(
+    session_id: int,
+    request: RPGContextBuildRequest,
+    service: RPGService = Depends(_service),
+) -> RPGContextResponse:
+    try:
+        return RPGContextResponse.model_validate(
+            jsonable_encoder(
+                asdict(
+                    service.build_context(
+                        session_id=session_id,
+                        query=request.query,
+                        max_chars=request.max_chars,
+                    )
+                )
+            )
         )
     except Exception as exc:
         raise _map_error(exc) from exc

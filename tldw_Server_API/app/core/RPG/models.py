@@ -30,6 +30,21 @@ class RuleAdapterInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class RuleCitation:
+    adapter_key: str
+    source_title: str
+    source_url: str
+    license: str
+    license_url: str | None
+    attribution: str
+    trust_level: str
+    content_hash: str
+    snippet_id: str
+    source_version: str
+    content_pack_version: str
+
+
+@dataclass(frozen=True, slots=True)
 class DiceRollResult:
     expression: str
     values: list[int]

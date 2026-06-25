@@ -39,6 +39,7 @@ def test_rpg_endpoint_scopes_are_cataloged():
     expected_ids = {
         rpg_endpoint.RPG_RULES_READ,
         rpg_endpoint.RPG_CAMPAIGNS_MANAGE,
+        rpg_endpoint.RPG_SESSIONS_READ,
         rpg_endpoint.RPG_SESSIONS_MANAGE,
         rpg_endpoint.RPG_PROPOSALS_REVIEW,
     }
@@ -128,3 +129,59 @@ def test_record_events_rejects_stale_expected_sequence():
 
     assert stale.status_code == 409  # nosec B101
     assert stale.json()["detail"] == "stale_event_sequence"  # nosec B101
+
+
+def test_rules_lookup_and_context_endpoints():
+    client = TestClient(app)
+    _, session_id = _create_campaign_and_session(client, "api-rules")
+    scene = client.post(
+        f"/api/v1/rpg/sessions/{session_id}/events",
+        headers=_headers(**{"Idempotency-Key": "api-rules-scene"}),
+        json={
+            "expected_last_event_sequence": 0,
+            "events": [
+                {
+                    "event_type": "scene.updated",
+                    "event_payload": {"scene_id": "scene-1", "summary": "Lanterns in the rain"},
+                }
+            ],
+        },
+    )
+    assert scene.status_code == 200  # nosec B101
+
+    lookup = client.post(
+        f"/api/v1/rpg/sessions/{session_id}/rules/lookup",
+        headers=_headers(),
+        json={"query": "stress"},
+    )
+
+    assert lookup.status_code == 200  # nosec B101
+    lookup_payload = lookup.json()
+    assert lookup_payload["query"] == "stress"  # nosec B101
+    assert lookup_payload["diagnostics"]["bundled_policy"] == "citations_only"  # nosec B101
+    assert lookup_payload["diagnostics"]["result_mode"] == "citation_index"  # nosec B101
+    assert all(item["text"] == "" for item in lookup_payload["results"])  # nosec B101
+
+    context = client.post(
+        f"/api/v1/rpg/sessions/{session_id}/context",
+        headers=_headers(),
+        json={"query": "stress", "max_chars": 1000},
+    )
+
+    assert context.status_code == 200  # nosec B101
+    context_payload = context.json()
+    assert "Lanterns in the rain" in context_payload["text"]  # nosec B101
+    assert context_payload["diagnostics"]["rules_result_count"] >= 1  # nosec B101
+
+
+def test_context_endpoint_rejects_tiny_budget():
+    client = TestClient(app)
+    _, session_id = _create_campaign_and_session(client, "api-context-budget")
+
+    response = client.post(
+        f"/api/v1/rpg/sessions/{session_id}/context",
+        headers=_headers(),
+        json={"max_chars": 999},
+    )
+
+    assert response.status_code == 422  # nosec B101

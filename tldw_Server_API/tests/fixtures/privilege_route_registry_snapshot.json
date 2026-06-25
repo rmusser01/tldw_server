@@ -7535,6 +7535,40 @@
         }
       ],
       "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.build_context",
+      "methods": [
+        "POST"
+      ],
+      "name": "build_context",
+      "path": "/api/v1/rpg/sessions/{session_id}/context",
+      "rate_limit_resources": [
+        "rpg.sessions.read"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
       "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.record_events",
       "methods": [
         "POST"
@@ -7611,6 +7645,40 @@
       "path": "/api/v1/rpg/sessions/{session_id}/proposals/{proposal_id}/reject",
       "rate_limit_resources": [
         "rpg.proposals.review"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.lookup_rules",
+      "methods": [
+        "POST"
+      ],
+      "name": "lookup_rules",
+      "path": "/api/v1/rpg/sessions/{session_id}/rules/lookup",
+      "rate_limit_resources": [
+        "rpg.rules.read"
       ],
       "summary": null,
       "tags": [
@@ -7793,6 +7861,40 @@
         "rpg",
         "rpg"
       ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.lookup_rules",
+      "methods": [
+        "POST"
+      ],
+      "name": "lookup_rules",
+      "path": "/api/v1/rpg/sessions/{session_id}/rules/lookup",
+      "rate_limit_resources": [
+        "rpg.rules.read"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
     }
   ],
   "rpg.sessions.manage": [
@@ -7857,6 +7959,42 @@
       "path": "/api/v1/rpg/sessions/{session_id}/events",
       "rate_limit_resources": [
         "rpg.sessions.manage"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    }
+  ],
+  "rpg.sessions.read": [
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.build_context",
+      "methods": [
+        "POST"
+      ],
+      "name": "build_context",
+      "path": "/api/v1/rpg/sessions/{session_id}/context",
+      "rate_limit_resources": [
+        "rpg.sessions.read"
       ],
       "summary": null,
       "tags": [
