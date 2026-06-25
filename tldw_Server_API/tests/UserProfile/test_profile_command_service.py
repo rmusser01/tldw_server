@@ -7,6 +7,9 @@ import pytest
 
 from tldw_Server_API.app.core.UserProfiles.command_service import ProfileCommandService
 from tldw_Server_API.app.core.UserProfiles.contracts import ProfileUpdateCommand
+from tldw_Server_API.app.core.UserProfiles.response_mappers import (
+    LegacyProfileCommandResult,
+)
 from tldw_Server_API.app.core.UserProfiles.update_service import UpdateResult
 
 
@@ -32,8 +35,10 @@ class _ProfileService:
 class _Planner:
     def __init__(self, result: UpdateResult | None = None) -> None:
         self.result = result
+        self.calls: list[dict[str, Any]] = []
 
     async def plan(self, command, *, db_conn, scope):
+        self.calls.append({"command": command, "db_conn": db_conn, "scope": scope})
         if self.result is not None:
             return self.result
         return UpdateResult(applied=[key for key, _value in command.updates])
@@ -133,6 +138,179 @@ async def test_command_service_preflight_skip_returns_error_without_executor() -
     assert result.applied == ("preferences.ui.theme",)
     assert result.skipped == ({"key": "identity.email", "message": "invalid_email"},)
     assert executor.called is False
+
+
+@pytest.mark.asyncio
+async def test_command_service_unknown_key_skip_maps_to_legacy_bad_request() -> None:
+    executor = _Executor()
+    command_service = ProfileCommandService(
+        db_pool=object(),
+        profile_service=_ProfileService(),
+        planner=_Planner(
+            UpdateResult(
+                skipped=[{"key": "preferences.ui.unknown", "message": "unknown_key"}],
+            )
+        ),
+        executor=executor,
+    )
+    command = ProfileUpdateCommand(
+        actor_user_id=7,
+        target_user_id=7,
+        updates=(("preferences.ui.unknown", "oops"),),
+        roles=frozenset({"user"}),
+        dry_run=False,
+    )
+
+    result = await command_service.apply(command, db_conn=object(), scope=None)
+
+    assert result.status_code == 400
+    assert result.error_code == "profile_update_unknown_key"
+    assert result.detail == "One or more keys are not recognized"
+    assert result.skipped == (
+        {"key": "preferences.ui.unknown", "message": "unknown_key"},
+    )
+    assert executor.called is False
+
+
+@pytest.mark.asyncio
+async def test_command_service_forbidden_skip_maps_to_legacy_forbidden() -> None:
+    executor = _Executor()
+    command_service = ProfileCommandService(
+        db_pool=object(),
+        profile_service=_ProfileService(),
+        planner=_Planner(
+            UpdateResult(
+                skipped=[{"key": "limits.storage_quota_mb", "message": "forbidden"}],
+            )
+        ),
+        executor=executor,
+    )
+    command = ProfileUpdateCommand(
+        actor_user_id=7,
+        target_user_id=7,
+        updates=(("limits.storage_quota_mb", 1024),),
+        roles=frozenset({"user"}),
+        dry_run=False,
+    )
+
+    result = await command_service.apply(command, db_conn=object(), scope=None)
+
+    assert result.status_code == 403
+    assert result.error_code == "profile_update_forbidden"
+    assert result.detail == "Caller cannot edit one or more fields"
+    assert result.skipped == (
+        {"key": "limits.storage_quota_mb", "message": "forbidden"},
+    )
+    assert executor.called is False
+
+
+@pytest.mark.asyncio
+async def test_command_service_generic_preflight_skip_stays_legacy_invalid() -> None:
+    executor = _Executor()
+    command_service = ProfileCommandService(
+        db_pool=object(),
+        profile_service=_ProfileService(),
+        planner=_Planner(
+            UpdateResult(
+                skipped=[{"key": "preferences.ui.theme", "message": "type_mismatch"}],
+            )
+        ),
+        executor=executor,
+    )
+    command = ProfileUpdateCommand(
+        actor_user_id=7,
+        target_user_id=7,
+        updates=(("preferences.ui.theme", 123),),
+        roles=frozenset({"user"}),
+        dry_run=False,
+    )
+
+    result = await command_service.apply(command, db_conn=object(), scope=None)
+
+    assert result.status_code == 422
+    assert result.error_code == "profile_update_invalid"
+    assert result.detail == "One or more updates failed validation"
+    assert executor.called is False
+
+
+@pytest.mark.asyncio
+async def test_command_service_dry_run_rejects_stale_version_before_planning() -> None:
+    profile_service = _ProfileService()
+    planner = _Planner()
+    executor = _Executor()
+    command_service = ProfileCommandService(
+        db_pool=object(),
+        profile_service=profile_service,
+        planner=planner,
+        executor=executor,
+    )
+    command = ProfileUpdateCommand(
+        actor_user_id=7,
+        target_user_id=7,
+        updates=(("preferences.ui.theme", "paper"),),
+        roles=frozenset({"user"}),
+        dry_run=True,
+        expected_profile_version=datetime(2000, 1, 1, tzinfo=timezone.utc),
+    )
+
+    result = await command_service.apply(command, db_conn=object(), scope=None)
+
+    assert result.status_code == 409
+    assert result.profile_version == profile_service.initial
+    assert result.error_code == "profile_version_mismatch"
+    assert result.skipped == ({"key": "profile_version", "message": "mismatch"},)
+    assert planner.calls == []
+    assert executor.called is False
+
+
+@pytest.mark.asyncio
+async def test_command_service_stale_version_wins_over_invalid_preflight_candidate() -> None:
+    profile_service = _ProfileService()
+    planner = _Planner(
+        UpdateResult(
+            skipped=[{"key": "preferences.ui.unknown", "message": "unknown_key"}],
+        )
+    )
+    executor = _Executor()
+    command_service = ProfileCommandService(
+        db_pool=object(),
+        profile_service=profile_service,
+        planner=planner,
+        executor=executor,
+    )
+    command = ProfileUpdateCommand(
+        actor_user_id=7,
+        target_user_id=7,
+        updates=(("preferences.ui.unknown", "oops"),),
+        roles=frozenset({"user"}),
+        dry_run=False,
+        expected_profile_version=datetime(2000, 1, 1, tzinfo=timezone.utc),
+    )
+
+    result = await command_service.apply(command, db_conn=object(), scope=None)
+
+    assert result.status_code == 409
+    assert result.profile_version == profile_service.initial
+    assert result.error_code == "profile_version_mismatch"
+    assert planner.calls == []
+    assert executor.called is False
+
+
+def test_legacy_command_result_error_version_and_skipped_are_defensive() -> None:
+    skipped = {"key": "identity.email", "message": "invalid_email"}
+    result = LegacyProfileCommandResult(
+        status_code=422,
+        skipped=(skipped,),
+        error_code="profile_update_invalid",
+        detail="One or more updates failed validation",
+    )
+
+    skipped["message"] = "mutated"
+
+    assert result.profile_version is None
+    assert result.skipped == ({"key": "identity.email", "message": "invalid_email"},)
+    with pytest.raises(TypeError):
+        result.skipped[0]["message"] = "mutated"
 
 
 @pytest.mark.asyncio
