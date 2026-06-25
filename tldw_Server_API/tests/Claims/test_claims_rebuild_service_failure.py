@@ -10,8 +10,24 @@ from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDa
 pytestmark = pytest.mark.unit
 
 
+def test_rebuild_claims_for_media_returns_skipped_for_missing_media(tmp_path):
+    from tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service import (
+        rebuild_claims_for_media,
+    )
+
+    db_path = tmp_path / "missing-media.db"
+    db = MediaDatabase(db_path=str(db_path), client_id="test")
+    db.initialize_db()
+    db.close_connection()
+
+    result = rebuild_claims_for_media(db_path=str(db_path), media_id=404)
+
+    assert result == {"outcome": "skipped", "reason": "media_missing", "media_id": 404}
+
+
 def test_claims_rebuild_service_worker_handles_failure(monkeypatch):
     svc = ClaimsRebuildService(worker_threads=1)
+
     # Monkeypatch _process_task to raise an error
     def _boom(task: ClaimsRebuildTask):  # noqa: ARG001
         raise RuntimeError("boom")
@@ -30,6 +46,32 @@ def test_claims_rebuild_service_worker_handles_failure(monkeypatch):
         assert stats.get("processed", 0) == 0
     finally:
         svc.stop()
+
+
+def test_claims_rebuild_service_process_task_delegates_to_rebuild_helper(monkeypatch, tmp_path):
+    svc = ClaimsRebuildService(worker_threads=1)
+    db_path = str(tmp_path / "claims-task.db")
+    rebuild_calls: list[dict[str, object]] = []
+
+    def _fake_rebuild_claims_for_media(*, db_path: str, media_id: int) -> dict[str, object]:
+        rebuild_calls.append({"db_path": db_path, "media_id": media_id})
+        return {"outcome": "skipped", "reason": "media_missing", "media_id": media_id}
+
+    def _unexpected_managed_media_database(*args, **kwargs):  # noqa: ARG001
+        raise AssertionError("_process_task should delegate to rebuild_claims_for_media")
+
+    monkeypatch.setattr(
+        claims_rebuild_service,
+        "rebuild_claims_for_media",
+        _fake_rebuild_claims_for_media,
+        raising=False,
+    )
+    monkeypatch.setattr(claims_rebuild_service, "managed_media_database", _unexpected_managed_media_database)
+
+    result = svc._process_task(ClaimsRebuildTask(media_id=42, db_path=db_path))
+
+    assert result is None
+    assert rebuild_calls == [{"db_path": db_path, "media_id": 42}]
 
 
 def test_claims_rebuild_service_persist_health_uses_managed_media_database(monkeypatch, tmp_path):

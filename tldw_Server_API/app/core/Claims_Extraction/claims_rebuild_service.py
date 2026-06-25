@@ -62,9 +62,61 @@ def _format_timestamp(ts: float | None) -> str | None:
     if not ts:
         return None
     try:
-        return datetime.fromtimestamp(float(ts), tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+        return datetime.fromtimestamp(float(ts), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     except _TIMESTAMP_PARSE_EXCEPTIONS:
         return None
+
+
+def rebuild_claims_for_media(*, db_path: str, media_id: int) -> dict[str, Any]:
+    media_id = int(media_id)
+    with managed_media_database(
+        client_id=str(settings.get("SERVER_CLIENT_ID", "SERVER_API_V1")),
+        db_path=str(db_path),
+        initialize=False,
+        suppress_close_exceptions=_CLAIMS_REBUILD_NONCRITICAL_EXCEPTIONS,
+    ) as db:
+        media = db.get_media_by_id(media_id, include_deleted=False, include_trash=False)
+        if not media:
+            logger.warning(f"Claims rebuild: media_id={media_id} not found")
+            return {"outcome": "skipped", "reason": "media_missing", "media_id": media_id}
+        content = media.get("content") or ""
+        title = media.get("title") or f"media_{media_id}.txt"
+        chunks = chunk_for_embedding(content, file_name=title)
+        max_per = int(settings.get("CLAIMS_MAX_PER_CHUNK", 3))
+        mode = str(settings.get("CLAIM_EXTRACTOR_MODE", "heuristic"))
+        budget = resolve_claims_job_budget(settings=settings)
+        claims = extract_claims_for_chunks(
+            chunks,
+            extractor_mode=mode,
+            max_per_chunk=max_per,
+            budget=budget,
+        )
+        if not claims:
+            logger.info(f"Claims rebuild: no claims extracted for media_id={media_id}")
+            return {"outcome": "skipped", "reason": "no_claims_extracted", "media_id": media_id}
+        chunk_text_map: dict[int, str] = {}
+        for ch in chunks:
+            meta = (ch or {}).get("metadata", {}) or {}
+            idx = int(meta.get("chunk_index") or meta.get("index") or 0)
+            chunk_text_map[idx] = (ch or {}).get("text") or (ch or {}).get("content") or ""
+        # Replace old claims atomically so failed writes keep the previous claim set active.
+        with db.transaction():
+            deleted = db.soft_delete_claims_for_media(media_id)
+            inserted = store_claims(
+                db,
+                media_id=media_id,
+                chunk_texts_by_index=chunk_text_map,
+                claims=claims,
+            )
+            if inserted <= 0:
+                raise RuntimeError(f"Claims rebuild stored zero replacement claims for media_id={media_id}")
+        logger.info(f"Claims rebuild: media_id={media_id} deleted={deleted} inserted={inserted}")
+        return {
+            "outcome": "ok",
+            "media_id": media_id,
+            "deleted": int(deleted),
+            "inserted": int(inserted),
+        }
 
 
 class ClaimsRebuildService:
@@ -211,46 +263,7 @@ class ClaimsRebuildService:
                 self._queue.task_done()
 
     def _process_task(self, task: ClaimsRebuildTask) -> None:
-        with managed_media_database(
-            client_id=str(settings.get("SERVER_CLIENT_ID", "SERVER_API_V1")),
-            db_path=task.db_path,
-            initialize=False,
-            suppress_close_exceptions=_CLAIMS_REBUILD_NONCRITICAL_EXCEPTIONS,
-        ) as db:
-            media = db.get_media_by_id(task.media_id, include_deleted=False, include_trash=False)
-            if not media:
-                logger.warning(f"Claims rebuild: media_id={task.media_id} not found")
-                return
-            content = media.get("content") or ""
-            title = media.get("title") or f"media_{task.media_id}.txt"
-            # Chunk content
-            chunks = chunk_for_embedding(content, file_name=title)
-            # Extract
-            max_per = int(settings.get("CLAIMS_MAX_PER_CHUNK", 3))
-            mode = str(settings.get("CLAIM_EXTRACTOR_MODE", "heuristic"))
-            budget = resolve_claims_job_budget(settings=settings)
-            claims = extract_claims_for_chunks(
-                chunks,
-                extractor_mode=mode,
-                max_per_chunk=max_per,
-                budget=budget,
-            )
-            if not claims:
-                logger.info(f"Claims rebuild: no claims extracted for media_id={task.media_id}")
-                return
-            # Build map
-            chunk_text_map: dict[int, str] = {}
-            for ch in chunks:
-                meta = (ch or {}).get("metadata", {}) or {}
-                idx = int(meta.get("chunk_index") or meta.get("index") or 0)
-                chunk_text_map[idx] = (ch or {}).get("text") or (ch or {}).get("content") or ""
-            # Replace old claims atomically so failed writes keep the previous claim set active.
-            with db.transaction():
-                deleted = db.soft_delete_claims_for_media(task.media_id)
-                inserted = store_claims(db, media_id=task.media_id, chunk_texts_by_index=chunk_text_map, claims=claims)
-                if inserted <= 0:
-                    raise RuntimeError(f"Claims rebuild stored zero replacement claims for media_id={task.media_id}")
-            logger.info(f"Claims rebuild: media_id={task.media_id} deleted={deleted} inserted={inserted}")
+        rebuild_claims_for_media(db_path=task.db_path, media_id=task.media_id)
 
     def get_stats(self) -> dict[str, int]:
         with self._stats_lock:
