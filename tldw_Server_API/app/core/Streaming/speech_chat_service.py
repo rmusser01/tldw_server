@@ -86,6 +86,59 @@ from tldw_Server_API.app.core.TTS.tts_request_resolution import (
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 
 _ALLOWED_AUDIO_FORMATS = {"wav", "mp3", "ogg", "opus", "aac", "flac", "webm", "m4a"}
+_STT_EXTRA_PARAM_KEYS = {"whisper_model"}
+_LLM_EXTRA_PARAM_RESERVED_KEYS = {
+    "action",
+    "api_base_url",
+    "api_endpoint",
+    "api_key",
+    "api_provider",
+    "api_url",
+    "app_config",
+    "auth_user",
+    "base_url",
+    "caller_request",
+    "extra_body",
+    "extra_headers",
+    "frequency_penalty",
+    "function_call",
+    "functions",
+    "http_client_factory",
+    "http_fetcher",
+    "max_tokens",
+    "maxp",
+    "messages",
+    "messages_payload",
+    "model",
+    "presence_penalty",
+    "principal",
+    "provider",
+    "request",
+    "response_format",
+    "stream",
+    "streaming",
+    "system_message",
+    "temp",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "topk",
+    "topp",
+    "trusted_base_url_override",
+    "user",
+    "user_identifier",
+}
+
+
+def _audio_chat_max_bytes() -> int:
+    """Return the configured speech-chat audio byte limit."""
+    raw_max_bytes = os.getenv("AUDIO_CHAT_MAX_BYTES")
+    if raw_max_bytes is not None:
+        try:
+            return int(raw_max_bytes)
+        except (ValueError, TypeError):
+            logger.debug("AUDIO_CHAT_MAX_BYTES parse failed; using default 20MB")
+    return 20 * 1024 * 1024
 
 
 def _normalize_audio_format(input_format: str) -> str:
@@ -112,6 +165,23 @@ def _decode_base64_audio(data: str) -> bytes:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid base64 encoding for input_audio",
         ) from e
+
+
+def _estimate_base64_decoded_size(data: str) -> int:
+    """Estimate decoded byte length without allocating the decoded payload."""
+    encoded = str(data or "").strip()
+    padding = min(2, len(encoded) - len(encoded.rstrip("=")))
+    return max(0, (len(encoded) * 3) // 4 - padding)
+
+
+def _validate_encoded_audio_size(input_audio: str) -> None:
+    """Reject base64 payloads that would decode above the speech-chat byte limit."""
+    max_bytes = _audio_chat_max_bytes()
+    if _estimate_base64_decoded_size(input_audio) > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="input_audio exceeds size limit for speech chat",
+        )
 
 
 def _load_audio_to_mono_np(audio_bytes: bytes) -> tuple[np.ndarray, int]:
@@ -161,17 +231,8 @@ def _validate_audio_constraints(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported input_audio_format '{input_format}'",
         )
-    # Size limit (bytes): allow env override but fall back safely on parse errors.
-    _raw_max_bytes = os.getenv("AUDIO_CHAT_MAX_BYTES")
-    if _raw_max_bytes is not None:
-        try:
-            max_bytes = int(_raw_max_bytes)
-        except (ValueError, TypeError):
-            logger.debug("AUDIO_CHAT_MAX_BYTES parse failed; using default 20MB")
-            max_bytes = 20 * 1024 * 1024
-    else:
-        max_bytes = 20 * 1024 * 1024
 
+    max_bytes = _audio_chat_max_bytes()
     if audio_bytes and len(audio_bytes) > max_bytes:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -200,20 +261,58 @@ def _actions_enabled() -> bool:
     return is_truthy(os.getenv("AUDIO_CHAT_ENABLE_ACTIONS"))
 
 
+def _allowed_audio_chat_actions() -> set[str]:
+    """Return the explicit audio-chat action allowlist."""
+    allow_env = os.getenv("AUDIO_CHAT_ALLOWED_ACTIONS", "")
+    return {action.strip() for action in allow_env.split(",") if action.strip()}
+
+
+def _provider_llm_extra_params(extra_params: dict[str, Any] | None) -> dict[str, Any]:
+    """Return provider-bound LLM params without internal or security-sensitive fields."""
+    if not isinstance(extra_params, dict):
+        return {}
+
+    safe_params: dict[str, Any] = {}
+    for raw_key, value in extra_params.items():
+        if not isinstance(raw_key, str):
+            continue
+        key = raw_key.strip()
+        key_lower = key.lower()
+        if (
+            not key
+            or key.startswith("_")
+            or key_lower in _LLM_EXTRA_PARAM_RESERVED_KEYS
+            or key_lower.endswith("_api_url")
+        ):
+            continue
+        safe_params[key] = value
+    return safe_params
+
+
+def _stt_extra_params(stt_extra_params: dict[str, Any] | None) -> dict[str, Any]:
+    """Return STT params supported by the shared transcription entrypoint."""
+    if not isinstance(stt_extra_params, dict):
+        return {}
+    return {
+        key: value
+        for key, value in stt_extra_params.items()
+        if isinstance(key, str) and key in _STT_EXTRA_PARAM_KEYS and value is not None
+    }
+
+
 async def _execute_action(action_name: str, transcript: str, current_user: User) -> dict[str, Any]:
     """
     Execute a tool/workflow via MCP modules when available; fail soft with status.
     """
-    allow_env = os.getenv("AUDIO_CHAT_ALLOWED_ACTIONS", "")
-    if allow_env:
-        allowed = {a.strip() for a in allow_env.split(",") if a.strip()}
-        if allowed and action_name not in allowed:
-            return {
-                "action": action_name,
-                "status": "not_allowed",
-                "message": "Action not allowed",
-                "user_id": getattr(current_user, "id", None),
-            }
+    action_name = str(action_name or "").strip()
+    allowed = _allowed_audio_chat_actions()
+    if not action_name or action_name not in allowed:
+        return {
+            "action": action_name,
+            "status": "not_allowed",
+            "message": "Action not allowed",
+            "user_id": getattr(current_user, "id", None),
+        }
     user_id = getattr(current_user, "id", None)
     ctx = RequestContext(
         request_id=str(uuid.uuid4()),
@@ -319,10 +418,13 @@ def _map_tts_exception(exc: Exception) -> HTTPException:
     """Map TTS exceptions to HTTPException consistent with /audio/speech."""
     if isinstance(exc, TTSInvalidVoiceReferenceError):
         logger.warning("TTS voice reference error in speech chat")
-        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid TTS voice reference",
+        )
     if isinstance(exc, TTSValidationError):
         logger.warning("TTS validation error in speech chat")
-        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid TTS request")
     if isinstance(exc, TTSProviderNotConfiguredError):
         logger.error("TTS provider not configured in speech chat")
         return HTTPException(
@@ -384,7 +486,18 @@ async def run_speech_chat_turn(
     """
     # --- Decode audio ---
     req_start = time.time()
+    _validate_audio_constraints(
+        audio_bytes=b"",
+        duration_sec=0.0,
+        input_format=request_data.input_audio_format,
+    )
+    _validate_encoded_audio_size(request_data.input_audio)
     raw_audio_bytes = _decode_base64_audio(request_data.input_audio)
+    _validate_audio_constraints(
+        audio_bytes=raw_audio_bytes,
+        duration_sec=0.0,
+        input_format=request_data.input_audio_format,
+    )
     audio_np, sample_rate = _load_audio_to_mono_np(raw_audio_bytes)
     duration_sec = float(len(audio_np) / float(sample_rate or 16000))
     _validate_audio_constraints(
@@ -397,9 +510,13 @@ async def run_speech_chat_turn(
     stt_start = time.time()
     stt_provider = None
     stt_language = None
+    stt_kwargs: dict[str, Any] = {}
     if request_data.stt_config is not None:
         stt_provider = request_data.stt_config.provider
         stt_language = request_data.stt_config.language
+        stt_kwargs.update(_stt_extra_params(request_data.stt_config.extra_params))
+        if request_data.stt_config.model:
+            stt_kwargs["whisper_model"] = request_data.stt_config.model
     try:
         transcript = await asyncio.to_thread(
             transcribe_audio,
@@ -407,6 +524,7 @@ async def run_speech_chat_turn(
             transcription_provider=stt_provider,
             sample_rate=sample_rate,
             speaker_lang=stt_language,
+            **stt_kwargs,
         )
     except HTTPException:
         raise
@@ -504,6 +622,7 @@ async def run_speech_chat_turn(
         or DEFAULT_LLM_PROVIDER
     )
     llm_model = request_data.llm_config.model
+    llm_extra_params = _provider_llm_extra_params(request_data.llm_config.extra_params)
 
     messages_payload = list(history_messages)
     messages_payload.append({"role": "user", "content": transcript})
@@ -567,6 +686,7 @@ async def run_speech_chat_turn(
                 "user": str(getattr(current_user, "id", client_id)),
                 "app_config": app_config,
             }
+            request_payload.update(llm_extra_params)
             try:
                 llm_response = await adapter.achat(request_payload)
             except NotImplementedError:
@@ -587,6 +707,7 @@ async def run_speech_chat_turn(
                 user_identifier=str(getattr(current_user, "id", client_id)),
                 system_message=system_message,
                 app_config=app_config,
+                **llm_extra_params,
             )
     except HTTPException:
         raise

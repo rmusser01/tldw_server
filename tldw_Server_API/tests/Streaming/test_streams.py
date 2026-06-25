@@ -2,6 +2,7 @@ import asyncio
 import os
 import time
 from contextlib import contextmanager
+from typing import Any
 
 import pytest
 
@@ -145,7 +146,7 @@ async def test_sse_stream_max_duration_triggers_error_then_done():
 
 @pytest.mark.asyncio
 async def test_sse_stream_send_json_and_raw_line():
-    stream = SSEStream(heartbeat_interval_s=0.5)
+    stream = SSEStream(heartbeat_interval_s=0.5, provider_control_passthru=True)
 
     async def producer():
         await stream.send_json({"hello": "world"})
@@ -166,6 +167,75 @@ async def test_sse_stream_send_json_and_raw_line():
     assert any(x.startswith("event: summary") for x in out)
     assert any("data: {\"summary\": true}" in x.lower() for x in out)
     assert out[-1].strip().lower() == "data: [done]"
+
+
+@pytest.mark.asyncio
+async def test_sse_stream_drops_provider_control_lines_by_default():
+    """Raw provider control lines should be filtered unless passthrough is enabled."""
+    stream = SSEStream(heartbeat_interval_s=10.0)
+
+    async def producer() -> None:
+        """Send provider-style raw SSE lines into the stream."""
+        await stream.send_raw_sse_line("event: provider-event")
+        await stream.send_raw_sse_line("id: provider-id")
+        await stream.send_raw_sse_line("retry: 1000")
+        await stream.send_raw_sse_line(": provider heartbeat")
+        await stream.send_raw_sse_line("data: {\"ok\": true}")
+        await stream.done()
+
+    out = []
+
+    async def consumer() -> None:
+        """Collect stream output until the done event is emitted."""
+        async for ln in stream.iter_sse():
+            out.append(ln)
+
+    await asyncio.gather(producer(), consumer())
+
+    assert not any(x.startswith("event:") for x in out)
+    assert not any(x.startswith("id:") for x in out)
+    assert not any(x.startswith("retry:") for x in out)
+    assert not any(x.startswith(":") for x in out)
+    assert any(x.startswith("data: {\"ok\": true}") for x in out)
+    assert out[-1].strip().lower() == "data: [done]"
+
+
+@pytest.mark.asyncio
+async def test_sse_stream_applies_control_filter_when_passthru_enabled():
+    """Control filters should map or drop provider control lines."""
+
+    def control_filter(name: str, value: str) -> tuple[str, str] | None:
+        """Map event names and drop provider IDs for this test."""
+        if name.lower() == "event":
+            return ("event", f"mapped-{value}")
+        if name.lower() == "id":
+            return None
+        return (name, value)
+
+    stream = SSEStream(
+        heartbeat_interval_s=10.0,
+        provider_control_passthru=True,
+        control_filter=control_filter,
+    )
+
+    async def producer() -> None:
+        """Send mixed control and data lines through the stream."""
+        await stream.send_raw_sse_line("event: original")
+        await stream.send_raw_sse_line("id: hidden")
+        await stream.send_raw_sse_line("data: {\"ok\": true}")
+        await stream.done()
+
+    out = []
+
+    async def consumer():
+        async for ln in stream.iter_sse():
+            out.append(ln)
+
+    await asyncio.gather(producer(), consumer())
+
+    assert any(x.startswith("event: mapped-original") for x in out)
+    assert not any(x.startswith("id: hidden") for x in out)
+    assert any(x.startswith("data: {\"ok\": true}") for x in out)
 
 
 @pytest.mark.asyncio
@@ -336,37 +406,70 @@ def test_parse_float_env_invalid_value_debug_log_is_sanitized(monkeypatch):
 
 
 class _StubWebSocket:
-    def __init__(self):
-        self.sent = []
+    """Minimal websocket stub for WebSocketStream tests."""
+
+    def __init__(self) -> None:
+        self.sent: list[dict[str, Any]] = []
         self.accepted = False
         self.closed = False
-        self.close_code = None
+        self.close_code: int | None = None
 
-    async def accept(self):
+    async def accept(self) -> None:
+        """Record that the websocket was accepted."""
         self.accepted = True
 
-    async def send_json(self, payload):
+    async def send_json(self, payload: dict[str, Any]) -> None:
+        """Record outbound JSON payloads."""
         self.sent.append(payload)
 
-    async def close(self, code: int = 1000):
+    async def close(self, code: int = 1000) -> None:
+        """Record close state and close code."""
         self.closed = True
         self.close_code = code
 
 
+class _AcceptFailWebSocket(_StubWebSocket):
+    """Websocket stub that raises a generic accept failure."""
+
+    async def accept(self) -> None:
+        """Raise a generic accept failure."""
+        raise RuntimeError("accept failed")
+
+
+class _AlreadyAcceptedWebSocket(_StubWebSocket):
+    """Websocket stub that raises Starlette's double-accept state error."""
+
+    async def accept(self) -> None:
+        """Raise the already-accepted RuntimeError variant."""
+        raise RuntimeError(
+            'Expected ASGI message "websocket.send" or "websocket.close", '
+            'but got "websocket.accept".'
+        )
+
+
 @pytest.mark.asyncio
 async def test_ws_stream_send_done_and_ping_metrics():
+    """Terminal done should stop later ping sends while preserving ping metrics."""
     ws = _StubWebSocket()
     reg = get_metrics_registry()
     stream = WebSocketStream(ws, heartbeat_interval_s=0.05, labels={"component": "test", "endpoint": "ws"})
     await stream.start()
+
+    async def wait_for_ping() -> None:
+        """Wait until the stream emits at least one ping frame."""
+        while not any(msg.get("type") == "ping" for msg in ws.sent):
+            await asyncio.sleep(0.01)
+
+    # Let the ping loop run at least once before the stream reaches a terminal state.
+    await asyncio.wait_for(wait_for_ping(), timeout=1.0)
     await stream.send_json({"hello": "world"})
     await stream.done()
-    # Allow a couple of pings
+    sent_after_done = len(ws.sent)
     await asyncio.sleep(0.12)
-    await stream.stop()
 
     assert ws.accepted is True
     assert any(msg.get("type") == "done" for msg in ws.sent)
+    assert len(ws.sent) == sent_after_done
 
     # Metrics assertions
     ws_latency_stats = reg.get_metric_stats("ws_send_latency_ms")
@@ -375,6 +478,36 @@ async def test_ws_stream_send_done_and_ping_metrics():
     assert pings_stats.get("count", 0) >= 1
     ping_fail_stats = reg.get_metric_stats("ws_ping_failures_total")
     assert ping_fail_stats.get("count", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_ws_stream_accept_failure_propagates_and_does_not_start_background_tasks():
+    """Generic accept failures should propagate without observable background sends."""
+    ws = _AcceptFailWebSocket()
+    stream = WebSocketStream(ws, heartbeat_interval_s=0.05, idle_timeout_s=0.05)
+
+    with pytest.raises(RuntimeError, match="accept failed"):
+        await stream.start()
+
+    await asyncio.sleep(0.12)
+    assert ws.accepted is False
+    assert ws.sent == []
+    assert ws.closed is False
+
+
+@pytest.mark.asyncio
+async def test_ws_stream_suppresses_starlette_double_accept_error():
+    """Already-accepted Starlette state errors should not fail stream startup."""
+    ws = _AlreadyAcceptedWebSocket()
+    stream = WebSocketStream(ws, heartbeat_interval_s=0, idle_timeout_s=0)
+
+    await stream.start()
+    await stream.send_json({"hello": "world"})
+    await stream.done()
+
+    assert ws.sent[0] == {"hello": "world"}
+    assert any(msg.get("type") == "done" for msg in ws.sent)
+    assert ws.closed is True
 
 
 @pytest.mark.asyncio
