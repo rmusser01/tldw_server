@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.media_database_impl import (
     MediaDatabase,
 )
@@ -80,6 +81,69 @@ def test_insert_claims_monitoring_event_returns_inserted_row_and_gets_by_id(
         assert loaded["delivered_at"] is None
     finally:
         db.close_connection()
+
+
+def test_insert_claims_monitoring_event_postgres_returning_id_reloads_inserted_row() -> None:
+    loaded_row = {
+        "id": 17,
+        "user_id": "1",
+        "event_type": "unsupported_ratio",
+        "severity": "warning",
+        "payload_json": '{"alert_id":9}',
+        "created_at": "2026-03-22T00:00:01Z",
+        "delivered_at": None,
+    }
+    execute_calls: list[tuple[str, tuple[object, ...], bool]] = []
+
+    class _Cursor:
+        def __init__(self, row: dict[str, object]) -> None:
+            self._row = row
+
+        def fetchone(self) -> dict[str, object]:
+            return self._row
+
+    class _FakePostgresDB:
+        backend_type = BackendType.POSTGRESQL
+
+        def _get_current_utc_timestamp_str(self) -> str:
+            return "2026-03-22T00:00:01Z"
+
+        def execute_query(
+            self,
+            sql: str,
+            params: tuple[object, ...] | None = None,
+            *,
+            commit: bool = False,
+        ) -> _Cursor:
+            execute_calls.append((sql, tuple(params or ()), commit))
+            if sql.startswith("INSERT INTO claims_monitoring_events"):
+                return _Cursor({"id": 17})
+            return _Cursor(loaded_row)
+
+    created = helper_insert_claims_monitoring_event(
+        _FakePostgresDB(),
+        user_id="1",
+        event_type="unsupported_ratio",
+        severity="warning",
+        payload_json='{"alert_id":9}',
+    )
+
+    assert created == loaded_row
+    assert execute_calls[0][0].endswith(" RETURNING id")
+    assert execute_calls[0][1] == (
+        "1",
+        "unsupported_ratio",
+        "warning",
+        '{"alert_id":9}',
+        "2026-03-22T00:00:01Z",
+        None,
+    )
+    assert execute_calls[0][2] is True
+    assert execute_calls[1][0].startswith(
+        "SELECT id, user_id, event_type, severity, payload_json, created_at, delivered_at "
+    )
+    assert execute_calls[1][1] == (17,)
+    assert execute_calls[1][2] is False
 
 
 def test_list_claims_monitoring_events_filters_and_preserves_created_at_order(
