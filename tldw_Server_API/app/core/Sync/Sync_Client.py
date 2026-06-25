@@ -324,6 +324,14 @@ class ClientSyncEngine:
         client_changes = [c for c in (local_changes or []) if c.get('client_id') == self.client_id]
 
         if not client_changes:
+            skipped_max_id = _max_change_id(local_changes or [])
+            if skipped_max_id > self.last_local_log_id_sent:
+                self.last_local_log_id_sent = skipped_max_id
+                self._save_sync_state()
+                logger.info(
+                    f"Advanced last_local_log_id_sent to {skipped_max_id} "
+                    "after skipping outbound changes from other clients."
+                )
             logger.info("No local changes to push.")
             return
 
@@ -1013,6 +1021,14 @@ class ClientSyncEngine:
         except ValueError as e:
             logger.error(f"Error getting columns for table {table_name}: {e}")
             return None
+
+    def _get_current_media_for_fts(self, cursor: sqlite3.Cursor, uuid: str) -> dict[str, str]:
+        """Return current Media title/content values used to refresh FTS rows."""
+
+        try:
+            return self.db.sync_get_media_fts_values(cursor.connection, entity_uuid=uuid)
+        except DatabaseError as exc:
+            raise DatabaseError(f"Could not fetch Media FTS values for {uuid}") from exc
 
 
 # --- Example Usage ---

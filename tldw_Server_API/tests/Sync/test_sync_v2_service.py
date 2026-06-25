@@ -1778,6 +1778,38 @@ def test_push_rejects_clear_payloads_over_actual_serialized_size_limit(
     ]
 
 
+def test_push_rejects_divergent_legacy_payload_over_actual_serialized_size_limit(
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+) -> None:
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        settings=SyncV2Settings(max_envelope_payload_bytes=40),
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(user_id="user-1", dataset_id="dataset-1", domains=["notes.note"])
+    envelope = _envelope(
+        client_envelope_id="legacy-payload-too-large",
+        payload_ciphertext=None,
+        payload_clear={},
+        routing_metadata={},
+        payload_size_bytes=1,
+    )
+    object.__setattr__(envelope, "payload", {"body": "x" * 80})
+
+    result = service.push(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        envelopes=[envelope],
+    )
+
+    assert result.accepted == []
+    assert [item.error_code for item in result.rejected] == ["payload_too_large"]
+
+
 def test_conflict_push_retry_reuses_existing_unresolved_conflict(
     sync_store: SyncV2Store,
 ):
@@ -4571,6 +4603,76 @@ def test_blob_upload_completion_returns_committed_blob_when_cleanup_fails(
     )
 
     assert blob.status == "available"
+    assert blob_store.read_blob(blob.storage_key) == payload
+
+
+def test_blob_upload_conflicting_duplicate_chunk_does_not_overwrite_existing_chunk(
+    sync_store: SyncV2Store,
+    registry: SyncAdapterRegistry,
+    tmp_path: Path,
+) -> None:
+    blob_store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        id_factory=lambda prefix: f"{prefix}-generated",
+        blob_store=blob_store,
+        settings=SyncV2Settings(
+            supports_attachments=True,
+            max_blob_bytes=64,
+            max_chunk_bytes=16,
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    _register_devices(service, "user-1", "device-1")
+    service.enroll_dataset(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        domains=["notes.note", "attachment.ref"],
+    )
+    payload = b"original"
+    conflicting_payload = b"rewritte"
+    session = service.create_blob_upload_session(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        domain="notes.note",
+        entity_id="note-1",
+        attachment_id="attachment-1",
+        content_type="application/octet-stream",
+        size_bytes=len(payload),
+        payload_hash=_sha256(payload),
+        chunk_size=len(payload),
+        chunk_count=1,
+    )
+    service.upload_blob_chunk(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        upload_id=session.upload_id,
+        chunk_index=0,
+        offset_bytes=0,
+        chunk_payload=payload,
+        chunk_hash=_sha256(payload),
+    )
+
+    with pytest.raises(SyncIdempotencyConflictError, match="different content"):
+        service.upload_blob_chunk(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            upload_id=session.upload_id,
+            chunk_index=0,
+            offset_bytes=0,
+            chunk_payload=conflicting_payload,
+            chunk_hash=_sha256(conflicting_payload),
+        )
+
+    blob = service.complete_blob_upload(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        upload_id=session.upload_id,
+    )
+
     assert blob_store.read_blob(blob.storage_key) == payload
 
 

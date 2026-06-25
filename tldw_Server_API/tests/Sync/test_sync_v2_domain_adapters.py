@@ -450,7 +450,7 @@ def test_notes_adapter_accepts_linear_delete_after_upsert():
     )
     incoming = _envelope(
         client_envelope_id="note-delete",
-        operation="delete",
+        operation="tombstone",
         payload_clear={"entity_kind": "note", "deleted": True},
         payload_hash="sha256:delete",
         base_version="note-v1",
@@ -476,12 +476,43 @@ def test_notes_adapter_conflicts_delete_vs_update():
     )
     incoming = _envelope(
         client_envelope_id="note-delete",
-        operation="delete",
+        operation="tombstone",
         payload_clear={"entity_kind": "note", "deleted": True},
         payload_hash="sha256:delete",
     )
 
     outcome = NotesDomainAdapter().evaluate_envelope(
+        incoming,
+        dataset=_dataset(),
+        context=_context(prior),
+    )
+
+    assert isinstance(outcome, AdapterConflict)
+    assert outcome.conflict_type == "delete_update_conflict"
+
+
+@pytest.mark.parametrize("domain", ["notes", "chat", "workspaces"])
+def test_domain_adapters_conflict_tombstone_operation_without_deleted_flag(domain: str) -> None:
+    prior = _stored(
+        _envelope(
+            client_envelope_id=f"{domain}-update",
+            domain=domain,
+            payload_clear=_domain_payload(domain),
+            payload_hash=f"sha256:{domain}-update",
+            entity_version=f"{domain}-v2",
+        )
+    )
+    incoming = _envelope(
+        client_envelope_id=f"{domain}-tombstone",
+        domain=domain,
+        operation="tombstone",
+        payload_clear=_domain_payload(domain),
+        payload_hash=f"sha256:{domain}-tombstone",
+        base_version=f"{domain}-v1",
+        entity_version=f"{domain}-v3",
+    )
+
+    outcome = _adapter_for_domain(domain).evaluate_envelope(
         incoming,
         dataset=_dataset(),
         context=_context(prior),

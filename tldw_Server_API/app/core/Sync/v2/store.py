@@ -440,6 +440,19 @@ class SyncV2Store:
     def record_blob_chunk(self, chunk: SyncBlobChunkCreate) -> SyncBlobChunk:
         return self.db.record_blob_chunk(chunk)
 
+    def get_blob_chunk(
+        self,
+        upload_id: str,
+        chunk_index: int,
+        *,
+        dataset_id: str | None = None,
+    ) -> SyncBlobChunk | None:
+        return self.db.get_blob_chunk(
+            upload_id,
+            chunk_index,
+            dataset_id=dataset_id,
+        )
+
     def complete_blob_upload(self, blob: SyncBlobObjectCreate) -> SyncBlobObject:
         return self.db.complete_blob_upload(blob)
 

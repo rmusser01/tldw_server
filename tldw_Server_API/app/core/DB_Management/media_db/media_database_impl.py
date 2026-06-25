@@ -64,6 +64,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.fts_ops import (
     _delete_fts_media,
     _update_fts_keyword,
     _update_fts_media,
+    sync_get_media_fts_values,
     sync_refresh_fts_for_entity,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.chunk_fts_ops import (
@@ -2075,6 +2076,7 @@ MediaDatabase._update_fts_media = _update_fts_media
 MediaDatabase._delete_fts_media = _delete_fts_media
 MediaDatabase._update_fts_keyword = _update_fts_keyword
 MediaDatabase._delete_fts_keyword = _delete_fts_keyword
+MediaDatabase.sync_get_media_fts_values = sync_get_media_fts_values
 MediaDatabase.sync_refresh_fts_for_entity = sync_refresh_fts_for_entity
 MediaDatabase.ensure_chunk_fts = ensure_chunk_fts
 MediaDatabase.maybe_rebuild_chunk_fts_if_empty = maybe_rebuild_chunk_fts_if_empty

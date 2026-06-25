@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -121,6 +123,41 @@ def test_local_blob_store_uses_unique_commit_temp_paths_for_same_payload_hash(
     assert first_key == second_key
     assert len(commit_write_paths) == 2
     assert len(set(commit_write_paths)) == 2
+
+
+def test_local_blob_store_does_not_overwrite_chunk_after_publish_race(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LocalSyncBlobStore(tmp_path / "sync_blobs")
+    existing_payload = b"winner"
+    losing_payload = b"losing"
+    upload_id = "upload-1"
+    storage_key = store.write_upload_chunk(
+        upload_id=upload_id,
+        chunk_index=0,
+        payload=existing_payload,
+        expected_hash=_sha256(existing_payload),
+    )
+    target = store.resolve_storage_key(storage_key)
+    original_link = os.link
+
+    def publish_race(src: Any, dst: Any, *args: Any, **kwargs: Any) -> None:
+        if Path(dst) == target:
+            raise FileExistsError
+        original_link(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "link", publish_race)
+
+    with pytest.raises(SyncBlobStoreError, match="different content"):
+        store.write_upload_chunk(
+            upload_id=upload_id,
+            chunk_index=0,
+            payload=losing_payload,
+            expected_hash=_sha256(losing_payload),
+        )
+
+    assert target.read_bytes() == existing_payload
 
 
 def test_local_blob_store_commit_cleanup_failure_is_nonfatal(
