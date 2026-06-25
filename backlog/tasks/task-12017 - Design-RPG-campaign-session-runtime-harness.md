@@ -1,7 +1,7 @@
 ---
 id: TASK-12017
 title: Design RPG campaign/session runtime harness
-status: In Progress
+status: Done
 created_date: 2026-06-25 02:10
 labels:
 - design
@@ -13,7 +13,7 @@ documentation:
 modified_files:
 - Docs/superpowers/specs/2026-06-25-rpg-campaign-session-runtime-design.md
 - backlog/tasks/task-12017 - Design-RPG-campaign-session-runtime-harness.md
-updated_date: 2026-06-25 02:20
+updated_date: 2026-06-25 15:07
 ---
 
 ## Description
@@ -43,6 +43,7 @@ Brainstorm and document a backend-first RPG/TTRPG harness design for tldw_server
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Spec written to Docs/superpowers/specs/2026-06-25-rpg-campaign-session-runtime-design.md. Self-review performed for unresolved markers/placeholders, contradictions, ambiguous scope, and whitespace issues. Verification: `rg -n "TBD|TODO|FIXME|placeholder|unclear|\?\?\?|\[ \]" Docs/superpowers/specs/2026-06-25-rpg-campaign-session-runtime-design.md` returned no matches; `git diff --check -- Docs/superpowers/specs/2026-06-25-rpg-campaign-session-runtime-design.md "backlog/tasks/task-12017 - Design-RPG-campaign-session-runtime-harness.md"` passed. Bandit skipped because this task only adds documentation and Backlog metadata, with no Python code changes.
 Follow-up design review amendments added: pinned `dnd5e_srd` to SRD 5.1, deferred SRD 5.2.1/5.5e to a separate key, tightened PF2e bundled prose requirements, clarified the `RPG_DB.py` repository boundary, required atomic multi-event proposal apply, tightened committed roll randomness provenance, and added AuthNZ privilege registry rollout/testing coverage. Verification repeated: unresolved-marker scan returned no matches and `git diff --check` passed for the spec/task scope.
+Status corrected to Done after confirming acceptance criteria, Definition of Done, design spec, final summary, and verification notes were already complete. Follow-on implementation tasks TASK-12018 through TASK-12028 completed the approved runtime plan.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
