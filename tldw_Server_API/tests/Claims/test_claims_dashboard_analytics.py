@@ -448,6 +448,64 @@ def test_evaluate_claims_alerts_missing_event_row_falls_back_without_crashing(mo
     assert len(dispatched) == 1
 
 
+def test_evaluate_claims_alerts_malformed_event_row_falls_back_without_crashing(monkeypatch):
+    dispatched: list[dict[str, object]] = []
+
+    class _Db:
+        db_path_str = "/tmp/user-1/Media_DB_v2.db"
+
+        def migrate_legacy_claims_monitoring_alerts(self, _user_id: str) -> None:
+            return None
+
+        def list_claims_monitoring_alerts(self, _user_id: str) -> list[dict[str, object]]:
+            return [
+                {
+                    "id": 7,
+                    "name": "Unsupported ratio",
+                    "alert_type": "threshold_breach",
+                    "enabled": True,
+                    "threshold_ratio": 0.2,
+                    "baseline_ratio": None,
+                    "channels": {"slack": True, "webhook": False, "email": False},
+                    "slack_webhook_url": "https://example.test/slack",
+                }
+            ]
+
+        def get_claims_monitoring_settings(self, _user_id: str) -> dict[str, object]:
+            return {"enabled": True}
+
+        def insert_claims_monitoring_event(self, **_kwargs):
+            return {"id": "bad"}
+
+    monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(claims_service, "settings", {"CLAIMS_MONITORING_ENABLED": True})
+    monkeypatch.setattr(
+        claims_service.claims_jobs,
+        "enqueue_claims_alert_delivery",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("Jobs enqueue should not run with invalid event id")),
+    )
+    monkeypatch.setattr(
+        claims_service,
+        "_dispatch_claims_alert_notifications",
+        lambda **kwargs: dispatched.append(kwargs),
+    )
+    monkeypatch.setattr(
+        claims_service,
+        "_compute_unsupported_ratios",
+        lambda _window_sec, _baseline_sec: {"window_ratio": 0.5, "baseline_ratio": 0.1},
+    )
+
+    result = claims_service._evaluate_claims_alerts_for_user(
+        target_user_id="1",
+        db=_Db(),
+        window_sec=3600,
+        baseline_sec=86400,
+    )
+
+    assert result["results"][0]["triggered"] is True
+    assert len(dispatched) == 1
+
+
 def test_evaluate_claims_alerts_invalid_alert_id_does_not_crash_jobs_path(monkeypatch):
     enqueued: list[dict[str, object]] = []
 

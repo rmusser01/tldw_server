@@ -2574,13 +2574,21 @@ def _evaluate_claims_alerts_for_user(
                 payload_json=json.dumps(payload),
             )
             event_row = event_row or {}
-            if claims_jobs.claims_jobs_enabled() and event_row.get("id"):
-                _enqueue_claims_alert_delivery_jobs(
-                    config_row=dict(cfg),
-                    event_id=int(event_row["id"]),
-                    owner_user_id=target_user_id,
-                )
-            else:
+            event_id = 0
+            delivered_via_jobs = False
+            if claims_jobs.claims_jobs_enabled():
+                try:
+                    event_id = int(event_row.get("id") or 0)
+                except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.debug("Claims alert delivery Jobs enqueue skipped: invalid event_id: {}", exc)
+                if event_id > 0:
+                    _enqueue_claims_alert_delivery_jobs(
+                        config_row=dict(cfg),
+                        event_id=event_id,
+                        owner_user_id=target_user_id,
+                    )
+                    delivered_via_jobs = True
+            if not delivered_via_jobs:
                 _dispatch_claims_alert_notifications(
                     config_row=dict(cfg),
                     payload=payload,
