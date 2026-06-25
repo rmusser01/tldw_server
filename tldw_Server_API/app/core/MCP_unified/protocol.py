@@ -1568,7 +1568,7 @@ class MCPProtocol:
                     skip_rate_limit = True
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
                 log.debug(
-                    "Failed to read rg_ingress_enforced from metadata; rate limit will be enforced",
+                    "Failed to read rg_ingress_enforced from metadata; rate limit will be enforced: {error_type}",
                     error_type=type(exc).__name__,
                 )
                 skip_rate_limit = False
@@ -2172,7 +2172,8 @@ class MCPProtocol:
                             tool_copy = ensure_tool_definition_eval_metadata(tool_copy)
                         except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
                             context.logger.opt(exception=exc).debug(
-                                "Failed to attach eval metadata to listed tool",
+                                "Failed to attach eval metadata to listed tool: module_id={module_id} "
+                                "tool_name={tool_name} error_type={error_type}",
                                 module_id=module_id,
                                 tool_name=name,
                                 error_type=exc.__class__.__name__,

@@ -24,11 +24,9 @@ from ..protocol_types import (
 )
 
 try:  # pragma: no cover - optional dependency
-    from redis.exceptions import RedisError
+    from redis.exceptions import RedisError as _RedisError
 except ImportError:  # pragma: no cover - redis not installed
-    class RedisError(Exception):
-        """Fallback RedisError when redis-py is unavailable."""
-        pass
+    _RedisError = RuntimeError
 
 
 _HOOK_HELPER_NONCRITICAL_EXCEPTIONS = (
@@ -50,7 +48,7 @@ _HOOK_HELPER_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     UnicodeDecodeError,
     json.JSONDecodeError,
-    RedisError,
+    _RedisError,
     RateLimitExceeded,
     InvalidParamsException,
 )

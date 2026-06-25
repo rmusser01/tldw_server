@@ -293,6 +293,10 @@ async def test_filesystem_tools_include_path_scope_metadata() -> None:
     assert write_text_metadata["replacement_tools"] == ["fs.patch", "fs.write"]  # nosec B101
     assert write_text_metadata["path_scope_action"] == "write"  # nosec B101
     assert by_name["fs.write_text"]["metadata"]["category"] == "management"  # nosec B101
+    write_text_schema = by_name["fs.write_text"]["inputSchema"]
+    assert "Replacing an existing file requires expected_sha256 or read_receipt" in by_name["fs.write_text"]["description"]  # nosec B101
+    assert "Required when replacing an existing file" in write_text_schema["properties"]["expected_sha256"]["description"]  # nosec B101
+    assert "Required when replacing an existing file" in write_text_schema["properties"]["read_receipt"]["description"]  # nosec B101
 
 
 @pytest.mark.asyncio

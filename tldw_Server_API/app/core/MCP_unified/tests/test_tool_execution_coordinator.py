@@ -39,6 +39,7 @@ class _Reporter:
         )
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_tool_execution_coordinator_delegates_prepare_then_execute() -> None:
     from tldw_Server_API.app.core.MCP_unified.tool_execution.coordinator import (
@@ -80,6 +81,7 @@ async def test_tool_execution_coordinator_delegates_prepare_then_execute() -> No
     assert result["tool"] == "demo.echo"
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_tool_execution_coordinator_reports_prepare_failure_before_reraising() -> None:
     from tldw_Server_API.app.core.MCP_unified.protocol import InvalidParamsException

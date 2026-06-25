@@ -88,7 +88,7 @@ def _is_authnz_access_token(token: str) -> bool:
     except Exception as exc:  # noqa: BLE001 - AuthNZ exception types stay behind runtime providers.
         if not _is_authnz_exception(exc):
             raise
-        logger.debug("MCP AuthNZ provider token detection failed", error_type=exc.__class__.__name__)
+        logger.debug("MCP AuthNZ provider token detection failed: {error_type}", error_type=exc.__class__.__name__)
 
     try:
         payload = get_jwt_service().decode_access_token(token)

@@ -21,6 +21,8 @@ from .dependencies import ToolExecutionDependencies
 
 
 class ToolExecutionRuntime:
+    """Execute validated MCP tool calls and record runtime side effects."""
+
     def __init__(
         self,
         *,
@@ -33,6 +35,8 @@ class ToolExecutionRuntime:
         make_idempotency_cache_key: Any,
         run_post_tool_hooks: Any | None = None,
     ) -> None:
+        """Store dependencies and protocol compatibility callbacks for runtime execution."""
+
         self.dependencies = dependencies
         self.security = security
         self.hooks = hooks
@@ -65,6 +69,8 @@ class ToolExecutionRuntime:
         tool_name: str,
         idempotency_key: str,
     ) -> str:
+        """Build the owner-scoped idempotency cache key for a tool call."""
+
         owner = f"user:{context.user_id}" if context.user_id else (f"client:{context.client_id}" if context.client_id else "anon")
         return f"{owner}|module:{module_name}|tool:{tool_name}|key:{idempotency_key}"
 
@@ -98,6 +104,8 @@ class ToolExecutionRuntime:
         return {}
 
     async def _run_post_hooks(self, **kwargs: Any) -> None:
+        """Run post-tool hooks through either a protocol seam or the extracted hook helper."""
+
         if self._run_post_tool_hooks is not None:
             await self._run_post_tool_hooks(**kwargs)
             return
@@ -192,9 +200,11 @@ class ToolExecutionRuntime:
                 await self.rate_limiter.check_rate_limit(rl_key, category=category)
             except RateLimitExceeded:
                 raise
-            except self._noncritical_exceptions:
-                # Best-effort; do not block on limiter errors
-                pass
+            except self._noncritical_exceptions as exc:
+                logger.debug(
+                    "MCP tool rate limit check skipped after noncritical failure: {error_type}",
+                    error_type=exc.__class__.__name__,
+                )
 
             # Execute tool with circuit breaker (pass context through)
             t0 = time.time()
@@ -304,8 +314,11 @@ class ToolExecutionRuntime:
                 try:
                     duration = max(0.0, time.time() - t0)
                     self.metrics.record_module_operation(module=module_name or "unknown", operation="tools_call", duration=duration, success=True)
-                except self._noncritical_exceptions:
-                    pass
+                except self._noncritical_exceptions as metrics_exc:
+                    logger.debug(
+                        "MCP tool success metrics skipped after noncritical failure: {error_type}",
+                        error_type=metrics_exc.__class__.__name__,
+                    )
                 self.reporter.audit_tool_event(
                     context,
                     tool_name,
@@ -337,14 +350,17 @@ class ToolExecutionRuntime:
             except self._noncritical_exceptions as e:
                 duration_ms = max(0.0, (time.time() - t0) * 1000.0)
                 context.logger.error(  # noqa: TRY400 - structured audit log records sanitized type only.
-                    "Tool execution failed",
+                    "Tool execution failed: {error_type}",
                     error_type=e.__class__.__name__,
                 )
                 try:
                     duration = max(0.0, time.time() - t0)
                     self.metrics.record_module_operation(module=getattr(module, "name", "unknown"), operation="tools_call", duration=duration, success=False)
-                except self._noncritical_exceptions:
-                    pass
+                except self._noncritical_exceptions as metrics_exc:
+                    logger.debug(
+                        "MCP tool failure metrics skipped after noncritical failure: {error_type}",
+                        error_type=metrics_exc.__class__.__name__,
+                    )
                 self.reporter.audit_tool_event(
                     context,
                     tool_name,
@@ -398,8 +414,11 @@ class ToolExecutionRuntime:
                         self.metrics.record_idempotency_hit(module_id or getattr(module, "name", "unknown"), str(tool_name))
                     else:
                         self.metrics.record_idempotency_miss(module_id or getattr(module, "name", "unknown"), str(tool_name))
-                except self._noncritical_exceptions:
-                    pass
+                except self._noncritical_exceptions as metrics_exc:
+                    logger.debug(
+                        "MCP idempotency metrics skipped after noncritical failure: {error_type}",
+                        error_type=metrics_exc.__class__.__name__,
+                    )
             except Exception as exc:
                 status, reason_code = classify_tool_use_exception(exc)
                 await _record_prepared_event(

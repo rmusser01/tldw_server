@@ -372,13 +372,22 @@ class FilesystemModule(BaseModule):
 
         write_text_tool = create_tool_definition(
             name="fs.write_text",
-            description="Create or replace UTF-8 text content under the active trusted workspace root.",
+            description=(
+                "Create UTF-8 text content under the active trusted workspace root. "
+                "Replacing an existing file requires expected_sha256 or read_receipt."
+            ),
             parameters={
                 "properties": {
                     "path": {"type": "string", "description": "Workspace-relative or absolute file path"},
                     "content": {"type": "string"},
-                    "expected_sha256": {"type": "string"},
-                    "read_receipt": {"type": "string"},
+                    "expected_sha256": {
+                        "type": "string",
+                        "description": "Required when replacing an existing file unless read_receipt is supplied.",
+                    },
+                    "read_receipt": {
+                        "type": "string",
+                        "description": "Required when replacing an existing file unless expected_sha256 is supplied.",
+                    },
                     "lock_lease_id": {"type": "string"},
                     "dry_run": {"type": "boolean", "default": False},
                 },
@@ -682,6 +691,8 @@ class FilesystemModule(BaseModule):
         if tool_name == "fs.write_text":
             target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
             mode = "replace" if target.exists() or target.is_symlink() else "create"
+            if mode == "replace" and not args.get("expected_sha256") and not args.get("read_receipt"):
+                raise ValueError("write_preimage_required")
             return await asyncio.to_thread(
                 self._write_file,
                 workspace_root,

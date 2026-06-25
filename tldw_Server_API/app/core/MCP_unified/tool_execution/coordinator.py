@@ -15,6 +15,8 @@ from .reporting import ToolExecutionReporter
 
 @dataclass(slots=True)
 class ToolExecutionCoordinator:
+    """Coordinate prepare, execution, and prepare-failure reporting for tools/call."""
+
     prepare_tool_call_impl: Callable[..., Awaitable[Any]]
     execute_prepared_tool_call_impl: Callable[[Any], Awaitable[dict[str, Any]]]
     reporter: ToolExecutionReporter
@@ -24,6 +26,8 @@ class ToolExecutionCoordinator:
         params: dict[str, Any],
         context: RequestContext,
     ) -> dict[str, Any]:
+        """Prepare and execute a tools/call request, reporting prepare failures."""
+
         start_ts = time.time()
         try:
             prepared = await self.prepare_tool_call(params=params, context=context)
@@ -49,6 +53,8 @@ class ToolExecutionCoordinator:
         context: RequestContext,
         idempotency_key: str | None = None,
     ) -> Any:
+        """Delegate prepare-time validation and policy checks to the configured implementation."""
+
         return await self.prepare_tool_call_impl(
             params=params,
             context=context,
@@ -56,4 +62,6 @@ class ToolExecutionCoordinator:
         )
 
     async def execute_prepared_tool_call(self, prepared: Any) -> dict[str, Any]:
+        """Delegate runtime execution for an already prepared tool call."""
+
         return await self.execute_prepared_tool_call_impl(prepared)

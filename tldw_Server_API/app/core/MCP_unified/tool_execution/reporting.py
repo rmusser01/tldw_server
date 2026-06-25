@@ -24,6 +24,8 @@ from .hooks import ToolExecutionHooks
 
 
 class ToolExecutionReporter:
+    """Build and emit MCP tool-use reporting, metrics, and audit records."""
+
     def __init__(
         self,
         *,
@@ -32,6 +34,8 @@ class ToolExecutionReporter:
         tool_name_re: Any,
         noncritical_exceptions: tuple[type[BaseException], ...],
     ) -> None:
+        """Store recorder, metrics, and validation dependencies for reporting."""
+
         self._tool_use_recorder = recorder
         self.metrics = metrics
         self._tool_name_re = tool_name_re
@@ -387,6 +391,8 @@ class ToolExecutionReporter:
         arguments_hash: str | None,
         error: Exception | None = None,
     ) -> None:
+        """Emit a best-effort structured audit log for a completed tool execution."""
+
         try:
             log = logger.bind(
                 audit=True,
@@ -401,10 +407,13 @@ class ToolExecutionReporter:
                 status=status,
             )
             if error:
-                log.error("MCP tool execution failed", error_type=error.__class__.__name__)
+                log.error("MCP tool execution failed: {error_type}", error_type=error.__class__.__name__)
             else:
                 log.info("MCP tool executed")
-        except self._noncritical_exceptions:
-            pass
+        except self._noncritical_exceptions as exc:
+            logger.debug(
+                "MCP audit log emission skipped after noncritical failure: {error_type}",
+                error_type=exc.__class__.__name__,
+            )
 
     _audit_tool_event = audit_tool_event

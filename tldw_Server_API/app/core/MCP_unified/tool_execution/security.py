@@ -63,6 +63,8 @@ def _is_unexpected_keyword_type_error(exc: TypeError, keyword: str) -> bool:
 
 
 class ToolExecutionSecurity:
+    """Perform validation, authorization, policy, and preparation for MCP tools/call."""
+
     def __init__(
         self,
         *,
@@ -71,6 +73,8 @@ class ToolExecutionSecurity:
         prepared_call_secret: bytes,
         noncritical_exceptions: tuple[type[BaseException], ...],
     ) -> None:
+        """Store security dependencies and mutable governance state."""
+
         self.dependencies = dependencies
         self.module_registry = dependencies.module_registry
         self.rbac_policy = dependencies.rbac_policy
@@ -93,6 +97,8 @@ class ToolExecutionSecurity:
         }
 
     def _prepare_callback(self, name: str, default: Callable[..., Any]) -> Callable[..., Any]:
+        """Return a late-bound compatibility callback or the extracted default."""
+
         callback = self._prepare_compatibility_callbacks.get(name)
         return callback if callable(callback) else default
 
@@ -105,6 +111,8 @@ class ToolExecutionSecurity:
         *,
         rbac_policy: Any | None = None,
     ) -> bool:
+        """Evaluate RBAC permissions through the configured policy adapter."""
+
         if not user_id:
             return False
         fn = getattr(rbac_policy or self.rbac_policy, "check_permission", None)
@@ -1133,7 +1141,7 @@ class ToolExecutionSecurity:
                     if category:
                         return category
         except Exception as exc:  # noqa: BLE001 - category fallback should not fail preflight.
-            logger.debug("Falling back to tool-name governance category", error_type=exc.__class__.__name__)
+            logger.debug("Falling back to tool-name governance category: {error_type}", error_type=exc.__class__.__name__)
 
         if isinstance(tool_name, str) and "." in tool_name:
             prefix = tool_name.split(".", 1)[0].strip().lower()
@@ -1159,7 +1167,10 @@ class ToolExecutionSecurity:
             candidate = str(raw_mode or "").strip().lower()
             return candidate if candidate in {"off", "shadow", "enforce"} else "off"
         except Exception as exc:  # noqa: BLE001 - config resolver exceptions should not block tools.
-            logger.debug("Unable to resolve governance rollout mode from app config", error_type=exc.__class__.__name__)
+            logger.debug(
+                "Unable to resolve governance rollout mode from app config: {error_type}",
+                error_type=exc.__class__.__name__,
+            )
             candidate = str(raw_mode or "").strip().lower()
             return candidate if candidate in {"off", "shadow", "enforce"} else "off"
 
@@ -1195,7 +1206,10 @@ class ToolExecutionSecurity:
                 if isinstance(dumped, dict):
                     return {str(k): v for k, v in dumped.items()}
             except Exception as exc:  # noqa: BLE001 - decision fallback handles noncritical model errors.
-                logger.debug("Falling back to attribute governance decision serialization", error_type=exc.__class__.__name__)
+                logger.debug(
+                    "Falling back to attribute governance decision serialization: {error_type}",
+                    error_type=exc.__class__.__name__,
+                )
         payload: dict[str, Any] = {}
         for key in ("action", "status", "category", "category_source", "fallback_reason", "matched_rules"):
             value = getattr(decision, key, None)
@@ -1424,7 +1438,8 @@ class ToolExecutionSecurity:
                 tool_def = ensure_tool_definition_eval_metadata(tool_def)
             except self._noncritical_exceptions as exc:
                 context.logger.opt(exception=exc).debug(
-                    "Failed to attach eval metadata to resolved tool definition",
+                    "Failed to attach eval metadata to resolved tool definition: module_id={module_id} "
+                    "tool_name={tool_name} error_type={error_type}",
                     module_id=module_id,
                     tool_name=tool_name,
                     error_type=exc.__class__.__name__,

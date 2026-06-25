@@ -6,8 +6,8 @@ No hardcoded secrets allowed.
 """
 
 import json
-import os
 import secrets
+import sys
 from functools import lru_cache
 from ipaddress import ip_address, ip_network
 from typing import Any, Optional
@@ -453,7 +453,7 @@ class MCPConfig(BaseSettings):
 
         # Console logging (safe format, no color)
         handler_id = logger.add(
-            sink=os.sys.stderr,
+            sink=sys.stderr,
             format=_fmt_template,
             level=self.log_level,
             colorize=False,

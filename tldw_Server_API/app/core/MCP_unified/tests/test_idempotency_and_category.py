@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
@@ -65,14 +66,22 @@ class _ProbeIdempotencyManager:
         self.bound_keys.append(key)
         return True
 
-    async def run(self, key: str, execute, *, ttl: int, max_size: int, lock_ttl: int):
+    async def run(
+        self,
+        key: str,
+        execute: Callable[[], Awaitable[Any]],
+        *,
+        ttl: int,
+        max_size: int,
+        lock_ttl: int,
+    ) -> tuple[Any, bool]:
         del ttl, max_size, lock_ttl
         self.run_keys.append(key)
         return await execute(), False
 
 
 @pytest.mark.asyncio
-async def test_idempotency_dedupes_write_calls():
+async def test_idempotency_dedupes_write_calls() -> None:
     registry = get_module_registry()
     await registry.register_module("counting_write", _CountingWriteModule, ModuleConfig(name="counting_write"))
 
@@ -111,8 +120,9 @@ async def test_idempotency_dedupes_write_calls():
     assert misses and any(getattr(e, "labels", {}).get("tool") == "write_count" for e in misses)
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
-async def test_replaced_idempotency_manager_is_used_by_runtime():
+async def test_replaced_idempotency_manager_is_used_by_runtime() -> None:
     registry = get_module_registry()
     await registry.register_module(
         "counting_write_replaced_idempotency",

@@ -11,6 +11,8 @@ from .reporting import ToolExecutionReporter
 
 @dataclass(frozen=True, slots=True)
 class CompatibilityCallbackLedgerEntry:
+    """Document a temporary protocol compatibility callback during extraction."""
+
     callback: str
     current_owner: str
     target_owner: str
@@ -20,6 +22,8 @@ class CompatibilityCallbackLedgerEntry:
 
 @dataclass(slots=True)
 class ToolExecutionDependencies:
+    """Dependency bundle shared by extracted MCP tool-execution stages."""
+
     module_registry: Any
     rbac_policy: Any
     rate_limiter: Any
