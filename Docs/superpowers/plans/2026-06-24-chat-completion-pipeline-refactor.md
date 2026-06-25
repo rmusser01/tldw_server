@@ -2129,7 +2129,7 @@ and 1 skipped; Bandit on `completion_pipeline.py`, `chat_service.py`, and
 - Modify: `tldw_Server_API/app/core/Chat/REFACTORING_PLAN.md`
 - Modify: `backlog/tasks/task-12013 - Refactor-Chat-completion-pipeline-and-fix-validated-review-findings.md`
 
-- [ ] **Step 1: Document service ownership in Chat README**
+- [x] **Step 1: Document service ownership in Chat README**
 
 Add a section:
 
@@ -2147,7 +2147,7 @@ Add a section:
 - `chat_logging.py`: safe summaries for prompt, content, tool, and exception logs.
 ```
 
-- [ ] **Step 2: Update refactoring plan status**
+- [x] **Step 2: Update refactoring plan status**
 
 Add:
 
@@ -2166,7 +2166,7 @@ Validated review findings fixed:
 The public Chat completion API remains compatible except for the intentional safety rejection of multi-choice local tool auto-execution.
 ```
 
-- [ ] **Step 3: Update Backlog task notes and modified files**
+- [x] **Step 3: Update Backlog task notes and modified files**
 
 Use Backlog MCP:
 
@@ -2177,7 +2177,7 @@ append_notes: Implementation plan saved at Docs/superpowers/plans/2026-06-24-cha
 modified_files: include the new Chat service modules, touched Chat tests, Chat docs, and endpoint command listing.
 ```
 
-- [ ] **Step 4: Commit docs and task update**
+- [x] **Step 4: Commit docs and task update**
 
 Run:
 

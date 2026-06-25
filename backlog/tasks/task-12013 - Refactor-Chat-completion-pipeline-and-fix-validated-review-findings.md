@@ -20,6 +20,8 @@ documentation:
 modified_files:
 - Docs/Design/2026-06-24-chat-completion-pipeline-refactor-design.md
 - Docs/superpowers/plans/2026-06-24-chat-completion-pipeline-refactor.md
+- tldw_Server_API/app/core/Chat/README.md
+- tldw_Server_API/app/core/Chat/REFACTORING_PLAN.md
 - tldw_Server_API/app/core/Chat/response_processor.py
 - tldw_Server_API/app/core/Chat/moderation_pipeline.py
 - tldw_Server_API/app/core/Chat/tool_execution_service.py
@@ -35,7 +37,7 @@ modified_files:
 - tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py
 - tldw_Server_API/tests/Chat/unit/test_chat_service_system_messages.py
 - tldw_Server_API/tests/Chat/unit/test_streaming_utils.py
-updated_date: 2026-06-25 02:20
+updated_date: 2026-06-25 02:22
 ---
 
 ## Description
@@ -84,6 +86,7 @@ Task 7 command authorization completed across commits 3e961e15d, 601295701, 5893
 Task 9 legacy history replacement completed across commits 4c2c07489, 93a0ad866, and a74fd93dd. Added transaction-recording regression coverage, moved existing-conversation validation plus active message fetch/delete into the same transaction as replacement insertion, added rollback coverage for insert failure after soft-delete, and preserved empty-history target validation for existing conversations. Verification: initial regression failed with delete transaction [1] versus insert transaction [2]; focused tests passed after fixes; full chat history multi-image unit file passed (4 passed); Bandit on tldw_Server_API/app/core/Chat/chat_history.py reported 0 findings; final focused review approved with no P0-P3 findings.
 Task 10 streaming pipeline extraction completed across commits 417f6e5611 and 698a17b415. Added `streaming_pipeline.py` as a thin assembly boundary around the existing streaming handler, routed the `chat_service.py` streaming call through it while preserving the `chat_service.create_streaming_response_with_timeout` monkeypatch surface, and added forwarding/default-preservation tests. Review finding addressed: unset optional wrapper fields now omit kwargs instead of overriding underlying factory defaults with `None`. Verification: default-preservation test failed before fix and passed after; `tldw_Server_API/tests/Chat/unit/test_streaming_utils.py` + `tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py` passed (43 passed, 1 skipped); Bandit on `tldw_Server_API/app/core/Chat/chat_service.py` and `tldw_Server_API/app/core/Chat/streaming_pipeline.py` reported 0 findings.
 Task 11 completion pipeline coordinator completed in commit f44bfee1ad. Added `completion_pipeline.py` with `ChatCompletionPipeline`, renamed the non-stream body to `_execute_non_stream_call_impl`, kept the public `execute_non_stream_call` facade as a pipeline delegator, and routed streaming response assembly through the same default pipeline while preserving the existing stream factory monkeypatch path. Verification: new coordinator tests failed before implementation (missing module and facade bypass), then passed; final Task 11 checks passed for `test_chat_service_content.py`, `test_chat_service_tool_autoexec.py`, `test_streaming_utils.py`, and `test_chat_service_fallback.py` (91 passed, 1 skipped); Bandit on `completion_pipeline.py`, `chat_service.py`, and `streaming_pipeline.py` reported 0 findings.
+Task 12 documentation update completed. Updated the Chat README module map and completion pipeline ownership section so `chat_service.py` is documented as the compatibility facade and focused modules own response processing, moderation, persistence, streaming assembly, tool execution, command authorization, and safe logging. Updated `REFACTORING_PLAN.md` with the 2026-06-24 integrated refactor status, validated findings fixed, and the compatibility note for intentional multi-choice local tool auto-execution rejection.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
