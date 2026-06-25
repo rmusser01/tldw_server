@@ -88,14 +88,29 @@ def _owner_user_id(value: Any) -> str:
 
 
 def _positive_int(value: Any, field: str) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError) as exc:
+    if isinstance(value, bool):
         raise ClaimsJobError(
             f"claims job payload has invalid {field}",
             retryable=False,
             failure_code="claims_invalid_payload",
-        ) from exc
+        )
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str):
+        normalized = value.strip()
+        if not normalized or not all("0" <= char <= "9" for char in normalized):
+            raise ClaimsJobError(
+                f"claims job payload has invalid {field}",
+                retryable=False,
+                failure_code="claims_invalid_payload",
+            )
+        parsed = int(normalized, 10)
+    else:
+        raise ClaimsJobError(
+            f"claims job payload has invalid {field}",
+            retryable=False,
+            failure_code="claims_invalid_payload",
+        )
     if parsed <= 0:
         raise ClaimsJobError(
             f"claims job payload has invalid {field}",
@@ -129,6 +144,8 @@ def validate_rebuild_media_payload(value: Any) -> dict[str, Any]:
 def validate_review_notification_payload(value: Any) -> dict[str, Any]:
     payload = _normalize_dict(value)
     _reject_sensitive_keys(payload)
+    version = _version(payload)
+    owner_user_id = _owner_user_id(payload.get("owner_user_id"))
     raw_ids = payload.get("notification_ids")
     if not isinstance(raw_ids, list):
         raise ClaimsJobError(
@@ -144,8 +161,8 @@ def validate_review_notification_payload(value: Any) -> dict[str, Any]:
             failure_code="claims_invalid_payload",
         )
     return {
-        "version": _version(payload),
-        "owner_user_id": _owner_user_id(payload.get("owner_user_id")),
+        "version": version,
+        "owner_user_id": owner_user_id,
         "notification_ids": ids,
     }
 
@@ -153,6 +170,8 @@ def validate_review_notification_payload(value: Any) -> dict[str, Any]:
 def validate_alert_delivery_payload(value: Any) -> dict[str, Any]:
     payload = _normalize_dict(value)
     _reject_sensitive_keys(payload)
+    version = _version(payload)
+    owner_user_id = _owner_user_id(payload.get("owner_user_id"))
     channel = str(payload.get("channel") or "").strip().lower()
     if channel not in CLAIMS_ALERT_JOB_CHANNELS:
         raise ClaimsJobError(
@@ -161,8 +180,8 @@ def validate_alert_delivery_payload(value: Any) -> dict[str, Any]:
             failure_code="claims_unsupported_channel",
         )
     return {
-        "version": _version(payload),
-        "owner_user_id": _owner_user_id(payload.get("owner_user_id")),
+        "version": version,
+        "owner_user_id": owner_user_id,
         "event_id": _positive_int(payload.get("event_id"), "event_id"),
         "alert_id": _positive_int(payload.get("alert_id"), "alert_id"),
         "channel": channel,
