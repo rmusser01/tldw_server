@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -218,8 +219,11 @@ def verify_signed_manifest(
 
     try:
         payload = _stable_json(manifest)
+        normalized_manifest = json.loads(payload.decode("utf-8"))
     except (TypeError, ValueError) as exc:
         raise ManifestSignatureError("manifest payload is not canonicalizable") from exc
+    if not isinstance(normalized_manifest, dict):
+        raise ManifestSignatureError("manifest payload is malformed")
     expected_digest = _manifest_digest(payload)
     if signed_manifest.get("manifest_digest") != expected_digest:
         raise ManifestSignatureError("manifest digest mismatch")
@@ -228,11 +232,11 @@ def verify_signed_manifest(
     if not isinstance(signature_value, str) or not signer.verify(payload, signature_value):
         raise ManifestSignatureError("manifest signature mismatch")
 
-    schema_version = _require_int_field(manifest, "schema_version")
+    schema_version = _require_int_field(normalized_manifest, "schema_version")
     if schema_version != _SUPPORTED_SCHEMA_VERSION:
         raise ManifestSignatureError("unsupported manifest schema version")
-    sequence = _require_int_field(manifest, "sequence")
-    entries = _require_entries(manifest)
+    sequence = _require_int_field(normalized_manifest, "sequence")
+    entries = _require_entries(normalized_manifest)
     if anti_rollback_anchor and (
         sequence < anti_rollback_anchor.sequence
         or (sequence == anti_rollback_anchor.sequence and expected_digest != anti_rollback_anchor.manifest_digest)

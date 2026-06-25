@@ -105,6 +105,35 @@ def test_verified_manifest_entries_are_immutable_snapshots() -> None:
     assert verified.entries[0]["metadata"]["nested"]["flag"] is True
 
 
+@pytest.mark.parametrize(
+    ("normalized_display_name", "raw_display_name"),
+    [
+        ("line\nname", "line\r\nname"),
+        ("caf\u00e9", "cafe\u0301"),
+    ],
+)
+def test_verified_manifest_entries_use_signed_canonical_string_values(
+    normalized_display_name: str,
+    raw_display_name: str,
+) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.manifest import (
+        HmacManifestSigner,
+        create_signed_manifest,
+        verify_signed_manifest,
+    )
+
+    signer = HmacManifestSigner(key_id="test-key", secret=b"secret")
+    entry = _entry("skill:user:1/demo")
+    entry["display_name"] = normalized_display_name
+    signed = create_signed_manifest(sequence=1, entries=[entry], signer=signer)
+    signed["manifest"]["entries"][0]["display_name"] = raw_display_name
+
+    verified = verify_signed_manifest(signed, signer=signer)
+
+    assert verified.manifest_digest == signed["manifest_digest"]
+    assert verified.entries[0]["display_name"] == normalized_display_name
+
+
 def test_manifest_tamper_is_rejected() -> None:
     from tldw_Server_API.app.core.Context_Integrity.manifest import (
         HmacManifestSigner,
