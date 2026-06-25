@@ -61,6 +61,8 @@ Each reference is normalized before persistence:
 }
 ```
 
+The server owns `created_at` and `updated_at`. Write requests may omit them. On replacement, unchanged refs preserve `created_at`; refs whose metadata changes receive a new `updated_at`. Timestamps are not part of client-provided identity.
+
 Initial `source_type` values:
 
 - `media_item`
@@ -72,7 +74,7 @@ Reserved future `source_type` value:
 
 `source_id` is stored as a string for future compatibility, but validated according to `source_type`. `adapter_keys` are advisory metadata for filtering and diagnostics, not a hard storage gate. A user can attach any readable rules source to any RPG adapter.
 
-`media_collection` references are live. Lookup resolves ready collection items at query time. Users who need reproducible pinned behavior should attach individual `media_item` references instead.
+`media_collection` references are live. Lookup resolves ready collection items at query time. Users who need reproducible pinned behavior should attach individual `media_item` references instead. Attaching a readable collection that currently has no ready items is valid; lookup returns no user evidence and a diagnostic until ready items exist.
 
 Removing a reference means replacing the stored list without that reference. There is no separate tombstone table in the first implementation.
 
@@ -103,9 +105,9 @@ Write behavior:
 - Require `expected_version`.
 - Normalize refs before hashing or persistence.
 - Reject unsupported source types.
-- Reject duplicate active refs with the same `(source_type, source_id)`.
+- Reject duplicate refs with the same `(source_type, source_id)`.
 - Enforce a small maximum ref count per object.
-- Validate referenced media or collection ownership/readability.
+- Validate referenced media or collection ownership/readability using the same content-scope and media-read posture as existing media/RAG access.
 - Update the parent campaign/session `version` and `updated_at` on success.
 - Return the updated normalized refs plus the new version.
 
@@ -152,6 +154,7 @@ Permission mapping:
 - Session ref read: `rpg.sessions.read`
 - Session ref write: `rpg.sessions.manage`
 - Rules lookup and adapter metadata: `rpg.rules.read`
+- Any operation that dereferences attached media items, resolves media collections, retrieves snippets, or generates an answer from attached media requires media read access as well. If implementation keeps static FastAPI dependencies, add `media.read` to the affected endpoints. If implementation uses conditional checks, fail closed before exposing user-provided source metadata or snippets.
 
 Privilege catalog tests should confirm every endpoint scope used by the RPG endpoint remains cataloged.
 
@@ -192,14 +195,17 @@ Add an async injectable RPG rules retrieval adapter. The adapter receives:
 
 The adapter returns a canonical evidence list rather than a full RAG answer. It should call existing retrieval components, not the public REST endpoint.
 
+The RPG service boundary must expose an async lookup path for retrieval-backed behavior. Implementation can either convert `lookup_rules` and query-backed `build_context` to async or add explicit async variants. REST endpoints that can retrieve snippets must be async and await the service. MCP already executes async tools and should await the same service path. Do not bridge by calling `asyncio.run()` or equivalent inside an active server event loop.
+
 Initial retrieval behavior:
 
-- `media_item`: pass validated IDs as `include_media_ids` or `allowed_media_ids`.
-- `media_collection`: resolve ready media IDs using existing collection ownership/readiness semantics, then pass those IDs.
+- `media_item`: validate that the item is readable and not deleted/trash, then pass IDs as `include_media_ids` or `allowed_media_ids`.
+- `media_collection`: validate that the collection is readable, resolve ready media IDs using existing collection readiness semantics, then pass those IDs.
 - `sources`: force `["media_db"]`.
 - `search_mode`: default to `"hybrid"`, with a small capped `top_k`.
 - Web fallback: forced off.
 - Broad user-content fallback: forced off.
+- Empty attached refs, disabled refs, collections with no ready items, or media with no retrievable chunks return no user evidence plus diagnostics. They are not hard lookup failures.
 - Retrieval errors: captured in diagnostics; do not fail lookup unless the session cannot be loaded or request validation fails.
 
 The adapter must be mockable for unit tests so the RPG suite does not require real embeddings, Chroma, or an external model.
@@ -278,6 +284,8 @@ Generated answers must be grounded in the retrieved snippets:
 
 This mode may use existing LLM generation facilities, but implementation should keep the generator injectable and testable with a fake.
 
+Answer generation must reuse existing provider configuration, rate-limit, and billing/quota posture. It must not introduce a hidden provider path or bypass configured model governance.
+
 ## Context Builder
 
 The session context builder keeps session state primary.
@@ -349,7 +357,9 @@ Expected failure modes:
 - Stale campaign/session version: `409`
 - Idempotency key reuse with different normalized payload: `409`
 - Missing campaign/session: `404`
-- Missing, deleted, not-ready, or unreadable source refs: fail closed through validation, using `400` or `404` according to visibility
+- Missing, deleted, trashed, or unreadable media-item refs during attachment writes: fail closed through validation, using `400` or `404` according to visibility
+- Missing or unreadable media collection refs during attachment writes: fail closed through validation, using `400` or `404` according to visibility
+- Readable collections with no ready items at lookup time: no user evidence, diagnostic only
 - Retrieval unavailable or partial failure: lookup/context returns bundled citations and diagnostics
 - Generation unavailable or failed: `answer_status="generation_failed"` and snippets still return
 
@@ -411,10 +421,12 @@ Retrieval and authorization tests:
 - Fake async retriever path.
 - Missing media item.
 - Deleted media item.
+- Trashed media item.
 - Missing media collection.
 - Collection with no ready items.
 - Source not readable by the user.
 - Privacy-safe diagnostics without snippet text.
+- Missing media-read permission on attached-source dereference.
 
 AuthNZ and catalog tests:
 
