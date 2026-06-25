@@ -150,6 +150,9 @@ def _require_entries(manifest: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
             if not isinstance(key, str):
                 raise ManifestSignatureError("manifest entry keys must be strings")
         verified_entries.append(_validate_entry_schema(entry))
+    asset_ids = [entry["asset_id"] for entry in verified_entries]
+    if asset_ids != sorted(asset_ids):
+        raise ManifestSignatureError("manifest entries must be sorted by asset_id")
     return tuple(verified_entries)
 
 
@@ -212,13 +215,13 @@ def verify_signed_manifest(
     if schema_version != _SUPPORTED_SCHEMA_VERSION:
         raise ManifestSignatureError("unsupported manifest schema version")
     sequence = _require_int_field(manifest, "sequence")
+    entries = _require_entries(manifest)
     if anti_rollback_anchor and (
         sequence < anti_rollback_anchor.sequence
         or (sequence == anti_rollback_anchor.sequence and expected_digest != anti_rollback_anchor.manifest_digest)
     ):
         raise ManifestRollbackError("manifest rollback detected")
 
-    entries = _require_entries(manifest)
     return VerifiedManifest(
         sequence=sequence,
         manifest_digest=expected_digest,

@@ -269,6 +269,59 @@ def test_manifest_rejects_malformed_entry_schema_that_is_correctly_signed(case: 
         verify_signed_manifest(signed, signer=signer)
 
 
+def test_manifest_entry_validation_runs_before_anti_rollback_check() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.manifest import (
+        AntiRollbackAnchor,
+        HmacManifestSigner,
+        ManifestSignatureError,
+        create_signed_manifest,
+        verify_signed_manifest,
+    )
+
+    signer = HmacManifestSigner(key_id="test-key", secret=b"secret")
+    signed = create_signed_manifest(sequence=1, entries=[_entry("skill:user:1/demo")], signer=signer)
+    manifest = signed["manifest"]
+    assert isinstance(manifest, dict)
+    entries = manifest["entries"]
+    assert isinstance(entries, list)
+    entry = entries[0]
+    assert isinstance(entry, dict)
+    del entry["digest"]
+    _resign(signed, signer)
+    anchor = AntiRollbackAnchor(sequence=2, manifest_digest="sha256:newer")
+
+    with pytest.raises(ManifestSignatureError):
+        verify_signed_manifest(signed, signer=signer, anti_rollback_anchor=anchor)
+
+
+def test_manifest_rejects_unsorted_entries_that_are_correctly_signed() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.manifest import (
+        HmacManifestSigner,
+        ManifestSignatureError,
+        create_signed_manifest,
+        verify_signed_manifest,
+    )
+
+    signer = HmacManifestSigner(key_id="test-key", secret=b"secret")
+    signed = create_signed_manifest(
+        sequence=1,
+        entries=[
+            _entry("skill:user:1/a"),
+            _entry("skill:user:1/b"),
+        ],
+        signer=signer,
+    )
+    manifest = signed["manifest"]
+    assert isinstance(manifest, dict)
+    entries = manifest["entries"]
+    assert isinstance(entries, list)
+    entries.reverse()
+    _resign(signed, signer)
+
+    with pytest.raises(ManifestSignatureError):
+        verify_signed_manifest(signed, signer=signer)
+
+
 def test_anti_rollback_anchor_rejects_older_valid_manifest() -> None:
     from tldw_Server_API.app.core.Context_Integrity.manifest import (
         AntiRollbackAnchor,
