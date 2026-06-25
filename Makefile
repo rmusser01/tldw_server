@@ -59,7 +59,7 @@ help:
 # -----------------------------------------------------------------------------
 # Quickstart targets (first-time setup)
 # -----------------------------------------------------------------------------
-.PHONY: setup-wizard-tools setup-docker-single start-docker-single verify-docker-single setup-docker-multi start-docker-multi verify-docker-multi install-local setup-local-single start-local-single verify-local-single quickstart quickstart-install quickstart-prereqs quickstart-local quickstart-docker quickstart-docker-bootstrap quickstart-docker-webui model-cycle verify pypi-build pypi-check tooling-install tooling-smoke show-api-key release release-patch release-minor mcp-unified-build mcp-unified-check mcp-unified-uat mcp-unified-rc mcp-unified-publish-dry-run
+.PHONY: setup-wizard-tools setup-docker-single start-docker-single verify-docker-single setup-docker-multi start-docker-multi verify-docker-multi install-local setup-local-single start-local-single verify-local-single quickstart quickstart-install quickstart-prereqs quickstart-local quickstart-docker quickstart-docker-bootstrap quickstart-docker-webui model-cycle verify pypi-build pypi-check pypi-check-contents tooling-install tooling-smoke show-api-key release release-patch release-minor mcp-unified-build mcp-unified-check mcp-unified-uat mcp-unified-rc mcp-unified-publish-dry-run
 
 PYTHON ?= python3
 VENV_DIR ?= .venv
@@ -265,6 +265,11 @@ pypi-check: pypi-build
 	@$(PYTHON) -m pip show twine >/dev/null 2>&1 || (echo "[pypi-check] Missing 'twine'. Install with: $(PYTHON) -m pip install twine" && exit 1)
 	@echo "[pypi-check] Validating distributions..."
 	@$(PYTHON) -m twine check dist/*
+	@$(MAKE) pypi-check-contents
+
+pypi-check-contents:
+	@echo "[pypi-check] Validating backend/API-only artifact contents..."
+	@$(PYTHON) Helper_Scripts/Packaging/check_pypi_artifacts.py --dist-dir dist
 
 # -----------------------------------------------------------------------------
 # MCP Unified standalone RC
