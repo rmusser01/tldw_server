@@ -949,7 +949,7 @@ passed
 - Modify any new files listed above if import cleanup reveals unused symbols.
 - Update `backlog/tasks/task-9936 - Plan-Chunker-process-text-refactor-implementation.md` only if this plan is executed in the same branch.
 
-- [ ] **Step 1: Remove unused imports from `chunker.py`**
+- [x] **Step 1: Remove unused imports from `chunker.py`**
 
 After the wrapper replacement, remove imports that are no longer used by `chunker.py`.
 
@@ -963,7 +963,7 @@ Likely candidates after extraction:
 
 Confirm with `rg` before removing each import.
 
-- [ ] **Step 2: Run focused Chunking tests**
+- [x] **Step 2: Run focused Chunking tests**
 
 Command:
 
@@ -977,7 +977,7 @@ Expected result:
 passed
 ```
 
-- [ ] **Step 3: Compile touched Python modules**
+- [x] **Step 3: Compile touched Python modules**
 
 Command:
 
@@ -991,7 +991,7 @@ Expected result:
 compileall exits 0
 ```
 
-- [ ] **Step 4: Run Bandit on touched Chunking code**
+- [x] **Step 4: Run Bandit on touched Chunking code**
 
 Command:
 
@@ -1005,7 +1005,7 @@ Expected result:
 No issues identified.
 ```
 
-- [ ] **Step 5: Check diff quality**
+- [x] **Step 5: Check diff quality**
 
 Command:
 

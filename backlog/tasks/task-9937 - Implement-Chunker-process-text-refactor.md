@@ -1,7 +1,7 @@
 ---
 id: TASK-9937
 title: Implement Chunker process_text refactor
-status: In Progress
+status: Done
 created_date: 2026-06-24 22:02
 dependencies:
 - TASK-9936
@@ -26,7 +26,7 @@ modified_files:
 - tldw_Server_API/tests/Chunking/test_process_text_components.py
 - Docs/superpowers/plans/2026-06-24-chunker-process-text-refactor.md
 - backlog/tasks/task-9937 - Implement-Chunker-process-text-refactor.md
-updated_date: 2026-06-25 03:16
+updated_date: 2026-06-25 03:32
 ---
 
 ## Description
@@ -37,9 +37,9 @@ Execute the approved implementation plan for the behavior-preserving Chunker.pro
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Characterization and component tests cover the documented process_text behaviors before production logic moves
-- [ ] #2 Chunker.process_text delegates to the new internal process_text pipeline without public behavior drift
-- [ ] #3 Focused Chunking tests, compileall, diff check, and Bandit verification are recorded
+- [x] #1 Characterization and component tests cover the documented process_text behaviors before production logic moves
+- [x] #2 Chunker.process_text delegates to the new internal process_text pipeline without public behavior drift
+- [x] #3 Focused Chunking tests, compileall, diff check, and Bandit verification are recorded
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -73,20 +73,22 @@ Task 6 final test-quality fix: added an explicit assertion that prefix-neutral `
 Task 7 started in worktree `/Users/appledev/Documents/GitHub/tldw_server/.worktrees/chunker-process-text-refactor-design` on branch `codex/chunker-process-text-refactor` at `0d3994750c`. Pre-edit `git status --short` was clean. Next step: add pipeline import-boundary and wrapper tests first, then record the expected red check for missing `process_text.pipeline`.
 Task 7 red check: added pipeline import-boundary and thin-wrapper tests before production implementation. `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chunking/test_process_text_components.py -q` exited 2 during collection because `tldw_Server_API.app.core.Chunking.process_text.pipeline` did not exist. Direct import check `source .venv/bin/activate && python -c "import tldw_Server_API.app.core.Chunking.process_text.pipeline"` exited 1 with `ModuleNotFoundError: No module named 'tldw_Server_API.app.core.Chunking.process_text.pipeline'`.
 Task 7 implementation: added `process_text/pipeline.py` with `ProcessTextPipeline`, moved `Chunker.process_text` orchestration into `ProcessTextPipeline.run`, exported the pipeline, added `_process_text_telemetry_hooks()` in `chunker.py`, and replaced `Chunker.process_text` with the thin wrapper. Non-telemetry helper monkeypatch coverage now targets `process_text.pipeline`; telemetry monkeypatch coverage remains on `chunker.py` through the hook factory. Verification: requested focused pytest command exited 0 with 81 passed and 174 warnings; compileall requested files exited 0; Bandit requested production files exited 0 with 0 results and 0 errors in `/tmp/bandit_chunker_process_text_task7.json`; `git diff --check` exited 0.
+Task 7 controller verification and review gate complete. Local focused pytest passed (81 passed, 174 warnings); compileall passed; Bandit report `/tmp/bandit_chunker_process_text_task7_controller.json` had results=0 errors=0. Spec reviewer approved as compliant; quality reviewer found no Critical/Important/Minor issues. Proceeding to Task 8 cleanup and final verification.
+Task 8 final verification complete. Unused-import check (`source .venv/bin/activate && python -m ruff check --select F401 tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/app/core/Chunking/process_text --quiet`) exited 0 with no stale imports, so no cleanup edit was required. Broader focused Chunking suite passed with 167 passed and 351 warnings. Compileall on touched modules exited 0. Bandit on touched production Chunking code wrote `/tmp/bandit_chunker_process_text_refactor.json` with results=0 errors=0. `git diff --check` exited 0. Final branch review found no Critical, Important, or Minor issues; reviewer reran a focused subset with 78 passed and 168 warnings and diff check exit 0.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented the behavior-preserving `Chunker.process_text` refactor in an isolated worktree on `codex/chunker-process-text-refactor`. The large public method now delegates to `ProcessTextPipeline`, while frontmatter preparation, option resolution, dispatch, metadata finalization, shared error policy, LLM override scope, and internal models live in focused helper modules under `tldw_Server_API/app/core/Chunking/process_text/`. Telemetry hooks remain sourced from `chunker.py` so existing monkeypatch behavior and metric names/timing boundaries are preserved. Added characterization and component tests for the extracted helpers, import boundaries, wrapper delegation, metric boundaries, metadata handling, LLM override restoration, and edge cases. Final verification passed: focused Chunking suite 167 passed/351 warnings, compileall exit 0, Ruff F401 exit 0, Bandit results=0 errors=0, diff check exit 0, and final branch review found no issues. No known blockers remain.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
