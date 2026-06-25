@@ -1001,6 +1001,7 @@ def deliver_claim_review_notifications_now(
     with managed_media_database(
         client_id=str(settings.get("SERVER_CLIENT_ID", "SERVER_API_V1")),
         db_path=str(db_path),
+        initialize=False,
         suppress_init_exceptions=_CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS,
         suppress_close_exceptions=_CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS,
     ) as db:
@@ -1099,6 +1100,7 @@ git commit -m "refactor: expose Claims review notification delivery"
 
 **Files:**
 - Create: `tldw_Server_API/app/core/Claims_Extraction/claims_job_handlers.py`
+- Create: `tldw_Server_API/app/core/Claims_Extraction/claims_alert_delivery.py`
 - Modify: `tldw_Server_API/app/core/Claims_Extraction/claims_service.py`
 - Test: `tldw_Server_API/tests/Claims/test_claims_jobs_handlers.py`
 - Test: `tldw_Server_API/tests/Claims/test_claims_webhook_delivery.py`
@@ -1108,10 +1110,14 @@ git commit -m "refactor: expose Claims review notification delivery"
 Create `test_claims_jobs_handlers.py`:
 
 ```python
+import json
+from contextlib import contextmanager
+
 import pytest
 
 from tldw_Server_API.app.core.Claims_Extraction import claims_job_handlers
 from tldw_Server_API.app.core.Claims_Extraction.claims_job_contracts import (
+    CLAIMS_DELIVER_ALERT_JOB_TYPE,
     CLAIMS_DELIVER_REVIEW_NOTIFICATION_JOB_TYPE,
     CLAIMS_REBUILD_MEDIA_JOB_TYPE,
     ClaimsJobError,
@@ -1190,6 +1196,62 @@ async def test_review_notification_delivery_failure_is_retryable(monkeypatch) ->
 
     assert excinfo.value.retryable is True
     assert excinfo.value.failure_code == "claims_review_notification_delivery_failed"
+
+
+@pytest.mark.asyncio
+async def test_alert_delivery_uses_existing_db_and_preserves_slack_payload(monkeypatch) -> None:
+    open_kwargs: dict[str, object] = {}
+    delivered: list[dict[str, object]] = []
+
+    class _Db:
+        def get_claims_monitoring_event(self, event_id: int) -> dict[str, object]:
+            assert event_id == 9
+            return {
+                "id": 9,
+                "user_id": "7",
+                "payload_json": json.dumps(
+                    {"window_ratio": 0.42, "threshold": 0.25, "baseline_ratio": 0.10}
+                ),
+            }
+
+        def get_claims_monitoring_alert(self, alert_id: int) -> dict[str, object]:
+            assert alert_id == 3
+            return {
+                "id": 3,
+                "user_id": "7",
+                "enabled": True,
+                "channels_json": json.dumps({"slack": True}),
+                "slack_webhook_url": "https://example.test/slack",
+            }
+
+        def list_claims_monitoring_events(self, **_kwargs) -> list[dict[str, object]]:
+            return []
+
+    @contextmanager
+    def _fake_managed_media_database(*_args, **kwargs):
+        open_kwargs.update(kwargs)
+        yield _Db()
+
+    monkeypatch.setattr(claims_job_handlers, "get_user_media_db_path", lambda owner: f"/tmp/user-{owner}/Media_DB_v2.db")
+    monkeypatch.setattr(claims_job_handlers, "managed_media_database", _fake_managed_media_database)
+    monkeypatch.setattr(
+        claims_job_handlers,
+        "deliver_claims_alert_webhook",
+        lambda **kwargs: delivered.append(kwargs) or True,
+    )
+
+    result = await claims_job_handlers.process_claims_job(
+        {
+            "id": 1,
+            "job_type": CLAIMS_DELIVER_ALERT_JOB_TYPE,
+            "owner_user_id": "7",
+            "payload": {"version": 1, "owner_user_id": "7", "event_id": 9, "alert_id": 3, "channel": "slack"},
+        }
+    )
+
+    assert result["outcome"] == "ok"
+    assert open_kwargs["initialize"] is False
+    assert delivered[0]["payload"]["text"] == "Claims alert: unsupported ratio 42.0% (threshold 25.0%, baseline 10.0%)"
 ```
 
 - [ ] **Step 2: Run handler tests and verify they fail for missing module**
@@ -1225,6 +1287,11 @@ from .claims_job_contracts import (
 )
 from .claims_notifications import deliver_claim_review_notifications_now
 from .claims_rebuild_service import rebuild_claims_for_media
+from .claims_alert_delivery import (
+    build_claims_alert_delivery_payload,
+    deliver_claims_alert_webhook,
+    normalize_claims_alert_channels,
+)
 
 
 def _payload(job: dict[str, Any]) -> dict[str, Any]:
@@ -1298,12 +1365,43 @@ async def process_claims_job(job: dict[str, Any]) -> dict[str, Any]:
     )
 ```
 
-- [ ] **Step 4: Add alert delivery handler seam**
+- [ ] **Step 4: Extract and reuse the alert delivery seam**
 
-In `claims_service.py`, change `_deliver_claims_alert_webhook` to return `bool` and accept `event_id`:
+Create `claims_alert_delivery.py` for alert-delivery-only behavior that can be used by both `claims_service.py` and `claims_job_handlers.py`. Move the existing webhook retry/event-recording behavior there and expose public helpers:
 
 ```python
-def _deliver_claims_alert_webhook(
+def normalize_claims_alert_channels(raw_value: Any | None) -> dict[str, bool]: ...
+
+def build_claims_alert_delivery_payload(*, channel: str, event_payload: dict[str, Any]) -> dict[str, Any]:
+    if channel == "slack":
+        return {
+            "text": (
+                "Claims alert: unsupported ratio "
+                f"{_format_ratio(event_payload.get('window_ratio'))} "
+                f"(threshold {_format_ratio(event_payload.get('threshold'))}, "
+                f"baseline {_format_ratio(event_payload.get('baseline_ratio'))})"
+            )
+        }
+    return dict(event_payload)
+
+def deliver_claims_alert_webhook(
+    *,
+    url: str,
+    payload: dict[str, Any],
+    channel: str,
+    db_path: str,
+    user_id: str,
+    alert_id: int | None = None,
+    event_id: int | None = None,
+) -> bool: ...
+```
+
+Keep `claims_service.py` importing these helpers instead of owning the delivery implementation. `claims_job_handlers.py` must not import private helpers from `claims_service.py`; alert delivery is domain delivery logic, not Jobs lifecycle logic.
+
+When moving the webhook helper, change it to return `bool` and persist `event_id` when present:
+
+```python
+def deliver_claims_alert_webhook(
     *,
     url: str,
     payload: dict[str, Any],
@@ -1338,15 +1436,13 @@ Update `_record_webhook_event` to persist `event_id` when provided:
                 payload["event_id"] = int(event_id)
 ```
 
-Add to `claims_job_handlers.py` after imports:
+Add `managed_media_database` and a local noncritical exception tuple to `claims_job_handlers.py` after imports. Do not import `claims_service.py` from this module.
 
 ```python
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
-from tldw_Server_API.app.core.Claims_Extraction.claims_service import (
-    _CLAIMS_NONCRITICAL_EXCEPTIONS,
-    _deliver_claims_alert_webhook,
-    _normalize_channels,
-)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import MEDIA_NONCRITICAL_EXCEPTIONS
+
+_CLAIMS_HANDLER_NONCRITICAL_EXCEPTIONS = MEDIA_NONCRITICAL_EXCEPTIONS
 ```
 
 Then add:
@@ -1384,8 +1480,9 @@ def _deliver_alert(payload: dict[str, Any]) -> dict[str, Any]:
     with managed_media_database(
         client_id="claims_jobs_worker",
         db_path=db_path,
-        suppress_init_exceptions=_CLAIMS_NONCRITICAL_EXCEPTIONS,
-        suppress_close_exceptions=_CLAIMS_NONCRITICAL_EXCEPTIONS,
+        initialize=False,
+        suppress_init_exceptions=_CLAIMS_HANDLER_NONCRITICAL_EXCEPTIONS,
+        suppress_close_exceptions=_CLAIMS_HANDLER_NONCRITICAL_EXCEPTIONS,
     ) as db:
         event = db.get_claims_monitoring_event(int(payload["event_id"]))
         if not event or str(event.get("user_id")) != str(owner_user_id):
@@ -1403,19 +1500,18 @@ def _deliver_alert(payload: dict[str, Any]) -> dict[str, Any]:
             channel=payload["channel"],
         ):
             return {"outcome": "skipped", "reason": "already_delivered", "alert_id": payload["alert_id"]}
-        channels = _normalize_channels(alert.get("channels_json") or alert.get("channels"))
+        channels = normalize_claims_alert_channels(alert.get("channels_json") or alert.get("channels"))
         if not channels.get(payload["channel"]):
             return {"outcome": "skipped", "reason": "channel_disabled", "channel": payload["channel"]}
         event_payload = _payload_dict(event)
         if payload["channel"] == "slack":
             url = alert.get("slack_webhook_url")
-            body = {"text": "Claims alert: unsupported ratio"}
         else:
             url = alert.get("webhook_url")
-            body = event_payload
         if not url:
             return {"outcome": "skipped", "reason": "channel_missing_url", "channel": payload["channel"]}
-        delivered = _deliver_claims_alert_webhook(
+        body = build_claims_alert_delivery_payload(channel=payload["channel"], event_payload=event_payload)
+        delivered = deliver_claims_alert_webhook(
             url=str(url),
             payload=body,
             channel=payload["channel"],
@@ -1453,7 +1549,7 @@ Expected: all listed tests pass.
 Run:
 
 ```bash
-git add tldw_Server_API/app/core/Claims_Extraction/claims_job_handlers.py tldw_Server_API/app/core/Claims_Extraction/claims_service.py tldw_Server_API/tests/Claims/test_claims_jobs_handlers.py tldw_Server_API/tests/Claims/test_claims_webhook_delivery.py
+git add tldw_Server_API/app/core/Claims_Extraction/claims_job_handlers.py tldw_Server_API/app/core/Claims_Extraction/claims_alert_delivery.py tldw_Server_API/app/core/Claims_Extraction/claims_service.py tldw_Server_API/tests/Claims/test_claims_jobs_handlers.py tldw_Server_API/tests/Claims/test_claims_webhook_delivery.py
 git commit -m "feat: add Claims Jobs handlers"
 ```
 
@@ -1595,6 +1691,29 @@ _enqueue_claim_rebuild_if_needed(
 )
 ```
 
+For `bulk_review_claims`, do not keep only a `set[int]` of media ids after the claim loop. Jobs mode needs the resolved owner for each media id. Replace the collector with an owner map:
+
+```python
+rebuild_media_owners: dict[int, str] = {}
+...
+if desired_status in {"flagged", "reassigned"} and desired_status != current_status:
+    with suppress(_CLAIMS_NONCRITICAL_EXCEPTIONS):
+        media_id = int(claim_row.get("media_id") or 0)
+        owner_for_rebuild = _resolve_claim_owner_user_id(
+            claim_row,
+            int(user_id) if user_id is not None else int(current_user.id),
+        )
+        if media_id > 0 and owner_for_rebuild:
+            rebuild_media_owners[media_id] = str(owner_for_rebuild)
+...
+for media_id, owner_for_rebuild in rebuild_media_owners.items():
+    _enqueue_claim_rebuild_if_needed(
+        media_id=media_id,
+        db_path=str(target_db.db_path_str),
+        owner_user_id=owner_for_rebuild,
+    )
+```
+
 Update notification dispatch call sites:
 
 ```python
@@ -1681,7 +1800,7 @@ def _enqueue_claims_alert_delivery_jobs(
     event_id: int,
     owner_user_id: str,
 ) -> None:
-    channels = _normalize_channels(config_row.get("channels_json") or config_row.get("channels"))
+    channels = normalize_claims_alert_channels(config_row.get("channels_json") or config_row.get("channels"))
     alert_id = int(config_row.get("id") or 0)
     for channel in ("slack", "webhook"):
         if not channels.get(channel):
