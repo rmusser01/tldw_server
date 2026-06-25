@@ -137,19 +137,24 @@ def _path_changed_error(path: Path) -> OSError:
 
 
 def _open_no_follow(path: Path) -> int:
-    flags = os.O_RDONLY
-    nofollow = getattr(os, "O_NOFOLLOW", None)
-    if nofollow is not None:
-        return os.open(path, flags | nofollow)
-
     initial_stat = path.lstat()
     if not stat.S_ISREG(initial_stat.st_mode):
         raise _not_regular_error(path)
+
+    flags = os.O_RDONLY
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is not None:
+        flags |= nofollow
+    nonblock = getattr(os, "O_NONBLOCK", None)
+    if nonblock is not None:
+        flags |= nonblock
 
     fd = os.open(path, flags)
     opened_successfully = False
     try:
         opened_stat = os.fstat(fd)
+        if not stat.S_ISREG(opened_stat.st_mode):
+            raise _not_regular_error(path)
         if (opened_stat.st_dev, opened_stat.st_ino) != (
             initial_stat.st_dev,
             initial_stat.st_ino,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,28 @@ def _symlink_or_skip(
         link.symlink_to(target, target_is_directory=target_is_directory)
     except (NotImplementedError, OSError) as exc:
         pytest.skip(f"symlinks are unavailable in this environment: {exc}")
+
+
+def _mkfifo_or_skip(path: Path) -> None:
+    mkfifo = getattr(os, "mkfifo", None)
+    if mkfifo is None:
+        pytest.skip("os.mkfifo is unavailable in this environment")
+    try:
+        mkfifo(path)
+    except OSError as exc:
+        pytest.skip(f"FIFOs are unavailable in this environment: {exc}")
+
+
+def _fail_if_fifo_opened(monkeypatch: pytest.MonkeyPatch, inventory_module: object, fifo: Path) -> None:
+    original_open = os.open
+
+    def guarded_open(path: object, flags: int, mode: int = 0o777, *args: object, **kwargs: object) -> int:
+        if Path(path).name == fifo.name:
+            pytest.fail(f"FIFO was opened during inventory: {path}")
+        return original_open(path, flags, mode, *args, **kwargs)
+
+    monkeypatch.setattr(inventory_module.os, "O_NOFOLLOW", 0, raising=False)
+    monkeypatch.setattr(inventory_module.os, "open", guarded_open)
 
 
 def test_inventory_user_skill_directory_includes_supporting_files(tmp_path) -> None:
@@ -180,6 +203,29 @@ def test_inventory_user_skill_reports_no_follow_open_error(monkeypatch, tmp_path
     assert result.findings[0].asset_id == "skill:user:1/demo"
 
 
+def test_inventory_user_skill_fifo_supporting_file_reports_error_without_opening(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.core.Context_Integrity import inventory
+
+    skill_dir = tmp_path / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: demo\n---\nBody", encoding="utf-8")
+    fifo = skill_dir / "pipe.md"
+    _mkfifo_or_skip(fifo)
+    _fail_if_fifo_opened(monkeypatch, inventory, fifo)
+
+    result = inventory.inventory_user_skills_with_findings(
+        user_id=1,
+        skills_root=tmp_path / "skills",
+    )
+
+    assert [asset.asset_id for asset in result.assets] == ["skill:user:1/demo"]
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert result.findings[0].asset_id == "skill:user:1/demo"
+
+
 def test_inventory_prompt_files_finds_supported_extensions(tmp_path) -> None:
     from tldw_Server_API.app.core.Context_Integrity.inventory import inventory_prompt_files
 
@@ -316,6 +362,22 @@ def test_inventory_prompt_files_reports_no_follow_open_error(monkeypatch, tmp_pa
     assert result.findings[0].asset_id == "prompt_file:root.md"
 
 
+def test_inventory_prompt_files_fifo_reports_error_without_opening(monkeypatch, tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity import inventory
+
+    prompts = tmp_path / "Prompts"
+    prompts.mkdir()
+    fifo = prompts / "pipe.md"
+    _mkfifo_or_skip(fifo)
+    _fail_if_fifo_opened(monkeypatch, inventory, fifo)
+
+    result = inventory.inventory_prompt_files_with_findings(prompts_dir=prompts)
+
+    assert result.assets == ()
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert result.findings[0].asset_id == "prompt_file:pipe.md"
+
+
 def test_inventory_env_prompt_overrides_finds_configured_files(tmp_path) -> None:
     from tldw_Server_API.app.core.Context_Integrity.inventory import (
         inventory_env_prompt_overrides,
@@ -374,6 +436,28 @@ def test_inventory_env_prompt_overrides_reports_symlink_without_hashing_target(t
     assert (
         first.findings[0].asset_id
         == "prompt_file:env:TLDW_PROMPT_FILE_CHAT__SYSTEM:override.md"
+    )
+
+
+def test_inventory_env_prompt_overrides_fifo_reports_error_without_opening(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.core.Context_Integrity import inventory
+
+    fifo = tmp_path / "pipe.md"
+    _mkfifo_or_skip(fifo)
+    _fail_if_fifo_opened(monkeypatch, inventory, fifo)
+
+    result = inventory.inventory_env_prompt_overrides_with_findings(
+        environ={"TLDW_PROMPT_FILE_CHAT__SYSTEM": str(fifo)}
+    )
+
+    assert result.assets == ()
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert (
+        result.findings[0].asset_id
+        == "prompt_file:env:TLDW_PROMPT_FILE_CHAT__SYSTEM:pipe.md"
     )
 
 
