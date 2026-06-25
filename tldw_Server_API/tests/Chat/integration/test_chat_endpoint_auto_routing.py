@@ -312,6 +312,14 @@ def test_chat_endpoint_auto_routing_uses_post_validation_tool_capabilities(
             ],
         }
 
+    from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+
+    skill_tool_patch_target = (
+        "tldw_Server_API.app.api.v1.endpoints.chat.add_skill_tool_to_tools_list_async"
+        if hasattr(chat_endpoint, "add_skill_tool_to_tools_list_async")
+        else "tldw_Server_API.app.api.v1.endpoints.chat.add_skill_tool_to_tools_list"
+    )
+
     with (
         patch(
             "tldw_Server_API.app.api.v1.endpoints.chat.route_model",
@@ -337,7 +345,7 @@ def test_chat_endpoint_auto_routing_uses_post_validation_tool_capabilities(
             },
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.add_skill_tool_to_tools_list",
+            skill_tool_patch_target,
             return_value=[
                 {
                     "type": "function",
