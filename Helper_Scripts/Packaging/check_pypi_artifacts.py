@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import argparse
-import sys
 import tarfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
-BLOCKED_PATH_PARTS = (
-    "apps/tldw-frontend",
+from loguru import logger
+
+BLOCKED_COMPONENT_NAMES = {
     ".next",
     "node_modules",
+}
+
+BLOCKED_COMPONENT_SEQUENCES = (
+    ("apps", "tldw-frontend"),
 )
 
 BLOCKED_FILE_NAMES = {
@@ -30,10 +34,10 @@ REQUIRED_PACKAGE_ROOTS = (
 
 def _normalize_name(name: str) -> str:
     """Return a safe, POSIX-style archive path for policy matching."""
-    normalized = str(PurePosixPath(name))
+    normalized = str(PurePosixPath(name.replace("\\", "/")))
     while normalized.startswith("./"):
         normalized = normalized[2:]
-    return normalized
+    return normalized.lstrip("/")
 
 
 def _strip_sdist_prefix(paths: list[str]) -> list[str]:
@@ -56,6 +60,7 @@ def _strip_sdist_prefix(paths: list[str]) -> list[str]:
 
 
 def _wheel_paths(path: Path) -> list[str]:
+    """Return normalized file member paths from a built wheel."""
     with zipfile.ZipFile(path) as archive:
         return [
             _normalize_name(info.filename)
@@ -65,6 +70,7 @@ def _wheel_paths(path: Path) -> list[str]:
 
 
 def _sdist_paths(path: Path) -> list[str]:
+    """Return normalized file member paths from a source distribution."""
     with tarfile.open(path, mode="r:gz") as archive:
         paths = [
             _normalize_name(member.name)
@@ -75,6 +81,7 @@ def _sdist_paths(path: Path) -> list[str]:
 
 
 def _archive_paths(path: Path) -> list[str]:
+    """Return normalized file paths for a supported distribution artifact."""
     if path.suffix == ".whl":
         return _wheel_paths(path)
     if path.name.endswith(".tar.gz"):
@@ -82,11 +89,31 @@ def _archive_paths(path: Path) -> list[str]:
     raise ValueError(f"Unsupported distribution artifact: {path}")
 
 
+def _contains_component_sequence(
+    parts: tuple[str, ...], sequence: tuple[str, ...]
+) -> bool:
+    """Return whether a path contains an exact adjacent component sequence."""
+    sequence_len = len(sequence)
+    if sequence_len == 0 or len(parts) < sequence_len:
+        return False
+    return any(
+        parts[index : index + sequence_len] == sequence
+        for index in range(0, len(parts) - sequence_len + 1)
+    )
+
+
 def _blocked_paths(paths: list[str]) -> list[str]:
+    """Return archive paths that violate frontend/Node artifact policy."""
     blocked: list[str] = []
     for path in paths:
         parts = PurePosixPath(path).parts
-        if any(blocked_part in path for blocked_part in BLOCKED_PATH_PARTS):
+        if any(part in BLOCKED_COMPONENT_NAMES for part in parts):
+            blocked.append(path)
+            continue
+        if any(
+            _contains_component_sequence(parts, sequence)
+            for sequence in BLOCKED_COMPONENT_SEQUENCES
+        ):
             blocked.append(path)
             continue
         if parts and parts[-1] in BLOCKED_FILE_NAMES:
@@ -95,19 +122,19 @@ def _blocked_paths(paths: list[str]) -> list[str]:
 
 
 def _missing_required_roots(paths: list[str]) -> list[str]:
+    """Return required package roots absent from archive path components."""
     return [
         root
         for root in REQUIRED_PACKAGE_ROOTS
         if not any(
-            path == root
-            or path.startswith(f"{root}/")
-            or f"/{root}/" in path
+            root in PurePosixPath(path).parts
             for path in paths
         )
     ]
 
 
 def _validate_artifact(path: Path) -> list[str]:
+    """Return validation errors for one built distribution artifact."""
     errors: list[str] = []
     archive_paths = _archive_paths(path)
 
@@ -125,6 +152,7 @@ def _validate_artifact(path: Path) -> list[str]:
 
 
 def _distribution_paths(dist_dir: Path) -> list[Path]:
+    """Return supported distribution artifacts in deterministic order."""
     return sorted(
         path
         for path in dist_dir.iterdir()
@@ -133,6 +161,7 @@ def _distribution_paths(dist_dir: Path) -> list[Path]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Validate built PyPI artifacts and return a process exit code."""
     parser = argparse.ArgumentParser(
         description="Validate tldw-server PyPI artifacts stay backend/API-only."
     )
@@ -145,12 +174,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if not args.dist_dir.is_dir():
-        print(f"[pypi-content-check] dist directory not found: {args.dist_dir}", file=sys.stderr)
+        logger.error("dist directory not found: {}", args.dist_dir)
         return 1
 
     artifacts = _distribution_paths(args.dist_dir)
     if not artifacts:
-        print(f"[pypi-content-check] no wheel or sdist artifacts found in {args.dist_dir}", file=sys.stderr)
+        logger.error("no wheel or sdist artifacts found in {}", args.dist_dir)
         return 1
 
     errors: list[str] = []
@@ -159,11 +188,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if errors:
         for error in errors:
-            print(f"[pypi-content-check] {error}", file=sys.stderr)
+            logger.error(error)
         return 1
 
     artifact_names = ", ".join(path.name for path in artifacts)
-    print(f"[pypi-content-check] backend/API-only artifact check passed: {artifact_names}")
+    logger.info("backend/API-only artifact check passed: {}", artifact_names)
     return 0
 
 

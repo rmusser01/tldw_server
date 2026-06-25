@@ -268,6 +268,7 @@ pypi-check: pypi-build
 	@$(MAKE) pypi-check-contents
 
 pypi-check-contents:
+	@$(PYTHON) -m pip show loguru >/dev/null 2>&1 || (echo "[pypi-check] Missing 'loguru'. Install with: $(PYTHON) -m pip install loguru" && exit 1)
 	@echo "[pypi-check] Validating backend/API-only artifact contents..."
 	@$(PYTHON) Helper_Scripts/Packaging/check_pypi_artifacts.py --dist-dir dist
 

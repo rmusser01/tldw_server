@@ -41,6 +41,13 @@ publish.
 
 ## Local Packaging Checks
 
+The packaging check requires the standard build tools plus Loguru for the
+artifact-content guard:
+
+```bash
+python -m pip install build twine setuptools wheel loguru
+```
+
 ```bash
 # Build source + wheel distributions
 make pypi-build
