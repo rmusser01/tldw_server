@@ -8,17 +8,22 @@ from tldw_Server_API.app.core.Resource_Governance.governor import RGDecision
 
 
 class _Snap:
-    def __init__(self, route_map):
+    def __init__(self, route_map, tenant=None):
         self.route_map = route_map
+        self.tenant = tenant or {}
 
 
 class _Loader:
-    def __init__(self, route_map):
-        self._snap = _Snap(route_map)
+    def __init__(self, route_map, policies=None, tenant=None):
+        self._snap = _Snap(route_map, tenant=tenant)
+        self._policies = policies or {}
 
     def get_snapshot(self):
 
         return self._snap
+
+    def get_policy(self, policy_id):
+        return dict(self._policies.get(policy_id) or {})
 
 
 class _Gov:
@@ -44,6 +49,31 @@ class _Gov:
             details={"policy_id": pid, "categories": {"requests": {"allowed": True, "limit": 2, "retry_after": 0}}},
         )
         return dec, "h1"
+
+    async def commit(self, handle_id, actuals=None):
+        return None
+
+
+class _ExplodingGov:
+    async def reserve(self, req, op_id=None):
+        raise RuntimeError("resource governor unavailable")
+
+
+class _CaptureGov:
+    def __init__(self):
+        self.requests = []
+
+    async def reserve(self, req, op_id=None):
+        self.requests.append(req)
+        dec = RGDecision(
+            allowed=True,
+            retry_after=None,
+            details={
+                "policy_id": req.tags.get("policy_id"),
+                "categories": {"requests": {"allowed": True, "limit": 2, "retry_after": 0}},
+            },
+        )
+        return dec, "h-capture"
 
     async def commit(self, handle_id, actuals=None):
         return None
@@ -127,3 +157,50 @@ async def test_middleware_resolves_new_domain_paths(path: str, pattern: str, pol
         r = c.get(path)
         assert r.status_code == 429
         assert r.json().get("policy_id") == policy_id
+
+
+@pytest.mark.asyncio
+async def test_middleware_fail_closed_on_reserve_error_when_policy_requires_it():
+    app = FastAPI()
+    app.add_middleware(RGSimpleMiddleware)
+
+    @app.get("/api/v1/fail-closed")
+    async def route():  # pragma: no cover - exercised via client
+        return {"ok": True}
+
+    route_map = {"by_path": {"/api/v1/fail-closed": "fail.closed"}}
+    app.state.rg_policy_loader = _Loader(route_map, policies={"fail.closed": {"fail_mode": "fail_closed"}})
+    app.state.rg_governor = _ExplodingGov()
+
+    with TestClient(app) as c:
+        r = c.get("/api/v1/fail-closed")
+
+    assert r.status_code == 503
+    assert r.json()["error"] == "resource_governance_unavailable"
+    assert r.json()["policy_id"] == "fail.closed"
+
+
+@pytest.mark.asyncio
+async def test_middleware_uses_tenant_entity_when_tenant_scope_enabled():
+    app = FastAPI()
+    app.add_middleware(RGSimpleMiddleware)
+
+    @app.get("/api/v1/tenant-scoped")
+    async def route():  # pragma: no cover - exercised via client
+        return {"ok": True}
+
+    route_map = {"by_path": {"/api/v1/tenant-scoped": "tenant.only"}}
+    gov = _CaptureGov()
+    app.state.rg_policy_loader = _Loader(
+        route_map,
+        policies={"tenant.only": {"requests": {"rpm": 2}, "scopes": ["tenant"]}},
+        tenant={"enabled": True, "header": "X-TLDW-Tenant"},
+    )
+    app.state.rg_governor = gov
+
+    with TestClient(app) as c:
+        r = c.get("/api/v1/tenant-scoped", headers={"X-TLDW-Tenant": "acme"})
+
+    assert r.status_code == 200
+    assert gov.requests
+    assert gov.requests[0].entity == "tenant:acme"

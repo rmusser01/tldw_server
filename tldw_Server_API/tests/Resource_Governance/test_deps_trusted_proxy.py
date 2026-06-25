@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 
 import pytest
 pytestmark = pytest.mark.rate_limit
@@ -18,6 +19,24 @@ def _build_request(headers=None, client_host="127.0.0.1", client_port=12345):
         "client": (client_host, client_port),
         "server": ("testserver", 80),
         "scheme": "http",
+    }
+    return Request(scope)
+
+
+def _build_request_with_app(headers=None):
+    class _Loader:
+        def get_snapshot(self):
+            return SimpleNamespace(tenant={"enabled": True, "header": "X-TLDW-Tenant"})
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()],
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+        "scheme": "http",
+        "app": SimpleNamespace(state=SimpleNamespace(rg_policy_loader=_Loader())),
     }
     return Request(scope)
 
@@ -44,3 +63,12 @@ async def test_x_forwarded_for_ignored_when_proxy_untrusted(monkeypatch):
     r = _build_request(headers={"X-Forwarded-For": "198.51.100.7"}, client_host="1.2.3.4")
     ent = derive_entity_key(r)
     assert ent == "ip:1.2.3.4"
+
+
+@pytest.mark.asyncio
+async def test_derive_entity_key_uses_policy_snapshot_tenant_when_config_omitted():
+    request = _build_request_with_app(headers={"X-TLDW-Tenant": "acme"})
+
+    ent = derive_entity_key(request)
+
+    assert ent == "tenant:acme"

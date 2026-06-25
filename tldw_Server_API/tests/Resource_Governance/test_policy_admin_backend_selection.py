@@ -47,6 +47,12 @@ class _FakeDbPool:
         return None
 
 
+class _ExistingPolicyDbPool(_FakeDbPool):
+    async def fetchone(self, query: str, *args: Any) -> Any:
+        self.fetchone_calls.append((str(query), tuple(args)))
+        return {"version": 1}
+
+
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_initialize_sqlite_backend_selection_uses_sqlite_schema() -> None:
@@ -105,3 +111,54 @@ async def test_upsert_policy_postgres_backend_selection_uses_postgres_upsert() -
     assert "on conflict (id) do update" in query.lower()
     assert "$1" in query and "$2::jsonb" in query
     assert args and args[0] == "p.pg"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_upsert_policy_sqlite_expected_version_uses_atomic_version_guard() -> None:
+    db = _ExistingPolicyDbPool(is_postgres=False)
+    admin = AuthNZPolicyAdmin(db_pool=db)
+    admin._initialized = True
+
+    await admin.upsert_policy("p.sqlite", {"requests": {"rpm": 12}}, version=1)
+
+    assert db.execute_calls
+    query, args = db.execute_calls[0]
+    q_lower = query.lower()
+    assert "where id = ?" in q_lower
+    assert "version = ?" in q_lower
+    assert args[-2:] == ("p.sqlite", 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_upsert_policy_sqlite_expected_version_create_does_not_replace() -> None:
+    db = _FakeDbPool(is_postgres=False)
+    admin = AuthNZPolicyAdmin(db_pool=db)
+    admin._initialized = True
+
+    await admin.upsert_policy("p.sqlite.create", {"requests": {"rpm": 12}}, version=1)
+
+    assert db.execute_calls
+    query, args = db.execute_calls[0]
+    q_lower = query.lower()
+    assert "insert or ignore into rg_policies" in q_lower
+    assert "insert or replace" not in q_lower
+    assert args[0] == "p.sqlite.create"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_upsert_policy_postgres_expected_version_uses_atomic_version_guard() -> None:
+    db = _ExistingPolicyDbPool(is_postgres=True)
+    admin = AuthNZPolicyAdmin(db_pool=db)
+    admin._initialized = True
+
+    await admin.upsert_policy("p.pg", {"requests": {"rpm": 13}}, version=1)
+
+    assert db.execute_calls
+    query, args = db.execute_calls[0]
+    q_lower = query.lower()
+    assert "on conflict (id) do update" in q_lower
+    assert "where rg_policies.version = $5" in q_lower
+    assert args[-1] == 1

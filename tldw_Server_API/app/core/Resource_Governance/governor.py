@@ -25,7 +25,7 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from .daily_caps import check_daily_cap
+from .daily_caps import check_daily_cap, consume_daily_cap
 from .metrics_rg import _labels, ensure_rg_metrics_registered, rg_metrics_entity_label_enabled
 from .tenant import hash_entity
 
@@ -263,6 +263,10 @@ class MemoryResourceGovernor(ResourceGovernor):
             with contextlib.suppress(KeyError):
                 del self._ops[op_id]
 
+    @staticmethod
+    def _op_key(phase: str, op_id: str) -> str:
+        return f"{phase}:{op_id}"
+
     # --- Core evaluation ---
     def _category_limits(self, policy: dict[str, Any], category: str) -> dict[str, Any]:
         return dict(policy.get(category, {}))
@@ -384,6 +388,55 @@ class MemoryResourceGovernor(ResourceGovernor):
         details = {"limit": int(limit), "remaining": int(effective_remaining), "ttl_sec": ttl_sec, "retry_after": retry_after}
         return allowed, int(retry_after or 0) if retry_after is not None else 0, details
 
+    async def _consume_daily_caps_for_reserve(
+        self,
+        *,
+        req: RGRequest,
+        policy_id: str,
+        policy: dict[str, Any],
+        entity_scope: str,
+        entity_value: str,
+        reserve_op_id: str,
+        decision: RGDecision,
+    ) -> RGDecision | None:
+        try:
+            categories = dict((decision.details or {}).get("categories") or {})
+        except (AttributeError, TypeError, ValueError):
+            categories = {}
+
+        retry_after = int(decision.retry_after or 0)
+        for category, cfg in req.categories.items():
+            try:
+                units = int((cfg or {}).get("units") or 0)
+                daily_cap = int((policy.get(category) or {}).get("daily_cap") or 0)
+            except (TypeError, ValueError):
+                continue
+            if units <= 0 or daily_cap <= 0:
+                continue
+            allowed, daily_ra, daily_details = await consume_daily_cap(
+                entity_scope=entity_scope,
+                entity_value=entity_value,
+                category=category,
+                daily_cap=daily_cap,
+                units=units,
+                op_id=f"{policy_id}:{reserve_op_id}:{category}",
+            )
+            retry_after = max(retry_after, int(daily_ra or 0))
+            current = dict(categories.get(category) or {})
+            current.update(daily_details or {})
+            current["retry_after"] = max(int(current.get("retry_after") or 0), int(daily_ra or 0))
+            if not allowed:
+                current["allowed"] = False
+                categories[category] = current
+                return RGDecision(
+                    allowed=False,
+                    retry_after=(retry_after or None),
+                    details={"policy_id": policy_id, "categories": categories},
+                )
+            current.setdefault("allowed", True)
+            categories[category] = current
+        return None
+
     # --- Public API ---
     async def check(self, req: RGRequest) -> RGDecision:
         now = self._time()
@@ -497,15 +550,16 @@ class MemoryResourceGovernor(ResourceGovernor):
         self._purge_expired_handles(now_purge)
         self._purge_expired_ops(now_purge)
         # Idempotency: return previous outcome for same op_id
-        if op_id and op_id in self._ops:
-            rec = self._ops[op_id]
+        reserve_key = self._op_key("reserve", op_id) if op_id else None
+        if reserve_key and reserve_key in self._ops:
+            rec = self._ops[reserve_key]
             hid = rec.get("handle_id")
             return rec.get("decision"), hid  # type: ignore[return-value]
 
         dec = await self.check(req)
         if not dec.allowed:
-            if op_id:
-                self._ops[op_id] = {"type": "reserve", "decision": dec, "handle_id": None, "created_at": now_purge}
+            if reserve_key:
+                self._ops[reserve_key] = {"type": "reserve", "decision": dec, "handle_id": None, "created_at": now_purge}
             return dec, None
 
         # Consume from buckets / acquire leases
@@ -516,6 +570,20 @@ class MemoryResourceGovernor(ResourceGovernor):
         handle_id = str(uuid.uuid4())
         ttl = self._default_handle_ttl
         h = _ReservationHandle(handle_id=handle_id, entity=req.entity, policy_id=policy_id, categories={}, created_at=now, expires_at=now + ttl)
+
+        daily_denial = await self._consume_daily_caps_for_reserve(
+            req=req,
+            policy_id=policy_id,
+            policy=pol,
+            entity_scope=entity_scope,
+            entity_value=entity_value,
+            reserve_op_id=op_id or handle_id,
+            decision=dec,
+        )
+        if daily_denial is not None:
+            if reserve_key:
+                self._ops[reserve_key] = {"type": "reserve", "decision": daily_denial, "handle_id": None, "created_at": now}
+            return daily_denial, None
 
         for category, cfg in req.categories.items():
             units = int(cfg.get("units") or 0)
@@ -583,8 +651,8 @@ class MemoryResourceGovernor(ResourceGovernor):
                 pass
 
         self._handles[handle_id] = h
-        if op_id:
-            self._ops[op_id] = {"type": "reserve", "decision": dec, "handle_id": handle_id, "created_at": now}
+        if reserve_key:
+            self._ops[reserve_key] = {"type": "reserve", "decision": dec, "handle_id": handle_id, "created_at": now}
         return dec, handle_id
 
     async def commit(self, handle_id: str, actuals: dict[str, int] | None = None, op_id: str | None = None) -> None:
@@ -592,8 +660,9 @@ class MemoryResourceGovernor(ResourceGovernor):
         self._purge_expired_handles(now_purge)
         self._purge_expired_ops(now_purge)
         # Idempotent per op_id
-        if op_id and op_id in self._ops:
-            rec = self._ops[op_id]
+        commit_key = self._op_key("commit", op_id) if op_id else None
+        if commit_key and commit_key in self._ops:
+            rec = self._ops[commit_key]
             if rec.get("type") == "commit" and rec.get("handle_id") == handle_id:
                 return
         h = self._handles.get(handle_id)
@@ -671,16 +740,17 @@ class MemoryResourceGovernor(ResourceGovernor):
 
         h.state = "finalized"
         self._handles.pop(handle_id, None)
-        if op_id:
-            self._ops[op_id] = {"type": "commit", "handle_id": handle_id, "created_at": now}
+        if commit_key:
+            self._ops[commit_key] = {"type": "commit", "handle_id": handle_id, "created_at": now}
 
     async def refund(self, handle_id: str, deltas: dict[str, int] | None = None, op_id: str | None = None) -> None:
         now_purge = self._time()
         self._purge_expired_handles(now_purge)
         self._purge_expired_ops(now_purge)
         # Idempotent per op_id
-        if op_id and op_id in self._ops:
-            rec = self._ops[op_id]
+        refund_key = self._op_key("refund", op_id) if op_id else None
+        if refund_key and refund_key in self._ops:
+            rec = self._ops[refund_key]
             if rec.get("type") == "refund" and rec.get("handle_id") == handle_id:
                 return
         h = self._handles.get(handle_id)
@@ -734,8 +804,8 @@ class MemoryResourceGovernor(ResourceGovernor):
                     except (AttributeError, RuntimeError, TypeError, ValueError):
                         pass
 
-        if op_id:
-            self._ops[op_id] = {"type": "refund", "handle_id": handle_id, "created_at": now}
+        if refund_key:
+            self._ops[refund_key] = {"type": "refund", "handle_id": handle_id, "created_at": now}
 
     async def renew(self, handle_id: str, ttl_s: int) -> None:
         h = self._handles.get(handle_id)
