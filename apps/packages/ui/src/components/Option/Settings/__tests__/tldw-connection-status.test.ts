@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  getCoreIssueLabel,
   getCoreStatusLabel,
   getRagStatusLabel
 } from "../tldw-connection-status"
@@ -24,6 +25,24 @@ describe("tldw connection status labels", () => {
     expect(getRagStatusLabel(fallbackT, "healthy")).toBe("RAG: healthy")
     expect(getRagStatusLabel(fallbackT, "unhealthy")).toBe(
       "RAG: needs attention"
+    )
+  })
+
+  it("labels connection setup and failure reasons separately", () => {
+    expect(getCoreIssueLabel(fallbackT, "missing_server_url")).toBe(
+      "Server URL missing"
+    )
+    expect(getCoreIssueLabel(fallbackT, "missing_api_key")).toBe(
+      "API key missing"
+    )
+    expect(getCoreIssueLabel(fallbackT, "invalid_api_key")).toBe(
+      "API key invalid"
+    )
+    expect(getCoreIssueLabel(fallbackT, "unreachable")).toBe(
+      "Server unreachable"
+    )
+    expect(getCoreIssueLabel(fallbackT, "degraded")).toBe(
+      "Feature checks degraded"
     )
   })
 })

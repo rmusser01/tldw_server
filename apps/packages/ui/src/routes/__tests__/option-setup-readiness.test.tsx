@@ -2,13 +2,16 @@
 
 import React from "react"
 import { MemoryRouter } from "react-router-dom"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import OptionSetup from "../option-setup"
 
 const mocks = vi.hoisted(() => ({
-  useSetupOnboarding: vi.fn()
+  useSetupOnboarding: vi.fn(),
+  navigate: vi.fn(),
+  setConfigPartial: vi.fn(),
+  testConnectionFromOnboarding: vi.fn()
 }))
 
 vi.mock("~/components/Layouts/Layout", () => ({
@@ -60,8 +63,25 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>(
+    "react-router-dom"
+  )
+  return {
+    ...actual,
+    useNavigate: () => mocks.navigate
+  }
+})
+
 vi.mock("@/hooks/useSetupOnboarding", () => ({
   useSetupOnboarding: () => mocks.useSetupOnboarding()
+}))
+
+vi.mock("@/hooks/useConnectionState", () => ({
+  useConnectionActions: () => ({
+    setConfigPartial: mocks.setConfigPartial,
+    testConnectionFromOnboarding: mocks.testConnectionFromOnboarding
+  })
 }))
 
 const renderRoute = () =>
@@ -73,6 +93,8 @@ const renderRoute = () =>
 
 describe("OptionSetup readiness route", () => {
   beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
     mocks.useSetupOnboarding.mockReturnValue({
       state: { status: "completed" },
       metadata: null,
@@ -130,5 +152,36 @@ describe("OptionSetup readiness route", () => {
     ).toBeInTheDocument()
     expect(screen.getByTestId("page-assist-loader")).toBeInTheDocument()
     expect(screen.queryByTestId("unified-setup-shell")).not.toBeInTheDocument()
+  })
+
+  it("shows a self-host connection path before operator recovery", () => {
+    renderRoute()
+
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Connect your tldw server" })
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText("Server URL")).toBeInTheDocument()
+    expect(screen.getByLabelText("API Key")).toHaveAttribute("type", "password")
+    expect(
+      screen.getByRole("button", { name: "Test connection" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Where do I find my key?" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Skip and explore UI" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Setup operator recovery" })
+    ).toBeInTheDocument()
+  })
+
+  it("persists the first-run skip when users choose to explore the UI", () => {
+    renderRoute()
+
+    fireEvent.click(screen.getByRole("button", { name: "Skip and explore UI" }))
+
+    expect(localStorage.getItem("assistant_setup_dismissed")).toBe("true")
+    expect(mocks.navigate).toHaveBeenCalledWith("/chat")
   })
 })

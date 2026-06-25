@@ -1,5 +1,11 @@
 export type CoreStatus = "unknown" | "checking" | "connected" | "failed"
 export type RagStatus = "healthy" | "unhealthy" | "unknown" | "checking"
+export type CoreIssueKind =
+  | "missing_server_url"
+  | "missing_api_key"
+  | "invalid_api_key"
+  | "unreachable"
+  | "degraded"
 
 type TranslateFn = (key: string, defaultValue: string) => string
 
@@ -15,6 +21,39 @@ export const getCoreStatusLabel = (t: TranslateFn, status: CoreStatus) => {
       return t(
         "settings:tldw.connection.coreUnknown",
         "Core: not checked yet"
+      )
+  }
+}
+
+export const getCoreIssueLabel = (
+  t: TranslateFn,
+  issue: CoreIssueKind
+) => {
+  switch (issue) {
+    case "missing_server_url":
+      return t(
+        "settings:tldw.connection.issueMissingServerUrl",
+        "Server URL missing"
+      )
+    case "missing_api_key":
+      return t(
+        "settings:tldw.connection.issueMissingApiKey",
+        "API key missing"
+      )
+    case "invalid_api_key":
+      return t(
+        "settings:tldw.connection.issueInvalidApiKey",
+        "API key invalid"
+      )
+    case "unreachable":
+      return t(
+        "settings:tldw.connection.issueUnreachable",
+        "Server unreachable"
+      )
+    case "degraded":
+      return t(
+        "settings:tldw.connection.issueDegraded",
+        "Feature checks degraded"
       )
   }
 }

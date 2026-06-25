@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import HealthStatus from "../health-status"
 
 const apiSendMock = vi.hoisted(() => vi.fn())
@@ -26,6 +26,7 @@ const designSystemLabels = vi.hoisted(() => ({
   degraded: "Registry Degraded",
   loading: "Registry Loading"
 }))
+const clipboardWriteTextMock = vi.hoisted(() => vi.fn())
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -159,6 +160,13 @@ describe("HealthStatus design-system states", () => {
       status: 200,
       data: { status: "ok" }
     })
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: clipboardWriteTextMock
+      }
+    })
+    clipboardWriteTextMock.mockResolvedValue(undefined)
   })
 
   it("renders Ready when every health check passes", async () => {
@@ -251,5 +259,55 @@ describe("HealthStatus design-system states", () => {
 
     expect(await screen.findByText("Sign in required")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Fix API key" })).toBeInTheDocument()
+  })
+
+  it("shows API key setup copy instead of core outage copy when credentials are missing", async () => {
+    connectionUxMock.uxState = "configuring_auth"
+    connectionUxMock.errorKind = null
+    connectionStateMock.serverUrl = "http://127.0.0.1:8000"
+    clientMock.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: ""
+    })
+    clientMock.healthCheck.mockResolvedValue(false)
+
+    await renderHealth()
+
+    expect(
+      await screen.findByText("API key required for health checks")
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText("Unable to reach server core health endpoint.")
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Add API key" })).toBeInTheDocument()
+  })
+
+  it("redacts secret-shaped fields before copying diagnostics", async () => {
+    apiSendMock.mockResolvedValue({
+      ok: false,
+      status: 401,
+      error: {
+        detail: "Unauthorized",
+        apiKey: "secret-test-key",
+        nested: {
+          Authorization: "Bearer secret-token",
+          cookie: "session=secret-cookie"
+        }
+      }
+    })
+
+    await renderHealth()
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy diagnostics" }))
+
+    await waitFor(() => {
+      expect(clipboardWriteTextMock).toHaveBeenCalled()
+    })
+    const copied = String(clipboardWriteTextMock.mock.calls[0]?.[0] ?? "")
+    expect(copied).toContain("[redacted]")
+    expect(copied).not.toContain("secret-test-key")
+    expect(copied).not.toContain("secret-token")
+    expect(copied).not.toContain("secret-cookie")
   })
 })

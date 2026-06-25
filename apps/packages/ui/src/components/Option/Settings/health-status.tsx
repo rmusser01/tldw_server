@@ -24,6 +24,7 @@ import {
 import { cleanUrl } from "@/libs/clean-url"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { getDesignSystemState } from "@/design-system"
+import { getCoreIssueLabel } from "./tldw-connection-status"
 
 type Check = {
   key: string
@@ -116,6 +117,25 @@ const DEGRADED_STATE_LABEL = getDesignSystemState("degraded")?.label
 const LOADING_STATE_LABEL = getDesignSystemState("loading")?.label
 
 type Result = { status: 'unknown'|'healthy'|'unhealthy', detail?: any, statusCode?: number, durationMs?: number }
+
+const SECRET_KEY_PATTERN = /api[_-]?key|authorization|bearer|token|password|cookie/i
+
+const redactDiagnostics = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map((item) => redactDiagnostics(item))
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, nested]) => [
+        key,
+        SECRET_KEY_PATTERN.test(key) ? "[redacted]" : redactDiagnostics(nested)
+      ])
+    )
+  }
+
+  return value
+}
 
 export default function HealthStatus() {
   const { t } = useTranslation(['settings', 'common', 'option'])
@@ -355,6 +375,7 @@ export default function HealthStatus() {
     return t('healthPage.statusLoading', LOADING_STATE_LABEL)
   }
 
+  const showMissingAuthCallout = uxState === "configuring_auth"
   const showAuthCallout =
     uxState === "error_auth" || errorKind === "auth"
   const showUnreachableCallout =
@@ -435,7 +456,7 @@ export default function HealthStatus() {
                     timestamp: new Date().toISOString(),
                     results
                   }
-                  const text = JSON.stringify(payload, null, 2)
+                  const text = JSON.stringify(redactDiagnostics(payload), null, 2)
                   await navigator.clipboard.writeText(text)
                   notification.success({
                     message: t(
@@ -477,10 +498,10 @@ export default function HealthStatus() {
         </Space>
       </div>
 
-      {(showAuthCallout || showUnreachableCallout || showDegradedCallout) && (
+      {(showMissingAuthCallout || showAuthCallout || showUnreachableCallout || showDegradedCallout) && (
         <RecoveryCallout
           state={
-            showAuthCallout
+            showMissingAuthCallout || showAuthCallout
               ? "auth_required"
               : showUnreachableCallout
                 ? "unavailable"
@@ -488,7 +509,12 @@ export default function HealthStatus() {
           }
           className="mt-3"
           title={
-            showAuthCallout
+            showMissingAuthCallout
+              ? t(
+                  "healthPage.missingApiKeyTitle",
+                  "API key required for health checks"
+                )
+              : showAuthCallout
               ? t(
                   "option:connectionCard.headlineErrorAuth",
                   "API key needs attention"
@@ -506,7 +532,12 @@ export default function HealthStatus() {
           message={
             <span className="space-y-1 text-sm">
               <span className="block">
-                {showAuthCallout
+                {showMissingAuthCallout
+                  ? t(
+                      "healthPage.missingApiKeyBody",
+                      "Your server URL is saved, but single-user health checks need an API key before authenticated endpoints can be checked."
+                    )
+                  : showAuthCallout
                   ? t(
                       "healthSummary.issueAuthHint",
                       "Your server responded but the API key or login is invalid. Fix your credentials, then re-run checks."
@@ -544,14 +575,16 @@ export default function HealthStatus() {
             </span>
           }
           primaryAction={{
-            label: showAuthCallout
-              ? t("healthPage.fixApiKeyCta", "Fix API key")
-              : showUnreachableCallout
-                ? t("healthPage.editUrlCta", "Edit server URL")
-                : t("healthPage.backToAppCta", "Back to app"),
+            label: showMissingAuthCallout
+              ? t("healthPage.addApiKeyCta", "Add API key")
+              : showAuthCallout
+                ? t("healthPage.fixApiKeyCta", "Fix API key")
+                : showUnreachableCallout
+                  ? t("healthPage.editUrlCta", "Edit server URL")
+                  : t("healthPage.backToAppCta", "Back to app"),
             onClick: () => {
-              if (showAuthCallout || showUnreachableCallout) {
-                navigate("/")
+              if (showMissingAuthCallout || showAuthCallout || showUnreachableCallout) {
+                navigate("/settings/tldw")
                 return
               }
               const target = getReturnTo()
@@ -582,10 +615,13 @@ export default function HealthStatus() {
         </DesignSystemAlert>
       )}
 
-      {!serverUrl || coreStatus === 'failed' ? (
+      {showMissingAuthCallout ? null : !serverUrl || coreStatus === 'failed' ? (
         !serverUrl ? (
           <SetupRequiredPanel
-            title={t('healthPage.serverNotConfigured', 'Server is not configured.')}
+            title={t(
+              'healthPage.serverNotConfigured',
+              getCoreIssueLabel(t, "missing_server_url")
+            )}
             message={t('healthPage.configureHint', 'Please configure a server URL under tldw settings.')}
             primaryAction={{
               label: t('healthPage.configureCta', 'Configure'),
@@ -610,7 +646,7 @@ export default function HealthStatus() {
         />
       )}
 
-      {(!serverUrl || coreStatus === 'failed') && (
+      {(!serverUrl || coreStatus === 'failed') && !showMissingAuthCallout && (
         <ServerOverviewHint />
       )}
 
@@ -707,7 +743,7 @@ export default function HealthStatus() {
             const detailText = (() => {
               if (!r.detail) return ""
               try {
-                return JSON.stringify(r.detail, null, 2)
+                return JSON.stringify(redactDiagnostics(r.detail), null, 2)
               } catch {
                 return String(r.detail)
               }
@@ -812,7 +848,11 @@ export default function HealthStatus() {
                               durationMs: r.durationMs,
                               detail: r.detail
                             }
-                            const text = JSON.stringify(payload, null, 2)
+                            const text = JSON.stringify(
+                              redactDiagnostics(payload),
+                              null,
+                              2
+                            )
                             await navigator.clipboard.writeText(text)
                             notification.success({
                               message: t(
