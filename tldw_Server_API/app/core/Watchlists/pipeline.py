@@ -70,7 +70,6 @@ except ImportError:  # pragma: no cover
     _bleach = None  # type: ignore[assignment]
 
 _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
@@ -493,8 +492,9 @@ def _select_sources_for_scope(db: WatchlistsDatabase, scope: dict[str, Any]) -> 
     """
     selected: dict[int, SourceRow] = {}
     # Explicit IDs
-    for sid in map(int, scope.get("sources", []) or []):
+    for raw_sid in scope.get("sources", []) or []:
         try:
+            sid = int(raw_sid)
             r = db.get_source(sid)
             if int(r.active or 0) == 1:
                 selected[int(r.id)] = r
@@ -508,7 +508,14 @@ def _select_sources_for_scope(db: WatchlistsDatabase, scope: dict[str, Any]) -> 
             if int(r.active or 0) == 1:
                 selected[int(r.id)] = r
     # Groups
-    group_ids = scope.get("groups") or []
+    group_ids: list[int] = []
+    for raw_gid in scope.get("groups", []) or []:
+        try:
+            gid = int(raw_gid)
+        except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS:
+            continue
+        if gid > 0:
+            group_ids.append(gid)
     if group_ids:
         try:
             rows = db.list_sources_by_group_ids(group_ids)
@@ -518,6 +525,19 @@ def _select_sources_for_scope(db: WatchlistsDatabase, scope: dict[str, Any]) -> 
         except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS:
             pass
     return list(selected.values())
+
+
+def _resolve_watchlist_tenant_id(explicit_tenant_id: str | None) -> str:
+    if isinstance(explicit_tenant_id, str) and explicit_tenant_id.strip():
+        return explicit_tenant_id.strip()
+    try:
+        scope = get_scope()
+        org_id = getattr(scope, "effective_org_id", None) if scope else None
+        if org_id is not None:
+            return f"org_{int(org_id)}"
+    except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS:
+        pass
+    return "default"
 
 
 async def _maybe_auto_generate_output(
@@ -662,6 +682,7 @@ async def run_watchlist_job(
     user_id: int,
     job_id: int,
     *,
+    tenant_id: str | None = None,
     source_ids_override: list[int] | None = None,
     capture_companion_activity: bool = False,
     companion_route: str | None = None,
@@ -675,6 +696,7 @@ async def run_watchlist_job(
     job = db.get_job(job_id)
     is_first_run = bool(not getattr(job, "last_run_at", None))
     run = db.create_run(job_id=job_id, status="running")
+    effective_tenant_id = _resolve_watchlist_tenant_id(tenant_id)
 
     job_output_prefs: dict[str, Any] = {}
     try:
@@ -983,7 +1005,7 @@ async def run_watchlist_job(
                                 etag=getattr(src, "etag", None),
                                 last_modified=getattr(src, "last_modified", None),
                                 timeout=8.0,
-                                tenant_id="default",
+                                tenant_id=effective_tenant_id,
                                 strategy=hist_strategy,
                                 max_pages=hist_max_pages,
                                 per_page_limit=hist_per_page,
@@ -997,7 +1019,7 @@ async def run_watchlist_job(
                                 etag=getattr(src, "etag", None),
                                 last_modified=getattr(src, "last_modified", None),
                                 timeout=8.0,
-                                tenant_id="default",
+                                tenant_id=effective_tenant_id,
                             )
                     status = int(res.get("status", 0) or 0)
                     if status == 304:
@@ -1357,7 +1379,7 @@ async def run_watchlist_job(
                             scraped_items = await fetch_site_items_with_rules(
                                 base_url=str(scrape_rules.get("list_url") or src.url),
                                 rules=scrape_rules,
-                                tenant_id="default",
+                                tenant_id=effective_tenant_id,
                             )
                         except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS as exc:
                             logger.debug(f"Scrape rules fetch failed for source {getattr(src, 'id', '?')}: {exc}")
@@ -1820,5 +1842,23 @@ async def run_watchlist_job(
             logger.debug(f"post-run stats persistence failed for run {run.id}: {exc}")
 
         return {"run_id": run.id, **stats}
+    except asyncio.CancelledError:
+        with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
+            db.update_run(
+                run.id,
+                status="cancelled",
+                finished_at=_utcnow_iso(),
+                error_msg="cancelled",
+            )
+        raise
+    except Exception as exc:
+        with contextlib.suppress(_WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS):
+            db.update_run(
+                run.id,
+                status="failed",
+                finished_at=_utcnow_iso(),
+                error_msg=_safe_source_error_text(exc) or type(exc).__name__,
+            )
+        raise
     finally:
         stack.close()

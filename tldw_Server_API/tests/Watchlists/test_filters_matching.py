@@ -2,7 +2,13 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from tldw_Server_API.app.core.Watchlists.filters import normalize_filters, evaluate_filters
+from tldw_Server_API.app.core.Watchlists.filters import (
+    _REGEX_TIMEOUT_ERROR,
+    _compile_regex,
+    _safe_regex_search,
+    evaluate_filters,
+    normalize_filters,
+)
 
 
 def test_keyword_any_and_all():
@@ -44,6 +50,37 @@ def test_regex_flags_and_field():
 
     decision, _ = evaluate_filters(flt, {"title": "Regular", "author": "author: John Doe"})
     assert decision == "flag"
+
+
+def test_regex_nested_quantifier_pattern_is_rejected():
+    assert _compile_regex(r"(a+)+$", None) is None
+
+
+def test_regex_oversized_pattern_is_skipped():
+    pattern = "a" * 1001
+    flt = normalize_filters(
+        {
+            "filters": [
+                {
+                    "type": "regex",
+                    "action": "exclude",
+                    "value": {"pattern": pattern, "field": "title"},
+                }
+            ]
+        }
+    )
+
+    decision, _ = evaluate_filters(flt, {"title": pattern})
+
+    assert decision is None
+
+
+def test_safe_regex_search_handles_regex_timeout_variant():
+    class TimeoutRegex:
+        def search(self, text, timeout=None):
+            raise _REGEX_TIMEOUT_ERROR("timed out")
+
+    assert _safe_regex_search(TimeoutRegex(), "aaaaaaaa") is False
 
 
 def test_date_range_max_age_days():
