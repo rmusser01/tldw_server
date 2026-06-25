@@ -1080,6 +1080,8 @@ def test_mcp_unified_publish_workflow_is_manual_and_gated() -> None:
     serialized_workflow = yaml.safe_dump(workflow, sort_keys=True)
     run_blocks = "\n".join(_workflow_run_blocks(workflow))
     jobs = workflow["jobs"]
+    testpypi_job = jobs["publish-testpypi"]
+    pypi_job = jobs["publish-pypi"]
 
     assert set(triggers) == {"workflow_dispatch"}  # nosec B101
     inputs = triggers["workflow_dispatch"]["inputs"]
@@ -1097,20 +1099,24 @@ def test_mcp_unified_publish_workflow_is_manual_and_gated() -> None:
     assert plan_job["permissions"] == {"contents": "read"}  # nosec B101
     for job_name, environment_name, permissions in (
         ("publish-testpypi", "testpypi", {"contents": "read"}),
-        ("publish-pypi", "pypi", {"contents": "read", "id-token": "write"}),
+        (
+            "publish-pypi",
+            "pypi",
+            {"actions": "read", "contents": "read", "id-token": "write"},
+        ),
     ):
         job = jobs[job_name]
         assert job["needs"] == "publish-plan"  # nosec B101
         assert "inputs.confirm_publish == 'MCP_UNIFIED_PUBLISH'" in job["if"]  # nosec B101
         assert job["permissions"] == permissions  # nosec B101
         assert job["environment"]["name"] == environment_name  # nosec B101
-    testpypi_job_text = yaml.safe_dump(jobs["publish-testpypi"], sort_keys=True)
-    pypi_job_text = yaml.safe_dump(jobs["publish-pypi"], sort_keys=True)
-    assert "MCP_UNIFIED_TESTPYPI_API_TOKEN" in testpypi_job_text  # nosec B101
-    assert "TWINE_USERNAME: __token__" in testpypi_job_text  # nosec B101
-    assert "MCP_UNIFIED_PYPI_API_TOKEN" not in pypi_job_text  # nosec B101
-    assert "TWINE_USERNAME: __token__" not in pypi_job_text  # nosec B101
-    assert "pypa/gh-action-pypi-publish" in pypi_job_text  # nosec B101
+    assert testpypi_job["env"]["TWINE_USERNAME"] == "__token__"  # nosec B101
+    assert "MCP_UNIFIED_TESTPYPI_API_TOKEN" in testpypi_job["env"]["TWINE_PASSWORD"]  # nosec B101
+    assert "env" not in pypi_job  # nosec B101
+    assert any(  # nosec B101
+        step.get("uses", "").startswith("pypa/gh-action-pypi-publish@")
+        for step in pypi_job["steps"]
+    )
 
 
 def test_mcp_unified_make_targets_do_not_call_root_pypi_check() -> None:
@@ -1191,21 +1197,43 @@ def test_mcp_unified_publish_workflow_uses_trusted_publishing_for_pypi() -> None
     """Production MCP Unified publishing must use the configured PyPI OIDC publisher."""
 
     workflow_path = REPO_ROOT / ".github" / "workflows" / "mcp-unified-publish.yml"
+    workflow_text = workflow_path.read_text(encoding="utf-8")
     workflow = _load_workflow(workflow_path)
 
     testpypi_job = workflow["jobs"]["publish-testpypi"]
     pypi_job = workflow["jobs"]["publish-pypi"]
-    pypi_serialized = yaml.safe_dump(pypi_job, sort_keys=True)
-    pypi_uses_steps = [step.get("uses") for step in pypi_job["steps"] if "uses" in step]
+    pypi_steps = {step["name"]: step for step in pypi_job["steps"]}
+    download_step = pypi_steps["Download MCP Unified distributions"]
+    publish_step = pypi_steps["Publish MCP Unified to PyPI"]
 
     assert testpypi_job["env"]["TWINE_USERNAME"] == "__token__"  # nosec B101
     assert "MCP_UNIFIED_TESTPYPI_API_TOKEN" in testpypi_job["env"]["TWINE_PASSWORD"]  # nosec B101
     assert pypi_job["environment"]["name"] == "pypi"  # nosec B101
-    assert pypi_job["permissions"] == {"contents": "read", "id-token": "write"}  # nosec B101
-    assert "MCP_UNIFIED_PYPI_API_TOKEN" not in pypi_serialized  # nosec B101
-    assert "TWINE_PASSWORD" not in pypi_serialized  # nosec B101
-    assert any("pypa/gh-action-pypi-publish" in str(step) for step in pypi_uses_steps)  # nosec B101
-    assert ".artifacts/mcp-unified-rc/dist/" in pypi_serialized  # nosec B101
+    assert pypi_job["permissions"] == {  # nosec B101
+        "actions": "read",
+        "contents": "read",
+        "id-token": "write",
+    }
+    assert [step["name"] for step in pypi_job["steps"]] == [  # nosec B101
+        "Download MCP Unified distributions",
+        "Publish MCP Unified to PyPI",
+    ]
+    assert "env" not in pypi_job  # nosec B101
+    assert all("run" not in step for step in pypi_job["steps"])  # nosec B101
+    assert download_step["uses"] == (  # nosec B101
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+    )
+    assert download_step["with"] == {  # nosec B101
+        "name": "mcp-unified-publish-plan",
+        "path": ".artifacts/mcp-unified-rc",
+    }
+    assert publish_step["uses"] == (  # nosec B101
+        "pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e"
+    )
+    assert publish_step["with"]["packages-dir"] == ".artifacts/mcp-unified-rc/dist/"  # nosec B101
+    assert "MCP_UNIFIED_PYPI_API_TOKEN" not in workflow_text  # nosec B101
+    assert "TWINE_PASSWORD: ${{ secrets.MCP_UNIFIED_PYPI_API_TOKEN }}" not in workflow_text  # nosec B101
+    assert "pypa/gh-action-pypi-publish@v1.13.0" not in workflow_text  # nosec B101
 
 
 @pytest.mark.smoke
