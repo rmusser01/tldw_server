@@ -1865,7 +1865,7 @@ git commit -m "feat: add RPG service authority flow"
 - Modify: `tldw_Server_API/Config_Files/privilege_catalog.yaml`
 - Test: `tldw_Server_API/tests/RPG/test_rpg_api.py`
 
-Before endpoint code is written, create a route matrix in the task notes and keep implementation aligned with it:
+Before endpoint code is written, create a route matrix in the task notes and keep implementation aligned with it. This is the target RPG API surface; Task 6 implements only rows backed by the current service layer, while later rules/context and final-hardening tasks add the remaining handlers.
 
 | Method | Path | Permission | Endpoint ID | Idempotency | Expected Sequence |
 | --- | --- | --- | --- | --- | --- |
@@ -1891,7 +1891,7 @@ Before endpoint code is written, create a route matrix in the task notes and kee
 | `POST` | `/api/v1/rpg/sessions/{session_id}/rules/lookup` | `rpg.rules.read` | `rpg.rules.read` | no | no |
 | `POST` | `/api/v1/rpg/sessions/{session_id}/context` | `rpg.sessions.read` | `rpg.sessions.read` | no | no |
 
-- [ ] **Step 1: Write failing API tests**
+- [x] **Step 1: Write failing API tests**
 
 ```python
 from fastapi.testclient import TestClient
@@ -1944,13 +1944,13 @@ def test_create_campaign_session_and_record_user_event():
     assert event_response.json()["committed_events"][0]["sequence_number"] == 1
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_api.py -v`
 
 Expected: FAIL because the RPG router is not registered.
 
-- [ ] **Step 3: Add Pydantic schemas**
+- [x] **Step 3: Add Pydantic schemas**
 
 ```python
 # tldw_Server_API/app/api/v1/schemas/rpg_schemas.py
@@ -2036,7 +2036,7 @@ class RPGProposalRejectRequest(BaseModel):
     review_notes: str | None = Field(default=None, max_length=2000)
 ```
 
-- [ ] **Step 4: Add endpoints with token scope metadata**
+- [x] **Step 4: Add endpoints with token scope metadata**
 
 ```python
 # tldw_Server_API/app/api/v1/endpoints/rpg.py
@@ -2165,9 +2165,9 @@ def build_context(session_id: int, request: RPGContextBuildRequest, service: RPG
     return asdict(service.build_context(session_id=session_id, query=request.query, max_chars=request.max_chars))
 ```
 
-Add the remaining route handlers from the matrix with the same dependency style. All write handlers must require the `Idempotency-Key` header and the matching explicit permission dependency.
+Add the route handlers backed by the current service slice with the same dependency style. Do not add placeholder routes for rules/context/session-read rows until the backing service behavior exists. All write handlers must require the `Idempotency-Key` header and the matching explicit permission dependency.
 
-- [ ] **Step 5: Register the router**
+- [x] **Step 5: Register the router**
 
 ```python
 # tldw_Server_API/app/api/v1/router_groups/content.py
@@ -2183,17 +2183,17 @@ append_imported_router_spec(specs, rpg_spec)
 
 Add this spec near adjacent content runtimes, before the VN route group tail.
 
-- [ ] **Step 6: Add privilege catalog entries needed by the RPG router**
+- [x] **Step 6: Add privilege catalog entries needed by the RPG router**
 
 Add the catalog entries from Task 7 before expecting endpoint tests to pass. Include `rpg.snapshots.admin` for snapshot rebuild. Run `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrivilegeCatalog/test_endpoint_scope_catalog_sync.py -v`.
 
-- [ ] **Step 7: Run focused API tests**
+- [x] **Step 7: Run focused API tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_api.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/schemas/rpg_schemas.py tldw_Server_API/app/api/v1/endpoints/rpg.py tldw_Server_API/app/api/v1/router_groups/content.py tldw_Server_API/Config_Files/privilege_catalog.yaml tldw_Server_API/tests/RPG/test_rpg_api.py

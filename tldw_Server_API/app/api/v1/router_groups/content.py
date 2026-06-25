@@ -393,6 +393,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     # Workspace and character endpoints
     for character_spec in (
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.rpg",
+            log_name="rpg",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("rpg",),
+            route_key="rpg",
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.workspace_migrations",
             log_name="workspace_migrations",
             prefix=f"{API_V1_PREFIX}/workspaces",
