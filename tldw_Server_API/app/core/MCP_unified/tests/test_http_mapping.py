@@ -1,9 +1,9 @@
-import os
 import base64
-import json
-import pytest
 import ipaddress
+import json
+import os
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -21,6 +21,7 @@ def _setup_env():
 
 def _build_mcp_client():
     from fastapi import FastAPI
+
     from tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint import router as mcp_router
 
     app = FastAPI()
@@ -31,10 +32,10 @@ def _build_mcp_client():
 @pytest.fixture(scope="module")
 def client():
     _setup_env()
-    from fastapi import FastAPI
-    from fastapi import Request, HTTPException, status
-    from tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint import router as mcp_router
+    from fastapi import FastAPI, HTTPException, Request, status
+
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint import router as mcp_router
     from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
     app = FastAPI()
     app.include_router(mcp_router, prefix="/api/v1")
@@ -228,8 +229,10 @@ def test_demo_auth_issues_token_with_secret(monkeypatch):
 
 def test_refresh_endpoint_rejects_query_token_and_accepts_body(monkeypatch):
     _setup_env()
-    from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
+    monkeypatch.setenv("MCP_ENABLE_DEMO_AUTH", "1")
+    monkeypatch.setenv("MCP_DEMO_AUTH_SECRET", "supersecretvalue12345")
     from tldw_Server_API.app.core.MCP_unified import config as config_module
+    from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
     from tldw_Server_API.app.core.MCP_unified.security import ip_filter
 
     try:
@@ -257,6 +260,30 @@ def test_refresh_endpoint_rejects_query_token_and_accepts_body(monkeypatch):
         assert r_body.status_code == 200
         data = r_body.json()
         assert "access_token" in data and data["token_type"] == "bearer"
+
+
+def test_refresh_endpoint_disabled_without_demo_auth(monkeypatch):
+    _setup_env()
+    monkeypatch.delenv("MCP_ENABLE_DEMO_AUTH", raising=False)
+    from tldw_Server_API.app.core.MCP_unified import config as config_module
+    from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
+    from tldw_Server_API.app.core.MCP_unified.security import ip_filter
+
+    try:
+        config_module.get_config.cache_clear()  # type: ignore[attr-defined]
+        ip_filter.get_ip_access_controller.cache_clear()  # type: ignore[attr-defined]
+    except Exception:
+        _ = None
+
+    refresh, token_id = get_jwt_manager().create_refresh_token(subject="1")
+
+    with _build_mcp_client() as temp_client:
+        r_body = temp_client.post(
+            "/api/v1/mcp/auth/refresh",
+            json={"refresh_token": refresh, "token_id": token_id},
+        )
+
+    assert r_body.status_code == 501
 
 
 def test_request_guard_enforces_body_size_limit(monkeypatch):

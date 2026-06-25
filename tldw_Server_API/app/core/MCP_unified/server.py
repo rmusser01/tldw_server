@@ -19,7 +19,6 @@ from typing import Any, Optional
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.exceptions import AuthenticationError
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import is_single_user_ip_allowed
 from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, is_single_user_profile_mode
@@ -62,10 +61,17 @@ _MCP_SERVER_NONCRITICAL_EXCEPTIONS = (
     WebSocketDisconnect,
     RateLimitExceeded,
 )
-_AUTHNZ_TOKEN_DETECTION_EXCEPTIONS = _MCP_SERVER_NONCRITICAL_EXCEPTIONS + (AuthenticationError,)
+_AUTHNZ_TOKEN_DETECTION_EXCEPTIONS = _MCP_SERVER_NONCRITICAL_EXCEPTIONS
 
 _ENV_PLACEHOLDER_RE = re.compile(r"^\$\{(?P<name>[A-Z0-9_]+)(?::-(?P<default>.*))?\}$")
 _JSONRPC_EXPLICIT_NULL_ID_PREFIX = "__tldw_ws_jsonrpc_explicit_null_id_"
+
+
+def _is_authnz_exception(exc: Exception) -> bool:
+    module = exc.__class__.__module__
+    return module == "tldw_Server_API.app.core.AuthNZ.exceptions" or module.startswith(
+        "tldw_Server_API.app.core.AuthNZ.exceptions."
+    )
 
 
 def _is_authnz_access_token(token: str) -> bool:
@@ -78,11 +84,19 @@ def _is_authnz_access_token(token: str) -> bool:
         if TldwServerAuthProvider().is_authnz_access_token(token):
             return True
     except _AUTHNZ_TOKEN_DETECTION_EXCEPTIONS:
-        pass
+        logger.debug("MCP AuthNZ provider token detection unavailable")
+    except Exception as exc:  # noqa: BLE001 - AuthNZ exception types stay behind runtime providers.
+        if not _is_authnz_exception(exc):
+            raise
+        logger.debug("MCP AuthNZ provider token detection failed: {error_type}", error_type=exc.__class__.__name__)
 
     try:
         payload = get_jwt_service().decode_access_token(token)
     except _AUTHNZ_TOKEN_DETECTION_EXCEPTIONS:
+        return False
+    except Exception as exc:  # noqa: BLE001 - AuthNZ exception types stay behind runtime providers.
+        if not _is_authnz_exception(exc):
+            raise
         return False
     return isinstance(payload, dict) and bool(payload.get("sub"))
 
@@ -884,9 +898,23 @@ class MCPServer:
                 connection = self.connections[conn_id]
                 await connection.close(code=1001, reason="Connection timeout")
                 del self.connections[conn_id]
+                client_ip = str((connection.metadata or {}).get("client_ip") or "")
+                self._decrement_ip_connection_count(client_ip)
             # Update connection gauge
             with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
                 self.metrics_collector.update_connection_count("websocket", len(self.connections))
+
+    def _decrement_ip_connection_count(self, client_ip: str | None) -> None:
+        """Release one reserved per-IP WebSocket slot."""
+        if not client_ip:
+            return
+        try:
+            if client_ip in self._ip_connection_counts and self._ip_connection_counts[client_ip] > 0:
+                self._ip_connection_counts[client_ip] -= 1
+                if self._ip_connection_counts[client_ip] == 0:
+                    del self._ip_connection_counts[client_ip]
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            pass
 
     async def _metrics_collection_loop(self):
         """Periodically collect and log metrics"""
@@ -1237,6 +1265,7 @@ class MCPServer:
             metadata["workspace_id"] = workspace_key
         if cwd_key:
             metadata["cwd"] = cwd_key
+        metadata["client_ip"] = client_ip
 
         if not await self._guard_websocket_start(websocket):
             return
@@ -1322,16 +1351,9 @@ class MCPServer:
                     await stream.stop()
             # Remove connection
             async with self.connection_lock:
-                if connection_id in self.connections:
-                    del self.connections[connection_id]
-                # Decrement per-IP count
-                try:
-                    if client_ip in self._ip_connection_counts and self._ip_connection_counts[client_ip] > 0:
-                        self._ip_connection_counts[client_ip] -= 1
-                        if self._ip_connection_counts[client_ip] == 0:
-                            del self._ip_connection_counts[client_ip]
-                except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-                    pass
+                removed = self.connections.pop(connection_id, None)
+                if removed is not None:
+                    self._decrement_ip_connection_count(client_ip)
 
             logger.bind(connection_id=connection_id).info(f"WebSocket cleanup complete: {connection_id}")
             # Update connection gauge

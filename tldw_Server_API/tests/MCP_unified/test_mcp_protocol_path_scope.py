@@ -139,9 +139,7 @@ def _effective_path_policy(path_grants: list[dict]) -> dict:
 
 @pytest.mark.asyncio
 async def test_handle_tools_call_raises_approval_for_path_scope_violation(monkeypatch) -> None:
-    from tldw_Server_API.app.core.MCP_unified.protocol import ApprovalRequiredError
-    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
-    from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+    from tldw_Server_API.app.core.MCP_unified.protocol import ApprovalRequiredError, MCPProtocol, RequestContext
     from tldw_Server_API.app.services import mcp_hub_approval_service as approval_service_mod
     from tldw_Server_API.app.services import mcp_hub_path_enforcement_service as path_service_mod
 
@@ -237,9 +235,7 @@ async def test_handle_tools_call_raises_approval_for_path_scope_violation(monkey
 
 @pytest.mark.asyncio
 async def test_handle_tools_call_raises_approval_for_path_allowlist_violation(monkeypatch) -> None:
-    from tldw_Server_API.app.core.MCP_unified.protocol import ApprovalRequiredError
-    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
-    from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+    from tldw_Server_API.app.core.MCP_unified.protocol import ApprovalRequiredError, MCPProtocol, RequestContext
     from tldw_Server_API.app.services import mcp_hub_approval_service as approval_service_mod
     from tldw_Server_API.app.services import mcp_hub_path_enforcement_service as path_service_mod
 
@@ -335,9 +331,7 @@ async def test_handle_tools_call_raises_approval_for_path_allowlist_violation(mo
 async def test_handle_tools_call_requires_approval_for_fs_write_text_out_of_scope_before_execution(
     monkeypatch,
 ) -> None:
-    from tldw_Server_API.app.core.MCP_unified.protocol import ApprovalRequiredError
-    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
-    from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+    from tldw_Server_API.app.core.MCP_unified.protocol import ApprovalRequiredError, MCPProtocol, RequestContext
     from tldw_Server_API.app.services import mcp_hub_approval_service as approval_service_mod
     from tldw_Server_API.app.services import mcp_hub_path_enforcement_service as path_service_mod
 
@@ -437,20 +431,19 @@ async def test_handle_tools_call_requires_approval_for_run_chain_preflight_path_
     from tldw_Server_API.app.core.MCP_unified.modules.implementations.run_command_module import (
         RunCommandModule,
     )
-    from tldw_Server_API.app.core.MCP_unified.protocol import ApprovalRequiredError
-    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
-    from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+    from tldw_Server_API.app.core.MCP_unified.protocol import ApprovalRequiredError, MCPProtocol, RequestContext
     from tldw_Server_API.app.services import mcp_hub_approval_service as approval_service_mod
     from tldw_Server_API.app.services import mcp_hub_path_enforcement_service as path_service_mod
 
     fs_write_tool = {
-        "name": "fs.write_text",
+        "name": "fs.write",
         "description": "Write text",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "path": {"type": "string"},
                 "content": {"type": "string"},
+                "mode": {"type": "string"},
             },
             "required": ["path", "content"],
             "additionalProperties": False,
@@ -491,14 +484,14 @@ async def test_handle_tools_call_requires_approval_for_run_chain_preflight_path_
             return [dict(fs_write_tool), dict(fs_read_tool)]
 
         async def get_tool_def(self, tool_name: str) -> dict | None:
-            if tool_name == "fs.write_text":
+            if tool_name == "fs.write":
                 return dict(fs_write_tool)
             if tool_name == "fs.read_text":
                 return dict(fs_read_tool)
             return None
 
         def is_write_tool_def(self, tool_def: dict) -> bool:
-            return tool_def.get("name") == "fs.write_text"
+            return tool_def.get("name") == "fs.write"
 
         def sanitize_input(self, input_data):  # noqa: ANN001
             return input_data
@@ -542,7 +535,7 @@ async def test_handle_tools_call_requires_approval_for_run_chain_preflight_path_
 
         async def evaluate_tool_call(self, **kwargs) -> dict:  # noqa: ANN003
             self.calls.append(dict(kwargs))
-            if kwargs.get("tool_name") == "fs.write_text":
+            if kwargs.get("tool_name") == "fs.write":
                 return {
                     "enabled": True,
                     "within_scope": False,
@@ -572,12 +565,12 @@ async def test_handle_tools_call_requires_approval_for_run_chain_preflight_path_
 
         async def evaluate_tool_call(self, **kwargs) -> dict:  # noqa: ANN003
             self.calls.append(dict(kwargs))
-            if kwargs.get("tool_name") == "fs.write_text":
+            if kwargs.get("tool_name") == "fs.write":
                 return {
                     "status": "approval_required",
                     "approval": {
                         "approval_policy_id": 1,
-                        "tool_name": "fs.write_text",
+                        "tool_name": "fs.write",
                         "reason": kwargs.get("approval_reason"),
                         "scope_context": dict(kwargs.get("scope_payload") or {}),
                     },
@@ -603,7 +596,7 @@ async def test_handle_tools_call_requires_approval_for_run_chain_preflight_path_
         modules={"run_command": run_module, "filesystem": filesystem_module},
         tool_to_module={
             "run": "run_command",
-            "fs.write_text": "filesystem",
+            "fs.write": "filesystem",
             "fs.read_text": "filesystem",
         },
     )
@@ -611,7 +604,7 @@ async def test_handle_tools_call_requires_approval_for_run_chain_preflight_path_
     async def _resolve_effective_policy(_context):
         return {
             "enabled": True,
-            "allowed_tools": ["run", "fs.write_text", "fs.read_text"],
+            "allowed_tools": ["run", "fs.write", "fs.read_text"],
             "approval_policy_id": 1,
             "policy_document": {
                 "path_scope_mode": "cwd_descendants",
@@ -642,7 +635,7 @@ async def test_handle_tools_call_requires_approval_for_run_chain_preflight_path_
         )
 
     assert filesystem_module.execute_calls == []
-    assert [call.get("tool_name") for call in path_service.calls] == ["run", "fs.write_text"]
+    assert [call.get("tool_name") for call in path_service.calls] == ["run", "fs.write"]
 
 
 @pytest.mark.asyncio
@@ -674,8 +667,7 @@ async def test_handle_tools_call_hard_denies_external_slot_blockers_without_appr
     blocked_reason: str,
     scope_payload: dict,
 ) -> None:
-    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
-    from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
     from tldw_Server_API.app.services import mcp_hub_approval_service as approval_service_mod
 
     tool_def = {
@@ -993,8 +985,7 @@ async def test_path_grants_patch_bundle_fails_closed_when_create_needs_write(tmp
 
 @pytest.mark.asyncio
 async def test_handle_tools_call_allows_direct_workspace_scoped_reader(monkeypatch) -> None:
-    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
-    from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
     from tldw_Server_API.app.services import mcp_hub_path_enforcement_service as path_service_mod
     from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
         McpHubPathEnforcementService,
@@ -1079,9 +1070,7 @@ async def test_handle_tools_call_allows_direct_workspace_scoped_reader(monkeypat
 async def test_handle_tools_call_hard_denies_workspace_not_allowed_for_assignment_without_approval(
     monkeypatch,
 ) -> None:
-    from tldw_Server_API.app.core.MCP_unified.protocol import GovernanceDeniedError
-    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
-    from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+    from tldw_Server_API.app.core.MCP_unified.protocol import GovernanceDeniedError, MCPProtocol, RequestContext
     from tldw_Server_API.app.services import mcp_hub_approval_service as approval_service_mod
 
     tool_def = {
@@ -1166,9 +1155,7 @@ async def test_handle_tools_call_hard_denies_workspace_not_allowed_for_assignmen
 async def test_handle_tools_call_hard_denies_shared_registry_workspace_without_approval(
     monkeypatch,
 ) -> None:
-    from tldw_Server_API.app.core.MCP_unified.protocol import GovernanceDeniedError
-    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
-    from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+    from tldw_Server_API.app.core.MCP_unified.protocol import GovernanceDeniedError, MCPProtocol, RequestContext
     from tldw_Server_API.app.services import mcp_hub_approval_service as approval_service_mod
 
     tool_def = {
@@ -1254,9 +1241,7 @@ async def test_handle_tools_call_hard_denies_shared_registry_workspace_without_a
 async def test_handle_tools_call_requires_approval_for_trusted_workspace_not_allowed_by_assignment(
     monkeypatch,
 ) -> None:
-    from tldw_Server_API.app.core.MCP_unified.protocol import ApprovalRequiredError
-    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
-    from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+    from tldw_Server_API.app.core.MCP_unified.protocol import ApprovalRequiredError, MCPProtocol, RequestContext
     from tldw_Server_API.app.services import mcp_hub_approval_service as approval_service_mod
 
     tool_def = {
@@ -1346,9 +1331,7 @@ async def test_handle_tools_call_requires_approval_for_trusted_workspace_not_all
 async def test_handle_tools_call_hard_denies_unresolvable_workspace_for_trust_source_without_approval(
     monkeypatch,
 ) -> None:
-    from tldw_Server_API.app.core.MCP_unified.protocol import GovernanceDeniedError
-    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
-    from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+    from tldw_Server_API.app.core.MCP_unified.protocol import GovernanceDeniedError, MCPProtocol, RequestContext
     from tldw_Server_API.app.services import mcp_hub_approval_service as approval_service_mod
 
     tool_def = {
@@ -1437,9 +1420,7 @@ async def test_handle_tools_call_hard_denies_unresolvable_workspace_for_trust_so
 async def test_handle_tools_call_requires_approval_when_direct_workspace_root_missing(
     monkeypatch,
 ) -> None:
-    from tldw_Server_API.app.core.MCP_unified.protocol import ApprovalRequiredError
-    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
-    from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+    from tldw_Server_API.app.core.MCP_unified.protocol import ApprovalRequiredError, MCPProtocol, RequestContext
     from tldw_Server_API.app.services import mcp_hub_approval_service as approval_service_mod
     from tldw_Server_API.app.services import mcp_hub_path_enforcement_service as path_service_mod
     from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
@@ -1534,9 +1515,7 @@ async def test_handle_tools_call_requires_approval_when_direct_workspace_root_mi
 async def test_handle_tools_call_direct_cwd_descendants_stays_narrower_than_workspace_root(
     monkeypatch,
 ) -> None:
-    from tldw_Server_API.app.core.MCP_unified.protocol import ApprovalRequiredError
-    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
-    from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+    from tldw_Server_API.app.core.MCP_unified.protocol import ApprovalRequiredError, MCPProtocol, RequestContext
     from tldw_Server_API.app.services import mcp_hub_approval_service as approval_service_mod
     from tldw_Server_API.app.services import mcp_hub_path_enforcement_service as path_service_mod
     from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (

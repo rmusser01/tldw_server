@@ -1,7 +1,10 @@
+from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.MCP_unified import protocol as protocol_module
 from tldw_Server_API.app.core.MCP_unified.command_runtime.adapters import (
     derive_step_idempotency_key,
 )
@@ -16,12 +19,13 @@ from tldw_Server_API.app.core.MCP_unified.protocol import IdempotencyManager, MC
 
 
 class AllowAllRBAC:
-    async def check_permission(self, *args, **kwargs):
+    async def check_permission(self, *args: Any, **kwargs: Any) -> bool:
+        del args, kwargs
         return True
 
 
 class _CountingWriteModule(BaseModule):
-    def __init__(self, config: ModuleConfig):
+    def __init__(self, config: ModuleConfig) -> None:
         super().__init__(config)
         self.counter = 0
 
@@ -44,18 +48,49 @@ class _CountingWriteModule(BaseModule):
             )
         ]
 
-    def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]):
+    def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
         if tool_name == "write_count" and (not isinstance(arguments, dict) or "x" not in arguments):
             raise ValueError("x required")
 
-    async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context=None):
+    async def execute_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: RequestContext | None = None,
+    ) -> str:
+        del tool_name, context
         # Side effect: increment counter when actually executed
         self.counter += 1
         return f"count:{self.counter}:{arguments.get('x')}"
 
 
+class _ProbeIdempotencyManager:
+    def __init__(self) -> None:
+        self.bound_keys: list[str] = []
+        self.run_keys: list[str] = []
+
+    async def bind_arguments(self, key: str, arguments_hash: str, *, ttl: int, max_size: int) -> bool:
+        del arguments_hash, ttl, max_size
+        self.bound_keys.append(key)
+        return True
+
+    async def run(
+        self,
+        key: str,
+        execute: Callable[[], Awaitable[Any]],
+        *,
+        ttl: int,
+        max_size: int,
+        lock_ttl: int,
+    ) -> tuple[Any, bool]:
+        del ttl, max_size, lock_ttl
+        self.run_keys.append(key)
+        return await execute(), False
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
-async def test_idempotency_dedupes_write_calls():
+async def test_idempotency_dedupes_write_calls() -> None:
     registry = get_module_registry()
     await registry.register_module("counting_write", _CountingWriteModule, ModuleConfig(name="counting_write"))
 
@@ -94,8 +129,38 @@ async def test_idempotency_dedupes_write_calls():
     assert misses and any(getattr(e, "labels", {}).get("tool") == "write_count" for e in misses)
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
-async def test_idempotency_key_reuse_with_different_arguments_rejected():
+async def test_replaced_idempotency_manager_is_used_by_runtime() -> None:
+    registry = get_module_registry()
+    await registry.register_module(
+        "counting_write_replaced_idempotency",
+        _CountingWriteModule,
+        ModuleConfig(name="counting_write_replaced_idempotency"),
+    )
+
+    proto = MCPProtocol()
+    proto.rbac_policy = AllowAllRBAC()
+    probe = _ProbeIdempotencyManager()
+    proto._idempotency = probe
+
+    ctx = RequestContext(request_id="id-replaced", user_id="u1", client_id="c1")
+    req = MCPRequest(method="tools/call", params={
+        "name": "write_count",
+        "arguments": {"x": "A"},
+        "idempotencyKey": "k-replaced",
+    }, id="r-replaced")
+
+    resp = await proto.process_request(req, ctx)
+
+    assert resp.error is None
+    assert probe.bound_keys
+    assert probe.run_keys == probe.bound_keys
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_idempotency_key_reuse_with_different_arguments_rejected() -> None:
     registry = get_module_registry()
     await registry.register_module("counting_write_diff_args", _CountingWriteModule, ModuleConfig(name="counting_write_diff_args"))
 
@@ -126,8 +191,9 @@ async def test_idempotency_key_reuse_with_different_arguments_rejected():
     assert "idempotency key" in resp2.error.message.lower()
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
-async def test_idempotency_key_isolated_across_users():
+async def test_idempotency_key_isolated_across_users() -> None:
     registry = get_module_registry()
     await registry.register_module("counting_write_user_isolation", _CountingWriteModule, ModuleConfig(name="counting_write_user_isolation"))
 
@@ -159,10 +225,11 @@ async def test_idempotency_key_isolated_across_users():
 
 
 class _CategoryProbeLimiter:
-    def __init__(self):
-        self.last_category = None
+    def __init__(self) -> None:
+        self.last_category: str | None = None
 
-    async def check_rate_limit(self, *args, **kwargs):
+    async def check_rate_limit(self, *args: Any, **kwargs: Any) -> bool:
+        del args
         self.last_category = kwargs.get("category")
         return True
 
@@ -186,16 +253,98 @@ class _CategoryModule(BaseModule):
             metadata={"category": "ingestion"},
         )]
 
-    def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]):
+    def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
+        del tool_name
         if "m" not in arguments:
             raise ValueError("m required")
 
-    async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context=None):
+    async def execute_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: RequestContext | None = None,
+    ) -> Any:
+        del tool_name, context
         return arguments.get("m")
 
 
+class _MetadataCategoryModule(BaseModule):
+    async def on_initialize(self) -> None:
+        return None
+
+    async def on_shutdown(self) -> None:
+        return None
+
+    async def check_health(self) -> dict[str, bool]:
+        return {"ok": True}
+
+    async def get_tools(self) -> list[dict[str, Any]]:
+        category = str(self.config.settings["category"])
+        metadata = {"category": category}
+        if self.config.settings.get("uses_network"):
+            metadata["uses_network"] = True
+        return [
+            create_tool_definition(
+                name=f"echo_meta_{category}",
+                description="echo",
+                parameters={"properties": {"m": {"type": "string"}}, "required": ["m"]},
+                metadata=metadata,
+            )
+        ]
+
+    def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
+        del tool_name
+        if "m" not in arguments:
+            raise ValueError("m required")
+
+    async def execute_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: RequestContext | None = None,
+    ) -> Any:
+        del tool_name, context
+        return arguments.get("m")
+
+
+class _ConfigMappedCategoryModule(BaseModule):
+    async def on_initialize(self) -> None:
+        return None
+
+    async def on_shutdown(self) -> None:
+        return None
+
+    async def check_health(self) -> dict[str, bool]:
+        return {"ok": True}
+
+    async def get_tools(self) -> list[dict[str, Any]]:
+        return [
+            create_tool_definition(
+                name="echo_config_mapped",
+                description="echo",
+                parameters={"properties": {"m": {"type": "string"}}, "required": ["m"]},
+                metadata={},
+            )
+        ]
+
+    def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
+        del tool_name
+        if "m" not in arguments:
+            raise ValueError("m required")
+
+    async def execute_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: RequestContext | None = None,
+    ) -> Any:
+        del tool_name, context
+        return arguments.get("m")
+
+
+@pytest.mark.unit
 @pytest.mark.asyncio
-async def test_category_prefers_metadata_over_config_mapping(monkeypatch):
+async def test_category_prefers_metadata_over_config_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
     registry = get_module_registry()
     await registry.register_module("category_probe", _CategoryModule, ModuleConfig(name="category_probe"))
 
@@ -214,11 +363,87 @@ async def test_category_prefers_metadata_over_config_mapping(monkeypatch):
     assert probe.last_category == "ingestion"
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
-async def test_idempotency_local_lock_map_prunes_with_cache_bounds():
+async def test_runtime_config_provider_observes_post_construction_get_config_patch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = get_module_registry()
+    await registry.register_module(
+        "category_config_patch",
+        _ConfigMappedCategoryModule,
+        ModuleConfig(name="category_config_patch"),
+    )
+
+    proto = MCPProtocol()
+    proto.rbac_policy = AllowAllRBAC()
+    probe = _CategoryProbeLimiter()
+    proto.rate_limiter = probe
+
+    class _Config:
+        tool_category_map = {"echo_config_mapped": "management"}
+
+    monkeypatch.setattr(protocol_module, "get_config", lambda: _Config())
+
+    ctx = RequestContext(request_id="cx-config-patch", user_id="u1", client_id="c1")
+    req = MCPRequest(
+        method="tools/call",
+        params={"name": "echo_config_mapped", "arguments": {"m": "ok"}},
+        id="cx-config-patch",
+    )
+    resp = await proto.process_request(req, ctx)
+
+    assert resp.error is None
+    assert probe.last_category == "management"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("metadata_category", "uses_network", "expected_category"),
+    [
+        ("web", True, "network"),
+        ("utility", False, "utility"),
+    ],
+)
+async def test_category_preserves_non_legacy_metadata_categories(
+    metadata_category: str,
+    uses_network: bool,
+    expected_category: str,
+) -> None:
+    registry = get_module_registry()
+    await registry.register_module(
+        f"category_probe_{metadata_category}",
+        _MetadataCategoryModule,
+        ModuleConfig(
+            name=f"category_probe_{metadata_category}",
+            settings={"category": metadata_category, "uses_network": uses_network},
+        ),
+    )
+
+    proto = MCPProtocol()
+    proto.rbac_policy = AllowAllRBAC()
+    probe = _CategoryProbeLimiter()
+    proto.rate_limiter = probe
+
+    ctx = RequestContext(request_id=f"cx-{metadata_category}", user_id="u1", client_id="c1")
+    req = MCPRequest(
+        method="tools/call",
+        params={"name": f"echo_meta_{metadata_category}", "arguments": {"m": "ok"}},
+        id=f"cx-{metadata_category}",
+    )
+    resp = await proto.process_request(req, ctx)
+
+    assert resp.error is None
+    assert probe.last_category == expected_category
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_idempotency_local_lock_map_prunes_with_cache_bounds() -> None:
     manager = IdempotencyManager()
 
-    async def _execute(value: str):
+    async def _execute(value: str) -> dict[str, list[dict[str, str]]]:
         return {"content": [{"type": "text", "text": value}]}
 
     for idx in range(10):
@@ -236,8 +461,9 @@ async def test_idempotency_local_lock_map_prunes_with_cache_bounds():
     assert len(manager._local_locks) <= 3
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
-async def test_idempotency_warns_when_redis_factory_returns_none(monkeypatch):
+async def test_idempotency_warns_when_redis_factory_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.MCP_unified import protocol as protocol_mod
 
     class _Config:
@@ -267,7 +493,8 @@ async def test_idempotency_warns_when_redis_factory_returns_none(monkeypatch):
     assert any("returned None" in message for message, _args, _kwargs in warnings)
 
 
-def test_nested_step_idempotency_is_stable_and_content_derived():
+@pytest.mark.unit
+def test_nested_step_idempotency_is_stable_and_content_derived() -> None:
     first = derive_step_idempotency_key("parent-1", ["write", "notes.txt", "hello"], 0)
     second = derive_step_idempotency_key("parent-1", ["write", "notes.txt", "hello"], 0)
     different = derive_step_idempotency_key("parent-1", ["write", "notes.txt", "hello"], 1)
@@ -280,8 +507,11 @@ def test_nested_step_idempotency_is_stable_and_content_derived():
     assert first != changed_args
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
-async def test_run_prepare_tool_call_classifies_write_chain_dynamically(monkeypatch):
+async def test_run_prepare_tool_call_classifies_write_chain_dynamically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("MCP_DISABLE_WRITE_TOOLS", "true")
     try:
         get_config.cache_clear()  # type: ignore[attr-defined]
@@ -312,8 +542,11 @@ async def test_run_prepare_tool_call_classifies_write_chain_dynamically(monkeypa
     assert prepared.is_write is False
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
-async def test_protocol_idempotency_key_is_forwarded_to_run_nested_steps(monkeypatch):
+async def test_protocol_idempotency_key_is_forwarded_to_run_nested_steps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("MCP_DISABLE_WRITE_TOOLS", "false")
     try:
         get_config.cache_clear()  # type: ignore[attr-defined]
@@ -321,7 +554,7 @@ async def test_protocol_idempotency_key_is_forwarded_to_run_nested_steps(monkeyp
         _ = None
 
     class _PreparedCall:
-        def __init__(self, params: dict[str, Any], idempotency_key: str | None = None):
+        def __init__(self, params: dict[str, Any], idempotency_key: str | None = None) -> None:
             self.params = dict(params)
             self.idempotency_key = idempotency_key
 
@@ -330,7 +563,7 @@ async def test_protocol_idempotency_key_is_forwarded_to_run_nested_steps(monkeyp
             self.prepare_calls: list[_PreparedCall] = []
 
         async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
-            return {"tools": [{"name": "fs.write_text", "module": "filesystem", "canExecute": True}]}
+            return {"tools": [{"name": "fs.write", "module": "filesystem", "canExecute": True}]}
 
         async def prepare_tool_call(
             self,
@@ -382,8 +615,12 @@ async def test_protocol_idempotency_key_is_forwarded_to_run_nested_steps(monkeyp
     )
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
-async def test_prepare_tool_call_accepts_run_idempotency_key_inside_arguments(monkeypatch, tmp_path):
+async def test_prepare_tool_call_accepts_run_idempotency_key_inside_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     monkeypatch.setenv("MCP_DISABLE_WRITE_TOOLS", "false")
     monkeypatch.setenv("MCP_AUDIT_LOG_FILE", str(tmp_path / "audit.log"))
     try:

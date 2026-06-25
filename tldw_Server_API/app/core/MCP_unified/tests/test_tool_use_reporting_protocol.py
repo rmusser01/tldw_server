@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import re
 from types import SimpleNamespace
 from typing import Any
 
@@ -108,6 +109,19 @@ class _AllowApprovalEvaluator:
 
     async def evaluate_tool_call(self, **_kwargs: Any) -> dict[str, Any]:
         return {"status": "allow", "reason": "test_allow"}
+
+
+class _NoopExternalAccessEvaluator:
+    """Test double with no external server credential grants."""
+
+    async def resolve_for_sources(
+        self,
+        *,
+        sources: list[dict[str, Any]],
+        effective_policy: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        del sources, effective_policy
+        return {"servers": []}
 
 
 class _FilePolicyPathScopeEnforcer:
@@ -405,6 +419,7 @@ def _protocol(
         effective_policy_resolver=_StaticEffectivePolicyResolver(effective_policy),
         approval_evaluator=_AllowApprovalEvaluator(),
         path_scope_enforcer=path_scope_enforcer or _FilePolicyPathScopeEnforcer(),
+        external_access_evaluator=_NoopExternalAccessEvaluator(),
         redis_client_factory=lambda **kwargs: None,
         tool_use_recorder=recorder,
         tool_call_hook_manager=hook_manager,
@@ -430,6 +445,7 @@ def _run_command_protocol() -> tuple[MCPProtocol, _RecordingToolUseRecorder]:
         effective_policy_resolver=_StaticEffectivePolicyResolver(None),
         approval_evaluator=_AllowApprovalEvaluator(),
         path_scope_enforcer=_FilePolicyPathScopeEnforcer(),
+        external_access_evaluator=_NoopExternalAccessEvaluator(),
         redis_client_factory=lambda **kwargs: None,
         tool_use_recorder=recorder,
         tool_call_hook_manager=None,
@@ -592,6 +608,44 @@ def test_protocol_consumes_hook_results_per_tool_use_event() -> None:
     assert first_event.tool_hook_results[0].hook_id == "policy-hook"
     assert "mcp_tool_hook_results" not in context.metadata
     assert len(second_event.tool_hook_results) == 0
+
+
+@pytest.mark.asyncio
+async def test_tool_execution_reporter_records_process_request_failure_directly() -> None:
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPRequest
+    from tldw_Server_API.app.core.MCP_unified.tool_execution.reporting import (
+        ToolExecutionReporter,
+    )
+
+    recorder = _RecordingToolUseRecorder()
+    reporter = ToolExecutionReporter(
+        recorder=recorder,
+        metrics=_NoopMetrics(),
+        tool_name_re=re.compile(r"^[A-Za-z0-9_.:-]{1,100}$"),
+        noncritical_exceptions=(Exception,),
+    )
+    context = _request_context(metadata={"profile_id": "architect"})
+    request = MCPRequest(
+        method="tools/call",
+        params={"name": "test.read", "arguments": {"value": "ok"}},
+        id="req-reporter",
+    )
+
+    await reporter.record_process_request_failure(
+        request=request,
+        context=context,
+        status="denied",
+        reason_code="permission_denied",
+        start_ts=0,
+    )
+
+    event = recorder.events[-1]
+    assert event.runtime_surface == "protocol"
+    assert event.requested_tool_name == "test.read"
+    assert event.status == "denied"
+    assert event.reason_code == "permission_denied"
+    assert event.execution_origin == "failed_before_execution"
+    assert event.profile_id == "architect"
 
 
 @pytest.mark.asyncio
@@ -892,7 +946,7 @@ async def test_protocol_records_early_process_request_tool_name_error() -> None:
         _request_context(),
     )
 
-    assert response.error.code == ErrorCode.INTERNAL_ERROR
+    assert response.error.code == ErrorCode.INVALID_PARAMS
     event = recorder.events[-1]
     assert event.runtime_surface == "protocol"
     assert event.requested_tool_name == "unknown"
@@ -935,7 +989,7 @@ async def test_protocol_event_build_failure_preserves_process_request_error(
         _request_context(),
     )
 
-    assert response.error.code == ErrorCode.INTERNAL_ERROR
+    assert response.error.code == ErrorCode.INVALID_PARAMS
     assert "Invalid tool name" in response.error.message
     assert recorder.events == []
 
@@ -978,6 +1032,29 @@ async def test_protocol_event_build_failure_preserves_tool_response(
 
     assert response["tool"] == "test.read"
     assert recorder.events == []
+
+
+@pytest.mark.asyncio
+async def test_restoring_protocol_tool_use_event_builder_does_not_recurse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol, recorder = _protocol()
+    original_build_event = protocol._build_tool_use_event
+
+    def fail_event(**_kwargs: Any) -> ToolUseEvent:
+        raise ValueError("telemetry build failed")
+
+    monkeypatch.setattr(protocol, "_build_tool_use_event", fail_event)
+    protocol._build_tool_use_event = original_build_event
+
+    response = await protocol._handle_tools_call(
+        {"name": "test.read", "arguments": {}},
+        _request_context(),
+    )
+
+    assert response["tool"] == "test.read"
+    assert len(recorder.events) == 1
+    assert recorder.events[0].requested_tool_name == "test.read"
 
 
 @pytest.mark.asyncio
@@ -1089,3 +1166,120 @@ async def test_protocol_process_request_does_not_double_record_handler_rate_limi
     ]
     assert len(rate_limited_events) == 1
     assert rate_limited_events[0].execution_origin == "failed_before_execution"
+
+
+@pytest.mark.asyncio
+async def test_tools_call_coarse_authorization_denial_records_denied_tool_use() -> None:
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPRequest
+
+    recorder = _RecordingToolUseRecorder()
+    protocol, _ = _protocol(recorder=recorder)
+
+    async def deny_request(_request: MCPRequest, _context: RequestContext) -> bool:
+        return False
+
+    protocol._check_authorization = deny_request  # type: ignore[method-assign]
+    context = RequestContext(request_id="coarse-deny", user_id="u1", client_id="c1")
+    request = MCPRequest(
+        method="tools/call",
+        params={"name": "test.read", "arguments": {"value": "x"}},
+        id="coarse-deny",
+    )
+
+    response = await protocol.process_request(request, context)
+
+    assert response.error is not None
+    assert response.error.code == ErrorCode.AUTHORIZATION_ERROR
+    assert len(recorder.events) == 1
+    event = recorder.events[-1]
+    assert event.runtime_surface == "protocol"
+    assert event.requested_tool_name == "test.read"
+    assert event.status == "denied"
+    assert event.reason_code == "permission_denied"
+    assert event.execution_origin == "failed_before_execution"
+
+
+@pytest.mark.asyncio
+async def test_tools_call_deep_authorization_denial_records_prepare_failure() -> None:
+    recorder = _RecordingToolUseRecorder()
+    protocol, _ = _protocol(recorder=recorder)
+
+    async def allow_request(_request: Any, _context: RequestContext) -> bool:
+        return True
+
+    async def deny_prepare(
+        *,
+        params: dict[str, Any],
+        context: RequestContext,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        del params, context, idempotency_key
+        raise PermissionError("Permission denied for tool: test.read")
+
+    protocol._check_authorization = allow_request  # type: ignore[method-assign]
+    protocol.prepare_tool_call = deny_prepare  # type: ignore[method-assign]
+    context = RequestContext(request_id="deep-deny", user_id="u1", client_id="c1")
+
+    response = await protocol.process_request(
+        {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {"name": "test.read", "arguments": {"value": "x"}},
+            "id": "deep-deny",
+        },
+        context,
+    )
+
+    assert response.error is not None
+    assert response.error.code == ErrorCode.AUTHORIZATION_ERROR
+    assert len(recorder.events) == 1
+    event = recorder.events[-1]
+    assert event.runtime_surface == "protocol"
+    assert event.requested_tool_name == "test.read"
+    assert event.status == "denied"
+    assert event.reason_code == "permission_denied"
+    assert event.execution_origin == "failed_before_execution"
+
+
+@pytest.mark.asyncio
+async def test_restoring_public_prepare_tool_call_does_not_recurse() -> None:
+    protocol, _ = _protocol()
+    original_prepare = protocol.prepare_tool_call
+
+    async def patched_prepare(
+        *,
+        params: dict[str, Any],
+        context: RequestContext,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        return await original_prepare(
+            params=params,
+            context=context,
+            idempotency_key=idempotency_key,
+        )
+
+    protocol.prepare_tool_call = patched_prepare  # type: ignore[method-assign]
+    protocol.prepare_tool_call = original_prepare  # type: ignore[method-assign]
+
+    result = await protocol._handle_tools_call(
+        {"name": "test.read", "arguments": {"value": "x"}},
+        RequestContext(request_id="restore-prepare", user_id="u1", client_id="c1"),
+    )
+
+    assert result["tool"] == "test.read"
+
+
+@pytest.mark.asyncio
+async def test_replaced_tool_name_regex_syncs_reporting_and_security_helpers() -> None:
+    protocol, _ = _protocol()
+    protocol._tool_name_re = re.compile(r"^test:[A-Za-z]+$")
+    context = RequestContext(request_id="regex-sync", user_id="u1", client_id="c1")
+
+    assert protocol._safe_tool_use_name("test.read") == "unknown"
+    with pytest.raises(InvalidParamsException, match="Invalid tool name"):
+        await protocol.prepare_tool_call(
+            params={"name": "test.read", "arguments": {"value": "x"}},
+            context=context,
+        )
+
+    assert protocol._safe_tool_use_name("test:read") == "test:read"

@@ -6,8 +6,8 @@ No hardcoded secrets allowed.
 """
 
 import json
-import os
 import secrets
+import sys
 from functools import lru_cache
 from ipaddress import ip_address, ip_network
 from typing import Any, Optional
@@ -33,6 +33,18 @@ _MCP_CONFIG_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ValueError,
     json.JSONDecodeError,
 )
+_MCP_LOGGER_HANDLER_IDS: set[int] = set()
+
+
+def _remove_mcp_logger_handlers() -> None:
+    """Remove only handlers installed by MCP logging configuration."""
+    for handler_id in list(_MCP_LOGGER_HANDLER_IDS):
+        try:
+            logger.remove(handler_id)
+        except (RuntimeError, ValueError):
+            pass
+        finally:
+            _MCP_LOGGER_HANDLER_IDS.discard(handler_id)
 
 
 def _default_ws_allowed_origins() -> list[str]:
@@ -425,6 +437,7 @@ class MCPConfig(BaseSettings):
         try:
             # Optional opt-out to inherit global logger configuration
             if env_flag_enabled("MCP_INHERIT_GLOBAL_LOGGER"):
+                _remove_mcp_logger_handlers()
                 return
         except _MCP_CONFIG_NONCRITICAL_EXCEPTIONS:
             pass
@@ -436,22 +449,20 @@ class MCPConfig(BaseSettings):
             "{name}:{function}:{line} - {message}"
         )
 
-        try:
-            logger.remove()  # Reset to avoid duplicate/default handlers
-        except (RuntimeError, ValueError):
-            pass
+        _remove_mcp_logger_handlers()
 
         # Console logging (safe format, no color)
-        logger.add(
-            sink=os.sys.stderr,
+        handler_id = logger.add(
+            sink=sys.stderr,
             format=_fmt_template,
             level=self.log_level,
             colorize=False,
         )
+        _MCP_LOGGER_HANDLER_IDS.add(handler_id)
 
         # File logging if configured (safe format)
         if self.log_file:
-            logger.add(
+            handler_id = logger.add(
                 sink=self.log_file,
                 format=_fmt_template,
                 level=self.log_level,
@@ -459,10 +470,11 @@ class MCPConfig(BaseSettings):
                 retention=self.log_retention,
                 compression="zip",
             )
+            _MCP_LOGGER_HANDLER_IDS.add(handler_id)
 
         # Audit logging if enabled (plain format)
         if self.audit_enabled:
-            logger.add(
+            handler_id = logger.add(
                 sink=self.audit_log_file,
                 format="{time:YYYY-MM-DD HH:mm:ss.SSS} | AUDIT | {message}",
                 level="INFO",
@@ -471,6 +483,7 @@ class MCPConfig(BaseSettings):
                 retention="90 days",
                 compression="zip",
             )
+            _MCP_LOGGER_HANDLER_IDS.add(handler_id)
 
 
 @lru_cache

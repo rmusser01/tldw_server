@@ -9,6 +9,7 @@ import pytest
 from mcp_unified.interfaces.runtime import ToolHookCallContext, ToolHookDecision
 
 from tldw_Server_API.app.core.MCP_unified.protocol import (
+    GovernanceDeniedError,
     MCPProtocol,
     MCPRequest,
     RequestContext,
@@ -38,6 +39,45 @@ class _Span:
 class _Telemetry:
     def trace_context(self, *_args: Any, **_kwargs: Any) -> contextlib.AbstractContextManager[_Span]:
         return contextlib.nullcontext(_Span())
+
+
+class _StaticEffectivePolicyResolver:
+    async def resolve_for_context(
+        self,
+        *,
+        user_id: str | None,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        del user_id, metadata
+        return None
+
+
+class _AllowApprovalEvaluator:
+    async def evaluate_tool_call(self, **_kwargs: Any) -> dict[str, Any]:
+        return {"status": "allow", "reason": "test_allow"}
+
+
+class _AllowPathScopeEnforcer:
+    async def evaluate_tool_call(self, **_kwargs: Any) -> dict[str, Any]:
+        return {
+            "enabled": False,
+            "within_scope": True,
+            "reason": None,
+            "force_approval": False,
+            "normalized_paths": [],
+            "scope_payload": None,
+        }
+
+
+class _NoopExternalAccessEvaluator:
+    async def resolve_for_sources(
+        self,
+        *,
+        sources: list[dict[str, Any]],
+        effective_policy: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        del sources, effective_policy
+        return {"servers": []}
 
 
 class _ToolModuleStub:
@@ -207,6 +247,10 @@ def _protocol(
         metrics_collector=_NoopMetrics(),
         telemetry_provider=_Telemetry(),
         tool_catalog_provider=object(),
+        effective_policy_resolver=_StaticEffectivePolicyResolver(),
+        approval_evaluator=_AllowApprovalEvaluator(),
+        path_scope_enforcer=_AllowPathScopeEnforcer(),
+        external_access_evaluator=_NoopExternalAccessEvaluator(),
         redis_client_factory=lambda **_kwargs: None,
         tool_call_hook_manager=hook_manager,
     )
@@ -307,8 +351,13 @@ async def test_pre_hook_deny_maps_to_authorization_error_and_skips_execution() -
         before_decision=ToolHookDecision(
             action="deny",
             reason_code="blocked_by_test_hook",
-            message="blocked by hook",
-            metadata={"hook_id": "local-policy"},
+            message="blocked /Users/example/private.txt token=secret",
+            metadata={
+                "hook_id": "local-policy",
+                "hook_order": "7",
+                "path": "/Users/example/private.txt",
+                "token": "secret",
+            },
         )
     )
     protocol, module, _ = _protocol(hook_manager=hooks)
@@ -324,8 +373,88 @@ async def test_pre_hook_deny_maps_to_authorization_error_and_skips_execution() -
     assert response.error is not None
     assert response.error.code == -32001
     assert isinstance(response.error.data, dict)
-    assert response.error.data["governance"]["hook"]["reason_code"] == "blocked_by_test_hook"
-    assert response.error.data["governance"]["hook"]["metadata"] == {"hook_id": "local-policy"}
+    assert response.error.data["governance"]["hook"] == {
+        "phase": "pre",
+        "action": "deny",
+        "status": "deny",
+        "reason_code": "blocked_by_test_hook",
+        "hook_id": "local-policy",
+        "hook_order": 7,
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_pre_hook_summary_strips_untrusted_composite_hook_payload_fields() -> None:
+    hooks = _RecordingToolHookManager(
+        before_decision=ToolHookDecision(
+            action="deny",
+            reason_code="blocked_by_composite_hook",
+            metadata={
+                "hook_results": [
+                    {
+                        "phase": "pre",
+                        "hook_id": "profile-policy",
+                        "hook_order": 8,
+                        "action": "deny",
+                        "status": "deny",
+                        "reason_code": "blocked_by_composite_hook",
+                        "message": "raw /Users/example/private.txt should not be retained",
+                        "metadata": {"path": "/Users/example/private.txt"},
+                        "raw_args": {"token": "super-secret"},
+                    }
+                ]
+            },
+        )
+    )
+    protocol, _, _ = _protocol(hook_manager=hooks)
+    context = _context()
+
+    with pytest.raises(GovernanceDeniedError):
+        await protocol._run_pre_tool_hooks(
+            tool_name="stub.echo",
+            tool_args={"target": "beta"},
+            module_id="stub",
+            tool_def={"metadata": {"category": "read"}},
+            is_write=False,
+            arguments_hash="abc123",
+            context=context,
+            scope_payload=None,
+        )
+
+    assert context.metadata["mcp_tool_hook_results"] == [
+        {
+            "phase": "pre",
+            "hook_id": "profile-policy",
+            "hook_order": 8,
+            "action": "deny",
+            "status": "deny",
+            "reason_code": "blocked_by_composite_hook",
+        }
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_replacing_protocol_hook_manager_updates_hook_execution_helper() -> None:
+    protocol, module, original_hooks = _protocol()
+    replacement_hooks = _RecordingToolHookManager(
+        before_decision=ToolHookDecision(
+            action="deny",
+            reason_code="blocked_after_replacement",
+        )
+    )
+    protocol._tool_call_hook_manager = replacement_hooks
+
+    with pytest.raises(GovernanceDeniedError):
+        await protocol._handle_tools_call(
+            {"name": "stub.echo", "arguments": {"target": "beta"}},
+            _context(),
+        )
+
+    assert module.executions == 0
+    assert original_hooks.before_contexts == []
+    assert len(replacement_hooks.before_contexts) == 1
 
 
 @pytest.mark.unit
@@ -335,7 +464,13 @@ async def test_pre_hook_ask_maps_to_approval_error_and_skips_execution() -> None
         before_decision=ToolHookDecision(
             action="ask",
             reason_code="operator_review_required",
-            message="needs approval",
+            message="needs approval for /Users/example/private.txt token=secret",
+            metadata={
+                "hook_id": "approval-policy",
+                "hook_order": "3",
+                "path": "/Users/example/private.txt",
+                "token": "secret",
+            },
         )
     )
     protocol, module, _ = _protocol(hook_manager=hooks)
@@ -353,6 +488,15 @@ async def test_pre_hook_ask_maps_to_approval_error_and_skips_execution() -> None
     assert isinstance(response.error.data, dict)
     assert response.error.data["approval"]["source"] == "tool_hook"
     assert response.error.data["approval"]["reason_code"] == "operator_review_required"
+    assert response.error.data["approval"]["message"] is None
+    assert response.error.data["approval"]["hook"] == {
+        "phase": "pre",
+        "action": "ask",
+        "status": "ask",
+        "reason_code": "operator_review_required",
+        "hook_id": "approval-policy",
+        "hook_order": 3,
+    }
 
 
 @pytest.mark.unit
@@ -400,6 +544,30 @@ async def test_post_hook_failure_preserves_success_result() -> None:
     assert hooks.after_contexts[0].tool_name == "stub.echo"
     assert hooks.after_contexts[0].module_id == "stub"
     assert hooks.after_contexts[0].status == "success"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_replacing_protocol_post_hook_wrapper_controls_runtime_post_hooks() -> None:
+    protocol, module, hooks = _protocol()
+    wrapper_calls: list[dict[str, Any]] = []
+
+    async def replacement_post_hook_wrapper(**kwargs: Any) -> None:
+        wrapper_calls.append(kwargs)
+
+    protocol._run_post_tool_hooks = replacement_post_hook_wrapper
+
+    result = await protocol._handle_tools_call(
+        {"name": "stub.echo", "arguments": {"target": "theta"}},
+        _context(),
+    )
+
+    assert module.executions == 1
+    assert result["tool"] == "stub.echo"
+    assert len(wrapper_calls) == 1
+    assert wrapper_calls[0]["tool_name"] == "stub.echo"
+    assert wrapper_calls[0]["status"] == "success"
+    assert hooks.after_contexts == []
 
 
 @pytest.mark.unit

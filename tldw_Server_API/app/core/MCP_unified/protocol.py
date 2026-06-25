@@ -6,9 +6,6 @@ Implements JSON-RPC 2.0 with enhanced error handling and request routing.
 
 import asyncio
 import contextlib
-import copy
-import hashlib
-import hmac
 import inspect
 import json
 import re
@@ -16,11 +13,9 @@ import secrets
 import time
 import uuid
 from collections import OrderedDict
-from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime, timezone
 from enum import IntEnum
-from pathlib import Path
-from typing import Any, Callable, Literal, Optional, Union, cast
+from typing import Any, Callable, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -36,26 +31,13 @@ except ImportError:  # Fallback for v1
         model_validator = None  # type: ignore
 
 from loguru import logger
-from mcp_unified.interfaces.path_scope import (
-    PathScopeCandidate,
-    normalize_path_scope_candidates,
-)
-from mcp_unified.tool_use_reporting.builders import (
-    classify_tool_use_exception,
-    extract_safe_context_dimensions,
-)
-from mcp_unified.tool_use_reporting.models import (
-    MAX_FILE_POLICY_DECISIONS,
-    MAX_TOOL_HOOK_RESULTS,
-    ToolUseEvent,
-    ToolUseStatus,
-)
-from mcp_unified.tool_use_reporting.recorder import record_tool_use_safely
+from mcp_unified.interfaces.path_scope import PathScopeCandidate
+from mcp_unified.tool_use_reporting.models import ToolUseEvent, ToolUseStatus
 
+from ..exception_types import PromptCatalogError
 from .auth.authnz_rbac import Action, Resource
 from .auth.rate_limiter import RateLimitExceeded
 from .config import get_config
-from ..exception_types import PromptCatalogError
 from .interfaces.runtime import (
     MCPRuntimeDependencies,
     NoopToolCallHookManager,
@@ -65,18 +47,49 @@ from .interfaces.runtime import (
     ToolHookCallContext,
     ToolHookDecision,
 )
+from .modules.base import BaseModule
 from .modules.implementations.prompts_catalog import (
     CONFIG_PROMPT_PREFIX,
     LIBRARY_PROMPT_PREFIX,
     decode_prompt_cursor,
 )
-from .modules.base import BaseModule
-from .tool_observability import (
-    attach_execution_eval_metadata,
-    ensure_tool_definition_eval_metadata,
-    execution_eval_metadata_from_tool_definition,
-    sanitize_eval_profile_id,
+from .protocol_types import (
+    _TRUSTED_COMPAT_AUTH_VIA as _TRUSTED_COMPAT_AUTH_VIA,
 )
+from .protocol_types import (
+    _TRUSTED_COMPAT_CLAIMS_SENTINEL as _TRUSTED_COMPAT_CLAIMS_SENTINEL,
+)
+from .protocol_types import (
+    _TRUSTED_COMPAT_CLAIMS_SENTINEL_KEY as _TRUSTED_COMPAT_CLAIMS_SENTINEL_KEY,
+)
+from .protocol_types import (
+    _TRUSTED_COMPAT_CLAIMS_SOURCES as _TRUSTED_COMPAT_CLAIMS_SOURCES,
+)
+from .protocol_types import (
+    ApprovalRequiredError,
+    GovernanceDeniedError,
+    InvalidParamsException,
+    PreparedToolCall,
+    RequestContext,
+    _has_trusted_compat_claims,
+)
+from .protocol_types import (
+    _metadata_claim_values as _metadata_claim_values,
+)
+from .protocol_types import (
+    _metadata_has_admin_claims as _metadata_has_admin_claims,
+)
+from .protocol_types import (
+    _trusted_compat_claims_metadata as _trusted_compat_claims_metadata,
+)
+from .protocol_types import (
+    _TrustedCompatClaimsSentinel as _TrustedCompatClaimsSentinel,
+)
+from .tool_execution import ToolExecutionCoordinator, ToolExecutionDependencies, ToolExecutionReporter
+from .tool_execution.hooks import ToolExecutionHooks
+from .tool_execution.runtime import ToolExecutionRuntime
+from .tool_execution.security import ToolExecutionSecurity
+from .tool_observability import ensure_tool_definition_eval_metadata
 
 try:  # pragma: no cover - optional dependency
     from redis.exceptions import RedisError
@@ -108,27 +121,6 @@ class ErrorCode(IntEnum):
     TIMEOUT_ERROR = -32004
 
 
-class InvalidParamsException(Exception):
-    """Raised when tool parameters fail validation or validators are missing for write tools."""
-    pass
-
-
-class GovernanceDeniedError(PermissionError):
-    """Permission error carrying structured governance decision details."""
-
-    def __init__(self, message: str, governance: Optional[dict[str, Any]] = None):
-        super().__init__(message)
-        self.governance = governance or {}
-
-
-class ApprovalRequiredError(PermissionError):
-    """Permission error carrying structured MCP Hub approval request details."""
-
-    def __init__(self, message: str, approval: Optional[dict[str, Any]] = None):
-        super().__init__(message)
-        self.approval = approval or {}
-
-
 _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
     asyncio.TimeoutError,
@@ -154,10 +146,6 @@ _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS = (
 )
 
 _MCP_TOOL_EXECUTION_ERROR = "tool_execution_error"
-_TOOL_AUTHORIZATION_ALIASES = {
-    "bash": "run",
-    "shell": "run",
-}
 _TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
 
 
@@ -278,132 +266,6 @@ class MCPResponse(BaseModel):
             if self.error is not None and self.result is not None:
                 raise ValueError("Response cannot have both result and error")
             return self
-
-
-class RequestContext:
-    """Context for request processing.
-
-    Request contexts store caller metadata and explicit database path mappings
-    only. Host-specific database path resolution is owned by MCPProtocol or
-    MCPServer dependencies so standalone callers do not import tldw_server
-    adapters through this neutral context object.
-    """
-    def __init__(
-        self,
-        request_id: str,
-        user_id: Optional[str] = None,
-        client_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
-        db_paths: Optional[dict[str, str]] = None,
-    ):
-        self.request_id = request_id
-        self.user_id = user_id
-        self.client_id = client_id
-        self.session_id = session_id
-        self.metadata = metadata or {}
-        self.start_time = datetime.now(timezone.utc)
-        self.db_paths = dict(db_paths or {})
-        # Build a bound logger for this request
-        self.logger = logger.bind(
-            request_id=request_id,
-            user_id=user_id,
-            client_id=client_id,
-            session_id=session_id,
-        )
-
-
-class _TrustedCompatClaimsSentinel:
-    """Object-identity marker for server-created mounted auth compatibility claims."""
-
-    def __repr__(self) -> str:
-        return "<trusted_mcp_compat_auth>"
-
-
-_TRUSTED_COMPAT_CLAIMS_SENTINEL = _TrustedCompatClaimsSentinel()
-_TRUSTED_COMPAT_CLAIMS_SENTINEL_KEY = "_server_auth_compat_sentinel"
-_TRUSTED_COMPAT_AUTH_VIA = frozenset({"single_user_api_key", "single_user_test_api_key"})
-_TRUSTED_COMPAT_CLAIMS_SOURCES = frozenset({"mounted_http", "mounted_ws"})
-
-
-def _metadata_claim_values(value: Any) -> tuple[Any, ...]:
-    """Return metadata claim values without iterating strings character-by-character."""
-    if isinstance(value, str):
-        return (value,)
-    if isinstance(value, (list, tuple, set, frozenset)):
-        return tuple(value)
-    return ()
-
-
-def _trusted_compat_claims_metadata(*, auth_via: str, compat_claims_source: str) -> dict[str, Any]:
-    """Return server-only metadata for mounted single-user compatibility claims."""
-    if auth_via not in _TRUSTED_COMPAT_AUTH_VIA:
-        raise ValueError("Unsupported compatibility auth source")
-    if compat_claims_source not in _TRUSTED_COMPAT_CLAIMS_SOURCES:
-        raise ValueError("Unsupported compatibility claims source")
-    return {
-        "auth_via": auth_via,
-        "trusted_auth_claims": True,
-        "compat_claims_source": compat_claims_source,
-        _TRUSTED_COMPAT_CLAIMS_SENTINEL_KEY: _TRUSTED_COMPAT_CLAIMS_SENTINEL,
-    }
-
-
-def _metadata_has_admin_claims(metadata: dict[str, Any]) -> bool:
-    """Return True when trusted metadata carries wildcard or admin claims."""
-    roles = {
-        str(role).strip().lower()
-        for role in _metadata_claim_values(metadata.get("roles"))
-        if str(role).strip()
-    }
-    permissions = {
-        str(permission).strip().lower()
-        for permission in _metadata_claim_values(metadata.get("permissions"))
-        if str(permission).strip()
-    }
-    return "admin" in roles or "*" in permissions
-
-
-def _has_trusted_compat_claims(context: RequestContext) -> bool:
-    """Return True only for server-created mounted compatibility auth claims."""
-    metadata = getattr(context, "metadata", None)
-    if not isinstance(metadata, dict):
-        return False
-    server_auth_keys = {
-        key
-        for key in metadata
-        if isinstance(key, str) and key.startswith("_server_auth_")
-    }
-    if server_auth_keys != {_TRUSTED_COMPAT_CLAIMS_SENTINEL_KEY}:
-        return False
-    if metadata.get(_TRUSTED_COMPAT_CLAIMS_SENTINEL_KEY) is not _TRUSTED_COMPAT_CLAIMS_SENTINEL:
-        return False
-    if metadata.get("trusted_auth_claims") is not True:
-        return False
-    if metadata.get("auth_via") not in _TRUSTED_COMPAT_AUTH_VIA:
-        return False
-    if metadata.get("compat_claims_source") not in _TRUSTED_COMPAT_CLAIMS_SOURCES:
-        return False
-    return _metadata_has_admin_claims(metadata)
-
-
-@dataclass(frozen=True, slots=True)
-class PreparedToolCall:
-    """Prepared tool execution context reused by nested tool orchestration."""
-
-    tool_name: str
-    tool_args: Any
-    module: BaseModule
-    module_id: Optional[str]
-    tool_def: Optional[dict[str, Any]]
-    is_write: Optional[bool]
-    normalized_idempotency_key: Optional[str]
-    idempotency_cache_key: Optional[str]
-    arguments_hash: Optional[str]
-    context_fingerprint: str
-    integrity_tag: str
-    context: RequestContext
-    scope_payload: Optional[dict[str, Any]] = None
 
 
 class IdempotencyManager:
@@ -718,6 +580,54 @@ class MCPProtocol:
     - Request tracing
     """
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        object.__setattr__(self, name, value)
+        if name == "prepare_tool_call" and callable(value) and hasattr(self, "_tool_execution"):
+            if (
+                getattr(value, "__self__", None) is self
+                and getattr(value, "__func__", None) is type(self).prepare_tool_call
+            ):
+                self._tool_execution.prepare_tool_call_impl = self._prepare_tool_call_inline
+            else:
+                self._tool_execution.prepare_tool_call_impl = value
+        elif name == "execute_prepared_tool_call" and callable(value) and hasattr(self, "_tool_execution"):
+            if (
+                getattr(value, "__self__", None) is self
+                and getattr(value, "__func__", None) is type(self).execute_prepared_tool_call
+            ):
+                self._tool_execution.execute_prepared_tool_call_impl = self._execute_prepared_tool_call_inline
+            else:
+                self._tool_execution.execute_prepared_tool_call_impl = value
+        elif name == "_tool_call_hook_manager" and hasattr(self, "_tool_execution_hooks"):
+            self._tool_execution_hooks._tool_call_hook_manager = value
+            if hasattr(self, "_tool_execution_security"):
+                self._sync_tool_execution_dependencies()
+        elif (
+            name in {
+                "module_registry",
+                "rbac_policy",
+                "rate_limiter",
+                "metrics",
+                "_tool_use_recorder",
+                "_idempotency",
+                "_tool_name_re",
+            }
+            and hasattr(self, "_tool_execution_security")
+        ):
+            self._sync_tool_execution_dependencies()
+        elif name == "_build_tool_use_event" and hasattr(self, "_tool_execution_reporter"):
+            if (
+                getattr(value, "__self__", None) is self
+                and getattr(value, "__func__", None) is type(self)._build_tool_use_event
+            ):
+                self._tool_execution_reporter.build_event = self._tool_execution_reporter.build_tool_use_event
+            else:
+                self._tool_execution_reporter.build_event = value
+        elif name == "_record_tool_use_event" and hasattr(self, "_tool_execution_reporter"):
+            self._tool_execution_reporter.record_event = value
+        elif name == "_should_record_tool_use" and hasattr(self, "_tool_execution_reporter"):
+            self._tool_execution_reporter.should_record = value
+
     def __init__(self, dependencies: MCPRuntimeDependencies | None = None):
         if dependencies is None:
             from .adapters.tldw_runtime import build_default_runtime_dependencies
@@ -754,10 +664,99 @@ class MCPProtocol:
         )
         # Integrity secret for prepared tool call execution
         self._prepared_call_secret = secrets.token_bytes(32)
-        # Governance preflight state
-        self._governance_service: Any | None = None
-        self._governance_store: Any | None = None
-        self._governance_lock = asyncio.Lock()
+        self._tool_execution_reporter = ToolExecutionReporter(
+            recorder=self._tool_use_recorder,
+            metrics=self.metrics,
+            tool_name_re=self._tool_name_re,
+            noncritical_exceptions=_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS,
+        )
+        self._tool_execution_hooks = ToolExecutionHooks(
+            hook_manager=self._tool_call_hook_manager,
+            reporter=self._tool_execution_reporter,
+            noncritical_exceptions=_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS,
+        )
+        self._tool_execution_dependencies = ToolExecutionDependencies(
+            module_registry=self.module_registry,
+            rbac_policy=self.rbac_policy,
+            rate_limiter=self.rate_limiter,
+            metrics=self.metrics,
+            telemetry=self.telemetry,
+            hook_manager=self._tool_call_hook_manager,
+            tool_use_recorder=self._tool_use_recorder,
+            idempotency=self._idempotency,
+            config_provider=lambda: get_config(),
+            effective_policy_resolver=self.dependencies.effective_policy_resolver,
+            path_scope_enforcer=self.dependencies.path_scope_enforcer,
+            approval_evaluator=self.dependencies.approval_evaluator,
+            external_access_evaluator=self.dependencies.external_access_evaluator,
+            reporter=self._tool_execution_reporter,
+            api_key_scope_normalizer=getattr(self.dependencies, "api_key_scope_normalizer", None),
+        )
+        self._tool_execution_security = ToolExecutionSecurity(
+            dependencies=self._tool_execution_dependencies,
+            tool_name_re=self._tool_name_re,
+            prepared_call_secret=self._prepared_call_secret,
+            noncritical_exceptions=_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS,
+        )
+        self._tool_execution_security.configure_prepare_compatibility_callbacks(
+            module_registry=lambda: self.module_registry,
+            is_tool_allowed_by_context=(
+                lambda tool_name, tool_args, context: self._is_tool_allowed_by_context(tool_name, tool_args, context)
+            ),
+            resolve_effective_tool_policy=lambda context: self._resolve_effective_tool_policy(context),
+            is_tool_allowed_by_effective_policy=(
+                lambda tool_name, tool_args, policy: self._is_tool_allowed_by_effective_policy(
+                    tool_name,
+                    tool_args,
+                    policy,
+                )
+            ),
+            evaluate_external_access=lambda **kwargs: self._evaluate_external_access(**kwargs),
+            has_module_permission=lambda context, module_id: self._has_module_permission(context, module_id),
+            has_tool_permission=lambda context, tool_name, **kwargs: self._has_tool_permission(
+                context,
+                tool_name,
+                **kwargs,
+            ),
+            make_idempotency_cache_key=lambda context, module_name, tool_name, idempotency_key: (
+                self._make_idempotency_cache_key(context, module_name, tool_name, idempotency_key)
+            ),
+            extract_path_scope_candidates=lambda **kwargs: self._extract_path_scope_candidates(**kwargs),
+            evaluate_path_scope=lambda **kwargs: self._evaluate_path_scope(**kwargs),
+            evaluate_runtime_approval=lambda **kwargs: self._evaluate_runtime_approval(**kwargs),
+            run_governance_preflight=lambda **kwargs: self._run_governance_preflight(**kwargs),
+        )
+
+        async def _prepare_with_hooks(
+            *,
+            params: dict[str, Any],
+            context: RequestContext,
+            idempotency_key: str | None = None,
+        ) -> PreparedToolCall:
+            self._sync_tool_execution_dependencies()
+            return await self._tool_execution_security.prepare_tool_call(
+                params=params,
+                context=context,
+                idempotency_key=idempotency_key,
+                hooks=self._tool_execution_hooks,
+            )
+
+        self._prepare_with_hooks = _prepare_with_hooks
+        self._tool_execution_runtime = ToolExecutionRuntime(
+            dependencies=self._tool_execution_dependencies,
+            security=self._tool_execution_security,
+            hooks=self._tool_execution_hooks,
+            noncritical_exceptions=_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS,
+            tool_execution_error=_MCP_TOOL_EXECUTION_ERROR,
+            generic_exception_like=self._generic_exception_like,
+            make_idempotency_cache_key=ToolExecutionRuntime.make_idempotency_cache_key,
+            run_post_tool_hooks=lambda **kwargs: self._run_post_tool_hooks(**kwargs),
+        )
+        self._tool_execution = ToolExecutionCoordinator(
+            prepare_tool_call_impl=_prepare_with_hooks,
+            execute_prepared_tool_call_impl=self._tool_execution_runtime.execute_prepared_tool_call,
+            reporter=self._tool_execution_reporter,
+        )
 
         # Method handlers — telemetry is accessed via a property so that
         # a shutdown/re-init cycle is picked up automatically.
@@ -776,6 +775,39 @@ class MCPProtocol:
         }
 
         logger.info("MCP Protocol handler initialized")
+
+    def _sync_tool_execution_dependencies(self) -> None:
+        """Keep extracted tool-execution helpers aligned with mutable protocol test seams."""
+
+        if not hasattr(self, "_tool_execution_security"):
+            return
+        deps = self._tool_execution_security.dependencies
+        deps.module_registry = self.module_registry
+        deps.rbac_policy = self.rbac_policy
+        deps.rate_limiter = self.rate_limiter
+        deps.metrics = self.metrics
+        deps.telemetry = self.telemetry
+        deps.hook_manager = self._tool_call_hook_manager
+        deps.tool_use_recorder = self._tool_use_recorder
+        deps.idempotency = self._idempotency
+        deps.config_provider = lambda: get_config()
+        deps.effective_policy_resolver = self.dependencies.effective_policy_resolver
+        deps.path_scope_enforcer = self.dependencies.path_scope_enforcer
+        deps.approval_evaluator = self.dependencies.approval_evaluator
+        deps.external_access_evaluator = self.dependencies.external_access_evaluator
+        self._tool_execution_reporter._tool_use_recorder = self._tool_use_recorder
+        self._tool_execution_reporter.metrics = self.metrics
+        self._tool_execution_reporter._tool_name_re = self._tool_name_re
+        deps.reporter = self._tool_execution_reporter
+        self._tool_execution_security.module_registry = self.module_registry
+        self._tool_execution_security.rbac_policy = self.rbac_policy
+        self._tool_execution_security.metrics = self.metrics
+        self._tool_execution_security._tool_name_re = self._tool_name_re
+        if hasattr(self, "_tool_execution_runtime"):
+            self._tool_execution_runtime.dependencies = deps
+            self._tool_execution_runtime.security = self._tool_execution_security
+            self._tool_execution_runtime.hooks = self._tool_execution_hooks
+            self._tool_execution_runtime.sync_from_dependencies()
 
     @staticmethod
     def _module_declares_prompts(module: BaseModule) -> bool:
@@ -802,32 +834,25 @@ class MCPProtocol:
 
     def _should_record_tool_use(self, context: RequestContext) -> bool:
         """Return whether this protocol path should record tool-use metadata."""
-        metadata = getattr(context, "metadata", {})
-        if not isinstance(metadata, dict):
-            return True
-        return metadata.get("mcp_tool_use_observed") is not True
+        return self._tool_execution_reporter.should_record_tool_use(context)
 
     async def _record_tool_use_event(self, event: ToolUseEvent) -> None:
         """Record a tool-use event through the configured recorder."""
-        await record_tool_use_safely(self._tool_use_recorder, event)
+        await self._tool_execution_reporter.record_tool_use_event(event)
 
     def _safe_tool_use_name(self, value: Any) -> str:
         """Return a safe tool name or the unknown sentinel."""
-        if isinstance(value, str) and self._tool_name_re.match(value):
-            return value
-        return "unknown"
+        return self._tool_execution_reporter.safe_tool_use_name(value)
 
     @staticmethod
     def _tool_use_duration_ms(start_ts: float) -> float:
         """Return elapsed milliseconds from a monotonic-ish wall clock sample."""
-        return max(0.0, (time.time() - start_ts) * 1000.0)
+        return ToolExecutionReporter.tool_use_duration_ms(start_ts)
 
     @staticmethod
     def _tool_use_execution_origin_for_failure(status: ToolUseStatus) -> str:
         """Return execution-origin metadata for a failed tool path."""
-        if status == "unavailable":
-            return "unavailable"
-        return "failed_before_execution"
+        return ToolExecutionReporter.tool_use_execution_origin_for_failure(status)
 
     @staticmethod
     def _tool_use_eval_metadata(
@@ -836,117 +861,37 @@ class MCPProtocol:
         tool_def: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Extract safe eval metadata from response payload or tool definition."""
-        if isinstance(payload, dict) and isinstance(payload.get("eval"), dict):
-            return dict(payload["eval"])
-        metadata = (tool_def or {}).get("metadata") if isinstance(tool_def, dict) else None
-        if isinstance(metadata, dict) and isinstance(metadata.get("eval"), dict):
-            return dict(metadata["eval"])
-        return {}
+        return ToolExecutionReporter.tool_use_eval_metadata(payload=payload, tool_def=tool_def)
 
     @staticmethod
     def _tool_use_file_policy_decisions(scope_payload: dict[str, Any] | None) -> list[dict[str, Any]]:
         """Extract redacted file-policy path decisions from a scope payload."""
-
-        if not isinstance(scope_payload, dict):
-            return []
-        raw_decisions = scope_payload.get("path_decisions")
-        if not isinstance(raw_decisions, list):
-            return []
-        bounded_decisions = raw_decisions[:MAX_FILE_POLICY_DECISIONS]
-        return [dict(decision) for decision in bounded_decisions if isinstance(decision, dict)]
+        return ToolExecutionReporter.tool_use_file_policy_decisions(scope_payload)
 
     @staticmethod
     def _tool_use_hook_results(metadata: dict[str, Any] | None) -> list[dict[str, Any]]:
         """Consume bounded tool-hook result metadata from request metadata."""
-
-        if not isinstance(metadata, dict):
-            return []
-        raw_results = metadata.pop("mcp_tool_hook_results", None)
-        if not isinstance(raw_results, list):
-            return []
-        bounded_results = raw_results[:MAX_TOOL_HOOK_RESULTS]
-        return [dict(result) for result in bounded_results if isinstance(result, dict)]
+        return ToolExecutionReporter.tool_use_hook_results(metadata)
 
     @staticmethod
     def _tool_hook_summary_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
         """Return sanitized hook summary rows from a protocol hook payload."""
-
-        metadata = payload.get("metadata")
-        if isinstance(metadata, dict):
-            hook_results = metadata.get("hook_results")
-            if isinstance(hook_results, list):
-                return [
-                    dict(item)
-                    for item in hook_results[:MAX_TOOL_HOOK_RESULTS]
-                    if isinstance(item, dict)
-                ]
-
-        row: dict[str, Any] = {
-            "phase": payload.get("phase"),
-            "action": payload.get("action"),
-            "status": payload.get("status"),
-        }
-        if payload.get("reason_code") is not None:
-            row["reason_code"] = payload.get("reason_code")
-        if payload.get("error_type") is not None:
-            row["error_type"] = payload.get("error_type")
-        if isinstance(metadata, dict):
-            if metadata.get("hook_id") is not None:
-                row["hook_id"] = metadata.get("hook_id")
-            if metadata.get("hook_order") is not None:
-                row["hook_order"] = metadata.get("hook_order")
-        elif payload.get("hook_id") is not None:
-            row["hook_id"] = payload.get("hook_id")
-            if payload.get("hook_order") is not None:
-                row["hook_order"] = payload.get("hook_order")
-        return [row]
+        return ToolExecutionReporter.tool_hook_summary_items(payload)
 
     @staticmethod
     def _append_tool_hook_summary(context: RequestContext, payload: dict[str, Any]) -> None:
         """Append safe hook metadata for tool-use reporting."""
-
-        metadata = getattr(context, "metadata", None)
-        if not isinstance(metadata, dict):
-            return
-        existing = metadata.get("mcp_tool_hook_results")
-        if not isinstance(existing, list):
-            existing = []
-            metadata["mcp_tool_hook_results"] = existing
-        remaining = max(0, MAX_TOOL_HOOK_RESULTS - len(existing))
-        if remaining <= 0:
-            return
-        existing.extend(MCPProtocol._tool_hook_summary_items(payload)[:remaining])
+        ToolExecutionReporter.append_tool_hook_summary(context, payload)
 
     @staticmethod
     def _tool_use_decision_grant_outcome(file_policy_decisions: list[dict[str, Any]]) -> str | None:
         """Summarize path-decision grant outcomes with denial precedence."""
-
-        outcomes = [
-            outcome.strip()
-            for decision in file_policy_decisions
-            if isinstance(decision, dict)
-            and isinstance(outcome := decision.get("grant_outcome"), str)
-            and outcome.strip()
-        ]
-        if "denied" in outcomes:
-            return "denied"
-        if "not_granted" in outcomes:
-            return "not_granted"
-        if outcomes:
-            return "allowed"
-        return None
+        return ToolExecutionReporter.tool_use_decision_grant_outcome(file_policy_decisions)
 
     @staticmethod
     def _tool_use_value_present(value: Any) -> bool:
         """Return whether a sensitive value marker contains actual data."""
-
-        if value is None:
-            return False
-        if isinstance(value, str):
-            return bool(value.strip())
-        if isinstance(value, (dict, list, tuple, set)):
-            return bool(value)
-        return True
+        return ToolExecutionReporter.tool_use_value_present(value)
 
     @staticmethod
     def _tool_use_contains_key(
@@ -956,37 +901,12 @@ class MCPProtocol:
         _depth: int = 0,
     ) -> bool:
         """Return whether a nested tool payload/args object contains any key."""
-
-        if _depth > 4:
-            return False
-        if isinstance(value, dict):
-            for key, nested in value.items():
-                if key in keys and MCPProtocol._tool_use_value_present(nested):
-                    return True
-                if isinstance(nested, (dict, list)) and MCPProtocol._tool_use_contains_key(
-                    nested,
-                    keys,
-                    _depth=_depth + 1,
-                ):
-                    return True
-        elif isinstance(value, list):
-            for item in value:
-                if isinstance(item, (dict, list)) and MCPProtocol._tool_use_contains_key(
-                    item,
-                    keys,
-                    _depth=_depth + 1,
-                ):
-                    return True
-        return False
+        return ToolExecutionReporter.tool_use_contains_key(value, keys, _depth=_depth)
 
     @staticmethod
     def _tool_use_category(tool_def: dict[str, Any] | None) -> str | None:
         """Return the metadata category from a tool definition when present."""
-        metadata = (tool_def or {}).get("metadata") if isinstance(tool_def, dict) else None
-        if not isinstance(metadata, dict):
-            return None
-        category = metadata.get("category")
-        return str(category) if isinstance(category, str) and category.strip() else None
+        return ToolExecutionReporter.tool_use_category(tool_def)
 
     def _build_tool_use_event(
         self,
@@ -1007,67 +927,21 @@ class MCPProtocol:
         idempotency_replay: bool = False,
     ) -> ToolUseEvent:
         """Build a metadata-only tool-use event."""
-        metadata = getattr(context, "metadata", {})
-        dimensions = extract_safe_context_dimensions(metadata if isinstance(metadata, dict) else None)
-        nested = isinstance(metadata, dict) and metadata.get("mcp_tool_use_nested") is True
-        hook_results = self._tool_use_hook_results(metadata if isinstance(metadata, dict) else None)
-        eval_metadata = self._tool_use_eval_metadata(payload=payload, tool_def=tool_def)
-        safe_requested_name = self._safe_tool_use_name(requested_tool_name)
-        safe_effective_name = self._safe_tool_use_name(effective_tool_name or safe_requested_name)
-        file_policy_decisions = self._tool_use_file_policy_decisions(scope_payload)
-        file_policy_related = bool(file_policy_decisions) or safe_effective_name.startswith("fs.")
-        sha256_before_keys = {"sha256_before", "expected_sha256", "expected_sha256_by_path"}
-        file_policy_sha256_before_present = (
-            (
-                self._tool_use_contains_key(payload, sha256_before_keys)
-                or self._tool_use_contains_key(tool_args, sha256_before_keys)
-            )
-            if file_policy_related
-            else None
-        )
-        file_policy_sha256_after_present = (
-            self._tool_use_contains_key(payload, {"sha256_after"})
-            if file_policy_related
-            else None
-        )
-        file_policy_lock_lease_present = (
-            (
-                self._tool_use_contains_key(payload, {"lock_lease_id", "lock_lease_id_by_path"})
-                or self._tool_use_contains_key(tool_args, {"lock_lease_id", "lock_lease_id_by_path"})
-            )
-            if file_policy_related
-            else None
-        )
-        decision_grant_outcome = self._tool_use_decision_grant_outcome(file_policy_decisions)
-        return ToolUseEvent(
-            runtime_surface="protocol",
-            execution_origin=execution_origin,  # type: ignore[arg-type]
-            nested=nested,
-            requested_tool_name=safe_requested_name,
-            effective_tool_name=safe_effective_name,
-            module_id=module_id,
-            category=self._tool_use_category(tool_def),
-            read_only=(not is_write) if is_write is not None else None,
-            is_write=is_write,
-            source_kind="local",
+        return self._tool_execution_reporter.build_event(
+            context=context,
+            requested_tool_name=requested_tool_name,
             status=status,
-            reason_code=reason_code,
+            execution_origin=execution_origin,
             duration_ms=duration_ms,
+            effective_tool_name=effective_tool_name,
+            module_id=module_id,
+            tool_def=tool_def,
+            payload=payload,
+            tool_args=tool_args,
+            scope_payload=scope_payload,
+            is_write=is_write,
+            reason_code=reason_code,
             idempotency_replay=idempotency_replay,
-            tool_prompt_id=eval_metadata.get("tool_prompt_id"),
-            tool_prompt_version=eval_metadata.get("tool_prompt_version"),
-            prompt_variant=eval_metadata.get("prompt_variant"),
-            action_family=eval_metadata.get("action_family"),
-            result_kind=eval_metadata.get("result_kind") or eval_metadata.get("expected_result_kind"),
-            path_filter_used=eval_metadata.get("path_filter_used"),
-            grant_outcome=eval_metadata.get("grant_outcome") or decision_grant_outcome,
-            truncated=eval_metadata.get("truncated"),
-            file_policy_decisions=file_policy_decisions,
-            tool_hook_results=hook_results,
-            file_policy_sha256_before_present=file_policy_sha256_before_present,
-            file_policy_sha256_after_present=file_policy_sha256_after_present,
-            file_policy_lock_lease_present=file_policy_lock_lease_present,
-            **dimensions,
         )
 
     async def _record_process_request_tool_use_failure(
@@ -1081,98 +955,41 @@ class MCPProtocol:
         requested_tool_name: Any = None,
     ) -> None:
         """Record a tools/call failure that occurs before handler dispatch."""
-        if request.method != "tools/call" or not self._should_record_tool_use(context):
-            return
-        params = request.params if isinstance(request.params, dict) else {}
-        requested = (
-            requested_tool_name
-            if requested_tool_name is not None
-            else params.get("name")
+        await self._tool_execution_reporter.record_process_request_failure(
+            request=request,
+            context=context,
+            status=status,
+            reason_code=reason_code,
+            start_ts=start_ts,
+            requested_tool_name=requested_tool_name,
+            should_record=self._should_record_tool_use,
+            build_event=self._build_tool_use_event,
+            record_event=self._record_tool_use_event,
+            duration_ms=self._tool_use_duration_ms,
+            execution_origin_for_failure=self._tool_use_execution_origin_for_failure,
         )
-        try:
-            event = self._build_tool_use_event(
-                context=context,
-                requested_tool_name=requested,
-                status=status,
-                execution_origin=self._tool_use_execution_origin_for_failure(status),
-                duration_ms=self._tool_use_duration_ms(start_ts),
-                reason_code=reason_code,
-            )
-            await self._record_tool_use_event(event)
-        except Exception as exc:  # noqa: BLE001 - reporting must not affect requests.
-            logger.warning(
-                "Failed to build or record process-request tool-use event: {}",
-                exc.__class__.__name__,
-            )
 
     async def _rbac_check(self, user_id: Optional[str], resource: Resource, action: Action, resource_id: Optional[str] = None) -> bool:
-        if not user_id:
-            return False
-        fn = getattr(self.rbac_policy, "check_permission", None)
-        if not fn:
-            return False
-        try:
-            if inspect.iscoroutinefunction(fn):
-                return await fn(user_id, resource, action, resource_id)
-            return fn(user_id, resource, action, resource_id)
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-            return False
+        return await self._tool_execution_security.rbac_check(
+            user_id,
+            resource,
+            action,
+            resource_id,
+            rbac_policy=self.rbac_policy,
+        )
 
     def _scoped_permissions(self, context: RequestContext) -> list[str]:
-        metadata = getattr(context, "metadata", {})
-        if not isinstance(metadata, dict):
-            return []
-        raw = metadata.get("permissions") or []
-        if isinstance(raw, str):
-            return [raw]
-        if isinstance(raw, list):
-            return [str(item) for item in raw if isinstance(item, str)]
-        return []
+        return self._tool_execution_security.scoped_permissions(context)
 
     def _mcp_scopes(self, context: RequestContext) -> list[str]:
-        scopes: list[str] = []
-        for scope in self._scoped_permissions(context):
-            try:
-                if scope.lower().startswith("mcp:"):
-                    scopes.append(scope)
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                continue
-        return scopes
+        return self._tool_execution_security.mcp_scopes(
+            context,
+            scoped_permissions=self._scoped_permissions,
+        )
 
     def _api_key_scopes(self, context: RequestContext) -> Optional[set[str]]:
         """Return normalized API key scopes when present on the request context."""
-        metadata = getattr(context, "metadata", {})
-        if not isinstance(metadata, dict):
-            return None
-        raw = metadata.get("api_key_scopes")
-        if raw is None:
-            return None
-        try:
-            return set(self.dependencies.api_key_scope_normalizer.normalize(raw))
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(
-                "MCP API key scope normalization failed; using local fallback: {}",
-                exc.__class__.__name__,
-            )
-
-        if isinstance(raw, str):
-            stripped = raw.strip()
-            if stripped.startswith("["):
-                try:
-                    parsed = json.loads(stripped)
-                except json.JSONDecodeError:
-                    pass
-                else:
-                    if isinstance(parsed, list):
-                        return {
-                            item.strip().lower()
-                            for item in parsed
-                            if isinstance(item, str) and item.strip()
-                        }
-            return {stripped.lower()} if stripped else set()
-        if isinstance(raw, (list, tuple, set)):
-            return {str(item).strip().lower() for item in raw if str(item).strip()}
-        return set()
+        return self._tool_execution_security.api_key_scopes(context)
 
     def _resolve_user_db_paths(self, user_id: Optional[str]) -> dict[str, str]:
         try:
@@ -1181,93 +998,49 @@ class MCPProtocol:
             return {}
 
     def _api_key_scope_level(self, context: RequestContext) -> Optional[str]:
-        scopes = self._api_key_scopes(context)
-        if not scopes:
-            return None
-        if "admin" in scopes or "service" in scopes:
-            return "admin"
-        if "write" in scopes:
-            return "write"
-        if "read" in scopes:
-            return "read"
-        return None
+        return self._tool_execution_security.api_key_scope_level(
+            context,
+            api_key_scopes=self._api_key_scopes,
+        )
 
     def _api_key_allows(self, context: RequestContext, *, is_write: Optional[bool] = None) -> bool:
         """Gate MCP operations by API key scopes when present."""
-        level = self._api_key_scope_level(context)
-        if level is None:
-            return True
-        if level == "admin":
-            return True
-        if is_write is None:
-            return level in {"read", "write"}
-        if is_write:
-            return level == "write"
-        return level in {"read", "write"}
+        return self._tool_execution_security.api_key_allows(
+            context,
+            is_write=is_write,
+            api_key_scope_level=self._api_key_scope_level,
+        )
 
     def _scope_matches(self, scope: str, resource_kind: str, identifier: Optional[str]) -> bool:
-        scope = scope.strip().lower()
-        if not scope.startswith("mcp:"):
-            return False
-        parts = scope.split(":")
-        if len(parts) == 2 and parts[1] == "*":
-            return True
-        if len(parts) < 3:
-            return False
-        kind = parts[1]
-        value = ":".join(parts[2:])
-        if kind == "*":
-            return True
-        if kind != resource_kind:
-            return False
-        if value in {"*", ""}:
-            return True
-        if identifier is None:
-            return False
-        return value == identifier.lower()
+        return self._tool_execution_security.scope_matches(scope, resource_kind, identifier)
 
     def _scope_allows(self, context: RequestContext, resource_kind: str, identifier: Optional[str]) -> bool:
-        scopes = self._mcp_scopes(context)
-        if not scopes:
-            return True
-        identifier_norm = identifier.lower() if isinstance(identifier, str) else None
-        if identifier_norm is None:
-            # Allow listing/browsing when any scoped permission exists for this resource kind.
-            for scope in scopes:
-                try:
-                    parts = scope.strip().lower().split(":")
-                except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                    continue
-                if len(parts) >= 2 and parts[0] == "mcp":
-                    if parts[1] == "*" or parts[1] == resource_kind:
-                        return True
-        return any(self._scope_matches(scope, resource_kind, identifier_norm) for scope in scopes)
+        return self._tool_execution_security.scope_allows(
+            context,
+            resource_kind,
+            identifier,
+            mcp_scopes=self._mcp_scopes,
+            scope_matches=self._scope_matches,
+        )
 
     async def _has_module_permission(self, context: RequestContext, module_id: Optional[str]) -> bool:
-        module_id_norm = module_id or ""
-        if _has_trusted_compat_claims(context):
-            return self._scope_allows(context, Resource.MODULE.value, module_id_norm or None)
-        if not await self._rbac_check(context.user_id, Resource.MODULE, Action.READ, module_id_norm):
-            return False
-        return self._scope_allows(context, Resource.MODULE.value, module_id_norm or None)
+        return await self._tool_execution_security.has_module_permission(
+            context,
+            module_id,
+            rbac_check=self._rbac_check,
+            scope_allows=self._scope_allows,
+        )
 
     async def _has_tool_permission(self, context: RequestContext, tool_name: str, *, is_write: Optional[bool] = None) -> bool:
-        if _has_trusted_compat_claims(context):
-            for auth_name in self._tool_authorization_names(tool_name):
-                if self._scope_allows(context, Resource.TOOL.value, auth_name):
-                    return self._api_key_allows(context, is_write=is_write)
-            return False
-        has_named_permission = False
-        for auth_name in self._tool_authorization_names(tool_name):
-            if not await self._rbac_check(context.user_id, Resource.TOOL, Action.EXECUTE, auth_name):
-                continue
-            if not self._scope_allows(context, Resource.TOOL.value, auth_name):
-                continue
-            has_named_permission = True
-            break
-        if not has_named_permission:
-            return False
-        return self._api_key_allows(context, is_write=is_write)
+        return await self._tool_execution_security.has_tool_permission(
+            context,
+            tool_name,
+            is_write=is_write,
+            rbac_check=self._rbac_check,
+            scope_allows=self._scope_allows,
+            api_key_allows=self._api_key_allows,
+            tool_authorization_names=self._tool_authorization_names,
+        )
 
     async def _has_resource_permission(self, context: RequestContext, resource_uri: str, module_id: Optional[str]) -> bool:
         if await self._rbac_check(context.user_id, Resource.RESOURCE, Action.READ, resource_uri):
@@ -1374,119 +1147,67 @@ class MCPProtocol:
         return decoded.library_after_name is not None or decoded.library_after_uuid is not None
 
     @staticmethod
-    def _hash_arguments(arguments: dict[str, Any]) -> Optional[str]:
-        try:
-            payload = json.dumps(arguments or {}, sort_keys=True, default=str).encode("utf-8")
-            import hashlib
-            return hashlib.sha256(payload).hexdigest()
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-            return None
+    def _hash_arguments(arguments: dict[str, Any]) -> str | None:
+        return ToolExecutionSecurity.hash_arguments_with_exceptions(
+            arguments,
+            noncritical_exceptions=_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS,
+        )
 
     async def _resolve_tool_definition(
         self,
         module: BaseModule,
         tool_name: str,
-    ) -> Optional[dict[str, Any]]:
-        """Resolve a tool definition for a module/tool pair."""
-        try:
-            get_def = getattr(module, "get_tool_def", None)
-            if callable(get_def):
-                tool_def = await get_def(tool_name)  # type: ignore[misc]
-                if isinstance(tool_def, dict):
-                    return tool_def
-            tool_defs = await module.get_tools()
-            for candidate in tool_defs:
-                if isinstance(candidate, dict) and candidate.get("name") == tool_name:
-                    return candidate
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-            return None
-        return None
+    ) -> dict[str, Any] | None:
+        return await self._tool_execution_security.resolve_tool_definition(module, tool_name)
 
     def _classify_write_tool_call(
         self,
         module: BaseModule,
         tool_name: str,
         tool_args: Any,
-        tool_def: Optional[dict[str, Any]],
-    ) -> Optional[bool]:
-        """Best-effort write classification using per-call module hook."""
-        try:
-            normalized_args = tool_args if isinstance(tool_args, dict) else {}
-            return module.is_write_tool_call(tool_name, normalized_args, tool_def=tool_def)
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-            return None
+        tool_def: dict[str, Any] | None,
+    ) -> bool | None:
+        return self._tool_execution_security.classify_write_tool_call(module, tool_name, tool_args, tool_def)
 
     def _resolve_write_classification(
         self,
         module: BaseModule,
         tool_name: str,
         tool_args: Any,
-        tool_def: Optional[dict[str, Any]],
+        tool_def: dict[str, Any] | None,
         *,
         fallback_to_name_heuristic: bool,
     ) -> bool:
-        """Resolve write classification with optional legacy fallback."""
-        is_write = self._classify_write_tool_call(module, tool_name, tool_args, tool_def)
-        if is_write is not None:
-            return bool(is_write)
-        if fallback_to_name_heuristic:
-            return bool(re.search(r"(ingest|update|delete|create|import)", str(tool_name).lower()))
-        return False
+        return self._tool_execution_security.resolve_write_classification(
+            module,
+            tool_name,
+            tool_args,
+            tool_def,
+            fallback_to_name_heuristic=fallback_to_name_heuristic,
+        )
 
     @staticmethod
     def _strip_forbidden_tool_argument_overrides(tool_args: dict[str, Any]) -> dict[str, Any]:
-        """Remove tool argument fields that could override request ownership/db scope."""
-        forbidden = {"user_id", "db_path", "db_paths", "chacha_db", "media_db", "prompts_db"}
-        sanitized = dict(tool_args)
-        for key in forbidden:
-            sanitized.pop(key, None)
-        return sanitized
+        return ToolExecutionSecurity.strip_forbidden_tool_argument_overrides(tool_args)
 
     def _harden_and_sanitize_tool_arguments(
         self,
         module: BaseModule,
         tool_args: Any,
     ) -> Any:
-        """Normalize tool arguments before policy and execution checks."""
-        if not isinstance(tool_args, dict):
-            return tool_args
-        hardened_args = self._strip_forbidden_tool_argument_overrides(tool_args)
-        try:
-            return module.sanitize_input(hardened_args)
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as san_err:
-            raise InvalidParamsException(f"Invalid arguments: {str(san_err)}") from san_err
+        return self._tool_execution_security.harden_and_sanitize_tool_arguments(module, tool_args)
 
     def _prepared_tool_call_payload(
         self,
         *,
         tool_name: str,
-        module_id: Optional[str],
-        is_write: Optional[bool],
-        idempotency_cache_key: Optional[str],
-        arguments_hash: Optional[str],
+        module_id: str | None,
+        is_write: bool | None,
+        idempotency_cache_key: str | None,
+        arguments_hash: str | None,
         context_fingerprint: str,
     ) -> bytes:
-        payload = {
-            "tool_name": str(tool_name),
-            "module_id": str(module_id or ""),
-            "is_write": bool(is_write),
-            "idempotency_cache_key": str(idempotency_cache_key or ""),
-            "arguments_hash": str(arguments_hash or ""),
-            "context_fingerprint": str(context_fingerprint or ""),
-        }
-        return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-
-    def _build_prepared_tool_call_integrity_tag(
-        self,
-        *,
-        tool_name: str,
-        module_id: Optional[str],
-        is_write: Optional[bool],
-        idempotency_cache_key: Optional[str],
-        arguments_hash: Optional[str],
-        context_fingerprint: str,
-    ) -> str:
-        payload = self._prepared_tool_call_payload(
+        return ToolExecutionSecurity.prepared_tool_call_payload(
             tool_name=tool_name,
             module_id=module_id,
             is_write=is_write,
@@ -1494,96 +1215,44 @@ class MCPProtocol:
             arguments_hash=arguments_hash,
             context_fingerprint=context_fingerprint,
         )
-        return hmac.new(self._prepared_call_secret, payload, digestmod="sha256").hexdigest()
+
+    def _build_prepared_tool_call_integrity_tag(
+        self,
+        *,
+        tool_name: str,
+        module_id: str | None,
+        is_write: bool | None,
+        idempotency_cache_key: str | None,
+        arguments_hash: str | None,
+        context_fingerprint: str,
+    ) -> str:
+        return self._tool_execution_security.build_prepared_tool_call_integrity_tag(
+            tool_name=tool_name,
+            module_id=module_id,
+            is_write=is_write,
+            idempotency_cache_key=idempotency_cache_key,
+            arguments_hash=arguments_hash,
+            context_fingerprint=context_fingerprint,
+        )
 
     def _verify_prepared_tool_call_integrity(
         self,
         prepared: PreparedToolCall,
     ) -> None:
-        if not isinstance(prepared.tool_name, str) or not self._tool_name_re.match(prepared.tool_name):
-            raise InvalidParamsException("Prepared tool call integrity check failed: invalid tool name")
-
-        expected_hash = self._hash_arguments(prepared.tool_args if isinstance(prepared.tool_args, dict) else {})
-        if expected_hash != prepared.arguments_hash:
-            raise InvalidParamsException("Prepared tool call integrity check failed: argument fingerprint mismatch")
-
-        expected_context_fingerprint = self._fingerprint_request_context(prepared.context)
-        if expected_context_fingerprint != prepared.context_fingerprint:
-            raise InvalidParamsException("Prepared tool call integrity check failed: context fingerprint mismatch")
-
-        expected_write = self._resolve_write_classification(
-            prepared.module,
-            prepared.tool_name,
-            prepared.tool_args,
-            prepared.tool_def,
-            fallback_to_name_heuristic=True,
-        )
-        if bool(expected_write) != bool(prepared.is_write):
-            raise InvalidParamsException("Prepared tool call integrity check failed: write classification mismatch")
-
-        expected_tag = self._build_prepared_tool_call_integrity_tag(
-            tool_name=prepared.tool_name,
-            module_id=prepared.module_id,
-            is_write=prepared.is_write,
-            idempotency_cache_key=prepared.idempotency_cache_key,
-            arguments_hash=prepared.arguments_hash,
-            context_fingerprint=prepared.context_fingerprint,
-        )
-        if not hmac.compare_digest(prepared.integrity_tag, expected_tag):
-            raise InvalidParamsException("Prepared tool call integrity check failed: signature mismatch")
+        self._tool_execution_security.verify_prepared_tool_call_integrity(prepared)
 
     def _fingerprint_request_context(self, context: RequestContext) -> str:
-        payload = {
-            "request_id": str(context.request_id or ""),
-            "user_id": str(context.user_id or ""),
-            "client_id": str(context.client_id or ""),
-            "session_id": str(context.session_id or ""),
-            "metadata": self._context_json_safe(getattr(context, "metadata", {})),
-            "db_paths": self._context_json_safe(getattr(context, "db_paths", {})),
-        }
-        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-        return hashlib.sha256(encoded).hexdigest()
+        return self._tool_execution_security.fingerprint_request_context(context)
 
     def _context_json_safe(self, value: Any) -> Any:
-        if value is None or isinstance(value, (bool, int, float, str)):
-            return value
-        if isinstance(value, Path):
-            return str(value)
-        if isinstance(value, dict):
-            return {str(key): self._context_json_safe(item) for key, item in sorted(value.items(), key=lambda kv: str(kv[0]))}
-        if isinstance(value, (list, tuple, set)):
-            return [self._context_json_safe(item) for item in value]
-        if is_dataclass(value):
-            return self._context_json_safe(asdict(value))
-        return str(value)
+        return self._tool_execution_security.context_json_safe(value)
 
     @staticmethod
     def _normalize_idempotency_key(
         params: dict[str, Any],
         idempotency_key: str | None = None,
-    ) -> Optional[str]:
-        """Normalize idempotency key from explicit argument or request params."""
-        raw_idempotency_key = idempotency_key
-        if raw_idempotency_key is None:
-            raw_idempotency_key = params.get("idempotencyKey")
-            if raw_idempotency_key is None:
-                raw_idempotency_key = params.get("idempotency_key")
-        if raw_idempotency_key is None:
-            arguments = params.get("arguments")
-            if isinstance(arguments, dict):
-                raw_idempotency_key = arguments.get("idempotencyKey")
-                if raw_idempotency_key is None:
-                    raw_idempotency_key = arguments.get("idempotency_key")
-
-        if raw_idempotency_key is None:
-            return None
-        if not isinstance(raw_idempotency_key, str):
-            raise InvalidParamsException("idempotencyKey must be a string")
-
-        normalized = raw_idempotency_key.strip()
-        if not normalized:
-            raise InvalidParamsException("idempotencyKey must not be empty")
-        return normalized
+    ) -> str | None:
+        return ToolExecutionSecurity.normalize_idempotency_key(params, idempotency_key=idempotency_key)
 
     def _audit_tool_event(
         self,
@@ -1595,90 +1264,31 @@ class MCPProtocol:
         arguments_hash: Optional[str],
         error: Optional[Exception] = None,
     ) -> None:
-        try:
-            log = logger.bind(
-                audit=True,
-                request_id=context.request_id,
-                user_id=context.user_id,
-                client_id=context.client_id,
-                session_id=context.session_id,
-                tool=tool_name,
-                module=module_id or "unknown",
-                duration_ms=round(duration_ms, 2),
-                arguments_hash=arguments_hash,
-                status=status,
-            )
-            if error:
-                log.error("MCP tool execution failed", error_type=error.__class__.__name__)
-            else:
-                log.info("MCP tool executed")
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-            pass
+        self._tool_execution_reporter.audit_tool_event(
+            context,
+            tool_name,
+            module_id,
+            status,
+            duration_ms,
+            arguments_hash,
+            error=error,
+        )
 
     @staticmethod
     def _governance_preflight_bypassed(tool_name: str, context: RequestContext) -> bool:
-        if str(tool_name or "").startswith("governance."):
-            return True
+        return ToolExecutionSecurity._governance_preflight_bypassed(tool_name, context)
 
-        metadata = getattr(context, "metadata", None)
-        if not isinstance(metadata, dict):
-            return False
-
-        raw = metadata.get("governance_bypass")
-        if isinstance(raw, bool):
-            return raw
-        if isinstance(raw, (int, float)):
-            return bool(raw)
-        if isinstance(raw, str):
-            return _is_truthy(raw)
-        return False
-
-    @staticmethod
-    def _governance_summary(tool_name: str, tool_args: dict[str, Any]) -> str:
-        rendered_args = ""
-        try:
-            rendered_args = json.dumps(tool_args or {}, sort_keys=True, default=str)
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-            rendered_args = str(tool_args)
-        if len(rendered_args) > 1200:
-            rendered_args = rendered_args[:1200]
-        return f"tool={tool_name}; args={rendered_args}"
+    def _governance_summary(self, tool_name: str, tool_args: dict[str, Any]) -> str:
+        return self._tool_execution_security._governance_summary(tool_name, tool_args)
 
     @staticmethod
     def _resolve_governance_category(tool_name: str, tool_def: Optional[dict[str, Any]]) -> str:
-        try:
-            if isinstance(tool_def, dict):
-                meta = tool_def.get("metadata")
-                if isinstance(meta, dict):
-                    category = str(meta.get("category") or "").strip().lower()
-                    if category:
-                        return category
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-            pass
+        return ToolExecutionSecurity._resolve_governance_category(tool_name, tool_def)
 
-        if isinstance(tool_name, str) and "." in tool_name:
-            prefix = tool_name.split(".", 1)[0].strip().lower()
-            if prefix:
-                return prefix
-        return "general"
-
-    @staticmethod
-    def _resolve_governance_rollout_mode(metadata: Optional[dict[str, Any]] = None) -> str:
+    def _resolve_governance_rollout_mode(self, metadata: Optional[dict[str, Any]] = None) -> str:
         """Resolve governance rollout mode from metadata override and server config."""
-        raw_mode = None
-        if isinstance(metadata, dict):
-            raw_mode = metadata.get("governance_rollout_mode")
-
-        try:
-            from tldw_Server_API.app.core import config as app_config
-
-            return app_config.resolve_governance_rollout_mode(
-                str(raw_mode) if raw_mode is not None else None
-            )
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Unable to resolve governance rollout mode from config: {exc}")
-            candidate = str(raw_mode or "").strip().lower()
-            return candidate if candidate in {"off", "shadow", "enforce"} else "off"
+        self._sync_tool_execution_dependencies()
+        return self._tool_execution_security._resolve_governance_rollout_mode(metadata)
 
     def _record_governance_check(
         self,
@@ -1689,67 +1299,21 @@ class MCPProtocol:
         rollout_mode: str,
     ) -> None:
         """Emit one governance check metric entry, failing open on metric errors."""
-        with contextlib.suppress(_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS):
-            self.metrics.record_governance_check(
-                surface=surface,
-                category=category,
-                status=status,
-                rollout_mode=rollout_mode,
-            )
+        self._sync_tool_execution_dependencies()
+        self._tool_execution_security._record_governance_check(
+            surface=surface,
+            category=category,
+            status=status,
+            rollout_mode=rollout_mode,
+        )
 
     @classmethod
     def _serialize_governance_decision(cls, decision: Any) -> dict[str, Any]:
-        if decision is None:
-            return {}
-        if isinstance(decision, dict):
-            return {str(k): v for k, v in decision.items()}
-        if is_dataclass(decision):
-            return cls._serialize_governance_decision(asdict(decision))
-        dump = getattr(decision, "model_dump", None)
-        if callable(dump):
-            try:
-                dumped = dump()
-                if isinstance(dumped, dict):
-                    return {str(k): v for k, v in dumped.items()}
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                pass
-        payload: dict[str, Any] = {}
-        for key in ("action", "status", "category", "category_source", "fallback_reason", "matched_rules"):
-            value = getattr(decision, key, None)
-            if value is not None:
-                payload[key] = value
-        return payload
+        return ToolExecutionSecurity._serialize_governance_decision(decision)
 
     async def _ensure_governance_service(self) -> Any | None:
-        if self._governance_service is not None:
-            return self._governance_service
-
-        async with self._governance_lock:
-            if self._governance_service is not None:
-                return self._governance_service
-            try:
-                from tldw_Server_API.app.core.Governance.service import GovernanceService
-                from tldw_Server_API.app.core.Governance.store import GovernanceStore
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"MCP governance preflight unavailable (import failure): {exc}")
-                return None
-
-            try:
-                cfg = get_config()
-                configured_path = getattr(cfg, "governance_db_path", None)
-                sqlite_path = str(configured_path or "Databases/governance.db")
-                db_path = Path(sqlite_path).expanduser()
-                db_path.parent.mkdir(parents=True, exist_ok=True)
-
-                self._governance_store = GovernanceStore(sqlite_path=str(db_path))
-                await self._governance_store.ensure_schema()
-                self._governance_service = GovernanceService(store=self._governance_store)
-                return self._governance_service
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"MCP governance preflight disabled (service init failure): {exc}")
-                self._governance_service = None
-                self._governance_store = None
-                return None
+        self._sync_tool_execution_dependencies()
+        return await self._tool_execution_security._ensure_governance_service()
 
     async def _run_governance_preflight(
         self,
@@ -1759,124 +1323,46 @@ class MCPProtocol:
         tool_def: Optional[dict[str, Any]],
         context: RequestContext,
     ) -> Optional[dict[str, Any]]:
-        if self._governance_preflight_bypassed(tool_name, context):
-            return None
-
-        metadata = context.metadata if isinstance(getattr(context, "metadata", None), dict) else {}
-        rollout_mode = self._resolve_governance_rollout_mode(metadata)
-        category = self._resolve_governance_category(tool_name, tool_def)
-
-        if rollout_mode == "off":
-            self._record_governance_check(
-                surface="mcp_tool",
-                category=category,
-                status="unknown",
-                rollout_mode=rollout_mode,
-            )
-            return {"status": "unknown", "rollout_mode": rollout_mode}
-
-        service = await self._ensure_governance_service()
-        if service is None:
-            self._record_governance_check(
-                surface="mcp_tool",
-                category=category,
-                status="error",
-                rollout_mode=rollout_mode,
-            )
-            return None
-
-        try:
-            decision = await service.validate_change(
-                surface="mcp_tool",
-                summary=self._governance_summary(tool_name, tool_args),
-                category=category,
-                metadata=metadata,
-            )
-            payload = self._serialize_governance_decision(decision)
-            payload.setdefault("rollout_mode", rollout_mode)
-            if isinstance(context.metadata, dict):
-                context.metadata["governance_preflight"] = payload
-            action = str(payload.get("action") or payload.get("status") or "").strip().lower() or "unknown"
-            self._record_governance_check(
-                surface="mcp_tool",
-                category=category,
-                status=action,
-                rollout_mode=rollout_mode,
-            )
-            if action == "deny" and rollout_mode == "enforce":
-                raise GovernanceDeniedError(
-                    "Permission denied by governance policy",
-                    governance=payload,
-                )
-            return payload
-        except GovernanceDeniedError:
-            raise
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-            self._record_governance_check(
-                surface="mcp_tool",
-                category=category,
-                status="error",
-                rollout_mode=rollout_mode,
-            )
-            try:
-                context.logger.debug(f"Governance preflight failed open: {exc}")
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                pass
-            return None
+        self._sync_tool_execution_dependencies()
+        return await self._tool_execution_security._run_governance_preflight(
+            tool_name=tool_name,
+            tool_args=tool_args,
+            tool_def=tool_def,
+            context=context,
+            governance_preflight_bypassed=self._governance_preflight_bypassed,
+            resolve_governance_rollout_mode=self._resolve_governance_rollout_mode,
+            resolve_governance_category=self._resolve_governance_category,
+            record_governance_check=self._record_governance_check,
+            governance_summary=self._governance_summary,
+            serialize_governance_decision=self._serialize_governance_decision,
+            ensure_governance_service=self._ensure_governance_service,
+        )
 
     @staticmethod
     def _hook_safe_copy(value: Any) -> Any:
         """Return a detached copy of hook-visible metadata without failing tool preparation."""
-        try:
-            return copy.deepcopy(value)
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-            try:
-                return json.loads(json.dumps(value, default=str))
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                return str(value)
+        return ToolExecutionHooks._hook_safe_copy(value)
 
     @staticmethod
     def _hook_safe_metadata(context: RequestContext) -> dict[str, Any]:
         """Return request metadata safe for local lifecycle hook decisions."""
-        metadata = getattr(context, "metadata", None)
-        if not isinstance(metadata, dict):
-            return {}
-        return {
-            str(key): MCPProtocol._hook_safe_copy(value)
-            for key, value in metadata.items()
-            if isinstance(key, str) and not key.startswith("_") and key not in {"governance_preflight"}
-        }
+        return ToolExecutionHooks._hook_safe_metadata(context)
 
     @staticmethod
     def _hook_safe_tool_args(tool_args: Any, *, tool_name: str | None = None) -> dict[str, Any] | None:
         """Return detached sanitized tool arguments for hook evaluation."""
-        if not isinstance(tool_args, dict):
-            return None
-        copied = MCPProtocol._hook_safe_copy(tool_args)
-        if not isinstance(copied, dict):
-            return None
-        return MCPProtocol._redact_hook_visible_tool_args(copied, tool_name=tool_name)
+        return ToolExecutionHooks._hook_safe_tool_args(tool_args, tool_name=tool_name)
 
     @staticmethod
     def _redact_hook_visible_tool_args(tool_args: dict[str, Any], *, tool_name: str | None = None) -> dict[str, Any]:
         """Redact secret-bearing argument values from hook-visible metadata."""
 
-        if str(tool_name or "") != "sandbox.run":
-            return tool_args
-        env = tool_args.get("env")
-        if not isinstance(env, dict):
-            return tool_args
-        redacted = dict(tool_args)
-        redacted["env"] = {str(key): "[redacted]" for key in env}
-        return redacted
+        return ToolExecutionHooks._redact_hook_visible_tool_args(tool_args, tool_name=tool_name)
 
     @staticmethod
     def _hook_safe_scope_payload(scope_payload: dict[str, Any] | None) -> dict[str, Any] | None:
         """Return detached path/external scope metadata for hooks."""
-        if not isinstance(scope_payload, dict):
-            return None
-        copied = MCPProtocol._hook_safe_copy(scope_payload)
-        return copied if isinstance(copied, dict) else None
+        return ToolExecutionHooks._hook_safe_scope_payload(scope_payload)
 
     def _build_tool_hook_context(
         self,
@@ -1895,68 +1381,32 @@ class MCPProtocol:
         error: Exception | None = None,
     ) -> ToolHookCallContext:
         """Build a bounded, detached context object for lifecycle hook evaluation."""
-        return ToolHookCallContext(
-            phase="post" if phase == "post" else "pre",
-            tool_name=str(tool_name),
+        return self._tool_execution_hooks._build_tool_hook_context(
+            phase=phase,
+            tool_name=tool_name,
             module_id=module_id,
+            tool_def=tool_def,
+            tool_args=tool_args,
             is_write=is_write,
-            tool_category=self._tool_use_category(tool_def),
             arguments_hash=arguments_hash,
-            request_id=str(context.request_id),
-            user_id=context.user_id,
-            client_id=context.client_id,
-            session_id=context.session_id,
-            metadata=self._hook_safe_metadata(context),
-            tool_args=self._hook_safe_tool_args(tool_args, tool_name=tool_name),
+            context=context,
+            scope_payload=scope_payload,
             status=status,
             duration_ms=duration_ms,
-            error_type=error.__class__.__name__ if error is not None else None,
-            scope_payload=self._hook_safe_scope_payload(scope_payload),
+            error=error,
         )
 
     @staticmethod
     def _coerce_tool_hook_action(action: Any) -> ToolHookAction | None:
         """Normalize a runtime hook action into the public literal contract."""
-        normalized = str(action or "allow").strip().lower()
-        if normalized in {"allow", "deny", "ask", "approval_required"}:
-            return cast(ToolHookAction, normalized)
-        return None
+        return ToolExecutionHooks._coerce_tool_hook_action(action)
 
     @staticmethod
     def _coerce_tool_hook_decision(
         decision: ToolHookDecision | dict[str, Any] | None,
     ) -> ToolHookDecision:
         """Normalize hook decision values from typed or dict-based embedders."""
-        if decision is None:
-            return ToolHookDecision(action="allow")
-        if isinstance(decision, ToolHookDecision):
-            return decision
-        if isinstance(decision, dict):
-            metadata = decision.get("metadata")
-            action = MCPProtocol._coerce_tool_hook_action(
-                decision.get("action") or decision.get("status") or "allow"
-            )
-            if action is None:
-                return ToolHookDecision(
-                    action="deny",
-                    reason_code="invalid_tool_hook_action",
-                    message="Invalid MCP tool hook action",
-                )
-            return ToolHookDecision(
-                action=action,
-                reason_code=(
-                    str(decision.get("reason_code"))
-                    if decision.get("reason_code") is not None
-                    else None
-                ),
-                message=str(decision.get("message")) if decision.get("message") is not None else None,
-                metadata=dict(metadata) if isinstance(metadata, dict) else {},
-            )
-        return ToolHookDecision(
-            action="deny",
-            reason_code="invalid_tool_hook_decision",
-            message="Invalid MCP tool hook decision",
-        )
+        return ToolExecutionHooks._coerce_tool_hook_decision(decision)
 
     @staticmethod
     def _tool_hook_payload(
@@ -1966,22 +1416,11 @@ class MCPProtocol:
         fallback_reason_code: str | None = None,
     ) -> dict[str, Any]:
         """Serialize a normalized hook decision into response-safe metadata."""
-        action = str(decision.action or "allow").strip().lower()
-        if action == "approval_required":
-            action = "ask"
-        payload: dict[str, Any] = {
-            "phase": phase,
-            "action": action,
-            "status": action,
-        }
-        reason_code = decision.reason_code or fallback_reason_code
-        if reason_code:
-            payload["reason_code"] = str(reason_code)
-        if decision.message:
-            payload["message"] = str(decision.message)
-        if isinstance(decision.metadata, dict) and decision.metadata:
-            payload["metadata"] = dict(decision.metadata)
-        return payload
+        return ToolExecutionHooks._tool_hook_payload(
+            decision,
+            phase=phase,
+            fallback_reason_code=fallback_reason_code,
+        )
 
     async def _run_pre_tool_hooks(
         self,
@@ -1996,8 +1435,7 @@ class MCPProtocol:
         scope_payload: dict[str, Any] | None,
     ) -> dict[str, Any]:
         """Run pre-tool hooks and map enforcement decisions to protocol errors."""
-        hook_context = self._build_tool_hook_context(
-            phase="pre",
+        return await self._tool_execution_hooks._run_pre_tool_hooks(
             tool_name=tool_name,
             module_id=module_id,
             tool_def=tool_def,
@@ -2006,78 +1444,6 @@ class MCPProtocol:
             arguments_hash=arguments_hash,
             context=context,
             scope_payload=scope_payload,
-        )
-        try:
-            raw_decision = await self._tool_call_hook_manager.before_tool_call(hook_context)
-        except asyncio.CancelledError:
-            raise
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-            logger.exception(
-                "MCP pre-tool hook failed closed: tool_name={} module_id={} request_id={} error_type={}",
-                tool_name,
-                module_id,
-                context.request_id,
-                exc.__class__.__name__,
-            )
-            payload = {
-                "phase": "pre",
-                "action": "deny",
-                "status": "deny",
-                "reason_code": "tool_hook_unavailable",
-                "error_type": exc.__class__.__name__,
-            }
-            hook_id = getattr(exc, "hook_id", None)
-            if hook_id is not None:
-                payload["hook_id"] = hook_id
-            hook_order = getattr(exc, "hook_order", None)
-            if hook_order is not None:
-                payload["hook_order"] = hook_order
-            self._append_tool_hook_summary(context, payload)
-            raise GovernanceDeniedError(
-                "Permission denied by MCP tool hook",
-                governance={
-                    "action": "deny",
-                    "status": "deny",
-                    "reason_code": "tool_hook_unavailable",
-                    "hook": payload,
-                },
-            ) from exc
-
-        decision = self._coerce_tool_hook_decision(raw_decision)
-        payload = self._tool_hook_payload(decision, phase="pre")
-        if raw_decision is not None:
-            self._append_tool_hook_summary(context, payload)
-        action = str(payload.get("action") or "allow").strip().lower()
-        if action == "allow":
-            return payload
-        if action == "ask":
-            raise ApprovalRequiredError(
-                "Approval required by MCP tool hook",
-                approval={
-                    "source": "tool_hook",
-                    "reason_code": payload.get("reason_code") or "tool_hook_approval_required",
-                    "message": payload.get("message"),
-                    "hook": payload,
-                },
-            )
-        if action != "deny":
-            payload = self._tool_hook_payload(
-                ToolHookDecision(
-                    action="deny",
-                    reason_code="invalid_tool_hook_action",
-                    message=f"Unsupported MCP tool hook action: {action}",
-                    metadata={"requested_action": action},
-                ),
-                phase="pre",
-            )
-        raise GovernanceDeniedError(
-            "Permission denied by MCP tool hook",
-            governance={
-                "action": "deny",
-                "status": "deny",
-                "reason_code": payload.get("reason_code") or "tool_hook_denied",
-                "hook": payload,
-            },
         )
 
     async def _run_post_tool_hooks(
@@ -2096,12 +1462,11 @@ class MCPProtocol:
         error: Exception | None = None,
     ) -> None:
         """Notify post-tool hooks while preserving the original tool outcome."""
-        hook_context = self._build_tool_hook_context(
-            phase="post",
+        await self._tool_execution_hooks._run_post_tool_hooks(
             tool_name=tool_name,
+            tool_args=tool_args,
             module_id=module_id,
             tool_def=tool_def,
-            tool_args=tool_args,
             is_write=is_write,
             arguments_hash=arguments_hash,
             context=context,
@@ -2110,39 +1475,6 @@ class MCPProtocol:
             duration_ms=duration_ms,
             error=error,
         )
-        try:
-            raw_decision = await self._tool_call_hook_manager.after_tool_call(hook_context)
-        except asyncio.CancelledError:
-            raise
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-            logger.exception(
-                "MCP post-tool hook failed; suppressed to preserve tool outcome: "
-                "tool_name={} module_id={} request_id={} status={} error_type={}",
-                tool_name,
-                module_id,
-                context.request_id,
-                status,
-                exc.__class__.__name__,
-            )
-            payload = {
-                "phase": "post",
-                "action": "deny",
-                "status": "error",
-                "reason_code": "tool_hook_unavailable",
-                "error_type": exc.__class__.__name__,
-            }
-            hook_id = getattr(exc, "hook_id", None)
-            if hook_id is not None:
-                payload["hook_id"] = hook_id
-            hook_order = getattr(exc, "hook_order", None)
-            if hook_order is not None:
-                payload["hook_order"] = hook_order
-            self._append_tool_hook_summary(context, payload)
-            return
-        if raw_decision is not None:
-            decision = self._coerce_tool_hook_decision(raw_decision)
-            payload = self._tool_hook_payload(decision, phase="post")
-            self._append_tool_hook_summary(context, payload)
 
     async def process_request(
         self,
@@ -2236,7 +1568,7 @@ class MCPProtocol:
                     skip_rate_limit = True
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
                 log.debug(
-                    "Failed to read rg_ingress_enforced from metadata; rate limit will be enforced",
+                    "Failed to read rg_ingress_enforced from metadata; rate limit will be enforced: {error_type}",
                     error_type=type(exc).__name__,
                 )
                 skip_rate_limit = False
@@ -2289,7 +1621,6 @@ class MCPProtocol:
                             request.id,
                         )
                     if not self._tool_name_re.match(_name):
-                        # Regex violation treated as internal error per legacy expectation
                         await self._record_process_request_tool_use_failure(
                             request=request,
                             context=context,
@@ -2299,7 +1630,7 @@ class MCPProtocol:
                             requested_tool_name=_name,
                         )
                         return pre_dispatch_error(
-                            ErrorCode.INTERNAL_ERROR,
+                            ErrorCode.INVALID_PARAMS,
                             "Invalid tool name",
                             request.id,
                         )
@@ -2663,11 +1994,33 @@ class MCPProtocol:
                         resource_id = name
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
                 resource_id = None
+            if resource == Resource.TOOL and action == Action.EXECUTE:
+                if not isinstance(resource_id, str):
+                    return False
+                tool_def = None
+                module = None
+                is_write = None
+                try:
+                    tool_args = params.get("arguments", {}) if isinstance(params, dict) else {}
+                    module = await self.module_registry.find_module_for_tool(resource_id)
+                    if module is not None:
+                        tool_def = await self._resolve_tool_definition(module, resource_id)
+                        tool_args = self._harden_and_sanitize_tool_arguments(module, tool_args)
+                        is_write = self._resolve_write_classification(
+                            module,
+                            resource_id,
+                            tool_args,
+                            tool_def,
+                            fallback_to_name_heuristic=True,
+                        )
+                    else:
+                        is_write = bool(re.search(r"(ingest|update|delete|create|import)", resource_id.lower()))
+                except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
+                    is_write = None
+                return await self._has_tool_permission(context, resource_id, is_write=is_write)
             trusted_compat_allowed = False
             if _has_trusted_compat_claims(context):
-                if resource == Resource.TOOL and action == Action.EXECUTE and isinstance(resource_id, str):
-                    trusted_compat_allowed = await self._has_tool_permission(context, resource_id)
-                elif resource == Resource.MODULE:
+                if resource == Resource.MODULE:
                     trusted_compat_allowed = await self._has_module_permission(
                         context,
                         resource_id if isinstance(resource_id, str) else None,
@@ -2689,32 +2042,7 @@ class MCPProtocol:
             if not self._scope_allows(context, resource.value, resource_id):
                 return False
             # Apply API key scope gating for read-style methods
-            if method != "tools/call":
-                return self._api_key_allows(context, is_write=None)
-            # For tools/call, evaluate write vs read-only tool when possible
-            tool_name = resource_id if isinstance(resource_id, str) else None
-            tool_def = None
-            module = None
-            is_write = None
-            try:
-                tool_args = params.get("arguments", {}) if isinstance(params, dict) else {}
-                if tool_name:
-                    module = await self.module_registry.find_module_for_tool(tool_name)
-                if module is not None and tool_name:
-                    tool_def = await self._resolve_tool_definition(module, tool_name)
-                    tool_args = self._harden_and_sanitize_tool_arguments(module, tool_args)
-                    is_write = self._resolve_write_classification(
-                        module,
-                        tool_name,
-                        tool_args,
-                        tool_def,
-                        fallback_to_name_heuristic=True,
-                    )
-                elif tool_name:
-                    is_write = bool(re.search(r"(ingest|update|delete|create|import)", tool_name.lower()))
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                is_write = None
-            return self._api_key_allows(context, is_write=is_write)
+            return self._api_key_allows(context, is_write=None)
 
         # Unknown method - deny by default
         return False
@@ -2844,7 +2172,8 @@ class MCPProtocol:
                             tool_copy = ensure_tool_definition_eval_metadata(tool_copy)
                         except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
                             context.logger.opt(exception=exc).debug(
-                                "Failed to attach eval metadata to listed tool",
+                                "Failed to attach eval metadata to listed tool: module_id={module_id} "
+                                "tool_name={tool_name} error_type={error_type}",
                                 module_id=module_id,
                                 tool_name=name,
                                 error_type=exc.__class__.__name__,
@@ -2876,141 +2205,65 @@ class MCPProtocol:
 
     def _extract_allowed_tools(self, context: RequestContext) -> list[str] | None:
         """Extract allowed-tools list from request context metadata."""
-        try:
-            metadata = context.metadata or {}
-            allowed = metadata.get("allowed_tools")
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-            return None
-
-        if allowed is None:
-            return None
-        if isinstance(allowed, list):
-            cleaned = [str(item).strip() for item in allowed if str(item).strip()]
-            return cleaned or None
-        if isinstance(allowed, str):
-            try:
-                parsed = json.loads(allowed)
-                if isinstance(parsed, list):
-                    cleaned = [str(item).strip() for item in parsed if str(item).strip()]
-                    return cleaned or None
-            except json.JSONDecodeError:
-                pass
-            cleaned = [part.strip() for part in allowed.split(",") if part.strip()]
-            return cleaned or None
-        return None
+        return self._tool_execution_security.extract_allowed_tools(context)
 
     def _extract_eval_profile_id(self, context: RequestContext) -> str | None:
         """Extract a non-sensitive profile identifier for execution eval metadata."""
-        metadata = getattr(context, "metadata", {})
-        if not isinstance(metadata, dict):
-            return None
-        for key in ("profile_id", "mcp_profile_id", "gateway_profile_id"):
-            value = metadata.get(key)
-            clean_value = sanitize_eval_profile_id(value)
-            if clean_value is not None:
-                return clean_value
-        return None
+        return self._tool_execution_runtime.extract_eval_profile_id(context)
 
     def _extract_tool_command(self, tool_args: Any) -> str | None:
         """Extract command-like string from tool arguments for pattern matching."""
-        if not isinstance(tool_args, dict):
-            return None
-        for key in ("command", "cmd", "args", "arguments"):
-            if key not in tool_args:
-                continue
-            value = tool_args.get(key)
-            if isinstance(value, str):
-                return value
-            if isinstance(value, list):
-                return " ".join(str(part) for part in value)
-        return None
+        return self._tool_execution_security.extract_tool_command(tool_args)
 
     def _matches_allowed_tool_pattern(self, tool_name: str, tool_args: Any, pattern: str) -> bool:
         """Check if tool invocation matches an allowed-tools pattern."""
-        pattern = str(pattern or "").strip()
-        if not pattern:
-            return False
-        if "(" not in pattern:
-            return tool_name == pattern
-        if not pattern.endswith(")"):
-            return False
-
-        base_name, cmd_pattern = pattern.split("(", 1)
-        cmd_pattern = cmd_pattern[:-1]
-        base_name = base_name.strip()
-        if tool_name != base_name:
-            return False
-
-        command = self._extract_tool_command(tool_args)
-        if command is None:
-            return False
-
-        regex_pattern = re.escape(cmd_pattern)
-        regex_pattern = regex_pattern.replace(r"\*", ".*")
-        try:
-            return bool(re.match(f"^{regex_pattern}$", command.strip()))
-        except re.error:
-            return False
+        return self._tool_execution_security.matches_allowed_tool_pattern(
+            tool_name,
+            tool_args,
+            pattern,
+            extract_tool_command=self._extract_tool_command,
+        )
 
     @staticmethod
     def _tool_authorization_names(tool_name: str) -> tuple[str, ...]:
         """Return invoked and canonical names that may authorize a tool call."""
 
-        canonical_name = _TOOL_AUTHORIZATION_ALIASES.get(tool_name)
-        if canonical_name and canonical_name != tool_name:
-            return (tool_name, canonical_name)
-        return (tool_name,)
+        return ToolExecutionSecurity.tool_authorization_names(tool_name)
 
     def _matches_tool_authorization_pattern(self, tool_name: str, tool_args: Any, pattern: str) -> bool:
         """Match a policy pattern against the invoked name and any canonical alias."""
 
-        return any(
-            self._matches_allowed_tool_pattern(auth_name, tool_args, pattern)
-            for auth_name in self._tool_authorization_names(tool_name)
+        return self._tool_execution_security.matches_tool_authorization_pattern(
+            tool_name,
+            tool_args,
+            pattern,
+            matches_allowed_tool_pattern=self._matches_allowed_tool_pattern,
+            tool_authorization_names=self._tool_authorization_names,
         )
 
     def _scope_allows_tool_name(self, context: RequestContext, tool_name: str) -> bool:
         """Return True when scopes allow the invoked tool name or canonical alias."""
 
-        return any(
-            self._scope_allows(context, Resource.TOOL.value, auth_name)
-            for auth_name in self._tool_authorization_names(tool_name)
+        return self._tool_execution_security.scope_allows_tool_name(
+            context,
+            tool_name,
+            scope_allows=self._scope_allows,
+            tool_authorization_names=self._tool_authorization_names,
         )
 
     def _is_tool_allowed_by_context(self, tool_name: str, tool_args: Any, context: RequestContext) -> bool:
         """Return True when tool usage is allowed by context metadata."""
-        allowed_tools = self._extract_allowed_tools(context)
-        if not allowed_tools:
-            return True
-        return any(self._matches_tool_authorization_pattern(tool_name, tool_args, pattern) for pattern in allowed_tools)
+        return self._tool_execution_security.is_tool_allowed_by_context(
+            tool_name,
+            tool_args,
+            context,
+            extract_allowed_tools=self._extract_allowed_tools,
+            matches_tool_authorization_pattern=self._matches_tool_authorization_pattern,
+        )
 
     async def _resolve_effective_tool_policy(self, context: RequestContext) -> dict[str, Any] | None:
-        metadata = getattr(context, "metadata", None)
-        if not isinstance(metadata, dict):
-            return None
-        if not _is_truthy(metadata.get("mcp_policy_context_enabled")):
-            return None
-        cached = metadata.get("_mcp_effective_tool_policy")
-        if isinstance(cached, dict):
-            return cached
-        try:
-            policy = await self.dependencies.effective_policy_resolver.resolve_for_context(
-                user_id=context.user_id,
-                metadata=metadata,
-            )
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning("Failed to resolve MCP Hub effective policy: {}", exc)
-            policy = {
-                "enabled": True,
-                "allowed_tools": [],
-                "denied_tools": [],
-                "capabilities": [],
-                "sources": [],
-                "resolution_error": "policy_resolution_failed",
-            }
-        if policy is not None:
-            metadata["_mcp_effective_tool_policy"] = policy
-        return policy
+        self._sync_tool_execution_dependencies()
+        return await self._tool_execution_security._resolve_effective_tool_policy(context)
 
     def _is_tool_allowed_by_effective_policy(
         self,
@@ -3018,25 +2271,12 @@ class MCPProtocol:
         tool_args: Any,
         policy: dict[str, Any] | None,
     ) -> bool:
-        if not isinstance(policy, dict) or not bool(policy.get("enabled", False)):
-            return True
-        if str(policy.get("resolution_error") or "").strip():
-            return False
-        denied_tools = [
-            str(pattern).strip()
-            for pattern in (policy.get("denied_tools") or [])
-            if str(pattern).strip()
-        ]
-        if any(self._matches_tool_authorization_pattern(tool_name, tool_args, pattern) for pattern in denied_tools):
-            return False
-        allowed_tools = [
-            str(pattern).strip()
-            for pattern in (policy.get("allowed_tools") or [])
-            if str(pattern).strip()
-        ]
-        if not allowed_tools:
-            return True
-        return any(self._matches_tool_authorization_pattern(tool_name, tool_args, pattern) for pattern in allowed_tools)
+        return self._tool_execution_security._is_tool_allowed_by_effective_policy(
+            tool_name,
+            tool_args,
+            policy,
+            matches_tool_authorization_pattern=self._matches_tool_authorization_pattern,
+        )
 
     async def _evaluate_runtime_approval(
         self,
@@ -3052,29 +2292,19 @@ class MCPProtocol:
         approval_reason: str | None = None,
         scope_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        policy = dict(effective_policy or {})
-        if not bool(policy.get("enabled", False)):
-            return {"status": "allow", "reason": "policy_disabled"}
-        if str(policy.get("resolution_error") or "").strip():
-            return {"status": "deny", "reason": "policy_unavailable"}
-        try:
-            return await self.dependencies.approval_evaluator.evaluate_tool_call(
-                effective_policy=policy,
-                tool_name=tool_name,
-                tool_args=tool_args,
-                context=context,
-                tool_def=tool_def,
-                is_write=is_write,
-                within_effective_policy=within_effective_policy,
-                force_approval=force_approval,
-                approval_reason=approval_reason,
-                scope_payload=scope_payload,
-            )
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("Failed to evaluate MCP Hub runtime approval: {}", exc)
-            if policy.get("approval_policy_id") is not None or policy.get("approval_mode"):
-                return {"status": "deny", "reason": "approval_unavailable"}
-            return {"status": "allow" if within_effective_policy else "deny", "reason": "approval_not_configured"}
+        self._sync_tool_execution_dependencies()
+        return await self._tool_execution_security._evaluate_runtime_approval(
+            effective_policy=effective_policy,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            context=context,
+            tool_def=tool_def,
+            is_write=is_write,
+            within_effective_policy=within_effective_policy,
+            force_approval=force_approval,
+            approval_reason=approval_reason,
+            scope_payload=scope_payload,
+        )
 
     async def _evaluate_path_scope(
         self,
@@ -3086,63 +2316,15 @@ class MCPProtocol:
         tool_def: dict[str, Any] | None,
         path_scope_candidates: list[PathScopeCandidate] | None = None,
     ) -> dict[str, Any]:
-        policy = dict(effective_policy or {})
-        policy_document = dict(policy.get("policy_document") or {})
-        path_scope_mode = str(policy_document.get("path_scope_mode") or "").strip()
-        if not bool(policy.get("enabled", False)) or not path_scope_mode or path_scope_mode == "none":
-            return {
-                "enabled": False,
-                "within_scope": True,
-                "reason": None,
-                "force_approval": False,
-                "normalized_paths": [],
-                "scope_payload": None,
-            }
-        if str(policy.get("resolution_error") or "").strip():
-            return {
-                "enabled": True,
-                "within_scope": False,
-                "reason": "policy_unavailable",
-                "force_approval": False,
-                "normalized_paths": [],
-                "scope_payload": {"path_scope_mode": path_scope_mode, "reason": "policy_unavailable"},
-            }
-        try:
-            try:
-                return await self.dependencies.path_scope_enforcer.evaluate_tool_call(
-                    effective_policy=policy,
-                    context=context,
-                    tool_name=tool_name,
-                    tool_args=tool_args,
-                    tool_def=tool_def,
-                    path_scope_candidates=path_scope_candidates,
-                )
-            except TypeError as exc:
-                if not _is_unexpected_keyword_type_error(exc, "path_scope_candidates"):
-                    raise
-                if path_scope_candidates:
-                    raise PermissionError("path_scope_candidates_unsupported") from exc
-                return await self.dependencies.path_scope_enforcer.evaluate_tool_call(
-                    effective_policy=policy,
-                    context=context,
-                    tool_name=tool_name,
-                    tool_args=tool_args,
-                    tool_def=tool_def,
-                )
-        except PermissionError:
-            raise
-        except TypeError:
-            raise
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("Failed to evaluate MCP Hub path scope: {}", exc)
-            return {
-                "enabled": True,
-                "within_scope": False,
-                "reason": "path_scope_unavailable",
-                "force_approval": True,
-                "normalized_paths": [],
-                "scope_payload": {"path_scope_mode": path_scope_mode, "reason": "path_scope_unavailable"},
-            }
+        self._sync_tool_execution_dependencies()
+        return await self._tool_execution_security._evaluate_path_scope(
+            effective_policy=effective_policy,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            context=context,
+            tool_def=tool_def,
+            path_scope_candidates=path_scope_candidates,
+        )
 
     async def _extract_path_scope_candidates(
         self,
@@ -3153,25 +2335,14 @@ class MCPProtocol:
         context: RequestContext,
         tool_def: dict[str, Any] | None,
     ) -> list[PathScopeCandidate] | None:
-        metadata = tool_def.get("metadata") if isinstance(tool_def, dict) else None
-        if not isinstance(metadata, dict) or metadata.get("path_scope_candidate_source") != "module":
-            return None
-        if not isinstance(tool_args, dict):
-            raise PermissionError("path_scope_candidates_unavailable")
-        extractor = getattr(module, "extract_path_scope_candidates", None)
-        if not callable(extractor):
-            raise PermissionError("path_scope_candidates_unavailable")
-        try:
-            candidates = normalize_path_scope_candidates(
-                await extractor(tool_name, tool_args, context)
-            )
-        except NotImplementedError as exc:
-            raise PermissionError("path_scope_candidates_unavailable") from exc
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-            raise InvalidParamsException(str(exc)) from exc
-        if not candidates:
-            raise PermissionError("path_scope_candidates_unavailable")
-        return candidates
+        self._sync_tool_execution_dependencies()
+        return await self._tool_execution_security._extract_path_scope_candidates(
+            module=module,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            context=context,
+            tool_def=tool_def,
+        )
 
     async def _evaluate_external_access(
         self,
@@ -3180,158 +2351,12 @@ class MCPProtocol:
         tool_name: str,
         context: RequestContext,
     ) -> dict[str, Any]:
-        deny_only_reasons = {
-            "external_access_unavailable",
-            "external_server_not_bound",
-            "invalid_external_tool_name",
-            "required_slot_not_granted",
-            "required_slot_secret_missing",
-        }
-        if not str(tool_name or "").startswith("ext."):
-            return {
-                "enabled": False,
-                "within_scope": True,
-                "reason": None,
-                "scope_payload": None,
-                "hard_deny": False,
-            }
-        policy = dict(effective_policy or {})
-        if not bool(policy.get("enabled", False)):
-            return {
-                "enabled": False,
-                "within_scope": True,
-                "reason": None,
-                "scope_payload": None,
-                "hard_deny": False,
-            }
-        sources = policy.get("sources")
-        if not isinstance(sources, list):
-            return {
-                "enabled": True,
-                "within_scope": False,
-                "reason": "external_access_unavailable",
-                "scope_payload": {
-                    "server_id": tool_name.split(".", 2)[1],
-                    "reason": "external_access_unavailable",
-                    "blocked_reason": "external_access_unavailable",
-                    "requested_slots": [],
-                    "missing_bound_slots": [],
-                    "missing_secret_slots": [],
-                },
-                "hard_deny": True,
-            }
-        parts = str(tool_name or "").split(".", 2)
-        if len(parts) != 3 or not parts[1]:
-            return {
-                "enabled": True,
-                "within_scope": False,
-                "reason": "invalid_external_tool_name",
-                "scope_payload": {
-                    "reason": "invalid_external_tool_name",
-                    "blocked_reason": "invalid_external_tool_name",
-                    "requested_slots": [],
-                    "missing_bound_slots": [],
-                    "missing_secret_slots": [],
-                },
-                "hard_deny": True,
-            }
-        server_id = parts[1]
-        metadata = context.metadata if isinstance(getattr(context, "metadata", None), dict) else {}
-        cached = metadata.get("_mcp_effective_external_access")
-        if not isinstance(cached, dict):
-            try:
-                cached = await self.dependencies.external_access_evaluator.resolve_for_sources(
-                    sources=[dict(item) for item in sources if isinstance(item, dict)],
-                    effective_policy=policy,
-                )
-                metadata["_mcp_effective_external_access"] = cached
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug("Failed to evaluate MCP Hub external access: {}", exc)
-                return {
-                    "enabled": True,
-                    "within_scope": False,
-                    "reason": "external_access_unavailable",
-                    "scope_payload": {
-                        "server_id": server_id,
-                        "reason": "external_access_unavailable",
-                        "blocked_reason": "external_access_unavailable",
-                        "requested_slots": [],
-                        "missing_bound_slots": [],
-                        "missing_secret_slots": [],
-                    },
-                    "hard_deny": True,
-                }
-
-        rows = cached.get("servers") if isinstance(cached, dict) else None
-        server_row = next(
-            (
-                row for row in rows
-                if isinstance(row, dict) and str(row.get("server_id") or "") == server_id
-            ),
-            None,
-        ) if isinstance(rows, list) else None
-        if not isinstance(server_row, dict):
-            return {
-                "enabled": True,
-                "within_scope": False,
-                "reason": "external_server_not_bound",
-                "scope_payload": {
-                    "server_id": server_id,
-                    "reason": "external_server_not_bound",
-                    "blocked_reason": "external_server_not_bound",
-                    "requested_slots": [],
-                    "missing_bound_slots": [],
-                    "missing_secret_slots": [],
-                },
-                "hard_deny": True,
-            }
-        runtime_executable = bool(server_row.get("runtime_executable"))
-        reason = str(server_row.get("blocked_reason") or "").strip() or None
-        requested_slots = [
-            str(slot).strip()
-            for slot in (server_row.get("requested_slots") or [])
-            if str(slot).strip()
-        ]
-        bound_slots = [
-            str(slot).strip()
-            for slot in (server_row.get("bound_slots") or [])
-            if str(slot).strip()
-        ]
-        missing_bound_slots = [
-            str(slot).strip()
-            for slot in (server_row.get("missing_bound_slots") or [])
-            if str(slot).strip()
-        ]
-        missing_secret_slots = [
-            str(slot).strip()
-            for slot in (server_row.get("missing_secret_slots") or [])
-            if str(slot).strip()
-        ]
-        scope_payload = {
-            "server_id": server_id,
-            "server_name": str(server_row.get("server_name") or "").strip() or None,
-            "reason": reason or ("external_server_allowed" if runtime_executable else "external_server_not_bound"),
-            "blocked_reason": reason or ("external_server_allowed" if runtime_executable else "external_server_not_bound"),
-            "requested_slots": requested_slots,
-            "bound_slots": bound_slots,
-            "missing_bound_slots": missing_bound_slots,
-            "missing_secret_slots": missing_secret_slots,
-        }
-        if not runtime_executable:
-            return {
-                "enabled": True,
-                "within_scope": False,
-                "reason": reason or "external_server_not_bound",
-                "scope_payload": scope_payload,
-                "hard_deny": (reason or "external_server_not_bound") in deny_only_reasons,
-            }
-        return {
-            "enabled": True,
-            "within_scope": True,
-            "reason": None,
-            "scope_payload": scope_payload,
-            "hard_deny": False,
-        }
+        self._sync_tool_execution_dependencies()
+        return await self._tool_execution_security._evaluate_external_access(
+            effective_policy=effective_policy,
+            tool_name=tool_name,
+            context=context,
+        )
 
     async def _handle_tools_call(
         self,
@@ -3339,40 +2364,7 @@ class MCPProtocol:
         context: RequestContext
     ) -> dict[str, Any]:
         """Execute a tool."""
-        start_ts = time.time()
-        try:
-            prepared = await self.prepare_tool_call(params=params, context=context)
-        except Exception as exc:
-            if self._should_record_tool_use(context):
-                try:
-                    status, reason_code = classify_tool_use_exception(exc)
-                    scope_payload = None
-                    if isinstance(exc, GovernanceDeniedError) and isinstance(exc.governance, dict):
-                        path_scope = exc.governance.get("path_scope")
-                        if isinstance(path_scope, dict):
-                            scope_payload = path_scope
-                    event = self._build_tool_use_event(
-                        context=context,
-                        requested_tool_name=(
-                            params.get("name") if isinstance(params, dict) else None
-                        ),
-                        status=status,
-                        execution_origin="failed_before_execution",
-                        duration_ms=self._tool_use_duration_ms(start_ts),
-                        reason_code=reason_code,
-                        tool_args=(
-                            params.get("arguments") if isinstance(params, dict) else None
-                        ),
-                        scope_payload=scope_payload,
-                    )
-                    await self._record_tool_use_event(event)
-                except Exception as record_exc:  # noqa: BLE001 - preserve original exception.
-                    logger.warning(
-                        "Failed to build or record prepare-failure tool-use event: {}",
-                        record_exc.__class__.__name__,
-                    )
-            raise
-        return await self.execute_prepared_tool_call(prepared)
+        return await self._tool_execution.handle_tools_call(params, context)
 
     async def prepare_tool_call(
         self,
@@ -3381,648 +2373,58 @@ class MCPProtocol:
         idempotency_key: str | None = None,
     ) -> PreparedToolCall:
         """Prepare a tool invocation through protocol policy, validation, and governance checks."""
-        tool_name = params.get("name")
-        tool_args = params.get("arguments", {})
-        normalized_idempotency_key = self._normalize_idempotency_key(params, idempotency_key=idempotency_key)
-
-        if not tool_name:
-            raise InvalidParamsException("Tool name is required")
-
-        # Strictly validate tool name
-        if not self._tool_name_re.match(tool_name):
-            raise InvalidParamsException("Invalid tool name")
-
-        # Enforce allowed-tools constraints from context metadata (skill execution)
-        if not self._is_tool_allowed_by_context(tool_name, tool_args, context):
-            raise PermissionError(f"Tool '{tool_name}' not allowed by execution context")
-        effective_policy = await self._resolve_effective_tool_policy(context)
-        within_effective_policy = self._is_tool_allowed_by_effective_policy(tool_name, tool_args, effective_policy)
-        external_access_result = await self._evaluate_external_access(
-            effective_policy=effective_policy,
-            tool_name=tool_name,
+        return await self._tool_execution.prepare_tool_call(
+            params=params,
             context=context,
-        )
-        external_block_reason = str(external_access_result.get("reason") or "").strip()
-        if bool(external_access_result.get("hard_deny")) or external_block_reason in {
-            "required_slot_not_granted",
-            "required_slot_secret_missing",
-        }:
-            external_scope = (
-                dict(external_access_result.get("scope_payload") or {})
-                if isinstance(external_access_result.get("scope_payload"), dict)
-                else {}
-            )
-            blocked_reason = external_block_reason or "external_access_denied"
-            raise GovernanceDeniedError(
-                "Blocked external credential use",
-                governance={
-                    "action": "deny",
-                    "status": "deny",
-                    "reason_code": blocked_reason,
-                    "external_access": external_scope,
-                },
-            )
-
-        # Find module for tool
-        module = await self.module_registry.find_module_for_tool(tool_name)
-        if not module:
-            raise InvalidParamsException(f"Tool not found: {tool_name}")
-
-        module_id = self.module_registry.get_module_id_for_tool(tool_name) or getattr(module, "name", None)
-
-        # Look up tool definition early for scope gating and validation
-        tool_def = await self._resolve_tool_definition(module, tool_name)
-        if isinstance(tool_def, dict):
-            try:
-                tool_def = ensure_tool_definition_eval_metadata(tool_def)
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
-                context.logger.opt(exception=exc).debug(
-                    "Failed to attach eval metadata to resolved tool definition",
-                    module_id=module_id,
-                    tool_name=tool_name,
-                    error_type=exc.__class__.__name__,
-                )
-        tool_args = self._harden_and_sanitize_tool_arguments(module, tool_args)
-
-        # Determine write-capable status from sanitized arguments.
-        is_write = self._resolve_write_classification(
-            module,
-            tool_name,
-            tool_args,
-            tool_def,
-            fallback_to_name_heuristic=True,
+            idempotency_key=idempotency_key,
         )
 
-        module_allowed = await self._has_module_permission(context, module_id)
-        tool_allowed = await self._has_tool_permission(context, tool_name, is_write=is_write)
-
-        if not module_allowed and not tool_allowed:
-            raise PermissionError(f"Permission denied for module: {module_id}")
-
-        if not tool_allowed:
-            raise PermissionError(f"Permission denied for tool: {tool_name}")
-
-        # Protocol-level pre-execution validation for write-capable tools
-        # Ensures that modules validate arguments even if they forgot to call
-        # validate_tool_arguments inside execute_tool.
-        # Look up tool definition from module cache where possible
-        if tool_def is None:
-            tool_def = await self._resolve_tool_definition(module, tool_name)
-
-        idempotency_cache_key = None
-        try:
-            # Lightweight inputSchema validation (config-gated)
-            cfg = get_config()
-            if cfg.validate_input_schema and isinstance(tool_def, dict):
-                schema = tool_def.get("inputSchema") or {}
-                try:
-                    self._validate_input_schema(schema, tool_args)
-                except InvalidParamsException:
-                    with contextlib.suppress(_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS):
-                        self.metrics.record_tool_invalid_params(getattr(module, "name", "unknown"), str(tool_name))
-                    raise
-
-            # Optional policy: disable write-capable tools entirely
-            if is_write:
-                if get_config().disable_write_tools:
-                    raise PermissionError("Write tools are disabled by server policy")
-                # Check module overrides validator
-                if module.__class__.validate_tool_arguments is BaseModule.validate_tool_arguments:
-                    with contextlib.suppress(_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS):
-                        self.metrics.record_tool_validator_missing(getattr(module, "name", "unknown"), str(tool_name))
-                    raise ValueError(
-                        "Write-capable tool requires module.validate_tool_arguments override"
-                    )
-                # Run validator
-                try:
-                    module.validate_tool_arguments(tool_name, tool_args)
-                except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as ve:
-                    with contextlib.suppress(_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS):
-                        self.metrics.record_tool_invalid_params(getattr(module, "name", "unknown"), str(tool_name))
-                    raise ValueError(f"Invalid parameters for tool {tool_name}: {ve}") from ve
-
-                if normalized_idempotency_key:
-                    idempotency_cache_key = self._make_idempotency_cache_key(
-                        context,
-                        module_id or getattr(module, "name", "unknown"),
-                        tool_name,
-                        normalized_idempotency_key,
-                    )
-        except ValueError as ve:
-            # Surface as JSON-RPC INVALID_PARAMS at the protocol layer
-            # by raising a sentinel exception handled by process_request
-            raise InvalidParamsException(str(ve)) from ve
-
-        policy_document = (effective_policy or {}).get("policy_document")
-        path_scope_mode = ""
-        if isinstance(policy_document, dict):
-            path_scope_mode = str(policy_document.get("path_scope_mode") or "").strip()
-        elif isinstance(policy_document, BaseModel):
-            if hasattr(policy_document, "model_dump"):
-                policy_document_payload = policy_document.model_dump()
-            else:  # pragma: no cover - pydantic v1 compatibility
-                policy_document_payload = policy_document.dict()
-            path_scope_mode = str(policy_document_payload.get("path_scope_mode") or "").strip()
-        path_scope_candidates = None
-        if bool((effective_policy or {}).get("enabled")) and path_scope_mode not in {"", "none"}:
-            path_scope_candidates = await self._extract_path_scope_candidates(
-                module=module,
-                tool_name=tool_name,
-                tool_args=tool_args,
-                context=context,
-                tool_def=tool_def if isinstance(tool_def, dict) else None,
-            )
-        path_scope_result = await self._evaluate_path_scope(
-            effective_policy=effective_policy,
-            tool_name=tool_name,
-            tool_args=tool_args,
+    async def _prepare_tool_call_inline(
+        self,
+        params: dict[str, Any],
+        context: RequestContext,
+        idempotency_key: str | None = None,
+    ) -> PreparedToolCall:
+        """Prepare a tool invocation through protocol policy, validation, and governance checks."""
+        self._sync_tool_execution_dependencies()
+        return await self._tool_execution_security.prepare_tool_call(
+            params=params,
             context=context,
-            tool_def=tool_def if isinstance(tool_def, dict) else None,
-            path_scope_candidates=path_scope_candidates,
-        )
-        within_resolved_scope = bool(path_scope_result.get("within_scope", True)) and bool(
-            external_access_result.get("within_scope", True)
-        )
-        approval_reason = str(path_scope_result.get("reason") or "").strip() or None
-        if approval_reason is None:
-            approval_reason = str(external_access_result.get("reason") or "").strip() or None
-        scope_payload: dict[str, Any] | None = None
-        for payload in (
-            path_scope_result.get("scope_payload"),
-            external_access_result.get("scope_payload"),
-        ):
-            if isinstance(payload, dict):
-                scope_payload = dict(scope_payload or {})
-                scope_payload.update(payload)
-
-        path_scope_block_reason = str(path_scope_result.get("reason") or "").strip()
-        if path_scope_block_reason and not bool(path_scope_result.get("within_scope", True)):
-            requires_approval = bool(path_scope_result.get("force_approval", False))
-            if not requires_approval or path_scope_block_reason == "workspace_unresolvable_for_trust_source":
-                raise GovernanceDeniedError(
-                    "Blocked path-scoped tool use",
-                    governance={
-                        "action": "deny",
-                        "status": "deny",
-                        "reason_code": path_scope_block_reason,
-                        "path_scope": dict(scope_payload or {}),
-                    },
-                )
-
-        approval_result = await self._evaluate_runtime_approval(
-            effective_policy=effective_policy,
-            tool_name=tool_name,
-            tool_args=tool_args,
-            context=context,
-            tool_def=tool_def if isinstance(tool_def, dict) else None,
-            is_write=is_write,
-            within_effective_policy=within_effective_policy and within_resolved_scope,
-            force_approval=bool(path_scope_result.get("force_approval", False)),
-            approval_reason=approval_reason,
-            scope_payload=scope_payload,
-        )
-        approval_status = str(approval_result.get("status") or "allow").strip().lower()
-        if approval_status == "approval_required":
-            raise ApprovalRequiredError(
-                "Approval required by MCP Hub policy",
-                approval=approval_result.get("approval") if isinstance(approval_result.get("approval"), dict) else None,
-            )
-        if approval_status != "allow":
-            raise PermissionError(f"Tool '{tool_name}' not allowed by MCP Hub policy")
-
-        args_hash = self._hash_arguments(tool_args if isinstance(tool_args, dict) else {})
-        await self._run_governance_preflight(
-            tool_name=tool_name,
-            tool_args=tool_args if isinstance(tool_args, dict) else {},
-            tool_def=tool_def if isinstance(tool_def, dict) else None,
-            context=context,
-        )
-        await self._run_pre_tool_hooks(
-            tool_name=tool_name,
-            tool_args=tool_args,
-            module_id=module_id,
-            tool_def=tool_def if isinstance(tool_def, dict) else None,
-            is_write=is_write,
-            arguments_hash=args_hash,
-            context=context,
-            scope_payload=scope_payload,
-        )
-        context_fingerprint = self._fingerprint_request_context(context)
-        integrity_tag = self._build_prepared_tool_call_integrity_tag(
-            tool_name=tool_name,
-            module_id=module_id,
-            is_write=is_write,
-            idempotency_cache_key=idempotency_cache_key,
-            arguments_hash=args_hash,
-            context_fingerprint=context_fingerprint,
-        )
-
-        return PreparedToolCall(
-            tool_name=tool_name,
-            tool_args=tool_args,
-            module=module,
-            module_id=module_id,
-            tool_def=tool_def if isinstance(tool_def, dict) else None,
-            is_write=is_write,
-            normalized_idempotency_key=normalized_idempotency_key,
-            idempotency_cache_key=idempotency_cache_key,
-            arguments_hash=args_hash,
-            context_fingerprint=context_fingerprint,
-            integrity_tag=integrity_tag,
-            context=context,
-            scope_payload=scope_payload,
+            idempotency_key=idempotency_key,
+            hooks=self._tool_execution_hooks,
         )
 
     async def execute_prepared_tool_call(self, prepared: PreparedToolCall) -> dict[str, Any]:
         """Execute a previously prepared tool invocation."""
-        self._verify_prepared_tool_call_integrity(prepared)
-        tool_name = prepared.tool_name
-        tool_args = prepared.tool_args
-        module = prepared.module
-        module_id = prepared.module_id
-        tool_def = prepared.tool_def
-        is_write = prepared.is_write
-        normalized_idempotency_key = prepared.normalized_idempotency_key
-        idempotency_cache_key = prepared.idempotency_cache_key
-        args_hash = prepared.arguments_hash
-        context = prepared.context
-        execution_start_ts = time.time()
+        self._sync_tool_execution_dependencies()
+        return await self._tool_execution.execute_prepared_tool_call(prepared)
 
-        async def _record_prepared_event(
-            *,
-            status: ToolUseStatus,
-            execution_origin: str,
-            reason_code: str | None = None,
-            payload: dict[str, Any] | None = None,
-            idempotency_replay: bool = False,
-        ) -> None:
-            try:
-                if not self._should_record_tool_use(context):
-                    return
-                event = self._build_tool_use_event(
-                    context=context,
-                    requested_tool_name=tool_name,
-                    effective_tool_name=tool_name,
-                    status=status,
-                    execution_origin=execution_origin,
-                    duration_ms=self._tool_use_duration_ms(execution_start_ts),
-                    module_id=module_id or getattr(module, "name", None),
-                    tool_def=tool_def if isinstance(tool_def, dict) else None,
-                    payload=payload,
-                    tool_args=tool_args,
-                    scope_payload=prepared.scope_payload,
-                    is_write=is_write,
-                    reason_code=reason_code,
-                    idempotency_replay=idempotency_replay,
-                )
-                await self._record_tool_use_event(event)
-            except Exception as exc:  # noqa: BLE001 - reporting must not affect tool calls.
-                logger.warning(
-                    "Failed to build or record prepared tool-use event: {}",
-                    exc.__class__.__name__,
-                )
-
-        async def _execute_tool_call() -> dict[str, Any]:
-            # Optional per-tool/category rate limits (ingestion vs read)
-            try:
-                # Categorization for per-category rate limiting
-                cfg = get_config()
-                category = None
-                # 1) Prefer tool metadata.category if available
-                try:
-                    meta = (tool_def or {}).get("metadata") or {}
-                    cat = str(meta.get("category") or "").lower()
-                    if cat in {"ingestion", "management", "read"}:
-                        category = cat
-                except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                    category = None
-                # 2) Config-driven mapping
-                if not category:
-                    try:
-                        if isinstance(cfg.tool_category_map, dict) and tool_name in cfg.tool_category_map:
-                            category = str(cfg.tool_category_map.get(tool_name))
-                    except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                        category = None
-                # 3) Heuristic fallback
-                if not category:
-                    ingestion_tools = {'ingest_media', 'update_media', 'delete_media'}
-                    category = 'ingestion' if tool_name in ingestion_tools else 'read'
-                key_owner = f"user:{context.user_id}" if context.user_id else (f"client:{context.client_id}" if context.client_id else "anon")
-                rl_key = f"{key_owner}:tool:{tool_name}:cat:{category}"
-                await self.rate_limiter.check_rate_limit(rl_key, category=category)
-            except RateLimitExceeded:
-                raise
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                # Best-effort; do not block on limiter errors
-                pass
-
-            # Execute tool with circuit breaker (pass context through)
-            t0 = time.time()
-
-            try:
-                # Trace the tool call with OTEL
-                with self.telemetry.trace_context(
-                    "mcp.tool_call",
-                    {
-                        "mcp.tool": tool_name,
-                        "mcp.module": getattr(module, "name", "unknown"),
-                        "mcp.user_id": str(context.user_id or ""),
-                        "mcp.client_id": str(context.client_id or ""),
-                    },
-                ) as span:
-                    try:
-                        execution_args = tool_args
-                        tool_schema_props = (
-                            (tool_def or {}).get("inputSchema", {}).get("properties", {})
-                            if isinstance(tool_def, dict)
-                            else {}
-                        )
-                        if (
-                            normalized_idempotency_key
-                            and isinstance(tool_args, dict)
-                            and isinstance(tool_schema_props, dict)
-                            and "idempotencyKey" in tool_schema_props
-                            and "idempotencyKey" not in tool_args
-                        ):
-                            execution_args = dict(tool_args)
-                            execution_args["idempotencyKey"] = normalized_idempotency_key
-                        result = await module.execute_with_circuit_breaker(
-                            module.execute_tool,
-                            tool_name,
-                            execution_args,
-                            context
-                        )
-                        span.set_attribute("mcp.status", "success")
-                    except InvalidParamsException as _tool_e:
-                        span.set_attribute("mcp.status", "failure")
-                        span.set_attribute("mcp.error_type", _tool_e.__class__.__name__)
-                        span.set_attribute("mcp.error_message", str(_tool_e)[:200])
-                        with contextlib.suppress(_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS):
-                            self.metrics.record_tool_invalid_params(getattr(module, "name", "unknown"), str(tool_name))
-                        raise
-                    except (TypeError, ValueError) as _tool_e:
-                        # Module argument validators often raise ValueError/TypeError.
-                        # Normalize those to INVALID_PARAMS so HTTP callers receive 400.
-                        span.set_attribute("mcp.status", "failure")
-                        span.set_attribute("mcp.error_type", _tool_e.__class__.__name__)
-                        span.set_attribute("mcp.error_message", str(_tool_e)[:200])
-                        with contextlib.suppress(_MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS):
-                            self.metrics.record_tool_invalid_params(getattr(module, "name", "unknown"), str(tool_name))
-                        raise InvalidParamsException(str(_tool_e)) from _tool_e
-                    except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as _tool_e:
-                        sanitized_tool_error = self._generic_exception_like(
-                            _tool_e,
-                            _MCP_TOOL_EXECUTION_ERROR,
-                        )
-                        span.set_attribute("mcp.status", "failure")
-                        span.set_attribute("mcp.error_type", sanitized_tool_error.__class__.__name__)
-                        span.set_attribute("mcp.error_message", _MCP_TOOL_EXECUTION_ERROR)
-                        raise sanitized_tool_error from None
-                    finally:
-                        span.set_attribute("mcp.duration_ms", max(0.0, (time.time() - t0) * 1000.0))
-
-                # Format result
-                duration_ms = max(0.0, (time.time() - t0) * 1000.0)
-                profile_id = self._extract_eval_profile_id(context)
-                result = attach_execution_eval_metadata(
-                    result,
-                    tool_name=tool_name,
-                    tool_def=tool_def,
-                    profile_id=profile_id,
-                    duration_ms=duration_ms,
-                )
-                execution_eval = execution_eval_metadata_from_tool_definition(
-                    tool_name=tool_name,
-                    tool_def=tool_def,
-                    profile_id=profile_id,
-                    duration_ms=duration_ms,
-                )
-                result_eval = self._tool_use_eval_metadata(payload=result if isinstance(result, dict) else None)
-                for key in (
-                    "tool_prompt_id",
-                    "tool_prompt_version",
-                    "action_family",
-                    "result_kind",
-                    "path_filter_used",
-                    "truncated",
-                    "reason_code",
-                ):
-                    if key in result_eval:
-                        execution_eval[key] = result_eval[key]
-                if isinstance(result, str):
-                    content = [{"type": "text", "text": result}]
-                elif isinstance(result, list):
-                    content = result
-                elif isinstance(result, dict):
-                    # Preserve structured tool results as JSON content instead of stringifying.
-                    content = [{"type": "json", "json": result}]
-                else:
-                    content = [{"type": "text", "text": str(result)}]
-
-                module_name = module_id or getattr(module, "name", None)
-                # Record module operation metrics
-                try:
-                    duration = max(0.0, time.time() - t0)
-                    self.metrics.record_module_operation(module=module_name or "unknown", operation="tools_call", duration=duration, success=True)
-                except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                    pass
-                self._audit_tool_event(
-                    context,
-                    tool_name,
-                    module_name,
-                    status="success",
-                    duration_ms=duration_ms,
-                    arguments_hash=args_hash,
-                )
-                response_payload = {
-                    "content": content,
-                    "module": module_name,
-                    "tool": tool_name,
-                    "eval": execution_eval,
-                }
-                await self._run_post_tool_hooks(
-                    tool_name=tool_name,
-                    tool_args=tool_args,
-                    module_id=module_name,
-                    tool_def=tool_def if isinstance(tool_def, dict) else None,
-                    is_write=is_write,
-                    arguments_hash=args_hash,
-                    context=context,
-                    scope_payload=prepared.scope_payload,
-                    status="success",
-                    duration_ms=duration_ms,
-                )
-                return response_payload
-
-            except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as e:
-                duration_ms = max(0.0, (time.time() - t0) * 1000.0)
-                context.logger.error(  # noqa: TRY400 - structured audit log records sanitized type only.
-                    "Tool execution failed",
-                    error_type=e.__class__.__name__,
-                )
-                try:
-                    duration = max(0.0, time.time() - t0)
-                    self.metrics.record_module_operation(module=getattr(module, "name", "unknown"), operation="tools_call", duration=duration, success=False)
-                except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                    pass
-                self._audit_tool_event(
-                    context,
-                    tool_name,
-                    module_id or getattr(module, "name", None),
-                    status="failure",
-                    duration_ms=duration_ms,
-                    arguments_hash=args_hash,
-                    error=e,
-                )
-                await self._run_post_tool_hooks(
-                    tool_name=tool_name,
-                    tool_args=tool_args,
-                    module_id=module_id or getattr(module, "name", None),
-                    tool_def=tool_def if isinstance(tool_def, dict) else None,
-                    is_write=is_write,
-                    arguments_hash=args_hash,
-                    context=context,
-                    scope_payload=prepared.scope_payload,
-                    status="failure",
-                    duration_ms=duration_ms,
-                    error=e,
-                )
-                raise
-
-        if is_write and idempotency_cache_key:
-            try:
-                cfg = get_config()
-                ttl = max(1, int(getattr(cfg, "idempotency_ttl_seconds", 300)))
-                max_size = max(1, int(getattr(cfg, "idempotency_cache_size", 512)))
-                if args_hash is None:
-                    raise InvalidParamsException("Unable to fingerprint tool arguments for idempotency")
-                arguments_bound = await self._idempotency.bind_arguments(
-                    idempotency_cache_key,
-                    args_hash,
-                    ttl=ttl,
-                    max_size=max_size,
-                )
-                if not arguments_bound:
-                    raise InvalidParamsException("Idempotency key was already used with different arguments")
-                module_timeout = int(getattr(getattr(module, "config", None), "timeout_seconds", cfg.module_timeout))
-                lock_ttl = max(ttl, module_timeout * 2)
-                payload, from_cache = await self._idempotency.run(
-                    idempotency_cache_key,
-                    _execute_tool_call,
-                    ttl=ttl,
-                    max_size=max_size,
-                    lock_ttl=lock_ttl,
-                )
-                try:
-                    if from_cache:
-                        self.metrics.record_idempotency_hit(module_id or getattr(module, "name", "unknown"), str(tool_name))
-                    else:
-                        self.metrics.record_idempotency_miss(module_id or getattr(module, "name", "unknown"), str(tool_name))
-                except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-                    pass
-            except Exception as exc:
-                status, reason_code = classify_tool_use_exception(exc)
-                await _record_prepared_event(
-                    status=status,
-                    execution_origin=(
-                        self._tool_use_execution_origin_for_failure(status)
-                        if status != "error"
-                        else "executed"
-                    ),
-                    reason_code=reason_code,
-                )
-                raise
-            await _record_prepared_event(
-                status="success",
-                execution_origin="cached" if from_cache else "executed",
-                payload=payload if isinstance(payload, dict) else None,
-                idempotency_replay=from_cache,
-            )
-            return payload
-
-        try:
-            payload = await _execute_tool_call()
-        except Exception as exc:
-            status, reason_code = classify_tool_use_exception(exc)
-            await _record_prepared_event(
-                status=status,
-                execution_origin=(
-                    self._tool_use_execution_origin_for_failure(status)
-                    if status != "error"
-                    else "executed"
-                ),
-                reason_code=reason_code,
-            )
-            raise
-        await _record_prepared_event(
-            status="success",
-            execution_origin="executed",
-            payload=payload if isinstance(payload, dict) else None,
-        )
-        return payload
+    async def _execute_prepared_tool_call_inline(self, prepared: PreparedToolCall) -> dict[str, Any]:
+        """Execute a previously prepared tool invocation."""
+        self._sync_tool_execution_dependencies()
+        return await self._tool_execution_runtime.execute_prepared_tool_call(prepared)
 
     # -------------------------
     # Idempotency cache helpers
     # -------------------------
     def _make_idempotency_cache_key(self, context: RequestContext, module_name: str, tool_name: str, idempotency_key: str) -> str:
-        owner = f"user:{context.user_id}" if context.user_id else (f"client:{context.client_id}" if context.client_id else "anon")
-        return f"{owner}|module:{module_name}|tool:{tool_name}|key:{idempotency_key}"
+        runtime = getattr(self, "_tool_execution_runtime", None)
+        if runtime is None:
+            return ToolExecutionRuntime.make_idempotency_cache_key(
+                context,
+                module_name,
+                tool_name,
+                idempotency_key,
+            )
+        return runtime.make_idempotency_cache_key(
+            context,
+            module_name,
+            tool_name,
+            idempotency_key,
+        )
 
     def _validate_input_schema(self, schema: dict[str, Any], args: dict[str, Any]) -> None:
-        """Quick JSON Schema checks: required keys, primitive types, unknown fields.
-        Only applies when schema.type == object.
-        """
-        try:
-            if not isinstance(schema, dict):
-                return
-            if schema.get("type") != "object":
-                return
-            if not isinstance(args, dict):
-                raise InvalidParamsException("Arguments must be an object")
-            props = schema.get("properties") or {}
-            required = schema.get("required") or []
-            addl = schema.get("additionalProperties", True)
-
-            # Required
-            for key in required:
-                if key not in args or args.get(key) is None:
-                    raise InvalidParamsException(f"Missing required parameter: {key}")
-
-            # Unknown fields
-            if addl is False:
-                unknown = [k for k in args if k not in props]
-                if unknown:
-                    raise InvalidParamsException(f"Unknown parameters: {', '.join(unknown)}")
-
-            # Primitive type checks
-            def _type_ok(expected: str, value: Any) -> bool:
-                mapping = {
-                    "string": str,
-                    "number": (int, float),
-                    "integer": int,
-                    "boolean": bool,
-                    "object": dict,
-                    "array": list,
-                }
-                py = mapping.get(expected)
-                if py is None:
-                    return True
-                # number should not reject ints; python isinstance(True, int) caveat
-                if expected in {"number", "integer"} and isinstance(value, bool):
-                    return False
-                return isinstance(value, py)
-
-            for k, v in args.items():
-                if k in props:
-                    p = props.get(k) or {}
-                    t = p.get("type")
-                    if isinstance(t, str) and not _type_ok(t, v):
-                        raise InvalidParamsException(f"Invalid type for '{k}': expected {t}")
-        except InvalidParamsException:
-            raise
-        except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
-            # Be forgiving on schema format errors
-            return
+        self._tool_execution_security.validate_input_schema(schema, args)
 
     async def _handle_resources_list(
         self,

@@ -252,6 +252,44 @@ def _single_user_test_key_compat_allowed() -> bool:
     return True
 
 
+def _require_demo_auth_enabled(request: Request) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    """Require the direct MCP demo-auth surface to be explicitly enabled."""
+    if not env_flag_enabled("MCP_ENABLE_DEMO_AUTH"):
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Direct MCP auth is disabled. Use AuthNZ bearer tokens.",
+        )
+
+    cfg = get_config()
+    test_mode = is_test_mode()
+    if not cfg.debug_mode and not test_mode:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Demo auth is restricted to debug/test environments.",
+        )
+
+    demo_secret = os.getenv("MCP_DEMO_AUTH_SECRET", "")
+    if len(demo_secret) < 16:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Demo auth secret not configured; set MCP_DEMO_AUTH_SECRET to enable.",
+        )
+
+    client_host = getattr(request.client, "host", None)
+    if client_host == "testclient" and test_mode:
+        client_host = "127.0.0.1"
+    try:
+        peer_ip = ipaddress.ip_address(client_host) if client_host else None
+    except ValueError:
+        peer_ip = None
+    if not peer_ip or (not peer_ip.is_loopback and not peer_ip.is_private):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Demo auth is only available from loopback/private addresses.",
+        )
+    return peer_ip
+
+
 def _get_client_ip(request: Optional[Request]) -> Optional[str]:
     """Extract client IP from the incoming request."""
     if request is None:
@@ -1563,37 +1601,8 @@ async def create_token(
     Use the primary AuthNZ login flow to obtain a JWT, or enable this endpoint
     explicitly via MCP_ENABLE_DEMO_AUTH=1 for development/testing only.
     """
-    if not env_flag_enabled("MCP_ENABLE_DEMO_AUTH"):
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Direct MCP auth is disabled. Use AuthNZ bearer tokens.",
-        )
-
-    cfg = get_config()
-    test_mode = is_test_mode()
-    if not cfg.debug_mode and not test_mode:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Demo auth is restricted to debug/test environments.",
-        )
-
+    peer_ip = _require_demo_auth_enabled(request)
     demo_secret = os.getenv("MCP_DEMO_AUTH_SECRET", "")
-    if len(demo_secret) < 16:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Demo auth secret not configured; set MCP_DEMO_AUTH_SECRET to enable.",
-        )
-
-    client_host = getattr(request.client, "host", None)
-    try:
-        peer_ip = ipaddress.ip_address(client_host) if client_host else None
-    except ValueError:
-        peer_ip = None
-    if not peer_ip or (not peer_ip.is_loopback and not peer_ip.is_private):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Demo auth is only available from loopback/private addresses.",
-        )
 
     provided_secret = auth_request.api_key or auth_request.password or ""
     if not provided_secret or not secrets.compare_digest(provided_secret, demo_secret):
@@ -1635,6 +1644,7 @@ async def create_token(
 @router.post("/auth/refresh", response_model=AuthTokenResponse)
 async def refresh_token(
     auth_request: AuthRefreshRequest,
+    request: Request,
     _guard: None = Depends(enforce_http_security),
 ):
     """
@@ -1645,6 +1655,8 @@ async def refresh_token(
     If `token_id` is not provided, the system attempts to locate it by scanning
     active refresh tokens (acceptable for in-memory DEV mode).
     """
+    _require_demo_auth_enabled(request)
+
     jwt_manager = get_jwt_manager()
     refresh_token_value = auth_request.refresh_token
     token_id = auth_request.token_id

@@ -32,7 +32,6 @@ from pathlib import Path
 from typing import Any
 
 import pathspec
-from pathspec.patterns.gitwildmatch import GitWildMatchPatternError
 from loguru import logger
 from mcp_unified.filesystem_locks import (
     FilesystemLockConflict,
@@ -42,6 +41,7 @@ from mcp_unified.filesystem_locks import (
 )
 from mcp_unified.interfaces.file_policy_actions import get_file_policy_action_metadata
 from mcp_unified.interfaces.path_scope import PathScopeCandidate
+from pathspec.patterns.gitwildmatch import GitWildMatchPatternError
 
 from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
     McpHubWorkspaceRootResolver,
@@ -372,11 +372,24 @@ class FilesystemModule(BaseModule):
 
         write_text_tool = create_tool_definition(
             name="fs.write_text",
-            description="Write UTF-8 text content to a file under the active trusted workspace root.",
+            description=(
+                "Create UTF-8 text content under the active trusted workspace root. "
+                "Replacing an existing file requires expected_sha256 or read_receipt."
+            ),
             parameters={
                 "properties": {
                     "path": {"type": "string", "description": "Workspace-relative or absolute file path"},
                     "content": {"type": "string"},
+                    "expected_sha256": {
+                        "type": "string",
+                        "description": "Required when replacing an existing file unless read_receipt is supplied.",
+                    },
+                    "read_receipt": {
+                        "type": "string",
+                        "description": "Required when replacing an existing file unless expected_sha256 is supplied.",
+                    },
+                    "lock_lease_id": {"type": "string"},
+                    "dry_run": {"type": "boolean", "default": False},
                 },
                 "required": ["path", "content"],
             },
@@ -676,13 +689,24 @@ class FilesystemModule(BaseModule):
             )
 
         if tool_name == "fs.write_text":
-            target = self._resolve_workspace_path(workspace_root, str(args.get("path")))
-            content = args.get("content")
-            write_result = await asyncio.to_thread(self._write_text_file, target, str(content))
-            return {
-                "path": self._to_workspace_relative_path(workspace_root, target),
-                "bytes_written": write_result["bytes_written"],
-            }
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            mode = "replace" if target.exists() or target.is_symlink() else "create"
+            if mode == "replace" and not args.get("expected_sha256") and not args.get("read_receipt"):
+                raise ValueError("write_preimage_required")
+            return await asyncio.to_thread(
+                self._write_file,
+                workspace_root,
+                target,
+                str(args.get("content")),
+                mode,
+                args.get("expected_sha256"),
+                args.get("read_receipt"),
+                args.get("lock_lease_id"),
+                bool(args.get("dry_run", False)),
+                self._setting_positive_int("write_max_bytes", 5_000_000),
+                self._setting_positive_int("write_preimage_max_bytes", 5_000_000),
+                context,
+            )
 
         if tool_name == "fs.stat":
             target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
@@ -993,7 +1017,17 @@ class FilesystemModule(BaseModule):
             return
 
         if tool_name == "fs.write_text":
-            unknown = sorted(set(arguments) - {"path", "content"})
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "path",
+                    "content",
+                    "expected_sha256",
+                    "read_receipt",
+                    "lock_lease_id",
+                    "dry_run",
+                }
+            )
             if unknown:
                 raise ValueError(f"unknown arguments: {', '.join(unknown)}")
             path = arguments.get("path")
@@ -1002,6 +1036,12 @@ class FilesystemModule(BaseModule):
                 raise ValueError("path is required")
             if not isinstance(content, str):
                 raise ValueError("content must be a string")
+            for key in ("expected_sha256", "read_receipt"):
+                value = arguments.get(key)
+                if value is not None and not isinstance(value, str):
+                    raise ValueError(f"{key} must be a string")
+            self._validate_optional_nonempty_string_argument(arguments, "lock_lease_id")
+            self._validate_bool_argument(arguments, "dry_run")
             return
 
         if tool_name == "fs.stat":
@@ -2835,10 +2875,3 @@ class FilesystemModule(BaseModule):
         except UnicodeDecodeError as exc:
             raise ValueError("binary content is not supported by fs.read_text") from exc
         return {"text": text}
-
-    @staticmethod
-    def _write_text_file(target: Path, content: str) -> dict[str, Any]:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        data = content.encode("utf-8")
-        target.write_bytes(data)
-        return {"bytes_written": len(data)}
