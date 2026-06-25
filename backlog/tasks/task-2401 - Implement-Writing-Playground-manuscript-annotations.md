@@ -103,6 +103,24 @@ Review evidence:
 Security/static checks:
 - Bandit on Task 4 endpoint/schema/helper touched scope wrote `/tmp/bandit_task_2401_task4_controller.json` with no findings.
 - `git diff --check HEAD~1..HEAD` passed for the Task 4 implementation commit.
+
+Task 5 complete: added Jobs-backed full-scene manuscript annotation review helpers, API endpoint, worker processor/service, startup registration, and regression tests.
+
+TDD and review-fix evidence:
+- Initial Task 5 target suites passed after implementation: `../../.venv/bin/python -m pytest tldw_Server_API/tests/Writing/test_manuscript_annotation_review_jobs.py tldw_Server_API/tests/Writing/test_manuscript_annotations_api.py -q` -> 28 passed, 5 warnings; `../../.venv/bin/python -m pytest tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py tldw_Server_API/tests/Services/test_startup_primary_jobs_pollers.py -q` -> 33 passed, 3 warnings.
+- Review-fix red tests failed as expected for missing worker job_type filtering, cross-owner idempotency collision, same-batch duplicate suppression, acquire_next_jobs job_type forwarding, and transient provider retryability.
+- Final Task 5 green run: `../../.venv/bin/python -m pytest tldw_Server_API/tests/Writing/test_manuscript_annotation_review_jobs.py tldw_Server_API/tests/Writing/test_manuscript_annotations_db.py tldw_Server_API/tests/Jobs/test_jobs_manager_acquire.py tldw_Server_API/tests/Writing/test_manuscript_annotations_api.py tldw_Server_API/tests/Services/test_startup_primary_jobs_pollers.py tldw_Server_API/tests/Jobs/test_worker_sdk.py tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py -q` -> 94 passed, 5 warnings.
+
+Review evidence:
+- Spec review initially found the worker leased all writing-domain jobs before validating job_type; fix commit `030135992e` added job_type filtering through JobManager, WorkerSDK, and the writing review worker.
+- Spec re-review approved the full Task 5 range after the acquisition fix.
+- Code-quality review found cross-user idempotency collisions, same-batch duplicate persistence, acquire_next_jobs inconsistency, and transient provider retry classification gaps.
+- Fix commits `26b223c503` and `d7d10a014e` owner-scoped scene-review idempotency with a digest, dedupe retained candidates in memory, thread job_type through batch acquisition, and mark Chat rate limits/upstream 408/429/5xx failures retryable while keeping auth/config/bad-request terminal.
+- Final code-quality re-review approved with no remaining Critical, Important, or Minor issues.
+
+Security/static checks:
+- Bandit on Task 5 touched app files wrote `/tmp/bandit_task_2401_task5_after_filter_fix.json`, `/tmp/bandit_task_2401_task5_hardening_uncommitted.json`, and `/tmp/bandit_task_2401_task5_retry_classification.json` with empty results.
+- `git diff --check 83293fb52a1bbb6f3464386ac028d848d8070c6e..HEAD` passed after the final Task 5 fix.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
