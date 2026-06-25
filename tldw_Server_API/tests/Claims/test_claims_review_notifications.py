@@ -47,7 +47,6 @@ def test_build_review_email_bodies_escapes_html() -> None:
 
 def _seed_review_notification_db() -> MediaDatabase:
 
-
     tmpdir = tempfile.mkdtemp(prefix="claims_review_notify_")
     db_path = os.path.join(tmpdir, "media.db")
     db = MediaDatabase(db_path=db_path, client_id="1")
@@ -80,7 +79,6 @@ def _seed_review_notification_db() -> MediaDatabase:
 
 
 def test_claims_review_notifications_deliver_email(monkeypatch):
-
 
     from tldw_Server_API.app.core.AuthNZ import email_service as email_module
 
@@ -134,7 +132,161 @@ def test_claims_review_notifications_deliver_email(monkeypatch):
         db.close_connection()
 
 
-def test_dispatch_claim_review_notifications_uses_managed_media_database(monkeypatch):
+def test_deliver_claim_review_notifications_now_returns_skipped_when_disabled(monkeypatch, tmp_path):
+    class _FakeDb:
+        def get_claims_monitoring_settings(self, user_id):
+            assert user_id == "1"
+            return {"enabled": False}
+
+        def close_connection(self) -> None:
+            pass
+
+    @contextmanager
+    def _fake_managed_media_database(*_args, **_kwargs):
+        yield _FakeDb()
+
+    monkeypatch.setattr(claims_notifications, "managed_media_database", _fake_managed_media_database)
+    db_path = str(tmp_path / "claims-review.db")
+
+    result = claims_notifications.deliver_claim_review_notifications_now(
+        db_path=db_path,
+        owner_user_id="1",
+        notification_ids=[7],
+    )
+
+    assert result == {"outcome": "skipped", "reason": "settings_disabled", "notification_ids": [7]}
+
+
+def test_deliver_claim_review_notifications_now_returns_success_contract(monkeypatch, tmp_path):
+    class _FakeDb:
+        def __init__(self) -> None:
+            self.marked_ids: list[int] = []
+
+        def get_claims_monitoring_settings(self, user_id):
+            assert user_id == "1"
+            return {
+                "enabled": True,
+                "slack_webhook_url": None,
+                "webhook_url": None,
+                "email_recipients": json.dumps(["review@example.com"]),
+            }
+
+        def get_claim_notifications_by_ids(self, notification_ids):
+            assert notification_ids == [2, 7]
+            return [
+                {
+                    "id": 7,
+                    "kind": "review_update",
+                    "payload_json": json.dumps({"claim_text": "A.", "new_status": "approved"}),
+                    "created_at": "2026-03-16T00:00:00Z",
+                    "delivered_at": None,
+                },
+                {
+                    "id": 2,
+                    "kind": "review_assignment",
+                    "payload_json": json.dumps({"claim_text": "B.", "new_status": "pending"}),
+                    "created_at": "2026-03-17T00:00:00Z",
+                    "delivered_at": None,
+                },
+            ]
+
+        def mark_claim_notifications_delivered(self, notification_ids):
+            self.marked_ids.extend(notification_ids)
+            return len(notification_ids)
+
+    fake_db = _FakeDb()
+    managed_calls: list[dict[str, object]] = []
+    email_calls: list[dict[str, object]] = []
+
+    @contextmanager
+    def _fake_managed_media_database(client_id, *, initialize=True, **kwargs):
+        managed_calls.append(
+            {
+                "client_id": client_id,
+                "initialize": initialize,
+                "kwargs": kwargs,
+            }
+        )
+        yield fake_db
+
+    def _fake_deliver_review_email_sync(**kwargs):
+        email_calls.append(kwargs)
+        return True
+
+    monkeypatch.setattr(claims_notifications, "managed_media_database", _fake_managed_media_database)
+    monkeypatch.setattr(claims_notifications, "_deliver_review_email_sync", _fake_deliver_review_email_sync)
+    db_path = str(tmp_path / "claims-review.db")
+
+    result = claims_notifications.deliver_claim_review_notifications_now(
+        db_path=db_path,
+        owner_user_id="1",
+        notification_ids=[7, 2, 7, 0, -5],
+    )
+
+    assert result == {"outcome": "ok", "notification_ids": [2, 7], "delivered": 2}
+    assert fake_db.marked_ids == [2, 7]
+    assert email_calls and email_calls[0]["recipients"] == ["review@example.com"]
+    assert managed_calls == [
+        {
+            "client_id": claims_notifications.settings.get("SERVER_CLIENT_ID", "SERVER_API_V1"),
+            "initialize": False,
+            "kwargs": {
+                "db_path": db_path,
+                "suppress_init_exceptions": claims_notifications._CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS,
+                "suppress_close_exceptions": claims_notifications._CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS,
+            },
+        }
+    ]
+
+
+def test_deliver_claim_review_notifications_now_skips_already_delivered(monkeypatch, tmp_path):
+    class _FakeDb:
+        def get_claims_monitoring_settings(self, user_id):
+            assert user_id == "1"
+            return {
+                "enabled": True,
+                "slack_webhook_url": None,
+                "webhook_url": None,
+                "email_recipients": "review@example.com",
+            }
+
+        def get_claim_notifications_by_ids(self, notification_ids):
+            assert notification_ids == [7]
+            return [
+                {
+                    "id": 7,
+                    "kind": "review_update",
+                    "payload_json": json.dumps({"claim_text": "A.", "new_status": "approved"}),
+                    "created_at": "2026-03-16T00:00:00Z",
+                    "delivered_at": "2026-03-16T00:01:00Z",
+                }
+            ]
+
+        def mark_claim_notifications_delivered(self, notification_ids):
+            raise AssertionError(f"Already delivered notifications should not be marked again: {notification_ids}")
+
+    @contextmanager
+    def _fake_managed_media_database(*_args, **_kwargs):
+        yield _FakeDb()
+
+    monkeypatch.setattr(claims_notifications, "managed_media_database", _fake_managed_media_database)
+    monkeypatch.setattr(
+        claims_notifications,
+        "_deliver_review_email_sync",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError(f"Email should not be delivered: {kwargs}")),
+    )
+    db_path = str(tmp_path / "claims-review.db")
+
+    result = claims_notifications.deliver_claim_review_notifications_now(
+        db_path=db_path,
+        owner_user_id="1",
+        notification_ids=[7],
+    )
+
+    assert result == {"outcome": "skipped", "reason": "already_delivered", "notification_ids": [7]}
+
+
+def test_dispatch_claim_review_notifications_uses_managed_media_database(monkeypatch, tmp_path):
     class _FakeDb:
         def __init__(self) -> None:
             self.closed = False
@@ -162,6 +314,7 @@ def test_dispatch_claim_review_notifications_uses_managed_media_database(monkeyp
 
         def mark_claim_notifications_delivered(self, notification_ids):
             self.marked_ids.extend(notification_ids)
+            return len(notification_ids)
 
         def close_connection(self) -> None:
             self.closed = True
@@ -200,9 +353,10 @@ def test_dispatch_claim_review_notifications_uses_managed_media_database(monkeyp
     )
     monkeypatch.setattr(claims_notifications.threading, "Thread", _ImmediateThread)
     monkeypatch.setattr(claims_notifications, "_deliver_review_email_sync", lambda **kwargs: True, raising=False)
+    db_path = str(tmp_path / "claims-review.db")
 
     dispatch_claim_review_notifications(
-        db_path="/tmp/claims-review.db",
+        db_path=db_path,
         owner_user_id="1",
         notification_ids=[7],
     )
@@ -212,9 +366,9 @@ def test_dispatch_claim_review_notifications_uses_managed_media_database(monkeyp
     assert managed_calls == [
         {
             "client_id": claims_notifications.settings.get("SERVER_CLIENT_ID", "SERVER_API_V1"),
-            "initialize": True,
+            "initialize": False,
             "kwargs": {
-                "db_path": "/tmp/claims-review.db",
+                "db_path": db_path,
                 "suppress_init_exceptions": claims_notifications._CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS,
                 "suppress_close_exceptions": claims_notifications._CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS,
             },
@@ -249,7 +403,7 @@ def test_submit_claims_notification_delivery_drops_when_queue_is_full(monkeypatc
     assert started_threads == []
 
 
-def test_dispatch_claims_alert_notifications_uses_bounded_submission(monkeypatch):
+def test_dispatch_claims_alert_notifications_uses_bounded_submission(monkeypatch, tmp_path):
     submissions: list[dict[str, object]] = []
 
     def _submit(fn, *args, **kwargs):
@@ -262,6 +416,7 @@ def test_dispatch_claims_alert_notifications_uses_bounded_submission(monkeypatch
 
     monkeypatch.setattr(claims_service, "submit_claims_notification_delivery", _submit)
     monkeypatch.setattr(claims_service.threading, "Thread", _RawThread)
+    db_path = str(tmp_path / "claims-alert.db")
 
     claims_service._dispatch_claims_alert_notifications(
         config_row={
@@ -275,7 +430,7 @@ def test_dispatch_claims_alert_notifications_uses_bounded_submission(monkeypatch
             "threshold": 0.2,
             "baseline_ratio": 0.1,
         },
-        db_path="/tmp/claims-alert.db",
+        db_path=db_path,
         user_id="1",
     )
 
