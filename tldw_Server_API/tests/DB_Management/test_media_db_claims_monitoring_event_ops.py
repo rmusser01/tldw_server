@@ -8,6 +8,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.media_database_impl import 
     MediaDatabase,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
+    get_claims_monitoring_event as helper_get_claims_monitoring_event,
     get_latest_claims_monitoring_event_delivery as helper_get_latest_claims_monitoring_event_delivery,
     insert_claims_monitoring_event as helper_insert_claims_monitoring_event,
     list_claims_monitoring_events as helper_list_claims_monitoring_events,
@@ -51,6 +52,32 @@ def test_insert_claims_monitoring_event_writes_null_delivered_at_and_rebinds_met
         assert row["payload_json"] == '{"status":"failure"}'
         assert row["created_at"]
         assert row["delivered_at"] is None
+    finally:
+        db.close_connection()
+
+
+def test_insert_claims_monitoring_event_returns_inserted_row_and_gets_by_id(
+    tmp_path: Path,
+) -> None:
+    db = _make_db(tmp_path, "claims-monitoring-event-get.db")
+    try:
+        assert db.get_claims_monitoring_event.__func__ is helper_get_claims_monitoring_event
+
+        created = db.insert_claims_monitoring_event(
+            user_id="1",
+            event_type="unsupported_ratio",
+            severity="warning",
+            payload_json='{"alert_id":9}',
+        )
+
+        assert isinstance(created["id"], int)
+        loaded = db.get_claims_monitoring_event(int(created["id"]))
+        assert loaded["id"] == created["id"]
+        assert loaded["user_id"] == "1"
+        assert loaded["event_type"] == "unsupported_ratio"
+        assert loaded["severity"] == "warning"
+        assert loaded["payload_json"] == '{"alert_id":9}'
+        assert loaded["delivered_at"] is None
     finally:
         db.close_connection()
 

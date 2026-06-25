@@ -360,6 +360,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_h
     upsert_claims_monitoring_health,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_monitoring_event_ops import (
+    get_claims_monitoring_event,
     get_latest_claims_monitoring_event_delivery,
     insert_claims_monitoring_event,
     list_claims_monitoring_events,
@@ -2075,6 +2076,7 @@ MediaDatabase.delete_claims_monitoring_alert = delete_claims_monitoring_alert
 MediaDatabase.get_claims_monitoring_health = get_claims_monitoring_health
 MediaDatabase.upsert_claims_monitoring_health = upsert_claims_monitoring_health
 MediaDatabase.insert_claims_monitoring_event = insert_claims_monitoring_event
+MediaDatabase.get_claims_monitoring_event = get_claims_monitoring_event
 MediaDatabase.list_claims_monitoring_events = list_claims_monitoring_events
 MediaDatabase.list_undelivered_claims_monitoring_events = (
     list_undelivered_claims_monitoring_events

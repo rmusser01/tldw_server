@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
@@ -19,14 +20,17 @@ def insert_claims_monitoring_event(
     event_type: str,
     severity: str | None = None,
     payload_json: str | None = None,
-) -> None:
+) -> dict[str, Any]:
     now = self._get_current_utc_timestamp_str()
-    self.execute_query(
-        (
-            "INSERT INTO claims_monitoring_events "
-            "(user_id, event_type, severity, payload_json, created_at, delivered_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)"
-        ),
+    insert_sql = (
+        "INSERT INTO claims_monitoring_events "
+        "(user_id, event_type, severity, payload_json, created_at, delivered_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    if self.backend_type == BackendType.POSTGRESQL:
+        insert_sql += " RETURNING id"
+    cursor = self.execute_query(
+        insert_sql,
         (
             str(user_id),
             str(event_type),
@@ -37,6 +41,21 @@ def insert_claims_monitoring_event(
         ),
         commit=True,
     )
+    if self.backend_type == BackendType.POSTGRESQL:
+        row = cursor.fetchone()
+        event_id = int(row["id"]) if row else 0
+    else:
+        event_id = int(getattr(cursor, "lastrowid", 0) or 0)
+    return get_claims_monitoring_event(self, event_id) if event_id else {}
+
+
+def get_claims_monitoring_event(self, event_id: int) -> dict[str, Any]:
+    row = self.execute_query(
+        "SELECT id, user_id, event_type, severity, payload_json, created_at, delivered_at "
+        "FROM claims_monitoring_events WHERE id = ?",
+        (int(event_id),),
+    ).fetchone()
+    return dict(row) if row else {}
 
 
 def list_claims_monitoring_events(
