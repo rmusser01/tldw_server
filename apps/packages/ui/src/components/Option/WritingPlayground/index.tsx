@@ -60,6 +60,7 @@ import { useStoreChatModelSettings } from "@/store/model"
 import { useWritingPlaygroundStore } from "@/store/writing-playground"
 import { cn } from "@/libs/utils"
 import { markdownToText } from "@/utils/markdown-to-text"
+import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 import {
   buildExtraBodyPayload,
   parseStringListInput
@@ -99,6 +100,7 @@ import { CharacterWorldTab } from "./CharacterWorldTab"
 import { ResearchTab } from "./ResearchTab"
 import { AIAgentTab } from "./AIAgentTab"
 import { FeedbackTab } from "./FeedbackTab"
+import { WritingAnnotationsTab } from "./WritingAnnotationsTab"
 import { MOOD_COLORS } from "./feedback-constants"
 import { WritingAnalysisModalHost } from "./WritingAnalysisModalHost"
 import { WritingPlaygroundDiagnosticsPanel } from "./WritingPlaygroundDiagnosticsPanel"
@@ -112,6 +114,7 @@ import {
   WRITING_REVISION_PRESETS,
   getWritingRevisionPreset
 } from "./writing-revision-presets"
+import { resolveWritingAnnotationTargetContext } from "./writing-annotation-types"
 import {
   buildRevisionUserPrompt,
   parseRevisionModelResponse
@@ -155,7 +158,8 @@ import {
   useWritingContextComposition,
   useWritingInspectorPanels,
   useWritingImportExport,
-  useWritingFeedback
+  useWritingFeedback,
+  useWritingAnnotations
 } from "./hooks"
 import { useWritingRevisions } from "./hooks/useWritingRevisions"
 import {
@@ -210,7 +214,15 @@ const getEditorSelection = (
   ) {
     return { start: options.start, end: options.end }
   }
-  return options.selection
+  if (
+    "selection" in options &&
+    options.selection &&
+    typeof options.selection.start === "number" &&
+    typeof options.selection.end === "number"
+  ) {
+    return options.selection
+  }
+  return undefined
 }
 
 const getEditorPromptRich = (
@@ -263,9 +275,12 @@ export const WritingPlayground = () => {
     setFocusMode,
     activeNodeId,
     activeNodeType,
+    activeProjectId,
     setAnalysisModalOpen,
   } = useWritingPlaygroundStore()
   const [selectedModel, setSelectedModel] = useStorage<string>("selectedModel")
+  const [annotationApiProvider, setAnnotationApiProvider] =
+    React.useState<string | undefined>()
   const apiProviderOverride = useStoreChatModelSettings(
     (state) => state.apiProvider
   )
@@ -407,9 +422,11 @@ export const WritingPlayground = () => {
   const {
     scene: activeScene,
     sceneId: activeSceneId,
+    sceneVersion: activeSceneVersion,
     isSceneBound,
     isSceneLoading,
     isSceneDirty,
+    canCreateRangeAnnotation,
     saveScene: saveActiveScene
   } = activeManuscriptScene
   const isSceneNodeSelected =
@@ -657,6 +674,46 @@ export const WritingPlayground = () => {
     isGenerating,
     selectedModel: selectedModel ?? undefined,
   })
+
+  const activeAnnotationTargetContext = React.useMemo(() => {
+    return resolveWritingAnnotationTargetContext({
+      projectId: activeProjectId,
+      activeNodeType,
+      activeNodeId,
+      activeSceneId
+    })
+  }, [activeNodeId, activeNodeType, activeProjectId, activeSceneId])
+  const annotations = useWritingAnnotations({
+    projectId: activeProjectId,
+    targetContext: activeAnnotationTargetContext,
+    enabled: isOnline && Boolean(activeProjectId)
+  })
+
+  React.useEffect(() => {
+    const modelId = selectedModel?.trim()
+    const explicitProvider = apiProviderOverride?.trim()
+    let cancelled = false
+
+    if (!modelId) {
+      setAnnotationApiProvider(undefined)
+      return
+    }
+    if (explicitProvider) {
+      setAnnotationApiProvider(explicitProvider)
+      return
+    }
+
+    setAnnotationApiProvider(undefined)
+    void resolveApiProviderForModel({ modelId }).then((provider) => {
+      if (!cancelled) {
+        setAnnotationApiProvider(provider ?? undefined)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [apiProviderOverride, selectedModel])
 
   // --- Diagnostics ---
   const showOffline = !isOnline
@@ -2885,6 +2942,23 @@ export const WritingPlayground = () => {
   const researchTabContent = <ResearchTab isOnline={isOnline} />
   const agentTabContent = <AIAgentTab isOnline={isOnline} />
   const feedbackTabContent = <FeedbackTab {...feedback} />
+  const activeChapterId =
+    activeNodeType === "chapter" ? activeNodeId : activeScene?.chapter_id ?? null
+  const annotationsTabContent = (
+    <WritingAnnotationsTab
+      annotationsHook={annotations}
+      projectId={activeProjectId}
+      activeChapterId={activeChapterId}
+      activeSceneId={activeSceneId}
+      activeSceneVersion={activeSceneVersion}
+      activeSceneText={editorText}
+      selection={revisionSelection}
+      canCreateRangeAnnotation={canCreateRangeAnnotation}
+      isSceneDirty={isSceneDirty}
+      selectedModel={selectedModel}
+      apiProvider={annotationApiProvider}
+    />
+  )
 
   const inspectorDrawerContent = (
     <div className="p-3">
@@ -2896,6 +2970,7 @@ export const WritingPlayground = () => {
           context: t("option:writingPlayground.sidebarContext", "Context"),
           setup: t("option:writingPlayground.sidebarSetup", "Setup"),
           inspect: t("option:writingPlayground.sidebarInspect", "Analysis"),
+          annotations: t("option:writingPlayground.sidebarAnnotations", "Annotations"),
           characters: t("option:writingPlayground.sidebarCharacters", "Characters"),
           research: t("option:writingPlayground.sidebarResearch", "Research"),
           agent: t("option:writingPlayground.sidebarAgent", "Agent"),
@@ -2938,6 +3013,7 @@ export const WritingPlayground = () => {
         context={contextTabContent}
         setup={setupTabContent}
         inspect={inspectTabContent}
+        annotations={annotationsTabContent}
         characters={charactersTabContent}
         research={researchTabContent}
         agent={agentTabContent}

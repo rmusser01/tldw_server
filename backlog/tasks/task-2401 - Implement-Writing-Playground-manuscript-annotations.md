@@ -155,6 +155,24 @@ Review evidence:
 Security/static checks:
 - Bandit was skipped for Task 7 because the slice changed TypeScript/TSX test files only and no Python files.
 - `git diff --check 1fc61f26e4296b5c29d0dfca918a65ea9a1b581d..HEAD` passed after the final Task 7 review fix.
+
+Task 8 complete: added the Writing Playground annotation inspector tab, compact annotation list/actions, range-anchor utilities, and `useWritingAnnotations` React Query hook using the existing annotation service functions.
+
+TDD and verification evidence:
+- Initial red run failed as expected before implementation because `writing-annotation-anchor-utils`, `useWritingAnnotations`, and `WritingAnnotationsTab` did not exist and the inspector lacked the Annotations tab.
+- Code-quality review-fix red run failed as expected for scene annotation context falling back to project while a selected scene was binding, invalid selected-text AI review enablement, and selected-model provider resolution not enabling annotation AI affordances.
+- Final focused green run from `apps/packages/ui`: `bunx vitest run src/components/Option/WritingPlayground/__tests__/writing-annotation-anchor-utils.test.ts src/components/Option/WritingPlayground/__tests__/useWritingAnnotations.test.tsx src/components/Option/WritingPlayground/__tests__/WritingAnnotationsTab.test.tsx src/components/Option/WritingPlayground/__tests__/WritingPlayground.inspector-tabs.test.tsx` -> 4 files passed, 28 tests passed.
+- `bunx tsc --noEmit --pretty false` hit the default Node heap limit; rerun with `NODE_OPTIONS=--max-old-space-size=8192` completed and failed only on existing unrelated package errors in Notes, AudioStudio, ScheduledTasks, background, scheduled-task services, Dexie audiobook migration, and voice-cloning files. No touched Writing Playground files were reported in the final typecheck output.
+- `git diff --check` passed.
+
+Review evidence:
+- Spec review approved the Task 8 file set, hook export, query/filter behavior, disabled query behavior, exact invalidation, inspector keyboard navigation, saved-scene gating, note creation paths, list actions, `needs_review` display, code-point conversion, context clamp, and disabled AI review state.
+- Code-quality review found scene/project context leakage during scene binding, invalid selected-text AI review enablement, unresolved provider routing for annotation AI affordances, and a chapter/project default-target UX mismatch.
+- Review-fix commits in this task added `resolveWritingAnnotationTargetContext`, reused range validation for selected-text AI review gating, resolved effective annotation providers through `resolveApiProviderForModel`, and defaulted note targets to the available active context.
+- Code-quality re-review approved.
+
+Security/static checks:
+- Bandit skipped for Task 8 because this slice changed TypeScript/TSX/frontend test files only and no Python files.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -20,3 +20,9 @@ export type { UseWritingImportExportDeps } from "./useWritingImportExport"
 
 export { useWritingFeedback } from "./useWritingFeedback"
 export type { UseWritingFeedbackReturn } from "./useWritingFeedback"
+
+export {
+  buildWritingAnnotationsQueryKey,
+  useWritingAnnotations
+} from "./useWritingAnnotations"
+export type { UseWritingAnnotationsResult } from "./useWritingAnnotations"
