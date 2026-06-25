@@ -2829,7 +2829,7 @@ Status note: Task 9 implemented an optional RPG MCP module with read-only adapte
 **Files:**
 - Create: `tldw_Server_API/app/core/RPG/README.md`
 
-- [ ] **Step 1: Write the RPG runtime README**
+- [x] **Step 1: Write the RPG runtime README**
 
 ```markdown
 # RPG Runtime
@@ -2843,31 +2843,31 @@ Rules adapters provide mechanics metadata and check resolution for D&D 5e SRD, P
 State changes from users, imports, and trusted system operations can commit directly. Model-sourced changes become proposals unless the session explicitly enables auto-commit. Proposal application validates base sequence and appends all accepted events atomically.
 ```
 
-- [ ] **Step 2: Run the focused RPG suite**
+- [x] **Step 2: Run the focused RPG suite**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG -v`
 
 Expected: PASS.
 
-- [ ] **Step 3: Run adjacent regression tests**
+- [x] **Step 3: Run adjacent regression tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_db.py tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_and_category.py tldw_Server_API/tests/PrivilegeCatalog/test_endpoint_scope_catalog_sync.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 4: Run Bandit on touched code**
+- [x] **Step 4: Run Bandit on touched code**
 
 Run: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/RPG tldw_Server_API/app/core/DB_Management/RPG_DB.py tldw_Server_API/app/api/v1/endpoints/rpg.py tldw_Server_API/app/api/v1/schemas/rpg_schemas.py tldw_Server_API/app/core/MCP_unified/modules/implementations/rpg_module.py -f json -o /tmp/bandit_rpg_runtime.json`
 
 Expected: exit code 0 or only non-actionable findings documented in the Backlog task with rationale.
 
-- [ ] **Step 5: Run formatting and import sanity checks**
+- [x] **Step 5: Run formatting and import sanity checks**
 
 Run: `source .venv/bin/activate && python -m compileall -q tldw_Server_API/app/core/RPG tldw_Server_API/app/core/DB_Management/RPG_DB.py tldw_Server_API/app/api/v1/endpoints/rpg.py tldw_Server_API/app/api/v1/schemas/rpg_schemas.py tldw_Server_API/app/core/MCP_unified/modules/implementations/rpg_module.py`
 
 Expected: PASS with no output.
 
-- [ ] **Step 6: Update Backlog task final summary**
+- [x] **Step 6: Update Backlog task final summary**
 
 Record:
 
@@ -2877,12 +2877,14 @@ Record:
 - Any deliberate skips with exact reason.
 - Confirmation that no virtual tabletop canvas/map/token features were added.
 
-- [ ] **Step 7: Final commit**
+- [x] **Step 7: Final commit**
 
 ```bash
 git add tldw_Server_API/app/core/RPG/README.md
 git commit -m "docs: document RPG runtime"
 ```
+
+Status note: Task 10 added `tldw_Server_API/app/core/RPG/README.md` documenting the backend harness scope, non-VTT boundary, per-user ChaCha storage model, event/snapshot/idempotency behavior, current adapter/rules lookup limits, authority/proposal model, REST/MCP surfaces, concrete input limits, and current non-goals. A subagent documentation review identified over-broad sequence and rules-pack wording plus missing concrete limits; those were corrected before closeout. Verification passed: `python -m pytest tldw_Server_API/tests/RPG -q` reported 59 passed; `python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_db.py tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_and_category.py tldw_Server_API/tests/PrivilegeCatalog/test_endpoint_scope_catalog_sync.py -q` reported 47 passed; `python -m compileall -q ...` passed; `python -m bandit -r ... -f json -o /tmp/bandit_rpg_runtime.json` reported 0 results/errors/skips; `git diff --check` passed. No virtual tabletop canvas, map, token, wall, lighting, or live renderer features were added.
 
 ## Self-Review Checklist
 
