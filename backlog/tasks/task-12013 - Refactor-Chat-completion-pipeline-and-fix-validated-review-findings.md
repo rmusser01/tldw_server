@@ -32,7 +32,7 @@ modified_files:
 - tldw_Server_API/tests/Chat/unit/test_chat_service_streaming_tool_autoexec.py
 - tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py
 - tldw_Server_API/tests/Chat/unit/test_chat_service_system_messages.py
-updated_date: 2026-06-24 23:06
+updated_date: 2026-06-25 02:00
 ---
 
 ## Description
@@ -47,9 +47,9 @@ Design and implement a broad, compatibility-preserving refactor of the Chat comp
 - [ ] #2 Validated findings have failing tests before production-code fixes.
 - [ ] #3 Non-streaming responses process moderation/redaction/structured validation across all returned choices or reject unsupported modes before provider calls.
 - [ ] #4 Chat logs no longer include raw user messages, system prompts, custom prompts, tool arguments, API keys, or assistant content.
-- [ ] #5 Document prompt saves support repeated versions while preserving exactly one active prompt per document type.
-- [ ] #6 Slash command dispatch enforces declared permissions fail-closed while preserving single-user owner/admin behavior.
-- [ ] #7 Legacy history replacement preserves the exported wrapper signature and avoids deleting existing messages before replacement can safely complete.
+- [x] #5 Document prompt saves support repeated versions while preserving exactly one active prompt per document type.
+- [x] #6 Slash command dispatch enforces declared permissions fail-closed while preserving single-user owner/admin behavior.
+- [x] #7 Legacy history replacement preserves the exported wrapper signature and avoids deleting existing messages before replacement can safely complete.
 - [ ] #8 `chat_service.py` remains a compatibility facade while focused modules own response processing, moderation, persistence, streaming orchestration, tool execution, command authorization, and safe logging.
 - [ ] #9 Public chat API response shapes and SSE event shapes remain stable except for intentional safety rejections.
 - [ ] #10 Targeted tests, relevant Chat regression tests, and Bandit over touched Chat scope are recorded before finalization.
@@ -78,6 +78,7 @@ Task 6 safe logging work started: scoped to chat_logging.py, chat_service.py, ch
 Task 5 and Task 6 progress update 2026-06-24: First-choice persistence is extracted into `persistence_service.py` while preserving the existing persisted assistant/tool payload shape. Safe logging is extracted into `chat_logging.py` and wired through `chat_service.py` and `chat_orchestrator.py`; review follow-up removed raw exception metric labels, raw mapping-key summaries, and the `logging.exception` traceback leak. Verification recorded locally: `test_chat_service_system_messages.py` = 7 passed; focused Chat regression slice across system messages, content, tool autoexec, streaming tool autoexec, and fallback = 73 passed; Bandit on touched Chat logging/service/orchestrator scope reported zero findings. Task 6 spec and quality reviewers passed after follow-up commit `31dc9d163`.
 Task 8 document prompt versioning completed in commit a2f598003. Added regression coverage for repeated prompt saves and legacy schema repair; replaced the legacy UNIQUE(document_type, is_active) table constraint with a partial unique index on active prompts only, preserving inactive history while enforcing one active prompt per document_type. Verification: targeted red test failed before fix with sqlite3.IntegrityError; focused prompt tests passed (2 passed); full document generator unit file passed (23 passed); Bandit on tldw_Server_API/app/core/Chat/document_generator.py reported 0 findings; focused review approved with no P0-P3 findings.
 Task 7 command authorization completed across commits 3e961e15d, 601295701, 5893b0f92, 00cefdf1d, and e72e2901f. Centralized slash command authorization in command_authorization.py, wired both command dispatch and /chat/commands listing through the same fail-closed authorization decision, preserved direct orchestrator slash command compatibility in single-user owner mode, and updated docs/config references so CHAT_COMMANDS_REQUIRE_PERMISSIONS / require_permissions are documented as deprecated compatibility flags rather than security toggles. Verification: command router + command endpoint + injection focused tests passed earlier (35 passed); Bandit on touched command authorization scope reported 0 findings; final focused review approved with no P0-P3 findings after the guide snippet follow-up.
+Task 9 legacy history replacement completed across commits 4c2c07489, 93a0ad866, and a74fd93dd. Added transaction-recording regression coverage, moved existing-conversation validation plus active message fetch/delete into the same transaction as replacement insertion, added rollback coverage for insert failure after soft-delete, and preserved empty-history target validation for existing conversations. Verification: initial regression failed with delete transaction [1] versus insert transaction [2]; focused tests passed after fixes; full chat history multi-image unit file passed (4 passed); Bandit on tldw_Server_API/app/core/Chat/chat_history.py reported 0 findings; final focused review approved with no P0-P3 findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

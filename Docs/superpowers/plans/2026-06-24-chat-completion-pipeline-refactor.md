@@ -1792,7 +1792,7 @@ Expected: commit succeeds with only the listed files.
 - Modify: `tldw_Server_API/app/core/Chat/chat_history.py`
 - Test: `tldw_Server_API/tests/Chat/unit/test_chat_history_multi_image.py`
 
-- [ ] **Step 1: Add transaction recording regression test**
+- [x] **Step 1: Add transaction recording regression test**
 
 Append to `test_chat_history_multi_image.py`:
 
@@ -1852,7 +1852,7 @@ def test_legacy_history_replacement_deletes_and_inserts_in_one_transaction():
     assert db.soft_delete_transaction_ids == db.add_message_transaction_ids
 ```
 
-- [ ] **Step 2: Verify the test fails against separate transactions**
+- [x] **Step 2: Verify the test fails against separate transactions**
 
 Run:
 
@@ -1862,7 +1862,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/te
 
 Expected: test fails because deletion and insertion use different transaction ids.
 
-- [ ] **Step 3: Combine existing-conversation replacement into one transaction**
+- [x] **Step 3: Combine existing-conversation replacement into one transaction**
 
 In `save_chat_history_to_db_wrapper`, remove the first transaction that only soft-deletes old messages. Keep validation of character mismatch before any delete, then perform existing-message soft deletes inside the same transaction that inserts replacement messages:
 
@@ -1904,7 +1904,7 @@ if existing_messages_for_replacement:
         db.soft_delete_message(msg["id"], msg["version"])
 ```
 
-- [ ] **Step 4: Run chat history tests**
+- [x] **Step 4: Run chat history tests**
 
 Run:
 
