@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 from typing import Any
 
 import pytest
@@ -31,6 +34,36 @@ def _resign(signed: dict[str, Any], signer: Any) -> None:
     signature["value"] = signer.sign(payload)
 
 
+def test_hmac_manifest_signer_requires_key_id() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.manifest import HmacManifestSigner
+
+    with pytest.raises(ValueError):
+        HmacManifestSigner(key_id="", secret=b"secret")
+
+
+def test_hmac_manifest_signer_requires_secret() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.manifest import HmacManifestSigner
+
+    with pytest.raises(ValueError):
+        HmacManifestSigner(key_id="test-key", secret=b"")
+
+
+def test_hmac_manifest_signer_returns_base64url_sha256_signature() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.manifest import HmacManifestSigner
+
+    payload = b"payload"
+    secret = b"secret"
+    signer = HmacManifestSigner(key_id="test-key", secret=secret)
+    expected = base64.urlsafe_b64encode(hmac.new(secret, payload, hashlib.sha256).digest()).decode("ascii").rstrip("=")
+
+    signature = signer.sign(payload)
+
+    assert signature == expected
+    assert "=" not in signature
+    assert set(signature) <= set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+    assert signer.verify(payload, signature) is True
+
+
 def test_manifest_roundtrip_verifies_signature() -> None:
     from tldw_Server_API.app.core.Context_Integrity.manifest import (
         HmacManifestSigner,
@@ -44,6 +77,9 @@ def test_manifest_roundtrip_verifies_signature() -> None:
     verified = verify_signed_manifest(signed, signer=signer)
 
     assert verified.sequence == 1
+    assert verified.manifest_digest == signed["manifest_digest"]
+    assert verified.key_id == signer.key_id
+    assert isinstance(verified.entries, tuple)
     assert verified.entries[0]["asset_id"] == "skill:user:1/demo"
 
 
@@ -87,6 +123,44 @@ def test_manifest_rejects_unsupported_signature_algorithm() -> None:
     signer = HmacManifestSigner(key_id="test-key", secret=b"secret")
     signed = create_signed_manifest(sequence=1, entries=[_entry("skill:user:1/demo")], signer=signer)
     signed["signature"]["alg"] = "none"
+
+    with pytest.raises(ManifestSignatureError):
+        verify_signed_manifest(signed, signer=signer)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "key_id_mismatch",
+        "manifest_digest_mismatch",
+        "signature_value_mismatch",
+        "malformed_manifest_shape",
+        "malformed_signature_shape",
+    ],
+)
+def test_manifest_rejects_explicit_malformed_verification_inputs(case: str) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.manifest import (
+        HmacManifestSigner,
+        ManifestSignatureError,
+        create_signed_manifest,
+        verify_signed_manifest,
+    )
+
+    signer = HmacManifestSigner(key_id="test-key", secret=b"secret")
+    signed = create_signed_manifest(sequence=1, entries=[_entry("skill:user:1/demo")], signer=signer)
+
+    if case == "key_id_mismatch":
+        signed["signature"]["key_id"] = "other-key"
+    elif case == "manifest_digest_mismatch":
+        signed["manifest_digest"] = "sha256:different"
+    elif case == "signature_value_mismatch":
+        signed["signature"]["value"] = "invalid"
+    elif case == "malformed_manifest_shape":
+        signed["manifest"] = []
+    elif case == "malformed_signature_shape":
+        signed["signature"] = []
+    else:
+        raise AssertionError(f"unhandled case: {case}")
 
     with pytest.raises(ManifestSignatureError):
         verify_signed_manifest(signed, signer=signer)
@@ -226,9 +300,16 @@ def test_manifest_rejects_malformed_entry_that_is_correctly_signed(entry: object
     [
         "missing_digest",
         "missing_source_type",
+        "missing_display_name",
+        "display_name_none",
+        "empty_display_name",
+        "missing_owner_scope",
+        "owner_scope_none",
         "asset_id_none",
         "executable_string",
+        "required_string",
         "empty_asset_id",
+        "path_int",
         "metadata_scalar",
     ],
 )
@@ -253,12 +334,26 @@ def test_manifest_rejects_malformed_entry_schema_that_is_correctly_signed(case: 
         del entry["digest"]
     elif case == "missing_source_type":
         del entry["source_type"]
+    elif case == "missing_display_name":
+        del entry["display_name"]
+    elif case == "display_name_none":
+        entry["display_name"] = None
+    elif case == "empty_display_name":
+        entry["display_name"] = ""
+    elif case == "missing_owner_scope":
+        del entry["owner_scope"]
+    elif case == "owner_scope_none":
+        entry["owner_scope"] = None
     elif case == "asset_id_none":
         entry["asset_id"] = None
     elif case == "executable_string":
         entry["executable"] = "true"
+    elif case == "required_string":
+        entry["required"] = "false"
     elif case == "empty_asset_id":
         entry["asset_id"] = ""
+    elif case == "path_int":
+        entry["path"] = 1
     elif case == "metadata_scalar":
         entry["metadata"] = "not-a-mapping"
     else:
