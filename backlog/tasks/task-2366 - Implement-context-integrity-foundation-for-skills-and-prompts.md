@@ -26,6 +26,9 @@ modified_files:
 - tldw_Server_API/tests/Skills/integration/test_skills_api.py
 - tldw_Server_API/tests/Skills/integration/test_skill_mcp_integration.py
 - tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py
+- tldw_Server_API/app/core/Utils/prompt_loader.py
+- tldw_Server_API/tests/Utils/test_prompt_loader_paths.py
+- tldw_Server_API/tests/Utils/test_prompt_loader_env_overrides.py
 ---
 
 ## Description
@@ -72,6 +75,14 @@ Verification recorded for Task 6:
 - RED run for review regressions: `.venv/bin/python -m pytest tldw_Server_API/tests/Skills/unit/test_skills_service.py::TestSkillsService::test_degraded_global_resolver_blocks_default_service tldw_Server_API/tests/Skills/unit/test_skills_service.py::TestSkillsService::test_symlinked_skill_directory_is_not_read_without_resolver -q` failed before the correction with both tests failing.
 - Focused Task 6 suite: `.venv/bin/python -m pytest tldw_Server_API/tests/Skills/unit/test_skills_service.py tldw_Server_API/tests/Skills/integration/test_skills_api.py tldw_Server_API/tests/Skills/integration/test_skill_mcp_integration.py tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py -q` passed with `133 passed, 6 warnings`.
 - Bandit: `.venv/bin/python -m bandit -r tldw_Server_API/app/core/Skills/skills_service.py tldw_Server_API/app/core/Skills/context_integration.py tldw_Server_API/app/core/Chat/command_router.py tldw_Server_API/app/api/v1/endpoints/skills.py -f json -o /tmp/bandit_context_integrity_task6.json` exited 0 with zero findings.
+- Formatter/whitespace: `.venv/bin/python -m black ...` completed; `git diff --check` clean.
+
+Task 7 slice enforced Context Integrity in the prompt loader. Markdown, YAML, JSON, and `TLDW_PROMPT_FILE_*` override reads now flow through `_read_prompt_file_text()`, which reads bytes once, computes the canonical digest over those exact bytes using the same asset IDs and metadata as inventory, asks the global resolver, and only then decodes the same bytes for parsing. Quarantined files, unapproved files under enforcement, live edits after boot, invalid UTF-8, and symlinked prompt files fail closed without logging prompt content.
+
+Verification recorded for Task 7:
+- RED run: `.venv/bin/python -m pytest tldw_Server_API/tests/Utils/test_prompt_loader_paths.py -q` failed before implementation with the three new prompt-loader integrity tests failing.
+- Focused Task 7 suite: `.venv/bin/python -m pytest tldw_Server_API/tests/Utils/test_prompt_loader_paths.py tldw_Server_API/tests/Utils/test_prompt_loader_env_overrides.py -q` passed with `10 passed, 6 warnings`.
+- Bandit: `.venv/bin/python -m bandit -r tldw_Server_API/app/core/Utils/prompt_loader.py -f json -o /tmp/bandit_context_integrity_task7.json` exited 0 with zero findings.
 - Formatter/whitespace: `.venv/bin/python -m black ...` completed; `git diff --check` clean.
 <!-- SECTION:FINAL_SUMMARY:END -->
 

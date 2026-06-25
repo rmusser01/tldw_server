@@ -2122,6 +2122,14 @@ git commit -m "feat: enforce context integrity for skills"
 
 ## Task 7: Prompt Loader Enforcement With Single-Read Semantics
 
+**Status**: Complete. Implemented single-read prompt-file verification for Markdown, YAML, JSON, and environment override prompt files.
+
+**Verification**:
+- RED run: `.venv/bin/python -m pytest tldw_Server_API/tests/Utils/test_prompt_loader_paths.py -q` failed before implementation with the three new prompt-loader integrity tests failing.
+- Focused Task 7 suite: `.venv/bin/python -m pytest tldw_Server_API/tests/Utils/test_prompt_loader_paths.py tldw_Server_API/tests/Utils/test_prompt_loader_env_overrides.py -q` passed with `10 passed, 6 warnings`.
+- Bandit: `.venv/bin/python -m bandit -r tldw_Server_API/app/core/Utils/prompt_loader.py -f json -o /tmp/bandit_context_integrity_task7.json` exited 0 with zero findings.
+- Formatter/whitespace: `.venv/bin/python -m black ...` completed; `git diff --check` clean.
+
 **Files:**
 - Modify: `tldw_Server_API/app/core/Utils/prompt_loader.py`
 - Modify: `tldw_Server_API/tests/Utils/test_prompt_loader_paths.py`
