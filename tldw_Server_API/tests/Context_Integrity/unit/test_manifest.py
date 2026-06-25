@@ -83,6 +83,28 @@ def test_manifest_roundtrip_verifies_signature() -> None:
     assert verified.entries[0]["asset_id"] == "skill:user:1/demo"
 
 
+def test_verified_manifest_entries_are_immutable_snapshots() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.manifest import (
+        HmacManifestSigner,
+        create_signed_manifest,
+        verify_signed_manifest,
+    )
+
+    signer = HmacManifestSigner(key_id="test-key", secret=b"secret")
+    entry = _entry("skill:user:1/demo")
+    entry["metadata"] = {"nested": {"flag": True}, "tags": ["demo"]}
+    signed = create_signed_manifest(sequence=1, entries=[entry], signer=signer)
+
+    verified = verify_signed_manifest(signed, signer=signer)
+
+    with pytest.raises(TypeError):
+        verified.entries[0]["digest"] = "sha256:mutated"
+    signed["manifest"]["entries"][0]["digest"] = "sha256:mutated"
+    signed["manifest"]["entries"][0]["metadata"]["nested"]["flag"] = False
+    assert verified.entries[0]["digest"] == "sha256:a"
+    assert verified.entries[0]["metadata"]["nested"]["flag"] is True
+
+
 def test_manifest_tamper_is_rejected() -> None:
     from tldw_Server_API.app.core.Context_Integrity.manifest import (
         HmacManifestSigner,
@@ -412,6 +434,28 @@ def test_manifest_rejects_unsorted_entries_that_are_correctly_signed() -> None:
     assert isinstance(entries, list)
     entries.reverse()
     _resign(signed, signer)
+
+    with pytest.raises(ManifestSignatureError):
+        verify_signed_manifest(signed, signer=signer)
+
+
+def test_manifest_rejects_duplicate_asset_ids_that_are_correctly_signed() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.manifest import (
+        HmacManifestSigner,
+        ManifestSignatureError,
+        create_signed_manifest,
+        verify_signed_manifest,
+    )
+
+    signer = HmacManifestSigner(key_id="test-key", secret=b"secret")
+    signed = create_signed_manifest(
+        sequence=1,
+        entries=[
+            _entry("skill:user:1/demo", digest="sha256:a"),
+            _entry("skill:user:1/demo", digest="sha256:b"),
+        ],
+        signer=signer,
+    )
 
     with pytest.raises(ManifestSignatureError):
         verify_signed_manifest(signed, signer=signer)

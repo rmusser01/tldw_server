@@ -7,6 +7,7 @@ import hashlib
 import hmac
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
@@ -44,7 +45,7 @@ class VerifiedManifest:
     sequence: int
     manifest_digest: str
     key_id: str
-    entries: tuple[dict[str, Any], ...]
+    entries: tuple[Mapping[str, Any], ...]
 
 
 class HmacManifestSigner:
@@ -83,6 +84,20 @@ def _stable_json(payload: Mapping[str, Any]) -> bytes:
 
 def _manifest_digest(payload: bytes) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def _freeze_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return _freeze_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_value(item) for item in value)
+    if isinstance(value, set):
+        return frozenset(_freeze_value(item) for item in value)
+    return value
+
+
+def _freeze_mapping(value: Mapping[str, Any]) -> Mapping[str, Any]:
+    return MappingProxyType({key: _freeze_value(item) for key, item in value.items()})
 
 
 def _require_int_field(manifest: Mapping[str, Any], field_name: str) -> int:
@@ -127,22 +142,22 @@ def _validate_optional_entry_fields(entry: Mapping[str, Any]) -> None:
             raise ManifestSignatureError("manifest entry metadata is not canonicalizable") from exc
 
 
-def _validate_entry_schema(entry: Mapping[str, Any]) -> dict[str, Any]:
+def _validate_entry_schema(entry: Mapping[str, Any]) -> Mapping[str, Any]:
     for field_name in _REQUIRED_ENTRY_STRING_FIELDS:
         _require_entry_string(entry, field_name)
     for field_name in _REQUIRED_ENTRY_BOOL_FIELDS:
         _require_entry_bool(entry, field_name)
     _validate_optional_entry_fields(entry)
-    return dict(entry)
+    return _freeze_mapping(entry)
 
 
-def _require_entries(manifest: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
+def _require_entries(manifest: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
     if "entries" not in manifest:
         raise ManifestSignatureError("manifest entries are required")
     entries = manifest["entries"]
     if not isinstance(entries, list):
         raise ManifestSignatureError("manifest entries must be a list")
-    verified_entries: list[dict[str, Any]] = []
+    verified_entries: list[Mapping[str, Any]] = []
     for entry in entries:
         if not isinstance(entry, Mapping):
             raise ManifestSignatureError("manifest entries must be objects")
@@ -153,6 +168,8 @@ def _require_entries(manifest: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
     asset_ids = [entry["asset_id"] for entry in verified_entries]
     if asset_ids != sorted(asset_ids):
         raise ManifestSignatureError("manifest entries must be sorted by asset_id")
+    if len(asset_ids) != len(set(asset_ids)):
+        raise ManifestSignatureError("manifest entries must have unique asset_id values")
     return tuple(verified_entries)
 
 
