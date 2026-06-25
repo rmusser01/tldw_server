@@ -52,14 +52,6 @@ def _verification_error(
     )
 
 
-def _path_resolves_within(path: Path, root: Path) -> bool:
-    try:
-        path.resolve(strict=False).relative_to(root.resolve(strict=False))
-    except (OSError, RuntimeError, ValueError):
-        return False
-    return True
-
-
 def _symlink_finding(
     *,
     asset_id: str,
@@ -67,43 +59,14 @@ def _symlink_finding(
     path: Path,
     root: Path | None,
 ) -> ContextIntegrityFinding:
-    escaped = root is not None and not _path_resolves_within(path, root)
-    summary = (
-        "Symlinked context path escapes the inventory root and was skipped."
-        if escaped
-        else "Symlinked context path was skipped."
-    )
     details = {"root": str(root)} if root is not None else None
     return _verification_error(
         asset_id=asset_id,
         source_type=source_type,
-        summary=summary,
+        summary="Symlinked context path was skipped.",
         path=path,
         details=details,
     )
-
-
-def _find_symlink_component(path: Path) -> Path | None:
-    if path.is_absolute():
-        current = Path(path.anchor)
-        parts = path.parts[1:]
-    else:
-        current = Path(".")
-        parts = path.parts
-
-    for part in parts:
-        if part in ("", "."):
-            continue
-        current = current / part
-        try:
-            component_stat = current.lstat()
-        except FileNotFoundError:
-            return None
-        except OSError:
-            return None
-        if stat.S_ISLNK(component_stat.st_mode):
-            return current
-    return None
 
 
 def _validate_inventory_root(
@@ -112,54 +75,54 @@ def _validate_inventory_root(
     asset_id: str,
     source_type: ContextAssetSource,
 ) -> tuple[bool, ContextIntegrityFinding | None]:
-    try:
-        root_stat = root.lstat()
-    except FileNotFoundError:
-        symlink_component = _find_symlink_component(root)
-        if symlink_component is not None:
+    if root.is_absolute():
+        current = Path(root.anchor)
+        parts = root.parts[1:]
+    else:
+        current = Path(".")
+        parts = root.parts
+
+    if any(part == ".." for part in parts):
+        return (
+            False,
+            _verification_error(
+                asset_id=asset_id,
+                source_type=source_type,
+                summary="Context inventory root contains parent traversal and was skipped.",
+                path=root,
+            ),
+        )
+
+    for part in parts:
+        if part in ("", "."):
+            continue
+        current = current / part
+        try:
+            component_stat = current.lstat()
+        except FileNotFoundError:
+            return False, None
+        except OSError as exc:
+            return (
+                False,
+                _verification_error(
+                    asset_id=asset_id,
+                    source_type=source_type,
+                    summary=f"Unable to inspect context inventory root component: {exc.__class__.__name__}.",
+                    path=current,
+                    details={"root": str(root), "error": str(exc)},
+                ),
+            )
+        if stat.S_ISLNK(component_stat.st_mode):
             return (
                 False,
                 _verification_error(
                     asset_id=asset_id,
                     source_type=source_type,
                     summary="Context inventory root contains a symlink component and was skipped.",
-                    path=symlink_component,
+                    path=current,
                     details={"root": str(root)},
                 ),
             )
-        return False, None
-    except OSError as exc:
-        return (
-            False,
-            _verification_error(
-                asset_id=asset_id,
-                source_type=source_type,
-                summary=f"Unable to inspect context inventory root: {exc.__class__.__name__}.",
-                path=root,
-                details={"error": str(exc)},
-            ),
-        )
-
-    if stat.S_ISLNK(root_stat.st_mode):
-        return (
-            False,
-            _verification_error(
-                asset_id=asset_id,
-                source_type=source_type,
-                summary="Context inventory root is a symlink and was skipped.",
-                path=root,
-            ),
-        )
-    if not stat.S_ISDIR(root_stat.st_mode):
-        return (
-            False,
-            _verification_error(
-                asset_id=asset_id,
-                source_type=source_type,
-                summary="Context inventory root is not a directory and was skipped.",
-                path=root,
-            ),
-        )
     return True, None
 
 

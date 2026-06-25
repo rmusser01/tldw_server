@@ -78,6 +78,34 @@ def _raise_fd_listdir_type_error(monkeypatch: pytest.MonkeyPatch, inventory_modu
     monkeypatch.setattr(inventory_module.os, "listdir", guarded_listdir)
 
 
+def _fail_resolve_for_path(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
+    original_resolve = Path.resolve
+
+    def guarded_resolve(self: Path, *args: object, **kwargs: object) -> Path:
+        try:
+            self.relative_to(root)
+        except ValueError:
+            return original_resolve(self, *args, **kwargs)
+        pytest.fail(f"Path.resolve was called during symlink reporting: {self}")
+
+    monkeypatch.setattr(Path, "resolve", guarded_resolve)
+
+
+def _fail_parent_traversal_lstat(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
+    original_lstat = Path.lstat
+
+    def guarded_lstat(self: Path) -> os.stat_result:
+        try:
+            self.relative_to(root)
+        except ValueError:
+            return original_lstat(self)
+        if ".." in self.parts:
+            pytest.fail(f"Path.lstat was called before rejecting parent traversal: {self}")
+        return original_lstat(self)
+
+    monkeypatch.setattr(Path, "lstat", guarded_lstat)
+
+
 def test_inventory_user_skill_directory_includes_supporting_files(tmp_path) -> None:
     from tldw_Server_API.app.core.Context_Integrity.inventory import inventory_user_skills
 
@@ -143,6 +171,28 @@ def test_inventory_user_skill_reports_symlink_escape_without_hashing_target(tmp_
     assert first.assets[0].digest == second.assets[0].digest
     assert [finding.state for finding in first.findings] == ["verification_error"]
     assert first.findings[0].asset_id == "skill:user:1/demo"
+
+
+def test_inventory_user_skill_broken_symlink_child_does_not_resolve_target(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import (
+        inventory_user_skills_with_findings,
+    )
+
+    skills_root = tmp_path / "skills"
+    skill_dir = skills_root / "demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: demo\n---\nBody", encoding="utf-8")
+    _symlink_or_skip(skill_dir / "missing.md", tmp_path / "missing.md")
+    _fail_resolve_for_path(monkeypatch, tmp_path)
+
+    result = inventory_user_skills_with_findings(user_id=1, skills_root=skills_root)
+
+    assert [asset.asset_id for asset in result.assets] == ["skill:user:1/demo"]
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert result.findings[0].asset_id == "skill:user:1/demo"
 
 
 def test_inventory_user_skill_reports_symlinked_skill_file_without_hashing_target(tmp_path) -> None:
@@ -221,6 +271,31 @@ def test_inventory_user_skill_broken_symlinked_root_parent_reports_error(tmp_pat
     skills_root = linked_parent / "skills"
 
     result = inventory_user_skills_with_findings(user_id=1, skills_root=skills_root)
+
+    assert result.assets == ()
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert result.findings[0].asset_id == "skill:user:1"
+
+
+def test_inventory_user_skill_parent_traversal_root_reports_error_before_lstat(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import (
+        inventory_user_skills_with_findings,
+    )
+
+    root = tmp_path / "root"
+    skill_dir = root / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    (root / "child").mkdir()
+    (skill_dir / "SKILL.md").write_text("---\nname: demo\n---\nBody", encoding="utf-8")
+    _fail_parent_traversal_lstat(monkeypatch, tmp_path)
+
+    result = inventory_user_skills_with_findings(
+        user_id=1,
+        skills_root=root / "child" / ".." / "skills",
+    )
 
     assert result.assets == ()
     assert [finding.state for finding in result.findings] == ["verification_error"]
@@ -462,6 +537,26 @@ def test_inventory_prompt_files_does_not_recurse_or_follow_symlink_escape(tmp_pa
     assert result.findings[0].asset_id == "prompt_file:escape.md"
 
 
+def test_inventory_prompt_files_broken_symlink_child_does_not_resolve_target(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import (
+        inventory_prompt_files_with_findings,
+    )
+
+    prompts = tmp_path / "Prompts"
+    prompts.mkdir()
+    _symlink_or_skip(prompts / "missing.md", tmp_path / "missing.md")
+    _fail_resolve_for_path(monkeypatch, tmp_path)
+
+    result = inventory_prompt_files_with_findings(prompts_dir=prompts)
+
+    assert result.assets == ()
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert result.findings[0].asset_id == "prompt_file:missing.md"
+
+
 def test_inventory_prompt_files_reports_symlinked_directory_escape(tmp_path) -> None:
     from tldw_Server_API.app.core.Context_Integrity.inventory import (
         inventory_prompt_files_with_findings,
@@ -535,6 +630,30 @@ def test_inventory_prompt_files_broken_symlinked_root_parent_reports_error(tmp_p
     prompts = linked_parent / "Prompts"
 
     result = inventory_prompt_files_with_findings(prompts_dir=prompts)
+
+    assert result.assets == ()
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert result.findings[0].asset_id == "prompt_file:Prompts"
+
+
+def test_inventory_prompt_files_parent_traversal_root_reports_error_before_lstat(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import (
+        inventory_prompt_files_with_findings,
+    )
+
+    root = tmp_path / "root"
+    prompts = root / "Prompts"
+    prompts.mkdir(parents=True)
+    (root / "child").mkdir()
+    (prompts / "root.md").write_text("root prompt", encoding="utf-8")
+    _fail_parent_traversal_lstat(monkeypatch, tmp_path)
+
+    result = inventory_prompt_files_with_findings(
+        prompts_dir=root / "child" / ".." / "Prompts",
+    )
 
     assert result.assets == ()
     assert [finding.state for finding in result.findings] == ["verification_error"]
