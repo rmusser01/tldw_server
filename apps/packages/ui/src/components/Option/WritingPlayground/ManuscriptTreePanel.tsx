@@ -5,7 +5,15 @@ import type { DataNode } from "antd/es/tree"
 import type { TreeProps } from "antd"
 import { BookOpen, FileText, FolderOpen, Layers, Plus } from "lucide-react"
 import { useWritingPlaygroundStore } from "@/store/writing-playground"
-import { getManuscriptStructure, listManuscriptProjects, createManuscriptProject, reorderManuscriptItems } from "@/services/writing-playground"
+import {
+  getManuscriptStructure,
+  listManuscriptProjects,
+  createManuscriptProject,
+  reorderManuscriptItems,
+  type ManuscriptChapterSummary,
+  type ManuscriptSceneSummary,
+  type ManuscriptStructureResponse
+} from "@/services/writing-playground"
 
 type ManuscriptTreeNodeType = "part" | "chapter" | "scene" | null
 
@@ -21,8 +29,12 @@ type ManuscriptTreePanelProps = {
   ) => boolean | Promise<boolean>
 }
 
-// Extended DataNode that carries the entity's version for reorder
-type VersionedDataNode = DataNode & { version?: number; entityType?: "part" | "chapter" | "scene" }
+type VersionedDataNode = Omit<DataNode, "children"> & {
+  version?: number
+  entityType?: "part" | "chapter" | "scene"
+  sortOrder?: number
+  children?: VersionedDataNode[]
+}
 
 export function ManuscriptTreePanel({
   isOnline,
@@ -61,7 +73,7 @@ export function ManuscriptTreePanel({
         if (n.version != null && n.entityType) {
           map.set(String(n.key), { version: n.version, entityType: n.entityType })
         }
-        if (n.children) walk(n.children as VersionedDataNode[])
+        if (n.children) walk(n.children)
       }
     }
     walk(treeData)
@@ -90,7 +102,7 @@ export function ManuscriptTreePanel({
     // Compute a sort_order that places the dragged node near the drop target
     const dropPos = info.dropPosition // -1 = before, 0 = inside, 1 = after
     const dropNodeData = info.node as VersionedDataNode
-    const baseSortOrder = (dropNodeData as any).sort_order ?? info.dropPosition
+    const baseSortOrder = dropNodeData.sortOrder ?? info.dropPosition
     const newSortOrder = dropPos <= 0 ? baseSortOrder - 0.5 : baseSortOrder + 0.5
 
     try {
@@ -124,7 +136,7 @@ export function ManuscriptTreePanel({
   )
 
   if (!activeProjectId) {
-    const projects = (projectsData as any)?.projects || []
+    const projects = projectsData?.projects ?? []
     return (
       <div className="flex flex-col gap-3 p-3">
         <Typography.Text strong className="text-sm">
@@ -141,10 +153,8 @@ export function ManuscriptTreePanel({
               icon={<Plus className="h-3 w-3" />}
               onClick={async () => {
                 try {
-                  const result = await createManuscriptProject({ title: "Untitled Project" }) as any
-                  if (result?.id) {
-                    await selectProject(result.id)
-                  }
+                  const result = await createManuscriptProject({ title: "Untitled Project" })
+                  await selectProject(result.id)
                   queryClient.invalidateQueries({ queryKey: ["manuscript-projects"] })
                 } catch (err) {
                   console.error("Failed to create project:", err)
@@ -156,7 +166,7 @@ export function ManuscriptTreePanel({
           </Empty>
         ) : (
           <div className="flex flex-col gap-1">
-            {projects.map((p: any) => (
+            {projects.map((p) => (
               <div
                 key={p.id}
                 className="cursor-pointer rounded-md px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800"
@@ -222,37 +232,40 @@ export function ManuscriptTreePanel({
   )
 }
 
-function buildTreeData(structure: any): VersionedDataNode[] {
+function buildTreeData(structure: ManuscriptStructureResponse | undefined): VersionedDataNode[] {
   if (!structure) return []
 
-  const sceneNode = (s: any): VersionedDataNode => ({
+  const sceneNode = (s: ManuscriptSceneSummary): VersionedDataNode => ({
     key: s.id,
     title: `${s.title} (${s.word_count}w)`,
     icon: <FileText className="h-3.5 w-3.5" />,
     isLeaf: true,
     version: s.version,
     entityType: "scene",
+    sortOrder: s.sort_order,
   })
 
-  const chapterNode = (ch: any): VersionedDataNode => ({
+  const chapterNode = (ch: ManuscriptChapterSummary): VersionedDataNode => ({
     key: ch.id,
     title: `${ch.title} (${ch.word_count}w)`,
     icon: <FolderOpen className="h-3.5 w-3.5" />,
-    children: ch.scenes?.map(sceneNode) || [],
+    children: ch.scenes.map(sceneNode),
     version: ch.version,
     entityType: "chapter",
+    sortOrder: ch.sort_order,
   })
 
-  const partNodes: VersionedDataNode[] = (structure.parts || []).map((p: any) => ({
+  const partNodes: VersionedDataNode[] = structure.parts.map((p) => ({
     key: p.id,
     title: `${p.title} (${p.word_count}w)`,
     icon: <Layers className="h-3.5 w-3.5" />,
-    children: p.chapters?.map(chapterNode) || [],
+    children: p.chapters.map(chapterNode),
     version: p.version,
     entityType: "part",
+    sortOrder: p.sort_order,
   }))
 
-  const unassigned: VersionedDataNode[] = (structure.unassigned_chapters || []).map(chapterNode)
+  const unassigned: VersionedDataNode[] = structure.unassigned_chapters.map(chapterNode)
 
   return [...partNodes, ...unassigned]
 }

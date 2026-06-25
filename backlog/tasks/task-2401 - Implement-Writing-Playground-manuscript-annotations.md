@@ -4,7 +4,7 @@ title: Implement Writing Playground manuscript annotations
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-25 04:18'
+updated_date: '2026-06-25 07:15'
 labels:
   - implementation
   - webui
@@ -221,6 +221,28 @@ Security/static checks:
 - Bandit skipped because Task 10 touched TypeScript/TSX/frontend test files only and no Python files.
 - `git diff --check` passed.
 - `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still fails only on existing unrelated package errors in Notes, AudioStudio, ScheduledTasks, Setup, Dexie audiobook migration, background, scheduled-tasks control-plane, and voice-cloning files. No touched Task 10 Writing Playground files were reported.
+
+Task 11 complete: ran the final verification pass, browser/layout parity check, security scan, and review cleanup for the manuscript annotations workflow.
+
+Verification evidence:
+- Focused backend: `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Writing/test_manuscript_annotations_anchor.py tldw_Server_API/tests/Writing/test_manuscript_annotations_db.py tldw_Server_API/tests/Writing/test_manuscript_annotations_api.py tldw_Server_API/tests/Writing/test_manuscript_annotation_review_jobs.py tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py -q` -> 71 passed, 5 warnings.
+- Adjacent backend: `source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/Writing/test_manuscript_db.py tldw_Server_API/tests/Writing/test_manuscript_analysis_integration.py tldw_Server_API/tests/Writing/test_writing_error_mapping.py tldw_Server_API/tests/Services/test_startup_primary_jobs_pollers.py -q` -> 141 passed, 5 warnings.
+- Focused frontend from `apps/packages/ui`: `bunx vitest run src/components/Option/WritingPlayground/__tests__/writing-annotation-anchor-utils.test.ts src/components/Option/WritingPlayground/__tests__/useActiveManuscriptScene.test.tsx src/components/Option/WritingPlayground/__tests__/useWritingAnnotations.test.tsx src/components/Option/WritingPlayground/__tests__/WritingAnnotationsTab.test.tsx src/components/Option/WritingPlayground/__tests__/WritingAnnotationMarginRail.test.tsx src/components/Option/WritingPlayground/__tests__/writing-editor-adapter.test.ts src/services/__tests__/writing-playground.annotations.test.ts` -> 7 files passed, 55 tests passed.
+- Adjacent frontend from `apps/packages/ui`: `NODE_OPTIONS=--max-old-space-size=8192 bunx vitest run src/components/Option/WritingPlayground/__tests__/WritingPlayground.phase1-baseline.test.tsx src/components/Option/WritingPlayground/__tests__/WritingPlayground.inspector-tabs.test.tsx` -> 2 files passed, 44 tests passed.
+- Route parity from `apps/tldw-frontend`: `bunx vitest run extension/__tests__/writing-playground-route-parity.guard.test.ts` -> 1 file passed, 1 test passed.
+- Browser/layout parity from `apps/extension`: `bunx playwright test tests/e2e/writing-playground-mode-parity.spec.ts --reporter=line` -> 4 skipped in this local extension environment.
+- Guard red/green cleanup: adding `ManuscriptTreePanel.tsx` to the `as any` guard failed as expected before cleanup, then `bunx vitest run src/components/Option/WritingPlayground/__tests__/writing-review-comments.guard.test.ts` -> 1 file passed, 5 tests passed.
+- Post-cleanup focused frontend rerun -> 7 files passed, 55 tests passed; post-cleanup adjacent frontend rerun -> 2 files passed, 44 tests passed.
+
+Review evidence:
+- Final self-review checked sanitized Jobs payload boundaries, stale anchor/status behavior, expected-version paths, suggested-fix revision routing, and frontend type escape hatches.
+- Cleanup removed `as any` casts from `ManuscriptTreePanel.tsx`, added explicit manuscript project/structure response types to the writing service, carried `sortOrder` through tree nodes for reorder, and expanded the review-comment guard to keep that file covered.
+- Final subagent reviewer found no actionable issues in the cleanup diff. Residual risk is limited to pre-existing Ant Tree drag/drop runtime semantics, which were not materially changed.
+
+Security/static checks:
+- `git diff --check` passed.
+- Bandit on the touched backend scope wrote `/tmp/bandit_writing_manuscript_annotations.json` with zero high, medium, or low findings.
+- `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still fails only on existing unrelated package errors in Notes, AudioStudio, ScheduledTasks, Setup, Dexie audiobook migration, background, scheduled-tasks control-plane, and voice-cloning files. No touched Writing Playground annotation/tree/service files were reported.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

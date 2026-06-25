@@ -10,6 +10,7 @@ describe("writing review comment guards", () => {
     const files = [
       "AIAgentTab.tsx",
       "CharacterWorldTab.tsx",
+      "ManuscriptTreePanel.tsx",
       "ResearchTab.tsx",
       path.join("modals", "ConnectionWebModal.tsx"),
     ]

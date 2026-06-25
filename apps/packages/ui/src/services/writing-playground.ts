@@ -2,6 +2,34 @@ import { bgRequest } from "@/services/background-proxy"
 import { buildQuery, createResourceClient } from "@/services/resource-client"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
 
+export type ManuscriptProjectResponse = {
+  id: string
+  title: string
+  subtitle?: string | null
+  author?: string | null
+  genre?: string | null
+  status: string
+  synopsis?: string | null
+  target_word_count?: number | null
+  settings: Record<string, unknown>
+  word_count: number
+  created_at: string
+  last_modified: string
+  deleted: boolean
+  client_id: string
+  version: number
+}
+
+export type ManuscriptProjectListResponse = {
+  projects: ManuscriptProjectResponse[]
+  total: number
+  limit: number
+  offset: number
+  has_more?: boolean | null
+  next_offset?: number | null
+  pagination?: ManuscriptOffsetPagination
+}
+
 export type ManuscriptSceneResponse = {
   id: string
   chapter_id: string
@@ -19,6 +47,37 @@ export type ManuscriptSceneResponse = {
   deleted: boolean
   client_id: string
   version: number
+}
+
+export type ManuscriptSceneSummary = Pick<
+  ManuscriptSceneResponse,
+  "id" | "title" | "sort_order" | "word_count" | "status" | "version"
+>
+
+export type ManuscriptChapterSummary = {
+  id: string
+  title: string
+  sort_order: number
+  part_id?: string | null
+  word_count: number
+  status: string
+  version: number
+  scenes: ManuscriptSceneSummary[]
+}
+
+export type ManuscriptPartSummary = {
+  id: string
+  title: string
+  sort_order: number
+  word_count: number
+  version: number
+  chapters: ManuscriptChapterSummary[]
+}
+
+export type ManuscriptStructureResponse = {
+  project_id: string
+  parts: ManuscriptPartSummary[]
+  unassigned_chapters: ManuscriptChapterSummary[]
 }
 
 export type ManuscriptCharacterResponse = {
@@ -978,16 +1037,18 @@ export async function listManuscriptProjects(params?: {
   status?: string
   limit?: number
   offset?: number
-}) {
-  return manuscriptProjectsClient.list(params)
+}): Promise<ManuscriptProjectListResponse> {
+  return manuscriptProjectsClient.list<ManuscriptProjectListResponse>(params)
 }
 
-export async function getManuscriptProject(id: string) {
-  return manuscriptProjectsClient.get(id)
+export async function getManuscriptProject(id: string): Promise<ManuscriptProjectResponse> {
+  return manuscriptProjectsClient.get<ManuscriptProjectResponse>(id)
 }
 
-export async function createManuscriptProject(data: Record<string, unknown>) {
-  return manuscriptProjectsClient.create(data)
+export async function createManuscriptProject(
+  data: Record<string, unknown>
+): Promise<ManuscriptProjectResponse> {
+  return manuscriptProjectsClient.create<ManuscriptProjectResponse>(data)
 }
 
 export async function updateManuscriptProject(
@@ -1006,8 +1067,10 @@ export async function deleteManuscriptProject(id: string, version: number) {
   })
 }
 
-export async function getManuscriptStructure(projectId: string) {
-  return await bgRequest({
+export async function getManuscriptStructure(
+  projectId: string
+): Promise<ManuscriptStructureResponse> {
+  return await bgRequest<ManuscriptStructureResponse>({
     path: `/api/v1/writing/manuscripts/projects/${encodeURIComponent(projectId)}/structure` as AllowedPath,
     method: "GET",
   })
