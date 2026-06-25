@@ -12,6 +12,8 @@ modified_files:
 - .github/workflows/mcp-unified-publish.yml
 - tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
 - backlog/tasks/task-12013 - Convert-MCP-Unified-PyPI-publish-workflow-to-trusted-publishing.md
+references:
+- https://github.com/rmusser01/tldw_server/pull/2514
 ---
 
 ## Description
@@ -39,7 +41,10 @@ Update the standalone MCP Unified production PyPI publish workflow to use the pe
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+PR: https://github.com/rmusser01/tldw_server/pull/2514
+
 Validation:
+- GitHub Actions environment `pypi` verified via `gh api`: id `17193755583`.
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py -q -k publish_workflow` -> 3 passed.
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py -q` -> 47 passed.
 - `make PYTHON=/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python mcp-unified-publish-dry-run` -> passed; helper build and TestPyPI dry-run plan still work.
