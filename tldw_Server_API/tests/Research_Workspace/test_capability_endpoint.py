@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -8,6 +9,8 @@ import pytest
 from tldw_Server_API.app.api.v1.router_groups.content import API_V1_PREFIX, iter_content_router_specs
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
 from tldw_Server_API.app.core.Research_Workspace.capabilities import build_research_workspace_capabilities
+
+pytestmark = pytest.mark.unit
 
 
 def _closure_values(callable_obj: Any) -> list[Any]:
@@ -88,3 +91,12 @@ def test_openapi_contains_research_workspace_capabilities_path():
 
     assert "/api/v1/research-workspace/capabilities" in schema["paths"]
     assert "/api/v1/research-studio/capabilities" not in schema["paths"]
+
+
+def test_research_workspace_readme_names_current_collector_function():
+    readme = Path("tldw_Server_API/app/core/Research_Workspace/README.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "collect_research_workspace_capabilities()" in readme
+    assert "collect_research_workspace_health()" not in readme

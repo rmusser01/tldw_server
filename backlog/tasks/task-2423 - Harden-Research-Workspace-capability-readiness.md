@@ -1,0 +1,64 @@
+---
+id: TASK-2423
+title: Harden Research Workspace capability readiness
+status: Done
+updated_date: 2026-06-24 20:07
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Fix the current Research_Workspace capability module review findings: fail closed for real Slides DB unavailability, decouple core health collection from API endpoint functions, bound/concurrently run health probes, stop placeholder sync/share from forcing degraded overall status, tighten capability response typing, and correct README function naming.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-06-23-research-workspace-capability-readiness-hardening.md
+
+Implemented review fixes:
+- Slides DB lookup returning None now reports unavailable, so slides_generation blocks instead of warning/failing open.
+- Core capability collection now uses injectable ResearchWorkspaceHealthCollectors and concurrent bounded probes instead of importing API endpoint health functions.
+- The sync_share placeholder remains in the response but no longer degrades the top-level status by itself.
+- Capability response mapping keys are typed as ResearchWorkspaceCapabilityId.
+- README function naming now matches collect_research_workspace_capabilities().
+
+Verification:
+- source .venv/bin/activate && python -m pytest --confcutdir=tldw_Server_API/tests/Research_Workspace tldw_Server_API/tests/Research_Workspace -q => 20 passed, 2 warnings in 95.67s.
+- source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Research_Workspace tldw_Server_API/app/api/v1/schemas/research_workspace_capabilities.py -f json -o /tmp/bandit_research_workspace_capability_readiness.json => 0 findings.
+- git diff --check => passed.
+
+Note: the official Backlog CLI hung in this environment and the fallback CLI did not support adding acceptance criteria after task creation, so the task acceptance criteria section remains empty.
+PR review follow-up on 2026-06-24:
+- Added Loguru exception logging for unexpected Research Workspace health probe and collector failures while keeping response payloads sanitized.
+- Updated async collector invocation to recognize callable objects with async __call__ methods.
+- Moved get_chacha_health_snapshot() behind asyncio.to_thread to preserve event-loop responsiveness.
+- Added focused regression coverage for async callable collector instances and off-thread ChaCha health snapshot collection.
+
+Follow-up verification:
+- AUTH_MODE=single_user SINGLE_USER_TEST_API_KEY=test-api-key-12345 SINGLE_USER_API_KEY=test-api-key-12345 python -m pytest --confcutdir=tldw_Server_API/tests/Research_Workspace tldw_Server_API/tests/Research_Workspace -q => 22 passed, 2 warnings in 14.38s.
+- python -m bandit -r tldw_Server_API/app/core/Research_Workspace tldw_Server_API/app/api/v1/schemas/research_workspace_capabilities.py -f json -o /tmp/bandit_research_workspace_capability_readiness_review_followup.json => 0 findings.
+- git diff --check => passed.
+2026-06-24 Qodo follow-up pass: rebased onto latest origin/dev, added helper docstrings, preserved subsystem reason_code values through dependency capability mapping, made slides probe timeouts fail closed as unavailable/blocking for slides generation, replaced untyped lambda test double, added pytest unit markers for Research Workspace tests, and added regressions for slides timeout handling plus unknown dependency reason-code preservation. Verification: Research Workspace focused pytest suite passed (24 passed, 2 warnings); Bandit on touched Research Workspace scope reported 0 findings; git diff --check passed.
+Final Qodo follow-up verification after reason-code sanitization: AUTH_MODE=single_user SINGLE_USER_TEST_API_KEY=test-api-key-12345 SINGLE_USER_API_KEY=test-api-key-12345 python -m pytest --confcutdir=tldw_Server_API/tests/Research_Workspace tldw_Server_API/tests/Research_Workspace -q => 25 passed, 2 warnings in 29.87s. Bandit touched scope => 0 findings. git diff --check => passed. Branch comparison against origin/dev before commit => 0 behind / 2 ahead.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Hardened Research Workspace capability readiness by failing closed for unavailable Slides DB access, replacing endpoint health imports with injectable concurrent timeout-bounded core probes, preventing the sync/share placeholder from degrading otherwise-ready capabilities, tightening schema key typing, and correcting README naming. Focused Research Workspace tests, Bandit, and diff checks passed.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

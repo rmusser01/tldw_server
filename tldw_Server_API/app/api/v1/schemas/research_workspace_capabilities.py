@@ -33,5 +33,5 @@ class ResearchWorkspaceCapabilitiesResponse(BaseModel):
 
     status: ResearchWorkspaceOverallStatus
     ttl_seconds: int = 30
-    capabilities: dict[str, ResearchWorkspaceCapability]
+    capabilities: dict[ResearchWorkspaceCapabilityId, ResearchWorkspaceCapability]
     timestamp: datetime
