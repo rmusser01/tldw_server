@@ -1,7 +1,7 @@
 ---
 id: TASK-12017
 title: Implement Jobs backend parity refactor first slice
-status: In Progress
+status: Done
 created_date: 2026-06-24 21:44
 labels:
 - jobs
@@ -34,7 +34,7 @@ modified_files:
 - tldw_Server_API/app/core/Jobs/operations/contracts.py
 - tldw_Server_API/tests/Jobs/test_jobs_operation_contracts.py
 - backlog/tasks/task-12017 - Implement-Jobs-backend-parity-refactor-first-slice.md
-updated_date: 2026-06-25 02:33
+updated_date: 2026-06-25 02:54
 ---
 
 ## Description
@@ -63,20 +63,21 @@ Task 5 completed: added tldw_Server_API.app.core.Jobs.settings with immutable Jo
 Task 5 review follow-up completed: unknown Jobs setting keys now classify as `UNCLASSIFIED` instead of silently becoming operation-time, queue-related settings are named/classified as refreshable env extras rather than a full runtime allowlist, and a drift guard now verifies literal `JOBS_*` env reads plus helper-built quota/acquire-policy keys in the Jobs manager/admin endpoint are classified. Verification: `RUN_JOBS=1 python -m pytest tldw_Server_API/tests/Jobs/test_jobs_settings.py -q` exited 0 with 8 passed and 28 warnings.
 Task 6 completed: added the Jobs operations package marker, typed operation command/result contracts, and TDD coverage for CreateJobCommand, AdmissionResult, LifecycleResult, reason enums, and the no-JobManager-import boundary. Red verification: the initial target test run failed during collection with ModuleNotFoundError for tldw_Server_API.app.core.Jobs.operations, as expected before implementation. Verification: `RUN_JOBS=1 python -m pytest tldw_Server_API/tests/Jobs/test_jobs_operation_contracts.py -q` exited 0 with 4 passed and 20 warnings; `rg -n "JobManager|Jobs\\.manager|from .*manager" tldw_Server_API/app/core/Jobs/operations` exited 1 with no matches, which is the expected success state; `git diff --check` exited 0 after intent-to-add for the new files; the exact Bandit command exited 0 but warned that the operations directory was skipped without `-r`, so a recursive follow-up `python -m bandit -q -s B101 -r tldw_Server_API/app/core/Jobs/operations tldw_Server_API/tests/Jobs/test_jobs_operation_contracts.py` also exited 0.
 Task 6 review follow-up completed: renamed the admission inserted-row factory to `AdmissionResult.applied()` to avoid the `inserted` field/factory collision, added result invariant checks for impossible admission/lifecycle states including non-applied durable events, shallow-copied mutable row/event facts into frozen results, and strengthened the no-JobManager-import test to walk all operation package modules including attribute-style references. Verification: `RUN_JOBS=1 python -m pytest tldw_Server_API/tests/Jobs/test_jobs_operation_contracts.py -q` exited 0 with 8 passed and 28 warnings; manager import scan exited 1 with no matches; `git diff --check` exited 0; recursive Bandit on operations and the contract test exited 0.
+Final verification completed: focused Jobs/Chatbooks matrix `RUN_JOBS=1 python -m pytest ... -q` over touched SQLite/Postgres parity tests, admin contract, Chatbooks adapter, settings, and operation contracts exited 0 with 45 passed, 9 skipped, and 217 warnings. Postgres skip reason check exited 0 with all 9 Postgres-marked tests skipped because Postgres was not reachable. Bandit touched-scope command with B101 excluded exited 0. `git diff --check` exited 0. Worktree status only showed two unrelated untracked watchlist template files left unstaged and untouched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented the first Jobs backend parity refactor safety-net slice without moving production SQL. The branch now has a direct-SQL/domain mapping inventory, shared SQLite/Postgres parity scenarios, public admin and Chatbooks mapping contract tests, an explicit JobsSettings snapshot/refresh contract, typed operation result contracts, and focused verification evidence. Local Postgres-backed tests were skipped because Postgres was not reachable; SQLite and contract coverage passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
