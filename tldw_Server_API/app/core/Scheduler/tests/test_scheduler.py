@@ -9,6 +9,7 @@ import pytest
 import tempfile
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 import uuid
 
 from ..scheduler import Scheduler, create_scheduler
@@ -16,10 +17,52 @@ from ..base import Task, TaskStatus, TaskPriority
 from ..base.registry import get_registry
 from ..config import SchedulerConfig
 from ..backends import create_backend
+from ..backends.postgresql_backend import PostgreSQLBackend
+from ..core.leader_election import LeaderElection
 from ..services import LeaseService
 from ..authorization import AuthContext, TaskPermission
 
 DEFAULT_METADATA = {"user_id": "test-user"}
+
+
+class _AsyncContext:
+    def __init__(self, value):
+        self.value = value
+
+    async def __aenter__(self):
+        return self.value
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _FakePostgresConnection:
+    def __init__(self):
+        self.fetchrow_calls = []
+        self.executemany_calls = []
+        self.execute_calls = []
+
+    async def fetchrow(self, query, *args):
+        self.fetchrow_calls.append((query, args))
+        return {"id": args[0]}
+
+    async def executemany(self, query, values):
+        self.executemany_calls.append((query, list(values)))
+
+    async def execute(self, query, *args):
+        self.execute_calls.append((query, args))
+        return "SELECT 1"
+
+    def transaction(self):
+        return _AsyncContext(self)
+
+
+class _FakePostgresPool:
+    def __init__(self, connection):
+        self.connection = connection
+
+    def acquire(self):
+        return _AsyncContext(self.connection)
 
 
 @pytest.fixture
@@ -64,6 +107,30 @@ async def test_scheduler_lifecycle(test_config):
     # Stop scheduler
     await scheduler.stop()
     assert scheduler._started is False
+
+
+@pytest.mark.asyncio
+async def test_scheduler_background_loops_survive_start_if_leadership_setup_yields(test_config, monkeypatch):
+    """Background loops should not observe the scheduler as stopped during startup."""
+    original = LeaderElection.maintain_leadership
+
+    async def yielding_maintain(self, resource, callback=None, ttl=None, renew_interval=None):
+        await asyncio.sleep(0)
+        task = await original(self, resource, callback=callback, ttl=ttl, renew_interval=renew_interval)
+        return task
+
+    monkeypatch.setattr(LeaderElection, "maintain_leadership", yielding_maintain)
+
+    scheduler = Scheduler(test_config)
+    await scheduler.start(start_workers=False)
+    try:
+        await asyncio.sleep(0)
+        assert scheduler._cleanup_task is not None
+        assert scheduler._monitor_task is not None
+        assert scheduler._cleanup_task.done() is False
+        assert scheduler._monitor_task.done() is False
+    finally:
+        await scheduler.stop()
 
 
 @pytest.mark.asyncio
@@ -568,6 +635,176 @@ async def test_sqlite_auto_renew_extends_lease_expiration():
             assert renewed_expires > original_expires, "Lease expiration should extend after renewal"
         finally:
             await backend.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_dequeues_iso_scheduled_task_on_current_day(tmp_path):
+    """SQLite should compare ISO scheduled_at values as timestamps, not strings."""
+    config = SchedulerConfig(
+        database_url=f"sqlite:///{tmp_path}/scheduled.db",
+        base_path=tmp_path / "scheduler",
+        min_workers=0,
+        max_workers=0,
+    )
+    backend = create_backend(config)
+    await backend.connect()
+    try:
+        scheduled_at = datetime.now(timezone.utc).replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+            tzinfo=None,
+        )
+        task = Task(
+            handler="test.handler",
+            payload={},
+            scheduled_at=scheduled_at,
+            metadata=DEFAULT_METADATA,
+        )
+        await backend.enqueue(task)
+
+        dequeued = await backend.dequeue_atomic("default", "worker-iso-time")
+
+        assert dequeued is not None
+        assert dequeued.id == task.id
+    finally:
+        await backend.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_reclaims_iso_expired_lease(tmp_path):
+    """SQLite should compare ISO lease expiry values as timestamps, not strings."""
+    config = SchedulerConfig(
+        database_url=f"sqlite:///{tmp_path}/lease-expiry.db",
+        base_path=tmp_path / "scheduler",
+        lease_duration_seconds=30,
+        lease_renewal_interval=5,
+        min_workers=0,
+        max_workers=0,
+    )
+    backend = create_backend(config)
+    await backend.connect()
+    try:
+        task = Task(handler="test.handler", payload={}, metadata=DEFAULT_METADATA)
+        await backend.enqueue(task)
+        dequeued = await backend.dequeue_atomic("default", "worker-expired")
+        assert dequeued is not None
+
+        expired_at = datetime.now(timezone.utc).replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+            tzinfo=None,
+        )
+        await backend.execute(
+            "UPDATE task_leases SET expires_at = ? WHERE lease_id = ?",
+            expired_at.isoformat(),
+            dequeued.lease_id,
+        )
+
+        assert await backend.reclaim_expired_leases() == 1
+        reclaimed = await backend.get_task(task.id)
+        assert reclaimed is not None
+        assert reclaimed.status == TaskStatus.QUEUED
+    finally:
+        await backend.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_ack_rejects_stale_lease_owner(tmp_path):
+    """A reclaimed task must not be completed by a stale worker lease."""
+    config = SchedulerConfig(
+        database_url=f"sqlite:///{tmp_path}/lease-owner.db",
+        base_path=tmp_path / "scheduler",
+        lease_duration_seconds=30,
+        lease_renewal_interval=5,
+        min_workers=0,
+        max_workers=0,
+    )
+    backend = create_backend(config)
+    await backend.connect()
+    try:
+        task = Task(handler="test.handler", payload={}, metadata=DEFAULT_METADATA)
+        await backend.enqueue(task)
+
+        first_claim = await backend.dequeue_atomic("default", "worker-1")
+        assert first_claim is not None
+        stale_lease_id = first_claim.lease_id
+
+        expired_at = datetime.now(timezone.utc).replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+            tzinfo=None,
+        )
+        await backend.execute(
+            "UPDATE task_leases SET expires_at = ? WHERE lease_id = ?",
+            expired_at.isoformat(),
+            stale_lease_id,
+        )
+        assert await backend.reclaim_expired_leases() == 1
+
+        second_claim = await backend.dequeue_atomic("default", "worker-2")
+        assert second_claim is not None
+        assert second_claim.lease_id != stale_lease_id
+
+        stale_ack = await backend.ack(
+            task.id,
+            {"stale": True},
+            lease_id=stale_lease_id,
+            worker_id="worker-1",
+        )
+        assert stale_ack is False
+
+        still_running = await backend.get_task(task.id)
+        assert still_running is not None
+        assert still_running.status == TaskStatus.RUNNING
+        assert still_running.worker_id == "worker-2"
+
+        current_ack = await backend.ack(
+            task.id,
+            {"ok": True},
+            lease_id=second_claim.lease_id,
+            worker_id="worker-2",
+        )
+        assert current_ack is True
+    finally:
+        await backend.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_postgresql_enqueue_normalizes_pending_tasks_to_queued():
+    """PostgreSQL inserts must persist newly submitted tasks as queued."""
+    backend = PostgreSQLBackend.__new__(PostgreSQLBackend)
+    backend.config = SimpleNamespace(
+        payload_threshold_bytes=10_000_000,
+        payload_compression=False,
+        default_queue_name="default",
+    )
+    connection = _FakePostgresConnection()
+    backend.pool = _FakePostgresPool(connection)
+
+    task = Task(handler="test.handler", payload={"value": 1}, metadata=DEFAULT_METADATA)
+    assert task.status == TaskStatus.PENDING
+
+    await backend.enqueue(task)
+
+    insert_args = connection.fetchrow_calls[0][1]
+    assert insert_args[4] == TaskStatus.QUEUED.value
+
+    await backend.bulk_enqueue([
+        Task(handler="test.handler", payload={"value": 2}, metadata=DEFAULT_METADATA),
+        Task(handler="test.handler", payload={"value": 3}, metadata=DEFAULT_METADATA),
+    ])
+
+    bulk_values = connection.executemany_calls[0][1]
+    assert [value[4] for value in bulk_values] == [
+        TaskStatus.QUEUED.value,
+        TaskStatus.QUEUED.value,
+    ]
 
 
 @pytest.mark.asyncio

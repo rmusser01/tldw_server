@@ -105,6 +105,8 @@ class Scheduler:
                 self.worker_pool = WorkerPool(self.backend, self.registry, self.config)
                 await self.worker_pool.start()
 
+            self._started = True
+
             # Start background tasks
             self._cleanup_task = asyncio.create_task(self._cleanup_loop())
             self._monitor_task = asyncio.create_task(self._monitor_loop())
@@ -115,7 +117,6 @@ class Scheduler:
                 callback=self._on_become_cleanup_leader
             )
 
-            self._started = True
             logger.info("Scheduler started successfully")
 
         except (AttributeError, LookupError, OSError, RuntimeError, TypeError, ValueError) as e:

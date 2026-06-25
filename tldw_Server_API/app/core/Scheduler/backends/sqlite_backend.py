@@ -390,8 +390,8 @@ class SQLiteBackend(QueueBackend):
                     SELECT * FROM tasks
                     WHERE queue_name = ?
                       AND status = 'queued'
-                      AND (scheduled_at IS NULL OR scheduled_at <= datetime('now'))
-                      AND (expires_at IS NULL OR expires_at > datetime('now'))
+                      AND (scheduled_at IS NULL OR datetime(replace(scheduled_at, 'T', ' ')) <= datetime('now'))
+                      AND (expires_at IS NULL OR datetime(replace(expires_at, 'T', ' ')) > datetime('now'))
                       AND NOT EXISTS (
                           SELECT 1
                           FROM json_each(COALESCE(depends_on, '[]')) AS deps
@@ -453,8 +453,8 @@ class SQLiteBackend(QueueBackend):
         query = (
             "SELECT id, depends_on FROM tasks "
             "WHERE status = 'queued' "
-            "AND (scheduled_at IS NULL OR scheduled_at <= datetime('now')) "
-            "AND (expires_at IS NULL OR expires_at > datetime('now'))"
+            "AND (scheduled_at IS NULL OR datetime(replace(scheduled_at, 'T', ' ')) <= datetime('now')) "
+            "AND (expires_at IS NULL OR datetime(replace(expires_at, 'T', ' ')) > datetime('now'))"
         )
         params = []
         if queue_name:
@@ -506,18 +506,37 @@ class SQLiteBackend(QueueBackend):
 
         return ready
 
-    async def ack(self, task_id: str, result: Optional[Any] = None) -> bool:
+    async def ack(
+        self,
+        task_id: str,
+        result: Optional[Any] = None,
+        *,
+        lease_id: Optional[str] = None,
+        worker_id: Optional[str] = None,
+    ) -> bool:
         """Acknowledge task completion"""
         result_json = json.dumps(result) if result is not None else None
 
-        affected = await self.execute("""
+        affected = await self.execute(
+            """
             UPDATE tasks
             SET status = 'completed',
                 completed_at = datetime('now'),
                 result = ?,
-                execution_time = (julianday('now') - julianday(started_at)) * 86400
+                execution_time = (julianday('now') - julianday(started_at)) * 86400,
+                worker_id = NULL,
+                lease_id = NULL
             WHERE id = ? AND status = 'running'
-        """, result_json, task_id)
+              AND (? IS NULL OR lease_id = ?)
+              AND (? IS NULL OR worker_id = ?)
+            """,
+            result_json,
+            task_id,
+            lease_id,
+            lease_id,
+            worker_id,
+            worker_id,
+        )
 
         if affected:
             # Delete lease
@@ -525,7 +544,15 @@ class SQLiteBackend(QueueBackend):
 
         return affected > 0
 
-    async def nack(self, task_id: str, error: str, retry: bool = True) -> bool:
+    async def nack(
+        self,
+        task_id: str,
+        error: str,
+        retry: bool = True,
+        *,
+        lease_id: Optional[str] = None,
+        worker_id: Optional[str] = None,
+    ) -> bool:
         """Handle task failure"""
         task = await self.get_task(task_id)
         if not task:
@@ -536,7 +563,8 @@ class SQLiteBackend(QueueBackend):
             retry_delay = task.calculate_retry_delay()
             scheduled_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=retry_delay)
 
-            await self.execute("""
+            affected = await self.execute(
+                """
                 UPDATE tasks
                 SET status = 'queued',
                     retry_count = retry_count + 1,
@@ -544,17 +572,42 @@ class SQLiteBackend(QueueBackend):
                     error = ?,
                     worker_id = NULL,
                     lease_id = NULL
-                WHERE id = ?
-            """, scheduled_at.isoformat(), error, task_id)
+                WHERE id = ? AND status = 'running'
+                  AND (? IS NULL OR lease_id = ?)
+                  AND (? IS NULL OR worker_id = ?)
+                """,
+                scheduled_at.isoformat(),
+                error,
+                task_id,
+                lease_id,
+                lease_id,
+                worker_id,
+                worker_id,
+            )
         else:
             # Move to failed or DLQ
-            await self.execute("""
+            affected = await self.execute(
+                """
                 UPDATE tasks
                 SET status = 'failed',
                     completed_at = datetime('now'),
-                    error = ?
-                WHERE id = ?
-            """, error, task_id)
+                    error = ?,
+                    worker_id = NULL,
+                    lease_id = NULL
+                WHERE id = ? AND status = 'running'
+                  AND (? IS NULL OR lease_id = ?)
+                  AND (? IS NULL OR worker_id = ?)
+                """,
+                error,
+                task_id,
+                lease_id,
+                lease_id,
+                worker_id,
+                worker_id,
+            )
+
+        if affected <= 0:
+            return False
 
         # Delete lease
         await self.execute("DELETE FROM task_leases WHERE task_id = ?", task_id)
@@ -707,7 +760,7 @@ class SQLiteBackend(QueueBackend):
     async def get_expired_leases(self) -> list[dict[str, Any]]:
         """Get expired leases"""
         return await self.fetch(
-            "SELECT * FROM task_leases WHERE expires_at < datetime('now')"
+            "SELECT * FROM task_leases WHERE datetime(replace(expires_at, 'T', ' ')) < datetime('now')"
         )
 
     # Transaction support
@@ -776,7 +829,7 @@ class SQLiteBackend(QueueBackend):
                 # Find all expired leases
                 cursor = await self._connection.execute("""
                     SELECT task_id FROM task_leases
-                    WHERE expires_at < datetime('now')
+                    WHERE datetime(replace(expires_at, 'T', ' ')) < datetime('now')
                 """)
                 expired_rows = await cursor.fetchall()
 

@@ -5,6 +5,7 @@ This module provides authorization checks to ensure users can only
 submit and manage tasks they have permissions for.
 """
 
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
@@ -66,6 +67,7 @@ class TaskAuthorizer:
 
         # User rate limits: user_id -> max tasks per minute
         self._user_rate_limits: dict[str, int] = {}
+        self._user_rate_windows: dict[str, list[float]] = {}
 
         # Default permissions for unauthenticated users
         self._allow_anonymous = False
@@ -127,7 +129,11 @@ class TaskAuthorizer:
             user_id: User ID
             max_per_minute: Maximum tasks per minute
         """
+        if not isinstance(max_per_minute, int) or max_per_minute < 0:
+            raise ValueError("max_per_minute must be a non-negative integer")
+
         self._user_rate_limits[user_id] = max_per_minute
+        self._user_rate_windows.pop(user_id, None)
         logger.debug(f"Set rate limit for user {user_id}: {max_per_minute}/min")
 
     def can_submit_task(self,
@@ -152,6 +158,12 @@ class TaskAuthorizer:
         # Require authentication for non-anonymous handlers
         if not context.is_authenticated:
             return False, "Authentication required"
+
+        # Check configured per-user rate limits before permission bypasses
+        if context.user_id in self._user_rate_limits:
+            allowed, reason = self._check_user_rate_limit(context.user_id)
+            if not allowed:
+                return False, reason
 
         # Check admin-only handlers
         if handler in self._admin_handlers and not context.is_admin:
@@ -181,12 +193,28 @@ class TaskAuthorizer:
             if missing_perms:
                 return False, f"Missing queue permissions: {missing_perms}"
 
-        # Check rate limits
-        if context.user_id in self._user_rate_limits:
-            # This would need actual rate tracking implementation
-            # For now, just return true
-            pass
+        return True, None
 
+    def _check_user_rate_limit(self, user_id: str) -> tuple[bool, Optional[str]]:
+        """Apply the configured per-minute submission limit for a user."""
+        max_per_minute = self._user_rate_limits.get(user_id)
+        if max_per_minute is None:
+            return True, None
+
+        now = time.monotonic()
+        window_start = now - 60
+        timestamps = [
+            timestamp
+            for timestamp in self._user_rate_windows.get(user_id, [])
+            if timestamp > window_start
+        ]
+
+        if len(timestamps) >= max_per_minute:
+            self._user_rate_windows[user_id] = timestamps
+            return False, f"Rate limit exceeded: {max_per_minute} tasks per minute"
+
+        timestamps.append(now)
+        self._user_rate_windows[user_id] = timestamps
         return True, None
 
     def can_cancel_task(self,

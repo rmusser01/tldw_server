@@ -484,11 +484,16 @@ class ACPTriggerManager:
         """Submit an ``acp_run`` task via the global scheduler."""
         from tldw_Server_API.app.core.Scheduler import get_global_scheduler
 
-        scheduler = get_global_scheduler()
+        user_id = str(payload.get("user_id") or "").strip()
+        if not user_id:
+            raise ValueError("acp_run payload requires user_id")
+
+        scheduler = await get_global_scheduler()
         task_id = await scheduler.submit(
             handler="acp_run",
             payload=payload,
             queue_name="acp",
+            metadata={"user_id": user_id},
         )
         return task_id
 

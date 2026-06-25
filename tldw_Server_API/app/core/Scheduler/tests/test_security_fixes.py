@@ -79,16 +79,17 @@ class TestPathTraversalFixes:
             assert 'scheduler' in str(config.base_path)
             assert config.base_path.exists() or True  # Path creation might be lazy
 
-    def test_unix_permission_fallback(self):
+    def test_unix_permission_fallback(self, tmp_path):
         """Test Unix path fallback when /var/lib is not writable."""
         with patch('platform.system', return_value='Linux'):
             with patch('os.access', return_value=False):
-                config = SchedulerConfig(
-                    base_path=Path('/var/lib/scheduler-security-test'),
-                    database_url=':memory:',
-                )
+                with patch.object(Path, 'home', return_value=tmp_path):
+                    config = SchedulerConfig(
+                        base_path=Path('/var/lib/scheduler-security-test'),
+                        database_url=':memory:',
+                    )
                 # Should use home directory
-                assert '.local/share/scheduler' in str(config.base_path)
+                assert config.base_path == tmp_path / '.local' / 'share' / 'scheduler'
 
 
 class TestPayloadSanitization:
@@ -475,6 +476,27 @@ class TestTaskAuthorization:
 
         can_submit, reason = self.authorizer.can_submit_task('some_task', 'priority_queue', authorized_context)
         assert can_submit is True
+
+    def test_user_rate_limit_is_enforced(self):
+        """Configured per-user task submission limits should reject excess calls."""
+        self.authorizer.set_user_rate_limit('limited-user', 1)
+        user_context = AuthContext(user_id='limited-user')
+
+        first_allowed, first_reason = self.authorizer.can_submit_task(
+            'some_task',
+            'default',
+            user_context,
+        )
+        second_allowed, second_reason = self.authorizer.can_submit_task(
+            'some_task',
+            'default',
+            user_context,
+        )
+
+        assert first_allowed is True
+        assert first_reason is None
+        assert second_allowed is False
+        assert 'Rate limit exceeded' in second_reason
 
     def test_payload_size_validation_for_non_admin(self):
         """Test that non-admin users have payload size limits."""
