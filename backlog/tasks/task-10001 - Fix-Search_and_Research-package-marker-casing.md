@@ -4,7 +4,7 @@ title: Fix Search_and_Research package marker casing
 status: Done
 assignee: []
 created_date: '2026-06-23 21:16'
-updated_date: '2026-06-23 21:23'
+updated_date: '2026-06-24 20:51'
 labels:
   - core
   - docs
@@ -37,7 +37,7 @@ Address current-state review findings in `tldw_Server_API/app/core/Search_and_Re
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Implemented the package-marker casing cleanup and README spelling update. Added a focused lint regression test for the canonical marker filename and README reference. Verification passed: isolated focused pytest (`2 passed`), import-spec check resolves to `Search_and_Research/__init__.py`, scoped `git diff --check` passed, and Bandit on touched Python files reported no findings. Repository-wide `git diff --check` remains blocked by an unrelated pre-existing whitespace issue in `tldw_Server_API/tests/FileArtifacts/test_file_artifacts_service_exports.py:317`.
+Implemented the package-marker casing cleanup and README spelling update. Added a focused lint regression test for the canonical marker filename and README reference. Verification passed: isolated focused pytest (`2 passed`), import-spec check resolves to `Search_and_Research/__init__.py`, scoped `git diff --check` passed, and Bandit on touched Python files reported no findings. Repository-wide `git diff --check` remains blocked by an unrelated pre-existing whitespace issue in `tldw_Server_API/tests/FileArtifacts/test_file_artifacts_service_exports.py:317`. Draft PR: https://github.com/rmusser01/tldw_server/pull/2518
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
