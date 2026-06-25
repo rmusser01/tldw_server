@@ -2,6 +2,8 @@ import os
 import sqlite3
 import tempfile
 
+import psycopg
+
 from tldw_Server_API.app.core.Chunking import chunk_for_embedding
 from tldw_Server_API.app.core.Claims_Extraction import ingestion_claims
 from tldw_Server_API.app.core.Claims_Extraction.ingestion_claims import (
@@ -156,6 +158,58 @@ def test_store_claims_review_assignment_job_sqlite_enqueue_failure_does_not_roll
         claims_jobs,
         "enqueue_claims_review_notification",
         lambda **_kwargs: (_ for _ in ()).throw(sqlite3.Error("jobs database unavailable")),
+    )
+    monkeypatch.setattr(
+        claims_notifications,
+        "record_review_assignment_notifications",
+        lambda **_kwargs: [101],
+    )
+    monkeypatch.setattr(
+        claims_notifications,
+        "dispatch_claim_review_notifications",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("legacy dispatch should not run")),
+    )
+
+    try:
+        media_id, _, _ = db.add_media_with_keywords(
+            title="Doc",
+            media_type="text",
+            content="A. B.",
+            keywords=None,
+            owner_user_id=1,
+        )
+        inserted = store_claims(
+            db,
+            media_id=media_id,
+            chunk_texts_by_index={0: "A. B."},
+            claims=[{"chunk_index": 0, "claim_text": "A."}],
+        )
+        rows = db.get_claims_by_media(media_id)
+    finally:
+        db.close_connection()
+
+    assert inserted == 1
+    assert len(rows) == 1
+
+
+def test_store_claims_review_assignment_job_pg_enqueue_failure_does_not_rollback(monkeypatch):
+    from tldw_Server_API.app.core.Claims_Extraction import claims_jobs, claims_notifications
+
+    temp_dir = tempfile.mkdtemp(prefix="claims_assignment_jobs_pg_failure_")
+    db_path = os.path.join(temp_dir, "media.db")
+    db = MediaDatabase(db_path=db_path, client_id="1")
+    db.initialize_db()
+
+    def _assign_review(*, db, claims):
+        del db
+        return [{**claim, "reviewer_id": 9} for claim in claims]
+
+    monkeypatch.setattr(ingestion_claims, "apply_review_rules", _assign_review)
+    monkeypatch.setattr(claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(
+        claims_jobs,
+        "enqueue_claims_review_notification",
+        lambda **_kwargs: (_ for _ in ()).throw(psycopg.Error("jobs database unavailable")),
     )
     monkeypatch.setattr(
         claims_notifications,

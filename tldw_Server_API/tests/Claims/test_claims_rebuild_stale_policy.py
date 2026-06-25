@@ -2,6 +2,9 @@ import hashlib
 import os
 import tempfile
 
+import psycopg
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.Claims_Extraction import claims_service
@@ -30,6 +33,28 @@ def test_rebuild_claims_uses_jobs_when_enabled(monkeypatch):
     assert result == {"status": "accepted", "media_id": 42, "job_id": "99"}
     assert calls[0]["owner_user_id"] == "1"
     assert calls[0]["media_id"] == 42
+
+
+def test_rebuild_claims_jobs_pg_enqueue_failure_returns_503(monkeypatch):
+    class _User:
+        id = 1
+        is_admin = True
+
+    class _Db:
+        db_path_str = "/tmp/user-1/Media_DB_v2.db"
+
+    monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(
+        claims_service.claims_jobs,
+        "enqueue_claims_rebuild_media",
+        lambda **_kwargs: (_ for _ in ()).throw(psycopg.Error("jobs database unavailable")),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        claims_service.rebuild_claims(media_id=42, user_id=None, current_user=_User(), db=_Db())
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Claims rebuild job enqueue failed"
 
 
 def test_rebuild_helper_falls_back_to_legacy_when_jobs_owner_missing(monkeypatch):

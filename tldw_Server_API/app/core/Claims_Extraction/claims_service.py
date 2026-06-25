@@ -67,6 +67,13 @@ from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatab
 from tldw_Server_API.app.core.exceptions import EgressPolicyError, RetryExhaustedError
 from tldw_Server_API.app.core.Setup import setup_manager
 
+try:
+    import psycopg as _psycopg
+except ImportError:
+    _CLAIMS_PG_EXCEPTIONS: tuple[type[BaseException], ...] = ()
+else:
+    _CLAIMS_PG_EXCEPTIONS = (_psycopg.Error,)
+
 _CLAIMS_NONCRITICAL_EXCEPTIONS = (
     asyncio.TimeoutError,
     AssertionError,
@@ -91,7 +98,7 @@ _CLAIMS_NONCRITICAL_EXCEPTIONS = (
     HTTPException,
     EgressPolicyError,
     RetryExhaustedError,
-)
+) + _CLAIMS_PG_EXCEPTIONS
 
 _ROLE_HIERARCHY = {
     "owner": 4,

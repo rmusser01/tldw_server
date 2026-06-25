@@ -70,6 +70,13 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
 )
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
+try:
+    import psycopg as _psycopg
+except ImportError:
+    _CLAIMS_PG_EXCEPTIONS: tuple[type[BaseException], ...] = ()
+else:
+    _CLAIMS_PG_EXCEPTIONS = (_psycopg.Error,)
+
 _CLAIMS_COERCE_EXCEPTIONS = (TypeError, ValueError, OverflowError)
 
 _CLAIMS_TEMPLATE_FORMAT_EXCEPTIONS = (
@@ -99,7 +106,7 @@ _CLAIMS_RESPONSE_PARSE_EXCEPTIONS = (
     AttributeError,
 )
 
-_CLAIMS_STORE_EXCEPTIONS = _CLAIMS_NONCRITICAL_EXCEPTIONS + (sqlite3.Error,)
+_CLAIMS_STORE_EXCEPTIONS = _CLAIMS_NONCRITICAL_EXCEPTIONS + (sqlite3.Error,) + _CLAIMS_PG_EXCEPTIONS
 
 _INGESTION_CLAIMS_RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
