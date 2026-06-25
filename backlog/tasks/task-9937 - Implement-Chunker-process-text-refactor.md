@@ -26,7 +26,7 @@ modified_files:
 - tldw_Server_API/tests/Chunking/test_process_text_components.py
 - Docs/superpowers/plans/2026-06-24-chunker-process-text-refactor.md
 - backlog/tasks/task-9937 - Implement-Chunker-process-text-refactor.md
-updated_date: 2026-06-25 03:32
+updated_date: 2026-06-25 03:51
 ---
 
 ## Description
@@ -75,6 +75,7 @@ Task 7 red check: added pipeline import-boundary and thin-wrapper tests before p
 Task 7 implementation: added `process_text/pipeline.py` with `ProcessTextPipeline`, moved `Chunker.process_text` orchestration into `ProcessTextPipeline.run`, exported the pipeline, added `_process_text_telemetry_hooks()` in `chunker.py`, and replaced `Chunker.process_text` with the thin wrapper. Non-telemetry helper monkeypatch coverage now targets `process_text.pipeline`; telemetry monkeypatch coverage remains on `chunker.py` through the hook factory. Verification: requested focused pytest command exited 0 with 81 passed and 174 warnings; compileall requested files exited 0; Bandit requested production files exited 0 with 0 results and 0 errors in `/tmp/bandit_chunker_process_text_task7.json`; `git diff --check` exited 0.
 Task 7 controller verification and review gate complete. Local focused pytest passed (81 passed, 174 warnings); compileall passed; Bandit report `/tmp/bandit_chunker_process_text_task7_controller.json` had results=0 errors=0. Spec reviewer approved as compliant; quality reviewer found no Critical/Important/Minor issues. Proceeding to Task 8 cleanup and final verification.
 Task 8 final verification complete. Unused-import check (`source .venv/bin/activate && python -m ruff check --select F401 tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/app/core/Chunking/process_text --quiet`) exited 0 with no stale imports, so no cleanup edit was required. Broader focused Chunking suite passed with 167 passed and 351 warnings. Compileall on touched modules exited 0. Bandit on touched production Chunking code wrote `/tmp/bandit_chunker_process_text_refactor.json` with results=0 errors=0. `git diff --check` exited 0. Final branch review found no Critical, Important, or Minor issues; reviewer reran a focused subset with 78 passed and 168 warnings and diff check exit 0.
+Draft PR created against `dev`: https://github.com/rmusser01/tldw_server/pull/2517. PR is intentionally draft because the project merge gate requires a human-authored Change summary before marking ready for review/merge.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
