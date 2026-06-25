@@ -22,7 +22,9 @@ modified_files:
 - tldw_Server_API/tests/Claims/test_claims_jobs_contracts.py
 - tldw_Server_API/app/core/Claims_Extraction/claims_jobs.py
 - tldw_Server_API/tests/Claims/test_claims_jobs_enqueue.py
-updated_date: 2026-06-25 04:20
+- tldw_Server_API/app/core/Claims_Extraction/claims_rebuild_service.py
+- tldw_Server_API/tests/Claims/test_claims_rebuild_service_failure.py
+updated_date: 2026-06-25 04:35
 ---
 
 ## Description
@@ -35,7 +37,7 @@ Execute the hardened Claims Jobs Stage 1 plan with subagent-driven TDD: contract
 <!-- AC:BEGIN -->
 - [x] #1 Task 1 Claims job contracts and payload validation implemented with tests.
 - [x] #2 Task 2 enqueue helpers and read-only Jobs summary implemented with tests.
-- [ ] #3 Task 3 rebuild business seam implemented with tests.
+- [x] #3 Task 3 rebuild business seam implemented with tests.
 - [ ] #4 Task 4 monitoring event reload support implemented with tests.
 - [ ] #5 Task 5 review notification delivery seam implemented with tests.
 - [ ] #6 Task 6 Claims job handlers implemented with tests.
@@ -49,6 +51,7 @@ Execute the hardened Claims Jobs Stage 1 plan with subagent-driven TDD: contract
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 complete. Implemented Claims Jobs contract constants, payload validation, WorkerSDK-compatible ClaimsJobError, and result helpers with strict ID-only top-level allowlists and owner validation precedence. Review loop fixed bool/float numeric coercion, non-scalar owners, unknown-key handling, invalid JSON/non-object JSON coverage, and reserved result-field overrides. Verification: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/Claims/test_claims_jobs_contracts.py -q => 29 passed, 70 warnings. Spec review: compliant. Code-quality review: ready to proceed. Commits: fb8b7f772e, 45b436e2c0, 76331f44f2, 2c9edcb42a.
 Task 2 complete. Implemented Claims Jobs enqueue helpers, read-only summary helper, feature/worker config helpers, and strict Jobs delegation for rebuild, review notification, and alert jobs. Review loop refined rebuild enqueue to be repeatable by default with optional bounded idempotency_scope, added environment fallback for CLAIMS_JOBS_* config while preserving explicit settings_obj precedence, clamped negative retry values to defaults, and expanded alert success coverage. Verification: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/Claims/test_claims_jobs_contracts.py tldw_Server_API/tests/Claims/test_claims_jobs_enqueue.py -q => 38 passed, 88 warnings. Spec review: compliant. Code-quality review: ready to proceed. Commits: 8743d44dc0, db7a2104f6.
+Task 3 complete. Extracted the one-media rebuild body into rebuild_claims_for_media with small non-sensitive result dictionaries for ok and skipped outcomes, kept _process_task as a legacy delegate, and preserved rollback behavior when replacement claim storage inserts zero rows. Review loop added direct coverage for the successful helper result contract. Verification: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/Claims/test_claims_rebuild_service_failure.py -q => 7 passed, 26 warnings. Spec review: compliant. Code-quality review: ready to proceed after minor test gap resolved. Commits: 25dca6d9dd, f8ca1f720f.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
