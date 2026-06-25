@@ -95,6 +95,10 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     CHAT_STREAM_INCLUDE_METADATA,
     create_streaming_response_with_timeout,
 )
+from tldw_Server_API.app.core.Chat.streaming_pipeline import (
+    StreamingPipelineRequest,
+    create_chat_streaming_response,
+)
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     HEARTBEAT_INTERVAL as CHAT_HEARTBEAT_INTERVAL,
 )
@@ -4784,18 +4788,21 @@ async def execute_streaming_call(
                     if hasattr(res, "__await__"):
                         await res  # type: ignore[misc]
 
-            generator = create_streaming_response_with_timeout(
-                stream=raw_stream_iter,  # type: ignore[arg-type]
-                conversation_id=final_conversation_id,
-                model_name=model,
-                save_callback=save_callback,
-                finalize_callback=_finalize_stream,
-                idle_timeout=CHAT_IDLE_TIMEOUT,
-                heartbeat_interval=CHAT_HEARTBEAT_INTERVAL,
-                text_transform=_out_transform,
-                before_success_callback=_await_mandatory_moderation_audits,
-                system_message_id=system_message_id,
-                continuation_metadata=normalized_continuation_metadata,
+            generator = create_chat_streaming_response(
+                request=StreamingPipelineRequest(
+                    stream=raw_stream_iter,  # type: ignore[arg-type]
+                    conversation_id=final_conversation_id,
+                    model_name=model,
+                    save_callback=save_callback,
+                    finalize_callback=_finalize_stream,
+                    idle_timeout=CHAT_IDLE_TIMEOUT,
+                    heartbeat_interval=CHAT_HEARTBEAT_INTERVAL,
+                    text_transform=_out_transform,
+                    before_success_callback=_await_mandatory_moderation_audits,
+                    system_message_id=system_message_id,
+                    continuation_metadata=normalized_continuation_metadata,
+                ),
+                stream_factory=create_streaming_response_with_timeout,
             )
             try:
                 async for chunk in generator:

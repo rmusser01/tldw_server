@@ -14,6 +14,56 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     STREAMING_IDLE_TIMEOUT,
     HEARTBEAT_INTERVAL,
 )
+from tldw_Server_API.app.core.Chat.streaming_pipeline import (
+    StreamingPipelineRequest,
+    create_chat_streaming_response,
+)
+
+
+def test_create_chat_streaming_response_forwards_request_fields():
+    stream = object()
+    save_callback = object()
+    finalize_callback = object()
+    text_transform = object()
+    before_success_callback = object()
+    continuation_metadata = {"parent_message_id": "msg-1"}
+    captured = {}
+
+    def fake_stream_factory(**kwargs):
+        captured.update(kwargs)
+        return "stream-result"
+
+    result = create_chat_streaming_response(
+        request=StreamingPipelineRequest(
+            stream=stream,
+            conversation_id="conv-1",
+            model_name="model-1",
+            save_callback=save_callback,
+            finalize_callback=finalize_callback,
+            idle_timeout=12.5,
+            heartbeat_interval=3.0,
+            text_transform=text_transform,
+            before_success_callback=before_success_callback,
+            system_message_id="sys-1",
+            continuation_metadata=continuation_metadata,
+        ),
+        stream_factory=fake_stream_factory,
+    )
+
+    assert result == "stream-result"
+    assert captured == {
+        "stream": stream,
+        "conversation_id": "conv-1",
+        "model_name": "model-1",
+        "save_callback": save_callback,
+        "finalize_callback": finalize_callback,
+        "idle_timeout": 12.5,
+        "heartbeat_interval": 3.0,
+        "text_transform": text_transform,
+        "before_success_callback": before_success_callback,
+        "system_message_id": "sys-1",
+        "continuation_metadata": continuation_metadata,
+    }
 
 
 class TestStreamingResponseHandler:
