@@ -88,6 +88,21 @@ Review evidence:
 Security/static checks:
 - Bandit on Task 3 endpoint/schema/helper touched scope wrote `/tmp/bandit_task_2401_task3_review_fix.json` with no findings.
 - `git diff --check HEAD~1..HEAD` passed for the Task 3 review-fix commit.
+
+Task 4 complete: added selected-text AI annotation review prompt/parsing helpers, request schema, API endpoint, and regression tests.
+
+TDD evidence:
+- API red run failed as expected before the endpoint existed: `../../.venv/bin/python -m pytest tldw_Server_API/tests/Writing/test_manuscript_annotations_api.py -q` -> 7 failed, 10 passed.
+- Green run: `../../.venv/bin/python -m pytest tldw_Server_API/tests/Writing/test_manuscript_annotations_api.py tldw_Server_API/tests/Writing/test_manuscript_analysis_integration.py -q` -> 43 passed, 7 warnings.
+
+Review evidence:
+- Spec review approved the explicit provider/model contract, scene version/range/selected-text conflict handling, parse-before-persist behavior, `ai_selected_text` source, and no manuscript mutation guarantee.
+- Code-quality review approved with no Critical, Important, or Minor issues.
+- Reviewer follow-up recommendations were non-blocking: add future coverage for out-of-bounds ranges and multi-annotation model output, and consider prompt/context hardening for selections beyond truncated scene text.
+
+Security/static checks:
+- Bandit on Task 4 endpoint/schema/helper touched scope wrote `/tmp/bandit_task_2401_task4_controller.json` with no findings.
+- `git diff --check HEAD~1..HEAD` passed for the Task 4 implementation commit.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
