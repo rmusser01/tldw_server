@@ -95,6 +95,10 @@ class _RowlessLegacyDb(_BrokenLegacyDb):
             "get_unvectorized_chunks_in_range",
             lambda db: media_db_api.get_unvectorized_chunks_in_range(db, 1, 0, 1),
         ),
+        (
+            "get_unvectorized_max_chunk_index",
+            lambda db: media_db_api.get_unvectorized_max_chunk_index(db, 1),
+        ),
         ("lookup_section_for_offset", lambda db: media_db_api.lookup_section_for_offset(db, 1, 10)),
         ("lookup_section_by_heading", lambda db: media_db_api.lookup_section_by_heading(db, 1, "intro")),
     ],

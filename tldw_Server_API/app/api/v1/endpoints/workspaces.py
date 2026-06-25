@@ -77,6 +77,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Sandbox.store import get_store as get_sandbox_store
 from tldw_Server_API.app.core.Sandbox.workspace_volumes import SandboxWorkspaceVolumeService
+from tldw_Server_API.app.core.Sharing.workspace_deletion_hook import on_workspace_deleted
 from tldw_Server_API.app.core.Workspaces.file_inventory_ignore import build_inventory_ignore_policy
 from tldw_Server_API.app.core.Workspaces.file_inventory_jobs import (
     WorkspaceFileInventoryEnqueueError,
@@ -1188,6 +1189,15 @@ async def delete_workspace(
         db.delete_workspace(workspace_id, ws["version"])
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to delete workspace") from exc
+    try:
+        await on_workspace_deleted(workspace_id, current_user.id)
+    except Exception:
+        logger.warning(
+            "Workspace sharing cleanup hook failed after workspace deletion; "
+            "workspace_id={} owner_user_id={}",
+            workspace_id,
+            current_user.id,
+        )
 
 
 # ── Memberships ─────────────────────────────────────────────────

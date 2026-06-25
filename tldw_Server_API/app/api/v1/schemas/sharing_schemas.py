@@ -133,6 +133,10 @@ class VerifyPasswordRequest(BaseModel):
     password: str = Field(..., min_length=1)
 
 
+class PublicImportRequest(BaseModel):
+    password: str | None = Field(None, min_length=1, max_length=128)
+
+
 class VerifyPasswordResponse(BaseModel):
     verified: bool
     session_token: str | None = None

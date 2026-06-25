@@ -278,6 +278,7 @@ def test_media_db_api_exposes_read_contract_functions() -> None:
     assert callable(getattr(media_db_api, "get_unvectorized_chunk_index_by_uuid", None))
     assert callable(getattr(media_db_api, "get_unvectorized_chunk_by_index", None))
     assert callable(getattr(media_db_api, "get_unvectorized_chunks_in_range", None))
+    assert callable(getattr(media_db_api, "get_unvectorized_max_chunk_index", None))
     assert callable(getattr(media_db_api, "search_media", None))
     assert callable(getattr(media_db_api, "list_document_versions", None))
     assert callable(getattr(media_db_api, "soft_delete_document_version", None))
@@ -295,6 +296,16 @@ def test_media_db_api_get_unvectorized_chunk_count_accepts_lightweight_read_doub
     result = media_db_api.get_unvectorized_chunk_count(StubReader(), 9)
 
     assert result == 10
+
+
+def test_media_db_api_get_unvectorized_max_chunk_index_accepts_lightweight_read_double() -> None:
+    class StubReader:
+        def get_unvectorized_max_chunk_index(self, media_id: int):
+            return media_id + 3
+
+    result = media_db_api.get_unvectorized_max_chunk_index(StubReader(), 9)
+
+    assert result == 12
 
 
 def test_media_db_api_has_unvectorized_chunks_accepts_lightweight_read_double() -> None:

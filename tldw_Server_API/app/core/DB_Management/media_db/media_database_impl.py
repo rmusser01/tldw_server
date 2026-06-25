@@ -495,6 +495,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.unvectorized_chunk_
     get_unvectorized_chunk_count,
     get_unvectorized_chunk_index_by_uuid,
     get_unvectorized_chunks_in_range,
+    get_unvectorized_max_chunk_index,
 )
 
 class MediaDatabase:
@@ -1796,6 +1797,7 @@ MediaDatabase.get_unvectorized_chunk_by_index = get_unvectorized_chunk_by_index
 MediaDatabase.get_unvectorized_chunk_count = get_unvectorized_chunk_count
 MediaDatabase.get_unvectorized_chunk_index_by_uuid = get_unvectorized_chunk_index_by_uuid
 MediaDatabase.get_unvectorized_chunks_in_range = get_unvectorized_chunks_in_range
+MediaDatabase.get_unvectorized_max_chunk_index = get_unvectorized_max_chunk_index
 MediaDatabase._postgres_migrate_to_v5 = run_postgres_migrate_to_v5
 MediaDatabase._postgres_migrate_to_v6 = run_postgres_migrate_to_v6
 MediaDatabase._postgres_migrate_to_v7 = run_postgres_migrate_to_v7

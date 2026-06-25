@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -369,6 +370,79 @@ def test_workspace_api_accepts_and_returns_study_materials_policy(workspace_fast
         workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
         workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_READ_RATE_LIMIT, None)
         workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_WRITE_RATE_LIMIT, None)
+
+
+@pytest.mark.integration
+def test_delete_workspace_invokes_sharing_cleanup_hook(
+    workspace_fastapi_app,
+    db,
+    monkeypatch,
+):
+    async def _allow_rate_limit() -> None:
+        return None
+
+    cleanup_calls: list[tuple[str, int]] = []
+
+    async def _record_cleanup(workspace_id: str, owner_user_id: int) -> None:
+        cleanup_calls.append((workspace_id, owner_user_id))
+
+    db.upsert_workspace("ws-delete-hook", "Delete Hook")
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
+    monkeypatch.setattr(
+        workspaces_endpoint,
+        "on_workspace_deleted",
+        _record_cleanup,
+        raising=False,
+    )
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.delete("/api/v1/workspaces/ws-delete-hook")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_DELETE_RATE_LIMIT, None)
+
+    assert response.status_code == 204, response.text
+    assert cleanup_calls == [("ws-delete-hook", 1)]
+
+
+@pytest.mark.integration
+def test_delete_workspace_cleanup_failure_log_includes_context(
+    workspace_fastapi_app,
+    db,
+    monkeypatch,
+):
+    async def _allow_rate_limit() -> None:
+        return None
+
+    async def _fail_cleanup(workspace_id: str, owner_user_id: int) -> None:
+        raise RuntimeError("cleanup backend unavailable")
+
+    fake_logger = MagicMock()
+    db.upsert_workspace("ws-delete-log", "Delete Log")
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
+    monkeypatch.setattr(workspaces_endpoint, "on_workspace_deleted", _fail_cleanup)
+    monkeypatch.setattr(workspaces_endpoint, "logger", fake_logger)
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.delete("/api/v1/workspaces/ws-delete-log")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_DELETE_RATE_LIMIT, None)
+
+    assert response.status_code == 204, response.text
+    fake_logger.warning.assert_called_once()
+    assert fake_logger.warning.call_args.args == (
+        "Workspace sharing cleanup hook failed after workspace deletion; "
+        "workspace_id={} owner_user_id={}",
+        "ws-delete-log",
+        1,
+    )
 
 
 @pytest.mark.integration

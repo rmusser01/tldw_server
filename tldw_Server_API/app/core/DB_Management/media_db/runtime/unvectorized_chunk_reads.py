@@ -11,6 +11,10 @@ def get_unvectorized_chunk_count(self, media_id: int) -> int | None:
     return media_db_api.get_unvectorized_chunk_count(self, media_id)
 
 
+def get_unvectorized_max_chunk_index(self, media_id: int) -> int | None:
+    return media_db_api.get_unvectorized_max_chunk_index(self, media_id)
+
+
 def get_unvectorized_anchor_index_for_offset(self, media_id: int, approx_offset: int) -> int | None:
     return media_db_api.get_unvectorized_anchor_index_for_offset(self, media_id, approx_offset)
 
@@ -43,4 +47,5 @@ __all__ = [
     "get_unvectorized_chunk_count",
     "get_unvectorized_chunk_index_by_uuid",
     "get_unvectorized_chunks_in_range",
+    "get_unvectorized_max_chunk_index",
 ]
