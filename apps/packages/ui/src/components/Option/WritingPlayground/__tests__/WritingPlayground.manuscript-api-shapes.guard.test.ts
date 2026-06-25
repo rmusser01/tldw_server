@@ -11,6 +11,16 @@ const readWritingPlaygroundModalSource = (filename: string) =>
 const readWritingPlaygroundRootSource = (filename: string) =>
   fs.readFileSync(path.resolve(__dirname, "..", "..", "..", "..", "services", filename), "utf8")
 
+const extractExportTypeSource = (source: string, typeName: string) => {
+  const start = source.indexOf(`export type ${typeName} =`)
+  if (start < 0) return ""
+  const nextType = source.indexOf("\n\nexport type ", start + 1)
+  const nextConst = source.indexOf("\n\nconst ", start + 1)
+  const candidates = [nextType, nextConst].filter((index) => index > start)
+  const end = candidates.length ? Math.min(...candidates) : source.length
+  return source.slice(start, end)
+}
+
 describe("Writing playground manuscript API shape guards", () => {
   it("uses typed wrapper response fields for agent and connection-web manuscript lookups", () => {
     const aiAgentSource = readWritingPlaygroundSource("AIAgentTab.tsx")
@@ -50,26 +60,52 @@ describe("Writing playground manuscript API shape guards", () => {
 
   it("types manuscript annotation service contracts and review provider payloads explicitly", () => {
     const serviceSource = readWritingPlaygroundRootSource("writing-playground.ts")
-    const annotationTypesStart = serviceSource.indexOf("export type ManuscriptAnnotationTargetType")
-    const annotationTypesEnd = serviceSource.indexOf("const sessionsClient")
-    const annotationTypesSource = serviceSource.slice(annotationTypesStart, annotationTypesEnd)
+    const responseTypeSource = extractExportTypeSource(serviceSource, "ManuscriptAnnotationResponse")
+    const listTypeSource = extractExportTypeSource(serviceSource, "ManuscriptAnnotationListResponse")
+    const createTypeSource = extractExportTypeSource(serviceSource, "ManuscriptAnnotationCreateInput")
+    const updateTypeSource = extractExportTypeSource(serviceSource, "ManuscriptAnnotationUpdateInput")
+    const selectedReviewTypeSource = extractExportTypeSource(
+      serviceSource,
+      "ManuscriptSelectedTextAnnotationReviewRequest"
+    )
+    const sceneReviewTypeSource = extractExportTypeSource(
+      serviceSource,
+      "ManuscriptSceneAnnotationReviewRequest"
+    )
+    const jobTypeSource = extractExportTypeSource(
+      serviceSource,
+      "ManuscriptSceneAnnotationReviewJobResponse"
+    )
 
-    expect(annotationTypesStart).toBeGreaterThanOrEqual(0)
-    expect(annotationTypesEnd).toBeGreaterThan(annotationTypesStart)
-    expect(annotationTypesSource).toContain("export type ManuscriptAnnotationResponse")
-    expect(annotationTypesSource).toContain("export type ManuscriptAnnotationListResponse")
-    expect(annotationTypesSource).toContain("export type ManuscriptAnnotationCreateInput")
-    expect(annotationTypesSource).toContain("export type ManuscriptAnnotationUpdateInput")
-    expect(annotationTypesSource).toContain("export type ManuscriptSelectedTextAnnotationReviewRequest")
-    expect(annotationTypesSource).toContain("export type ManuscriptSceneAnnotationReviewRequest")
-    expect(annotationTypesSource).toContain("export type ManuscriptSceneAnnotationReviewJobResponse")
-    expect(annotationTypesSource).toContain("provider: string")
-    expect(annotationTypesSource).toContain("model: string")
-    expect(annotationTypesSource).not.toContain("Record<string, unknown>")
-    expect(annotationTypesSource).not.toContain("api_provider")
-    expect(annotationTypesSource).not.toContain("apiProvider")
-    expect(annotationTypesSource).not.toContain("llm_provider")
-    expect(annotationTypesSource).not.toContain("llmProvider")
+    expect(responseTypeSource).toContain("export type ManuscriptAnnotationResponse")
+    expect(listTypeSource).toContain("export type ManuscriptAnnotationListResponse")
+    expect(createTypeSource).toContain("export type ManuscriptAnnotationCreateInput")
+    expect(updateTypeSource).toContain("export type ManuscriptAnnotationUpdateInput")
+    expect(selectedReviewTypeSource).toContain("export type ManuscriptSelectedTextAnnotationReviewRequest")
+    expect(sceneReviewTypeSource).toContain("export type ManuscriptSceneAnnotationReviewRequest")
+    expect(jobTypeSource).toContain("export type ManuscriptSceneAnnotationReviewJobResponse")
+    expect(responseTypeSource).not.toContain("Record<string, unknown>")
+    expect(listTypeSource).not.toContain("Record<string, unknown>")
+    expect(createTypeSource).not.toContain("Record<string, unknown>")
+    expect(updateTypeSource).not.toContain("Record<string, unknown>")
+    expect(selectedReviewTypeSource).toContain("provider: string")
+    expect(selectedReviewTypeSource).toContain("model: string")
+    expect(sceneReviewTypeSource).toContain("provider: string")
+    expect(sceneReviewTypeSource).toContain("model: string")
+    expect(selectedReviewTypeSource).not.toContain("api_provider")
+    expect(selectedReviewTypeSource).not.toContain("apiProvider")
+    expect(selectedReviewTypeSource).not.toContain("llm_provider")
+    expect(selectedReviewTypeSource).not.toContain("llmProvider")
+    expect(sceneReviewTypeSource).not.toContain("api_provider")
+    expect(sceneReviewTypeSource).not.toContain("apiProvider")
+    expect(sceneReviewTypeSource).not.toContain("llm_provider")
+    expect(sceneReviewTypeSource).not.toContain("llmProvider")
+    expect(updateTypeSource).toContain("status?: ManuscriptAnnotationStatus\n")
+    expect(updateTypeSource).toContain("category?: ManuscriptAnnotationCategory\n")
+    expect(updateTypeSource).toContain("body?: string\n")
+    expect(updateTypeSource).not.toContain("status?: ManuscriptAnnotationStatus | null")
+    expect(updateTypeSource).not.toContain("category?: ManuscriptAnnotationCategory | null")
+    expect(updateTypeSource).not.toContain("body?: string | null")
     expect(serviceSource).toContain("): Promise<ManuscriptAnnotationListResponse>")
     expect(serviceSource).toContain("): Promise<ManuscriptAnnotationResponse>")
     expect(serviceSource).toContain("): Promise<ManuscriptSceneAnnotationReviewJobResponse>")

@@ -259,9 +259,9 @@ export type ManuscriptAnnotationCreateInput = {
 }
 
 export type ManuscriptAnnotationUpdateInput = {
-  status?: ManuscriptAnnotationStatus | null
-  category?: ManuscriptAnnotationCategory | null
-  body?: string | null
+  status?: ManuscriptAnnotationStatus
+  category?: ManuscriptAnnotationCategory
+  body?: string
   tags?: string[] | null
   suggested_fix?: string | null
   followup_note?: string | null
