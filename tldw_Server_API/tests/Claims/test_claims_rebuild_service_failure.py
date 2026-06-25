@@ -215,6 +215,101 @@ def test_claims_rebuild_service_process_task_uses_managed_media_database(monkeyp
     ]
 
 
+def test_rebuild_claims_for_media_returns_success_result(monkeypatch, tmp_path):
+    class _FakeDb:
+        def __init__(self) -> None:
+            self.deleted_media_ids: list[int] = []
+
+        def get_media_by_id(self, media_id, include_deleted=False, include_trash=False):
+            assert media_id == 7
+            assert include_deleted is False
+            assert include_trash is False
+            return {
+                "id": media_id,
+                "title": "Doc",
+                "content": "First. Second.",
+            }
+
+        def soft_delete_claims_for_media(self, media_id):
+            self.deleted_media_ids.append(media_id)
+            return 1
+
+        @contextmanager
+        def transaction(self):
+            yield self
+
+        def close_connection(self) -> None:
+            pass
+
+    fake_db = _FakeDb()
+    managed_calls: list[dict[str, object]] = []
+    store_calls: list[dict[str, object]] = []
+    db_path = str(tmp_path / "claims-helper-success.db")
+
+    @contextmanager
+    def _fake_managed_media_database(client_id, *, initialize=True, **kwargs):
+        managed_calls.append(
+            {
+                "client_id": client_id,
+                "initialize": initialize,
+                "kwargs": kwargs,
+            }
+        )
+        yield fake_db
+
+    monkeypatch.setattr(claims_rebuild_service, "managed_media_database", _fake_managed_media_database)
+    monkeypatch.setattr(
+        claims_rebuild_service,
+        "chunk_for_embedding",
+        lambda content, file_name: [
+            {
+                "text": content,
+                "metadata": {"chunk_index": 0},
+            }
+        ],
+    )
+    monkeypatch.setattr(claims_rebuild_service, "resolve_claims_job_budget", lambda settings: "budget")
+    monkeypatch.setattr(
+        claims_rebuild_service,
+        "extract_claims_for_chunks",
+        lambda chunks, extractor_mode, max_per_chunk, budget: [
+            {
+                "chunk_index": 0,
+                "claim_text": "First.",
+            }
+        ],
+    )
+
+    def _fake_store_claims(db, media_id, chunk_texts_by_index, claims):
+        store_calls.append(
+            {
+                "db": db,
+                "media_id": media_id,
+                "chunk_texts_by_index": chunk_texts_by_index,
+                "claims": claims,
+            }
+        )
+        return 1
+
+    monkeypatch.setattr(claims_rebuild_service, "store_claims", _fake_store_claims)
+
+    result = claims_rebuild_service.rebuild_claims_for_media(db_path=db_path, media_id=7)
+
+    assert result == {"outcome": "ok", "media_id": 7, "deleted": 1, "inserted": 1}
+    assert fake_db.deleted_media_ids == [7]
+    assert len(store_calls) == 1
+    assert managed_calls == [
+        {
+            "client_id": claims_rebuild_service.settings.get("SERVER_CLIENT_ID", "SERVER_API_V1"),
+            "initialize": False,
+            "kwargs": {
+                "db_path": db_path,
+                "suppress_close_exceptions": claims_rebuild_service._CLAIMS_REBUILD_NONCRITICAL_EXCEPTIONS,
+            },
+        }
+    ]
+
+
 def test_claims_rebuild_process_task_rolls_back_soft_delete_when_store_returns_zero(monkeypatch, tmp_path):
     db_path = str(tmp_path / "claims-rebuild-rollback.db")
     seed_db = MediaDatabase(db_path=db_path, client_id="1")
