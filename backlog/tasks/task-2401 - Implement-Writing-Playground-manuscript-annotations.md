@@ -139,6 +139,22 @@ Review evidence:
 Security/static checks:
 - Bandit was skipped for Task 6 because the slice changed TypeScript/TS test files only and no Python files.
 - `git diff --check HEAD~1..HEAD` passed after the Task 6 review fix.
+
+Task 7 complete: bound the Writing Playground editor to active saved manuscript scenes while preserving session prompt/settings isolation.
+
+TDD and verification evidence:
+- Initial package-local hook test run failed as expected before `useActiveManuscriptScene` existed.
+- Review-fix red tests failed as expected for session prompt reclaim, scene text leaking into session saves, stale scene transitions, pending generation/revision actions, scene-leave autosave restoration, revision queue mutation locks, and manuscript node switching during in-flight writing requests.
+- Final focused green run: `cd apps/packages/ui && bunx vitest run src/components/Option/WritingPlayground/__tests__/useActiveManuscriptScene.test.tsx src/components/Option/WritingPlayground/__tests__/WritingPlayground.phase1-baseline.test.tsx src/components/Option/WritingPlayground/__tests__/WritingRevisionQueue.test.tsx` -> 3 files passed, 44 tests passed.
+
+Review evidence:
+- Spec review approved the saved-scene binding hook, hook export, editor wiring, scene save affordance, and dirty scene switch boundary after the implementation matched the Task 7 contract.
+- Code-quality review found and fixed multiple scene/session ownership gaps: bound scenes could be reclaimed by session prompt sync, scene content could be saved into session prompts through settings/template/theme/session-payload saves, stale scene responses could stay bound during transitions, pending scene binding still allowed generation/revision entry points, leaving a scene during scene-bound autosave could leave scene text in session mode, revision queue mutations remained active during scene binding, and tree selection could change during in-flight generation/revision.
+- Final code-quality re-review approved with no blockers; residual gap is only that the full UI suite was not run.
+
+Security/static checks:
+- Bandit was skipped for Task 7 because the slice changed TypeScript/TSX test files only and no Python files.
+- `git diff --check 1fc61f26e4296b5c29d0dfca918a65ea9a1b581d..HEAD` passed after the final Task 7 review fix.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
