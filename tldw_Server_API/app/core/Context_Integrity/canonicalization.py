@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import hashlib
 import json
+import math
 import unicodedata
-from typing import Any, Mapping
+from typing import Any
 
 from tldw_Server_API.app.core.Context_Integrity.models import CanonicalDigest
 
@@ -17,18 +19,33 @@ def _normalize_text(value: str) -> str:
 def _normalize_json_value(value: Any) -> Any:
     if isinstance(value, str):
         return _normalize_text(value)
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("Non-finite floats are not supported in canonical JSON")
+        return value
     if isinstance(value, Mapping):
-        return {str(key): _normalize_json_value(value[key]) for key in sorted(value)}
+        for key in value:
+            if not isinstance(key, str):
+                raise TypeError("Canonical JSON mapping keys must be strings")
+        return {key: _normalize_json_value(value[key]) for key in sorted(value)}
     if isinstance(value, list):
         return [_normalize_json_value(item) for item in value]
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    return _normalize_text(str(value))
+    raise TypeError(f"Unsupported canonical JSON value type: {type(value).__name__}")
 
 
 def _stable_json(payload: Mapping[str, Any]) -> str:
     normalized = _normalize_json_value(payload)
-    return json.dumps(normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return json.dumps(
+        normalized,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
 
 
 def _sha256(data: bytes) -> str:
