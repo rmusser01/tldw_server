@@ -16,6 +16,11 @@ references:
 - TASK-9936
 documentation:
 - Docs/superpowers/plans/2026-06-25-claims-jobs-stage1-implementation-plan.md
+modified_files:
+- backlog/tasks/task-9937 - Implement-Claims-Jobs-Stage-1.md
+- tldw_Server_API/app/core/Claims_Extraction/claims_job_contracts.py
+- tldw_Server_API/tests/Claims/test_claims_jobs_contracts.py
+updated_date: 2026-06-25 03:54
 ---
 
 ## Description
@@ -26,7 +31,7 @@ Execute the hardened Claims Jobs Stage 1 plan with subagent-driven TDD: contract
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Task 1 Claims job contracts and payload validation implemented with tests.
+- [x] #1 Task 1 Claims job contracts and payload validation implemented with tests.
 - [ ] #2 Task 2 enqueue helpers and read-only Jobs summary implemented with tests.
 - [ ] #3 Task 3 rebuild business seam implemented with tests.
 - [ ] #4 Task 4 monitoring event reload support implemented with tests.
@@ -40,7 +45,7 @@ Execute the hardened Claims Jobs Stage 1 plan with subagent-driven TDD: contract
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Task 1 complete. Implemented Claims Jobs contract constants, payload validation, WorkerSDK-compatible ClaimsJobError, and result helpers with strict ID-only top-level allowlists and owner validation precedence. Review loop fixed bool/float numeric coercion, non-scalar owners, unknown-key handling, invalid JSON/non-object JSON coverage, and reserved result-field overrides. Verification: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest tldw_Server_API/tests/Claims/test_claims_jobs_contracts.py -q => 29 passed, 70 warnings. Spec review: compliant. Code-quality review: ready to proceed. Commits: fb8b7f772e, 45b436e2c0, 76331f44f2, 2c9edcb42a.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
