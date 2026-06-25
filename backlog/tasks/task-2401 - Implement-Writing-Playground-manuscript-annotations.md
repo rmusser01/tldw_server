@@ -1,7 +1,7 @@
 ---
 id: TASK-2401
 title: Implement Writing Playground manuscript annotations
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
 updated_date: '2026-06-25 07:15'
@@ -248,14 +248,24 @@ Security/static checks:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented the Writing Playground manuscript annotations workflow end to end:
+- Added backend anchor helpers, annotation persistence, CRUD/list API, selected-text AI review, queued scene-review Jobs processing, duplicate suppression, and stale-target protections.
+- Added frontend annotation service types, React Query hooks, inspector tab, Google Docs-style margin rail, TipTap range measurements, selected-text/scene review actions, and suggested-fix handoff into the revision queue.
+- Hardened review-job payload sanitization, stale scene-version handling, annotation/revision offset conversion, and typed manuscript tree/service surfaces.
+- Recorded focused and adjacent backend/frontend verification, browser parity status, Bandit results, final self-review, and subagent review evidence in the implementation notes above.
+
+Known residuals:
+- Browser/layout parity E2E reported 4 skipped tests in the local extension environment.
+- UI package typecheck still has unrelated pre-existing failures outside the touched Writing Playground annotation/tree/service files.
+- Unrelated dirty files remain outside this task: `apps/packages/ui/node_modules/antd` and two untracked watchlist templates.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
