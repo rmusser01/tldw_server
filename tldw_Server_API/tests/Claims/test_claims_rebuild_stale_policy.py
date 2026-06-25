@@ -4,7 +4,32 @@ import tempfile
 
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Claims_Extraction import claims_service
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+
+
+def test_rebuild_claims_uses_jobs_when_enabled(monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    class _User:
+        id = 1
+        is_admin = True
+
+    class _Db:
+        db_path_str = "/tmp/user-1/Media_DB_v2.db"
+
+    monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(
+        claims_service.claims_jobs,
+        "enqueue_claims_rebuild_media",
+        lambda **kwargs: calls.append(kwargs) or {"id": 99},
+    )
+
+    result = claims_service.rebuild_claims(media_id=42, user_id=None, current_user=_User(), db=_Db())
+
+    assert result == {"status": "accepted", "media_id": 42, "job_id": "99"}
+    assert calls[0]["owner_user_id"] == "1"
+    assert calls[0]["media_id"] == 42
 
 
 def test_rebuild_all_stale_policy_enqueues_expected_media(monkeypatch):
@@ -55,9 +80,9 @@ def test_rebuild_all_stale_policy_enqueues_expected_media(monkeypatch):
     ])
 
     # Build app and override dependencies
-    from tldw_Server_API.app.main import app as fastapi_app
     from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+    from tldw_Server_API.app.main import app as fastapi_app
 
     class _User:
         def __init__(self):

@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Claims_Extraction import claims_jobs
 from tldw_Server_API.app.core.Claims_Extraction.alignment import align_claim_span
 from tldw_Server_API.app.core.Claims_Extraction.claims_alert_delivery import (
     build_claims_alert_delivery_payload,
@@ -581,13 +582,22 @@ def _fva_claims_analyze_call(
         return ""
 
 
-def _enqueue_claim_rebuild_if_needed(*, media_id: int, db_path: str) -> None:
+def _enqueue_claim_rebuild_if_needed(*, media_id: int, db_path: str, owner_user_id: str | None = None) -> None:
     """Best-effort enqueue of a claims rebuild task for a media item."""
     try:
+        if claims_jobs.claims_jobs_enabled():
+            if not owner_user_id:
+                logger.debug("Claims rebuild Jobs enqueue skipped: missing owner_user_id")
+                return
+            claims_jobs.enqueue_claims_rebuild_media(
+                media_id=int(media_id),
+                owner_user_id=str(owner_user_id),
+            )
+            return
         svc = get_claims_rebuild_service()
         svc.submit(media_id=int(media_id), db_path=str(db_path))
-    except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-        pass
+    except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("Claims rebuild enqueue failed: {}", exc)
 
 
 def _build_alert_channels(
@@ -732,6 +742,29 @@ def _dispatch_claims_alert_notifications(
             user_id=user_id,
             alert_id=alert_id,
         )
+
+
+def _enqueue_claims_alert_delivery_jobs(
+    *,
+    config_row: dict[str, Any],
+    event_id: int,
+    owner_user_id: str,
+) -> None:
+    """Best-effort enqueue of alert delivery jobs for Jobs-owned Claims queues."""
+    channels = _normalize_channels(config_row.get("channels_json") or config_row.get("channels"))
+    alert_id = int(config_row.get("id") or 0)
+    for channel in ("slack", "webhook"):
+        if not channels.get(channel):
+            continue
+        try:
+            claims_jobs.enqueue_claims_alert_delivery(
+                owner_user_id=str(owner_user_id),
+                event_id=int(event_id),
+                alert_id=alert_id,
+                channel=channel,
+            )
+        except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug("Failed to enqueue claims alert delivery job: {}", exc)
 
 
 async def _send_claims_alert_email_digest(
@@ -2521,18 +2554,25 @@ def _evaluate_claims_alerts_for_user(
                 "window_sec": window_sec,
                 "baseline_sec": baseline_sec,
             }
-            db.insert_claims_monitoring_event(
+            event_row = db.insert_claims_monitoring_event(
                 user_id=str(target_user_id),
                 event_type="unsupported_ratio",
                 severity="warning",
                 payload_json=json.dumps(payload),
             )
-            _dispatch_claims_alert_notifications(
-                config_row=dict(cfg),
-                payload=payload,
-                db_path=db.db_path_str,
-                user_id=target_user_id,
-            )
+            if claims_jobs.claims_jobs_enabled() and event_row.get("id"):
+                _enqueue_claims_alert_delivery_jobs(
+                    config_row=dict(cfg),
+                    event_id=int(event_row["id"]),
+                    owner_user_id=target_user_id,
+                )
+            else:
+                _dispatch_claims_alert_notifications(
+                    config_row=dict(cfg),
+                    payload=payload,
+                    db_path=db.db_path_str,
+                    user_id=target_user_id,
+                )
         results.append(
             {
                 "config_id": cfg.get("id"),
@@ -2764,10 +2804,15 @@ async def review_claim(
         except _CLAIMS_NONCRITICAL_EXCEPTIONS:
             latency_s = None
         record_claims_review_metrics(processed=1, latency_s=latency_s)
+        owner_user_id = _resolve_claim_owner_user_id(
+            claim_row,
+            int(user_id) if user_id is not None else int(current_user.id),
+        )
         if new_status in {"flagged", "reassigned"} and new_status != current_status:
             _enqueue_claim_rebuild_if_needed(
                 media_id=int(claim_row.get("media_id") or 0),
                 db_path=str(target_db.db_path_str),
+                owner_user_id=owner_user_id,
             )
         if corrected_text is not None:
             target_user_id = str(user_id) if user_id is not None else str(current_user.id)
@@ -2779,10 +2824,6 @@ async def review_claim(
                 new_text=str(corrected_text),
                 user_id=target_user_id,
             )
-        owner_user_id = _resolve_claim_owner_user_id(
-            claim_row,
-            int(user_id) if user_id is not None else int(current_user.id),
-        )
         if owner_user_id:
             try:
                 notif_payload = {
@@ -2810,11 +2851,20 @@ async def review_claim(
                 )
                 notif_id = created.get("id") if isinstance(created, dict) else None
                 if notif_id is not None:
-                    dispatch_claim_review_notifications(
-                        db_path=str(target_db.db_path_str),
-                        owner_user_id=str(owner_user_id),
-                        notification_ids=[int(notif_id)],
-                    )
+                    if claims_jobs.claims_jobs_enabled():
+                        try:
+                            claims_jobs.enqueue_claims_review_notification(
+                                owner_user_id=str(owner_user_id),
+                                notification_ids=[int(notif_id)],
+                            )
+                        except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+                            logger.debug("Failed to enqueue claims review notification job: {}", exc)
+                    else:
+                        dispatch_claim_review_notifications(
+                            db_path=str(target_db.db_path_str),
+                            owner_user_id=str(owner_user_id),
+                            notification_ids=[int(notif_id)],
+                        )
             except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug("Failed to emit claims review notification: {}", exc)
         return _normalize_claim_row(dict(updated))
@@ -2869,7 +2919,7 @@ def bulk_review_claims(
         conflicts: list[int] = []
         missing: list[int] = []
         invalid: list[int] = []
-        rebuild_media_ids: set[int] = set()
+        rebuild_media_owners: dict[int, str] = {}
         action_ip, action_user_agent = _extract_request_metadata(request)
         desired_status = str(payload.get("status")).lower()
         for cid in payload.get("claim_ids") or []:
@@ -2900,17 +2950,22 @@ def bulk_review_claims(
                 updated_ids.append(int(cid))
                 if desired_status in {"flagged", "reassigned"} and desired_status != current_status:
                     with suppress(_CLAIMS_NONCRITICAL_EXCEPTIONS):
-                        rebuild_media_ids.add(int(claim_row.get("media_id") or 0))
+                        media_id = int(claim_row.get("media_id") or 0)
+                        owner_for_rebuild = _resolve_claim_owner_user_id(
+                            claim_row,
+                            int(user_id) if user_id is not None else int(current_user.id),
+                        )
+                        if media_id > 0 and owner_for_rebuild:
+                            rebuild_media_owners[media_id] = str(owner_for_rebuild)
 
         if updated_ids:
             record_claims_review_metrics(processed=len(updated_ids))
-        if rebuild_media_ids:
-            for media_id in rebuild_media_ids:
-                if media_id > 0:
-                    _enqueue_claim_rebuild_if_needed(
-                        media_id=media_id,
-                        db_path=str(target_db.db_path_str),
-                    )
+        for media_id, owner_for_rebuild in rebuild_media_owners.items():
+            _enqueue_claim_rebuild_if_needed(
+                media_id=media_id,
+                db_path=str(target_db.db_path_str),
+                owner_user_id=owner_for_rebuild,
+            )
         if updated_ids:
             owner_user_id = str(user_id) if user_id is not None else str(current_user.id)
             try:
@@ -2933,11 +2988,20 @@ def bulk_review_claims(
                 )
                 notif_id = created.get("id") if isinstance(created, dict) else None
                 if notif_id is not None:
-                    dispatch_claim_review_notifications(
-                        db_path=str(target_db.db_path_str),
-                        owner_user_id=str(owner_user_id),
-                        notification_ids=[int(notif_id)],
-                    )
+                    if claims_jobs.claims_jobs_enabled():
+                        try:
+                            claims_jobs.enqueue_claims_review_notification(
+                                owner_user_id=str(owner_user_id),
+                                notification_ids=[int(notif_id)],
+                            )
+                        except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+                            logger.debug("Failed to enqueue claims review notification job: {}", exc)
+                    else:
+                        dispatch_claim_review_notifications(
+                            db_path=str(target_db.db_path_str),
+                            owner_user_id=str(owner_user_id),
+                            notification_ids=[int(notif_id)],
+                        )
             except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug("Failed to emit claims bulk review notification: {}", exc)
         return {
@@ -3063,6 +3127,10 @@ def claims_dashboard_analytics(
         payload["rebuild_health"] = claims_rebuild_health(principal, summary=True)
     except _CLAIMS_NONCRITICAL_EXCEPTIONS:
         payload["rebuild_health"] = None
+    try:
+        payload["claims_jobs"] = claims_jobs.claims_jobs_summary(owner_user_id=owner_user_id)
+    except _CLAIMS_NONCRITICAL_EXCEPTIONS:
+        payload["claims_jobs"] = None
     try:
         metrics_user_id = owner_user_id or str(settings.get("SINGLE_USER_FIXED_ID", "1"))
         today = datetime.utcnow().date()
@@ -4112,6 +4180,21 @@ def rebuild_claims(
     db: MediaDatabase,
     rebuild_service: Any = None,
 ) -> dict[str, Any]:
+    owner_user_id = (
+        str(user_id)
+        if user_id is not None and _legacy_user_has_platform_admin_claims(current_user)
+        else str(current_user.id)
+    )
+    if claims_jobs.claims_jobs_enabled():
+        try:
+            job = claims_jobs.enqueue_claims_rebuild_media(
+                media_id=int(media_id),
+                owner_user_id=owner_user_id,
+            )
+        except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+            raise HTTPException(status_code=503, detail="Claims rebuild job enqueue failed") from exc
+        return {"status": "accepted", "media_id": media_id, "job_id": str(job.get("id") or "")}
+
     if user_id is not None and _legacy_user_has_platform_admin_claims(current_user):
         db_path = get_user_media_db_path(int(user_id))
     else:
@@ -4129,8 +4212,12 @@ def rebuild_all_media(
     db: MediaDatabase,
     rebuild_service: Any = None,
 ) -> dict[str, Any]:
-    svc = rebuild_service or get_claims_rebuild_service()
     normalized_policy = str(policy or "missing").lower()
+    owner_user_id = (
+        str(user_id)
+        if user_id is not None and _legacy_user_has_platform_admin_claims(current_user)
+        else str(current_user.id)
+    )
 
     def _enqueue_for_db(query_db: Any, *, db_path: str) -> dict[str, Any]:
         mids = list_claims_rebuild_media_ids(
@@ -4138,6 +4225,17 @@ def rebuild_all_media(
             policy=normalized_policy,
             compare_media_last_modified=True,
         )
+        if claims_jobs.claims_jobs_enabled():
+            enqueued = 0
+            try:
+                for mid in mids:
+                    claims_jobs.enqueue_claims_rebuild_media(media_id=int(mid), owner_user_id=owner_user_id)
+                    enqueued += 1
+            except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+                raise HTTPException(status_code=503, detail="Claims rebuild job enqueue failed") from exc
+            return {"status": "accepted", "enqueued": enqueued, "policy": normalized_policy}
+
+        svc = rebuild_service or get_claims_rebuild_service()
         for mid in mids:
             svc.submit(media_id=mid, db_path=db_path)
         return {

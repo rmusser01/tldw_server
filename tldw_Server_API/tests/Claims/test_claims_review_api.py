@@ -1,15 +1,17 @@
 import hashlib
 import os
 import tempfile
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
 from tldw_Server_API.app.core.AuthNZ.permissions import CLAIMS_ADMIN, CLAIMS_REVIEW
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+from tldw_Server_API.app.core.Claims_Extraction import claims_service
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 
@@ -264,3 +266,50 @@ def test_claims_review_corrected_text_updates_span():
         fastapi_app.dependency_overrides.pop(get_auth_principal, None)
         fastapi_app.dependency_overrides.pop(get_request_user, None)
         fastapi_app.dependency_overrides.pop(get_media_db_for_user, None)
+
+
+@pytest.mark.asyncio
+async def test_review_notification_enqueue_failure_does_not_rollback_review(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ.permissions import CLAIMS_ADMIN, CLAIMS_REVIEW
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    class _User:
+        id = 1
+        username = "reviewer"
+        is_admin = False
+
+    db_path, claim_id, _media_id = _seed_review_db()
+    db = MediaDatabase(db_path=db_path, client_id="1")
+    principal = AuthPrincipal(
+        kind="user",
+        user_id=1,
+        api_key_id=None,
+        subject="reviewer",
+        token_type="access",
+        jti=None,
+        roles=["reviewer"],
+        permissions=[CLAIMS_REVIEW, CLAIMS_ADMIN],
+        is_admin=False,
+        org_ids=[],
+        team_ids=[],
+    )
+    monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(
+        claims_service.claims_jobs,
+        "enqueue_claims_review_notification",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("jobs unavailable")),
+    )
+
+    try:
+        result = await claims_service.review_claim(
+            claim_id=claim_id,
+            payload={"status": "approved", "review_version": 1},
+            user_id=None,
+            principal=principal,
+            current_user=_User(),
+            db=db,
+        )
+    finally:
+        db.close_connection()
+
+    assert result["review_status"] == "approved"

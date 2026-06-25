@@ -1,16 +1,16 @@
 import hashlib
 import os
 import tempfile
+from collections.abc import AsyncGenerator
 from datetime import datetime
-from typing import AsyncGenerator
 
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
 from tldw_Server_API.app.core.AuthNZ.permissions import CLAIMS_ADMIN
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.app.core.Claims_Extraction import claims_service
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
@@ -122,7 +122,7 @@ def _seed_dashboard_db() -> str:
     return db_path
 
 
-def test_claims_dashboard_analytics_and_export():
+def test_claims_dashboard_analytics_and_export(monkeypatch):
 
 
     from tldw_Server_API.app.main import app as fastapi_app
@@ -147,6 +147,12 @@ def test_claims_dashboard_analytics_and_export():
                 override_db.close_connection()
             except Exception:
                 _ = None
+
+    monkeypatch.setattr(
+        claims_service.claims_jobs,
+        "claims_jobs_summary",
+        lambda **_kwargs: {"domain": "claims", "counts": {"queued": 2, "running": 1}},
+    )
 
     fastapi_app.dependency_overrides[get_auth_principal] = _principal_override_admin()
     fastapi_app.dependency_overrides[get_request_user] = _override_user
@@ -177,6 +183,10 @@ def test_claims_dashboard_analytics_and_export():
             assert isinstance(data["provider_usage"], list)
             rebuild = data.get("rebuild_health")
             assert rebuild is None or rebuild.get("status") == "ok"
+            assert "claims_jobs" in data
+            assert "pause" not in data["claims_jobs"]
+            assert "drain" not in data["claims_jobs"]
+            assert "requeue" not in data["claims_jobs"]
 
             r2 = client.post(
                 "/api/v1/claims/analytics/export",
