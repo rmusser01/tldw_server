@@ -64,6 +64,81 @@ def test_build_assistant_message_payload_preserves_persisted_shape():
 
 
 @pytest.mark.asyncio
+async def test_chat_completion_pipeline_delegates_executors():
+    from tldw_Server_API.app.core.Chat.completion_pipeline import ChatCompletionPipeline
+
+    captured_non_stream: dict[str, object] = {}
+    captured_streaming: dict[str, object] = {}
+
+    async def non_stream_executor(**kwargs):
+        captured_non_stream.update(kwargs)
+        return {"mode": "non-stream"}
+
+    def streaming_executor(**kwargs):
+        captured_streaming.update(kwargs)
+        return "stream-result"
+
+    pipeline = ChatCompletionPipeline(
+        non_stream_executor=non_stream_executor,
+        streaming_executor=streaming_executor,
+    )
+
+    non_stream_result = await pipeline.execute_non_stream(model="model-1")
+    streaming_result = pipeline.execute_streaming(request="request-1")
+
+    assert non_stream_result == {"mode": "non-stream"}
+    assert streaming_result == "stream-result"
+    assert captured_non_stream == {"model": "model-1"}
+    assert captured_streaming == {"request": "request-1"}
+
+
+@pytest.mark.asyncio
+async def test_execute_non_stream_call_routes_through_pipeline(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _Pipeline:
+        async def execute_non_stream(self, **kwargs):
+            captured.update(kwargs)
+            return {"routed": True}
+
+    monkeypatch.setattr(
+        chat_service,
+        "get_chat_completion_pipeline",
+        lambda: _Pipeline(),
+        raising=False,
+    )
+
+    response = await chat_service.execute_non_stream_call(
+        current_loop=asyncio.get_running_loop(),
+        cleaned_args={"api_endpoint": "openai", "streaming": False},
+        selected_provider="openai",
+        provider="openai",
+        model="gpt-test",
+        request_json="{}",
+        request=None,
+        metrics=_DummyMetrics(),
+        provider_manager=None,
+        templated_llm_payload=[],
+        should_persist=False,
+        final_conversation_id="conv-pipeline",
+        character_card_for_context=None,
+        chat_db=None,
+        save_message_fn=lambda *_args, **_kwargs: None,
+        audit_service=None,
+        audit_context=None,
+        client_id="client",
+        queue_execution_enabled=False,
+        enable_provider_fallback=False,
+        llm_call_func=lambda: {"choices": []},
+        refresh_provider_params=lambda *_args, **_kwargs: None,
+    )
+
+    assert response == {"routed": True}
+    assert captured["model"] == "gpt-test"
+    assert captured["final_conversation_id"] == "conv-pipeline"
+
+
+@pytest.mark.asyncio
 async def test_save_tool_messages_preserves_order_and_transaction_flag():
     calls: list[tuple[str, str, dict[str, object], bool]] = []
 

@@ -57,6 +57,7 @@ from tldw_Server_API.app.core.Chat.chat_logging import (
     prompt_template_summary,
     text_summary,
 )
+from tldw_Server_API.app.core.Chat.completion_pipeline import ChatCompletionPipeline
 from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_role
 from tldw_Server_API.app.core.Chat.prompt_template_manager import (
     DEFAULT_RAW_PASSTHROUGH_TEMPLATE,
@@ -4788,7 +4789,7 @@ async def execute_streaming_call(
                     if hasattr(res, "__await__"):
                         await res  # type: ignore[misc]
 
-            generator = create_chat_streaming_response(
+            generator = get_chat_completion_pipeline().execute_streaming(
                 request=StreamingPipelineRequest(
                     stream=raw_stream_iter,  # type: ignore[arg-type]
                     conversation_id=final_conversation_id,
@@ -4891,7 +4892,7 @@ async def execute_streaming_call(
     )
 
 
-async def execute_non_stream_call(
+async def _execute_non_stream_call_impl(
     *,
     current_loop: Any,
     cleaned_args: dict[str, Any],
@@ -5681,3 +5682,14 @@ async def execute_non_stream_call(
         pass
 
     return encoded_payload
+
+
+def get_chat_completion_pipeline() -> ChatCompletionPipeline:
+    return ChatCompletionPipeline(
+        non_stream_executor=_execute_non_stream_call_impl,
+        streaming_executor=create_chat_streaming_response,
+    )
+
+
+async def execute_non_stream_call(**kwargs: Any) -> dict[str, Any]:
+    return await get_chat_completion_pipeline().execute_non_stream(**kwargs)
