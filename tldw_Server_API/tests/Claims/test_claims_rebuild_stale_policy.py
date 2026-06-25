@@ -32,6 +32,75 @@ def test_rebuild_claims_uses_jobs_when_enabled(monkeypatch):
     assert calls[0]["media_id"] == 42
 
 
+def test_rebuild_helper_falls_back_to_legacy_when_jobs_owner_missing(monkeypatch):
+    submissions: list[tuple[int, str]] = []
+
+    class _FakeSvc:
+        def submit(self, media_id: int, db_path: str):
+            submissions.append((int(media_id), db_path))
+
+    monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(
+        claims_service.claims_jobs,
+        "enqueue_claims_rebuild_media",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("Jobs enqueue should not run")),
+    )
+    monkeypatch.setattr(claims_service, "get_claims_rebuild_service", lambda: _FakeSvc())
+
+    claims_service._enqueue_claim_rebuild_if_needed(
+        media_id=42,
+        db_path="/tmp/user-1/Media_DB_v2.db",
+        owner_user_id=None,
+    )
+
+    assert submissions == [(42, "/tmp/user-1/Media_DB_v2.db")]
+
+
+def test_rebuild_all_media_uses_jobs_when_enabled(monkeypatch):
+    tmpdir = tempfile.mkdtemp(prefix="claims_rebuild_jobs_")
+    db_path = os.path.join(tmpdir, "media.db")
+    db = MediaDatabase(db_path=db_path, client_id="1")
+    db.initialize_db()
+    media_id, _, _ = db.add_media_with_keywords(
+        title="Doc",
+        media_type="text",
+        content="A claimable sentence.",
+        keywords=None,
+    )
+    enqueued: list[dict[str, object]] = []
+    legacy_submissions: list[tuple[int, str]] = []
+
+    class _User:
+        id = 1
+        is_admin = True
+
+    class _FakeSvc:
+        def submit(self, media_id: int, db_path: str):
+            legacy_submissions.append((int(media_id), db_path))
+
+    monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(
+        claims_service.claims_jobs,
+        "enqueue_claims_rebuild_media",
+        lambda **kwargs: enqueued.append(kwargs) or {"id": 100},
+    )
+    monkeypatch.setattr(claims_service, "get_claims_rebuild_service", lambda: _FakeSvc())
+
+    try:
+        result = claims_service.rebuild_all_media(
+            policy="missing",
+            user_id=None,
+            current_user=_User(),
+            db=db,
+        )
+    finally:
+        db.close_connection()
+
+    assert result == {"status": "accepted", "enqueued": 1, "policy": "missing"}
+    assert enqueued == [{"media_id": media_id, "owner_user_id": "1"}]
+    assert legacy_submissions == []
+
+
 def test_rebuild_all_stale_policy_enqueues_expected_media(monkeypatch):
 
 

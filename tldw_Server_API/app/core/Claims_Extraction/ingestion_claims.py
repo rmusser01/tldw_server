@@ -678,14 +678,26 @@ def store_claims(
                 assignments=assignments,
             )
             if notification_ids:
-                from tldw_Server_API.app.core.Claims_Extraction.claims_notifications import (
-                    dispatch_claim_review_notifications,
-                )
-                dispatch_claim_review_notifications(
-                    db_path=str(db.db_path_str),
-                    owner_user_id=str(owner_user_id),
-                    notification_ids=notification_ids,
-                )
+                from tldw_Server_API.app.core.Claims_Extraction import claims_jobs
+
+                if claims_jobs.claims_jobs_enabled():
+                    try:
+                        claims_jobs.enqueue_claims_review_notification(
+                            owner_user_id=str(owner_user_id),
+                            notification_ids=notification_ids,
+                        )
+                    except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+                        logger.debug("Failed to enqueue claims review assignment notification job: {}", exc)
+                else:
+                    from tldw_Server_API.app.core.Claims_Extraction.claims_notifications import (
+                        dispatch_claim_review_notifications,
+                    )
+
+                    dispatch_claim_review_notifications(
+                        db_path=str(db.db_path_str),
+                        owner_user_id=str(owner_user_id),
+                        notification_ids=notification_ids,
+                    )
         return inserted
     except _CLAIMS_STORE_EXCEPTIONS as e:  # pragma: no cover
         logger.error(f"Failed to store claims for media_id={media_id}: {e}")

@@ -323,3 +323,68 @@ def test_claims_analytics_scope_aggregate_widgets_to_owner(tmp_path):
     assert analytics["claims_per_media_top"] == [{"media_id": owner_one_media_id, "count": 2}]
     assert analytics["claims_per_media_stats"] == {"mean": 2.0, "p95": 2, "max": 2}
     assert analytics["clusters"]["orphan_claims"] == 2
+
+
+def test_evaluate_claims_alerts_enqueues_jobs_when_enabled(monkeypatch):
+    enqueued: list[dict[str, object]] = []
+
+    class _Db:
+        db_path_str = "/tmp/user-1/Media_DB_v2.db"
+
+        def migrate_legacy_claims_monitoring_alerts(self, _user_id: str) -> None:
+            return None
+
+        def list_claims_monitoring_alerts(self, _user_id: str) -> list[dict[str, object]]:
+            return [
+                {
+                    "id": 7,
+                    "name": "Unsupported ratio",
+                    "alert_type": "threshold_breach",
+                    "enabled": True,
+                    "threshold_ratio": 0.2,
+                    "baseline_ratio": None,
+                    "channels": {"slack": True, "webhook": True, "email": True},
+                    "slack_webhook_url": "https://example.test/slack",
+                    "webhook_url": "https://example.test/webhook",
+                    "email_recipients": "ops@example.test",
+                }
+            ]
+
+        def get_claims_monitoring_settings(self, _user_id: str) -> dict[str, object]:
+            return {"enabled": True}
+
+        def insert_claims_monitoring_event(self, **kwargs):
+            assert kwargs["user_id"] == "1"
+            assert kwargs["event_type"] == "unsupported_ratio"
+            return {"id": 55, **kwargs}
+
+    monkeypatch.setattr(claims_service.claims_jobs, "claims_jobs_enabled", lambda: True)
+    monkeypatch.setattr(claims_service, "settings", {"CLAIMS_MONITORING_ENABLED": True})
+    monkeypatch.setattr(
+        claims_service.claims_jobs,
+        "enqueue_claims_alert_delivery",
+        lambda **kwargs: enqueued.append(kwargs) or {"id": len(enqueued) + 1},
+    )
+    monkeypatch.setattr(
+        claims_service,
+        "_dispatch_claims_alert_notifications",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("legacy dispatch should not run")),
+    )
+    monkeypatch.setattr(
+        claims_service,
+        "_compute_unsupported_ratios",
+        lambda _window_sec, _baseline_sec: {"window_ratio": 0.5, "baseline_ratio": 0.1},
+    )
+
+    result = claims_service._evaluate_claims_alerts_for_user(
+        target_user_id="1",
+        db=_Db(),
+        window_sec=3600,
+        baseline_sec=86400,
+    )
+
+    assert result["results"][0]["triggered"] is True
+    assert enqueued == [
+        {"owner_user_id": "1", "event_id": 55, "alert_id": 7, "channel": "slack"},
+        {"owner_user_id": "1", "event_id": 55, "alert_id": 7, "channel": "webhook"},
+    ]

@@ -587,13 +587,13 @@ def _enqueue_claim_rebuild_if_needed(*, media_id: int, db_path: str, owner_user_
     try:
         if claims_jobs.claims_jobs_enabled():
             if not owner_user_id:
-                logger.debug("Claims rebuild Jobs enqueue skipped: missing owner_user_id")
+                logger.debug("Claims rebuild Jobs enqueue skipped: missing owner_user_id; falling back to legacy service")
+            else:
+                claims_jobs.enqueue_claims_rebuild_media(
+                    media_id=int(media_id),
+                    owner_user_id=str(owner_user_id),
+                )
                 return
-            claims_jobs.enqueue_claims_rebuild_media(
-                media_id=int(media_id),
-                owner_user_id=str(owner_user_id),
-            )
-            return
         svc = get_claims_rebuild_service()
         svc.submit(media_id=int(media_id), db_path=str(db_path))
     except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
