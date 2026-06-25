@@ -68,6 +68,8 @@ def _clean_text(value: Any) -> str:
 
 
 def _normalized_for_match(value: Any) -> str:
+    """Normalize whitespace before comparing model text to evidence."""
+
     return " ".join(_clean_text(value).split())
 
 
@@ -75,25 +77,26 @@ def extract_openai_content(response: Any) -> str | None:
     """Extract generated text from the small OpenAI-style response surface used here."""
 
     if isinstance(response, Mapping):
-        try:
-            choices = response.get("choices") or []
-            if choices and isinstance(choices[0], Mapping):
-                message = choices[0].get("message") or {}
+        choices = response.get("choices")
+        if isinstance(choices, Sequence) and not isinstance(choices, (str, bytes, bytearray)) and choices:
+            first_choice = choices[0]
+            if isinstance(first_choice, Mapping):
+                message = first_choice.get("message") or {}
                 if isinstance(message, Mapping):
                     content = message.get("content")
                     if isinstance(content, str):
                         return content
-            text = response.get("content") or response.get("text")
-            if isinstance(text, str):
-                return text
-        except (AttributeError, IndexError, KeyError, TypeError, ValueError):
-            return None
+        text = response.get("content") or response.get("text")
+        if isinstance(text, str):
+            return text
     if isinstance(response, str):
         return response
     return None
 
 
 def _citation_text_matches_evidence(citation_text: str, evidence_text: str) -> bool:
+    """Return whether a citation quote appears in the resolved evidence."""
+
     normalized_citation = _normalized_for_match(citation_text)
     normalized_evidence = _normalized_for_match(evidence_text)
     return bool(normalized_citation and normalized_citation in normalized_evidence)
@@ -362,17 +365,39 @@ class StudyPackGenerationService:
 
     def _next_destination_deck_name(self, base_name: str) -> str:
         cleaned_base_name = _clean_text(base_name) or "Study Pack"
-        if not self._deck_name_exists(cleaned_base_name):
+        existing_names = None if callable(getattr(self.note_db, "get_deck_by_name", None)) else self._existing_deck_names()
+        if not self._deck_name_exists(cleaned_base_name, existing_names=existing_names):
             return cleaned_base_name
 
         for suffix in range(2, _MAX_DECK_NAME_ATTEMPTS + 1):
             candidate_name = f"{cleaned_base_name} ({suffix})"
-            if not self._deck_name_exists(candidate_name):
+            if not self._deck_name_exists(candidate_name, existing_names=existing_names):
                 return candidate_name
 
         raise CharactersRAGDBError(f"Could not allocate a unique deck name for '{cleaned_base_name}'")  # noqa: TRY003
 
-    def _deck_name_exists(self, deck_name: str) -> bool:
+    def _existing_deck_names(self) -> set[str]:
+        """Fetch deck names once for stores without an exact name lookup API."""
+
+        list_decks = getattr(self.note_db, "list_decks", None)
+        if not callable(list_decks):
+            return set()
+        try:
+            decks = list_decks(limit=10_000, include_deleted=True, include_workspace_items=True)
+        except TypeError:
+            decks = list_decks()
+        return {
+            _clean_text(deck.get("name"))
+            for deck in decks
+            if isinstance(deck, Mapping) and _clean_text(deck.get("name"))
+        }
+
+    def _deck_name_exists(self, deck_name: str, *, existing_names: set[str] | None = None) -> bool:
+        """Return whether a deck name already exists, preferring exact DB lookup."""
+
+        if existing_names is not None:
+            return deck_name in existing_names
+
         get_deck_by_name = getattr(self.note_db, "get_deck_by_name", None)
         if callable(get_deck_by_name):
             try:
@@ -380,14 +405,7 @@ class StudyPackGenerationService:
             except TypeError:
                 return bool(get_deck_by_name(deck_name))
 
-        list_decks = getattr(self.note_db, "list_decks", None)
-        if not callable(list_decks):
-            return False
-        try:
-            decks = list_decks(limit=10_000, include_deleted=True, include_workspace_items=True)
-        except TypeError:
-            decks = list_decks()
-        return any(_clean_text(deck.get("name")) == deck_name for deck in decks if isinstance(deck, Mapping))
+        return deck_name in self._existing_deck_names()
 
     async def _call_generation_model(self, *, system_prompt: str, user_prompt: str) -> str:
         response = await perform_chat_api_call_async(

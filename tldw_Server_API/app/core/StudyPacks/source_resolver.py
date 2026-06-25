@@ -73,6 +73,8 @@ def _parse_non_negative_float(value: Any, field_name: str) -> float:
 
 
 def _max_evidence_chars_per_source() -> int:
+    """Return the configured per-source evidence character limit."""
+
     configured_limit = _clean_text(os.getenv(_MAX_EVIDENCE_CHARS_ENV))
     if not configured_limit:
         return _DEFAULT_MAX_EVIDENCE_CHARS_PER_SOURCE
@@ -98,10 +100,14 @@ def _max_evidence_chars_per_source() -> int:
 
 
 def _normalized_for_match(value: Any) -> str:
+    """Normalize whitespace for source/excerpt containment checks."""
+
     return " ".join(_clean_text(value).split())
 
 
 def _candidate_contains_excerpt(candidate: str, excerpt_text: str) -> bool:
+    """Return whether an excerpt is present in canonical source evidence."""
+
     if excerpt_text in candidate:
         return True
     normalized_candidate = _normalized_for_match(candidate)
@@ -110,6 +116,8 @@ def _candidate_contains_excerpt(candidate: str, excerpt_text: str) -> bool:
 
 
 def _pick_evidence_text(selection: StudySourceSelection, *candidates: Any) -> str:
+    """Select evidence text, requiring caller excerpts to match a source candidate."""
+
     for candidate in candidates:
         text = _clean_text(candidate)
         if text:
@@ -123,6 +131,8 @@ def _pick_evidence_text(selection: StudySourceSelection, *candidates: Any) -> st
 
 
 def _bounded_evidence_text(evidence_text: str, locator: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Bound evidence text and annotate the locator when truncation occurs."""
+
     normalized_locator = dict(locator)
     max_chars = _max_evidence_chars_per_source()
     if len(evidence_text) <= max_chars:
@@ -137,6 +147,8 @@ def _prepare_evidence(
     locator: Mapping[str, Any],
     *candidates: Any,
 ) -> tuple[str, dict[str, Any]]:
+    """Resolve source-backed evidence and apply the configured evidence bound."""
+
     evidence_text = _pick_evidence_text(selection, *candidates)
     if not evidence_text:
         return "", dict(locator)

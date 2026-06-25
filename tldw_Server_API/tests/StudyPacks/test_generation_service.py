@@ -10,7 +10,7 @@ from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackCreateJobReq
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.unit]
 
 
 def _load_generation_modules():
@@ -290,6 +290,30 @@ def test_destination_deck_name_checks_exact_candidates_beyond_list_window(
     service.note_db = WindowedDeckDb()
 
     assert service._next_destination_deck_name("zzzz-existing") == "zzzz-existing (2)"  # nosec B101
+
+
+def test_destination_deck_name_fallback_lists_decks_once(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service, _ = _build_service(db, monkeypatch, [])
+
+    class ListOnlyDeckDb:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def list_decks(self, **_: Any) -> list[dict[str, str]]:
+            self.calls += 1
+            return [
+                {"name": "Fallback Pack"},
+                {"name": "Fallback Pack (2)"},
+            ]
+
+    deck_db = ListOnlyDeckDb()
+    service.note_db = deck_db
+
+    assert service._next_destination_deck_name("Fallback Pack") == "Fallback Pack (3)"  # nosec B101
+    assert deck_db.calls == 1  # nosec B101
 
 
 async def test_create_study_pack_from_request_uses_collision_safe_deck_suffixing(

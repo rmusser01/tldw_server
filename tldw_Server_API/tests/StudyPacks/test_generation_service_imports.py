@@ -3,6 +3,11 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
+
+pytestmark = pytest.mark.unit
+
 
 def test_generation_service_does_not_import_workflows_adapter_common():
     source_path = (

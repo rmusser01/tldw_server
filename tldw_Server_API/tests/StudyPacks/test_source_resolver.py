@@ -11,6 +11,9 @@ from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackSourceSelect
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
+pytestmark = pytest.mark.unit
+
+
 def _load_study_modules():
     try:
         types_mod = import_module("tldw_Server_API.app.core.StudyPacks.types")

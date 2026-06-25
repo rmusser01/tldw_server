@@ -195,6 +195,37 @@ def test_regenerate_study_pack_job_uses_stored_source_bundle(
     ]
 
 
+def test_regenerate_study_pack_returns_400_when_job_payload_is_too_large(
+    client: TestClient,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("JOBS_MAX_JSON_BYTES", "64")
+    deck_id = db.add_deck("Oversized Deck", workspace_id="ws-1")
+    pack_id = db.create_study_pack(
+        title="Oversized",
+        workspace_id="ws-1",
+        deck_id=deck_id,
+        source_bundle_json={
+            "items": [
+                {
+                    "source_type": "note",
+                    "source_id": "note-large",
+                    "label": "Large note",
+                    "locator": {"note_id": "note-large"},
+                    "evidence_text": "x" * 200,
+                }
+            ]
+        },
+        generation_options_json={"deck_mode": "new"},
+    )
+
+    response = client.post(f"/api/v1/flashcards/study-packs/{pack_id}/regenerate")
+
+    assert response.status_code == 400  # nosec B101
+    assert "too large" in response.json()["detail"]  # nosec B101
+
+
 def test_failed_study_pack_jobs_return_diagnostics_without_partial_pack(
     client: TestClient,
     jobs_db_path: Path,
