@@ -1,7 +1,9 @@
 import { useMemo, useRef, useState, type ReactNode } from "react"
 import { useSearchParams } from "react-router-dom"
+import { useQuery } from "@tanstack/react-query"
 import { Button, Tabs, Typography } from "antd"
 import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
+import { RecoveryCallout, buildCapabilityState } from "@/components/ui/state"
 
 import { ApprovalPoliciesTab } from "./ApprovalPoliciesTab"
 import { CapabilityMappingsTab } from "./CapabilityMappingsTab"
@@ -15,10 +17,11 @@ import { ToolCatalogsTab } from "./ToolCatalogsTab"
 import { ExternalServersTab } from "./ExternalServersTab"
 import { DeploymentDiagnosticsPanel } from "./DeploymentDiagnosticsPanel"
 import { WorkspaceSetsTab } from "./WorkspaceSetsTab"
-import type {
-  McpHubDrillAction,
-  McpHubDrillTarget,
-  McpHubGovernanceAuditNavigateTarget
+import {
+  getToolRegistrySummary,
+  type McpHubDrillAction,
+  type McpHubDrillTarget,
+  type McpHubGovernanceAuditNavigateTarget
 } from "@/services/tldw/mcp-hub"
 import {
   persistMcpHubExplainerDismissed,
@@ -93,6 +96,28 @@ const MCP_HUB_STATUS_ITEMS: McpHubStatusItem[] = [
   }
 ]
 
+const MCP_HUB_CAPABILITY_ENDPOINT = "/api/v1/mcp/hub/tool-registry/summary"
+
+const buildMcpHubCapabilityState = (error: unknown) => {
+  const state = buildCapabilityState({
+    featureName: "MCP Hub",
+    capabilityName: "MCP Hub management",
+    endpoint: MCP_HUB_CAPABILITY_ENDPOINT,
+    method: "GET",
+    error
+  })
+
+  if (state.state === "auth_required" || state.state === "permission_denied") {
+    return state
+  }
+
+  return {
+    ...state,
+    title: "MCP Hub is unavailable on this server",
+    message: "The connected server does not advertise MCP Hub management."
+  }
+}
+
 export const McpHubPage = () => {
   const [searchParams, setSearchParams] = useSearchParams()
   const [explainerDismissed, setExplainerDismissed] = useState(
@@ -100,6 +125,12 @@ export const McpHubPage = () => {
   )
   const [drillTarget, setDrillTarget] = useState<McpHubDrillTarget | null>(null)
   const requestIdRef = useRef(0)
+  const capabilityQuery = useQuery({
+    queryKey: ["mcp-hub", "capability-readiness"],
+    queryFn: getToolRegistrySummary,
+    staleTime: 30_000,
+    retry: false
+  })
 
   const routeState = useMemo(
     () =>
@@ -225,6 +256,36 @@ export const McpHubPage = () => {
     ),
     children: tabContentByView[view]
   }))
+  const capabilityErrorState =
+    capabilityQuery.isError && !capabilityQuery.data
+      ? buildMcpHubCapabilityState(capabilityQuery.error)
+      : null
+
+  if (capabilityErrorState) {
+    return (
+      <div className="flex h-full min-h-0 flex-col gap-4 p-4" data-testid="mcp-hub-shell">
+        <Typography.Title level={1} className="!mb-0 !text-2xl">
+          MCP Hub
+        </Typography.Title>
+        <Typography.Text type="secondary">
+          Manage external tool servers and governance policies for the Model Context Protocol (MCP).
+        </Typography.Text>
+        <RecoveryCallout
+          state={capabilityErrorState.state}
+          title={capabilityErrorState.title}
+          message={capabilityErrorState.message}
+          diagnostics={capabilityErrorState.diagnostics}
+          primaryAction={{
+            label: "Try again",
+            onClick: () => {
+              void capabilityQuery.refetch()
+            }
+          }}
+          data-testid="mcp-hub-capability-recovery"
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 p-4" data-testid="mcp-hub-shell">

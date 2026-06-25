@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest"
-import { render, screen, within } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, useLocation } from "react-router-dom"
 
@@ -65,6 +66,14 @@ vi.mock("../CapabilityMappingsTab", () => ({
   CapabilityMappingsTab: () => <div>capability mappings tab</div>
 }))
 
+const serviceMocks = vi.hoisted(() => ({
+  getToolRegistrySummary: vi.fn()
+}))
+
+vi.mock("@/services/tldw/mcp-hub", () => ({
+  getToolRegistrySummary: serviceMocks.getToolRegistrySummary
+}))
+
 import { McpHubPage } from "../McpHubPage"
 
 const LocationProbe = () => {
@@ -72,15 +81,75 @@ const LocationProbe = () => {
   return <div data-testid="location-probe">{`${location.pathname}${location.search}`}</div>
 }
 
-const renderMcpHubPage = (initialEntry = "/mcp-hub") =>
-  render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <McpHubPage />
-      <LocationProbe />
-    </MemoryRouter>
+const renderMcpHubPage = (initialEntry = "/mcp-hub") => {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false
+      }
+    }
+  })
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <McpHubPage />
+        <LocationProbe />
+      </MemoryRouter>
+    </QueryClientProvider>
   )
+}
 
 describe("McpHubPage", () => {
+  beforeEach(() => {
+    serviceMocks.getToolRegistrySummary.mockResolvedValue({
+      total_tools: 0,
+      modules: []
+    })
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("renders a shared recovery state when MCP Hub is unavailable", async () => {
+    const user = userEvent.setup()
+    serviceMocks.getToolRegistrySummary.mockRejectedValueOnce(
+      Object.assign(new Error("Request failed: 404"), {
+        response: { status: 404 }
+      })
+    )
+
+    renderMcpHubPage()
+
+    const recovery = await screen.findByTestId("mcp-hub-capability-recovery")
+
+    expect(recovery).toHaveAttribute("data-ds-component", "RecoveryCallout")
+    expect(
+      within(recovery).getByRole("heading", {
+        name: "MCP Hub is unavailable on this server"
+      })
+    ).toBeTruthy()
+    expect(
+      within(recovery).getByText(
+        "The connected server does not advertise MCP Hub management."
+      )
+    ).toBeTruthy()
+    expect(
+      within(recovery).getByText("/api/v1/mcp/hub/tool-registry/summary")
+    ).toBeTruthy()
+    expect(within(recovery).getByText("404")).toBeTruthy()
+    expect(within(recovery).getByText("Request failed: 404")).toBeTruthy()
+
+    await user.click(
+      within(recovery).getByRole("button", { name: "Try again" })
+    )
+
+    await waitFor(() => {
+      expect(serviceMocks.getToolRegistrySummary).toHaveBeenCalledTimes(2)
+    })
+  })
+
   it("renders a compact status summary before workflow detail", () => {
     renderMcpHubPage()
 
