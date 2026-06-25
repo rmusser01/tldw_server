@@ -9,7 +9,8 @@ import pytest
 import tempfile
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
+from types import SimpleNamespace, TracebackType
+from typing import Any
 import uuid
 
 from ..scheduler import Scheduler, create_scheduler
@@ -26,42 +27,63 @@ DEFAULT_METADATA = {"user_id": "test-user"}
 
 
 class _AsyncContext:
-    def __init__(self, value):
+    """Minimal async context manager used by fake PostgreSQL pool objects."""
+
+    def __init__(self, value: Any) -> None:
+        """Store the value returned by the async context manager."""
         self.value = value
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Any:
+        """Return the configured context value."""
         return self.value
 
-    async def __aexit__(self, exc_type, exc, tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool:
+        """Allow exceptions to propagate out of the context."""
         return False
 
 
 class _FakePostgresConnection:
-    def __init__(self):
-        self.fetchrow_calls = []
-        self.executemany_calls = []
-        self.execute_calls = []
+    """Fake asyncpg connection that records calls made by PostgreSQLBackend."""
 
-    async def fetchrow(self, query, *args):
+    def __init__(self) -> None:
+        """Initialize call recording buffers."""
+        self.fetchrow_calls: list[tuple[str, tuple[Any, ...]]] = []
+        self.executemany_calls: list[tuple[str, list[tuple[Any, ...]]]] = []
+        self.execute_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    async def fetchrow(self, query: str, *args: Any) -> dict[str, Any]:
+        """Record an insert-returning call and return a minimal row."""
         self.fetchrow_calls.append((query, args))
         return {"id": args[0]}
 
-    async def executemany(self, query, values):
+    async def executemany(self, query: str, values: list[tuple[Any, ...]]) -> None:
+        """Record batched insert values."""
         self.executemany_calls.append((query, list(values)))
 
-    async def execute(self, query, *args):
+    async def execute(self, query: str, *args: Any) -> str:
+        """Record execute calls and return an asyncpg-like status string."""
         self.execute_calls.append((query, args))
         return "SELECT 1"
 
-    def transaction(self):
+    def transaction(self) -> _AsyncContext:
+        """Return an async transaction context."""
         return _AsyncContext(self)
 
 
 class _FakePostgresPool:
-    def __init__(self, connection):
+    """Fake asyncpg pool that returns a single fake connection."""
+
+    def __init__(self, connection: _FakePostgresConnection) -> None:
+        """Store the connection returned by acquire()."""
         self.connection = connection
 
-    def acquire(self):
+    def acquire(self) -> _AsyncContext:
+        """Return an async context wrapping the fake connection."""
         return _AsyncContext(self.connection)
 
 
@@ -110,11 +132,21 @@ async def test_scheduler_lifecycle(test_config):
 
 
 @pytest.mark.asyncio
-async def test_scheduler_background_loops_survive_start_if_leadership_setup_yields(test_config, monkeypatch):
+async def test_scheduler_background_loops_survive_start_if_leadership_setup_yields(
+    test_config: SchedulerConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Background loops should not observe the scheduler as stopped during startup."""
     original = LeaderElection.maintain_leadership
 
-    async def yielding_maintain(self, resource, callback=None, ttl=None, renew_interval=None):
+    async def yielding_maintain(
+        self: LeaderElection,
+        resource: str,
+        callback: Any = None,
+        ttl: int | None = None,
+        renew_interval: float | None = None,
+    ) -> asyncio.Task[Any]:
+        """Yield once before delegating to the real leadership maintainer."""
         await asyncio.sleep(0)
         task = await original(self, resource, callback=callback, ttl=ttl, renew_interval=renew_interval)
         return task
@@ -638,7 +670,7 @@ async def test_sqlite_auto_renew_extends_lease_expiration():
 
 
 @pytest.mark.asyncio
-async def test_sqlite_dequeues_iso_scheduled_task_on_current_day(tmp_path):
+async def test_sqlite_dequeues_iso_scheduled_task_on_current_day(tmp_path: Path) -> None:
     """SQLite should compare ISO scheduled_at values as timestamps, not strings."""
     config = SchedulerConfig(
         database_url=f"sqlite:///{tmp_path}/scheduled.db",
@@ -673,7 +705,7 @@ async def test_sqlite_dequeues_iso_scheduled_task_on_current_day(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_sqlite_reclaims_iso_expired_lease(tmp_path):
+async def test_sqlite_reclaims_iso_expired_lease(tmp_path: Path) -> None:
     """SQLite should compare ISO lease expiry values as timestamps, not strings."""
     config = SchedulerConfig(
         database_url=f"sqlite:///{tmp_path}/lease-expiry.db",
@@ -713,7 +745,7 @@ async def test_sqlite_reclaims_iso_expired_lease(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_sqlite_ack_rejects_stale_lease_owner(tmp_path):
+async def test_sqlite_ack_rejects_stale_lease_owner(tmp_path: Path) -> None:
     """A reclaimed task must not be completed by a stale worker lease."""
     config = SchedulerConfig(
         database_url=f"sqlite:///{tmp_path}/lease-owner.db",
@@ -776,7 +808,7 @@ async def test_sqlite_ack_rejects_stale_lease_owner(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_postgresql_enqueue_normalizes_pending_tasks_to_queued():
+async def test_postgresql_enqueue_normalizes_pending_tasks_to_queued() -> None:
     """PostgreSQL inserts must persist newly submitted tasks as queued."""
     backend = PostgreSQLBackend.__new__(PostgreSQLBackend)
     backend.config = SimpleNamespace(

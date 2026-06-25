@@ -129,7 +129,7 @@ class TaskAuthorizer:
             user_id: User ID
             max_per_minute: Maximum tasks per minute
         """
-        if not isinstance(max_per_minute, int) or max_per_minute < 0:
+        if isinstance(max_per_minute, bool) or not isinstance(max_per_minute, int) or max_per_minute < 0:
             raise ValueError("max_per_minute must be a non-negative integer")
 
         self._user_rate_limits[user_id] = max_per_minute
@@ -159,39 +159,36 @@ class TaskAuthorizer:
         if not context.is_authenticated:
             return False, "Authentication required"
 
-        # Check configured per-user rate limits before permission bypasses
-        if context.user_id in self._user_rate_limits:
-            allowed, reason = self._check_user_rate_limit(context.user_id)
-            if not allowed:
-                return False, reason
-
         # Check admin-only handlers
         if handler in self._admin_handlers and not context.is_admin:
             return False, f"Handler '{handler}' requires admin privileges"
 
-        # Admins bypass further permission checks
-        if context.is_admin:
-            return True, None
+        if not context.is_admin:
+            # Check handler-specific permissions
+            required_perms = self._handler_permissions.get(handler, set())
+            if required_perms:
+                # Convert permission enums to strings for comparison
+                required_perm_values = {p.value if isinstance(p, TaskPermission) else p for p in required_perms}
+                user_perms = context.permissions
+                missing_perms = required_perm_values - user_perms
+                if missing_perms:
+                    return False, f"Missing required permissions: {missing_perms}"
 
-        # Check handler-specific permissions
-        required_perms = self._handler_permissions.get(handler, set())
-        if required_perms:
-            # Convert permission enums to strings for comparison
-            required_perm_values = {p.value if isinstance(p, TaskPermission) else p for p in required_perms}
-            user_perms = context.permissions
-            missing_perms = required_perm_values - user_perms
-            if missing_perms:
-                return False, f"Missing required permissions: {missing_perms}"
+            # Check queue-specific permissions
+            queue_perms = self._queue_permissions.get(queue, set())
+            if queue_perms:
+                # Convert permission enums to strings for comparison
+                queue_perm_values = {p.value if isinstance(p, TaskPermission) else p for p in queue_perms}
+                user_perms = context.permissions
+                missing_perms = queue_perm_values - user_perms
+                if missing_perms:
+                    return False, f"Missing queue permissions: {missing_perms}"
 
-        # Check queue-specific permissions
-        queue_perms = self._queue_permissions.get(queue, set())
-        if queue_perms:
-            # Convert permission enums to strings for comparison
-            queue_perm_values = {p.value if isinstance(p, TaskPermission) else p for p in queue_perms}
-            user_perms = context.permissions
-            missing_perms = queue_perm_values - user_perms
-            if missing_perms:
-                return False, f"Missing queue permissions: {missing_perms}"
+        # Check configured per-user rate limits after all permission checks pass.
+        if context.user_id in self._user_rate_limits:
+            allowed, reason = self._check_user_rate_limit(context.user_id)
+            if not allowed:
+                return False, reason
 
         return True, None
 

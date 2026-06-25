@@ -4,7 +4,7 @@ title: Harden Scheduler module review findings
 status: Done
 assignee: []
 created_date: 2026-06-23 21:55
-updated_date: 2026-06-25 02:06
+updated_date: 2026-06-25 02:21
 labels: []
 dependencies: []
 priority: high
@@ -39,10 +39,11 @@ Fix Scheduler review findings around queue status persistence, SQLite timestamp 
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Scheduler review hardening. Added red/green regression tests for startup loop races, SQLite ISO timestamp comparisons, stale lease ownership, PostgreSQL queued-state persistence, Scheduler authorizer rate limits, ACP webhook scheduler submission metadata, and the improved worker-pool release path. Adjusted the Unix fallback test to use a temporary home path so it does not write outside the workspace.
+PR #2510 review follow-up: moved rate-limit consumption to the end of the non-anonymous authorization path after permission checks, kept admin handler/queue permission bypass while still honoring configured user limits, rejected boolean rate-limit values, changed SQLite time predicates to compare indexed timestamp columns against a normalized ISO current-time expression, and added docstrings/type hints to new test helpers.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed all Scheduler review findings: PostgreSQL now persists new tasks as queued, SQLite timestamp predicates parse ISO strings, ack/nack can require matching lease and worker ownership, workers pass ownership tokens, ACP webhook submissions await the global scheduler and include metadata, startup loops are created after the scheduler is marked started, authorizer rate limits are enforced, and the improved worker pool no longer calls a nonexistent release_task method. Clean worktree verification: Scheduler tests plus ACP webhook trigger tests passed with 115 passed and 1 skipped; Bandit touched production scan reported 0 errors and 0 findings; staged and unstaged git diff --check both passed.
+Fixed all Scheduler review findings and PR #2510 follow-up issues: PostgreSQL persists new tasks as queued, SQLite timestamp predicates use indexed column comparisons against normalized ISO current time, ack/nack can require matching lease and worker ownership, workers pass ownership tokens, ACP webhook submissions await the global scheduler and include metadata, startup loops are created after the scheduler is marked started, authorizer rate limits are enforced only after permission checks pass, boolean rate-limit values are rejected, and the improved worker pool no longer calls a nonexistent release_task method. Clean worktree verification: focused PR-review regression run passed with 18 passed; Scheduler tests plus ACP webhook trigger tests passed with 118 passed and 1 skipped; Bandit touched production scan reported 0 errors and 0 findings; staged and unstaged git diff --check both passed.
 <!-- SECTION:FINAL_SUMMARY:END -->

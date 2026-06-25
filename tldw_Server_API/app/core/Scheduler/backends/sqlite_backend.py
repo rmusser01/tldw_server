@@ -390,8 +390,8 @@ class SQLiteBackend(QueueBackend):
                     SELECT * FROM tasks
                     WHERE queue_name = ?
                       AND status = 'queued'
-                      AND (scheduled_at IS NULL OR datetime(replace(scheduled_at, 'T', ' ')) <= datetime('now'))
-                      AND (expires_at IS NULL OR datetime(replace(expires_at, 'T', ' ')) > datetime('now'))
+                      AND (scheduled_at IS NULL OR scheduled_at <= replace(datetime('now'), ' ', 'T'))
+                      AND (expires_at IS NULL OR expires_at > replace(datetime('now'), ' ', 'T'))
                       AND NOT EXISTS (
                           SELECT 1
                           FROM json_each(COALESCE(depends_on, '[]')) AS deps
@@ -453,8 +453,8 @@ class SQLiteBackend(QueueBackend):
         query = (
             "SELECT id, depends_on FROM tasks "
             "WHERE status = 'queued' "
-            "AND (scheduled_at IS NULL OR datetime(replace(scheduled_at, 'T', ' ')) <= datetime('now')) "
-            "AND (expires_at IS NULL OR datetime(replace(expires_at, 'T', ' ')) > datetime('now'))"
+            "AND (scheduled_at IS NULL OR scheduled_at <= replace(datetime('now'), ' ', 'T')) "
+            "AND (expires_at IS NULL OR expires_at > replace(datetime('now'), ' ', 'T'))"
         )
         params = []
         if queue_name:
@@ -760,7 +760,7 @@ class SQLiteBackend(QueueBackend):
     async def get_expired_leases(self) -> list[dict[str, Any]]:
         """Get expired leases"""
         return await self.fetch(
-            "SELECT * FROM task_leases WHERE datetime(replace(expires_at, 'T', ' ')) < datetime('now')"
+            "SELECT * FROM task_leases WHERE expires_at < replace(datetime('now'), ' ', 'T')"
         )
 
     # Transaction support
@@ -829,7 +829,7 @@ class SQLiteBackend(QueueBackend):
                 # Find all expired leases
                 cursor = await self._connection.execute("""
                     SELECT task_id FROM task_leases
-                    WHERE datetime(replace(expires_at, 'T', ' ')) < datetime('now')
+                    WHERE expires_at < replace(datetime('now'), ' ', 'T')
                 """)
                 expired_rows = await cursor.fetchall()
 

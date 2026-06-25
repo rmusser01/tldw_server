@@ -313,19 +313,23 @@ async def test_handle_webhook_submits_acp_run(
 @pytest.mark.asyncio
 async def test_submit_acp_run_awaits_scheduler_and_passes_metadata(
     mgr: ACPTriggerManager,
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Direct scheduler submission should await the async singleton and include metadata."""
     import tldw_Server_API.app.core.Scheduler as scheduler_module
 
     captured: dict[str, Any] = {}
 
     class FakeScheduler:
+        """Fake scheduler that records submit keyword arguments."""
+
         async def submit(self, **kwargs: Any) -> str:
+            """Capture submission details and return a deterministic task id."""
             captured.update(kwargs)
             return "task-direct-123"
 
-    async def fake_get_global_scheduler():
+    async def fake_get_global_scheduler() -> FakeScheduler:
+        """Return the fake scheduler through the async singleton contract."""
         return FakeScheduler()
 
     monkeypatch.setattr(scheduler_module, "get_global_scheduler", fake_get_global_scheduler)
