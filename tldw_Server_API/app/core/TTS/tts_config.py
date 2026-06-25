@@ -36,6 +36,9 @@ from .utils import parse_bool
 #
 # TTS Configuration Schema
 
+# Redaction marker only; not a credential.
+REDACTED_SECRET = "********"  # nosec B105
+
 class ProviderConfig(BaseModel):
     """Configuration for a single TTS provider"""
     enabled: bool = False
@@ -408,7 +411,6 @@ class TTSConfigManager:
         api_key_env_vars = {
             'OPENAI_API_KEY': ('openai', 'api_key'),
             'ELEVENLABS_API_KEY': ('elevenlabs', 'api_key'),
-            'ANTHROPIC_API_KEY': ('anthropic', 'api_key'),
         }
 
         for env_var, (provider, field) in api_key_env_vars.items():
@@ -476,18 +478,59 @@ class TTSConfigManager:
         enabled = self.get_enabled_providers()
         return [p for p in config.provider_priority if p in enabled]
 
-    def to_dict(self) -> dict[str, Any]:
+    @staticmethod
+    def _redact_provider_secrets(config_dict: dict[str, Any]) -> dict[str, Any]:
+        """Replace provider API keys in a serialized config dictionary."""
+        providers = config_dict.get("providers")
+        if not isinstance(providers, dict):
+            return config_dict
+
+        for provider_config in providers.values():
+            if not isinstance(provider_config, dict):
+                continue
+            if provider_config.get("api_key"):
+                provider_config["api_key"] = REDACTED_SECRET
+        return config_dict
+
+    def _has_provider_secrets(self) -> bool:
+        """Return whether the loaded config contains provider API keys."""
+        config_dict = model_dump_compat(self.get_config())
+        providers = config_dict.get("providers")
+        if not isinstance(providers, dict):
+            return False
+        return any(
+            isinstance(provider_config, dict) and bool(provider_config.get("api_key"))
+            for provider_config in providers.values()
+        )
+
+    def to_dict(self, *, include_secrets: bool = False) -> dict[str, Any]:
         """Convert configuration to dictionary"""
         cfg = self.get_config()
-        return model_dump_compat(cfg)
+        config_dict = model_dump_compat(cfg)
+        if not include_secrets:
+            config_dict = self._redact_provider_secrets(config_dict)
+        return config_dict
 
-    def save_yaml(self, path: Optional[Path] = None):
+    def save_yaml(self, path: Optional[Path] = None, *, include_secrets: bool = False) -> None:
         """Save current configuration to YAML file"""
         path = path or self.yaml_path
         if not path:
             raise ValueError("No YAML path specified")
 
-        config_dict = self.to_dict()
+        target_path = Path(path).expanduser()
+        configured_path = Path(self.yaml_path).expanduser() if self.yaml_path else None
+        if (
+            not include_secrets
+            and configured_path is not None
+            and target_path == configured_path
+            and self._has_provider_secrets()
+        ):
+            raise ValueError(
+                "Refusing to overwrite TTS config with redacted provider secrets; "
+                "pass include_secrets=True for persisted saves or choose an export path."
+            )
+
+        config_dict = self.to_dict(include_secrets=include_secrets)
 
         # Convert ProviderConfig objects to dicts
         if 'providers' in config_dict:
@@ -496,10 +539,10 @@ class TTSConfigManager:
                     cfg = config_dict['providers'][provider_name]
                     config_dict['providers'][provider_name] = model_dump_compat(cfg)
 
-        with open(path, 'w') as f:
+        with open(target_path, 'w') as f:
             yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
 
-        logger.info(f"Saved TTS configuration to {path}")
+        logger.info(f"Saved TTS configuration to {target_path}")
 
 
 # Singleton instance

@@ -6,12 +6,16 @@ import asyncio
 import contextlib
 import json
 import os
+import socket
+from dataclasses import dataclass
 from typing import Any, Optional
+from urllib.parse import urlparse, urlunparse
 
 #
 # Third-party Imports
 from loguru import logger
 
+from ...Security.egress import evaluate_url_policy
 from ..realtime_session import RealtimeSessionConfig, RealtimeTTSSession
 from ..tts_exceptions import (
     TTSProviderInitializationError,
@@ -36,6 +40,111 @@ from .base import (
 #######################################################################################################################
 #
 # VibeVoice Realtime Adapter (Skeleton)
+
+
+@dataclass(frozen=True)
+class _WebSocketEgressValidation:
+    """Validated websocket origin and DNS pins from the egress policy check."""
+
+    policy_url: str
+    hostname: str
+    resolved_ips: tuple[str, ...]
+
+
+class _PinnedWebSocketResolver:
+    """Aiohttp-compatible resolver that pins a validated host to known IPs."""
+
+    def __init__(self, hostname: str, resolved_ips: tuple[str, ...]) -> None:
+        """Store the validated hostname and IP addresses for websocket pinning."""
+        self._hostname = hostname.strip().rstrip(".").lower()
+        self._resolved_ips = resolved_ips
+
+    async def resolve(
+        self,
+        host: str,
+        port: int = 0,
+        family: int = socket.AF_INET,
+    ) -> list[dict[str, Any]]:
+        """Resolve the validated websocket hostname to the pinned IP set."""
+        if host.strip().rstrip(".").lower() != self._hostname:
+            return []
+        return [
+            {
+                "hostname": host,
+                "host": ip,
+                "port": port,
+                "family": socket.AF_INET6 if ":" in ip else socket.AF_INET,
+                "proto": 0,
+                "flags": socket.AI_NUMERICHOST,
+            }
+            for ip in self._resolved_ips
+        ]
+
+    async def close(self) -> None:
+        """Release resolver resources."""
+        return None
+
+
+def _websocket_url_to_policy_url(ws_url: str) -> str:
+    """Convert a websocket URL to a redacted HTTP(S) origin for egress checks."""
+    try:
+        parsed = urlparse(ws_url)
+    except (TypeError, ValueError) as exc:
+        raise TTSProviderInitializationError(
+            "Invalid VibeVoice Realtime websocket URL",
+            provider=VibeVoiceRealtimeAdapter.PROVIDER_KEY,
+            details={"error": str(exc)},
+        ) from exc
+
+    scheme = (parsed.scheme or "").lower()
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise TTSProviderInitializationError(
+            "Invalid VibeVoice Realtime websocket URL port",
+            provider=VibeVoiceRealtimeAdapter.PROVIDER_KEY,
+            details={"error": str(exc)},
+        ) from exc
+    if scheme not in {"ws", "wss"}:
+        raise TTSProviderInitializationError(
+            "VibeVoice Realtime websocket URL must use ws:// or wss://",
+            provider=VibeVoiceRealtimeAdapter.PROVIDER_KEY,
+            details={"scheme": scheme or None},
+        )
+    hostname = parsed.hostname
+    if not hostname:
+        raise TTSProviderInitializationError(
+            "VibeVoice Realtime websocket URL must include a hostname",
+            provider=VibeVoiceRealtimeAdapter.PROVIDER_KEY,
+        )
+    policy_scheme = "https" if scheme == "wss" else "http"
+    safe_host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+    safe_netloc = f"{safe_host}:{port}" if port is not None else safe_host
+    return urlunparse((policy_scheme, safe_netloc, "", "", "", ""))
+
+
+def _validate_websocket_egress(ws_url: str) -> _WebSocketEgressValidation:
+    """Validate websocket egress and return resolved IPs for DNS pinning."""
+    policy_url = _websocket_url_to_policy_url(ws_url)
+    result = evaluate_url_policy(policy_url)
+    if not result.allowed:
+        raise TTSProviderInitializationError(
+            f"VibeVoice Realtime websocket URL denied by egress policy: {result.reason}",
+            provider=VibeVoiceRealtimeAdapter.PROVIDER_KEY,
+            details={"reason": result.reason, "url": policy_url},
+        )
+    parsed = urlparse(policy_url)
+    hostname = parsed.hostname or ""
+    resolved_ips = tuple(
+        str(ip).strip()
+        for ip in (getattr(result, "resolved_ips", ()) or ())
+        if str(ip).strip()
+    )
+    return _WebSocketEgressValidation(
+        policy_url=policy_url,
+        hostname=hostname,
+        resolved_ips=resolved_ips,
+    )
 
 
 class VibeVoiceRealtimeAdapter(TTSAdapter):
@@ -188,6 +297,8 @@ class VibeVoiceRealtimeAdapter(TTSAdapter):
 
 
 class _VibeVoiceRealtimeWebSocketSession(RealtimeTTSSession):
+    """Manage a validated websocket-backed VibeVoice realtime TTS session."""
+
     def __init__(
         self,
         *,
@@ -209,9 +320,13 @@ class _VibeVoiceRealtimeWebSocketSession(RealtimeTTSSession):
 
     @property
     def error(self) -> Optional[Exception]:
+        """Return the terminal backend or transport error, if one occurred."""
         return self._error
 
     async def start(self) -> None:
+        """Validate outbound websocket policy and open the realtime backend session."""
+        validation = await asyncio.to_thread(_validate_websocket_egress, self._ws_url)
+
         try:
             import aiohttp
         except Exception as exc:
@@ -221,7 +336,14 @@ class _VibeVoiceRealtimeWebSocketSession(RealtimeTTSSession):
                 details={"error": str(exc)},
             ) from exc
 
-        self._session = aiohttp.ClientSession()
+        connector = None
+        if validation.resolved_ips:
+            connector = aiohttp.TCPConnector(
+                resolver=_PinnedWebSocketResolver(validation.hostname, validation.resolved_ips),
+                use_dns_cache=False,
+            )
+
+        self._session = aiohttp.ClientSession(connector=connector)
         self._ws = await self._session.ws_connect(
             self._ws_url,
             headers=self._ws_headers,
@@ -275,6 +397,7 @@ class _VibeVoiceRealtimeWebSocketSession(RealtimeTTSSession):
         await self._ws.send_json(payload)
 
     async def _recv_loop(self) -> None:
+        """Forward backend audio frames into the consumer queue until the session ends."""
         try:
             if not self._ws:
                 return
@@ -286,7 +409,9 @@ class _VibeVoiceRealtimeWebSocketSession(RealtimeTTSSession):
                 elif msg.type == aiohttp.WSMsgType.TEXT:
                     try:
                         data = json.loads(msg.data)
-                    except Exception:
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        data = None
+                    if not isinstance(data, dict):
                         continue
                     msg_type = str(data.get("type") or "").lower()
                     if msg_type == "error":

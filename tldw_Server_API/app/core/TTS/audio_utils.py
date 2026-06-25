@@ -232,7 +232,8 @@ class AudioProcessor:
         audio_bytes: bytes,
         target_format: str = 'wav',
         target_sample_rate: Optional[int] = None,
-        provider: Optional[str] = None
+        provider: Optional[str] = None,
+        strict: bool = False,
     ) -> bytes:
         """
         Convert audio to target format and sample rate.
@@ -242,12 +243,15 @@ class AudioProcessor:
             target_format: Target format (wav, mp3, flac)
             target_sample_rate: Target sample rate (Hz)
             provider: Provider name for specific requirements
+            strict: Raise when conversion fails instead of returning original bytes
 
         Returns:
             Converted audio bytes
         """
         if not self.ffmpeg_available and not self.librosa_available:
             logger.warning("No audio conversion libraries available")
+            if strict:
+                raise RuntimeError("Audio conversion failed: no conversion libraries available")
             return audio_bytes
 
         # Get provider requirements if specified
@@ -345,6 +349,8 @@ class AudioProcessor:
 
         except _AUDIO_PROCESS_EXCEPTIONS as e:
             logger.error(f"Audio conversion failed ({type(e).__name__})")
+            if strict:
+                raise RuntimeError("Audio conversion failed") from e
             return audio_bytes  # Return original if conversion fails
 
     async def convert_audio_async(
@@ -352,7 +358,8 @@ class AudioProcessor:
         audio_bytes: bytes,
         target_format: str = 'wav',
         target_sample_rate: Optional[int] = None,
-        provider: Optional[str] = None
+        provider: Optional[str] = None,
+        strict: bool = False,
     ) -> bytes:
         """
         Async-friendly wrapper around convert_audio.
@@ -369,6 +376,7 @@ class AudioProcessor:
                 target_format=target_format,
                 target_sample_rate=target_sample_rate,
                 provider=provider,
+                strict=strict,
             ),
         )
 
@@ -475,7 +483,8 @@ def process_voice_reference(
             audio_bytes = processor.convert_audio(
                 audio_bytes,
                 target_format='wav',
-                provider=provider
+                provider=provider,
+                strict=True,
             )
             logger.info(f"Voice reference converted for {provider}")
 
@@ -524,6 +533,7 @@ async def process_voice_reference_async(
                 audio_bytes,
                 target_format='wav',
                 provider=provider,
+                strict=True,
             )
             logger.info(f"Voice reference converted for {provider}")
 
