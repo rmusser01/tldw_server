@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-import inspect
+import ast
 import json
 import time
+from collections import UserDict
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -39,6 +41,26 @@ from tldw_Server_API.app.core.Chunking.process_text.models import (
     ResolvedProcessOptions,
     TelemetryHooks,
 )
+
+
+def _assert_no_chunker_imports(module: Any) -> None:
+    assert not hasattr(module, "Chunker")
+
+    module_path = Path(module.__file__)
+    tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                assert alias.name != "tldw_Server_API.app.core.Chunking.chunker"
+                assert not alias.name.endswith(".chunker")
+                assert alias.name != "chunker"
+                assert alias.asname != "Chunker"
+        elif isinstance(node, ast.ImportFrom):
+            module_name = node.module or ""
+            assert module_name != "tldw_Server_API.app.core.Chunking.chunker"
+            assert not module_name.endswith(".chunker")
+            assert not (node.level and module_name == "chunker")
+            assert all(alias.name != "Chunker" for alias in node.names)
 
 
 def _resolved_for_dispatch(**overrides: Any) -> ResolvedProcessOptions:
@@ -155,6 +177,7 @@ def test_process_text_internal_dataclasses_expose_expected_attributes() -> None:
     assert prepared.options["method"] == "words"
     assert resolved.max_size == 100
     assert resolved.method_options_for_chunk == {"strip": True}
+    assert resolved.align_text_to_source is True
     assert normalized.metadata["chunk_index"] == 1
     assert hooks.increment_counter("metric") is None
 
@@ -177,35 +200,19 @@ def test_process_text_context_protocol_accepts_chunker_shape() -> None:
 
 
 def test_process_text_models_module_does_not_import_chunker() -> None:
-    source = inspect.getsource(models)
-
-    assert not hasattr(models, "Chunker")
-    assert ".chunker" not in source
-    assert "Chunking.chunker" not in source
+    _assert_no_chunker_imports(models)
 
 
 def test_process_text_preparation_module_does_not_import_chunker() -> None:
-    source = inspect.getsource(preparation)
-
-    assert not hasattr(preparation, "Chunker")
-    assert ".chunker" not in source
-    assert "Chunking.chunker" not in source
+    _assert_no_chunker_imports(preparation)
 
 
 def test_process_text_options_module_does_not_import_chunker() -> None:
-    source = inspect.getsource(process_options)
-
-    assert not hasattr(process_options, "Chunker")
-    assert ".chunker" not in source
-    assert "Chunking.chunker" not in source
+    _assert_no_chunker_imports(process_options)
 
 
 def test_process_text_dispatch_module_does_not_import_chunker() -> None:
-    source = inspect.getsource(process_dispatch)
-
-    assert not hasattr(process_dispatch, "Chunker")
-    assert ".chunker" not in source
-    assert "Chunking.chunker" not in source
+    _assert_no_chunker_imports(process_dispatch)
 
 
 def test_resolve_process_options_rejects_invalid_max_size() -> None:
@@ -307,6 +314,17 @@ def test_resolve_process_options_excludes_process_only_options_and_keeps_tokeniz
         "tokenizer_name": "explicit-tokenizer",
         "tokenizer_name_or_path": "explicit-tokenizer-path",
     }
+    assert resolved.align_text_to_source is True
+
+
+def test_resolve_process_options_sets_align_text_to_source() -> None:
+    resolved = resolve_process_options(
+        Chunker(),
+        "Body text",
+        {"method": "words", "align_text_to_source": "false"},
+    )
+
+    assert resolved.align_text_to_source is False
 
 
 @pytest.mark.parametrize(
@@ -564,6 +582,28 @@ def test_dispatch_chunks_normal_path_converts_text_metadata_dict(
     assert chunks == [NormalizedChunk(text="beta", metadata={"start_offset": 2, "end_offset": 6})]
 
 
+def test_dispatch_chunks_normal_path_preserves_mapping_like_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunker = Chunker()
+    metadata = UserDict({"start_offset": 1, "end_offset": 5, "source": "mapping"})
+
+    def fake_chunk_text(*args: Any, **kwargs: Any) -> list[Any]:
+        return [{"text": "beta", "metadata": metadata}]
+
+    monkeypatch.setattr(chunker, "chunk_text", fake_chunk_text)
+
+    chunks = dispatch_chunks(chunker, "alpha beta", _resolved_for_dispatch())
+    metadata["source"] = "mutated"
+
+    assert chunks == [
+        NormalizedChunk(
+            text="beta",
+            metadata={"start_offset": 1, "end_offset": 5, "source": "mapping"},
+        )
+    ]
+
+
 def test_dispatch_chunks_hierarchical_path_uses_context_method(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -638,6 +678,36 @@ def test_dispatch_chunks_multi_level_metadata_result_becomes_dict_metadata(
     assert chunks[0].metadata["paragraph_index"] == 0
     assert chunks[0].metadata["paragraph_kind"] == "paragraph"
     assert chunks[0].metadata["multi_level"] is True
+
+
+def test_dispatch_chunks_multi_level_uses_resolved_align_text_to_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunker = Chunker()
+    calls: list[dict[str, Any]] = []
+
+    def fake_spans(*args: Any, **kwargs: Any) -> list[tuple[int, int, str]]:
+        return [(0, 10, "paragraph")]
+
+    def fake_chunk_text_with_metadata(*args: Any, **kwargs: Any) -> list[ChunkResult]:
+        calls.append(dict(kwargs))
+        return [
+            ChunkResult(
+                text="Alpha",
+                metadata=ChunkMetadata(index=0, start_char=0, end_char=5, word_count=1),
+            )
+        ]
+
+    monkeypatch.setattr(chunker, "_compute_paragraph_spans", fake_spans)
+    monkeypatch.setattr(chunker, "chunk_text_with_metadata", fake_chunk_text_with_metadata)
+
+    dispatch_chunks(
+        chunker,
+        "Alpha beta",
+        _resolved_for_dispatch(multi_level=True, align_text_to_source=False),
+    )
+
+    assert calls[0]["align_text_to_source"] is False
 
 
 def test_dispatch_chunks_multi_level_fallback_clamps_offsets(

@@ -139,6 +139,7 @@ def resolve_process_options(
     hierarchical = _coerce_bool_option(options.get("hierarchical"), False)
     hier_template = options.get("hierarchical_template") if isinstance(options.get("hierarchical_template"), dict) else None
     multi_level = _coerce_bool_option(options.get("multi_level"), False) and method in ("words", "sentences") and not (hierarchical or hier_template)
+    align_text_to_source = _coerce_bool_option(options.get("align_text_to_source"), True)
 
     return ResolvedProcessOptions(
         method=method,
@@ -152,4 +153,5 @@ def resolve_process_options(
         multi_level=multi_level,
         code_mode_for_method=code_mode_for_method,
         method_options_for_chunk=method_options_for_chunk,
+        align_text_to_source=align_text_to_source,
     )

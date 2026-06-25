@@ -14,7 +14,6 @@ import unicodedata
 from collections import OrderedDict
 from collections.abc import Generator
 from contextlib import nullcontext, suppress
-from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -26,7 +25,7 @@ from .error_policy import CHUNKER_NONCRITICAL_EXCEPTIONS as _CHUNKER_NONCRITICAL
 from .exceptions import ChunkingError, InvalidChunkingMethodError, InvalidInputError
 from .llm_context import _LLM_UNSET, llm_override_scope
 from .option_utils import _coerce_bool_option
-from .process_text.dispatch import _ALIGN_TEXT_TO_SOURCE_OPTION, dispatch_chunks
+from .process_text.dispatch import dispatch_chunks
 from .process_text.preparation import (
     _parse_frontmatter,
     _prepare_frontmatter_options,
@@ -2328,13 +2327,6 @@ class Chunker:
         hier_template = resolved.hier_template
         multi_level = resolved.multi_level
         code_mode_for_method = resolved.code_mode_for_method
-        method_options_for_chunk = resolved.method_options_for_chunk
-        if multi_level and "align_text_to_source" in opts:
-            method_options_for_chunk = {
-                **method_options_for_chunk,
-                _ALIGN_TEXT_TO_SOURCE_OPTION: opts.get("align_text_to_source"),
-            }
-            resolved = replace(resolved, method_options_for_chunk=method_options_for_chunk)
 
         norm_chunks: list[dict[str, Any]] = []
         chunk_start = time.perf_counter()

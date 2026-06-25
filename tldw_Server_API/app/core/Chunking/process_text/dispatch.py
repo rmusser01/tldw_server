@@ -1,21 +1,18 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import asdict
 from typing import Any
 
 from tldw_Server_API.app.core.Chunking.base import ChunkMetadata
 from tldw_Server_API.app.core.Chunking.error_policy import CHUNKER_NONCRITICAL_EXCEPTIONS
 from tldw_Server_API.app.core.Chunking.exceptions import ChunkingError
-from tldw_Server_API.app.core.Chunking.option_utils import _coerce_bool_option
 from tldw_Server_API.app.core.Chunking.process_text.models import (
     NormalizedChunk,
     ProcessTextContext,
     ResolvedProcessOptions,
 )
-
-
-_ALIGN_TEXT_TO_SOURCE_OPTION = "_process_text_align_text_to_source"
 
 
 def dispatch_chunks(
@@ -59,8 +56,6 @@ def _dispatch_multi_level(
     resolved: ResolvedProcessOptions,
 ) -> list[NormalizedChunk]:
     method_options_for_chunk = dict(resolved.method_options_for_chunk)
-    align_text_to_source_opt = method_options_for_chunk.pop(_ALIGN_TEXT_TO_SOURCE_OPTION, None)
-    align_text_to_source = _coerce_bool_option(align_text_to_source_opt, True)
     norm_chunks: list[NormalizedChunk] = []
     spans = context._compute_paragraph_spans(processed_text, template=None)
     pidx = 0
@@ -77,7 +72,7 @@ def _dispatch_multi_level(
                 max_size=resolved.max_size,
                 overlap=resolved.overlap,
                 language=resolved.language,
-                align_text_to_source=align_text_to_source,
+                align_text_to_source=resolved.align_text_to_source,
                 **method_options_for_chunk,
             )
             use_metadata = True
@@ -233,6 +228,10 @@ def _dispatch_normal(
 def _metadata_to_dict(metadata_obj: Any) -> dict[str, Any]:
     if isinstance(metadata_obj, ChunkMetadata):
         return asdict(metadata_obj)
-    if isinstance(metadata_obj, dict):
+    if isinstance(metadata_obj, Mapping):
         return dict(metadata_obj)
+    try:
+        return dict(metadata_obj)
+    except CHUNKER_NONCRITICAL_EXCEPTIONS:
+        pass
     return {}

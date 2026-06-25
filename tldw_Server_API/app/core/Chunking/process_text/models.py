@@ -30,6 +30,7 @@ class ResolvedProcessOptions:
     multi_level: bool
     code_mode_for_method: str | None
     method_options_for_chunk: dict[str, Any]
+    align_text_to_source: bool = True
 
 
 @dataclass(frozen=True)
