@@ -93,13 +93,18 @@ _LLM_EXTRA_PARAM_RESERVED_KEYS = {
     "api_endpoint",
     "api_key",
     "api_provider",
+    "api_url",
     "app_config",
     "auth_user",
     "base_url",
     "caller_request",
+    "extra_body",
+    "extra_headers",
     "frequency_penalty",
     "function_call",
     "functions",
+    "http_client_factory",
+    "http_fetcher",
     "max_tokens",
     "maxp",
     "messages",
@@ -123,6 +128,17 @@ _LLM_EXTRA_PARAM_RESERVED_KEYS = {
     "user",
     "user_identifier",
 }
+
+
+def _audio_chat_max_bytes() -> int:
+    """Return the configured speech-chat audio byte limit."""
+    raw_max_bytes = os.getenv("AUDIO_CHAT_MAX_BYTES")
+    if raw_max_bytes is not None:
+        try:
+            return int(raw_max_bytes)
+        except (ValueError, TypeError):
+            logger.debug("AUDIO_CHAT_MAX_BYTES parse failed; using default 20MB")
+    return 20 * 1024 * 1024
 
 
 def _normalize_audio_format(input_format: str) -> str:
@@ -149,6 +165,23 @@ def _decode_base64_audio(data: str) -> bytes:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid base64 encoding for input_audio",
         ) from e
+
+
+def _estimate_base64_decoded_size(data: str) -> int:
+    """Estimate decoded byte length without allocating the decoded payload."""
+    encoded = str(data or "").strip()
+    padding = min(2, len(encoded) - len(encoded.rstrip("=")))
+    return max(0, (len(encoded) * 3) // 4 - padding)
+
+
+def _validate_encoded_audio_size(input_audio: str) -> None:
+    """Reject base64 payloads that would decode above the speech-chat byte limit."""
+    max_bytes = _audio_chat_max_bytes()
+    if _estimate_base64_decoded_size(input_audio) > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="input_audio exceeds size limit for speech chat",
+        )
 
 
 def _load_audio_to_mono_np(audio_bytes: bytes) -> tuple[np.ndarray, int]:
@@ -198,17 +231,8 @@ def _validate_audio_constraints(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported input_audio_format '{input_format}'",
         )
-    # Size limit (bytes): allow env override but fall back safely on parse errors.
-    _raw_max_bytes = os.getenv("AUDIO_CHAT_MAX_BYTES")
-    if _raw_max_bytes is not None:
-        try:
-            max_bytes = int(_raw_max_bytes)
-        except (ValueError, TypeError):
-            logger.debug("AUDIO_CHAT_MAX_BYTES parse failed; using default 20MB")
-            max_bytes = 20 * 1024 * 1024
-    else:
-        max_bytes = 20 * 1024 * 1024
 
+    max_bytes = _audio_chat_max_bytes()
     if audio_bytes and len(audio_bytes) > max_bytes:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -253,7 +277,13 @@ def _provider_llm_extra_params(extra_params: dict[str, Any] | None) -> dict[str,
         if not isinstance(raw_key, str):
             continue
         key = raw_key.strip()
-        if not key or key.startswith("_") or key in _LLM_EXTRA_PARAM_RESERVED_KEYS:
+        key_lower = key.lower()
+        if (
+            not key
+            or key.startswith("_")
+            or key_lower in _LLM_EXTRA_PARAM_RESERVED_KEYS
+            or key_lower.endswith("_api_url")
+        ):
             continue
         safe_params[key] = value
     return safe_params
@@ -461,6 +491,7 @@ async def run_speech_chat_turn(
         duration_sec=0.0,
         input_format=request_data.input_audio_format,
     )
+    _validate_encoded_audio_size(request_data.input_audio)
     raw_audio_bytes = _decode_base64_audio(request_data.input_audio)
     _validate_audio_constraints(
         audio_bytes=raw_audio_bytes,

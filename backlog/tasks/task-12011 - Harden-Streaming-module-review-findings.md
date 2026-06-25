@@ -4,7 +4,7 @@ title: Harden Streaming module review findings
 status: Done
 assignee: []
 created_date: '2026-06-24'
-updated_date: '2026-06-24'
+updated_date: '2026-06-25'
 labels:
   - streaming
   - security
@@ -42,6 +42,13 @@ Implemented:
 - SSE raw provider lines now use the shared provider-line normalizer and honor provider control passthrough/filter settings.
 - WebSocket streams now propagate real accept failures, tolerate known already-accepted Starlette state errors, and stop ping/idle background tasks on terminal frames.
 - SSE heartbeat enqueue uses forced enqueue to avoid deadlock under a full queue.
+
+PR review follow-up:
+- Rebased `codex/streaming-module-hardening` onto latest `origin/dev`.
+- Made speech-chat LLM extra-param filtering case-insensitive and blocked `api_url`, `*_api_url`, `http_client_factory`, `http_fetcher`, `extra_headers`, and `extra_body` override keys.
+- Added an encoded-size guard so oversized base64 input is rejected before decoded bytes are allocated.
+- Broadened already-accepted WebSocket RuntimeError detection while preserving propagation for generic accept failures.
+- Reworked new tests to add docstrings/return annotations, avoid new direct action-helper coverage where public `run_speech_chat_turn` can verify behavior, and use event-driven ping waiting.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 <!-- SECTION:NOTES:END -->
 
@@ -54,6 +61,8 @@ Verification:
 - Initial focused red run: 10 expected failures in speech-chat and stream lifecycle tests.
 - Clean-worktree focused final run: `python -m pytest tldw_Server_API/tests/Audio/test_speech_chat_service.py tldw_Server_API/tests/Streaming/test_streams.py -q` -> 52 passed.
 - Clean-worktree touched-scope security scan: `python -m bandit -r tldw_Server_API/app/core/Streaming -f json -o /tmp/bandit_streaming_12011_worktree.json` -> 0 findings.
+- Rebased-review focused run: `python -m pytest tldw_Server_API/tests/Audio/test_speech_chat_service.py tldw_Server_API/tests/Streaming/test_streams.py -q` -> 55 passed.
+- Rebased-review touched-scope security scan: `python -m bandit -r tldw_Server_API/app/core/Streaming -f json -o /tmp/bandit_streaming_12011_rebased.json` -> 0 findings.
 
 Residual note: the optional audio WebSocket ping checks still fail in the clean worktree even with `MINIMAL_TEST_INCLUDE_AUDIO=1`, because `/api/v1/audio/stream/transcribe` explicitly constructs its `WebSocketStream` with `heartbeat_interval_s=0`. That endpoint-level behavior is outside this `app/core/Streaming` hardening change.
 <!-- SECTION:FINAL_SUMMARY:END -->

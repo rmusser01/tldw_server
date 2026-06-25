@@ -107,11 +107,15 @@ def _ensure_stream_metrics_registered() -> None:
 
 def _is_already_accepted_websocket_error(exc: RuntimeError) -> bool:
     """Return True for Starlette's double-accept state error."""
-    message = str(exc)
+    message = str(exc).lower()
     return (
-        "websocket.accept" in message
-        and "websocket.send" in message
-        and "websocket.close" in message
+        (
+            "websocket.accept" in message
+            and ("websocket.send" in message or "websocket.close" in message)
+        )
+        or "already accepted" in message
+        or ('cannot call "accept"' in message and "connection is established" in message)
+        or ("accept" in message and "already" in message and "connection" in message)
     )
 
 
