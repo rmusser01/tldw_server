@@ -841,7 +841,11 @@ async def _handle_telegram_link_command(
     if pairing_code is None:
         return _telegram_webhook_error(status.HTTP_400_BAD_REQUEST, "pairing_code_required")
 
-    consumed_pairing = await runtime_repo.consume_pairing_code(pairing_code)
+    consumed_pairing = await runtime_repo.consume_pairing_code(
+        pairing_code,
+        scope_type=scope.scope_type,
+        scope_id=scope.scope_id,
+    )
     if consumed_pairing is None:
         return _telegram_webhook_error(status.HTTP_403_FORBIDDEN, "invalid_pairing_code")
 

@@ -67,8 +67,37 @@ async def test_telegram_runtime_repo_persists_receipts_pairing_codes_and_links(t
     )
     assert pairing["pairing_code"] == "ABCD1234"
 
-    consumed_pairing = await repo.consume_pairing_code("abcd1234", now=now + timedelta(minutes=1))
-    missing_pairing = await repo.consume_pairing_code("ABCD1234", now=now + timedelta(minutes=1))
+    stored_pairing = await pool.fetchone(
+        """
+        SELECT pairing_code
+        FROM telegram_pairing_codes
+        WHERE id = ?
+        """,
+        (pairing["id"],),
+    )
+    assert stored_pairing is not None
+    assert stored_pairing["pairing_code"] != "ABCD1234"
+    assert str(stored_pairing["pairing_code"]).startswith("hmac_sha256:")
+
+    wrong_scope_pairing = await repo.consume_pairing_code(
+        "abcd1234",
+        scope_type="team",
+        scope_id=23,
+        now=now + timedelta(minutes=1),
+    )
+    consumed_pairing = await repo.consume_pairing_code(
+        "abcd1234",
+        scope_type="team",
+        scope_id=22,
+        now=now + timedelta(minutes=1),
+    )
+    missing_pairing = await repo.consume_pairing_code(
+        "ABCD1234",
+        scope_type="team",
+        scope_id=22,
+        now=now + timedelta(minutes=1),
+    )
+    assert wrong_scope_pairing is None
     assert consumed_pairing is not None
     assert consumed_pairing["auth_user_id"] == 901
     assert missing_pairing is None
