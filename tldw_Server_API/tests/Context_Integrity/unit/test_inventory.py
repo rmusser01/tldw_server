@@ -42,6 +42,17 @@ def _fail_if_fifo_opened(monkeypatch: pytest.MonkeyPatch, inventory_module: obje
     monkeypatch.setattr(inventory_module.os, "open", guarded_open)
 
 
+def _raise_is_symlink_for_path(monkeypatch: pytest.MonkeyPatch, protected_path: Path) -> None:
+    original_is_symlink = Path.is_symlink
+
+    def guarded_is_symlink(self: Path) -> bool:
+        if self == protected_path:
+            raise PermissionError("simulated permission denied")
+        return original_is_symlink(self)
+
+    monkeypatch.setattr(Path, "is_symlink", guarded_is_symlink)
+
+
 def test_inventory_user_skill_directory_includes_supporting_files(tmp_path) -> None:
     from tldw_Server_API.app.core.Context_Integrity.inventory import inventory_user_skills
 
@@ -192,6 +203,28 @@ def test_inventory_user_skill_reports_no_follow_open_error(monkeypatch, tmp_path
         raise OSError("simulated no-follow failure")
 
     monkeypatch.setattr(inventory, "_open_no_follow", raise_open_error, raising=False)
+
+    result = inventory.inventory_user_skills_with_findings(
+        user_id=1,
+        skills_root=tmp_path / "skills",
+    )
+
+    assert result.assets == ()
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert result.findings[0].asset_id == "skill:user:1/demo"
+
+
+def test_inventory_user_skill_symlink_preflight_permission_error_reports_finding(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.core.Context_Integrity import inventory
+
+    skill_dir = tmp_path / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    skill_file = skill_dir / "SKILL.md"
+    skill_file.write_text("---\nname: demo\n---\nBody", encoding="utf-8")
+    _raise_is_symlink_for_path(monkeypatch, skill_file)
 
     result = inventory.inventory_user_skills_with_findings(
         user_id=1,
@@ -362,6 +395,25 @@ def test_inventory_prompt_files_reports_no_follow_open_error(monkeypatch, tmp_pa
     assert result.findings[0].asset_id == "prompt_file:root.md"
 
 
+def test_inventory_prompt_files_symlink_preflight_permission_error_reports_finding(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.core.Context_Integrity import inventory
+
+    prompts = tmp_path / "Prompts"
+    prompts.mkdir()
+    prompt_file = prompts / "root.md"
+    prompt_file.write_text("root prompt", encoding="utf-8")
+    _raise_is_symlink_for_path(monkeypatch, prompt_file)
+
+    result = inventory.inventory_prompt_files_with_findings(prompts_dir=prompts)
+
+    assert result.assets == ()
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert result.findings[0].asset_id == "prompt_file:root.md"
+
+
 def test_inventory_prompt_files_fifo_reports_error_without_opening(monkeypatch, tmp_path) -> None:
     from tldw_Server_API.app.core.Context_Integrity import inventory
 
@@ -458,6 +510,28 @@ def test_inventory_env_prompt_overrides_fifo_reports_error_without_opening(
     assert (
         result.findings[0].asset_id
         == "prompt_file:env:TLDW_PROMPT_FILE_CHAT__SYSTEM:pipe.md"
+    )
+
+
+def test_inventory_env_prompt_overrides_symlink_preflight_permission_error_reports_finding(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.core.Context_Integrity import inventory
+
+    override = tmp_path / "override.md"
+    override.write_text("override prompt", encoding="utf-8")
+    _raise_is_symlink_for_path(monkeypatch, override)
+
+    result = inventory.inventory_env_prompt_overrides_with_findings(
+        environ={"TLDW_PROMPT_FILE_CHAT__SYSTEM": str(override)}
+    )
+
+    assert result.assets == ()
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert (
+        result.findings[0].asset_id
+        == "prompt_file:env:TLDW_PROMPT_FILE_CHAT__SYSTEM:override.md"
     )
 
 

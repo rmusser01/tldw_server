@@ -83,6 +83,50 @@ def _symlink_finding(
     )
 
 
+def _safe_is_symlink(
+    *,
+    path: Path,
+    asset_id: str,
+    source_type: ContextAssetSource,
+    findings: list[ContextIntegrityFinding],
+) -> bool | None:
+    try:
+        return path.is_symlink()
+    except OSError as exc:
+        findings.append(
+            _verification_error(
+                asset_id=asset_id,
+                source_type=source_type,
+                summary=f"Unable to inspect context path symlink status: {exc.__class__.__name__}.",
+                path=path,
+                details={"error": str(exc)},
+            )
+        )
+        return None
+
+
+def _safe_is_dir(
+    *,
+    path: Path,
+    asset_id: str,
+    source_type: ContextAssetSource,
+    findings: list[ContextIntegrityFinding],
+) -> bool | None:
+    try:
+        return path.is_dir()
+    except OSError as exc:
+        findings.append(
+            _verification_error(
+                asset_id=asset_id,
+                source_type=source_type,
+                summary=f"Unable to inspect context path directory status: {exc.__class__.__name__}.",
+                path=path,
+                details={"error": str(exc)},
+            )
+        )
+        return None
+
+
 def _validate_inventory_root(
     *,
     root: Path,
@@ -235,7 +279,16 @@ def _read_skill_file_map(
         current_path = Path(current_root)
         for dirname in list(dirnames):
             child = current_path / dirname
-            if child.is_symlink():
+            is_symlink = _safe_is_symlink(
+                path=child,
+                asset_id=asset_id,
+                source_type="skill_file",
+                findings=findings,
+            )
+            if is_symlink is None:
+                dirnames.remove(dirname)
+                continue
+            if is_symlink:
                 findings.append(
                     _symlink_finding(
                         asset_id=asset_id,
@@ -248,7 +301,15 @@ def _read_skill_file_map(
 
         for filename in filenames:
             path = current_path / filename
-            if path.is_symlink():
+            is_symlink = _safe_is_symlink(
+                path=path,
+                asset_id=asset_id,
+                source_type="skill_file",
+                findings=findings,
+            )
+            if is_symlink is None:
+                continue
+            if is_symlink:
                 findings.append(
                     _symlink_finding(
                         asset_id=asset_id,
@@ -346,7 +407,15 @@ def inventory_user_skills_with_findings(*, user_id: int, skills_root: Path) -> I
             continue
 
         skill_file = skill_dir / "SKILL.md"
-        if skill_file.is_symlink():
+        skill_file_is_symlink = _safe_is_symlink(
+            path=skill_file,
+            asset_id=asset_id,
+            source_type="skill_file",
+            findings=findings,
+        )
+        if skill_file_is_symlink is None:
+            continue
+        if skill_file_is_symlink:
             findings.append(
                 _symlink_finding(
                     asset_id=asset_id,
@@ -428,7 +497,15 @@ def inventory_prompt_files_with_findings(*, prompts_dir: Path) -> InventoryResul
 
     for path in entries:
         asset_id = f"prompt_file:{path.name}"
-        if path.is_symlink():
+        is_symlink = _safe_is_symlink(
+            path=path,
+            asset_id=asset_id,
+            source_type="prompt_file",
+            findings=findings,
+        )
+        if is_symlink is None:
+            continue
+        if is_symlink:
             findings.append(
                 _symlink_finding(
                     asset_id=asset_id,
@@ -438,7 +515,15 @@ def inventory_prompt_files_with_findings(*, prompts_dir: Path) -> InventoryResul
                 )
             )
             continue
-        if path.is_dir():
+        is_dir = _safe_is_dir(
+            path=path,
+            asset_id=asset_id,
+            source_type="prompt_file",
+            findings=findings,
+        )
+        if is_dir is None:
+            continue
+        if is_dir:
             continue
         if path.suffix.lower() not in _PROMPT_SUFFIXES:
             continue
@@ -511,7 +596,15 @@ def inventory_env_prompt_overrides_with_findings(
         source_label = f"env:{env_name}"
         asset_id = f"prompt_file:{source_label}:{path.name}"
         metadata = {"path": str(path), "source_label": source_label}
-        if path.is_symlink():
+        is_symlink = _safe_is_symlink(
+            path=path,
+            asset_id=asset_id,
+            source_type="prompt_file",
+            findings=findings,
+        )
+        if is_symlink is None:
+            continue
+        if is_symlink:
             findings.append(
                 _symlink_finding(
                     asset_id=asset_id,
