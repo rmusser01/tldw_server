@@ -6,6 +6,9 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Personalization.companion_derivations import derive_companion_knowledge_cards
+from tldw_Server_API.app.core.Personalization.companion_user_ids import (
+    resolve_companion_storage_user_id,
+)
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.services.personalization_consolidation import PersonalizationConsolidationService
 
@@ -154,6 +157,43 @@ def test_consolidation_upserts_companion_knowledge_cards(companion_derivations_e
     assert "source_focus" in card_types
     project_card = next(card for card in cards if card["card_type"] == "project_focus")
     assert "security" in project_card["summary"]
+
+
+def test_consolidation_pairs_storage_dirs_with_logical_profile_ids(companion_derivations_env):
+    user_id = "user-alpha"
+    storage_user_id = resolve_companion_storage_user_id(user_id)
+    db = PersonalizationDB(str(DatabasePaths.get_personalization_db_path(storage_user_id)))
+    db.update_profile(user_id, enabled=1)
+    _insert_event(
+        db,
+        user_id=user_id,
+        event_type="reading_item_saved",
+        source_id="501",
+        tags=["storage-safe", "research"],
+        title="Storage-safe profile event",
+    )
+    _insert_event(
+        db,
+        user_id=user_id,
+        event_type="reading_item_updated",
+        source_id="502",
+        tags=["storage-safe", "research"],
+        title="Storage-safe follow-up",
+    )
+
+    service = PersonalizationConsolidationService()
+    targets = service._enumerate_user_targets()
+
+    assert [
+        (target.logical_user_id, target.storage_user_id)
+        for target in targets
+    ] == [(user_id, storage_user_id)]
+
+    service._consolidate_user(user_id, storage_user_id=storage_user_id)
+
+    cards = db.list_companion_knowledge_cards(user_id)
+    assert cards
+    assert not db.list_companion_knowledge_cards(storage_user_id)
 
 
 def test_derive_companion_knowledge_cards_emits_multiple_card_families(companion_derivations_env):

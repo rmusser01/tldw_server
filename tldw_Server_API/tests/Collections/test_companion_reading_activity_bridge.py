@@ -248,7 +248,9 @@ def test_reading_note_links_and_highlights_record_companion_activity(
     )
     assert highlight_create_event["source_type"] == "reading_highlight"
     assert highlight_create_event["source_id"] == str(highlight_id)
-    assert highlight_create_event["metadata"]["quote"] == "Important sentence"
+    assert highlight_create_event["metadata"]["quote_preview"] == "Important sentence"
+    assert highlight_create_event["metadata"]["quote_char_count"] == len("Important sentence")
+    assert "quote" not in highlight_create_event["metadata"]
     assert highlight_create_event["metadata"]["item_title"] == "Annotated Article"
     assert highlight_create_event["provenance"]["route"] == f"/api/v1/reading/items/{item_id}/highlight"
 
@@ -256,4 +258,5 @@ def test_reading_note_links_and_highlights_record_companion_activity(
         event for event in events if event["event_type"] == "reading_highlight_deleted"
     )
     assert highlight_delete_event["metadata"]["item_id"] == item_id
-    assert highlight_delete_event["metadata"]["quote"] == "Important sentence"
+    assert highlight_delete_event["metadata"]["quote_preview"] == "Important sentence"
+    assert "quote" not in highlight_delete_event["metadata"]

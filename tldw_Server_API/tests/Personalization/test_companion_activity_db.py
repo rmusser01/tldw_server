@@ -7,6 +7,7 @@ import pytest
 import tldw_Server_API.app.api.v1.API_Deps.personalization_deps as personalization_deps
 import tldw_Server_API.app.core.DB_Management.Personalization_DB as personalization_db_module
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
+from tldw_Server_API.app.core.Personalization.companion_user_ids import resolve_companion_storage_user_id
 
 
 pytestmark = pytest.mark.unit
@@ -55,6 +56,29 @@ def test_personalization_dependency_uses_safe_for_user_factory(monkeypatch):
     )
 
     assert result is sentinel
+
+
+def test_personalization_dependency_uses_shared_storage_id_for_text_users(monkeypatch):
+    sentinel = object()
+    opened_user_ids: list[str] = []
+
+    def _fake_for_user(cls, user_id: str | int):
+        opened_user_ids.append(str(user_id))
+        return sentinel
+
+    monkeypatch.setattr(
+        personalization_deps.PersonalizationDB,
+        "for_user",
+        classmethod(_fake_for_user),
+        raising=False,
+    )
+
+    result = personalization_deps.get_personalization_db_for_user(
+        user=SimpleNamespace(id="user-alpha")
+    )
+
+    assert result is sentinel
+    assert opened_user_ids == [resolve_companion_storage_user_id("user-alpha")]
 
 
 def test_personalization_db_constructor_does_not_resolve_input_path(monkeypatch, tmp_path) -> None:
