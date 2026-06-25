@@ -114,11 +114,18 @@ async def run_lifespan_startup_sequence(
 
 
 def _run_startup_warning_producers(*, app: Any, startup_core_handles: Any) -> None:
+    from tldw_Server_API.app.services.startup_context_integrity import (
+        produce_context_integrity_startup_warnings,
+    )
     from tldw_Server_API.app.services.startup_warning_sandbox import (
         produce_sandbox_startup_warnings,
     )
 
     registry = app.state.startup_warning_registry
+    produce_context_integrity_startup_warnings(
+        app_state=app.state,
+        registry=registry,
+    )
     produce_sandbox_startup_warnings(
         orchestrator=getattr(startup_core_handles, "startup_sandbox_orchestrator", None),
         registry=registry,
@@ -129,15 +136,9 @@ def _raise_if_startup_blocked(registry: StartupWarningRegistry) -> None:
     if not registry.should_block_startup():
         return
     blocking_warning = next(
-        (
-            item
-            for item in registry.list_warnings()
-            if item.startup_action == "block_startup"
-        ),
+        (item for item in registry.list_warnings() if item.startup_action == "block_startup"),
         None,
     )
     if blocking_warning is None:
         raise RuntimeError("startup blocked by unknown warning")
-    raise RuntimeError(
-        f"startup blocked by {blocking_warning.code}: {blocking_warning.summary}"
-    )
+    raise RuntimeError(f"startup blocked by {blocking_warning.code}: {blocking_warning.summary}")

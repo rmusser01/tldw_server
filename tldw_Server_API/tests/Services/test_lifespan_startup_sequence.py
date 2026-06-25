@@ -8,6 +8,24 @@ from fastapi import FastAPI
 pytestmark = pytest.mark.unit
 
 
+def _patch_context_integrity_producer(
+    monkeypatch: pytest.MonkeyPatch,
+    calls: list[dict[str, object]] | None = None,
+) -> None:
+    from tldw_Server_API.app.services import startup_context_integrity
+
+    def _fake_produce_context_integrity_startup_warnings(**kwargs):
+        if calls is not None:
+            calls.append(kwargs)
+        return []
+
+    monkeypatch.setattr(
+        startup_context_integrity,
+        "produce_context_integrity_startup_warnings",
+        _fake_produce_context_integrity_startup_warnings,
+    )
+
+
 @pytest.mark.asyncio
 async def test_run_lifespan_startup_sequence_runs_helpers_in_order_and_updates_runtime(
     monkeypatch: pytest.MonkeyPatch,
@@ -58,6 +76,7 @@ async def test_run_lifespan_startup_sequence_runs_helpers_in_order_and_updates_r
         "initialize_startup_worker_bootstrap",
         _fake_initialize_startup_worker_bootstrap,
     )
+    _patch_context_integrity_producer(monkeypatch)
 
     handles = await run_lifespan_startup_sequence(
         app=app,
@@ -121,6 +140,7 @@ async def test_startup_initializes_registry_and_runs_sandbox_producer(
     app = FastAPI()
     worker_runtime = LifespanWorkerRuntimeState()
     producer_calls: list[dict[str, object]] = []
+    context_calls: list[dict[str, object]] = []
 
     async def _fake_prepare_startup_pre_core(**kwargs):
         return True
@@ -162,6 +182,7 @@ async def test_startup_initializes_registry_and_runs_sandbox_producer(
         "produce_sandbox_startup_warnings",
         _fake_produce_sandbox_startup_warnings,
     )
+    _patch_context_integrity_producer(monkeypatch, context_calls)
 
     await run_lifespan_startup_sequence(
         app=app,
@@ -184,6 +205,7 @@ async def test_startup_initializes_registry_and_runs_sandbox_producer(
 
     registry = app.state.startup_warning_registry
     assert registry.summary()["total"] == 0
+    assert context_calls == [{"app_state": app.state, "registry": registry}]
     assert producer_calls == [
         {
             "orchestrator": "orch-sentinel",
@@ -265,6 +287,7 @@ async def test_startup_blocks_on_protocol_mismatch_warning(
         "produce_sandbox_startup_warnings",
         _fake_produce_sandbox_startup_warnings,
     )
+    _patch_context_integrity_producer(monkeypatch)
 
     with pytest.raises(RuntimeError, match="vz_helper_protocol_mismatch"):
         await run_lifespan_startup_sequence(
@@ -346,6 +369,7 @@ async def test_startup_warning_registry_is_available_on_app_state(
         "produce_sandbox_startup_warnings",
         lambda **kwargs: [],
     )
+    _patch_context_integrity_producer(monkeypatch)
 
     await run_lifespan_startup_sequence(
         app=app,

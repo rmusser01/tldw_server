@@ -42,6 +42,18 @@ async def run_lifespan_shutdown_sequence(
         app.state._tldw_shutdown_timing_segments = []
     except startup_guard_exceptions:
         pass
+    try:
+        from tldw_Server_API.app.core.Context_Integrity.resolver import (
+            clear_global_context_integrity_resolver,
+        )
+
+        clear_global_context_integrity_resolver()
+        if hasattr(app.state, "context_integrity_resolver"):
+            delattr(app.state, "context_integrity_resolver")
+        if hasattr(app.state, "context_integrity_boot_state"):
+            delattr(app.state, "context_integrity_boot_state")
+    except startup_guard_exceptions + import_exceptions:
+        pass
 
     legacy_shutdown_plan: list[Any] = []
     with timed_shutdown_segment(app, "transition_handoff"):

@@ -26,6 +26,15 @@ async def test_run_lifespan_shutdown_sequence_stops_lifecycle_phases_in_order(
     from tldw_Server_API.app.services.lifespan_worker_runtime_state import (
         LifespanWorkerRuntimeState,
     )
+    from tldw_Server_API.app.core.Context_Integrity.models import (
+        ContextIntegrityBootState,
+    )
+    from tldw_Server_API.app.core.Context_Integrity.resolver import (
+        ContextIntegrityResolver,
+        clear_global_context_integrity_resolver,
+        get_global_context_integrity_resolver,
+        set_global_context_integrity_resolver,
+    )
 
     app = FastAPI()
 
@@ -52,6 +61,16 @@ async def test_run_lifespan_shutdown_sequence_stops_lifecycle_phases_in_order(
             )
 
     worker_lifecycle_session = _FakeLifecycleSession()
+    boot_state = ContextIntegrityBootState(
+        mode="enforce",
+        degraded=False,
+        manifest_sequence=1,
+        manifest_digest="sha256:manifest",
+    )
+    resolver = ContextIntegrityResolver(boot_state)
+    app.state.context_integrity_resolver = resolver
+    app.state.context_integrity_boot_state = boot_state
+    set_global_context_integrity_resolver(resolver)
     worker_runtime = LifespanWorkerRuntimeState(
         worker_lifecycle_session=worker_lifecycle_session,
     )
@@ -65,6 +84,9 @@ async def test_run_lifespan_shutdown_sequence_stops_lifecycle_phases_in_order(
         yield
 
     async def _fake_transition_handoff(**kwargs):
+        assert get_global_context_integrity_resolver() is None
+        assert not hasattr(app.state, "context_integrity_resolver")
+        assert not hasattr(app.state, "context_integrity_boot_state")
         calls.append(("transition", kwargs))
         return SimpleNamespace(legacy_shutdown_plan=["transition-plan"])
 
@@ -146,26 +168,28 @@ async def test_run_lifespan_shutdown_sequence_stops_lifecycle_phases_in_order(
         "shutdown_final_cleanup_tail",
         _fake_final_cleanup,
     )
-
-    await lifespan_shutdown_sequence.run_lifespan_shutdown_sequence(
-        app=app,
-        worker_runtime=worker_runtime,
-        readiness_state={"ready": True},
-        db_pool="db-pool",
-        session_manager="session-manager",
-        heavy_startup_handles="heavy-handles",
-        build_legacy_shutdown_context=lambda **kwargs: kwargs,
-        apply_shutdown_transition_gate=lambda *_args, **_kwargs: None,
-        quiesce_owned_job_pollers_for_shutdown=lambda *_args, **_kwargs: None,
-        run_coordinated_shutdown=lambda **_kwargs: None,
-        startup_guard_exceptions=(RuntimeError,),
-        import_exceptions=(ImportError,),
-        in_pytest_runtime=True,
-        test_db_instance_ref="test-db-ref",
-        timed_shutdown_segment=_timed_shutdown_segment,
-        record_shutdown_timing_total=lambda _app, total_ms: recorded_totals.append(total_ms),
-        monotonic=lambda: next(monotonic_values),
-    )
+    try:
+        await lifespan_shutdown_sequence.run_lifespan_shutdown_sequence(
+            app=app,
+            worker_runtime=worker_runtime,
+            readiness_state={"ready": True},
+            db_pool="db-pool",
+            session_manager="session-manager",
+            heavy_startup_handles="heavy-handles",
+            build_legacy_shutdown_context=lambda **kwargs: kwargs,
+            apply_shutdown_transition_gate=lambda *_args, **_kwargs: None,
+            quiesce_owned_job_pollers_for_shutdown=lambda *_args, **_kwargs: None,
+            run_coordinated_shutdown=lambda **_kwargs: None,
+            startup_guard_exceptions=(RuntimeError,),
+            import_exceptions=(ImportError,),
+            in_pytest_runtime=True,
+            test_db_instance_ref="test-db-ref",
+            timed_shutdown_segment=_timed_shutdown_segment,
+            record_shutdown_timing_total=lambda _app, total_ms: recorded_totals.append(total_ms),
+            monotonic=lambda: next(monotonic_values),
+        )
+    finally:
+        clear_global_context_integrity_resolver()
 
     assert [name for name, _ in calls] == [
         "segment",
