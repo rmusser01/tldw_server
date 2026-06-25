@@ -832,28 +832,47 @@ def test_restore_prefix_offsets_for_finalization_does_not_mutate_input() -> None
     }
 
 
-def test_process_text_normalization_metric_excludes_prefix_restore(
+def test_process_text_restores_prefix_before_normalization_metric(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    observed: dict[str, float] = {}
     real_restore = chunker_module.restore_prefix_offsets_for_finalization
+    real_finalize = chunker_module.finalize_chunks
+    events: list[Any] = []
 
-    def slow_restore(*args: Any, **kwargs: Any) -> Any:
-        time.sleep(0.05)
+    def tracking_restore(*args: Any, **kwargs: Any) -> Any:
+        events.append("restore")
         return real_restore(*args, **kwargs)
 
-    def capture_histogram(name: str, value: float, **kwargs: Any) -> None:
-        if name == "chunker_normalization_seconds":
-            observed[name] = value
+    def tracking_finalize(*args: Any, **kwargs: Any) -> Any:
+        prepared = kwargs["prepared"]
+        chunks = kwargs["chunks"]
+        events.append(("finalize", prepared.prefix_offset, chunks[0].metadata["start_offset"]))
+        return real_finalize(*args, **kwargs)
 
-    monkeypatch.setattr(chunker_module, "restore_prefix_offsets_for_finalization", slow_restore)
+    def capture_histogram(name: str, value: float, **kwargs: Any) -> None:
+        if name in {"chunker_chunking_duration_seconds", "chunker_normalization_seconds"}:
+            events.append(name)
+
+    monkeypatch.setattr(chunker_module, "restore_prefix_offsets_for_finalization", tracking_restore)
+    monkeypatch.setattr(chunker_module, "finalize_chunks", tracking_finalize)
     monkeypatch.setattr(chunker_module, "observe_histogram", capture_histogram)
 
+    body = "Body text."
     payload = '{"meta": "x", "__tldw_frontmatter__": true}\nBody text.'
-    rows = Chunker().process_text(payload, options={"method": "words", "max_size": 100})
+    prefix_offset = len(payload) - len(body)
+    chunker = Chunker()
+
+    def fake_chunk_text(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return [{"text": body, "metadata": {"start_offset": 0, "end_offset": len(body)}}]
+
+    monkeypatch.setattr(chunker, "chunk_text", fake_chunk_text)
+
+    rows = chunker.process_text(payload, options={"method": "words", "max_size": 100})
 
     assert rows[0]["metadata"]["initial_document_json_metadata"] == {"meta": "x"}
-    assert observed["chunker_normalization_seconds"] < 0.03
+    assert events.index("chunker_chunking_duration_seconds") < events.index("restore")
+    assert events.index("restore") < events.index("chunker_normalization_seconds")
+    assert ("finalize", 0, prefix_offset) in events
 
 
 def test_finalize_chunks_restores_prefix_offset_to_all_offset_keys() -> None:

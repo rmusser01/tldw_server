@@ -25,7 +25,7 @@ modified_files:
 - tldw_Server_API/tests/Chunking/test_process_text_components.py
 - Docs/superpowers/plans/2026-06-24-chunker-process-text-refactor.md
 - backlog/tasks/task-9937 - Implement-Chunker-process-text-refactor.md
-updated_date: 2026-06-25 02:51
+updated_date: 2026-06-25 03:02
 ---
 
 ## Description
@@ -66,6 +66,8 @@ Task 5 follow-up review fix: narrowed `_metadata_to_dict` conversion-error handl
 Task 6 red check: added metadata finalization helper tests and import-boundary coverage before production implementation. `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chunking/test_process_text_components.py -q` exited 2 during collection because `tldw_Server_API.app.core.Chunking.process_text.metadata` did not exist. Direct import check `source .venv/bin/activate && python -c "import tldw_Server_API.app.core.Chunking.process_text.metadata"` exited 1 with `ModuleNotFoundError: No module named 'tldw_Server_API.app.core.Chunking.process_text.metadata'`.
 Task 6 metadata finalization extraction: added `process_text/metadata.py` with `finalize_chunks`, moved prefix offset restoration, timecode mapping, metadata defaults, document metadata, content hashing, and origin stamping out of `Chunker.process_text`, and wired normalization timing around the helper while keeping output/process metrics and tracing in `chunker.py`. Added helper coverage for all required metadata behaviors plus malformed timecode maps. Verification: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Chunking/test_process_text_components.py tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py tldw_Server_API/tests/Chunking/test_chunker_v2.py::TestV2Chunker::test_process_text_frontmatter_offsets_use_original_text -q` (74 passed, 160 warnings); compileall required files exit 0; Bandit `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/app/core/Chunking/process_text/metadata.py -f json -o /tmp/bandit_chunker_process_text_task6.json` exit 0 with 0 results and 0 errors; `git diff --check` exit 0.
 Task 6 review fix: restored pre-extraction metric boundaries by copying dispatched chunk metadata before `chunker_chunking_duration_seconds`, restoring prefix offsets before `chunker_normalization_seconds`, and passing a prefix-neutral PreparedText copy into `finalize_chunks` to avoid double restoration while keeping direct helper behavior. Added component coverage for finalization chunk copying, non-mutating prefix restoration, and normalization metric timing excluding prefix restoration latency.
+Task 6 test-quality follow-up: replaced the wall-clock based normalization metric boundary assertion with a deterministic call-order test that verifies chunking histogram, prefix restoration, prefix-neutral finalization, and normalization histogram ordering without sleeping.
+Task 6 test-quality follow-up verification: focused Task 6 pytest suite passed (77 passed, 166 warnings), compileall for touched files exited 0, and Bandit on `chunker.py` plus `process_text/metadata.py` reported 0 results and 0 errors in `/tmp/bandit_chunker_process_text_task6_review_fix2_controller.json`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
