@@ -473,7 +473,7 @@ jm.fail_job(job["id"], error="boom", retryable=True, worker_id=worker_id, lease_
 ### Encryption & Rotation
 
 - Enabling encryption
-  - Set `WORKFLOWS_ARTIFACT_ENC_KEY` to a base64-encoded AES key (16/24/32 bytes)
+  - Set `WORKFLOWS_ARTIFACT_ENC_KEY` to a strict base64-encoded 32-byte AES-256 key
   - Enable globally with `JOBS_ENCRYPT=true` or per-domain with `JOBS_ENCRYPT_<DOMAIN>=true`
   - When enabled, `payload`/`result` are stored as envelopes: `{ "_encrypted": {"_enc":"aesgcm:v1", ... } }`
 - Reading with dual keys (rotation window)

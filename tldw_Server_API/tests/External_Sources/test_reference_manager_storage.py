@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 
 import aiosqlite
@@ -148,7 +149,7 @@ async def test_oauth_state_metadata_is_encrypted_at_rest_when_crypto_enabled(
     sqlite_db: aiosqlite.Connection,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("WORKFLOWS_ARTIFACT_ENC_KEY", "reference-manager-test-key")
+    monkeypatch.setenv("WORKFLOWS_ARTIFACT_ENC_KEY", base64.b64encode(b"r" * 32).decode("ascii"))
 
     await svc.create_oauth_state(
         sqlite_db,

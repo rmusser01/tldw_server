@@ -1,8 +1,15 @@
+import ipaddress
+from types import SimpleNamespace
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 import tldw_Server_API.app.core.Security.setup_access_guard as guard
 from tldw_Server_API.app.core.Security.setup_access_guard import SetupAccessGuardMiddleware
+
+
+pytestmark = pytest.mark.unit
 
 
 def _make_app() -> FastAPI:
@@ -50,3 +57,37 @@ def test_setup_blocks_remote_when_toggle_off(monkeypatch):
     client = TestClient(_make_app())
     resp = client.get("/setup/ping")
     assert resp.status_code == 403
+
+
+def test_trusted_proxy_ignores_spoofed_leftmost_x_forwarded_for():
+    middleware = SetupAccessGuardMiddleware(_make_app())
+    request = SimpleNamespace(
+        client=SimpleNamespace(host="10.0.0.10"),
+        headers={
+            "x-forwarded-for": "127.0.0.1, 198.51.100.20, 10.0.0.10",
+        },
+    )
+
+    client_ip = middleware._resolve_client_ip(
+        request,
+        [ipaddress.ip_network("10.0.0.0/24")],
+    )
+
+    assert client_ip == "198.51.100.20"
+
+
+def test_trusted_proxy_skips_malformed_x_forwarded_for_entries():
+    middleware = SetupAccessGuardMiddleware(_make_app())
+    request = SimpleNamespace(
+        client=SimpleNamespace(host="10.0.0.10"),
+        headers={
+            "x-forwarded-for": "not-an-ip, 198.51.100.20, 10.0.0.10",
+        },
+    )
+
+    client_ip = middleware._resolve_client_ip(
+        request,
+        [ipaddress.ip_network("10.0.0.0/24")],
+    )
+
+    assert client_ip == "198.51.100.20"

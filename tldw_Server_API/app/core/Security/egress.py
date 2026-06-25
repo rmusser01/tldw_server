@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import contextlib
 import ipaddress
 import os
 import socket
+from concurrent import futures
 from collections.abc import Sequence
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -23,6 +23,11 @@ PROFILENAME = "WORKFLOWS_EGRESS_PROFILE"  # strict | permissive | custom
 # Webhook-specific per-tenant allow/deny controls
 WEBHOOK_ALLOWLIST_ENV = "WORKFLOWS_WEBHOOK_ALLOWLIST"
 WEBHOOK_DENYLIST_ENV = "WORKFLOWS_WEBHOOK_DENYLIST"
+DNS_RESOLVER_MAX_WORKERS = 4
+_DNS_RESOLVER_EXECUTOR = futures.ThreadPoolExecutor(
+    max_workers=DNS_RESOLVER_MAX_WORKERS,
+    thread_name_prefix="tldw-egress-dns",
+)
 
 
 PRIVATE_RANGES = [
@@ -99,6 +104,21 @@ def _host_matches_allowlist(host: str, allowlist: Sequence[str]) -> bool:
     return False
 
 
+def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
+    future = _DNS_RESOLVER_EXECUTOR.submit(
+        socket.getaddrinfo,
+        host,
+        None,
+        family=socket.AF_UNSPEC,  # both IPv4 and IPv6
+        type=socket.SOCK_STREAM,
+    )
+    try:
+        return list(future.result(timeout=timeout_s))
+    except (futures.TimeoutError, OSError, ValueError):
+        future.cancel()
+        return []
+
+
 def _resolve_host_ips(host: str) -> list[str]:
     """Resolve the host to all A/AAAA addresses with a short timeout.
 
@@ -106,26 +126,9 @@ def _resolve_host_ips(host: str) -> list[str]:
     in an empty list which callers must treat as unsafe.
     """
     try:
-        prev_timeout = None
-        try:
-            prev_timeout = socket.getdefaulttimeout()
-            # Short timeout to avoid long blocks during DNS resolution
-            socket.setdefaulttimeout(2.0)
-        except (OSError, TypeError, ValueError):
-            prev_timeout = None
-
-        try:
-            infos = socket.getaddrinfo(
-                host,
-                None,
-                family=socket.AF_UNSPEC,  # both IPv4 and IPv6
-                type=socket.SOCK_STREAM,
-            )
-        except (OSError, ValueError):
+        infos = _getaddrinfo_with_timeout(host)
+        if not infos:
             return []
-        finally:
-            with contextlib.suppress(OSError, TypeError, ValueError):
-                socket.setdefaulttimeout(prev_timeout)
 
         addrs: list[str] = []
         for _family, _stype, _proto, _canon, sockaddr in infos:
@@ -164,6 +167,12 @@ def _normalize_resolved_ips(ips: Sequence[str] | None) -> tuple[str, ...]:
     return tuple(out)
 
 
+def _same_resolved_ip_set(left: Sequence[str], right: Sequence[str]) -> bool:
+    return {str(ip).strip() for ip in left if str(ip).strip()} == {
+        str(ip).strip() for ip in right if str(ip).strip()
+    }
+
+
 def _resolve_and_check_private(host: str) -> tuple[bool, list[str]]:
     ips: list[str] = []
     # If the host is already an IP address, check directly
@@ -196,6 +205,7 @@ def evaluate_url_policy(
     denylist: Sequence[str] | None = None,
     block_private_override: bool | None = None,
     resolved_ips_override: Sequence[str] | None = None,
+    pinned_resolved_ips: Sequence[str] | None = None,
 ) -> URLPolicyResult:
     """Evaluate whether a URL passes the egress policy."""
     try:
@@ -292,8 +302,14 @@ def evaluate_url_policy(
                 if not resolved_ips:
                     return URLPolicyResult(False, "Host could not be resolved")
                 return URLPolicyResult(False, "URL resolves to a private or reserved address", resolved_ips)
+        pinned_ips = _normalize_resolved_ips(pinned_resolved_ips)
+        if pinned_ips and not _same_resolved_ip_set(resolved_ips, pinned_ips):
+            return URLPolicyResult(False, "DNS resolution changed since policy check", resolved_ips)
     else:
         resolved_ips = _normalize_resolved_ips(resolved_ips_override)
+        pinned_ips = _normalize_resolved_ips(pinned_resolved_ips)
+        if pinned_ips and resolved_ips and not _same_resolved_ip_set(resolved_ips, pinned_ips):
+            return URLPolicyResult(False, "DNS resolution changed since policy check", resolved_ips)
 
     return URLPolicyResult(True, None, resolved_ips)
 

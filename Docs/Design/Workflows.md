@@ -247,7 +247,7 @@ In single-user mode, the fixed user is exposed with admin-like claims for compat
 
 - PII/Secrets:
   - Log redaction for `log` step: `WORKFLOWS_REDACT_LOGS=true|false` (default true) applies PII redaction to messages before emitting to logs.
-  - Field-level encryption for artifact metadata: enable with `WORKFLOWS_ARTIFACT_ENCRYPTION=true` and provide `WORKFLOWS_ARTIFACT_ENC_KEY` (base64 16/24/32 bytes for AES-GCM). Encrypted metadata is transparently decrypted on read when the key is present; otherwise a placeholder is returned.
+  - Field-level encryption for artifact metadata: enable with `WORKFLOWS_ARTIFACT_ENCRYPTION=true` and provide `WORKFLOWS_ARTIFACT_ENC_KEY` (strict base64-encoded 32-byte AES-256 key). Encrypted metadata is transparently decrypted on read when the key is present; otherwise a placeholder is returned.
   - Scoped secrets injection: run requests accept `secrets` (map of strings). These are injected into the execution context as `context.secrets` and never persisted. Secrets are cleared from memory when the run reaches a terminal state.
 
 ### Webhooks: Delivery History, Replay, and Replay Protection

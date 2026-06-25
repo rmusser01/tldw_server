@@ -1022,7 +1022,7 @@ def _validate_egress_or_raise(
         res = evaluate_url_policy(
             url,
             block_private_override=block_override,
-            resolved_ips_override=pinned_ips,
+            pinned_resolved_ips=pinned_ips,
         )
     else:
         res = evaluate_url_policy(url, block_private_override=block_override)
@@ -1043,6 +1043,14 @@ def _validate_egress_or_raise(
                 "http_client_egress_denials_total", 1, labels={"reason": (reason or "denied")}
             )
         raise EgressPolicyError(reason)
+
+
+async def _avalidate_egress_or_raise(
+    url: str,
+    *,
+    dns_pin_cache: dict[str, tuple[str, ...]] | None = None,
+) -> None:
+    await asyncio.to_thread(_validate_egress_or_raise, url, dns_pin_cache=dns_pin_cache)
 
 
 def _is_url_allowed(url: str) -> bool:
@@ -2115,7 +2123,7 @@ async def _afetch_httpx(
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
-    _validate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
     _validate_proxies_or_raise(proxies)
 
     attempts = max(1, retry.attempts)
@@ -2214,7 +2222,7 @@ async def _afetch_httpx(
 
                 # Manual redirect handling inside each attempt
                 while True:
-                    _validate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
+                    await _avalidate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
                     resp, reason = await _do_once(ac, cur_url)
                     if resp is None:
                         # Special HEAD fallbacks: disable HTTP/2, then GET with Range 0-0
@@ -2439,7 +2447,7 @@ async def _afetch_aiohttp(
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
-    _validate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
     _validate_proxies_or_raise(proxies)
 
     attempts = max(1, retry.attempts)
@@ -2515,7 +2523,7 @@ async def _afetch_aiohttp(
             redirects = 0
 
             while True:
-                _validate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
+                await _avalidate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
                 resp, reason = await _do_once(session, cur_url)
                 if resp is None:
                     if method_upper == "HEAD" and not _head_get_range_tried:
@@ -2737,7 +2745,7 @@ async def apost(
     """
     if httpx is None:  # pragma: no cover
         raise RuntimeError("httpx is not available")  # noqa: TRY003
-    _validate_egress_or_raise(url)
+    await _avalidate_egress_or_raise(url)
     _validate_proxies_or_raise(proxies)
 
     need_close = False
@@ -3431,7 +3439,7 @@ async def _astream_bytes_httpx(
         raise RuntimeError("httpx is not available")  # noqa: TRY003
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
-    _validate_egress_or_raise(url)
+    await _avalidate_egress_or_raise(url)
     _validate_proxies_or_raise(proxies)
 
     need_close = False
@@ -3636,7 +3644,7 @@ async def _astream_bytes_aiohttp(
         raise RuntimeError("aiohttp is not available")  # noqa: TRY003
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
-    _validate_egress_or_raise(url)
+    await _avalidate_egress_or_raise(url)
     _validate_proxies_or_raise(proxies)
 
     session = client or _get_aiohttp_session()
@@ -3875,7 +3883,7 @@ async def _astream_sse_httpx(
         hdrs.update(headers)
     retry = retry or RetryPolicy()
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
-    _validate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
     _validate_proxies_or_raise(proxies)
 
     need_close = False
@@ -3894,7 +3902,7 @@ async def _astream_sse_httpx(
         for attempt in range(1, attempts + 1):
             # manual redirect handling before starting to read body
             while True:
-                _validate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
+                await _avalidate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
                 try:
                     # Optional cert pinning
                     try:
@@ -4012,7 +4020,7 @@ async def _astream_sse_aiohttp(
         hdrs.update(headers)
     retry = retry or RetryPolicy()
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
-    _validate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
     _validate_proxies_or_raise(proxies)
 
     session = client or _get_aiohttp_session()
@@ -4024,7 +4032,7 @@ async def _astream_sse_aiohttp(
 
     for attempt in range(1, attempts + 1):
         while True:
-            _validate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
+            await _avalidate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
             try:
                 # Optional cert pinning
                 try:

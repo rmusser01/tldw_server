@@ -28,15 +28,15 @@ untrusted URLs or sensitive configuration.
 
 - Reject unsafe outbound URLs before network calls.
 - Set security headers, CSP variants, HSTS behavior, and request IDs.
-- Guard remote Setup UI access and setup-specific CSP nonces.
+- Guard remote Setup UI access and setup-specific CSP policy.
 - Load and validate secrets without hard-coded defaults or log leakage.
 - Provide safe pickle and encrypted JSON helpers for callers that must handle
   serialized or sensitive blobs.
 
 ## Module Map
 
-- `egress.py` evaluates URL allow/deny/private-IP/port policies and tenant
-  webhook rules.
+- `egress.py` evaluates URL allow/deny/private-IP/port policies, DNS drift
+  checks for reused resolutions, and tenant webhook rules.
 - `url_validation.py` exposes endpoint-friendly safe-URL assertions.
 - `middleware.py` adds response hardening headers.
 - `request_id_middleware.py` sanitizes or creates `X-Request-ID`.
@@ -62,10 +62,13 @@ untrusted URLs or sensitive configuration.
 - Outbound callers should validate URLs through `egress.py` or
   `url_validation.py` before constructing network clients. The policy layer
   resolves global environment settings, workflow context, tenant webhook
-  allowances, private-address rejection, and port restrictions.
+  allowances, private-address rejection, port restrictions, and pinned DNS
+  resolution checks when a caller reuses an earlier egress decision.
 - Secret consumers use `secret_manager.py` for source precedence and validation;
   Jobs and related persistence use `crypto.py` for encrypted JSON blobs when
-  they need to store sensitive structured metadata.
+  they need to store sensitive structured metadata. AES-GCM helper keys must be
+  strict base64 encodings of 32-byte keys; invalid configured keys disable the
+  helper instead of being converted into derived key material.
 
 ### Security And Operations
 
@@ -73,7 +76,8 @@ untrusted URLs or sensitive configuration.
   create local allowlists that bypass private-IP, scheme, or port checks.
 - Setup UI rules are path-sensitive: changes to setup access or CSP behavior
   must preserve the distinction between `/setup`, `/docs`, and normal API
-  routes.
+  routes. Setup CSP is intentionally relaxed enough for the setup UI bundle and
+  does not rewrite response bodies to inject nonces.
 - Request IDs are sanitized on ingress and propagated through logs; do not let
   caller-provided IDs become log injection or unbounded cardinality sources.
 
