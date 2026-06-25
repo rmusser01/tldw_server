@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.main import app
+from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
+    UserProfileUpdateEntry,
+    UserProfileUpdateRequest,
+)
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     add_org_member,
     add_team_member,
@@ -16,6 +22,10 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     list_org_memberships_for_user,
 )
 from tldw_Server_API.app.core.AuthNZ.rate_limiter import get_rate_limiter
+from tldw_Server_API.app.core.UserProfiles.contracts import ProfileContractMode
+from tldw_Server_API.app.core.UserProfiles.response_mappers import (
+    LegacyProfileCommandResult,
+)
 
 
 def _run_async(coro):
@@ -442,6 +452,103 @@ def test_user_profile_update_rejects_inactive_user(auth_headers, monkeypatch) ->
         )
 
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_user_profile_update_delegates_to_command_service(monkeypatch) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import users as users_endpoints
+
+    version = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    write_conn = object()
+    captured: dict[str, object] = {}
+
+    async def _fake_resolve_user_context(_principal, *, allow_missing: bool = False):
+        del allow_missing
+        return {
+            "id": 7,
+            "username": "delegated-user",
+            "email": "delegated@example.invalid",
+            "role": "user",
+            "is_active": True,
+            "is_verified": True,
+            "storage_quota_mb": 5120,
+            "storage_used_mb": 0.0,
+            "created_at": version,
+            "last_login": None,
+        }
+
+    async def _fake_pool():
+        return object()
+
+    class _CommandService:
+        def __init__(self, *, db_pool) -> None:
+            captured["db_pool"] = db_pool
+
+        async def apply(self, command, *, db_conn, scope):
+            captured["command"] = command
+            captured["db_conn"] = db_conn
+            captured["scope"] = scope
+            return LegacyProfileCommandResult(
+                profile_version=version,
+                applied=("preferences.ui.theme",),
+            )
+
+    class _DirectUpdateServiceTrap:
+        def __init__(self, *_args, **_kwargs) -> None:
+            raise AssertionError("route must delegate to ProfileCommandService")
+
+    async def _audit(*_args, **_kwargs) -> None:
+        captured["audit"] = _kwargs
+
+    monkeypatch.setattr(users_endpoints, "_resolve_user_context", _fake_resolve_user_context)
+    monkeypatch.setattr(users_endpoints, "get_db_pool", _fake_pool)
+    monkeypatch.setattr(users_endpoints, "ProfileCommandService", _CommandService, raising=False)
+    monkeypatch.setattr(
+        users_endpoints,
+        "UserProfileUpdateService",
+        _DirectUpdateServiceTrap,
+        raising=False,
+    )
+    monkeypatch.setattr(users_endpoints, "_emit_user_profile_audit_event", _audit)
+
+    principal = AuthPrincipal(
+        kind="user",
+        user_id=7,
+        username="delegated-user",
+        roles=["user"],
+        permissions=[],
+        is_admin=False,
+        org_ids=[],
+        team_ids=[],
+        active_org_id=None,
+        active_team_id=None,
+    )
+    payload = UserProfileUpdateRequest(
+        profile_version=version,
+        updates=[UserProfileUpdateEntry(key="preferences.ui.theme", value="paper")],
+    )
+
+    response = await users_endpoints.update_current_user_profile(
+        payload,
+        http_request=object(),
+        principal=principal,
+        db=write_conn,
+    )
+
+    command = captured["command"]
+    assert command.actor_user_id == 7
+    assert command.target_user_id == 7
+    assert command.updates == (("preferences.ui.theme", "paper"),)
+    assert command.roles == frozenset({"user"})
+    assert command.dry_run is False
+    assert command.expected_profile_version == version
+    assert command.contract_mode == ProfileContractMode.LEGACY_V1
+    assert captured["db_conn"] is write_conn
+    assert captured["scope"] is None
+    assert response.profile_version == version
+    assert response.applied == ["preferences.ui.theme"]
+    assert response.skipped == []
+    assert captured["audit"]["applied_count"] == 1
 
 
 def test_admin_profile_update_audio_limits(auth_headers) -> None:
