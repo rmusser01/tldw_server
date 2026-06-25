@@ -234,6 +234,12 @@ class SnapshotManager:
             raise ValueError("Invalid workspace path")
 
         workspace_root = Path(workspace_path)
+        if workspace_root.is_symlink():
+            raise ValueError("Refusing symlink workspace root")
+        if workspace_root.exists():
+            if not workspace_root.is_dir():
+                raise ValueError(f"Invalid workspace path: {workspace_path}")
+            self._validate_workspace_tree_for_copy(workspace_root)
         backup_path = workspace_root.parent / f".restore_backup_{uuid.uuid4().hex}"
 
         # Take a backup first so failed restore can roll back atomically.

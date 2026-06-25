@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -20,6 +22,99 @@ def _spec(runtime: RuntimeType, *, network_policy: str | None = "deny_all") -> R
         network_policy=network_policy,
         timeout_sec=5,
     )
+
+
+def _run_entry_script_with_local_workspace(workspace: Path) -> subprocess.CompletedProcess[str]:
+    entry = workspace / "entry.sh"
+    local_entry = workspace / "entry.local.sh"
+    script = entry.read_text(encoding="utf-8").replace("/workspace", str(workspace))
+    script = script.replace("date +%s%3N 2>/dev/null || date +%s", "date +%s")
+    local_entry.write_text(script, encoding="utf-8")
+    local_entry.chmod(0o700)
+    return subprocess.run(
+        ["/bin/sh", str(local_entry)],
+        cwd=str(workspace),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _source_env_file(workspace: Path) -> str:
+    probe = workspace / "source-env.sh"
+    probe.write_text(
+        "#!/bin/sh\n"
+        "set -e\n"
+        ". ./.env\n"
+        "printf '%s' \"$SAFE_VALUE\" > sourced-value.txt\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["/bin/sh", str(probe)],
+        cwd=str(workspace),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        pytest.fail(f"env file failed to source: stdout={result.stdout!r} stderr={result.stderr!r}")
+    return (workspace / "sourced-value.txt").read_text(encoding="utf-8")
+
+
+def test_lima_entry_script_writes_status_for_nonzero_user_command(tmp_path: Path) -> None:
+    LimaRunner._write_entry_script(str(tmp_path), ["false"])
+
+    result = _run_entry_script_with_local_workspace(tmp_path)
+
+    assert result.returncode == 1
+    status = json.loads((tmp_path / ".sandbox_status.json").read_text(encoding="utf-8"))
+    assert status["exit_code"] == 1
+    assert status["reason"] == "exit"
+
+
+def test_firecracker_entry_script_writes_status_for_nonzero_user_command(tmp_path: Path) -> None:
+    firecracker_module._write_entry_script(str(tmp_path), ["false"])
+
+    result = _run_entry_script_with_local_workspace(tmp_path)
+
+    assert result.returncode == 1
+    status = json.loads((tmp_path / ".sandbox_status.json").read_text(encoding="utf-8"))
+    assert status["exit_code"] == 1
+    assert status["reason"] == "exit"
+
+
+def test_lima_env_file_quotes_values_and_rejects_invalid_keys(tmp_path: Path) -> None:
+    marker = tmp_path / "env-injection-created"
+    raw_value = f"ok'; touch {marker}; echo '"
+    LimaRunner._write_env_file(
+        str(tmp_path),
+        {
+            "SAFE_VALUE": raw_value,
+            "BAD-NAME": "bad",
+        },
+    )
+
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "BAD-NAME" not in env_text
+    assert _source_env_file(tmp_path) == raw_value
+    assert not marker.exists()
+
+
+def test_firecracker_env_file_quotes_values_and_rejects_invalid_keys(tmp_path: Path) -> None:
+    marker = tmp_path / "env-injection-created"
+    raw_value = f"ok'; touch {marker}; echo '"
+    firecracker_module._write_env_file(
+        str(tmp_path),
+        {
+            "SAFE_VALUE": raw_value,
+            "BAD-NAME": "bad",
+        },
+    )
+
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "BAD-NAME" not in env_text
+    assert _source_env_file(tmp_path) == raw_value
+    assert not marker.exists()
 
 
 def test_lima_real_run_cleans_run_dir_when_setup_fails_after_workspace_create(

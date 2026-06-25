@@ -251,27 +251,40 @@ def apply_egress_rules_atomic(container_ip: str, targets: Sequence[str], label: 
             logger.debug("iptables-restore failed; falling back to iterative iptables invocations")
     except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
         logger.debug(f"iptables-restore invocation failed: {e}")
-    # Fallback path: iterative `iptables` calls
+    # Fallback path: iterative `iptables` calls. This path must still fail
+    # closed; reporting rules as installed when iptables returned non-zero
+    # leaves allowlist containers with unrestricted egress.
+    failures: list[str] = []
     for tgt in targets:
         dspec = tgt if "/" in tgt else f"{tgt}/32"
         try:
-            subprocess.run([
+            proc = subprocess.run([
                 "iptables", "-I", "DOCKER-USER", "1",
                 "-s", container_ip, "-d", dspec, "-j", "ACCEPT",
                 "-m", "comment", "--comment", label,
             ], check=False)
-            rule_specs.append(f"DOCKER-USER -s {container_ip} -d {dspec} -j ACCEPT -m comment --comment {label}")
+            if proc.returncode == 0:
+                rule_specs.append(f"DOCKER-USER -s {container_ip} -d {dspec} -j ACCEPT -m comment --comment {label}")
+            else:
+                failures.append(f"ACCEPT {dspec} returned {proc.returncode}")
         except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
             logger.debug("network policy: iptables ACCEPT rule failed for {} -> {}: {}", container_ip, dspec, e)
+            failures.append(f"ACCEPT {dspec} raised {e}")
     try:
-        subprocess.run([
+        proc = subprocess.run([
             "iptables", "-A", "DOCKER-USER",
             "-s", container_ip, "-j", "DROP",
             "-m", "comment", "--comment", label,
         ], check=False)
-        rule_specs.append(f"DOCKER-USER -s {container_ip} -j DROP -m comment --comment {label}")
+        if proc.returncode == 0:
+            rule_specs.append(f"DOCKER-USER -s {container_ip} -j DROP -m comment --comment {label}")
+        else:
+            failures.append(f"DROP returned {proc.returncode}")
     except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
         logger.debug("network policy: iptables DROP rule failed for {}: {}", container_ip, e)
+        failures.append(f"DROP raised {e}")
+    if failures:
+        raise RuntimeError(f"iptables egress rule application failed: {'; '.join(failures)}")
     return rule_specs
 
 

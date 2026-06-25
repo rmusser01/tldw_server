@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
 
+import tldw_Server_API.app.core.Sandbox.runners.docker_runner as docker_module
 from tldw_Server_API.app.core.Sandbox.models import RunSpec, RuntimeType
 from tldw_Server_API.app.core.Sandbox.runners.docker_runner import DockerRunner
 
@@ -14,6 +16,25 @@ class _StopAfterCreate(Exception):
     """Sentinel used to stop DockerRunner after docker create is assembled."""
 
     pass
+
+
+class _FakeLogger:
+    def __init__(self) -> None:
+        self.info_messages: list[str] = []
+        self.warning_messages: list[str] = []
+        self.debug_messages: list[str] = []
+
+    def info(self, message: str, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+        self.info_messages.append(message)
+
+    def warning(self, message: str, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+        self.warning_messages.append(message)
+
+    def debug(self, message: str, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+        self.debug_messages.append(message)
 
 
 def _capture_docker_create_command(monkeypatch, spec: RunSpec) -> list[str]:
@@ -39,6 +60,69 @@ def _capture_docker_create_command(monkeypatch, spec: RunSpec) -> list[str]:
     if not create_cmd:
         pytest.fail(f"docker create command not captured: {recorded_cmds!r}")
     return create_cmd
+
+
+@pytest.mark.unit
+def test_docker_runner_fails_closed_when_configured_security_opt_is_rejected(monkeypatch) -> None:
+    """Configured seccomp/AppArmor hardening should not be silently removed."""
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")
+    monkeypatch.delenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", raising=False)
+    monkeypatch.setenv("SANDBOX_DOCKER_SECCOMP", "/tmp/tldw-test-seccomp.json")
+    create_attempts: list[list[str]] = []
+
+    def _fake_check_output(cmd, text: bool = False, timeout: int | None = None) -> str:
+        del text, timeout
+        cmd_list = list(cmd)
+        if cmd_list[:3] == ["docker", "version", "--format"]:
+            return "24.0.0"
+        if cmd_list[:2] == ["docker", "create"]:
+            create_attempts.append(cmd_list)
+            if len(create_attempts) == 1:
+                raise subprocess.CalledProcessError(125, cmd_list)
+            raise AssertionError("docker create retried without required security options")
+        raise AssertionError(f"Unexpected check_output call: {cmd_list!r}")
+
+    monkeypatch.setattr("subprocess.check_output", _fake_check_output)
+    spec = RunSpec(
+        session_id=None,
+        runtime=RuntimeType.docker,
+        base_image="python:3.11-slim",
+        command=["python", "-c", "print('ok')"],
+        timeout_sec=5,
+        network_policy="deny_all",
+        run_as_root=False,
+        read_only_root=True,
+    )
+
+    with pytest.raises(RuntimeError, match="docker create failed"):
+        DockerRunner().start_run(run_id="rid-seccomp-fail", spec=spec)
+
+    assert len(create_attempts) == 1
+    assert "seccomp=/tmp/tldw-test-seccomp.json" in create_attempts[0]
+
+
+@pytest.mark.unit
+def test_docker_runner_redacts_env_values_from_logged_create_command(monkeypatch) -> None:
+    """Docker command logging should not expose user-provided environment values."""
+    fake_logger = _FakeLogger()
+    monkeypatch.setattr(docker_module, "logger", fake_logger)
+    spec = RunSpec(
+        session_id=None,
+        runtime=RuntimeType.docker,
+        base_image="python:3.11-slim",
+        command=["python", "-c", "print('ok')"],
+        timeout_sec=5,
+        network_policy="deny_all",
+        run_as_root=False,
+        read_only_root=True,
+        env={"API_TOKEN": "secret-token-value"},
+    )
+
+    _capture_docker_create_command(monkeypatch, spec)
+
+    logged = "\n".join(fake_logger.info_messages)
+    assert "secret-token-value" not in logged
+    assert "API_TOKEN=<redacted>" in logged
 
 
 def _staged_mount_source(create_cmd: list[str]) -> str:

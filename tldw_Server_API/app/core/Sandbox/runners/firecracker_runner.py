@@ -4,6 +4,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import stat
@@ -35,6 +36,7 @@ _FIRECRACKER_RUNNER_NONCRITICAL_EXCEPTIONS = (
 )
 
 _OWNER_EXEC_ONLY_FILE_MODE = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
+_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _truthy(v: str | None) -> bool:
@@ -167,8 +169,10 @@ fi
 start_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 start_ms=$(date +%s%3N 2>/dev/null || date +%s)
 # Run command, capture stdout/stderr
+set +e
 /bin/sh -lc "{user_cmd}" > {log_path} 2>&1
 exit_code=$?
+set -e
 end_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 end_ms=$(date +%s%3N 2>/dev/null || date +%s)
 duration_ms=$((end_ms - start_ms))
@@ -184,15 +188,17 @@ exit $exit_code
 
 
 def _write_env_file(workspace: str, env: dict[str, str]) -> None:
+    import shlex
+
     if not env:
         return
     lines = []
     for k, v in env.items():
         key = str(k).strip()
-        if not key:
+        if not _ENV_KEY_RE.fullmatch(key):
             continue
         val = str(v).replace("\n", " ")
-        lines.append(f"{key}={val}")
+        lines.append(f"{key}={shlex.quote(val)}")
     if lines:
         Path(workspace, ".env").write_text("\n".join(lines) + "\n", encoding="utf-8")
 

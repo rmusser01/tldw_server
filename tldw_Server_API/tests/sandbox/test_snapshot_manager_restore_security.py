@@ -74,6 +74,30 @@ def test_restore_snapshot_rejects_symlink_member(tmp_path: Path) -> None:
     assert (workspace / "keep.txt").read_text(encoding="utf-8") == "safe"
 
 
+def test_restore_snapshot_rejects_symlink_workspace_root_before_touching_target(tmp_path: Path) -> None:
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    source_workspace = tmp_path / "source-workspace"
+    source_workspace.mkdir(parents=True, exist_ok=True)
+    (source_workspace / "restored.txt").write_text("snapshot", encoding="utf-8")
+    snapshot = manager.create_snapshot("sess-root-link", str(source_workspace))
+
+    outside_target = tmp_path / "outside-target"
+    outside_target.mkdir(parents=True, exist_ok=True)
+    outside_file = outside_target / "keep.txt"
+    outside_file.write_text("do not touch", encoding="utf-8")
+    symlink_root = tmp_path / "workspace-link"
+    try:
+        os.symlink(str(outside_target), str(symlink_root))
+    except OSError as exc:
+        pytest.skip(f"symlink creation not supported in this environment: {exc}")
+
+    with pytest.raises(ValueError, match="Refusing symlink workspace root"):
+        manager.restore_snapshot("sess-root-link", snapshot["snapshot_id"], str(symlink_root))
+
+    assert outside_file.read_text(encoding="utf-8") == "do not touch"
+    assert not (outside_target / "restored.txt").exists()
+
+
 def test_create_snapshot_during_concurrent_atomic_writes_is_consistent(tmp_path: Path) -> None:
     manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
     workspace = tmp_path / "workspace"
