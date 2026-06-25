@@ -1,0 +1,167 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.unit
+
+
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlinks are unavailable in this environment: {exc}")
+
+
+def test_inventory_user_skill_directory_includes_supporting_files(tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import inventory_user_skills
+
+    skill_dir = tmp_path / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: demo\n---\nBody", encoding="utf-8")
+    (skill_dir / "ref.md").write_text("reference", encoding="utf-8")
+
+    assets = inventory_user_skills(user_id=1, skills_root=tmp_path / "skills")
+
+    assert len(assets) == 1
+    assert assets[0].asset_id == "skill:user:1/demo"
+    assert assets[0].executable is True
+    assert assets[0].source_type == "skill_file"
+
+
+def test_inventory_user_skill_digest_changes_when_supporting_file_changes(tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import inventory_user_skills
+
+    skill_dir = tmp_path / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: demo\n---\nBody", encoding="utf-8")
+    reference = skill_dir / "ref.md"
+    reference.write_text("reference", encoding="utf-8")
+
+    original = inventory_user_skills(user_id=1, skills_root=tmp_path / "skills")
+    reference.write_text("changed reference", encoding="utf-8")
+    changed = inventory_user_skills(user_id=1, skills_root=tmp_path / "skills")
+
+    assert original[0].digest != changed[0].digest
+
+
+def test_inventory_user_skill_reports_symlink_escape_without_hashing_target(tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import (
+        inventory_user_skills_with_findings,
+    )
+
+    skills_root = tmp_path / "skills"
+    skill_dir = skills_root / "demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: demo\n---\nBody", encoding="utf-8")
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside secret", encoding="utf-8")
+    _symlink_or_skip(skill_dir / "escape.md", outside)
+
+    first = inventory_user_skills_with_findings(user_id=1, skills_root=skills_root)
+    outside.write_text("changed outside secret", encoding="utf-8")
+    second = inventory_user_skills_with_findings(user_id=1, skills_root=skills_root)
+
+    assert len(first.assets) == 1
+    assert first.assets[0].digest == second.assets[0].digest
+    assert [finding.state for finding in first.findings] == ["verification_error"]
+    assert first.findings[0].asset_id == "skill:user:1/demo"
+
+
+def test_inventory_prompt_files_finds_supported_extensions(tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import inventory_prompt_files
+
+    prompts = tmp_path / "Prompts"
+    prompts.mkdir()
+    (prompts / "rag.prompts.yaml").write_text("answer: prompt", encoding="utf-8")
+    (prompts / "ignore.bin").write_bytes(b"no")
+
+    assets = inventory_prompt_files(prompts_dir=prompts)
+
+    assert [asset.asset_id for asset in assets] == ["prompt_file:rag.prompts.yaml"]
+    assert assets[0].executable is False
+
+
+def test_inventory_prompt_files_does_not_recurse_or_follow_symlink_escape(tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import (
+        inventory_prompt_files_with_findings,
+    )
+
+    prompts = tmp_path / "Prompts"
+    prompts.mkdir()
+    (prompts / "root.md").write_text("root prompt", encoding="utf-8")
+    nested = prompts / "nested"
+    nested.mkdir()
+    (nested / "nested.md").write_text("nested prompt", encoding="utf-8")
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside prompt", encoding="utf-8")
+    _symlink_or_skip(prompts / "escape.md", outside)
+
+    result = inventory_prompt_files_with_findings(prompts_dir=prompts)
+
+    assert [asset.asset_id for asset in result.assets] == ["prompt_file:root.md"]
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert result.findings[0].asset_id == "prompt_file:escape.md"
+
+
+def test_inventory_prompt_files_reports_symlinked_directory_escape(tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import (
+        inventory_prompt_files_with_findings,
+    )
+
+    prompts = tmp_path / "Prompts"
+    prompts.mkdir()
+    outside = tmp_path / "outside_prompts"
+    outside.mkdir()
+    (outside / "outside.md").write_text("outside prompt", encoding="utf-8")
+    _symlink_or_skip(prompts / "linked_prompts", outside)
+
+    result = inventory_prompt_files_with_findings(prompts_dir=prompts)
+
+    assert result.assets == ()
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert result.findings[0].asset_id == "prompt_file:linked_prompts"
+
+
+def test_inventory_env_prompt_overrides_finds_configured_files(tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import (
+        inventory_env_prompt_overrides,
+    )
+
+    override = tmp_path / "override.md"
+    override.write_text("override prompt", encoding="utf-8")
+
+    assets = inventory_env_prompt_overrides(
+        environ={"TLDW_PROMPT_FILE_CHAT__SYSTEM": str(override)}
+    )
+
+    assert [asset.asset_id for asset in assets] == [
+        "prompt_file:env:TLDW_PROMPT_FILE_CHAT__SYSTEM:override.md"
+    ]
+    assert assets[0].metadata["source_label"] == "env:TLDW_PROMPT_FILE_CHAT__SYSTEM"
+
+
+def test_inventory_env_prompt_overrides_reports_missing_and_ignores_other_vars(tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import (
+        inventory_env_prompt_overrides_with_findings,
+    )
+
+    override = tmp_path / "override.md"
+    override.write_text("override prompt", encoding="utf-8")
+    missing = tmp_path / "missing.md"
+
+    result = inventory_env_prompt_overrides_with_findings(
+        environ={
+            "OTHER_PROMPT_FILE": str(missing),
+            "TLDW_PROMPT_FILE_EMPTY": "  ",
+            "TLDW_PROMPT_FILE_CHAT__SYSTEM": str(override),
+            "TLDW_PROMPT_FILE_MISSING": str(missing),
+        }
+    )
+
+    assert [asset.asset_id for asset in result.assets] == [
+        "prompt_file:env:TLDW_PROMPT_FILE_CHAT__SYSTEM:override.md"
+    ]
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert result.findings[0].asset_id == "prompt_file:env:TLDW_PROMPT_FILE_MISSING:missing.md"
