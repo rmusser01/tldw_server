@@ -14,6 +14,8 @@ from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
 )
 
 _SIGNATURE_ALGORITHM = "hmac-sha256"
+_SUPPORTED_SCHEMA_VERSION = 1
+_BASE64URL_SIGNATURE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
 
 
 class ManifestSignatureError(ValueError):
@@ -58,7 +60,16 @@ class HmacManifestSigner:
         return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
     def verify(self, payload: bytes, signature: str) -> bool:
-        return hmac.compare_digest(self.sign(payload), signature)
+        try:
+            signature.encode("ascii")
+        except UnicodeEncodeError:
+            return False
+        if not signature or any(char not in _BASE64URL_SIGNATURE_CHARS for char in signature):
+            return False
+        try:
+            return hmac.compare_digest(self.sign(payload), signature)
+        except TypeError:
+            return False
 
 
 def _stable_json(payload: Mapping[str, Any]) -> bytes:
@@ -78,13 +89,21 @@ def _require_int_field(manifest: Mapping[str, Any], field_name: str) -> int:
     return value
 
 
-def _require_entries(manifest: Mapping[str, Any]) -> list[Any]:
+def _require_entries(manifest: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
     if "entries" not in manifest:
         raise ManifestSignatureError("manifest entries are required")
     entries = manifest["entries"]
     if not isinstance(entries, list):
         raise ManifestSignatureError("manifest entries must be a list")
-    return entries
+    verified_entries: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            raise ManifestSignatureError("manifest entries must be objects")
+        for key in entry:
+            if not isinstance(key, str):
+                raise ManifestSignatureError("manifest entry keys must be strings")
+        verified_entries.append(dict(entry))
+    return tuple(verified_entries)
 
 
 def create_signed_manifest(
@@ -92,7 +111,7 @@ def create_signed_manifest(
     sequence: int,
     entries: list[dict[str, Any]],
     signer: HmacManifestSigner,
-    schema_version: int = 1,
+    schema_version: int = _SUPPORTED_SCHEMA_VERSION,
 ) -> dict[str, Any]:
     manifest_entries = [dict(entry) for entry in entries]
     manifest = {
@@ -136,7 +155,9 @@ def verify_signed_manifest(
     if not isinstance(signature_value, str) or not signer.verify(payload, signature_value):
         raise ManifestSignatureError("manifest signature mismatch")
 
-    _require_int_field(manifest, "schema_version")
+    schema_version = _require_int_field(manifest, "schema_version")
+    if schema_version != _SUPPORTED_SCHEMA_VERSION:
+        raise ManifestSignatureError("unsupported manifest schema version")
     sequence = _require_int_field(manifest, "sequence")
     if anti_rollback_anchor and (
         sequence < anti_rollback_anchor.sequence
@@ -149,5 +170,5 @@ def verify_signed_manifest(
         sequence=sequence,
         manifest_digest=expected_digest,
         key_id=signer.key_id,
-        entries=tuple(dict(item) for item in entries),
+        entries=entries,
     )
