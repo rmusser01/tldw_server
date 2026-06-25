@@ -15,7 +15,7 @@ documentation:
 - Docs/superpowers/plans/2026-06-25-rpg-campaign-session-runtime-implementation-plan.md
 modified_files:
 - Docs/superpowers/plans/2026-06-25-rpg-campaign-session-runtime-implementation-plan.md
-updated_date: 2026-06-25 02:44
+updated_date: 2026-06-25 03:11
 ---
 
 ## Description
@@ -44,12 +44,14 @@ Write the implementation plan for the approved RPG/TTRPG campaign/session runtim
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Wrote implementation plan for approved RPG campaign/session runtime design. Verified required plan header, ran red-flag scan for incomplete markers, and ran git diff --check on the plan and task file. Bandit is not applicable to this planning-only change because no Python implementation code was modified.
+Reopened for pre-execution review amendments. Local review found that the plan's idempotency uniqueness would block multi-event commits, append plus snapshot/proposal updates were not described as one atomic transaction, and several API/MCP snippets used __dict__ on slots dataclasses.
+Pre-execution review amendments completed. Updated the plan to require optimistic concurrency (`expected_last_event_sequence` plus snapshot version checks), operation-scoped idempotency records for all mutating REST/MCP operations, atomic event/snapshot/session/proposal/idempotency commits, server-derived event sources, explicit REST permission dependencies, MCP DB access via `context.db_paths["chacha"]`, protocol-level MCP authorization tests, adapter-owned check resolution, full V1 reducer event coverage, and corrected schema/service/API/MCP signatures. Ran `git diff --check` and markdown fence balance check on the amended plan.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implementation plan created at Docs/superpowers/plans/2026-06-25-rpg-campaign-session-runtime-implementation-plan.md. The plan maps the approved design into staged TDD tasks for adapters, ChaChaNotes persistence, reducer, dice/checks, service authority/proposals, REST APIs, privileges, rules context, MCP tools, documentation, and verification. Self-review found and corrected draft issues before final checks.
+Implementation plan amended after subagent-driven pre-execution review. The remaining plan is aligned around atomic ledger commits, operation-scoped idempotency, explicit API/MCP authorization, adapter boundaries, and complete V1 event validation/reducer coverage.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

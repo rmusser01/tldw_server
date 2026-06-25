@@ -74,6 +74,25 @@ Create tests:
 - Keep bundled PF2e prose out of v1 unless an explicit source/license inventory is added in the same task; mechanics metadata and citations are enough for the adapter contract.
 - Do not add maps, token positions, battlemap assets, shared tabletop synchronization, or a FoundryVTT-style canvas.
 - Every mutating service path must use an idempotency key or reject repeated unsafe writes with a domain error.
+- Every ledger-affecting write must carry `expected_last_event_sequence`; snapshot-affecting writes must also verify `current_snapshot_version` inside the same transaction.
+- Convert slots dataclasses with `dataclasses.asdict()` or dedicated serializer helpers. Do not use `obj.__dict__` for RPG dataclasses because they use `slots=True`.
+- Use `CharactersRAGDB.transaction()` for SQLite writes. Do not hand-roll `BEGIN`/`COMMIT` around ChaChaNotes connections.
+- REST endpoints must combine token-scope metadata with explicit permission dependencies such as `RequirePermission("rpg.sessions.manage")`; `rbac_rate_limit()` and `TokenScopeGuard()` alone are not authorization.
+- REST clients must not choose privileged event sources. REST event writes are source type `user`; MCP event writes are source type `mcp`; model/import/system sources are created by internal service paths only.
+- Existing MCP storage modules open user databases from `context.db_paths["chacha"]`; the RPG MCP module must follow that pattern and fail closed when `context.user_id` or the chacha DB path is absent.
+
+## Pre-Execution Review Amendments
+
+These amendments supersede any later snippet that conflicts with them.
+
+- Idempotency belongs to request/batch records, not event-row uniqueness. A single idempotent operation can append multiple events.
+- Event append, snapshot insert, session cursor updates, idempotency response storage, and proposal status changes must be one repository transaction.
+- Idempotency replay must return the stored operation response without re-reducing or writing another snapshot.
+- Mixed-source event batches are rejected. Authority is evaluated from the server-derived source and event action class, not from client-provided payload fields.
+- Unsupported event types are rejected before persistence through a shared event registry used by validation and the reducer.
+- Task 6 cannot require endpoint tests to pass until privilege catalog entries are in place. Implement catalog entries before the full API test run, or include the catalog update in the same task.
+- Task 6 must define all referenced schemas and service methods before endpoint handlers are added: `RPGRulesLookupRequest`, `RPGContextBuildRequest`, roll/proposal response schemas, `list_campaigns`, `get_session_payload`, and `list_events`.
+- The V1 REST route matrix must be explicit before endpoint implementation: method, path, response model, permission, endpoint ID, idempotency requirement, and expected sequence requirement.
 
 ### Task 1: Core RPG Models And Adapter Registry
 
@@ -262,8 +281,7 @@ class RPGSessionEvent:
     source_type: RPGSourceType
     source_actor_id: str | None
     source_label: str | None
-    idempotency_key: str | None
-    request_payload_hash: str | None
+    operation_id: int | None
     event_schema_version: str
     adapter_key: str
     adapter_version: str
@@ -277,6 +295,7 @@ class RPGSnapshotState:
     actors: dict[str, dict[str, Any]] = field(default_factory=dict)
     resources: dict[str, dict[str, Any]] = field(default_factory=dict)
     clocks: dict[str, dict[str, Any]] = field(default_factory=dict)
+    rolls: list[dict[str, Any]] = field(default_factory=list)
     notes: list[dict[str, Any]] = field(default_factory=list)
     recap: str = ""
     quests: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -323,6 +342,18 @@ class RuleAdapter(Protocol):
     def check_schema(self) -> dict[str, Any]:
         raise NotImplementedError
 
+    def supported_event_types(self) -> set[str]:
+        raise NotImplementedError
+
+    def validate_actor(self, actor_payload: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def resolve_check(self, roller: Any, payload: dict[str, Any]) -> Any:
+        raise NotImplementedError
+
+    def content_pack_refs(self) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
     def info(self) -> RuleAdapterInfo:
         raise NotImplementedError
 
@@ -345,6 +376,31 @@ class StaticRuleAdapter:
 
     def check_schema(self) -> dict[str, Any]:
         return dict(self._check_schema)
+
+    def supported_event_types(self) -> set[str]:
+        return {
+            "actor.upserted",
+            "clock.updated",
+            "faction.upserted",
+            "inventory.item.upserted",
+            "location.upserted",
+            "note.added",
+            "npc.upserted",
+            "quest.upserted",
+            "roll.recorded",
+            "rule.reference.added",
+            "ruling.added",
+            "scene.updated",
+        }
+
+    def validate_actor(self, actor_payload: dict[str, Any]) -> dict[str, Any]:
+        return dict(actor_payload)
+
+    def resolve_check(self, roller: Any, payload: dict[str, Any]) -> Any:
+        raise NotImplementedError("adapter-specific check resolution is implemented in Task 4")
+
+    def content_pack_refs(self) -> list[dict[str, Any]]:
+        return []
 
     def info(self) -> RuleAdapterInfo:
         return RuleAdapterInfo(
@@ -473,8 +529,41 @@ git commit -m "feat: add RPG rules adapter registry"
 - [ ] **Step 1: Write failing repository tests**
 
 ```python
+import pytest
+
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
+
+
+def _campaign(repo: RPGRepository, owner_user_id: int = 42, adapter_key: str = "fate"):
+    return repo.create_campaign(
+        owner_user_id,
+        "Campaign",
+        None,
+        adapter_key,
+        "1.0.0",
+        {},
+        [],
+        idempotency_key=f"campaign-{adapter_key}",
+        request_payload_hash=f"hash-campaign-{adapter_key}",
+        source_type="user",
+    )
+
+
+def _session(repo: RPGRepository, campaign_id: int, owner_user_id: int = 42, adapter_key: str = "fate"):
+    return repo.create_session(
+        owner_user_id,
+        campaign_id,
+        "Opening",
+        adapter_key,
+        "1.0.0",
+        {},
+        None,
+        [],
+        idempotency_key=f"session-{campaign_id}-{adapter_key}",
+        request_payload_hash=f"hash-session-{campaign_id}-{adapter_key}",
+        source_type="user",
+    )
 
 
 def test_repository_creates_campaign_session_and_initial_snapshot():
@@ -489,6 +578,9 @@ def test_repository_creates_campaign_session_and_initial_snapshot():
         default_adapter_version="1.0.0",
         settings={},
         linked_rules_pack_refs=[],
+        idempotency_key="campaign-saltmarsh",
+        request_payload_hash="hash-campaign-saltmarsh",
+        source_type="user",
     )
     session = repo.create_session(
         owner_user_id=42,
@@ -499,6 +591,9 @@ def test_repository_creates_campaign_session_and_initial_snapshot():
         authority_settings={"model_auto_commit": False},
         linked_chat_id=None,
         active_rules_pack_refs=[],
+        idempotency_key="session-1",
+        request_payload_hash="hash-session-1",
+        source_type="user",
     )
 
     assert session.campaign_id == campaign.id
@@ -506,15 +601,17 @@ def test_repository_creates_campaign_session_and_initial_snapshot():
     assert repo.get_latest_snapshot(owner_user_id=42, session_id=session.id).snapshot_version == 0
 
 
-def test_append_events_assigns_contiguous_sequence_numbers():
+def test_commit_events_assigns_sequences_and_updates_snapshot_cursor():
     db = CharactersRAGDB(":memory:", "test-client")
     repo = RPGRepository.initialized(db)
-    campaign = repo.create_campaign(42, "Campaign", None, "fate", "1.0.0", {}, [])
-    session = repo.create_session(42, campaign.id, "Opening", "fate", "1.0.0", {}, None, [])
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
 
-    result = repo.append_session_events(
+    result = repo.commit_events_and_snapshot(
         owner_user_id=42,
         session_id=session.id,
+        expected_last_event_sequence=0,
+        base_snapshot_version=0,
         events=[
             {
                 "event_type": "scene.updated",
@@ -527,6 +624,8 @@ def test_append_events_assigns_contiguous_sequence_numbers():
                 "source_type": "user",
             },
         ],
+        snapshot={"scene": {"scene_id": "scene-start", "summary": "At the docks"}, "notes": [{"note_id": "note-1", "text": "Storm clouds gather"}]},
+        diagnostics={"applied_event_count": 2},
         idempotency_key="req-1",
         request_payload_hash="hash-a",
         adapter_key="fate",
@@ -535,33 +634,48 @@ def test_append_events_assigns_contiguous_sequence_numbers():
     )
 
     assert [event.sequence_number for event in result.events] == [1, 2]
-    assert repo.get_session(owner_user_id=42, session_id=session.id).last_event_sequence == 2
+    updated = repo.get_session(owner_user_id=42, session_id=session.id)
+    assert updated.last_event_sequence == 2
+    assert updated.current_snapshot_version == 1
 
 
-def test_append_events_replays_same_idempotency_key_with_same_hash():
+def test_commit_events_replays_same_idempotency_key_with_same_hash():
     db = CharactersRAGDB(":memory:", "test-client")
     repo = RPGRepository.initialized(db)
-    campaign = repo.create_campaign(42, "Campaign", None, "fate", "1.0.0", {}, [])
-    session = repo.create_session(42, campaign.id, "Opening", "fate", "1.0.0", {}, None, [])
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
     payload = [{"event_type": "note.added", "event_payload": {"note_id": "n1", "text": "A"}, "source_type": "user"}]
 
-    first = repo.append_session_events(42, session.id, payload, "same-key", "hash-a", "fate", "1.0.0", None)
-    second = repo.append_session_events(42, session.id, payload, "same-key", "hash-a", "fate", "1.0.0", None)
+    first = repo.commit_events_and_snapshot(42, session.id, 0, 0, payload, {"notes": [{"note_id": "n1", "text": "A"}]}, {}, "same-key", "hash-a", "fate", "1.0.0", None)
+    second = repo.commit_events_and_snapshot(42, session.id, 0, 0, payload, {"notes": [{"note_id": "n1", "text": "A"}]}, {}, "same-key", "hash-a", "fate", "1.0.0", None)
 
     assert [event.id for event in second.events] == [event.id for event in first.events]
+    assert second.replayed is True
+    assert repo.get_session(owner_user_id=42, session_id=session.id).current_snapshot_version == 1
 
 
-def test_append_events_rejects_same_idempotency_key_with_different_hash():
+def test_commit_events_rejects_same_idempotency_key_with_different_hash():
     db = CharactersRAGDB(":memory:", "test-client")
     repo = RPGRepository.initialized(db)
-    campaign = repo.create_campaign(42, "Campaign", None, "fate", "1.0.0", {}, [])
-    session = repo.create_session(42, campaign.id, "Opening", "fate", "1.0.0", {}, None, [])
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
     payload = [{"event_type": "note.added", "event_payload": {"note_id": "n1", "text": "A"}, "source_type": "user"}]
 
-    repo.append_session_events(42, session.id, payload, "same-key", "hash-a", "fate", "1.0.0", None)
+    repo.commit_events_and_snapshot(42, session.id, 0, 0, payload, {"notes": [{"note_id": "n1", "text": "A"}]}, {}, "same-key", "hash-a", "fate", "1.0.0", None)
 
     with pytest.raises(Exception, match="idempotency"):
-        repo.append_session_events(42, session.id, payload, "same-key", "hash-b", "fate", "1.0.0", None)
+        repo.commit_events_and_snapshot(42, session.id, 1, 1, payload, {"notes": [{"note_id": "n1", "text": "A"}]}, {}, "same-key", "hash-b", "fate", "1.0.0", None)
+
+
+def test_commit_events_rejects_stale_expected_sequence():
+    db = CharactersRAGDB(":memory:", "test-client")
+    repo = RPGRepository.initialized(db)
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
+    payload = [{"event_type": "note.added", "event_payload": {"note_id": "n1", "text": "A"}, "source_type": "user"}]
+
+    with pytest.raises(Exception, match="stale_event_sequence"):
+        repo.commit_events_and_snapshot(42, session.id, 7, 0, payload, {"notes": []}, {}, "stale-key", "hash-a", "fate", "1.0.0", None)
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -605,7 +719,7 @@ class RPGSnapshotRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class AppendEventsResult:
+class CommitEventsResult:
     events: list[RPGSessionEvent]
     replayed: bool
 
@@ -621,9 +735,9 @@ class RPGRepository:
         return repo
 
     def ensure_schema(self) -> None:
-        conn = self.db.get_connection()
-        conn.executescript(
-            """
+        with self.db.transaction() as conn:
+            conn.executescript(
+                """
             CREATE TABLE IF NOT EXISTS rpg_campaigns (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 owner_user_id INTEGER NOT NULL,
@@ -640,7 +754,7 @@ class RPGRepository:
             );
             CREATE TABLE IF NOT EXISTS rpg_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                campaign_id INTEGER NOT NULL,
+                campaign_id INTEGER NOT NULL REFERENCES rpg_campaigns(id) ON DELETE CASCADE,
                 owner_user_id INTEGER NOT NULL,
                 title TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'active',
@@ -657,7 +771,7 @@ class RPGRepository:
             );
             CREATE TABLE IF NOT EXISTS rpg_session_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id INTEGER NOT NULL,
+                session_id INTEGER NOT NULL REFERENCES rpg_sessions(id) ON DELETE CASCADE,
                 owner_user_id INTEGER NOT NULL,
                 sequence_number INTEGER NOT NULL,
                 event_type TEXT NOT NULL,
@@ -665,19 +779,32 @@ class RPGRepository:
                 source_type TEXT NOT NULL,
                 source_actor_id TEXT,
                 source_label TEXT,
-                idempotency_key TEXT,
-                request_payload_hash TEXT,
+                operation_id INTEGER,
                 event_schema_version TEXT NOT NULL,
                 adapter_key TEXT NOT NULL,
                 adapter_version TEXT NOT NULL,
-                proposal_id INTEGER,
+                proposal_id INTEGER REFERENCES rpg_session_proposals(id) ON DELETE SET NULL,
                 created_at TEXT NOT NULL,
                 UNIQUE(owner_user_id, session_id, sequence_number),
-                UNIQUE(owner_user_id, session_id, source_type, idempotency_key)
+                CHECK(source_type IN ('user', 'system', 'mcp', 'model', 'import'))
+            );
+            CREATE TABLE IF NOT EXISTS rpg_idempotency_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_user_id INTEGER NOT NULL,
+                session_id INTEGER REFERENCES rpg_sessions(id) ON DELETE CASCADE,
+                source_type TEXT NOT NULL,
+                operation_scope TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_payload_hash TEXT NOT NULL,
+                event_ids_json TEXT NOT NULL DEFAULT '[]',
+                response_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                UNIQUE(owner_user_id, source_type, operation_scope, idempotency_key),
+                CHECK(source_type IN ('user', 'system', 'mcp', 'model', 'import'))
             );
             CREATE TABLE IF NOT EXISTS rpg_session_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id INTEGER NOT NULL,
+                session_id INTEGER NOT NULL REFERENCES rpg_sessions(id) ON DELETE CASCADE,
                 owner_user_id INTEGER NOT NULL,
                 snapshot_version INTEGER NOT NULL,
                 last_event_sequence INTEGER NOT NULL,
@@ -690,7 +817,7 @@ class RPGRepository:
             );
             CREATE TABLE IF NOT EXISTS rpg_session_proposals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id INTEGER NOT NULL,
+                session_id INTEGER NOT NULL REFERENCES rpg_sessions(id) ON DELETE CASCADE,
                 owner_user_id INTEGER NOT NULL,
                 base_event_sequence INTEGER NOT NULL,
                 base_snapshot_version INTEGER NOT NULL,
@@ -705,11 +832,12 @@ class RPGRepository:
                 review_notes TEXT,
                 created_at TEXT NOT NULL,
                 applied_at TEXT,
-                rejected_at TEXT
+                rejected_at TEXT,
+                CHECK(source_type IN ('user', 'system', 'mcp', 'model', 'import')),
+                CHECK(status IN ('pending', 'applied', 'rejected', 'expired', 'conflicted'))
             );
-            """
-        )
-        conn.commit()
+                """
+            )
         logger.debug("RPG repository schema ensured")
 ```
 
@@ -725,6 +853,9 @@ def create_campaign(
     default_adapter_version: str,
     settings: dict[str, Any],
     linked_rules_pack_refs: list[dict[str, Any]],
+    idempotency_key: str,
+    request_payload_hash: str,
+    source_type: str,
 ) -> RPGCampaign:
     raise NotImplementedError
 
@@ -738,6 +869,9 @@ def create_session(
     authority_settings: dict[str, Any],
     linked_chat_id: int | None,
     active_rules_pack_refs: list[dict[str, Any]],
+    idempotency_key: str,
+    request_payload_hash: str,
+    source_type: str,
 ) -> RPGSession:
     raise NotImplementedError
 
@@ -751,76 +885,170 @@ def get_latest_snapshot(self, owner_user_id: int, session_id: int) -> RPGSnapsho
     raise NotImplementedError
 ```
 
-- [ ] **Step 4: Add idempotent append behavior**
+- [ ] **Step 4: Add idempotent atomic event/snapshot commit behavior**
 
 ```python
-def append_session_events(
+def commit_events_and_snapshot(
     self,
     owner_user_id: int,
     session_id: int,
+    expected_last_event_sequence: int,
+    base_snapshot_version: int,
     events: list[dict[str, Any]],
-    idempotency_key: str | None,
-    request_payload_hash: str | None,
+    snapshot: dict[str, Any],
+    diagnostics: dict[str, Any],
+    idempotency_key: str,
+    request_payload_hash: str,
     adapter_key: str,
     adapter_version: str,
     proposal_id: int | None,
-) -> AppendEventsResult:
-    if idempotency_key:
-        replay = self._find_events_by_idempotency_key(owner_user_id, session_id, events[0]["source_type"], idempotency_key)
-        if replay:
-            if replay[0].request_payload_hash != request_payload_hash:
-                raise RPGConflictError("idempotency_key_conflict")
-            return AppendEventsResult(events=replay, replayed=True)
-
-    conn = self.db.get_connection()
+    proposal_review_notes: str | None = None,
+) -> CommitEventsResult:
+    if not events:
+        raise RPGConflictError("events_required")
+    source_type = events[0]["source_type"]
+    operation_scope = f"session:{session_id}:events"
     now = datetime.now(timezone.utc).isoformat()
     try:
-        conn.execute("BEGIN")
-        session = self.get_session(owner_user_id=owner_user_id, session_id=session_id)
-        next_sequence = session.last_event_sequence + 1
-        inserted: list[RPGSessionEvent] = []
-        for offset, event in enumerate(events):
-            sequence = next_sequence + offset
-            cursor = conn.execute(
+        with self.db.transaction() as conn:
+            replay = self._find_idempotency_record(
+                conn,
+                owner_user_id=owner_user_id,
+                session_id=session_id,
+                source_type=source_type,
+                operation_scope=operation_scope,
+                idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                if replay["request_payload_hash"] != request_payload_hash:
+                    raise RPGConflictError("idempotency_key_conflict")
+                event_ids = self._from_json(replay["event_ids_json"])
+                return CommitEventsResult(events=self._events_by_ids(conn, owner_user_id, event_ids), replayed=True)
+
+            session_row = conn.execute(
                 """
-                INSERT INTO rpg_session_events (
-                    session_id, owner_user_id, sequence_number, event_type, event_payload_json,
-                    source_type, source_actor_id, source_label, idempotency_key, request_payload_hash,
-                    event_schema_version, adapter_key, adapter_version, proposal_id, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                SELECT last_event_sequence, current_snapshot_version
+                FROM rpg_sessions
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (session_id, owner_user_id),
+            ).fetchone()
+            if session_row is None:
+                raise RPGNotFoundError("rpg_session_not_found")
+            if session_row["last_event_sequence"] != expected_last_event_sequence:
+                raise RPGConflictError("stale_event_sequence")
+            if session_row["current_snapshot_version"] != base_snapshot_version:
+                raise RPGConflictError("stale_snapshot_version")
+
+            next_sequence = expected_last_event_sequence + 1
+            inserted: list[RPGSessionEvent] = []
+            for offset, event in enumerate(events):
+                sequence = next_sequence + offset
+                cursor = conn.execute(
+                    """
+                    INSERT INTO rpg_session_events (
+                        session_id, owner_user_id, sequence_number, event_type, event_payload_json,
+                        source_type, source_actor_id, source_label, operation_id,
+                        event_schema_version, adapter_key, adapter_version, proposal_id, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session_id,
+                        owner_user_id,
+                        sequence,
+                        event["event_type"],
+                        self._to_json(event["event_payload"]),
+                        source_type,
+                        event.get("source_actor_id"),
+                        event.get("source_label"),
+                        event.get("event_schema_version", "1.0.0"),
+                        adapter_key,
+                        adapter_version,
+                        proposal_id,
+                        now,
+                    ),
+                )
+                inserted.append(self._get_event_with_conn(conn, owner_user_id, int(cursor.lastrowid)))
+
+            next_snapshot_version = base_snapshot_version + 1
+            conn.execute(
+                """
+                INSERT INTO rpg_session_snapshots (
+                    session_id, owner_user_id, snapshot_version, last_event_sequence,
+                    reducer_version, snapshot_schema_version, snapshot_json, diagnostics_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
                     owner_user_id,
-                    sequence,
-                    event["event_type"],
-                    self._to_json(event["event_payload"]),
-                    event["source_type"],
-                    event.get("source_actor_id"),
-                    event.get("source_label"),
-                    idempotency_key,
-                    request_payload_hash,
-                    event.get("event_schema_version", "1.0.0"),
-                    adapter_key,
-                    adapter_version,
-                    proposal_id,
+                    next_snapshot_version,
+                    inserted[-1].sequence_number,
+                    RPG_REDUCER_VERSION,
+                    RPG_SNAPSHOT_SCHEMA_VERSION,
+                    self._to_json(snapshot),
+                    self._to_json(diagnostics),
                     now,
                 ),
             )
-            inserted.append(self.get_event(owner_user_id=owner_user_id, event_id=int(cursor.lastrowid)))
-        conn.execute(
-            "UPDATE rpg_sessions SET last_event_sequence = ?, version = version + 1, updated_at = ? WHERE id = ? AND owner_user_id = ?",
-            (inserted[-1].sequence_number, now, session_id, owner_user_id),
-        )
-        conn.commit()
-        return AppendEventsResult(events=inserted, replayed=False)
+            update_cursor = conn.execute(
+                """
+                UPDATE rpg_sessions
+                SET last_event_sequence = ?, current_snapshot_version = ?, version = version + 1, updated_at = ?
+                WHERE id = ? AND owner_user_id = ? AND last_event_sequence = ? AND current_snapshot_version = ?
+                """,
+                (
+                    inserted[-1].sequence_number,
+                    next_snapshot_version,
+                    now,
+                    session_id,
+                    owner_user_id,
+                    expected_last_event_sequence,
+                    base_snapshot_version,
+                ),
+            )
+            if update_cursor.rowcount != 1:
+                raise RPGConflictError("stale_session_cursor")
+            if proposal_id is not None:
+                proposal_cursor = conn.execute(
+                    """
+                    UPDATE rpg_session_proposals
+                    SET status = 'applied', applied_at = ?, review_notes = COALESCE(review_notes, ?)
+                    WHERE id = ? AND owner_user_id = ? AND session_id = ? AND status = 'pending'
+                    """,
+                    (now, proposal_review_notes, proposal_id, owner_user_id, session_id),
+                )
+                if proposal_cursor.rowcount != 1:
+                    raise RPGConflictError("proposal_not_pending")
+            idempotency_cursor = conn.execute(
+                """
+                INSERT INTO rpg_idempotency_records (
+                    owner_user_id, session_id, source_type, operation_scope, idempotency_key,
+                    request_payload_hash, event_ids_json, response_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    owner_user_id,
+                    session_id,
+                    source_type,
+                    operation_scope,
+                    idempotency_key,
+                    request_payload_hash,
+                    self._to_json([event.id for event in inserted]),
+                    self._to_json({"event_ids": [event.id for event in inserted]}),
+                    now,
+                ),
+            )
+            operation_id = int(idempotency_cursor.lastrowid)
+            conn.execute(
+                f"UPDATE rpg_session_events SET operation_id = ? WHERE id IN ({','.join('?' for _ in inserted)})",
+                (operation_id, *[event.id for event in inserted]),
+            )
+            return CommitEventsResult(events=inserted, replayed=False)
     except sqlite3.IntegrityError as exc:
-        conn.rollback()
         raise RPGConflictError("rpg_event_append_conflict") from exc
-    except Exception:
-        conn.rollback()
-        raise
 ```
+
+The implementation must keep idempotency in `rpg_idempotency_records`, not as a uniqueness constraint on `rpg_session_events`; a single idempotent request can append multiple events. `operation_scope` distinguishes campaign creation, session creation, event recording, proposal apply, and proposal reject operations so all mutating REST and MCP calls can be idempotent. Idempotent replay returns the stored response payload/event IDs and must not re-run the reducer or insert another snapshot.
 
 - [ ] **Step 5: Run focused repository tests**
 
@@ -846,6 +1074,8 @@ git commit -m "feat: add RPG session repository"
 - [ ] **Step 1: Write failing event and reducer tests**
 
 ```python
+import pytest
+
 from tldw_Server_API.app.core.RPG.events import canonical_request_hash, validate_event_envelope
 from tldw_Server_API.app.core.RPG.reducer import initial_snapshot, reduce_events
 
@@ -864,11 +1094,24 @@ def test_validate_event_envelope_rejects_missing_stable_ids():
         validate_event_envelope(event)
 
 
+def test_validate_event_envelope_rejects_unknown_event_type():
+    event = {"event_type": "homebrew.mutates_state", "event_payload": {"id": "x"}, "source_type": "user"}
+
+    with pytest.raises(ValueError, match="Unsupported RPG event type"):
+        validate_event_envelope(event)
+
+
 def test_reducer_rebuilds_same_snapshot_from_same_events():
     events = [
         {"event_type": "scene.updated", "event_payload": {"scene_id": "s1", "summary": "Rainy docks"}, "source_type": "user"},
+        {"event_type": "actor.upserted", "event_payload": {"actor_id": "pc-1", "name": "Marin"}, "source_type": "user"},
         {"event_type": "npc.upserted", "event_payload": {"npc_id": "npc-ada", "name": "Ada"}, "source_type": "user"},
         {"event_type": "quest.upserted", "event_payload": {"quest_id": "q1", "title": "Find the map"}, "source_type": "user"},
+        {"event_type": "inventory.item.upserted", "event_payload": {"item_id": "map", "name": "Wet map"}, "source_type": "user"},
+        {"event_type": "location.upserted", "event_payload": {"location_id": "docks", "name": "The docks"}, "source_type": "user"},
+        {"event_type": "faction.upserted", "event_payload": {"faction_id": "guild", "name": "Harbor Guild"}, "source_type": "user"},
+        {"event_type": "clock.updated", "event_payload": {"clock_id": "storm", "progress": 2, "segments": 6}, "source_type": "user"},
+        {"event_type": "roll.recorded", "event_payload": {"roll_id": "roll-1", "total": 15}, "source_type": "user"},
     ]
 
     first = reduce_events(initial_snapshot(), events)
@@ -876,8 +1119,14 @@ def test_reducer_rebuilds_same_snapshot_from_same_events():
 
     assert first == second
     assert first.scene["summary"] == "Rainy docks"
+    assert first.actors["pc-1"]["name"] == "Marin"
     assert first.npcs["npc-ada"]["name"] == "Ada"
     assert first.quests["q1"]["title"] == "Find the map"
+    assert first.inventory["map"]["name"] == "Wet map"
+    assert first.locations["docks"]["name"] == "The docks"
+    assert first.factions["guild"]["name"] == "Harbor Guild"
+    assert first.clocks["storm"]["progress"] == 2
+    assert first.rolls[0]["roll_id"] == "roll-1"
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -912,6 +1161,7 @@ _REQUIRED_EVENT_IDS = {
     "rule.reference.added": "reference_id",
     "scene.updated": "scene_id",
 }
+SUPPORTED_EVENT_TYPES = frozenset(_REQUIRED_EVENT_IDS)
 
 
 def canonical_request_hash(payload: dict[str, Any]) -> str:
@@ -925,6 +1175,8 @@ def validate_event_envelope(event: dict[str, Any]) -> dict[str, Any]:
     payload = event.get("event_payload")
     if not event_type:
         raise ValueError("event_type is required")
+    if event_type not in SUPPORTED_EVENT_TYPES:
+        raise ValueError(f"Unsupported RPG event type: {event_type}")
     if source_type not in RPG_SOURCE_TYPES:
         raise ValueError("source_type is invalid")
     if not isinstance(payload, dict):
@@ -976,6 +1228,24 @@ def reduce_event(snapshot: RPGSnapshotState, event: dict[str, Any]) -> RPGSnapsh
         quests = dict(snapshot.quests)
         quests[payload["quest_id"]] = {**quests.get(payload["quest_id"], {}), **payload}
         return replace(snapshot, quests=quests)
+    if event_type == "inventory.item.upserted":
+        inventory = dict(snapshot.inventory)
+        inventory[payload["item_id"]] = {**inventory.get(payload["item_id"], {}), **payload}
+        return replace(snapshot, inventory=inventory)
+    if event_type == "location.upserted":
+        locations = dict(snapshot.locations)
+        locations[payload["location_id"]] = {**locations.get(payload["location_id"], {}), **payload}
+        return replace(snapshot, locations=locations)
+    if event_type == "faction.upserted":
+        factions = dict(snapshot.factions)
+        factions[payload["faction_id"]] = {**factions.get(payload["faction_id"], {}), **payload}
+        return replace(snapshot, factions=factions)
+    if event_type == "clock.updated":
+        clocks = dict(snapshot.clocks)
+        clocks[payload["clock_id"]] = {**clocks.get(payload["clock_id"], {}), **payload}
+        return replace(snapshot, clocks=clocks)
+    if event_type == "roll.recorded":
+        return replace(snapshot, rolls=[*snapshot.rolls, dict(payload)])
     if event_type == "note.added":
         return replace(snapshot, notes=[*snapshot.notes, dict(payload)])
     if event_type == "rule.reference.added":
@@ -1142,53 +1412,15 @@ from __future__ import annotations
 from typing import Any
 
 from tldw_Server_API.app.core.RPG.dice import DiceRoller
-from tldw_Server_API.app.core.RPG.models import CheckResult, DiceRollResult
+from tldw_Server_API.app.core.RPG.models import CheckResult
 from tldw_Server_API.app.core.RPG.rules.adapters import RuleAdapter
 
 
-def _d20_outcome(total: int, dc: int | None) -> str:
-    if dc is None:
-        return "rolled"
-    return "success" if total >= dc else "failure"
-
-
-def _fate_outcome(total: int, target: int) -> str:
-    if total < target:
-        return "failure"
-    if total == target:
-        return "tie"
-    if total >= target + 3:
-        return "success_with_style"
-    return "success"
-
-
 def resolve_check(adapter: RuleAdapter, roller: DiceRoller, payload: dict[str, Any]) -> CheckResult:
-    label = str(payload.get("check_label") or "Check")
-    if adapter.mechanics_tags.get("resolution_family") == "fate":
-        target = int(payload["ladder_target"])
-        fate_total = sum(roller.roll_fate()) + int(payload.get("skill_bonus") or 0)
-        return CheckResult(
-            adapter_key=adapter.adapter_key,
-            check_label=label,
-            total=fate_total,
-            target=target,
-            outcome=_fate_outcome(fate_total, target),
-            roll=None,
-            details={"resolution_family": "fate"},
-        )
-    roll: DiceRollResult = roller.roll(str(payload.get("roll_expression") or "1d20"))
-    dc = payload.get("dc")
-    target = int(dc) if dc is not None else None
-    return CheckResult(
-        adapter_key=adapter.adapter_key,
-        check_label=label,
-        total=roll.total,
-        target=target,
-        outcome=_d20_outcome(roll.total, target),
-        roll=roll,
-        details={"resolution_family": "d20"},
-    )
+    return adapter.resolve_check(roller, payload)
 ```
+
+Implement the actual D20 and Fate resolution helpers on the bundled adapter classes or resolver callbacks registered by `StaticRuleAdapter`; core check orchestration must not branch on `mechanics_tags["resolution_family"]`.
 
 - [ ] **Step 5: Run focused dice/check tests**
 
@@ -1228,12 +1460,14 @@ def _service():
 
 def test_model_events_create_pending_proposal_by_default():
     service = _service()
-    campaign = service.create_campaign("Campaign", None, "fate")
-    session = service.create_session(campaign.id, "Opening", adapter_key="fate")
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-model")
+    session = service.create_session(campaign.id, "Opening", adapter_key="fate", idempotency_key="session-model")
 
     result = service.record_events(
         session_id=session.id,
-        events=[{"event_type": "note.added", "event_payload": {"note_id": "n1", "text": "Suggested"}, "source_type": "model"}],
+        events=[{"event_type": "note.added", "event_payload": {"note_id": "n1", "text": "Suggested"}}],
+        source_type="model",
+        expected_last_event_sequence=0,
         idempotency_key="model-1",
     )
 
@@ -1244,12 +1478,14 @@ def test_model_events_create_pending_proposal_by_default():
 
 def test_user_events_commit_and_update_snapshot():
     service = _service()
-    campaign = service.create_campaign("Campaign", None, "fate")
-    session = service.create_session(campaign.id, "Opening", adapter_key="fate")
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-user")
+    session = service.create_session(campaign.id, "Opening", adapter_key="fate", idempotency_key="session-user")
 
     result = service.record_events(
         session_id=session.id,
-        events=[{"event_type": "note.added", "event_payload": {"note_id": "n1", "text": "Observed"}, "source_type": "user"}],
+        events=[{"event_type": "note.added", "event_payload": {"note_id": "n1", "text": "Observed"}}],
+        source_type="user",
+        expected_last_event_sequence=0,
         idempotency_key="user-1",
     )
 
@@ -1259,18 +1495,26 @@ def test_user_events_commit_and_update_snapshot():
 
 def test_apply_proposal_is_atomic_and_advances_snapshot_once():
     service = _service()
-    campaign = service.create_campaign("Campaign", None, "fate")
-    session = service.create_session(campaign.id, "Opening", adapter_key="fate")
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-proposal")
+    session = service.create_session(campaign.id, "Opening", adapter_key="fate", idempotency_key="session-proposal")
     proposed = service.record_events(
         session_id=session.id,
         events=[
-            {"event_type": "npc.upserted", "event_payload": {"npc_id": "npc-1", "name": "Ada"}, "source_type": "model"},
-            {"event_type": "quest.upserted", "event_payload": {"quest_id": "q1", "title": "Find Ada"}, "source_type": "model"},
+            {"event_type": "npc.upserted", "event_payload": {"npc_id": "npc-1", "name": "Ada"}},
+            {"event_type": "quest.upserted", "event_payload": {"quest_id": "q1", "title": "Find Ada"}},
         ],
+        source_type="model",
+        expected_last_event_sequence=0,
         idempotency_key="model-2",
     ).proposal
 
-    applied = service.apply_proposal(session_id=session.id, proposal_id=proposed.id, review_notes="accepted")
+    applied = service.apply_proposal(
+        session_id=session.id,
+        proposal_id=proposed.id,
+        expected_last_event_sequence=0,
+        idempotency_key="proposal-apply-1",
+        review_notes="accepted",
+    )
 
     assert [event.sequence_number for event in applied.committed_events] == [1, 2]
     snapshot = service.get_snapshot(session.id).snapshot
@@ -1299,14 +1543,20 @@ class AuthorityDecision:
     reason: str
 
 
-def decide_authority(source_type: str, authority_settings: dict[str, object]) -> AuthorityDecision:
-    if source_type in {"user", "system", "import"}:
-        return AuthorityDecision(action="commit", reason="trusted_source")
+def decide_authority(source_type: str, event_type: str, authority_settings: dict[str, object]) -> AuthorityDecision:
+    if source_type == "user":
+        return AuthorityDecision(action="commit", reason="user_direct_commit")
+    if source_type == "system":
+        return AuthorityDecision(action="commit", reason="internal_system_commit")
+    if source_type == "import" and authority_settings.get("import_auto_commit") is True:
+        return AuthorityDecision(action="commit", reason="import_auto_commit_enabled")
     if source_type == "mcp" and authority_settings.get("mcp_auto_commit") is True:
         return AuthorityDecision(action="commit", reason="mcp_auto_commit_enabled")
     if source_type == "model" and authority_settings.get("model_auto_commit") is True:
-        return AuthorityDecision(action="commit", reason="model_auto_commit_enabled")
-    return AuthorityDecision(action="proposal", reason=f"{source_type}_requires_review")
+        allowed = set(authority_settings.get("model_auto_commit_event_types") or [])
+        if event_type in allowed:
+            return AuthorityDecision(action="commit", reason="model_event_type_auto_commit_enabled")
+    return AuthorityDecision(action="proposal", reason=f"{source_type}_{event_type}_requires_review")
 ```
 
 - [ ] **Step 4: Implement service result types and orchestration**
@@ -1359,8 +1609,9 @@ class RPGService:
         self.owner_user_id = owner_user_id
         self.adapter_registry = adapter_registry or build_default_adapter_registry()
 
-    def create_campaign(self, title: str, description: str | None, default_adapter_key: str) -> RPGCampaign:
+    def create_campaign(self, title: str, description: str | None, default_adapter_key: str, idempotency_key: str) -> RPGCampaign:
         adapter = self.adapter_registry.get(default_adapter_key)
+        request_hash = canonical_request_hash({"title": title, "description": description, "default_adapter_key": adapter.adapter_key})
         return self.repo.create_campaign(
             owner_user_id=self.owner_user_id,
             title=title,
@@ -1369,10 +1620,14 @@ class RPGService:
             default_adapter_version=adapter.adapter_version,
             settings={},
             linked_rules_pack_refs=[],
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_hash,
+            source_type="user",
         )
 
-    def create_session(self, campaign_id: int, title: str, adapter_key: str) -> RPGSession:
+    def create_session(self, campaign_id: int, title: str, adapter_key: str, idempotency_key: str) -> RPGSession:
         adapter = self.adapter_registry.get(adapter_key)
+        request_hash = canonical_request_hash({"campaign_id": campaign_id, "title": title, "adapter_key": adapter.adapter_key})
         return self.repo.create_session(
             owner_user_id=self.owner_user_id,
             campaign_id=campaign_id,
@@ -1382,71 +1637,111 @@ class RPGService:
             authority_settings={"model_auto_commit": False, "mcp_auto_commit": False},
             linked_chat_id=None,
             active_rules_pack_refs=[],
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_hash,
+            source_type="user",
         )
 
-    def record_events(self, session_id: int, events: list[dict[str, Any]], idempotency_key: str | None) -> RecordEventsResult:
+    def record_events(
+        self,
+        session_id: int,
+        events: list[dict[str, Any]],
+        source_type: str,
+        expected_last_event_sequence: int,
+        idempotency_key: str,
+    ) -> RecordEventsResult:
+        if not idempotency_key:
+            raise RPGConflictError("idempotency_key_required")
         session = self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
-        normalized = [validate_event_envelope(event) for event in events]
-        source_type = normalized[0]["source_type"]
-        decision = decide_authority(source_type, session.authority_settings)
-        request_hash = canonical_request_hash({"events": normalized})
-        if decision.action == "proposal":
+        source_actor_id = f"{source_type}:{self.owner_user_id}" if source_type in {"user", "mcp"} else None
+        normalized = [
+            validate_event_envelope({**event, "source_type": source_type, "source_actor_id": source_actor_id})
+            for event in events
+        ]
+        if {event["source_type"] for event in normalized} != {source_type}:
+            raise RPGConflictError("mixed_source_batch")
+        decisions = [
+            decide_authority(source_type, event["event_type"], session.authority_settings)
+            for event in normalized
+        ]
+        request_hash = canonical_request_hash(
+            {
+                "events": normalized,
+                "expected_last_event_sequence": expected_last_event_sequence,
+                "source_type": source_type,
+            }
+        )
+        if any(decision.action == "proposal" for decision in decisions):
+            current = self.repo.get_latest_snapshot(owner_user_id=self.owner_user_id, session_id=session_id)
+            if expected_last_event_sequence != session.last_event_sequence:
+                raise RPGConflictError("stale_event_sequence")
             proposal = self.repo.create_proposal(
                 owner_user_id=self.owner_user_id,
                 session_id=session_id,
                 base_event_sequence=session.last_event_sequence,
-                base_snapshot_version=session.current_snapshot_version,
+                base_snapshot_version=current.snapshot_version,
                 proposed_events=normalized,
                 source_type=source_type,
                 source_actor_id=normalized[0].get("source_actor_id"),
                 model_metadata={},
+                idempotency_key=idempotency_key,
+                request_payload_hash=request_hash,
             )
             return RecordEventsResult(committed_events=[], proposal=RPGServiceProposal(proposal.id, session_id, proposal.status, normalized))
-        appended = self.repo.append_session_events(
-            owner_user_id=self.owner_user_id,
-            session_id=session_id,
-            events=normalized,
+        return self._commit_validated_events(
+            session=session,
+            normalized=normalized,
+            expected_last_event_sequence=expected_last_event_sequence,
             idempotency_key=idempotency_key,
-            request_payload_hash=request_hash,
-            adapter_key=session.adapter_key,
-            adapter_version=session.adapter_version,
+            request_hash=request_hash,
             proposal_id=None,
         )
-        self._rebuild_and_store_snapshot(session_id=session_id, events=appended.events)
-        return RecordEventsResult(committed_events=appended.events, proposal=None)
 ```
 
 Add these service methods in the same file:
 
 ```python
-def apply_proposal(self, session_id: int, proposal_id: int, review_notes: str | None = None) -> RecordEventsResult:
+def apply_proposal(
+    self,
+    session_id: int,
+    proposal_id: int,
+    expected_last_event_sequence: int,
+    idempotency_key: str,
+    review_notes: str | None = None,
+) -> RecordEventsResult:
+    if not idempotency_key:
+        raise ValueError("Idempotency-Key is required")
     session = self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
     proposal = self.repo.get_proposal(owner_user_id=self.owner_user_id, proposal_id=proposal_id)
+    if proposal.session_id != session_id:
+        raise RPGConflictError("proposal_session_mismatch")
     if proposal.status != "pending":
         raise RPGConflictError("proposal_not_pending")
+    if expected_last_event_sequence != proposal.base_event_sequence:
+        raise RPGConflictError("stale_event_sequence")
     if proposal.base_event_sequence != session.last_event_sequence:
         self.repo.mark_proposal_conflicted(self.owner_user_id, proposal_id)
         raise RPGConflictError("proposal_base_sequence_conflict")
     normalized = [validate_event_envelope(event) for event in proposal.proposed_events]
-    request_hash = canonical_request_hash({"proposal_id": proposal_id, "events": normalized})
-    appended = self.repo.append_session_events(
-        owner_user_id=self.owner_user_id,
-        session_id=session_id,
-        events=normalized,
-        idempotency_key=f"proposal:{proposal_id}:apply",
-        request_payload_hash=request_hash,
-        adapter_key=session.adapter_key,
-        adapter_version=session.adapter_version,
+    request_hash = canonical_request_hash({"proposal_id": proposal_id, "expected_last_event_sequence": expected_last_event_sequence, "events": normalized})
+    return self._commit_validated_events(
+        session=session,
+        normalized=normalized,
+        expected_last_event_sequence=proposal.base_event_sequence,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
         proposal_id=proposal_id,
+        proposal_review_notes=review_notes,
     )
-    self._rebuild_and_store_snapshot(session_id=session_id, events=appended.events)
-    self.repo.mark_proposal_applied(self.owner_user_id, proposal_id, review_notes)
-    return RecordEventsResult(committed_events=appended.events, proposal=None)
 
 
-def reject_proposal(self, session_id: int, proposal_id: int, review_notes: str | None = None) -> RPGServiceProposal:
-    self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
-    proposal = self.repo.mark_proposal_rejected(self.owner_user_id, proposal_id, review_notes)
+def reject_proposal(self, session_id: int, proposal_id: int, idempotency_key: str, review_notes: str | None = None) -> RPGServiceProposal:
+    if not idempotency_key:
+        raise ValueError("Idempotency-Key is required")
+    proposal = self.repo.get_proposal(owner_user_id=self.owner_user_id, proposal_id=proposal_id)
+    if proposal.session_id != session_id:
+        raise RPGConflictError("proposal_session_mismatch")
+    proposal = self.repo.mark_proposal_rejected(self.owner_user_id, proposal_id, idempotency_key, review_notes)
     return RPGServiceProposal(proposal.id, session_id, proposal.status, proposal.proposed_events)
 
 
@@ -1460,21 +1755,34 @@ def get_snapshot(self, session_id: int) -> SnapshotResult:
     )
 
 
-def _rebuild_and_store_snapshot(self, session_id: int, events: list[RPGSessionEvent]) -> None:
-    current = self.repo.get_latest_snapshot(owner_user_id=self.owner_user_id, session_id=session_id)
-    event_payloads = [
-        {"event_type": event.event_type, "event_payload": event.event_payload, "source_type": event.source_type}
-        for event in events
-    ]
-    next_snapshot = reduce_events(RPGSnapshotState(**current.snapshot_json), event_payloads)
-    self.repo.save_snapshot(
+def _commit_validated_events(
+    self,
+    session: RPGSession,
+    normalized: list[dict[str, Any]],
+    expected_last_event_sequence: int,
+    idempotency_key: str,
+    request_hash: str,
+    proposal_id: int | None,
+    proposal_review_notes: str | None = None,
+) -> RecordEventsResult:
+    current = self.repo.get_latest_snapshot(owner_user_id=self.owner_user_id, session_id=session.id)
+    next_snapshot = reduce_events(RPGSnapshotState(**current.snapshot_json), normalized)
+    committed = self.repo.commit_events_and_snapshot(
         owner_user_id=self.owner_user_id,
-        session_id=session_id,
-        snapshot_version=current.snapshot_version + 1,
-        last_event_sequence=events[-1].sequence_number,
+        session_id=session.id,
+        expected_last_event_sequence=expected_last_event_sequence,
+        base_snapshot_version=current.snapshot_version,
+        events=normalized,
         snapshot=asdict(next_snapshot),
-        diagnostics={"applied_event_count": len(events)},
+        diagnostics={"applied_event_count": len(normalized)},
+        idempotency_key=idempotency_key,
+        request_payload_hash=request_hash,
+        adapter_key=session.adapter_key,
+        adapter_version=session.adapter_version,
+        proposal_id=proposal_id,
+        proposal_review_notes=proposal_review_notes,
     )
+    return RecordEventsResult(committed_events=committed.events, proposal=None)
 ```
 
 - [ ] **Step 5: Add repository proposal and snapshot methods**
@@ -1492,6 +1800,8 @@ def create_proposal(
     source_type: str,
     source_actor_id: str | None,
     model_metadata: dict[str, Any],
+    idempotency_key: str,
+    request_payload_hash: str,
 ) -> RPGProposalRecord:
     raise NotImplementedError
 
@@ -1501,7 +1811,7 @@ def get_proposal(self, owner_user_id: int, proposal_id: int) -> RPGProposalRecor
 def mark_proposal_applied(self, owner_user_id: int, proposal_id: int, review_notes: str | None) -> RPGProposalRecord:
     raise NotImplementedError
 
-def mark_proposal_rejected(self, owner_user_id: int, proposal_id: int, review_notes: str | None) -> RPGProposalRecord:
+def mark_proposal_rejected(self, owner_user_id: int, proposal_id: int, idempotency_key: str, review_notes: str | None) -> RPGProposalRecord:
     raise NotImplementedError
 
 def mark_proposal_conflicted(self, owner_user_id: int, proposal_id: int) -> RPGProposalRecord:
@@ -1509,7 +1819,29 @@ def mark_proposal_conflicted(self, owner_user_id: int, proposal_id: int) -> RPGP
 
 def save_snapshot(self, owner_user_id: int, session_id: int, snapshot_version: int, last_event_sequence: int, snapshot: dict[str, Any], diagnostics: dict[str, Any]) -> RPGSnapshotRecord:
     raise NotImplementedError
+
+def commit_events_and_snapshot(
+    self,
+    owner_user_id: int,
+    session_id: int,
+    expected_last_event_sequence: int,
+    base_snapshot_version: int,
+    events: list[dict[str, Any]],
+    snapshot: dict[str, Any],
+    diagnostics: dict[str, Any],
+    idempotency_key: str,
+    request_payload_hash: str,
+    adapter_key: str,
+    adapter_version: str,
+    proposal_id: int | None,
+    proposal_review_notes: str | None = None,
+) -> CommitEventsResult:
+    raise NotImplementedError
 ```
+
+`commit_events_and_snapshot()` must perform all of these operations in one `CharactersRAGDB.transaction()` block: idempotency replay lookup, `expected_last_event_sequence` and `base_snapshot_version` validation, event inserts, snapshot insert, `rpg_sessions.last_event_sequence` and `current_snapshot_version` update, proposal status update when applicable, idempotency response insert, and event `operation_id` backfill. If any step fails, no event rows from that request may remain.
+
+`create_campaign()`, `create_session()`, `create_proposal()`, and `mark_proposal_rejected()` must also use `rpg_idempotency_records` with operation scopes such as `campaigns`, `campaign:{campaign_id}:sessions`, `session:{session_id}:proposals`, and `proposal:{proposal_id}:reject`. Replays return the stored response JSON and conflicting payload hashes raise `RPGConflictError("idempotency_key_conflict")`.
 
 - [ ] **Step 6: Run focused service tests**
 
@@ -1530,7 +1862,34 @@ git commit -m "feat: add RPG service authority flow"
 - Create: `tldw_Server_API/app/api/v1/schemas/rpg_schemas.py`
 - Create: `tldw_Server_API/app/api/v1/endpoints/rpg.py`
 - Modify: `tldw_Server_API/app/api/v1/router_groups/content.py`
+- Modify: `tldw_Server_API/Config_Files/privilege_catalog.yaml`
 - Test: `tldw_Server_API/tests/RPG/test_rpg_api.py`
+
+Before endpoint code is written, create a route matrix in the task notes and keep implementation aligned with it:
+
+| Method | Path | Permission | Endpoint ID | Idempotency | Expected Sequence |
+| --- | --- | --- | --- | --- | --- |
+| `GET` | `/api/v1/rpg/rules/adapters` | `rpg.rules.read` | `rpg.rules.read` | no | no |
+| `GET` | `/api/v1/rpg/rules/adapters/{adapter_key}` | `rpg.rules.read` | `rpg.rules.read` | no | no |
+| `POST` | `/api/v1/rpg/rules/lookup` | `rpg.rules.read` | `rpg.rules.read` | no | no |
+| `POST` | `/api/v1/rpg/campaigns` | `rpg.campaigns.manage` | `rpg.campaigns.manage` | header required | no |
+| `GET` | `/api/v1/rpg/campaigns` | `rpg.campaigns.read` | `rpg.campaigns.read` | no | no |
+| `GET` | `/api/v1/rpg/campaigns/{campaign_id}` | `rpg.campaigns.read` | `rpg.campaigns.read` | no | no |
+| `PATCH` | `/api/v1/rpg/campaigns/{campaign_id}` | `rpg.campaigns.manage` | `rpg.campaigns.manage` | header required | no |
+| `DELETE` | `/api/v1/rpg/campaigns/{campaign_id}` | `rpg.campaigns.manage` | `rpg.campaigns.manage` | header required | no |
+| `POST` | `/api/v1/rpg/campaigns/{campaign_id}/sessions` | `rpg.sessions.manage` | `rpg.sessions.manage` | header required | no |
+| `GET` | `/api/v1/rpg/sessions/{session_id}` | `rpg.sessions.read` | `rpg.sessions.read` | no | no |
+| `PATCH` | `/api/v1/rpg/sessions/{session_id}` | `rpg.sessions.manage` | `rpg.sessions.manage` | header required | yes |
+| `GET` | `/api/v1/rpg/sessions/{session_id}/events` | `rpg.sessions.read` | `rpg.sessions.read` | no | no |
+| `GET` | `/api/v1/rpg/sessions/{session_id}/snapshot` | `rpg.sessions.read` | `rpg.sessions.read` | no | no |
+| `POST` | `/api/v1/rpg/sessions/{session_id}/snapshot/rebuild` | `rpg.snapshots.admin` | `rpg.snapshots.admin` | header required | yes |
+| `POST` | `/api/v1/rpg/sessions/{session_id}/events` | `rpg.sessions.manage` | `rpg.sessions.manage` | header required | yes |
+| `POST` | `/api/v1/rpg/sessions/{session_id}/rolls` | `rpg.sessions.manage` | `rpg.sessions.manage` | header required | yes when recording |
+| `POST` | `/api/v1/rpg/sessions/{session_id}/proposals` | `rpg.sessions.manage` | `rpg.sessions.manage` | header required | yes |
+| `POST` | `/api/v1/rpg/sessions/{session_id}/proposals/{proposal_id}/apply` | `rpg.proposals.review` | `rpg.proposals.review` | header required | yes |
+| `POST` | `/api/v1/rpg/sessions/{session_id}/proposals/{proposal_id}/reject` | `rpg.proposals.review` | `rpg.proposals.review` | header required | no |
+| `POST` | `/api/v1/rpg/sessions/{session_id}/rules/lookup` | `rpg.rules.read` | `rpg.rules.read` | no | no |
+| `POST` | `/api/v1/rpg/sessions/{session_id}/context` | `rpg.sessions.read` | `rpg.sessions.read` | no | no |
 
 - [ ] **Step 1: Write failing API tests**
 
@@ -1552,11 +1911,11 @@ def test_rpg_adapters_endpoint_lists_default_adapters():
 
 def test_create_campaign_session_and_record_user_event():
     client = TestClient(app)
-    headers = {"X-API-KEY": "test-api-key-12345", "Idempotency-Key": "api-event-1"}
+    auth_headers = {"X-API-KEY": "test-api-key-12345"}
 
     campaign = client.post(
         "/api/v1/rpg/campaigns",
-        headers=headers,
+        headers={**auth_headers, "Idempotency-Key": "api-campaign-1"},
         json={"title": "Campaign", "default_adapter_key": "fate"},
     )
     assert campaign.status_code == 201
@@ -1564,7 +1923,7 @@ def test_create_campaign_session_and_record_user_event():
 
     session = client.post(
         f"/api/v1/rpg/campaigns/{campaign_id}/sessions",
-        headers=headers,
+        headers={**auth_headers, "Idempotency-Key": "api-session-1"},
         json={"title": "Opening", "adapter_key": "fate"},
     )
     assert session.status_code == 201
@@ -1572,10 +1931,11 @@ def test_create_campaign_session_and_record_user_event():
 
     event_response = client.post(
         f"/api/v1/rpg/sessions/{session_id}/events",
-        headers=headers,
+        headers={**auth_headers, "Idempotency-Key": "api-event-1"},
         json={
+            "expected_last_event_sequence": 0,
             "events": [
-                {"event_type": "note.added", "event_payload": {"note_id": "n1", "text": "At the docks"}, "source_type": "user"}
+                {"event_type": "note.added", "event_payload": {"note_id": "n1", "text": "At the docks"}}
             ]
         },
     )
@@ -1641,19 +2001,39 @@ class RPGEventInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     event_type: str = Field(min_length=1, max_length=120)
     event_payload: dict[str, Any]
-    source_type: Literal["user", "system", "mcp", "model", "import"]
-    source_actor_id: str | None = Field(default=None, max_length=120)
-    source_label: str | None = Field(default=None, max_length=200)
 
 
 class RPGRecordEventsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    expected_last_event_sequence: int = Field(ge=0)
     events: list[RPGEventInput] = Field(min_length=1, max_length=20)
 
 
 class RPGRecordEventsResponse(BaseModel):
     committed_events: list[dict[str, Any]]
     proposal: dict[str, Any] | None
+
+
+class RPGRulesLookupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    query: str = Field(min_length=1, max_length=500)
+
+
+class RPGContextBuildRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    query: str | None = Field(default=None, max_length=500)
+    max_chars: int = Field(default=24000, ge=1000, le=24000)
+
+
+class RPGProposalApplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_last_event_sequence: int = Field(ge=0)
+    review_notes: str | None = Field(default=None, max_length=2000)
+
+
+class RPGProposalRejectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    review_notes: str | None = Field(default=None, max_length=2000)
 ```
 
 - [ ] **Step 4: Add endpoints with token scope metadata**
@@ -1662,15 +2042,21 @@ class RPGRecordEventsResponse(BaseModel):
 # tldw_Server_API/app/api/v1/endpoints/rpg.py
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard, User, get_request_user, rbac_rate_limit
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, TokenScopeGuard, User, get_request_user, rbac_rate_limit
 from tldw_Server_API.app.api.v1.schemas.rpg_schemas import (
     RPGCampaignCreateRequest,
     RPGCampaignResponse,
+    RPGContextBuildRequest,
+    RPGProposalApplyRequest,
+    RPGProposalRejectRequest,
     RPGRecordEventsRequest,
     RPGRecordEventsResponse,
+    RPGRulesLookupRequest,
     RPGSessionCreateRequest,
     RPGSessionResponse,
 )
@@ -1709,11 +2095,12 @@ def _http_error(exc: Exception) -> HTTPException:
     "/rules/adapters",
     dependencies=[
         Depends(rbac_rate_limit("rpg.rules.read")),
+        Depends(RequirePermission("rpg.rules.read")),
         Depends(TokenScopeGuard("rpg", require_if_present=True, endpoint_id="rpg.rules.read")),
     ],
 )
 def list_adapters(service: RPGService = Depends(_service)) -> dict[str, object]:
-    return {"adapters": [adapter.__dict__ for adapter in service.adapter_registry.list_infos()]}
+    return {"adapters": [asdict(adapter) for adapter in service.adapter_registry.list_infos()]}
 
 
 @router.post(
@@ -1722,13 +2109,18 @@ def list_adapters(service: RPGService = Depends(_service)) -> dict[str, object]:
     status_code=status.HTTP_201_CREATED,
     dependencies=[
         Depends(rbac_rate_limit("rpg.campaigns.manage")),
+        Depends(RequirePermission("rpg.campaigns.manage")),
         Depends(TokenScopeGuard("rpg", require_if_present=True, endpoint_id="rpg.campaigns.manage")),
     ],
 )
-def create_campaign(request: RPGCampaignCreateRequest, service: RPGService = Depends(_service)) -> RPGCampaignResponse:
+def create_campaign(
+    request: RPGCampaignCreateRequest,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+    service: RPGService = Depends(_service),
+) -> RPGCampaignResponse:
     try:
-        campaign = service.create_campaign(request.title, request.description, request.default_adapter_key)
-        return RPGCampaignResponse.model_validate(campaign.__dict__)
+        campaign = service.create_campaign(request.title, request.description, request.default_adapter_key, idempotency_key=idempotency_key)
+        return RPGCampaignResponse.model_validate(asdict(campaign))
     except Exception as exc:
         raise _http_error(exc) from exc
 ```
@@ -1736,70 +2128,75 @@ def create_campaign(request: RPGCampaignCreateRequest, service: RPGService = Dep
 Add these route handlers in the same file with the same `_service` and `_http_error` helpers:
 
 ```python
-@router.get("/campaigns", dependencies=[Depends(rbac_rate_limit("rpg.campaigns.read")), Depends(TokenScopeGuard("rpg", require_if_present=True, endpoint_id="rpg.campaigns.read"))])
+@router.get("/campaigns", dependencies=[Depends(rbac_rate_limit("rpg.campaigns.read")), Depends(RequirePermission("rpg.campaigns.read")), Depends(TokenScopeGuard("rpg", require_if_present=True, endpoint_id="rpg.campaigns.read"))])
 def list_campaigns(service: RPGService = Depends(_service)) -> dict[str, object]:
-    return {"campaigns": [campaign.__dict__ for campaign in service.list_campaigns()]}
+    return {"campaigns": [asdict(campaign) for campaign in service.list_campaigns()]}
 
 
-@router.post("/campaigns/{campaign_id}/sessions", response_model=RPGSessionResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(rbac_rate_limit("rpg.sessions.manage")), Depends(TokenScopeGuard("rpg", require_if_present=True, endpoint_id="rpg.sessions.manage"))])
-def create_session(campaign_id: int, request: RPGSessionCreateRequest, service: RPGService = Depends(_service)) -> RPGSessionResponse:
-    session = service.create_session(campaign_id=campaign_id, title=request.title, adapter_key=request.adapter_key)
-    return RPGSessionResponse.model_validate(session.__dict__)
+@router.post("/campaigns/{campaign_id}/sessions", response_model=RPGSessionResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(rbac_rate_limit("rpg.sessions.manage")), Depends(RequirePermission("rpg.sessions.manage")), Depends(TokenScopeGuard("rpg", require_if_present=True, endpoint_id="rpg.sessions.manage"))])
+def create_session(campaign_id: int, request: RPGSessionCreateRequest, idempotency_key: str = Header(alias="Idempotency-Key"), service: RPGService = Depends(_service)) -> RPGSessionResponse:
+    session = service.create_session(campaign_id=campaign_id, title=request.title, adapter_key=request.adapter_key, idempotency_key=idempotency_key)
+    return RPGSessionResponse.model_validate(asdict(session))
 
 
-@router.get("/sessions/{session_id}", dependencies=[Depends(rbac_rate_limit("rpg.sessions.read")), Depends(TokenScopeGuard("rpg", require_if_present=True, endpoint_id="rpg.sessions.read"))])
+@router.get("/sessions/{session_id}", dependencies=[Depends(rbac_rate_limit("rpg.sessions.read")), Depends(RequirePermission("rpg.sessions.read")), Depends(TokenScopeGuard("rpg", require_if_present=True, endpoint_id="rpg.sessions.read"))])
 def get_session(session_id: int, service: RPGService = Depends(_service)) -> dict[str, object]:
     return service.get_session_payload(session_id)
 
 
-@router.get("/sessions/{session_id}/events", dependencies=[Depends(rbac_rate_limit("rpg.sessions.read")), Depends(TokenScopeGuard("rpg", require_if_present=True, endpoint_id="rpg.sessions.read"))])
+@router.get("/sessions/{session_id}/events", dependencies=[Depends(rbac_rate_limit("rpg.sessions.read")), Depends(RequirePermission("rpg.sessions.read")), Depends(TokenScopeGuard("rpg", require_if_present=True, endpoint_id="rpg.sessions.read"))])
 def list_events(session_id: int, service: RPGService = Depends(_service)) -> dict[str, object]:
-    return {"events": [event.__dict__ for event in service.list_events(session_id)]}
+    return {"events": [asdict(event) for event in service.list_events(session_id)]}
 
 
-@router.post("/sessions/{session_id}/events", response_model=RPGRecordEventsResponse, dependencies=[Depends(rbac_rate_limit("rpg.sessions.manage")), Depends(TokenScopeGuard("rpg", require_if_present=True, endpoint_id="rpg.sessions.manage"))])
-def record_events(session_id: int, request: RPGRecordEventsRequest, idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"), service: RPGService = Depends(_service)) -> RPGRecordEventsResponse:
-    result = service.record_events(session_id=session_id, events=[event.model_dump() for event in request.events], idempotency_key=idempotency_key)
-    return RPGRecordEventsResponse(committed_events=[event.__dict__ for event in result.committed_events], proposal=result.proposal.__dict__ if result.proposal else None)
+@router.post("/sessions/{session_id}/events", response_model=RPGRecordEventsResponse, dependencies=[Depends(rbac_rate_limit("rpg.sessions.manage")), Depends(RequirePermission("rpg.sessions.manage")), Depends(TokenScopeGuard("rpg", require_if_present=True, endpoint_id="rpg.sessions.manage"))])
+def record_events(session_id: int, request: RPGRecordEventsRequest, idempotency_key: str = Header(alias="Idempotency-Key"), service: RPGService = Depends(_service)) -> RPGRecordEventsResponse:
+    result = service.record_events(session_id=session_id, events=[event.model_dump() for event in request.events], source_type="user", expected_last_event_sequence=request.expected_last_event_sequence, idempotency_key=idempotency_key)
+    return RPGRecordEventsResponse(committed_events=[asdict(event) for event in result.committed_events], proposal=asdict(result.proposal) if result.proposal else None)
 
 
-@router.post("/sessions/{session_id}/rules/lookup", dependencies=[Depends(rbac_rate_limit("rpg.rules.read")), Depends(TokenScopeGuard("rpg", require_if_present=True, endpoint_id="rpg.rules.read"))])
+@router.post("/sessions/{session_id}/rules/lookup", dependencies=[Depends(rbac_rate_limit("rpg.rules.read")), Depends(RequirePermission("rpg.rules.read")), Depends(TokenScopeGuard("rpg", require_if_present=True, endpoint_id="rpg.rules.read"))])
 def lookup_rules(session_id: int, request: RPGRulesLookupRequest, service: RPGService = Depends(_service)) -> dict[str, object]:
-    return service.lookup_rules(session_id=session_id, query=request.query).__dict__
+    return asdict(service.lookup_rules(session_id=session_id, query=request.query))
 
 
-@router.post("/sessions/{session_id}/context", dependencies=[Depends(rbac_rate_limit("rpg.sessions.read")), Depends(TokenScopeGuard("rpg", require_if_present=True, endpoint_id="rpg.sessions.read"))])
+@router.post("/sessions/{session_id}/context", dependencies=[Depends(rbac_rate_limit("rpg.sessions.read")), Depends(RequirePermission("rpg.sessions.read")), Depends(TokenScopeGuard("rpg", require_if_present=True, endpoint_id="rpg.sessions.read"))])
 def build_context(session_id: int, request: RPGContextBuildRequest, service: RPGService = Depends(_service)) -> dict[str, object]:
-    return service.build_context(session_id=session_id, query=request.query, max_chars=request.max_chars).__dict__
+    return asdict(service.build_context(session_id=session_id, query=request.query, max_chars=request.max_chars))
 ```
 
-Add `POST /sessions/{session_id}/rolls`, `POST /sessions/{session_id}/proposals`, `POST /sessions/{session_id}/proposals/{proposal_id}/apply`, and `POST /sessions/{session_id}/proposals/{proposal_id}/reject` with the same dependency style and endpoint IDs `rpg.sessions.manage`, `rpg.sessions.manage`, `rpg.proposals.review`, and `rpg.proposals.review`.
+Add the remaining route handlers from the matrix with the same dependency style. All write handlers must require the `Idempotency-Key` header and the matching explicit permission dependency.
 
 - [ ] **Step 5: Register the router**
 
 ```python
 # tldw_Server_API/app/api/v1/router_groups/content.py
-ImportedRouterSpec(
+rpg_spec = ImportedRouterSpec(
     import_path="tldw_Server_API.app.api.v1.endpoints.rpg",
     log_name="rpg",
     prefix=f"{API_V1_PREFIX}",
     tags=("rpg",),
     route_key="rpg",
 )
+append_imported_router_spec(specs, rpg_spec)
 ```
 
 Add this spec near adjacent content runtimes, before the VN route group tail.
 
-- [ ] **Step 6: Run focused API tests**
+- [ ] **Step 6: Add privilege catalog entries needed by the RPG router**
+
+Add the catalog entries from Task 7 before expecting endpoint tests to pass. Include `rpg.snapshots.admin` for snapshot rebuild. Run `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrivilegeCatalog/test_endpoint_scope_catalog_sync.py -v`.
+
+- [ ] **Step 7: Run focused API tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_api.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add tldw_Server_API/app/api/v1/schemas/rpg_schemas.py tldw_Server_API/app/api/v1/endpoints/rpg.py tldw_Server_API/app/api/v1/router_groups/content.py tldw_Server_API/tests/RPG/test_rpg_api.py
+git add tldw_Server_API/app/api/v1/schemas/rpg_schemas.py tldw_Server_API/app/api/v1/endpoints/rpg.py tldw_Server_API/app/api/v1/router_groups/content.py tldw_Server_API/Config_Files/privilege_catalog.yaml tldw_Server_API/tests/RPG/test_rpg_api.py
 git commit -m "feat: expose RPG REST runtime"
 ```
 
@@ -1932,6 +2329,20 @@ Add these entries under `scopes:` in `tldw_Server_API/Config_Files/privilege_cat
     ownership_predicates:
       - same_org
     doc_url: https://docs.example.com/privileges/rpg-proposals-review
+  - id: rpg.snapshots.admin
+    description: Rebuild RPG session snapshots from the event ledger.
+    resource_tags:
+      - rpg
+      - snapshots
+      - admin
+    sensitivity_tier: restricted
+    rate_limit_class: admin
+    default_roles:
+      - admin
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/rpg-snapshots-admin
 ```
 
 - [ ] **Step 3: Regenerate route registry snapshot**
@@ -2198,7 +2609,22 @@ async def test_rpg_module_lists_adapters_without_database_context():
     result = await module.execute_tool("rpg.adapters.list", {}, context=None)
 
     assert [item["adapter_key"] for item in result["adapters"]] == ["dnd5e_srd", "fate", "pf2e"]
+
+
+@pytest.mark.asyncio
+async def test_rpg_database_tools_fail_closed_without_user_context():
+    module = RPGModule(ModuleConfig(name="rpg"))
+
+    with pytest.raises(ValueError, match="authenticated user context"):
+        await module.execute_tool("rpg.sessions.get", {"session_id": 1}, context=None)
 ```
+
+Add protocol-level MCP authorization tests that drive `MCPProtocol.process_request`, not just module methods:
+- no RPG permission: `tools/call` for `rpg.sessions.get` is denied and `tools/list` does not expose executable RPG tools.
+- read-only RPG permission: read tools execute, write tools such as `rpg.events.record` are denied.
+- exact write permission: `rpg.events.record` executes when the context has that tool permission and an idempotency key.
+- wildcard RPG permission: `rpg.*` or the configured wildcard form exposes read and write tools as executable.
+- `allowed_tools` filtering: context metadata with an unrelated allow-list hides or denies all RPG tools, and `allowed_tools=["rpg.sessions.get"]` leaves only that read tool executable.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -2212,10 +2638,14 @@ Expected: FAIL because `RPGModule` does not exist.
 # tldw_Server_API/app/core/MCP_unified/modules/implementations/rpg_module.py
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
+from tldw_Server_API.app.core.RPG.service import RPGService
 from tldw_Server_API.app.core.RPG.rules.adapters import build_default_adapter_registry
 
 from ..base import BaseModule, create_tool_definition
@@ -2254,7 +2684,7 @@ class RPGModule(BaseModule):
             create_tool_definition(
                 name="rpg.events.record",
                 description="Record trusted RPG session events or create a proposal based on authority settings.",
-                parameters={"properties": {"session_id": {"type": "integer"}, "events": {"type": "array"}, "idempotency_key": {"type": "string"}}, "required": ["session_id", "events"]},
+                parameters={"properties": {"session_id": {"type": "integer"}, "expected_last_event_sequence": {"type": "integer", "minimum": 0}, "events": {"type": "array"}, "idempotency_key": {"type": "string", "minLength": 1}}, "required": ["session_id", "expected_last_event_sequence", "events", "idempotency_key"]},
                 metadata={"category": "management", "auth_required": True},
             ),
             create_tool_definition(
@@ -2278,13 +2708,13 @@ class RPGModule(BaseModule):
             create_tool_definition(
                 name="rpg.proposals.apply",
                 description="Apply a pending RPG proposal atomically.",
-                parameters={"properties": {"session_id": {"type": "integer"}, "proposal_id": {"type": "integer"}, "review_notes": {"type": "string"}}, "required": ["session_id", "proposal_id"]},
+                parameters={"properties": {"session_id": {"type": "integer"}, "proposal_id": {"type": "integer"}, "expected_last_event_sequence": {"type": "integer", "minimum": 0}, "review_notes": {"type": "string"}, "idempotency_key": {"type": "string", "minLength": 1}}, "required": ["session_id", "proposal_id", "expected_last_event_sequence", "idempotency_key"]},
                 metadata={"category": "management", "auth_required": True},
             ),
             create_tool_definition(
                 name="rpg.proposals.reject",
                 description="Reject a pending RPG proposal.",
-                parameters={"properties": {"session_id": {"type": "integer"}, "proposal_id": {"type": "integer"}, "review_notes": {"type": "string"}}, "required": ["session_id", "proposal_id"]},
+                parameters={"properties": {"session_id": {"type": "integer"}, "proposal_id": {"type": "integer"}, "review_notes": {"type": "string"}, "idempotency_key": {"type": "string", "minLength": 1}}, "required": ["session_id", "proposal_id", "idempotency_key"]},
                 metadata={"category": "management", "auth_required": True},
             ),
         ]
@@ -2298,7 +2728,7 @@ class RPGModule(BaseModule):
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any = None) -> Any:
         if tool_name == "rpg.adapters.list":
             registry = build_default_adapter_registry()
-            return {"adapters": [info.__dict__ for info in registry.list_infos()]}
+            return {"adapters": [asdict(info) for info in registry.list_infos()]}
         raise ValueError(f"Unknown RPG tool: {tool_name}")
 ```
 
@@ -2306,35 +2736,38 @@ Add database-backed tool execution in `execute_tool` after `rpg.adapters.list`:
 
 ```python
 def _service_for_context(self, context: Any) -> RPGService:
-    owner_user_id = int(getattr(context, "user_id", None) or getattr(context, "owner_user_id", None) or 0)
-    if owner_user_id <= 0:
+    if context is None or not str(getattr(context, "user_id", "") or "").strip():
         raise ValueError("RPG MCP tools require an authenticated user context")
-    db = self._open_chacha_db_for_user(owner_user_id)
+    db_paths = getattr(context, "db_paths", None)
+    if not isinstance(db_paths, dict) or not db_paths.get("chacha"):
+        raise ValueError("ChaChaNotes DB path not available in context")
+    owner_user_id = int(str(context.user_id))
+    db = CharactersRAGDB(db_path=db_paths["chacha"], client_id=f"mcp_rpg_{self.config.name}")
     return RPGService(repo=RPGRepository.initialized(db), owner_user_id=owner_user_id)
 
 
 async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any = None) -> Any:
     if tool_name == "rpg.adapters.list":
         registry = build_default_adapter_registry()
-        return {"adapters": [info.__dict__ for info in registry.list_infos()]}
+        return {"adapters": [asdict(info) for info in registry.list_infos()]}
     service = self._service_for_context(context)
     if tool_name == "rpg.sessions.get":
         return service.get_session_payload(int(arguments["session_id"]))
     if tool_name == "rpg.events.list":
         events = service.list_events(int(arguments["session_id"]), limit=int(arguments.get("limit") or 100))
-        return {"events": [event.__dict__ for event in events]}
+        return {"events": [asdict(event) for event in events]}
     if tool_name == "rpg.events.record":
-        result = service.record_events(int(arguments["session_id"]), list(arguments["events"]), arguments.get("idempotency_key"))
-        return {"committed_events": [event.__dict__ for event in result.committed_events], "proposal": result.proposal.__dict__ if result.proposal else None}
+        result = service.record_events(int(arguments["session_id"]), list(arguments["events"]), source_type="mcp", expected_last_event_sequence=int(arguments["expected_last_event_sequence"]), idempotency_key=str(arguments["idempotency_key"]))
+        return {"committed_events": [asdict(event) for event in result.committed_events], "proposal": asdict(result.proposal) if result.proposal else None}
     if tool_name == "rpg.rules.lookup":
-        return service.lookup_rules(int(arguments["session_id"]), str(arguments["query"])).__dict__
+        return asdict(service.lookup_rules(int(arguments["session_id"]), str(arguments["query"])))
     if tool_name == "rpg.context.build":
-        return service.build_context(int(arguments["session_id"]), arguments.get("query"), int(arguments.get("max_chars") or 24000)).__dict__
+        return asdict(service.build_context(int(arguments["session_id"]), arguments.get("query"), int(arguments.get("max_chars") or 24000)))
     if tool_name == "rpg.proposals.apply":
-        result = service.apply_proposal(int(arguments["session_id"]), int(arguments["proposal_id"]), arguments.get("review_notes"))
-        return {"committed_events": [event.__dict__ for event in result.committed_events]}
+        result = service.apply_proposal(int(arguments["session_id"]), int(arguments["proposal_id"]), int(arguments["expected_last_event_sequence"]), str(arguments["idempotency_key"]), arguments.get("review_notes"))
+        return {"committed_events": [asdict(event) for event in result.committed_events]}
     if tool_name == "rpg.proposals.reject":
-        return service.reject_proposal(int(arguments["session_id"]), int(arguments["proposal_id"]), arguments.get("review_notes")).__dict__
+        return asdict(service.reject_proposal(int(arguments["session_id"]), int(arguments["proposal_id"]), str(arguments["idempotency_key"]), arguments.get("review_notes")))
     raise ValueError(f"Unknown RPG tool: {tool_name}")
 ```
 
