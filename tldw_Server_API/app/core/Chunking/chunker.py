@@ -14,6 +14,7 @@ import unicodedata
 from collections import OrderedDict
 from collections.abc import Generator
 from contextlib import nullcontext, suppress
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -26,7 +27,11 @@ from .exceptions import ChunkingError, InvalidChunkingMethodError, InvalidInputE
 from .llm_context import _LLM_UNSET, llm_override_scope
 from .option_utils import _coerce_bool_option
 from .process_text.dispatch import dispatch_chunks
-from .process_text.metadata import finalize_chunks
+from .process_text.metadata import (
+    copy_chunks_for_finalization,
+    finalize_chunks,
+    restore_prefix_offsets_for_finalization,
+)
 from .process_text.preparation import (
     _parse_frontmatter,
     _prepare_frontmatter_options,
@@ -2321,13 +2326,22 @@ class Chunker:
         chunk_start = time.perf_counter()
         with llm_override_scope(self, llm_call_func, llm_config):
             dispatched_chunks = dispatch_chunks(self, processed_text, resolved)
+        finalization_chunks = copy_chunks_for_finalization(dispatched_chunks)
         observe_histogram("chunker_chunking_duration_seconds", time.perf_counter() - chunk_start, labels=labels)
+
+        prepared_for_finalization = prepared
+        if prepared.prefix_offset:
+            finalization_chunks = restore_prefix_offsets_for_finalization(
+                finalization_chunks,
+                prepared.prefix_offset,
+            )
+            prepared_for_finalization = replace(prepared, prefix_offset=0)
 
         norm_start = time.perf_counter()
         out = finalize_chunks(
             original_text=text,
-            chunks=dispatched_chunks,
-            prepared=prepared,
+            chunks=finalization_chunks,
+            prepared=prepared_for_finalization,
             resolved=resolved,
         )
         observe_histogram("chunker_normalization_seconds", time.perf_counter() - norm_start, labels=labels)

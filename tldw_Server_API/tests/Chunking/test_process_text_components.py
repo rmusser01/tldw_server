@@ -35,7 +35,11 @@ from tldw_Server_API.app.core.Chunking.process_text.preparation import (
 from tldw_Server_API.app.core.Chunking.process_text import dispatch as process_dispatch
 from tldw_Server_API.app.core.Chunking.process_text.dispatch import dispatch_chunks
 from tldw_Server_API.app.core.Chunking.process_text import metadata as process_metadata
-from tldw_Server_API.app.core.Chunking.process_text.metadata import finalize_chunks
+from tldw_Server_API.app.core.Chunking.process_text.metadata import (
+    copy_chunks_for_finalization,
+    finalize_chunks,
+    restore_prefix_offsets_for_finalization,
+)
 from tldw_Server_API.app.core.Chunking.process_text import models
 from tldw_Server_API.app.core.Chunking.process_text.models import (
     NormalizedChunk,
@@ -795,6 +799,61 @@ def test_dispatch_chunks_multi_level_fallback_clamps_offsets(
     assert chunks[0].metadata["start_offset"] == 0
     assert chunks[0].metadata["end_offset"] == 5
     assert chunks[0].metadata["paragraph_index"] == 0
+
+
+def test_copy_chunks_for_finalization_copies_metadata() -> None:
+    original = NormalizedChunk(text="alpha", metadata={"start_offset": 0})
+
+    copied = copy_chunks_for_finalization([original])
+    copied[0].metadata["start_offset"] = 99
+
+    assert original.metadata["start_offset"] == 0
+
+
+def test_restore_prefix_offsets_for_finalization_does_not_mutate_input() -> None:
+    original = NormalizedChunk(
+        text="alpha",
+        metadata={"start_offset": 1, "end_offset": 6, "start_char": 2, "end_char": 7},
+    )
+
+    restored = restore_prefix_offsets_for_finalization([original], 10)
+
+    assert restored[0].metadata == {
+        "start_offset": 11,
+        "end_offset": 16,
+        "start_char": 12,
+        "end_char": 17,
+    }
+    assert original.metadata == {
+        "start_offset": 1,
+        "end_offset": 6,
+        "start_char": 2,
+        "end_char": 7,
+    }
+
+
+def test_process_text_normalization_metric_excludes_prefix_restore(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, float] = {}
+    real_restore = chunker_module.restore_prefix_offsets_for_finalization
+
+    def slow_restore(*args: Any, **kwargs: Any) -> Any:
+        time.sleep(0.05)
+        return real_restore(*args, **kwargs)
+
+    def capture_histogram(name: str, value: float, **kwargs: Any) -> None:
+        if name == "chunker_normalization_seconds":
+            observed[name] = value
+
+    monkeypatch.setattr(chunker_module, "restore_prefix_offsets_for_finalization", slow_restore)
+    monkeypatch.setattr(chunker_module, "observe_histogram", capture_histogram)
+
+    payload = '{"meta": "x", "__tldw_frontmatter__": true}\nBody text.'
+    rows = Chunker().process_text(payload, options={"method": "words", "max_size": 100})
+
+    assert rows[0]["metadata"]["initial_document_json_metadata"] == {"meta": "x"}
+    assert observed["chunker_normalization_seconds"] < 0.03
 
 
 def test_finalize_chunks_restores_prefix_offset_to_all_offset_keys() -> None:

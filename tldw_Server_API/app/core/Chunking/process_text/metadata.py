@@ -69,6 +69,28 @@ def finalize_chunks(
     return out
 
 
+def copy_chunks_for_finalization(chunks: list[NormalizedChunk]) -> list[NormalizedChunk]:
+    return [
+        NormalizedChunk(text=chunk.text, metadata=dict(chunk.metadata))
+        for chunk in chunks
+    ]
+
+
+def restore_prefix_offsets_for_finalization(
+    chunks: list[NormalizedChunk],
+    prefix_offset: int,
+) -> list[NormalizedChunk]:
+    if not prefix_offset:
+        return chunks
+
+    restored_chunks: list[NormalizedChunk] = []
+    for chunk in chunks:
+        metadata = dict(chunk.metadata)
+        _restore_prefix_offsets(metadata, prefix_offset)
+        restored_chunks.append(NormalizedChunk(text=chunk.text, metadata=metadata))
+    return restored_chunks
+
+
 def _restore_prefix_offsets(metadata: dict[str, Any], prefix_offset: int) -> None:
     if not prefix_offset:
         return
