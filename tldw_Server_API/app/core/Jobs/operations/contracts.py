@@ -55,18 +55,51 @@ class CreateJobCommand:
 class AdmissionResult:
     outcome: OperationOutcome
     row: dict[str, Any] | None = None
-    inserted: bool = False
+    was_inserted: bool = False
     no_transition_reason: NoTransitionReason | None = None
     admission_rejection_reason: AdmissionRejectionReason | None = None
     durable_events: Sequence[dict[str, Any]] = field(default_factory=tuple)
     message: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.outcome is OperationOutcome.APPLIED and not self.was_inserted:
+            raise ValueError("applied admission results must mark was_inserted")
+        if self.outcome is OperationOutcome.APPLIED and self.row is None:
+            raise ValueError("applied admission results require a row")
+        if self.outcome is OperationOutcome.NO_TRANSITION and self.no_transition_reason is None:
+            raise ValueError("no-transition admission results require a reason")
+        if self.outcome is OperationOutcome.ADMISSION_REJECTED and self.admission_rejection_reason is None:
+            raise ValueError("rejected admission results require a rejection reason")
+        if self.outcome is not OperationOutcome.APPLIED and self.was_inserted:
+            raise ValueError("only applied admission results may mark was_inserted")
+        if self.outcome is not OperationOutcome.NO_TRANSITION and self.no_transition_reason is not None:
+            raise ValueError("only no-transition admission results may include a no-transition reason")
+        if self.outcome is not OperationOutcome.ADMISSION_REJECTED and self.admission_rejection_reason is not None:
+            raise ValueError("only rejected admission results may include a rejection reason")
+        if self.outcome is not OperationOutcome.APPLIED and self.durable_events:
+            raise ValueError("only applied admission results may include durable events")
+        object.__setattr__(self, "row", dict(self.row) if self.row is not None else None)
+        object.__setattr__(self, "durable_events", tuple(dict(event) for event in self.durable_events))
+
+    @property
+    def inserted(self) -> bool:
+        return self.was_inserted
+
+    @classmethod
+    def applied(cls, *, row: dict[str, Any], durable_events: Sequence[dict[str, Any]] = ()) -> "AdmissionResult":
+        return cls(
+            outcome=OperationOutcome.APPLIED,
+            row=row,
+            was_inserted=True,
+            durable_events=durable_events,
+        )
 
     @classmethod
     def existing(cls, *, row: dict[str, Any]) -> "AdmissionResult":
         return cls(
             outcome=OperationOutcome.NO_TRANSITION,
             row=row,
-            inserted=False,
+            was_inserted=False,
             no_transition_reason=NoTransitionReason.IDEMPOTENT_EXISTING,
         )
 
@@ -79,23 +112,6 @@ class AdmissionResult:
         )
 
 
-def _inserted_admission_result(
-    cls,
-    *,
-    row: dict[str, Any],
-    durable_events: Sequence[dict[str, Any]] = (),
-) -> AdmissionResult:
-    return cls(
-        outcome=OperationOutcome.APPLIED,
-        row=row,
-        inserted=True,
-        durable_events=durable_events,
-    )
-
-
-AdmissionResult.inserted = classmethod(_inserted_admission_result)  # type: ignore[method-assign]
-
-
 @dataclass(frozen=True)
 class LifecycleResult:
     outcome: OperationOutcome
@@ -104,6 +120,22 @@ class LifecycleResult:
     no_transition_reason: NoTransitionReason | None = None
     durable_events: Sequence[dict[str, Any]] = field(default_factory=tuple)
     message: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.outcome is OperationOutcome.APPLIED and not self.transition_applied:
+            raise ValueError("applied lifecycle results must mark transition_applied")
+        if self.outcome is OperationOutcome.APPLIED and self.row is None:
+            raise ValueError("applied lifecycle results require a row")
+        if self.outcome is OperationOutcome.NO_TRANSITION and self.no_transition_reason is None:
+            raise ValueError("no-transition lifecycle results require a reason")
+        if self.outcome is not OperationOutcome.APPLIED and self.transition_applied:
+            raise ValueError("only applied lifecycle results may mark transition_applied")
+        if self.outcome is not OperationOutcome.NO_TRANSITION and self.no_transition_reason is not None:
+            raise ValueError("only no-transition lifecycle results may include a no-transition reason")
+        if self.outcome is not OperationOutcome.APPLIED and self.durable_events:
+            raise ValueError("only applied lifecycle results may include durable events")
+        object.__setattr__(self, "row", dict(self.row) if self.row is not None else None)
+        object.__setattr__(self, "durable_events", tuple(dict(event) for event in self.durable_events))
 
     @classmethod
     def applied(
