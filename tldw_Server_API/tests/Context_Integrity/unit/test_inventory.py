@@ -64,6 +64,20 @@ def _raise_child_stat_for_name(
     monkeypatch.setattr(inventory_module, "_stat_child_no_follow", guarded_child_stat, raising=False)
 
 
+def _raise_fd_listdir_type_error(monkeypatch: pytest.MonkeyPatch, inventory_module: object) -> None:
+    original_listdir = inventory_module.os.listdir
+
+    def guarded_listdir(path: object) -> list[str]:
+        if isinstance(path, int):
+            raise TypeError("simulated fd listdir failure")
+        return original_listdir(path)
+
+    supports_fd = set(inventory_module.os.supports_fd)
+    supports_fd.add(guarded_listdir)
+    monkeypatch.setattr(inventory_module.os, "supports_fd", supports_fd)
+    monkeypatch.setattr(inventory_module.os, "listdir", guarded_listdir)
+
+
 def test_inventory_user_skill_directory_includes_supporting_files(tmp_path) -> None:
     from tldw_Server_API.app.core.Context_Integrity.inventory import inventory_user_skills
 
@@ -197,6 +211,22 @@ def test_inventory_user_skill_symlinked_root_parent_reports_error_without_hashin
     assert first.findings[0].asset_id == "skill:user:1"
 
 
+def test_inventory_user_skill_broken_symlinked_root_parent_reports_error(tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import (
+        inventory_user_skills_with_findings,
+    )
+
+    linked_parent = tmp_path / "linked_parent"
+    _symlink_or_skip(linked_parent, tmp_path / "missing_parent", target_is_directory=True)
+    skills_root = linked_parent / "skills"
+
+    result = inventory_user_skills_with_findings(user_id=1, skills_root=skills_root)
+
+    assert result.assets == ()
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert result.findings[0].asset_id == "skill:user:1"
+
+
 def test_inventory_user_skill_broken_symlink_root_reports_error(tmp_path) -> None:
     from tldw_Server_API.app.core.Context_Integrity.inventory import (
         inventory_user_skills_with_findings,
@@ -263,6 +293,24 @@ def test_inventory_user_skill_root_fd_open_failure_reports_error(monkeypatch, tm
         raise OSError("simulated unsupported fd support")
 
     monkeypatch.setattr(inventory, "_open_dir_no_follow_fd", raise_open_error, raising=False)
+
+    result = inventory.inventory_user_skills_with_findings(
+        user_id=1,
+        skills_root=tmp_path / "skills",
+    )
+
+    assert result.assets == ()
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert result.findings[0].asset_id == "skill:user:1"
+
+
+def test_inventory_user_skill_root_fd_listdir_type_error_reports_error(monkeypatch, tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity import inventory
+
+    skill_dir = tmp_path / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: demo\n---\nBody", encoding="utf-8")
+    _raise_fd_listdir_type_error(monkeypatch, inventory)
 
     result = inventory.inventory_user_skills_with_findings(
         user_id=1,
@@ -477,6 +525,22 @@ def test_inventory_prompt_files_symlinked_root_parent_reports_error_without_hash
     assert first.findings[0].asset_id == "prompt_file:Prompts"
 
 
+def test_inventory_prompt_files_broken_symlinked_root_parent_reports_error(tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import (
+        inventory_prompt_files_with_findings,
+    )
+
+    linked_parent = tmp_path / "linked_parent"
+    _symlink_or_skip(linked_parent, tmp_path / "missing_parent", target_is_directory=True)
+    prompts = linked_parent / "Prompts"
+
+    result = inventory_prompt_files_with_findings(prompts_dir=prompts)
+
+    assert result.assets == ()
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert result.findings[0].asset_id == "prompt_file:Prompts"
+
+
 def test_inventory_prompt_files_broken_symlink_root_reports_error(tmp_path) -> None:
     from tldw_Server_API.app.core.Context_Integrity.inventory import (
         inventory_prompt_files_with_findings,
@@ -537,6 +601,21 @@ def test_inventory_prompt_files_root_fd_open_failure_reports_error(monkeypatch, 
         raise OSError("simulated unsupported fd support")
 
     monkeypatch.setattr(inventory, "_open_dir_no_follow_fd", raise_open_error, raising=False)
+
+    result = inventory.inventory_prompt_files_with_findings(prompts_dir=prompts)
+
+    assert result.assets == ()
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert result.findings[0].asset_id == "prompt_file:Prompts"
+
+
+def test_inventory_prompt_files_root_fd_listdir_type_error_reports_error(monkeypatch, tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity import inventory
+
+    prompts = tmp_path / "Prompts"
+    prompts.mkdir()
+    (prompts / "root.md").write_text("root prompt", encoding="utf-8")
+    _raise_fd_listdir_type_error(monkeypatch, inventory)
 
     result = inventory.inventory_prompt_files_with_findings(prompts_dir=prompts)
 

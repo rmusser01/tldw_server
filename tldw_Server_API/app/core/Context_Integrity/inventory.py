@@ -83,6 +83,29 @@ def _symlink_finding(
     )
 
 
+def _find_symlink_component(path: Path) -> Path | None:
+    if path.is_absolute():
+        current = Path(path.anchor)
+        parts = path.parts[1:]
+    else:
+        current = Path(".")
+        parts = path.parts
+
+    for part in parts:
+        if part in ("", "."):
+            continue
+        current = current / part
+        try:
+            component_stat = current.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError:
+            return None
+        if stat.S_ISLNK(component_stat.st_mode):
+            return current
+    return None
+
+
 def _validate_inventory_root(
     *,
     root: Path,
@@ -92,6 +115,18 @@ def _validate_inventory_root(
     try:
         root_stat = root.lstat()
     except FileNotFoundError:
+        symlink_component = _find_symlink_component(root)
+        if symlink_component is not None:
+            return (
+                False,
+                _verification_error(
+                    asset_id=asset_id,
+                    source_type=source_type,
+                    summary="Context inventory root contains a symlink component and was skipped.",
+                    path=symlink_component,
+                    details={"root": str(root)},
+                ),
+            )
         return False, None
     except OSError as exc:
         return (
@@ -362,7 +397,7 @@ def _read_skill_file_map_fd(
     files: dict[str, bytes] = {}
     try:
         names = sorted(os.listdir(dir_fd))
-    except OSError as exc:
+    except (OSError, TypeError) as exc:
         findings.append(
             _verification_error(
                 asset_id=asset_id,
@@ -507,7 +542,7 @@ def inventory_user_skills_with_findings(*, user_id: int, skills_root: Path) -> I
     try:
         try:
             names = sorted(os.listdir(root_fd))
-        except OSError as exc:
+        except (OSError, TypeError) as exc:
             return InventoryResult(
                 assets=(),
                 findings=(
@@ -626,7 +661,7 @@ def inventory_prompt_files_with_findings(*, prompts_dir: Path) -> InventoryResul
     try:
         try:
             names = sorted(os.listdir(root_fd))
-        except OSError as exc:
+        except (OSError, TypeError) as exc:
             return InventoryResult(
                 assets=(),
                 findings=(
