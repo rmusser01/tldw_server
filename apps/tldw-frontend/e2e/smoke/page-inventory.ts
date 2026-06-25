@@ -61,6 +61,7 @@ const routeGroupToPageCategory = (group: RouteGroup): PageCategory => {
 }
 
 const METADATA_PAGE_OVERRIDES: Record<string, Partial<PageEntry>> = {
+  "/admin/server": { category: "admin" },
   "/chat": { expectedTestId: "chat-input" },
   "/chatbooks": {
     skip:
@@ -73,10 +74,16 @@ const METADATA_PAGE_OVERRIDES: Record<string, Partial<PageEntry>> = {
 }
 
 const METADATA_ROUTE_PATHS = new Set(ROUTE_METADATA.map((route) => route.path))
+const METADATA_CHILD_SMOKE_ROUTE_PATHS = new Set([
+  "/settings/model",
+  "/settings/health",
+  "/admin/server"
+])
 
 const METADATA_SMOKE_PAGES: PageEntry[] = ROUTE_METADATA.filter(
   (metadata) =>
-    isAuditedRootRoute(metadata.path) &&
+    (isAuditedRootRoute(metadata.path) ||
+      METADATA_CHILD_SMOKE_ROUTE_PATHS.has(metadata.path)) &&
     metadata.availability.includes("web") &&
     metadata.smoke !== "exclude"
 ).map((metadata) => ({

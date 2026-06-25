@@ -4,6 +4,34 @@ import { waitForAppShell } from "../utils/helpers"
 const LOAD_TIMEOUT = 30_000
 
 test.describe("Stage 4 accessibility controls", () => {
+  test("header search trigger opens command palette and restores focus on Escape", async ({
+    page
+  }) => {
+    await seedAuth(page)
+
+    await page.goto("/chat", {
+      waitUntil: "domcontentloaded",
+      timeout: LOAD_TIMEOUT
+    })
+    await waitForAppShell(page, LOAD_TIMEOUT)
+
+    const trigger = page.getByRole("button", { name: "Open command palette" })
+    await expect(trigger).toBeVisible({ timeout: LOAD_TIMEOUT })
+    await expect(trigger).toHaveAttribute("title", "Search")
+
+    await trigger.click()
+
+    const palette = page.getByRole("dialog", { name: /command palette/i })
+    await expect(palette).toBeVisible({ timeout: LOAD_TIMEOUT })
+
+    const searchInput = page.getByRole("textbox", { name: "Search commands" })
+    await expect(searchInput).toBeFocused()
+
+    await page.keyboard.press("Escape")
+    await expect(palette).toHaveCount(0)
+    await expect(trigger).toBeFocused()
+  })
+
   test("document workspace pane toggles expose explicit accessible labels", async ({
     page
   }) => {

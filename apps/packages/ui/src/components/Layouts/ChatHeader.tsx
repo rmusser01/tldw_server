@@ -107,6 +107,10 @@ export function ChatHeader({
   const themeToggleLabel = isDarkTheme
     ? toText(t("common:theme.switchToLight", "Switch to light theme"))
     : toText(t("common:theme.switchToDark", "Switch to dark theme"))
+  const commandPaletteLabel = toText(
+    t("common:shortcuts.openCommandPalette", "Open command palette")
+  )
+  const commandPaletteTitle = toText(t("common:search", "Search"))
   const showSavedChatAction = Boolean(onStartSavedChat)
   const showTemporaryChatAction = Boolean(onStartTemporaryChat)
   const showCharacterChatAction = Boolean(onStartCharacterChat)
@@ -272,11 +276,13 @@ export function ChatHeader({
           <button
             type="button"
             onClick={onOpenCommandPalette}
+            aria-label={commandPaletteLabel}
             className={`hidden items-center gap-2 rounded-md px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface2 hover:text-text sm:inline-flex ${focusRingClasses}`}
-            title={toText(t("common:search", "Search"))}
+            title={commandPaletteTitle}
+            data-testid="chat-header-command-palette-trigger"
           >
             <Search className="size-4" aria-hidden="true" />
-            <span>{toText(t("common:search", "Search"))}</span>
+            <span>{commandPaletteTitle}</span>
             <span className="rounded border border-border px-1.5 py-0.5 text-xs text-text-subtle">
               {commandKeyLabel}K
             </span>

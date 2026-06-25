@@ -17,10 +17,13 @@ import {
 } from '../../../packages/ui/src/routes/route-metadata';
 
 const RESPONSIVE_ROUTE_PATHS = [
+  '/',
   '/chat',
   '/media',
   '/settings',
+  '/settings/health',
   '/settings/model',
+  '/admin/server',
   '/prompts',
   '/research-workspace',
   '/setup',
@@ -29,6 +32,7 @@ const RESPONSIVE_ROUTE_PATHS = [
   '/stt',
   '/tts',
   '/chat-workspace',
+  '/scheduled-tasks',
 ] as const;
 
 const SIDEPANEL_ROUTE_PATHS = ['/chat', '/flashcards', '/companion', '/persona'] as const;
