@@ -3,12 +3,12 @@ id: TASK-10001
 title: Fix TTS module review findings
 status: Done
 assignee: []
-created_date: '2026-06-23 21:55'
-updated_date: '2026-06-23 22:09'
+created_date: 2026-06-23 21:55
+updated_date: 2026-06-25 02:19
 labels:
-  - tts
-  - security
-  - review
+- tts
+- security
+- review
 dependencies: []
 priority: high
 ---
@@ -20,6 +20,7 @@ Address the current-code review findings in tldw_Server_API/app/core/TTS: VibeVo
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
+
 <!-- AC:BEGIN -->
 - [x] #1 VibeVoice non-stream generation forwards request generation config and guards shared model state.
 - [x] #2 Local blocking generation calls are offloaded from the event loop.
@@ -44,16 +45,19 @@ Stage 5: Run focused tests, Bandit on touched TTS scope, and record verification
 <!-- SECTION:NOTES:BEGIN -->
 Touched production files: tldw_Server_API/app/core/TTS/utils.py, tts_config.py, audio_utils.py, audio_converter.py, adapters/vibevoice_adapter.py, adapters/vibevoice_realtime_adapter.py, adapters/chatterbox_adapter.py, adapters/dia_adapter.py, adapters/higgs_adapter.py, adapters/kokoro_adapter.py. Added/updated focused tests under tldw_Server_API/tests/TTS and tldw_Server_API/tests/TTS_NEW.
 
-Verification passed: focused 10-test regression set; nearby 43-test TTS utility/config/VibeVoice suite; 77-test Chatterbox/Higgs/Kokoro mock/flow suite; py_compile on touched production TTS files; git diff --check on touched scope; Bandit touched production TTS scope wrote /tmp/bandit_tts_review_fixes.json with errors=[] and results_count=0. No separate user-facing docs were needed for these internal hardening fixes.
+PR #2484 follow-up rebased the branch onto latest dev and addressed Qodo/CodeRabbit review comments: VibeVoice model hints are canonicalized case-insensitively, Q8 variant reloads recompute quantization, VibeVoice streaming releases the model-state lock before yielding chunks, realtime websocket policy errors use sanitized origins and pin resolved IPs through an aiohttp resolver, audio converter long-running operations accept timeout overrides, canonical TTS config saves refuse redacted secrets unless include_secrets=True, new helpers/tests have docstrings/type cleanup, and markdown plan formatting was corrected.
+
+Fresh verification passed after the review follow-up: Ruff touched Python scope; 26-test focused review suite; 51-test TTS config/audio/VibeVoice suite; 77-test Chatterbox/Higgs/Kokoro suite; py_compile on touched production and test Python files; git diff --check; Bandit touched production TTS scope wrote /tmp/bandit_tts_review_fixes_rebased.json with errors=[] and results_count=0.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed the TTS review findings: VibeVoice now forwards non-stream generation config and serializes model variant reload/generation state; local blocking generation calls in Chatterbox, Dia, Higgs, VibeVoice, and Kokoro stream iteration now run through thread offload helpers; ffmpeg/ffprobe calls in audio_converter are timeout-bounded; voice-reference conversion opts into strict failures; VibeVoice realtime websocket sessions enforce central egress policy before connecting; TTS config export redacts provider API keys by default and ignores ANTHROPIC_API_KEY; touched-scope Bandit warnings were cleaned up.
+Fixed the original TTS review findings and the PR #2484 follow-up comments. The follow-up hardens VibeVoice variant switching and stream lock scope, pins realtime websocket DNS results after egress validation, prevents sensitive websocket URL details and canonical TTS config secrets from being leaked or overwritten, exposes timeout overrides for long-running audio converter operations, and strengthens regression tests so the fixes are covered by behavior checks rather than source-string checks.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
+
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded

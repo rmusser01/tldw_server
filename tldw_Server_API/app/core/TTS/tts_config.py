@@ -480,6 +480,7 @@ class TTSConfigManager:
 
     @staticmethod
     def _redact_provider_secrets(config_dict: dict[str, Any]) -> dict[str, Any]:
+        """Replace provider API keys in a serialized config dictionary."""
         providers = config_dict.get("providers")
         if not isinstance(providers, dict):
             return config_dict
@@ -491,6 +492,17 @@ class TTSConfigManager:
                 provider_config["api_key"] = REDACTED_SECRET
         return config_dict
 
+    def _has_provider_secrets(self) -> bool:
+        """Return whether the loaded config contains provider API keys."""
+        config_dict = model_dump_compat(self.get_config())
+        providers = config_dict.get("providers")
+        if not isinstance(providers, dict):
+            return False
+        return any(
+            isinstance(provider_config, dict) and bool(provider_config.get("api_key"))
+            for provider_config in providers.values()
+        )
+
     def to_dict(self, *, include_secrets: bool = False) -> dict[str, Any]:
         """Convert configuration to dictionary"""
         cfg = self.get_config()
@@ -499,11 +511,24 @@ class TTSConfigManager:
             config_dict = self._redact_provider_secrets(config_dict)
         return config_dict
 
-    def save_yaml(self, path: Optional[Path] = None, *, include_secrets: bool = False):
+    def save_yaml(self, path: Optional[Path] = None, *, include_secrets: bool = False) -> None:
         """Save current configuration to YAML file"""
         path = path or self.yaml_path
         if not path:
             raise ValueError("No YAML path specified")
+
+        target_path = Path(path).expanduser()
+        configured_path = Path(self.yaml_path).expanduser() if self.yaml_path else None
+        if (
+            not include_secrets
+            and configured_path is not None
+            and target_path == configured_path
+            and self._has_provider_secrets()
+        ):
+            raise ValueError(
+                "Refusing to overwrite TTS config with redacted provider secrets; "
+                "pass include_secrets=True for persisted saves or choose an export path."
+            )
 
         config_dict = self.to_dict(include_secrets=include_secrets)
 
@@ -514,10 +539,10 @@ class TTSConfigManager:
                     cfg = config_dict['providers'][provider_name]
                     config_dict['providers'][provider_name] = model_dump_compat(cfg)
 
-        with open(path, 'w') as f:
+        with open(target_path, 'w') as f:
             yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
 
-        logger.info(f"Saved TTS configuration to {path}")
+        logger.info(f"Saved TTS configuration to {target_path}")
 
 
 # Singleton instance

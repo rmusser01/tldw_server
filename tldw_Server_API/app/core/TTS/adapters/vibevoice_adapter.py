@@ -152,6 +152,14 @@ class VibeVoiceAdapter(TTSAdapter):
     # Voice presets loaded from files
     VOICE_PRESETS = {}
 
+    @classmethod
+    def _canonical_variant(cls, variant: Any) -> Optional[str]:
+        """Return the canonical model variant key for a case-insensitive hint."""
+        if not isinstance(variant, str):
+            return None
+        variant_lookup = {name.lower(): name for name in cls.MODEL_VARIANTS}
+        return variant_lookup.get(variant.strip().lower())
+
     def __init__(self, config: Optional[dict[str, Any]] = None):
         super().__init__(config)
 
@@ -203,16 +211,7 @@ class VibeVoiceAdapter(TTSAdapter):
         self.batch_size = self.config.get("vibevoice_batch_size", 1)
 
         # Memory optimization settings (4-bit quantization is effectively CUDA-only)
-        requested_quant = parse_bool(self.config.get("vibevoice_use_quantization", False), default=False)
-        self.use_quantization = requested_quant and self.device == "cuda"
-        # If using the pre-quantized 7B-Q8 variant (or Q8 repo), avoid stacking 4-bit quantization
-        try:
-            if self.variant.upper() == "7B-Q8" or "vibevoice-large-q8" in str(self.model_path).lower():
-                if self.use_quantization:
-                    logger.info("VibeVoice: Disabling additional 4-bit quantization for 7B-Q8 model")
-                self.use_quantization = False
-        except _VIBEVOICE_NONCRITICAL_EXCEPTIONS:
-            pass
+        self.use_quantization = self._compute_use_quantization_for_variant(self.variant, self.model_path)
         self.auto_cleanup = self.config.get("vibevoice_auto_cleanup", True)
         # Auto-download behavior: config override > env overrides > default False
         cfg_auto = self.config.get("vibevoice_auto_download")
@@ -781,9 +780,10 @@ class VibeVoiceAdapter(TTSAdapter):
 
         # Check if a different model variant was requested
         requested_model = getattr(request, "model", None) or request.extra_params.get("model")
-        if requested_model and requested_model in self.MODEL_VARIANTS and requested_model != self.variant:
-            await self._ensure_model_variant(requested_model)
-        effective_variant = requested_model if requested_model in self.MODEL_VARIANTS else self.variant
+        requested_variant = self._canonical_variant(requested_model)
+        if requested_variant and requested_variant != self.variant:
+            await self._ensure_model_variant(requested_variant)
+        effective_variant = requested_variant or self.variant
 
         # Extract generation parameters
         cfg_scale = request.cfg_scale or request.extra_params.get("cfg_scale", self.default_cfg_scale)
@@ -1056,32 +1056,31 @@ class VibeVoiceAdapter(TTSAdapter):
                 self._check_cancellation()
                 outputs = await run_tts_blocking_call(_generate_outputs)
 
-                # Get the generated audio
-                if outputs.speech_outputs and outputs.speech_outputs[0] is not None:
-                    audio_array = outputs.speech_outputs[0].cpu().numpy()
-
-                    # Stream the audio in chunks with configurable size
-                    chunk_size = int(self.sample_rate * self.stream_chunk_size)
-                    for i in range(0, len(audio_array), chunk_size):
-                        # Check for cancellation during streaming
-                        self._check_cancellation()
-
-                        chunk = audio_array[i:i + chunk_size]
-
-                        if len(chunk) > 0:
-                            # Normalize to int16
-                            normalized_chunk = normalizer.normalize(chunk, target_dtype=np.int16)
-
-                            # Encode to target format
-                            encoded_bytes = writer.write_chunk(normalized_chunk)
-                            if encoded_bytes:
-                                yield encoded_bytes
-                else:
+                if not outputs.speech_outputs or outputs.speech_outputs[0] is None:
                     logger.error("No audio output generated from VibeVoice")
                     raise TTSGenerationError(
                         "Failed to generate audio",
                         provider=self.provider_name
                     )
+                audio_array = outputs.speech_outputs[0].cpu().numpy()
+
+            # Stream the materialized audio outside the model-state lock so slow
+            # clients do not block later generations or model variant reloads.
+            chunk_size = int(self.sample_rate * self.stream_chunk_size)
+            for i in range(0, len(audio_array), chunk_size):
+                # Check for cancellation during streaming
+                self._check_cancellation()
+
+                chunk = audio_array[i:i + chunk_size]
+
+                if len(chunk) > 0:
+                    # Normalize to int16
+                    normalized_chunk = normalizer.normalize(chunk, target_dtype=np.int16)
+
+                    # Encode to target format
+                    encoded_bytes = writer.write_chunk(normalized_chunk)
+                    if encoded_bytes:
+                        yield encoded_bytes
 
             # Finalize stream
             final_bytes = writer.write_chunk(finalize=True)
@@ -1317,6 +1316,23 @@ class VibeVoiceAdapter(TTSAdapter):
             logger.error(f"Failed to generate synthetic voice: {e}")
             return None
 
+    def _compute_use_quantization_for_variant(self, variant: str, model_path: Any) -> bool:
+        """Return whether extra 4-bit quantization should be applied for a variant."""
+        requested_quant = parse_bool(self.config.get("vibevoice_use_quantization", False), default=False)
+        use_quantization = requested_quant and self.device == "cuda"
+        try:
+            is_prequantized = (
+                variant.upper() == "7B-Q8"
+                or "vibevoice-large-q8" in str(model_path).lower()
+            )
+            if is_prequantized:
+                if use_quantization:
+                    logger.info("VibeVoice: Disabling additional 4-bit quantization for 7B-Q8 model")
+                return False
+        except _VIBEVOICE_NONCRITICAL_EXCEPTIONS:
+            return use_quantization
+        return use_quantization
+
     async def _reload_model_for_variant(self, variant: str):
         """Reload the model with a different variant (1.5B or 7B)"""
         if variant not in self.MODEL_VARIANTS:
@@ -1331,6 +1347,7 @@ class VibeVoiceAdapter(TTSAdapter):
         self.model_path = variant_config["path"]
         self.context_length = variant_config["context"]
         self.frame_rate = variant_config["frame_rate"]
+        self.use_quantization = self._compute_use_quantization_for_variant(variant, self.model_path)
 
         # Reinitialize with new variant
         logger.info(f"Reloading VibeVoice with variant: {variant}")

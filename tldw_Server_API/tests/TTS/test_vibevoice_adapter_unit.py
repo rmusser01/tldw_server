@@ -1,9 +1,11 @@
+"""Unit tests for VibeVoice adapter request and model-state behavior."""
+
 import asyncio
-import os
+
 import pytest
 
-from tldw_Server_API.app.core.TTS.adapters.vibevoice_adapter import VibeVoiceAdapter
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSRequest
+from tldw_Server_API.app.core.TTS.adapters.vibevoice_adapter import VibeVoiceAdapter
 
 
 @pytest.mark.unit
@@ -150,3 +152,66 @@ async def test_generate_complete_forwards_generation_config(monkeypatch):
     assert audio == b"chunk"
     assert seen["gen_config"] is generation_config
     assert seen["voice_reference_path"] == "/tmp/reference.wav"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_generate_canonicalizes_lowercase_requested_variant(monkeypatch):
+    adapter = VibeVoiceAdapter({})
+    adapter.available_voices = {"speaker_1": "/voices/speaker.wav"}
+    seen: dict[str, object] = {}
+
+    async def fake_ensure_initialized():
+        return True
+
+    async def fake_ensure_model_variant(variant):
+        seen["variant"] = variant
+        adapter.variant = variant
+
+    def fake_stream(_request, _voice, _speaker_id, _voice_reference_path=None, gen_config=None):
+        seen["gen_config"] = gen_config
+
+        async def _chunks():
+            yield b"chunk"
+
+        return _chunks()
+
+    monkeypatch.setattr(adapter, "ensure_initialized", fake_ensure_initialized)
+    monkeypatch.setattr(adapter, "_ensure_model_variant", fake_ensure_model_variant)
+    monkeypatch.setattr(adapter, "_stream_audio_vibevoice", fake_stream)
+    monkeypatch.setattr(adapter, "cleanup_after_generation", fake_ensure_initialized)
+
+    request = TTSRequest(
+        text="Speaker 1: hello",
+        voice="speaker_1",
+        model="7B",
+        format=AudioFormat.WAV,
+        stream=True,
+    )
+
+    response = await adapter.generate(request)
+
+    assert response.audio_stream is not None
+    assert seen["variant"] == "7B"
+    assert seen["gen_config"]["model_variant"] == "7B"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_reload_model_for_q8_variant_recomputes_quantization(monkeypatch):
+    adapter = VibeVoiceAdapter({"vibevoice_device": "cuda", "vibevoice_use_quantization": True})
+    adapter.use_quantization = True
+
+    async def fake_cleanup_resources():
+        return None
+
+    async def fake_initialize():
+        return True
+
+    monkeypatch.setattr(adapter, "_cleanup_resources", fake_cleanup_resources)
+    monkeypatch.setattr(adapter, "initialize", fake_initialize)
+
+    await adapter._reload_model_for_variant("7B-Q8")
+
+    assert adapter.variant == "7B-Q8"
+    assert adapter.use_quantization is False
