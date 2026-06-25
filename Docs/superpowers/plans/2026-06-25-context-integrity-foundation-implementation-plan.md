@@ -4,6 +4,8 @@
 
 **Goal:** Build the first enforceable Context Integrity foundation for prompt-bearing assets, proving signed manifests, anti-rollback policy, quarantine resolution, startup warnings, Skills enforcement, and config prompt-loader enforcement.
 
+**Backlog:** Design `TASK-2363`; implementation planning `TASK-2365`; create or reuse a new implementation Backlog task before code edits.
+
 **Architecture:** Add a focused `tldw_Server_API.app.core.Context_Integrity` package with pure canonicalization, manifest, verifier, resolver, and inventory modules. Wire it into startup through the existing `StartupWarningRegistry`, expose admin status/findings through the existing admin router, and add thin resolver checks to Skills and prompt loading. This first slice protects filesystem skills and config prompt files; DB prompt-version and MCP prompt-catalog enforcement are represented by interfaces and explicit follow-up tests so they can plug into the same resolver without changing the core model.
 
 **Tech Stack:** Python 3.10+, FastAPI, Pydantic, Loguru, SQLite-backed existing DB layers, pytest, Bandit.
@@ -33,6 +35,7 @@ Create:
 Modify:
 
 - `tldw_Server_API/app/services/lifespan_startup_sequence.py` - call the Context Integrity startup producer after core initialization and before startup blockers are evaluated.
+- `tldw_Server_API/app/services/lifespan_shutdown_sequence.py` - clear global Context Integrity resolver state during shutdown.
 - `tldw_Server_API/app/api/v1/endpoints/admin/__init__.py` - include the admin Context Integrity router.
 - `tldw_Server_API/app/api/v1/schemas/admin_schemas.py` - add admin response schemas for current-process Context Integrity status.
 - `tldw_Server_API/app/core/Skills/skills_service.py` - add resolver dependency, filter quarantined skills from listings/context, and block direct content/execution access.
@@ -41,6 +44,24 @@ Modify:
 - `tldw_Server_API/tests/Skills/unit/test_skills_service.py` - cover quarantined skill filtering and blocking.
 - `tldw_Server_API/tests/Skills/integration/test_skills_api.py` - cover API error mapping for quarantined skills.
 - `tldw_Server_API/tests/Utils/test_prompt_loader_paths.py` - cover prompt-loader quarantine blocking and at-use verified bytes behavior.
+
+## Pre-Execution Review Amendments
+
+The following review fixes supersede any narrower snippets later in this plan:
+
+- New code must preserve Python 3.10 support. Use `datetime.now(timezone.utc)`, not `datetime.UTC`.
+- Startup must distinguish "no manifest loaded" from "valid empty manifest." No manifest means `degraded=True`, a `degraded_integrity` finding, and runtime context/execution reads fail closed.
+- Runtime resolver checks must fail closed for:
+  - any non-`audit_only` degraded state except static admin inspection paths;
+  - assets with no approved digest in the verified boot state;
+  - at-use digest mismatches.
+- Skills discovery/context paths must rehash the exact current skill file map and call `require_digest_allowed()`. A skill added or modified after startup must not appear in `available_skills`, skill tool availability, or system-message context.
+- Skills write paths (`create_skill`, `update_skill`, `import_skill`, `import_from_zip`) must still succeed under enforcement by returning a write-response snapshot that is not eligible for injection/execution until approved. Do not route write responses through the normal guarded `get_skill()` path.
+- Startup must discover existing user skill roots from `DatabasePaths.get_user_db_base_dir(allow_legacy_alias=True)` in addition to test-injected roots.
+- Inventory must not follow symlinks outside the asset root. Unreadable files, path escapes, and permission errors should emit `verification_error` findings and quarantine the narrowest asset/scope, not crash startup.
+- API and chat/tool paths that expose or execute full skill content must map `ContextIntegrityBlocked` to stable content-free failures, including direct get, execute, export, `context_integration.handle_skill_tool_call()`, `add_skill_tool_to_tools_list()`, and chat slash-command execution.
+- Environment prompt override files are protected only after they are inventoried. This slice should inventory currently configured `TLDW_PROMPT_FILE_*` paths; otherwise they must be explicitly excluded from enforcement. The plan chooses inventory.
+- The global resolver must be cleared during lifespan shutdown/test cleanup. App-state resolver injection remains preferred for request services; the global resolver is only a compatibility bridge for current non-request prompt loading.
 
 ## Task 1: Canonical Asset Models And Hashing
 
@@ -99,12 +120,12 @@ def test_filesystem_digest_detects_formatting_edits() -> None:
 
     original = canonical_filesystem_digest(
         source_type="prompt_file",
-        asset_id="config_prompt:rag.prompts.yaml",
+        asset_id="prompt_file:rag.prompts.yaml",
         files={"rag.prompts.yaml": b"answer: one\n"},
     )
     edited = canonical_filesystem_digest(
         source_type="prompt_file",
-        asset_id="config_prompt:rag.prompts.yaml",
+        asset_id="prompt_file:rag.prompts.yaml",
         files={"rag.prompts.yaml": b"answer: one\n# changed\n"},
     )
 
@@ -162,7 +183,7 @@ Create `tldw_Server_API/app/core/Context_Integrity/models.py`:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 ContextAssetSource = Literal["skill_file", "prompt_file", "db_prompt"]
@@ -220,7 +241,7 @@ class ContextIntegrityFinding:
     current_digest: str | None = None
     approved_digest: str | None = None
     details: dict[str, Any] = field(default_factory=dict)
-    detected_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    detected_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass(frozen=True, slots=True)
@@ -717,6 +738,52 @@ def test_resolver_detects_live_digest_mismatch_at_use() -> None:
         )
 
 
+def test_resolver_blocks_unknown_asset_in_enforce_mode() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.models import ContextIntegrityBootState
+    from tldw_Server_API.app.core.Context_Integrity.resolver import (
+        ContextIntegrityBlocked,
+        ContextIntegrityResolver,
+    )
+
+    resolver = ContextIntegrityResolver(
+        ContextIntegrityBootState(
+            mode="enforce",
+            degraded=False,
+            manifest_sequence=1,
+            manifest_digest="sha256:manifest",
+            approved_digests_by_asset_id={"skill:user:1/known": "sha256:approved"},
+        )
+    )
+
+    with pytest.raises(ContextIntegrityBlocked) as exc_info:
+        resolver.require_allowed("skill:user:1/live-added", purpose="skill_discovery")
+
+    assert exc_info.value.state == "new_unapproved"
+
+
+def test_resolver_blocks_degraded_injection_use() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.models import ContextIntegrityBootState
+    from tldw_Server_API.app.core.Context_Integrity.resolver import (
+        ContextIntegrityBlocked,
+        ContextIntegrityResolver,
+    )
+
+    resolver = ContextIntegrityResolver(
+        ContextIntegrityBootState(
+            mode="enforce",
+            degraded=True,
+            manifest_sequence=None,
+            manifest_digest=None,
+            approved_digests_by_asset_id={"prompt_file:demo.prompts.md": "sha256:approved"},
+        )
+    )
+
+    with pytest.raises(ContextIntegrityBlocked) as exc_info:
+        resolver.require_allowed("prompt_file:demo.prompts.md", purpose="prompt_load")
+
+    assert exc_info.value.state == "degraded_integrity"
+
+
 def test_resolver_allows_matching_digest_at_use() -> None:
     from tldw_Server_API.app.core.Context_Integrity.models import ContextIntegrityBootState
     from tldw_Server_API.app.core.Context_Integrity.resolver import ContextIntegrityResolver
@@ -886,14 +953,28 @@ class ContextIntegrityResolver:
         return self._findings_by_asset_id.get(asset_id)
 
     def require_allowed(self, asset_id: str, *, purpose: str) -> None:
+        if self.boot_state.mode != "audit_only" and self.boot_state.degraded:
+            if not purpose.startswith("admin_review"):
+                raise ContextIntegrityBlocked(asset_id=asset_id, state="degraded_integrity")
         finding = self.finding_for(asset_id)
         if finding is None:
+            if self.boot_state.mode == "audit_only":
+                return
+            if asset_id not in self.boot_state.approved_digests_by_asset_id:
+                raise ContextIntegrityBlocked(asset_id=asset_id, state="new_unapproved")
             return
         if self.boot_state.mode == "audit_only":
             return
         raise ContextIntegrityBlocked(asset_id=asset_id, state=finding.state)
 
-    def require_digest_allowed(self, asset_id: str, *, current_digest: str, purpose: str) -> None:
+    def require_digest_allowed(
+        self,
+        asset_id: str,
+        *,
+        current_digest: str,
+        purpose: str,
+        changed_state: str = "changed_approved_executable",
+    ) -> None:
         self.require_allowed(asset_id, purpose=purpose)
         if self.boot_state.mode == "audit_only":
             return
@@ -901,7 +982,7 @@ class ContextIntegrityResolver:
         if approved_digest is None:
             raise ContextIntegrityBlocked(asset_id=asset_id, state="new_unapproved")
         if approved_digest != current_digest:
-            raise ContextIntegrityBlocked(asset_id=asset_id, state="changed_approved_executable")
+            raise ContextIntegrityBlocked(asset_id=asset_id, state=changed_state)
 
 
 _global_resolver: ContextIntegrityResolver | None = None
@@ -985,6 +1066,22 @@ def test_inventory_prompt_files_finds_supported_extensions(tmp_path) -> None:
 
     assert [asset.asset_id for asset in assets] == ["prompt_file:rag.prompts.yaml"]
     assert assets[0].executable is False
+
+
+def test_inventory_env_prompt_overrides_finds_configured_files(tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import inventory_env_prompt_overrides
+
+    override = tmp_path / "override.md"
+    override.write_text("override prompt", encoding="utf-8")
+
+    assets = inventory_env_prompt_overrides(
+        environ={"TLDW_PROMPT_FILE_CHAT__SYSTEM": str(override)}
+    )
+
+    assert [asset.asset_id for asset in assets] == [
+        "prompt_file:env:TLDW_PROMPT_FILE_CHAT__SYSTEM:override.md"
+    ]
+    assert assets[0].metadata["source_label"] == "env:TLDW_PROMPT_FILE_CHAT__SYSTEM"
 ```
 
 - [ ] **Step 2: Run failing inventory tests**
@@ -1006,7 +1103,9 @@ Create `tldw_Server_API/app/core/Context_Integrity/inventory.py`:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from typing import Mapping
 
 from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
     canonical_filesystem_digest,
@@ -1086,6 +1185,42 @@ def inventory_prompt_files(*, prompts_dir: Path) -> list[ContextAssetDescriptor]
             )
         )
     return assets
+
+
+def inventory_env_prompt_overrides(
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> list[ContextAssetDescriptor]:
+    """Inventory configured prompt override files from TLDW_PROMPT_FILE_* vars."""
+    source = environ if environ is not None else os.environ
+    assets: list[ContextAssetDescriptor] = []
+    for env_name, raw_path in sorted(source.items()):
+        if not env_name.startswith("TLDW_PROMPT_FILE_") or not raw_path.strip():
+            continue
+        path = Path(raw_path).expanduser()
+        if not path.is_file():
+            continue
+        source_label = f"env:{env_name}"
+        asset_id = f"prompt_file:{source_label}:{path.name}"
+        digest = canonical_filesystem_digest(
+            source_type="prompt_file",
+            asset_id=asset_id,
+            files={path.name: path.read_bytes()},
+            metadata={"path": str(path), "source_label": source_label},
+        )
+        assets.append(
+            ContextAssetDescriptor(
+                asset_id=asset_id,
+                source_type="prompt_file",
+                digest=digest,
+                display_name=env_name,
+                executable=False,
+                owner_scope="system",
+                path=str(path),
+                metadata={"source_label": source_label},
+            )
+        )
+    return assets
 ```
 
 - [ ] **Step 4: Run inventory tests**
@@ -1111,6 +1246,7 @@ git commit -m "feat: add context integrity filesystem inventory"
 **Files:**
 - Create: `tldw_Server_API/app/services/startup_context_integrity.py`
 - Modify: `tldw_Server_API/app/services/lifespan_startup_sequence.py`
+- Modify: `tldw_Server_API/app/services/lifespan_shutdown_sequence.py`
 - Create: `tldw_Server_API/tests/Services/test_startup_context_integrity.py`
 - Modify: `tldw_Server_API/tests/Services/test_lifespan_startup_sequence.py`
 
@@ -1150,8 +1286,10 @@ def test_startup_context_integrity_sets_resolver_and_warning(tmp_path, monkeypat
         mode="enforce",
     )
 
-    assert len(findings) == 1
-    assert registry.summary(component_prefix="context_integrity")["total"] == 1
+    assert len(findings) == 2
+    assert registry.summary(component_prefix="context_integrity")["total"] == 2
+    assert app_state.context_integrity_boot_state.degraded is True
+    assert any(finding.state == "degraded_integrity" for finding in findings)
     assert app_state.context_integrity_resolver.finding_for("prompt_file:rag.prompts.yaml") is not None
 ```
 
@@ -1174,12 +1312,16 @@ Create `tldw_Server_API/app/services/startup_context_integrity.py`:
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 from typing import Iterable, Mapping
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Context_Integrity.inventory import (
+    inventory_env_prompt_overrides,
     inventory_prompt_files,
     inventory_user_skills,
 )
@@ -1187,6 +1329,10 @@ from tldw_Server_API.app.core.Context_Integrity.models import (
     ContextAssetDescriptor,
     ContextIntegrityBootState,
     ContextIntegrityFinding,
+)
+from tldw_Server_API.app.core.Context_Integrity.manifest import (
+    HmacManifestSigner,
+    verify_signed_manifest,
 )
 from tldw_Server_API.app.core.Context_Integrity.resolver import (
     ContextIntegrityResolver,
@@ -1196,6 +1342,63 @@ from tldw_Server_API.app.core.Context_Integrity.verifier import verify_inventory
 from tldw_Server_API.app.core.config_paths import resolve_prompts_dir
 from tldw_Server_API.app.services.startup_warning_models import StartupWarningRecord
 from tldw_Server_API.app.services.startup_warning_registry import StartupWarningRegistry
+
+
+def _load_startup_manifest_from_env() -> tuple[
+    tuple[Mapping[str, object], ...],
+    int | None,
+    str | None,
+    bool,
+    ContextIntegrityFinding | None,
+]:
+    """Load an operator-provided signed manifest from environment configuration."""
+    manifest_path = os.getenv("CONTEXT_INTEGRITY_MANIFEST_PATH")
+    secret = os.getenv("CONTEXT_INTEGRITY_HMAC_SECRET")
+    key_id = os.getenv("CONTEXT_INTEGRITY_HMAC_KEY_ID") or "local-hmac"
+    if not manifest_path or not secret:
+        return (), None, None, False, None
+    try:
+        signed_manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+        verified = verify_signed_manifest(
+            signed_manifest,
+            signer=HmacManifestSigner(key_id=key_id, secret=secret.encode("utf-8")),
+        )
+        return verified.entries, verified.sequence, verified.manifest_digest, True, None
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return (
+            (),
+            None,
+            None,
+            False,
+            ContextIntegrityFinding(
+                asset_id="manifest:env",
+                state="signature_invalid",
+                severity="error",
+                summary="Configured Context Integrity manifest could not be verified.",
+                remediation="Fix the manifest path/key or import a valid admin-held manifest.",
+                source_type="manifest",
+                details={"error_type": exc.__class__.__name__},
+            ),
+        )
+
+
+def _discover_user_skill_roots() -> list[tuple[int, Path]]:
+    """Discover existing per-user skill roots without creating directories."""
+    roots: list[tuple[int, Path]] = []
+    try:
+        base_dir = DatabasePaths.get_user_db_base_dir(allow_legacy_alias=True)
+    except Exception as exc:
+        logger.warning("Context Integrity could not discover user skill roots: {}", exc)
+        return roots
+    if not base_dir.exists():
+        return roots
+    for user_dir in sorted(path for path in base_dir.iterdir() if path.is_dir()):
+        if not user_dir.name.isdigit():
+            continue
+        skills_root = user_dir / "skills"
+        if skills_root.is_dir():
+            roots.append((int(user_dir.name), skills_root))
+    return roots
 
 
 def _finding_to_warning(finding: ContextIntegrityFinding) -> StartupWarningRecord:
@@ -1221,27 +1424,93 @@ def produce_context_integrity_startup_warnings(
     app_state: object,
     registry: StartupWarningRegistry,
     prompts_dir: Path | None = None,
-    user_skill_roots: Iterable[tuple[int, Path]] = (),
-    approved_entries: Iterable[Mapping[str, object]] = (),
+    user_skill_roots: Iterable[tuple[int, Path]] | None = None,
+    approved_entries: Iterable[Mapping[str, object]] | None = None,
+    manifest_loaded: bool | None = None,
+    manifest_sequence: int | None = None,
+    manifest_digest: str | None = None,
     mode: str = "enforce",
 ) -> tuple[ContextIntegrityFinding, ...]:
     """Build startup inventory, register warnings, and attach resolver state."""
     current_assets: list[ContextAssetDescriptor] = []
-    current_assets.extend(inventory_prompt_files(prompts_dir=prompts_dir or resolve_prompts_dir()))
-    for user_id, skills_root in user_skill_roots:
-        current_assets.extend(inventory_user_skills(user_id=user_id, skills_root=skills_root))
+    inventory_findings: list[ContextIntegrityFinding] = []
+    try:
+        current_assets.extend(inventory_prompt_files(prompts_dir=prompts_dir or resolve_prompts_dir()))
+        current_assets.extend(inventory_env_prompt_overrides())
+    except OSError as exc:
+        inventory_findings.append(
+            ContextIntegrityFinding(
+                asset_id="prompt_file:*",
+                state="verification_error",
+                severity="error",
+                summary="Prompt file inventory failed.",
+                remediation="Fix file permissions or remove unsafe prompt paths, then restart.",
+                source_type="prompt_file",
+                details={"error_type": exc.__class__.__name__},
+            )
+        )
+    roots = list(user_skill_roots) if user_skill_roots is not None else _discover_user_skill_roots()
+    for user_id, skills_root in roots:
+        try:
+            current_assets.extend(inventory_user_skills(user_id=user_id, skills_root=skills_root))
+        except OSError as exc:
+            inventory_findings.append(
+                ContextIntegrityFinding(
+                    asset_id=f"skill:user:{user_id}:*",
+                    state="verification_error",
+                    severity="error",
+                    summary=f"Skill inventory failed for user {user_id}.",
+                    remediation="Fix file permissions or remove unsafe skill paths, then restart.",
+                    source_type="skill_file",
+                    details={"error_type": exc.__class__.__name__},
+                )
+            )
 
-    findings = verify_inventory(current_assets=current_assets, approved_entries=approved_entries)
+    manifest_finding: ContextIntegrityFinding | None = None
+    if approved_entries is None:
+        (
+            approved_entries_tuple,
+            manifest_sequence,
+            manifest_digest,
+            loaded_from_env,
+            manifest_finding,
+        ) = _load_startup_manifest_from_env()
+        manifest_loaded = loaded_from_env
+    else:
+        approved_entries_tuple = tuple(approved_entries)
+        manifest_loaded = bool(manifest_loaded)
+    findings_list = list(inventory_findings)
+    if manifest_finding is not None:
+        findings_list.append(manifest_finding)
+    findings_list.extend(
+        verify_inventory(
+            current_assets=current_assets,
+            approved_entries=approved_entries_tuple,
+        )
+    )
+    degraded = not manifest_loaded
+    if degraded:
+        findings_list.append(
+            ContextIntegrityFinding(
+                asset_id="manifest:none",
+                state="degraded_integrity",
+                severity="error",
+                summary="No approved Context Integrity manifest was loaded.",
+                remediation="Import or approve a signed manifest before protected assets are used.",
+                source_type="manifest",
+            )
+        )
+    findings = tuple(findings_list)
     approved_digests_by_asset_id = {
         str(entry["asset_id"]): str(entry["digest"])
-        for entry in approved_entries
+        for entry in approved_entries_tuple
         if "asset_id" in entry and "digest" in entry
     }
     boot_state = ContextIntegrityBootState(
         mode=mode,  # type: ignore[arg-type]
-        degraded=False,
-        manifest_sequence=None,
-        manifest_digest=None,
+        degraded=degraded,
+        manifest_sequence=manifest_sequence,
+        manifest_digest=manifest_digest,
         approved_digests_by_asset_id=approved_digests_by_asset_id,
         findings=findings,
     )
@@ -1280,7 +1549,26 @@ def _run_startup_warning_producers(*, app: Any, startup_core_handles: Any) -> No
     )
 ```
 
-- [ ] **Step 5: Update lifespan test expectation**
+- [ ] **Step 5: Clear resolver on shutdown**
+
+Modify `tldw_Server_API/app/services/lifespan_shutdown_sequence.py` near the start of `run_lifespan_shutdown_sequence`:
+
+```python
+    try:
+        from tldw_Server_API.app.core.Context_Integrity.resolver import (
+            clear_global_context_integrity_resolver,
+        )
+
+        clear_global_context_integrity_resolver()
+        if hasattr(app.state, "context_integrity_resolver"):
+            delattr(app.state, "context_integrity_resolver")
+        if hasattr(app.state, "context_integrity_boot_state"):
+            delattr(app.state, "context_integrity_boot_state")
+    except startup_guard_exceptions:
+        pass
+```
+
+- [ ] **Step 6: Update lifespan test expectation**
 
 Modify `test_startup_initializes_registry_and_runs_sandbox_producer` in `tldw_Server_API/tests/Services/test_lifespan_startup_sequence.py` to monkeypatch the new producer:
 
@@ -1302,25 +1590,28 @@ monkeypatch.setattr(
 assert context_calls == [{"app_state": app.state, "registry": registry}]
 ```
 
-- [ ] **Step 6: Run startup tests**
+- [ ] **Step 7: Run startup tests**
 
 Run:
 
 ```bash
 source .venv/bin/activate && python -m pytest \
   tldw_Server_API/tests/Services/test_startup_context_integrity.py \
-  tldw_Server_API/tests/Services/test_lifespan_startup_sequence.py -v
+  tldw_Server_API/tests/Services/test_lifespan_startup_sequence.py \
+  tldw_Server_API/tests/Services/test_lifespan_shutdown_sequence.py -v
 ```
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 5**
+- [ ] **Step 8: Commit Task 5**
 
 ```bash
 git add tldw_Server_API/app/services/startup_context_integrity.py \
   tldw_Server_API/app/services/lifespan_startup_sequence.py \
+  tldw_Server_API/app/services/lifespan_shutdown_sequence.py \
   tldw_Server_API/tests/Services/test_startup_context_integrity.py \
-  tldw_Server_API/tests/Services/test_lifespan_startup_sequence.py
+  tldw_Server_API/tests/Services/test_lifespan_startup_sequence.py \
+  tldw_Server_API/tests/Services/test_lifespan_shutdown_sequence.py
 git commit -m "feat: wire context integrity startup checks"
 ```
 
@@ -1328,9 +1619,13 @@ git commit -m "feat: wire context integrity startup checks"
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/Skills/skills_service.py`
+- Modify: `tldw_Server_API/app/core/Skills/context_integration.py`
+- Modify: `tldw_Server_API/app/core/Chat/command_router.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/skills.py`
 - Modify: `tldw_Server_API/tests/Skills/unit/test_skills_service.py`
 - Modify: `tldw_Server_API/tests/Skills/integration/test_skills_api.py`
+- Modify: `tldw_Server_API/tests/Skills/integration/test_skill_mcp_integration.py`
+- Modify: `tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py`
 
 - [ ] **Step 1: Add failing service tests for quarantined skills**
 
@@ -1430,6 +1725,58 @@ Append to `TestSkillsService` in `tldw_Server_API/tests/Skills/unit/test_skills_
 
         with pytest.raises(ContextIntegrityBlocked):
             await service.get_skill("live-skill")
+
+    @pytest.mark.asyncio
+    async def test_live_skill_edit_after_boot_is_filtered_from_context(self, service):
+        from tldw_Server_API.app.core.Context_Integrity.inventory import inventory_user_skills
+        from tldw_Server_API.app.core.Context_Integrity.models import ContextIntegrityBootState
+        from tldw_Server_API.app.core.Context_Integrity.resolver import ContextIntegrityResolver
+
+        await service.create_skill("context-skill", "---\ndescription: Safe\n---\nOriginal")
+        asset = inventory_user_skills(user_id=1, skills_root=service.skills_dir)[0]
+        service.integrity_resolver = ContextIntegrityResolver(
+            ContextIntegrityBootState(
+                mode="enforce",
+                degraded=False,
+                manifest_sequence=1,
+                manifest_digest="sha256:manifest",
+                approved_digests_by_asset_id={asset.asset_id: asset.digest},
+            )
+        )
+        (service.skills_dir / "context-skill" / "SKILL.md").write_text(
+            "---\ndescription: Backdoored\n---\nModified",
+            encoding="utf-8",
+        )
+
+        payload = service.get_context_payload()
+
+        assert payload["available_skills"] == []
+        assert "Backdoored" not in payload["context_text"]
+
+    @pytest.mark.asyncio
+    async def test_create_skill_returns_write_response_under_enforce(self, service):
+        from tldw_Server_API.app.core.Context_Integrity.models import ContextIntegrityBootState
+        from tldw_Server_API.app.core.Context_Integrity.resolver import (
+            ContextIntegrityBlocked,
+            ContextIntegrityResolver,
+        )
+
+        service.integrity_resolver = ContextIntegrityResolver(
+            ContextIntegrityBootState(
+                mode="enforce",
+                degraded=False,
+                manifest_sequence=1,
+                manifest_digest="sha256:manifest",
+                approved_digests_by_asset_id={},
+            )
+        )
+
+        created = await service.create_skill("pending-skill", "---\ndescription: Pending\n---\nBody")
+
+        assert created["name"] == "pending-skill"
+        assert created["description"] == "Pending"
+        with pytest.raises(ContextIntegrityBlocked):
+            await service.get_skill("pending-skill")
 ```
 
 - [ ] **Step 2: Run failing skills service tests**
@@ -1440,7 +1787,9 @@ Run:
 source .venv/bin/activate && python -m pytest \
   tldw_Server_API/tests/Skills/unit/test_skills_service.py::TestSkillsService::test_quarantined_skill_is_filtered_from_context \
   tldw_Server_API/tests/Skills/unit/test_skills_service.py::TestSkillsService::test_quarantined_skill_get_is_blocked \
-  tldw_Server_API/tests/Skills/unit/test_skills_service.py::TestSkillsService::test_live_skill_edit_after_boot_is_blocked -v
+  tldw_Server_API/tests/Skills/unit/test_skills_service.py::TestSkillsService::test_live_skill_edit_after_boot_is_blocked \
+  tldw_Server_API/tests/Skills/unit/test_skills_service.py::TestSkillsService::test_live_skill_edit_after_boot_is_filtered_from_context \
+  tldw_Server_API/tests/Skills/unit/test_skills_service.py::TestSkillsService::test_create_skill_returns_write_response_under_enforce -v
 ```
 
 Expected: FAIL because `SkillsService` does not have integrity resolver logic.
@@ -1500,9 +1849,16 @@ Add helper methods:
         if self.integrity_resolver is None:
             return True
         try:
-            self.integrity_resolver.require_allowed(self._skill_asset_id(name), purpose=purpose)
+            skill_dir = self._get_skill_dir(name)
+            files = self._read_skill_file_map(skill_dir)
+            current_digest = self._skill_digest(name, skill_dir, files)
+            self.integrity_resolver.require_digest_allowed(
+                self._skill_asset_id(name),
+                current_digest=current_digest,
+                purpose=purpose,
+            )
             return True
-        except ContextIntegrityBlocked:
+        except (ContextIntegrityBlocked, OSError, UnicodeDecodeError):
             return False
 
     def _require_skill_allowed(
@@ -1523,12 +1879,16 @@ Add helper methods:
                     purpose=purpose,
                 )
 
-    def _parse_verified_skill_directory(self, name: str, skill_dir: Path):
-        files = self._read_skill_file_map(skill_dir)
+    def _parse_unchecked_skill_directory(
+        self,
+        name: str,
+        skill_dir: Path,
+        files: dict[str, bytes] | None = None,
+    ):
+        if files is None:
+            files = self._read_skill_file_map(skill_dir)
         if "SKILL.md" not in files:
             raise SkillNotFoundError(name, detail="SKILL.md not found")
-        current_digest = self._skill_digest(name, skill_dir, files)
-        self._require_skill_allowed(name, purpose="skill_read", current_digest=current_digest)
         raw_skill = files["SKILL.md"].decode("utf-8")
         parsed = self._parser.parse_content(raw_skill, default_name=name)
         parsed.supporting_files = {
@@ -1537,9 +1897,17 @@ Add helper methods:
             if relative_path != "SKILL.md"
         }
         return parsed
+
+    def _parse_verified_skill_directory(self, name: str, skill_dir: Path):
+        files = self._read_skill_file_map(skill_dir)
+        current_digest = self._skill_digest(name, skill_dir, files)
+        self._require_skill_allowed(name, purpose="skill_read", current_digest=current_digest)
+        return self._parse_unchecked_skill_directory(name, skill_dir, files=files)
 ```
 
-In `get_skill`, replace `self._parser.parse_directory(skill_dir)` with `self._parse_verified_skill_directory(name, skill_dir)`. This reads the files once, hashes those exact bytes, asks the resolver about that digest, and parses only the already-read content.
+Add an `enforce_integrity: bool = True` keyword-only parameter to `get_skill`. When `True`, replace `self._parser.parse_directory(skill_dir)` with `self._parse_verified_skill_directory(name, skill_dir)`. When `False`, use `_parse_unchecked_skill_directory(name, skill_dir)` and return the response only to the write caller.
+
+Update `create_skill`, `update_skill`, `import_skill`, and `import_from_zip` write-return paths to call `await self.get_skill(name, enforce_integrity=False)` after a successful write. Direct API reads, execution, exports, context injection, and tool use must keep the default `enforce_integrity=True`.
 
 Filter `list_skills`, `get_context_payload`, and `get_context_payload_async` so blocked skills are excluded:
 
@@ -1559,7 +1927,7 @@ Modify `tldw_Server_API/app/api/v1/endpoints/skills.py` imports:
 from tldw_Server_API.app.core.Context_Integrity.resolver import ContextIntegrityBlocked
 ```
 
-In `get_skill` and `execute_skill`, add:
+In `get_skill`, `export_skill`, and `execute_skill`, add:
 
 ```python
     except ContextIntegrityBlocked as e:
@@ -1587,6 +1955,131 @@ Append to `tldw_Server_API/tests/Skills/integration/test_skills_api.py`:
 
         assert response.status_code == 423
         assert response.json()["detail"] == "Asset is quarantined pending admin review."
+
+    def test_export_quarantined_skill_returns_423(self, client, monkeypatch):
+        from tldw_Server_API.app.core.Context_Integrity.resolver import ContextIntegrityBlocked
+        from tldw_Server_API.app.core.Skills.skills_service import SkillsService
+
+        async def _blocked(self, name):
+            raise ContextIntegrityBlocked(asset_id=f"skill:user:1/{name}", state="changed_approved_executable")
+
+        monkeypatch.setattr(SkillsService, "export_skill", _blocked)
+
+        response = client.get(f"{SKILLS_PREFIX}/blocked-skill/export")
+
+        assert response.status_code == 423
+        assert response.json()["detail"] == "Asset is quarantined pending admin review."
+```
+
+- [ ] **Step 6: Run focused Skills tests**
+
+Append to `tldw_Server_API/tests/Skills/integration/test_skill_mcp_integration.py`:
+
+```python
+@pytest.mark.asyncio
+async def test_handle_skill_tool_call_returns_content_free_integrity_error(tmp_path):
+    from tldw_Server_API.app.core.Context_Integrity.models import (
+        ContextIntegrityBootState,
+        ContextIntegrityFinding,
+    )
+    from tldw_Server_API.app.core.Context_Integrity.resolver import (
+        ContextIntegrityResolver,
+        set_global_context_integrity_resolver,
+        clear_global_context_integrity_resolver,
+    )
+    from tldw_Server_API.app.core.Skills.context_integration import handle_skill_tool_call
+
+    resolver = ContextIntegrityResolver(
+        ContextIntegrityBootState(
+            mode="enforce",
+            degraded=False,
+            manifest_sequence=1,
+            manifest_digest="sha256:manifest",
+            findings=(
+                ContextIntegrityFinding(
+                    asset_id="skill:user:1/blocked-skill",
+                    state="changed_approved_executable",
+                    severity="error",
+                    summary="changed",
+                    remediation="review",
+                    source_type="skill_file",
+                ),
+            ),
+        )
+    )
+    set_global_context_integrity_resolver(resolver)
+    try:
+        result = await handle_skill_tool_call(
+            skill_name="blocked-skill",
+            args="",
+            user_id=1,
+            base_path=tmp_path,
+            db=None,
+        )
+    finally:
+        clear_global_context_integrity_resolver()
+
+    assert result == {
+        "success": False,
+        "error": "context_integrity_blocked",
+    }
+```
+
+Modify `tldw_Server_API/app/core/Skills/context_integration.py`:
+
+```python
+from tldw_Server_API.app.core.Context_Integrity.resolver import ContextIntegrityBlocked
+```
+
+Add `except ContextIntegrityBlocked` before the existing `SkillsError` handler in `handle_skill_tool_call()`:
+
+```python
+    except ContextIntegrityBlocked:
+        logger.warning("Blocked quarantined skill invocation: {}", skill_name)
+        return {
+            "success": False,
+            "error": "context_integrity_blocked",
+        }
+```
+
+`add_skill_tool_to_tools_list()` already calls `service.get_context_payload()`; after `_is_skill_allowed()` rehashes current files, quarantined or live-edited skills must not cause the `Skill` tool to be advertised.
+
+Append to `tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py`:
+
+```python
+@pytest.mark.asyncio
+async def test_skill_command_reports_context_integrity_block(monkeypatch):
+    async def fake_exec(ctx, skill_name, skill_args):
+        return {"success": False, "error": "context_integrity_blocked"}
+
+    monkeypatch.setattr(command_router, "_execute_skill", fake_exec)
+    ctx = command_router.CommandContext(user_id="u1", auth_user_id=1)
+
+    res = await command_router.async_dispatch_command(ctx, "skill", "blocked-skill x")
+
+    assert not res.ok
+    assert "quarantined pending admin review" in res.content
+    assert res.metadata["error"] == "context_integrity_blocked"
+```
+
+Modify `tldw_Server_API/app/core/Chat/command_router.py`:
+
+```python
+from tldw_Server_API.app.core.Context_Integrity.resolver import ContextIntegrityBlocked
+```
+
+Catch `ContextIntegrityBlocked` in `_execute_skill()` before `SkillsError`:
+
+```python
+    except ContextIntegrityBlocked:
+        return {"success": False, "error": "context_integrity_blocked"}
+```
+
+Handle the stable error in `_skill_handler()`:
+
+```python
+        elif error == "context_integrity_blocked":
+            message = "Skill is quarantined pending admin review."
 ```
 
 - [ ] **Step 6: Run focused Skills tests**
@@ -1596,7 +2089,9 @@ Run:
 ```bash
 source .venv/bin/activate && python -m pytest \
   tldw_Server_API/tests/Skills/unit/test_skills_service.py \
-  tldw_Server_API/tests/Skills/integration/test_skills_api.py -v
+  tldw_Server_API/tests/Skills/integration/test_skills_api.py \
+  tldw_Server_API/tests/Skills/integration/test_skill_mcp_integration.py \
+  tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py -v
 ```
 
 Expected: PASS.
@@ -1605,9 +2100,13 @@ Expected: PASS.
 
 ```bash
 git add tldw_Server_API/app/core/Skills/skills_service.py \
+  tldw_Server_API/app/core/Skills/context_integration.py \
+  tldw_Server_API/app/core/Chat/command_router.py \
   tldw_Server_API/app/api/v1/endpoints/skills.py \
   tldw_Server_API/tests/Skills/unit/test_skills_service.py \
-  tldw_Server_API/tests/Skills/integration/test_skills_api.py
+  tldw_Server_API/tests/Skills/integration/test_skills_api.py \
+  tldw_Server_API/tests/Skills/integration/test_skill_mcp_integration.py \
+  tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py
 git commit -m "feat: enforce context integrity for skills"
 ```
 
@@ -1777,6 +2276,7 @@ def _read_prompt_file_text(path: str, *, source_label: str | None = None) -> str
             asset_id,
             current_digest=current_digest,
             purpose="prompt_load",
+            changed_state="changed_approved_non_executable",
         )
     return raw.decode("utf-8")
 ```
@@ -2085,9 +2585,12 @@ Run:
 source .venv/bin/activate && python -m pytest \
   tldw_Server_API/tests/Services/test_startup_context_integrity.py \
   tldw_Server_API/tests/Services/test_lifespan_startup_sequence.py \
+  tldw_Server_API/tests/Services/test_lifespan_shutdown_sequence.py \
   tldw_Server_API/tests/AuthNZ_SQLite/test_admin_context_integrity_sqlite.py \
   tldw_Server_API/tests/Skills/unit/test_skills_service.py \
   tldw_Server_API/tests/Skills/integration/test_skills_api.py \
+  tldw_Server_API/tests/Skills/integration/test_skill_mcp_integration.py \
+  tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py \
   tldw_Server_API/tests/Utils/test_prompt_loader_paths.py \
   tldw_Server_API/tests/Utils/test_prompt_loader_env_overrides.py -v
 ```
@@ -2103,7 +2606,10 @@ source .venv/bin/activate && python -m bandit -r \
   tldw_Server_API/app/core/Context_Integrity \
   tldw_Server_API/app/services/startup_context_integrity.py \
   tldw_Server_API/app/services/lifespan_startup_sequence.py \
+  tldw_Server_API/app/services/lifespan_shutdown_sequence.py \
   tldw_Server_API/app/core/Skills/skills_service.py \
+  tldw_Server_API/app/core/Skills/context_integration.py \
+  tldw_Server_API/app/core/Chat/command_router.py \
   tldw_Server_API/app/api/v1/endpoints/skills.py \
   tldw_Server_API/app/core/Utils/prompt_loader.py \
   tldw_Server_API/app/api/v1/endpoints/admin/context_integrity.py \
@@ -2129,9 +2635,10 @@ This plan intentionally makes DB prompt-version and MCP prompt-catalog enforceme
 
 1. DB prompt-version inventory and approval workflow in `Prompts_DB` and prompt APIs.
 2. MCP prompt-catalog resolver checks in `tldw_Server_API/app/core/MCP_unified/modules/implementations/prompts_catalog.py`.
-3. OS/hardware-backed key provider integration beyond the first HMAC signer.
-4. Admin approval/import/export endpoints for signed manifest lifecycle.
-5. Frontend review UI for source-grouped baseline approval and canonical diffs.
+3. Bundled/plugin/repo skill inventory adapters, including repo prompt-skill files such as `Docs/Prompts/Skills/*`.
+4. OS/hardware-backed key provider integration beyond the first HMAC signer.
+5. Admin approval/import/export endpoints for signed manifest lifecycle.
+6. Frontend review UI for source-grouped baseline approval and canonical diffs.
 
 ## Plan Self-Review
 

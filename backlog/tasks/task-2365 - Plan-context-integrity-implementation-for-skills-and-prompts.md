@@ -4,17 +4,19 @@ title: Plan context integrity implementation for skills and prompts
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-25 17:18'
+updated_date: 2026-06-25 17:18
 labels:
-  - security
-  - skills
-  - prompts
-  - planning
+- security
+- skills
+- prompts
+- planning
 dependencies: []
 documentation:
-  - Docs/superpowers/specs/2026-06-25-context-integrity-skills-prompts-design.md
-  - >-
-    Docs/superpowers/plans/2026-06-25-context-integrity-foundation-implementation-plan.md
+- Docs/superpowers/specs/2026-06-25-context-integrity-skills-prompts-design.md
+- Docs/superpowers/plans/2026-06-25-context-integrity-foundation-implementation-plan.md
+modified_files:
+- Docs/superpowers/plans/2026-06-25-context-integrity-foundation-implementation-plan.md
+- backlog/tasks/task-2365 - Plan-context-integrity-implementation-for-skills-and-prompts.md
 ---
 
 ## Description
@@ -48,7 +50,7 @@ Created after user approved the amended context integrity design spec on 2026-06
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created the Context Integrity Foundation implementation plan from TASK-2363. The plan decomposes the approved design into nine TDD tasks covering canonical hashing, signed manifests, anti-rollback checks, verifier/resolver behavior, filesystem inventory, startup warnings, Skills enforcement, prompt-loader enforcement, admin status, and focused verification. During review, strengthened the plan with digest-at-use checks for skills and prompt files, single-read prompt parsing, distinct env-override prompt asset IDs, and same-sequence anti-rollback digest validation. Verification: ran a red-flag term scan against the plan artifact; no matches. Bandit not applicable because this task only adds documentation.
+Pre-execution review completed before subagent-driven implementation. Updated the plan to address review findings: added Python 3.10-safe timestamp guidance, explicit env-backed signed manifest loading, degraded no-manifest fail-closed behavior, resolver blocking for degraded and unknown assets, live-digest checks for skill discovery/context, startup discovery of user skill roots, inventory error findings, env prompt override inventory, write-path pending responses for skill CRUD, export/tool/slash-command integrity handling, global resolver shutdown cleanup, final verification scope updates, and follow-up boundaries for bundled/plugin/repo skill adapters. Verification: red-flag term scan and ASCII scan both returned no matches. Bandit not applicable because this task only edits documentation.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
