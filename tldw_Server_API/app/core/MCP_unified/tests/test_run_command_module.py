@@ -345,13 +345,13 @@ async def test_run_applies_cwd_to_relative_workspace_file_arguments() -> None:
 
     assert [call.params["name"] for call in protocol.prepare_calls] == [
         "fs.read",
-        "fs.write_text",
+        "fs.write",
         "fs.list",
         "fs.grep",
     ]
     assert [call.params["arguments"] for call in protocol.prepare_calls] == [
         {"path": "docs/notes.txt"},
-        {"path": "docs/out.txt", "content": "hello"},
+        {"path": "docs/out.txt", "content": "hello", "mode": "create"},
         {"path": "docs"},
         {"pattern": "TODO", "base_path": "docs"},
     ]
@@ -373,7 +373,7 @@ async def test_run_cwd_preserves_whitespace_in_relative_file_arguments() -> None
 
     assert [call.params["arguments"] for call in protocol.prepare_calls] == [
         {"path": "docs/ notes.txt "},
-        {"path": "docs/ out.txt ", "content": "hello"},
+        {"path": "docs/ out.txt ", "content": "hello", "mode": "create"},
         {"path": "docs/ sub dir "},
     ]
 
@@ -1268,7 +1268,7 @@ async def test_run_help_policy_filters_filesystem_aliases() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_help_shows_write_create_only_when_structured_write_is_visible() -> None:
+async def test_run_help_shows_write_commands_when_structured_write_is_visible() -> None:
     class _StructuredWriteProtocolStub(_ProtocolStub):
         async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
             del params, context
@@ -1284,12 +1284,12 @@ async def test_run_help_shows_write_create_only_when_structured_write_is_visible
     rendered = await module.execute_tool("run", {"command": "--help"}, context=context)
 
     commands = {line.split()[0] for line in rendered.splitlines() if line.startswith("  ")}
+    assert "write" in commands
     assert "write-create" in commands
-    assert "write" not in commands
 
 
 @pytest.mark.asyncio
-async def test_run_help_shows_legacy_write_only_when_legacy_write_text_is_visible() -> None:
+async def test_run_help_hides_write_commands_when_only_legacy_write_text_is_visible() -> None:
     class _LegacyWriteProtocolStub(_ProtocolStub):
         async def _handle_tools_list(self, params: dict[str, Any], context: RequestContext) -> dict[str, Any]:
             del params, context
@@ -1305,7 +1305,7 @@ async def test_run_help_shows_legacy_write_only_when_legacy_write_text_is_visibl
     rendered = await module.execute_tool("run", {"command": "--help"}, context=context)
 
     commands = {line.split()[0] for line in rendered.splitlines() if line.startswith("  ")}
-    assert "write" in commands
+    assert "write" not in commands
     assert "write-create" not in commands
 
 
@@ -1407,7 +1407,7 @@ async def test_run_write_create_uses_structured_write_create_mode() -> None:
 @pytest.mark.asyncio
 async def test_run_preflights_write_chain_before_executing_first_step() -> None:
     protocol = _ProtocolStub()
-    protocol.prepare_errors["fs.write_text"] = PermissionError("blocked by policy")
+    protocol.prepare_errors["fs.write"] = PermissionError("blocked by policy")
     module = _build_module(protocol)
     context = RequestContext(request_id="run-preflight", user_id="1", client_id="unit")
 
@@ -1415,7 +1415,7 @@ async def test_run_preflights_write_chain_before_executing_first_step() -> None:
 
     assert "blocked by policy" in rendered
     assert "[exit:1 |" in rendered
-    assert [call.params["name"] for call in protocol.prepare_calls] == ["fs.list", "fs.write_text"]
+    assert [call.params["name"] for call in protocol.prepare_calls] == ["fs.list", "fs.write"]
     assert protocol.execute_calls == []
 
 
@@ -1440,7 +1440,7 @@ async def test_run_derives_step_idempotency_from_parent_key() -> None:
     assert "[exit:0 |" in first
     assert "[exit:0 |" in second
     assert len(protocol.prepare_calls) == 2
-    assert protocol.prepare_calls[0].params["name"] == "fs.write_text"
+    assert protocol.prepare_calls[0].params["name"] == "fs.write"
     assert protocol.prepare_calls[0].idempotency_key == derive_step_idempotency_key(
         "parent-idem-1",
         ["write", "notes.txt", "hello"],
@@ -1468,12 +1468,12 @@ async def test_run_uses_lexical_preflighted_step_for_identical_command_after_ski
     assert "[exit:0 |" in rendered
     assert [call.params["name"] for call in protocol.prepare_calls] == [
         "fs.read",
-        "fs.write_text",
-        "fs.write_text",
+        "fs.write",
+        "fs.write",
     ]
     assert [call.params["name"] for call in protocol.execute_calls] == [
         "fs.read",
-        "fs.write_text",
+        "fs.write",
     ]
     assert protocol.execute_calls[1].idempotency_key == derive_step_idempotency_key(
         "parent-idem-skip-1",
@@ -1498,7 +1498,7 @@ async def test_run_converts_governed_file_errors_into_cli_result() -> None:
 @pytest.mark.asyncio
 async def test_run_preserves_approval_required_errors() -> None:
     protocol = _ProtocolStub()
-    protocol.prepare_errors["fs.write_text"] = ApprovalRequiredError(
+    protocol.prepare_errors["fs.write"] = ApprovalRequiredError(
         "approval required",
         approval={"reason": "path_outside_current_folder_scope"},
     )

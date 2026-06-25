@@ -4,6 +4,7 @@ import pytest
 from fastapi import WebSocketDisconnect
 
 from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError
+from tldw_Server_API.app.core.MCP_unified.auth import rbac as legacy_rbac
 from tldw_Server_API.app.core.MCP_unified.auth.authnz_rbac import Action, AuthNZRBAC, Resource
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
 from tldw_Server_API.app.core.MCP_unified.config import get_config
@@ -261,3 +262,27 @@ async def test_rbac_does_not_seed_permission_for_unknown_tool(monkeypatch):
 
     assert allowed is False
     assert seeded is False
+
+
+def test_fallback_rbac_user_role_does_not_wildcard_execute_arbitrary_tools():
+    policy = legacy_rbac.RBACPolicy()
+    policy.assign_role("user-1", legacy_rbac.UserRole.USER.value)
+
+    assert (
+        policy.check_permission(
+            "user-1",
+            legacy_rbac.Resource.TOOL,
+            legacy_rbac.Action.EXECUTE,
+            "search_media",
+        )
+        is True
+    )
+    assert (
+        policy.check_permission(
+            "user-1",
+            legacy_rbac.Resource.TOOL,
+            legacy_rbac.Action.EXECUTE,
+            "definitely_missing_tool",
+        )
+        is False
+    )

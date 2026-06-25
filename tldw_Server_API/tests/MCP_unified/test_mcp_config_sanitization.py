@@ -55,3 +55,20 @@ def test_validate_config_failure_log_is_sanitized(monkeypatch):
     assert "Configuration validation failed" in rendered_logs
     assert sensitive_detail not in rendered_logs
     assert "sk-mcp-secret" not in rendered_logs
+
+
+def test_configure_logging_preserves_existing_loguru_sinks(monkeypatch):
+    monkeypatch.setenv("MCP_AUDIT_ENABLED", "false")
+    messages: list[str] = []
+    sink_id = mcp_config.logger.add(
+        lambda message: messages.append(str(message.record.get("message") or "")),
+        level="INFO",
+    )
+
+    try:
+        assert sink_id in mcp_config.logger._core.handlers  # nosec B101, SLF001
+        mcp_config.MCPConfig().configure_logging()
+        assert sink_id in mcp_config.logger._core.handlers  # nosec B101, SLF001
+    finally:
+        if sink_id in mcp_config.logger._core.handlers:  # nosec B101, SLF001
+            mcp_config.logger.remove(sink_id)

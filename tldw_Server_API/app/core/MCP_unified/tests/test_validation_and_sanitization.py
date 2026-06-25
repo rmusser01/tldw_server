@@ -3,17 +3,17 @@ Validation and sanitization tests for MCP Unified (tool name regex, deep arg san
 """
 
 import os
+from typing import Any
+
 import pytest
-import os as _os
 
 # Minimize startup side-effects for tests
-_os.environ.setdefault("TEST_MODE", "true")
-_os.environ.setdefault("ENABLE_TRACING", "false")
-_os.environ.setdefault("OTEL_METRICS_EXPORTER", "console")
-from typing import Dict, Any
+os.environ.setdefault("TEST_MODE", "true")
+os.environ.setdefault("ENABLE_TRACING", "false")
+os.environ.setdefault("OTEL_METRICS_EXPORTER", "console")
 
-from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
 from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule, ModuleConfig
+from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
 
 
 class InlineSanitizeModule(BaseModule):
@@ -23,10 +23,10 @@ class InlineSanitizeModule(BaseModule):
     async def on_shutdown(self) -> None:
         return None
 
-    async def check_health(self) -> Dict[str, bool]:
+    async def check_health(self) -> dict[str, bool]:
         return {"ok": True}
 
-    async def get_tools(self) -> list[Dict[str, Any]]:
+    async def get_tools(self) -> list[dict[str, Any]]:
         return [{
             "name": "echo_sanitize",
             "description": "Echo a message with deep sanitization",
@@ -37,7 +37,7 @@ class InlineSanitizeModule(BaseModule):
             }
         }]
 
-    async def execute_tool(self, tool_name: str, arguments: Dict[str, Any], context: Any | None = None) -> Any:
+    async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
         args = self.sanitize_input(arguments)
         if tool_name == "echo_sanitize":
             return args.get("message")
@@ -57,7 +57,7 @@ async def test_tool_name_strict_regex_blocks_invalid():
     }
     resp = await proto.process_request(req, ctx)
     assert resp is not None and resp.error is not None  # nosec B101
-    assert resp.error.code == -32603  # nosec B101
+    assert resp.error.code == -32602  # nosec B101
     assert "Invalid tool name" in (resp.error.message or "")  # nosec B101
 
 
