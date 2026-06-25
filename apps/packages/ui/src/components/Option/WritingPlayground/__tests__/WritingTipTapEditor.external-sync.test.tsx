@@ -41,6 +41,36 @@ describe("WritingTipTapEditor external sync", () => {
     })
   })
 
+  it("notifies after applying external content updates", async () => {
+    const onContentChange = vi.fn()
+    let textAtApply = ""
+    let container: HTMLElement
+    const onContentApplied = vi.fn(() => {
+      textAtApply = container.textContent ?? ""
+    })
+    const view = render(
+      <WritingTipTapEditor
+        content={FIRST_DOC}
+        onContentChange={onContentChange}
+        onContentApplied={onContentApplied}
+      />
+    )
+    container = view.container
+
+    view.rerender(
+      <WritingTipTapEditor
+        content={SECOND_DOC}
+        onContentChange={onContentChange}
+        onContentApplied={onContentApplied}
+      />
+    )
+
+    await waitFor(() => {
+      expect(onContentApplied).toHaveBeenCalledTimes(1)
+    })
+    expect(textAtApply).toContain("Second draft")
+  })
+
   it("maps selections to plain-text offsets after paragraph boundaries", async () => {
     const adapterRef: { current: WritingEditorAdapter | null } = {
       current: null

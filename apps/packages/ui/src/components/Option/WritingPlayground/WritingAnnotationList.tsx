@@ -34,8 +34,17 @@ export function WritingAnnotationList({
         const isEditing = editingId === annotation.id
         return (
           <div
+            id={`writing-annotation-inspector-row-${annotation.id}`}
             key={annotation.id}
+            data-testid="writing-annotation-inspector-row"
+            aria-labelledby={`writing-annotation-inspector-row-${annotation.id}-summary`}
             className="rounded border border-border bg-surface p-2 text-xs">
+            <span
+              id={`writing-annotation-inspector-row-${annotation.id}-summary`}
+              className="sr-only"
+            >
+              {annotation.category} annotation {annotation.id}
+            </span>
             <div className="mb-2 flex flex-wrap items-center gap-1">
               <Tag className="!m-0">{annotation.status}</Tag>
               <Tag className="!m-0">{annotation.category}</Tag>

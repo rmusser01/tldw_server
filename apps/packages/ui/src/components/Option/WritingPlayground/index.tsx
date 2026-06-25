@@ -101,6 +101,7 @@ import { ResearchTab } from "./ResearchTab"
 import { AIAgentTab } from "./AIAgentTab"
 import { FeedbackTab } from "./FeedbackTab"
 import { WritingAnnotationsTab } from "./WritingAnnotationsTab"
+import { WritingAnnotationMarginRail } from "./WritingAnnotationMarginRail"
 import { MOOD_COLORS } from "./feedback-constants"
 import { WritingAnalysisModalHost } from "./WritingAnalysisModalHost"
 import { WritingPlaygroundDiagnosticsPanel } from "./WritingPlaygroundDiagnosticsPanel"
@@ -332,6 +333,11 @@ export const WritingPlayground = () => {
     )
   const [revisionSelection, setRevisionSelection] =
     React.useState<WritingEditorSelection | null>(null)
+  const [activeAnnotationId, setActiveAnnotationId] = React.useState<string | null>(null)
+  const [annotationRailAdapter, setAnnotationRailAdapter] =
+    React.useState<WritingEditorAdapter | null>(null)
+  const [annotationRailMeasurementVersion, setAnnotationRailMeasurementVersion] =
+    React.useState(0)
 
   // --- Refs (local only) ---
   const generationServiceRef = React.useRef(new TldwChatService())
@@ -489,9 +495,31 @@ export const WritingPlayground = () => {
     []
   )
 
+  const bumpAnnotationRailMeasurementVersion = React.useCallback(() => {
+    setAnnotationRailMeasurementVersion((version) => version + 1)
+  }, [])
+
+  const handleTipTapContentChange = React.useCallback(
+    (json: JSONContent, plain: string) => {
+      editorTextChangedByTipTap.current = true
+      setTipTapContent(json)
+      applyEditorValue(plain, { promptRich: json })
+      bumpAnnotationRailMeasurementVersion()
+    },
+    [
+      applyEditorValue,
+      bumpAnnotationRailMeasurementVersion,
+      setTipTapContent
+    ]
+  )
+
   const setActiveEditorAdapter = React.useCallback(
     (adapter: WritingEditorAdapter | null) => {
       activeEditorAdapterRef.current = adapter
+      const measurableAdapter = adapter?.measureRange ? adapter : null
+      setAnnotationRailAdapter((current) =>
+        current === measurableAdapter ? current : measurableAdapter
+      )
       applyPendingEditorSelection(adapter)
       updateRevisionSelection(adapter?.getSelection() ?? null)
     },
@@ -507,16 +535,15 @@ export const WritingPlayground = () => {
     }
 
     if (!editorTextChangedByTipTap.current) {
-      setTipTapContent(
-        resolveTipTapDocument(
-          editorText,
-          (activeScene?.content as
-            | JSONContent
-            | null
-            | undefined) ??
-            getPromptRichFromPayload(activeSessionDetail?.payload)
-        )
+      const nextTipTapContent = resolveTipTapDocument(
+        editorText,
+        (activeScene?.content as
+          | JSONContent
+          | null
+          | undefined) ??
+          getPromptRichFromPayload(activeSessionDetail?.payload)
       )
+      setTipTapContent(nextTipTapContent)
     }
     editorTextChangedByTipTap.current = false
   }, [
@@ -688,6 +715,15 @@ export const WritingPlayground = () => {
     targetContext: activeAnnotationTargetContext,
     enabled: isOnline && Boolean(activeProjectId)
   })
+  const annotationMarginRail = (
+    <WritingAnnotationMarginRail
+      annotations={annotations.annotations}
+      adapter={editorMode === "tiptap" && editorView !== "preview" ? annotationRailAdapter : null}
+      activeAnnotationId={activeAnnotationId}
+      measurementVersion={annotationRailMeasurementVersion}
+      onActiveAnnotationChange={setActiveAnnotationId}
+    />
+  )
 
   React.useEffect(() => {
     const modelId = selectedModel?.trim()
@@ -3208,23 +3244,23 @@ export const WritingPlayground = () => {
                     )}
                   {editorView === "edit" && (
                     editorMode === "tiptap" ? (
-                      <React.Suspense fallback={<div className="p-4 text-sm text-gray-400">Loading editor...</div>}>
-                        <LazyWritingTipTapEditor
-                          content={tipTapContent}
-                          onContentChange={(json, plain) => {
-                            editorTextChangedByTipTap.current = true
-                            setTipTapContent(json)
-                            applyEditorValue(plain, { promptRich: json })
-                          }}
-                          onAdapterReady={(adapter) => {
-                            setActiveEditorAdapter(adapter)
-                          }}
-                          onSelectionChange={updateRevisionSelection}
-                          editable={!isEditorLocked}
-                          placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")}
-                          className={cn("flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}
-                        />
-                      </React.Suspense>
+                      <div className="flex flex-1 items-start gap-4">
+                        <React.Suspense fallback={<div className="p-4 text-sm text-gray-400">Loading editor...</div>}>
+                          <LazyWritingTipTapEditor
+                            content={tipTapContent}
+                            onContentChange={handleTipTapContentChange}
+                            onContentApplied={bumpAnnotationRailMeasurementVersion}
+                            onAdapterReady={(adapter) => {
+                              setActiveEditorAdapter(adapter)
+                            }}
+                            onSelectionChange={updateRevisionSelection}
+                            editable={!isEditorLocked}
+                            placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")}
+                            className={cn("min-w-0 flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}
+                          />
+                        </React.Suspense>
+                        {annotationMarginRail}
+                      </div>
                     ) : (
                       <Dropdown menu={{ items: editorMenuItems }} trigger={["contextMenu"]}>
                         <div className={cn("flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}>
@@ -3242,23 +3278,23 @@ export const WritingPlayground = () => {
                       <div className="flex flex-1 flex-col gap-4 lg:flex-row">
                         <div className={cn("flex-1", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}>
                           {editorMode === "tiptap" ? (
-                            <React.Suspense fallback={<div className="p-4 text-sm text-gray-400">Loading editor...</div>}>
-                              <LazyWritingTipTapEditor
-                                content={tipTapContent}
-                                onContentChange={(json, plain) => {
-                                  editorTextChangedByTipTap.current = true
-                                  setTipTapContent(json)
-                                  applyEditorValue(plain, { promptRich: json })
-                                }}
-                                onAdapterReady={(adapter) => {
-                                  setActiveEditorAdapter(adapter)
-                                }}
-                                onSelectionChange={updateRevisionSelection}
-                                editable={!isEditorLocked}
-                                placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")}
-                                className={cn("flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}
-                              />
-                            </React.Suspense>
+                            <div className="flex items-start gap-4">
+                              <React.Suspense fallback={<div className="p-4 text-sm text-gray-400">Loading editor...</div>}>
+                                <LazyWritingTipTapEditor
+                                  content={tipTapContent}
+                                  onContentChange={handleTipTapContentChange}
+                                  onContentApplied={bumpAnnotationRailMeasurementVersion}
+                                  onAdapterReady={(adapter) => {
+                                    setActiveEditorAdapter(adapter)
+                                  }}
+                                  onSelectionChange={updateRevisionSelection}
+                                  editable={!isEditorLocked}
+                                  placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")}
+                                  className={cn("min-w-0 flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}
+                                />
+                              </React.Suspense>
+                              {annotationMarginRail}
+                            </div>
                           ) : (
                             <Dropdown menu={{ items: editorMenuItems }} trigger={["contextMenu"]}>
                               <div>

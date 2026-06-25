@@ -15,6 +15,8 @@ const TIMED_FLOW_SAMPLE_PROMPTS = [
 ]
 const CONTROL_BASELINE_ENV = "TLDW_WRITING_CONTROL_BASELINE_COUNT"
 const CONTROL_REDUCTION_TARGET_PERCENT = 35
+const MANUSCRIPT_RAIL_SCENE_TEXT =
+  "Morning rain struck the window while Elias revised the first paragraph.\n\nHe circled the same line twice before finding the cleaner sentence."
 
 const normalizeServerUrl = (value: string) =>
   value.match(/^https?:\/\//) ? value.replace(/\/$/, "") : `http://${value}`
@@ -28,6 +30,130 @@ const fetchWritingCapabilities = async (serverUrl: string, apiKey: string) => {
   ).catch(() => null)
   if (!res || !res.ok) return null
   return await res.json().catch(() => null)
+}
+
+const apiJson = async <T>(
+  serverUrl: string,
+  apiKey: string,
+  path: string,
+  init: RequestInit = {}
+): Promise<T> => {
+  const res = await fetch(`${serverUrl}${path}`, {
+    ...init,
+    headers: {
+      "x-api-key": apiKey,
+      ...(init.body ? { "Content-Type": "application/json" } : {}),
+      ...init.headers
+    }
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => "")
+    throw new Error(`${init.method ?? "GET"} ${path} failed: ${res.status} ${body}`)
+  }
+  if (res.status === 204) return undefined as T
+  return (await res.json()) as T
+}
+
+type SeededRailFixture = {
+  projectId: string
+  projectTitle: string
+  sceneTitle: string
+  cleanup: () => Promise<void>
+}
+
+const sceneRichContent = (text: string) => ({
+  type: "doc",
+  content: text.split("\n\n").map((paragraph) => ({
+    type: "paragraph",
+    content: [{ type: "text", text: paragraph }]
+  }))
+})
+
+const seedMarginRailFixture = async (
+  serverUrl: string,
+  apiKey: string
+): Promise<SeededRailFixture> => {
+  const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  const projectTitle = `E2E Rail Project ${unique}`
+  const chapterTitle = `E2E Rail Chapter ${unique}`
+  const sceneTitle = `E2E Rail Scene ${unique}`
+  const project = await apiJson<{ id: string; version: number }>(
+    serverUrl,
+    apiKey,
+    "/api/v1/writing/manuscripts/projects",
+    {
+      method: "POST",
+      body: JSON.stringify({ title: projectTitle })
+    }
+  )
+  const chapter = await apiJson<{ id: string }>(
+    serverUrl,
+    apiKey,
+    `/api/v1/writing/manuscripts/projects/${encodeURIComponent(project.id)}/chapters`,
+    {
+      method: "POST",
+      body: JSON.stringify({ title: chapterTitle })
+    }
+  )
+  const scene = await apiJson<{ id: string; version: number }>(
+    serverUrl,
+    apiKey,
+    `/api/v1/writing/manuscripts/chapters/${encodeURIComponent(chapter.id)}/scenes`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        title: sceneTitle,
+        content: sceneRichContent(MANUSCRIPT_RAIL_SCENE_TEXT),
+        content_plain: MANUSCRIPT_RAIL_SCENE_TEXT
+      })
+    }
+  )
+  const firstStart = MANUSCRIPT_RAIL_SCENE_TEXT.indexOf("Morning rain")
+  const firstEnd = firstStart + "Morning rain".length
+  const secondStart = MANUSCRIPT_RAIL_SCENE_TEXT.indexOf("cleaner sentence")
+  const secondEnd = secondStart + "cleaner sentence".length
+  for (const annotation of [
+    {
+      category: "clarity",
+      body: "Clarify the opening sensory beat.",
+      start: firstStart,
+      end: firstEnd,
+      selected_text: MANUSCRIPT_RAIL_SCENE_TEXT.slice(firstStart, firstEnd)
+    },
+    {
+      category: "style",
+      body: "Make the revision payoff sharper.",
+      start: secondStart,
+      end: secondEnd,
+      selected_text: MANUSCRIPT_RAIL_SCENE_TEXT.slice(secondStart, secondEnd)
+    }
+  ] as const) {
+    await apiJson(serverUrl, apiKey, "/api/v1/writing/manuscripts/annotations", {
+      method: "POST",
+      body: JSON.stringify({
+        target_type: "scene",
+        target_id: scene.id,
+        scene_version: scene.version,
+        tags: [],
+        suggested_fix: null,
+        followup_note: null,
+        metadata: {},
+        ...annotation
+      })
+    })
+  }
+
+  return {
+    projectId: project.id,
+    projectTitle,
+    sceneTitle,
+    cleanup: async () => {
+      await apiJson(serverUrl, apiKey, `/api/v1/writing/manuscripts/projects/${encodeURIComponent(project.id)}`, {
+        method: "DELETE",
+        headers: { "expected-version": String(project.version) }
+      }).catch(() => undefined)
+    }
+  }
 }
 
 const waitForConnected = async (page: Page, label: string) => {
@@ -196,7 +322,7 @@ const setupModeParityPage = async (
     page.getByRole("heading", { name: /Writing Playground/i })
   ).toBeVisible()
 
-  return { context, page }
+  return { context, page, serverUrl: normalizedServerUrl, apiKey }
 }
 
 const createUniqueSessionForTest = async (page: Page, testNamePrefix: string) => {
@@ -361,6 +487,47 @@ test.describe("Writing Playground mode parity", () => {
         ((preRedesignBaseline - draftCount) / preRedesignBaseline) * 100
       expect(reductionPercent).toBeGreaterThanOrEqual(CONTROL_REDUCTION_TARGET_PERCENT)
     } finally {
+      await context.close()
+    }
+  })
+
+  test("renders manuscript annotation margin rail only when editor measurements are available", async () => {
+    const { context, page, serverUrl, apiKey } = await setupModeParityPage(test)
+    let fixture: SeededRailFixture | null = null
+
+    try {
+      fixture = await seedMarginRailFixture(serverUrl, apiKey)
+      await createUniqueSessionForTest(page, "E2E Writing Rail")
+
+      await page.getByText("Manuscript", { exact: true }).click()
+      await page.getByText(fixture.projectTitle, { exact: true }).click()
+      await page.getByText(new RegExp(`^${fixture.sceneTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`)).click()
+      await expect(page.getByTestId("writing-scene-save-status")).toContainText(/Scene saved/i, {
+        timeout: 15000
+      })
+
+      await page.getByText("Rich", { exact: true }).click()
+      const marginCards = page.getByTestId("writing-annotation-margin-card")
+      await expect(marginCards).toHaveCount(2, { timeout: 15000 })
+      await expect(page.getByRole("button", { name: /Focus annotation/i })).toHaveCount(2)
+
+      const cardRects = await marginCards.evaluateAll((cards) =>
+        cards.map((card) => {
+          const rect = card.getBoundingClientRect()
+          return { top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height }
+        })
+      )
+      expect(cardRects.every((rect) => rect.width > 0 && rect.height > 0)).toBe(true)
+      for (let index = 1; index < cardRects.length; index += 1) {
+        expect(cardRects[index].top).toBeGreaterThanOrEqual(cardRects[index - 1].bottom)
+      }
+
+      await page.getByText("Plain", { exact: true }).click()
+      await expect(page.getByTestId("writing-annotation-margin-card")).toHaveCount(0)
+      await page.getByTestId("writing-inspector-tab-annotations").click()
+      await expect(page.getByTestId("writing-annotation-list")).toBeVisible()
+    } finally {
+      await fixture?.cleanup()
       await context.close()
     }
   })

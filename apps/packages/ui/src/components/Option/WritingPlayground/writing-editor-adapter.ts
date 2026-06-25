@@ -8,11 +8,18 @@ export type WritingEditorSelection = {
   end: number
 }
 
+export type WritingEditorRangeMeasurement = {
+  top: number
+  bottom: number
+  height: number
+}
+
 export type WritingEditorAdapter = {
   getSelection: () => WritingEditorSelection
   setSelection: (selection: WritingEditorSelection) => void
   getSelectedText: (currentValue: string) => string
   focus: () => void
+  measureRange?: (selection: WritingEditorSelection) => WritingEditorRangeMeasurement | null
 }
 
 const clampIndex = (value: number, length: number): number => {
@@ -202,6 +209,47 @@ const getTipTapPositionAtPlainTextOffset = (
   return clampIndex(candidatePosition, doc.content.size)
 }
 
+const isMeasurableTipTapSelection = (
+  selection: WritingEditorSelection,
+  plainTextLength: number,
+): boolean =>
+  Number.isFinite(selection.start) &&
+  Number.isFinite(selection.end) &&
+  selection.start >= 0 &&
+  selection.end > selection.start &&
+  selection.end <= plainTextLength
+
+const measureTipTapRange = (
+  editor: Editor,
+  selection: WritingEditorSelection,
+): WritingEditorRangeMeasurement | null => {
+  if (editor.isDestroyed) return null
+
+  const plainTextLength = getTipTapPlainText(editor).length
+  if (!isMeasurableTipTapSelection(selection, plainTextLength)) return null
+
+  const from = getTipTapPositionAtPlainTextOffset(editor, selection.start)
+  const to = getTipTapPositionAtPlainTextOffset(editor, selection.end)
+  if (to <= from) return null
+
+  try {
+    const startCoords = editor.view.coordsAtPos(from)
+    const endCoords = editor.view.coordsAtPos(to)
+    const editorTop = editor.view.dom.getBoundingClientRect().top
+    const top = Math.min(startCoords.top, endCoords.top) - editorTop
+    const bottom = Math.max(startCoords.bottom, endCoords.bottom) - editorTop
+    const height = bottom - top
+
+    if (![top, bottom, height].every(Number.isFinite) || height < 0) {
+      return null
+    }
+
+    return { top, bottom, height }
+  } catch {
+    return null
+  }
+}
+
 export const getTipTapSelection = (editor: Editor): WritingEditorSelection => {
   const { from, to } = editor.state.selection
 
@@ -234,5 +282,6 @@ export const createTipTapEditorAdapter = (
       return currentValue.slice(start, end)
     },
     focus: () => editor.commands.focus(),
+    measureRange: (selection) => measureTipTapRange(editor, selection),
   }
 }

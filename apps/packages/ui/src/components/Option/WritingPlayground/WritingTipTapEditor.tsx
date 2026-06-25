@@ -17,6 +17,7 @@ import {
 export type WritingTipTapEditorProps = {
   content: JSONContent | null
   onContentChange: (json: JSONContent, plainText: string) => void
+  onContentApplied?: () => void
   onAdapterReady?: (adapter: WritingEditorAdapter | null) => void
   onSelectionChange?: (selection: WritingEditorSelection) => void
   editable?: boolean
@@ -27,6 +28,7 @@ export type WritingTipTapEditorProps = {
 export function WritingTipTapEditor({
   content,
   onContentChange,
+  onContentApplied,
   onAdapterReady,
   onSelectionChange,
   editable = true,
@@ -85,13 +87,22 @@ export function WritingTipTapEditor({
 
   useEffect(() => {
     if (!editor) return
+    let frame: number | null = null
     const nextContent = content || { type: "doc", content: [{ type: "paragraph" }] }
     const currentJson = JSON.stringify(editor.getJSON())
     const nextJson = JSON.stringify(nextContent)
     if (currentJson !== nextJson) {
       editor.commands.setContent(nextContent, { emitUpdate: false })
+      frame = window.requestAnimationFrame(() => {
+        onContentApplied?.()
+      })
     }
-  }, [editor, content])
+    return () => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame)
+      }
+    }
+  }, [editor, content, onContentApplied])
 
   // Sync editable state
   useEffect(() => {

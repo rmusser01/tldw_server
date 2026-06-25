@@ -4,7 +4,7 @@ title: Implement Writing Playground manuscript annotations
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-23 15:03'
+updated_date: '2026-06-25 03:42'
 labels:
   - implementation
   - webui
@@ -173,6 +173,26 @@ Review evidence:
 
 Security/static checks:
 - Bandit skipped for Task 8 because this slice changed TypeScript/TSX/frontend test files only and no Python files.
+
+Task 9 complete: added TipTap-backed manuscript annotation range measurement plus the Google Docs-style margin annotation rail for rich edit/split modes.
+
+TDD and verification evidence:
+- Initial red adapter/rail tests failed as expected before `measureRange`, margin card, and margin rail behavior existed.
+- Spec-review red/fix cycles covered active card expansion/details, removal of layout-affecting transitions, and stable card/body/inspector row ARIA linkages.
+- Code-quality review-fix red runs failed as expected for stable annotations not remeasuring on editor layout changes and for missing post-external-sync TipTap apply notification.
+- Final focused green run from `apps/packages/ui`: `NODE_OPTIONS=--max-old-space-size=8192 bunx vitest run src/components/Option/WritingPlayground/__tests__/writing-editor-adapter.test.ts src/components/Option/WritingPlayground/__tests__/WritingAnnotationMarginRail.test.tsx src/components/Option/WritingPlayground/__tests__/WritingTipTapEditor.external-sync.test.tsx src/components/Option/WritingPlayground/__tests__/WritingPlayground.phase1-baseline.test.tsx` -> 4 files passed, 49 tests passed.
+- Extension parity verification from `apps/extension`: `bunx playwright test tests/e2e/writing-playground-mode-parity.spec.ts --reporter=line` built the Chrome MV3 extension successfully and reported 4 skipped tests in this environment.
+- `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still fails on existing unrelated package errors in Notes, AudioStudio, ScheduledTasks, Setup, Dexie audiobook migration, background, scheduled-tasks control-plane, and voice-cloning files. No touched Writing Playground Task 9 files were reported.
+- `git diff --check` passed.
+
+Review evidence:
+- Spec review approved the optional TipTap-only `measureRange`, textarea measurement fallback, rail filtering to open scene range annotations, deterministic ordering/collision avoidance, active card affordances, responsive hiding without measurement/plain/preview, and stable margin-card-to-inspector ARIA IDs.
+- Code-quality review found stale card positioning when editor content reflowed without scroll/resize; fix added a `measurementVersion` invalidation path and a regression test for stable annotation remeasurement.
+- Code-quality re-review found the first external-content sync invalidation could fire before ProseMirror applied `setContent`; fix moved external-sync invalidation into `WritingTipTapEditor` via `onContentApplied` after `setContent(..., { emitUpdate: false })` and the next animation frame.
+- Final code-quality re-review approved.
+
+Security/static checks:
+- Bandit skipped for Task 9 because this slice changed TypeScript/TSX/frontend E2E files only and no Python files.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
