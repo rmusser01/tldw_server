@@ -212,7 +212,7 @@
     },
     "uploadBook": "Upload a book",
     "dropzone": "Click or drag file to upload",
-    "supportedFormats": "Supports PDF, EPUB, TXT, MD, DOC, DOCX",
+    "supportedFormats": "Supports PDF, EPUB, TXT, MD, DOCX",
     "reading": "Reading book file...",
     "bookSelected": "Book selected",
     "selectDifferent": "Select a different book",

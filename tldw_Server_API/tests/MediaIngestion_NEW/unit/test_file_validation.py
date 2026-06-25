@@ -192,6 +192,64 @@ class TestMimeTypeDetection:
         assert result.is_valid
         assert result.issues == []
 
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        ("filename", "mime_type", "media_type_key"),
+        [
+            ("notes.markdown", "text/markdown", "document"),
+            ("page.html", "text/html", "document"),
+            ("page.htm", "text/html", "document"),
+            ("page.xhtml", "application/xhtml+xml", "document"),
+            ("feed.xml", "application/xml", "document"),
+            ("data.json", "application/json", "document"),
+            ("clip.ogg", "application/ogg", "audio"),
+            ("movie.avi", "video/avi", "video"),
+        ],
+    )
+    def test_quick_ingest_advertised_file_types_validate_with_common_mimes(
+        self,
+        tmp_path,
+        filename,
+        mime_type,
+        media_type_key,
+    ):
+        """Quick Ingest advertised file types should pass backend upload validation."""
+        upload_path = tmp_path / filename
+        upload_path.write_bytes(b"quick ingest fixture")
+
+        validator = FileValidator()
+        validator.magic_available = False
+        validator.python_magic_available = False
+
+        with patch("mimetypes.guess_type", return_value=(mime_type, None)):
+            result = validator.validate_file(
+                upload_path,
+                original_filename=filename,
+                media_type_key=media_type_key,
+            )
+
+        assert result.is_valid, result.issues
+
+    @pytest.mark.unit
+    def test_legacy_doc_not_advertised_as_supported_document_upload(self, tmp_path):
+        """Legacy binary .doc should be rejected until a real parser/converter exists."""
+        doc_path = tmp_path / "legacy.doc"
+        doc_path.write_bytes(b"legacy word fixture")
+
+        validator = FileValidator()
+        validator.magic_available = False
+        validator.python_magic_available = False
+
+        with patch("mimetypes.guess_type", return_value=("application/msword", None)):
+            result = validator.validate_file(
+                doc_path,
+                original_filename=doc_path.name,
+                media_type_key="document",
+            )
+
+        assert not result.is_valid
+        assert any("not allowed" in issue.lower() for issue in result.issues)
+
 # ========================================================================
 # File Size Validation Tests
 # ========================================================================

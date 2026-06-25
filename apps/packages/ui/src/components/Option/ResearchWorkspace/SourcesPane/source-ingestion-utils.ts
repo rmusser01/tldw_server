@@ -4,7 +4,6 @@ export const DEFAULT_SOURCE_UPLOAD_MAX_SIZE_MB = 500
 
 const ACCEPTED_EXTENSIONS = [
   "pdf",
-  "doc",
   "docx",
   "txt",
   "md",
@@ -30,7 +29,6 @@ const ACCEPTED_MIME_PREFIXES = ["audio/", "video/"] as const
 
 const ACCEPTED_MIME_TYPES = new Set<string>([
   "application/pdf",
-  "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/epub+zip",
   "text/plain",
@@ -243,4 +241,4 @@ export const formatSourceUploadSizeLimit = (bytes: number): string => {
 }
 
 export const buildSourceUploadAccept = (): UploadProps["accept"] =>
-  ".pdf,.doc,.docx,.txt,.md,.epub,.html,.htm,.mp3,.wav,.m4a,.ogg,.flac,.mp4,.webm,.mkv,.avi,.mov"
+  ".pdf,.docx,.txt,.md,.epub,.html,.htm,.mp3,.wav,.m4a,.ogg,.flac,.mp4,.webm,.mkv,.avi,.mov"

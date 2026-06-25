@@ -297,11 +297,11 @@ async def save_uploaded_files(
                     inferred_media_key = "ebook"
                 elif any(c in {".eml", ".mbox", ".pst", ".ost"} for c in candidates):
                     inferred_media_key = "email"
-                elif any(c in {".html", ".htm"} for c in candidates):
+                elif any(c in {".html", ".htm", ".xhtml"} for c in candidates):
                     inferred_media_key = "html"
                 elif any(c in {".xml", ".opml"} for c in candidates):
                     inferred_media_key = "xml"
-                elif any(c in {".txt", ".md", ".docx", ".rtf", ".json"} for c in candidates):
+                elif any(c in {".txt", ".md", ".markdown", ".docx", ".rtf", ".json"} for c in candidates):
                     inferred_media_key = "document"
                 elif any(
                     c
