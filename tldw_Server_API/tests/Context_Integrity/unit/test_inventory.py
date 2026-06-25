@@ -38,19 +38,30 @@ def _fail_if_fifo_opened(monkeypatch: pytest.MonkeyPatch, inventory_module: obje
             pytest.fail(f"FIFO was opened during inventory: {path}")
         return original_open(path, flags, mode, *args, **kwargs)
 
-    monkeypatch.setattr(inventory_module.os, "O_NOFOLLOW", 0, raising=False)
+    supports_dir_fd = set(inventory_module.os.supports_dir_fd)
+    supports_dir_fd.add(guarded_open)
+    monkeypatch.setattr(inventory_module.os, "supports_dir_fd", supports_dir_fd)
     monkeypatch.setattr(inventory_module.os, "open", guarded_open)
 
 
-def _raise_is_symlink_for_path(monkeypatch: pytest.MonkeyPatch, protected_path: Path) -> None:
-    original_is_symlink = Path.is_symlink
+def _raise_child_stat_for_name(
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_module: object,
+    protected_name: str,
+) -> None:
+    original_child_stat = getattr(inventory_module, "_stat_child_no_follow", None)
 
-    def guarded_is_symlink(self: Path) -> bool:
-        if self == protected_path:
+    def guarded_child_stat(*args: object, **kwargs: object) -> os.stat_result:
+        name = kwargs.get("name")
+        if name is None and len(args) >= 2:
+            name = args[1]
+        if name == protected_name:
             raise PermissionError("simulated permission denied")
-        return original_is_symlink(self)
+        if original_child_stat is not None:
+            return original_child_stat(*args, **kwargs)
+        return os.stat_result((0,) * 10)
 
-    monkeypatch.setattr(Path, "is_symlink", guarded_is_symlink)
+    monkeypatch.setattr(inventory_module, "_stat_child_no_follow", guarded_child_stat, raising=False)
 
 
 def test_inventory_user_skill_directory_includes_supporting_files(tmp_path) -> None:
@@ -202,7 +213,7 @@ def test_inventory_user_skill_reports_no_follow_open_error(monkeypatch, tmp_path
     def raise_open_error(*args: object, **kwargs: object) -> int:
         raise OSError("simulated no-follow failure")
 
-    monkeypatch.setattr(inventory, "_open_no_follow", raise_open_error, raising=False)
+    monkeypatch.setattr(inventory, "_open_child_dir_no_follow_fd", raise_open_error, raising=False)
 
     result = inventory.inventory_user_skills_with_findings(
         user_id=1,
@@ -212,6 +223,28 @@ def test_inventory_user_skill_reports_no_follow_open_error(monkeypatch, tmp_path
     assert result.assets == ()
     assert [finding.state for finding in result.findings] == ["verification_error"]
     assert result.findings[0].asset_id == "skill:user:1/demo"
+
+
+def test_inventory_user_skill_root_fd_open_failure_reports_error(monkeypatch, tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity import inventory
+
+    skill_dir = tmp_path / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: demo\n---\nBody", encoding="utf-8")
+
+    def raise_open_error(*args: object, **kwargs: object) -> int:
+        raise OSError("simulated unsupported fd support")
+
+    monkeypatch.setattr(inventory, "_open_dir_no_follow_fd", raise_open_error, raising=False)
+
+    result = inventory.inventory_user_skills_with_findings(
+        user_id=1,
+        skills_root=tmp_path / "skills",
+    )
+
+    assert result.assets == ()
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert result.findings[0].asset_id == "skill:user:1"
 
 
 def test_inventory_user_skill_symlink_preflight_permission_error_reports_finding(
@@ -224,7 +257,7 @@ def test_inventory_user_skill_symlink_preflight_permission_error_reports_finding
     skill_dir.mkdir(parents=True)
     skill_file = skill_dir / "SKILL.md"
     skill_file.write_text("---\nname: demo\n---\nBody", encoding="utf-8")
-    _raise_is_symlink_for_path(monkeypatch, skill_file)
+    _raise_child_stat_for_name(monkeypatch, inventory, skill_file.name)
 
     result = inventory.inventory_user_skills_with_findings(
         user_id=1,
@@ -234,6 +267,28 @@ def test_inventory_user_skill_symlink_preflight_permission_error_reports_finding
     assert result.assets == ()
     assert [finding.state for finding in result.findings] == ["verification_error"]
     assert result.findings[0].asset_id == "skill:user:1/demo"
+
+
+def test_inventory_user_skill_reads_files_without_path_reader(monkeypatch, tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity import inventory
+
+    skill_dir = tmp_path / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: demo\n---\nBody", encoding="utf-8")
+    (skill_dir / "ref.md").write_text("reference", encoding="utf-8")
+
+    def fail_path_reader(*args: object, **kwargs: object) -> bytes:
+        pytest.fail("path-based inventory reader was called")
+
+    monkeypatch.setattr(inventory, "_read_regular_file", fail_path_reader, raising=False)
+
+    result = inventory.inventory_user_skills_with_findings(
+        user_id=1,
+        skills_root=tmp_path / "skills",
+    )
+
+    assert [asset.asset_id for asset in result.assets] == ["skill:user:1/demo"]
+    assert result.findings == ()
 
 
 def test_inventory_user_skill_fifo_supporting_file_reports_error_without_opening(
@@ -386,13 +441,32 @@ def test_inventory_prompt_files_reports_no_follow_open_error(monkeypatch, tmp_pa
     def raise_open_error(*args: object, **kwargs: object) -> int:
         raise OSError("simulated no-follow failure")
 
-    monkeypatch.setattr(inventory, "_open_no_follow", raise_open_error, raising=False)
+    monkeypatch.setattr(inventory, "_open_file_no_follow_fd", raise_open_error, raising=False)
 
     result = inventory.inventory_prompt_files_with_findings(prompts_dir=prompts)
 
     assert result.assets == ()
     assert [finding.state for finding in result.findings] == ["verification_error"]
     assert result.findings[0].asset_id == "prompt_file:root.md"
+
+
+def test_inventory_prompt_files_root_fd_open_failure_reports_error(monkeypatch, tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity import inventory
+
+    prompts = tmp_path / "Prompts"
+    prompts.mkdir()
+    (prompts / "root.md").write_text("root prompt", encoding="utf-8")
+
+    def raise_open_error(*args: object, **kwargs: object) -> int:
+        raise OSError("simulated unsupported fd support")
+
+    monkeypatch.setattr(inventory, "_open_dir_no_follow_fd", raise_open_error, raising=False)
+
+    result = inventory.inventory_prompt_files_with_findings(prompts_dir=prompts)
+
+    assert result.assets == ()
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert result.findings[0].asset_id == "prompt_file:Prompts"
 
 
 def test_inventory_prompt_files_symlink_preflight_permission_error_reports_finding(
@@ -405,13 +479,31 @@ def test_inventory_prompt_files_symlink_preflight_permission_error_reports_findi
     prompts.mkdir()
     prompt_file = prompts / "root.md"
     prompt_file.write_text("root prompt", encoding="utf-8")
-    _raise_is_symlink_for_path(monkeypatch, prompt_file)
+    _raise_child_stat_for_name(monkeypatch, inventory, prompt_file.name)
 
     result = inventory.inventory_prompt_files_with_findings(prompts_dir=prompts)
 
     assert result.assets == ()
     assert [finding.state for finding in result.findings] == ["verification_error"]
     assert result.findings[0].asset_id == "prompt_file:root.md"
+
+
+def test_inventory_prompt_files_reads_files_without_path_reader(monkeypatch, tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity import inventory
+
+    prompts = tmp_path / "Prompts"
+    prompts.mkdir()
+    (prompts / "root.md").write_text("root prompt", encoding="utf-8")
+
+    def fail_path_reader(*args: object, **kwargs: object) -> bytes:
+        pytest.fail("path-based inventory reader was called")
+
+    monkeypatch.setattr(inventory, "_read_regular_file", fail_path_reader, raising=False)
+
+    result = inventory.inventory_prompt_files_with_findings(prompts_dir=prompts)
+
+    assert [asset.asset_id for asset in result.assets] == ["prompt_file:root.md"]
+    assert result.findings == ()
 
 
 def test_inventory_prompt_files_fifo_reports_error_without_opening(monkeypatch, tmp_path) -> None:
@@ -521,7 +613,33 @@ def test_inventory_env_prompt_overrides_symlink_preflight_permission_error_repor
 
     override = tmp_path / "override.md"
     override.write_text("override prompt", encoding="utf-8")
-    _raise_is_symlink_for_path(monkeypatch, override)
+    _raise_child_stat_for_name(monkeypatch, inventory, override.name)
+
+    result = inventory.inventory_env_prompt_overrides_with_findings(
+        environ={"TLDW_PROMPT_FILE_CHAT__SYSTEM": str(override)}
+    )
+
+    assert result.assets == ()
+    assert [finding.state for finding in result.findings] == ["verification_error"]
+    assert (
+        result.findings[0].asset_id
+        == "prompt_file:env:TLDW_PROMPT_FILE_CHAT__SYSTEM:override.md"
+    )
+
+
+def test_inventory_env_prompt_overrides_parent_fd_open_failure_reports_error(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.core.Context_Integrity import inventory
+
+    override = tmp_path / "override.md"
+    override.write_text("override prompt", encoding="utf-8")
+
+    def raise_open_error(*args: object, **kwargs: object) -> int:
+        raise OSError("simulated unsupported fd support")
+
+    monkeypatch.setattr(inventory, "_open_dir_no_follow_fd", raise_open_error, raising=False)
 
     result = inventory.inventory_env_prompt_overrides_with_findings(
         environ={"TLDW_PROMPT_FILE_CHAT__SYSTEM": str(override)}
