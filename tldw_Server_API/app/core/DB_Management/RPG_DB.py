@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.RPG.constants import (
     RPG_SOURCE_TYPES,
 )
 from tldw_Server_API.app.core.RPG.errors import RPGConflictError, RPGNotFoundError, RPGValidationError
+from tldw_Server_API.app.core.RPG.events import canonical_request_hash
 from tldw_Server_API.app.core.RPG.models import (
     RPGCampaign,
     RPGSession,
@@ -24,6 +25,7 @@ from tldw_Server_API.app.core.RPG.models import (
     RPGSnapshotState,
     RPGSourceType,
 )
+from tldw_Server_API.app.core.RPG.proposals import RPGProposalRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +159,7 @@ class RPGRepository:
             )
             """,
             "CREATE INDEX IF NOT EXISTS idx_rpg_sessions_campaign ON rpg_sessions(owner_user_id, campaign_id)",
+            "CREATE INDEX IF NOT EXISTS idx_rpg_proposals_session ON rpg_session_proposals(owner_user_id, session_id, status)",
             "CREATE INDEX IF NOT EXISTS idx_rpg_events_session ON rpg_session_events(owner_user_id, session_id, sequence_number)",
             "CREATE INDEX IF NOT EXISTS idx_rpg_snapshots_latest ON rpg_session_snapshots(owner_user_id, session_id, snapshot_version DESC)",
         )
@@ -339,6 +342,165 @@ class RPGRepository:
                 raise RPGNotFoundError("rpg_snapshot_not_found")
             return self._snapshot_from_row(row)
 
+    def create_proposal(
+        self,
+        owner_user_id: int,
+        session_id: int,
+        base_event_sequence: int,
+        base_snapshot_version: int,
+        proposed_events: list[dict[str, Any]],
+        source_type: str,
+        source_actor_id: str | None,
+        model_metadata: dict[str, Any],
+        idempotency_key: str,
+        request_payload_hash: str,
+    ) -> RPGProposalRecord:
+        self._validate_source_type(source_type)
+        operation_scope = f"session:{session_id}:proposals"
+        now = self._now()
+        with self.db.transaction() as conn:
+            replay = self._find_idempotency_record(
+                conn,
+                owner_user_id=owner_user_id,
+                session_id=session_id,
+                source_type=source_type,
+                operation_scope=operation_scope,
+                idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                self._ensure_replay_hash(replay, request_payload_hash)
+                proposal_id = int(self._from_json(self._row_value(replay, "response_json"))["proposal_id"])
+                return self._get_proposal_with_conn(conn, owner_user_id, proposal_id)
+
+            session = self._get_session_with_conn(conn, owner_user_id, session_id)
+            if session.last_event_sequence != base_event_sequence:
+                raise RPGConflictError("stale_event_sequence")
+            if session.current_snapshot_version != base_snapshot_version:
+                raise RPGConflictError("stale_snapshot_version")
+
+            cursor = conn.execute(
+                """
+                INSERT INTO rpg_session_proposals (
+                    session_id, owner_user_id, base_event_sequence, base_snapshot_version,
+                    proposed_events_json, patch_json, rationale, confidence, source_type,
+                    source_actor_id, model_metadata_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    owner_user_id,
+                    base_event_sequence,
+                    base_snapshot_version,
+                    self._to_json(proposed_events),
+                    source_type,
+                    source_actor_id,
+                    self._to_json(model_metadata),
+                    now,
+                ),
+            )
+            proposal_id = int(cursor.lastrowid)
+            self._insert_idempotency_record(
+                conn,
+                owner_user_id=owner_user_id,
+                session_id=session_id,
+                source_type=source_type,
+                operation_scope=operation_scope,
+                idempotency_key=idempotency_key,
+                request_payload_hash=request_payload_hash,
+                event_ids=[],
+                response={"proposal_id": proposal_id},
+                created_at=now,
+            )
+            return self._get_proposal_with_conn(conn, owner_user_id, proposal_id)
+
+    def get_proposal(self, owner_user_id: int, proposal_id: int) -> RPGProposalRecord:
+        with self.db.transaction() as conn:
+            return self._get_proposal_with_conn(conn, owner_user_id, proposal_id)
+
+    def mark_proposal_applied(
+        self,
+        owner_user_id: int,
+        proposal_id: int,
+        review_notes: str | None,
+    ) -> RPGProposalRecord:
+        now = self._now()
+        with self.db.transaction() as conn:
+            proposal = self._get_proposal_with_conn(conn, owner_user_id, proposal_id)
+            cursor = conn.execute(
+                """
+                UPDATE rpg_session_proposals
+                SET status = 'applied', applied_at = ?, review_notes = COALESCE(?, review_notes)
+                WHERE id = ? AND owner_user_id = ? AND status = 'pending'
+                """,
+                (now, review_notes, proposal.id, owner_user_id),
+            )
+            if cursor.rowcount != 1:
+                raise RPGConflictError("proposal_not_pending")
+            return self._get_proposal_with_conn(conn, owner_user_id, proposal_id)
+
+    def mark_proposal_rejected(
+        self,
+        owner_user_id: int,
+        proposal_id: int,
+        idempotency_key: str,
+        review_notes: str | None,
+    ) -> RPGProposalRecord:
+        now = self._now()
+        request_payload_hash = canonical_request_hash({"proposal_id": proposal_id, "review_notes": review_notes})
+        operation_scope = f"proposal:{proposal_id}:reject"
+        with self.db.transaction() as conn:
+            proposal = self._get_proposal_with_conn(conn, owner_user_id, proposal_id)
+            replay = self._find_idempotency_record(
+                conn,
+                owner_user_id=owner_user_id,
+                session_id=proposal.session_id,
+                source_type="user",
+                operation_scope=operation_scope,
+                idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                self._ensure_replay_hash(replay, request_payload_hash)
+                replayed_id = int(self._from_json(self._row_value(replay, "response_json"))["proposal_id"])
+                return self._get_proposal_with_conn(conn, owner_user_id, replayed_id)
+
+            cursor = conn.execute(
+                """
+                UPDATE rpg_session_proposals
+                SET status = 'rejected', rejected_at = ?, review_notes = COALESCE(?, review_notes)
+                WHERE id = ? AND owner_user_id = ? AND status = 'pending'
+                """,
+                (now, review_notes, proposal.id, owner_user_id),
+            )
+            if cursor.rowcount != 1:
+                raise RPGConflictError("proposal_not_pending")
+            self._insert_idempotency_record(
+                conn,
+                owner_user_id=owner_user_id,
+                session_id=proposal.session_id,
+                source_type="user",
+                operation_scope=operation_scope,
+                idempotency_key=idempotency_key,
+                request_payload_hash=request_payload_hash,
+                event_ids=[],
+                response={"proposal_id": proposal_id},
+                created_at=now,
+            )
+            return self._get_proposal_with_conn(conn, owner_user_id, proposal_id)
+
+    def mark_proposal_conflicted(self, owner_user_id: int, proposal_id: int) -> RPGProposalRecord:
+        with self.db.transaction() as conn:
+            proposal = self._get_proposal_with_conn(conn, owner_user_id, proposal_id)
+            if proposal.status == "pending":
+                conn.execute(
+                    """
+                    UPDATE rpg_session_proposals
+                    SET status = 'conflicted'
+                    WHERE id = ? AND owner_user_id = ? AND status = 'pending'
+                    """,
+                    (proposal_id, owner_user_id),
+                )
+            return self._get_proposal_with_conn(conn, owner_user_id, proposal_id)
+
     def commit_events_and_snapshot(
         self,
         owner_user_id: int,
@@ -358,7 +520,7 @@ class RPGRepository:
         if not events:
             raise RPGConflictError("events_required")
         source_type = self._event_source_type(events)
-        operation_scope = f"session:{session_id}:events"
+        operation_scope = f"proposal:{proposal_id}:apply" if proposal_id is not None else f"session:{session_id}:events"
         now = self._now()
         try:
             with self.db.transaction() as conn:
@@ -505,6 +667,12 @@ class RPGRepository:
     def _parse_datetime(value: str) -> datetime:
         return datetime.fromisoformat(value)
 
+    @classmethod
+    def _parse_optional_datetime(cls, value: str | None) -> datetime | None:
+        if value is None:
+            return None
+        return cls._parse_datetime(value)
+
     @staticmethod
     def _row_value(row: Any, key: str) -> Any:
         if isinstance(row, dict):
@@ -583,6 +751,28 @@ class RPGRepository:
             created_at=cls._parse_datetime(str(cls._row_value(row, "created_at"))),
         )
 
+    @classmethod
+    def _proposal_from_row(cls, row: Any) -> RPGProposalRecord:
+        return RPGProposalRecord(
+            id=int(cls._row_value(row, "id")),
+            session_id=int(cls._row_value(row, "session_id")),
+            owner_user_id=int(cls._row_value(row, "owner_user_id")),
+            base_event_sequence=int(cls._row_value(row, "base_event_sequence")),
+            base_snapshot_version=int(cls._row_value(row, "base_snapshot_version")),
+            proposed_events=cls._from_json(cls._row_value(row, "proposed_events_json"), []),
+            patch=cls._from_json(cls._row_value(row, "patch_json"), None),
+            rationale=cls._row_value(row, "rationale"),
+            confidence=cls._row_value(row, "confidence"),
+            source_type=str(cls._row_value(row, "source_type")),
+            source_actor_id=cls._row_value(row, "source_actor_id"),
+            model_metadata=cls._from_json(cls._row_value(row, "model_metadata_json"), {}),
+            status=str(cls._row_value(row, "status")),
+            review_notes=cls._row_value(row, "review_notes"),
+            created_at=cls._parse_datetime(str(cls._row_value(row, "created_at"))),
+            applied_at=cls._parse_optional_datetime(cls._row_value(row, "applied_at")),
+            rejected_at=cls._parse_optional_datetime(cls._row_value(row, "rejected_at")),
+        )
+
     def _get_campaign_with_conn(self, conn: Any, owner_user_id: int, campaign_id: int) -> RPGCampaign:
         row = conn.execute(
             """
@@ -621,6 +811,19 @@ class RPGRepository:
         if row is None:
             raise RPGNotFoundError("rpg_event_not_found")
         return self._event_from_row(row)
+
+    def _get_proposal_with_conn(self, conn: Any, owner_user_id: int, proposal_id: int) -> RPGProposalRecord:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM rpg_session_proposals
+            WHERE id = ? AND owner_user_id = ?
+            """,
+            (proposal_id, owner_user_id),
+        ).fetchone()
+        if row is None:
+            raise RPGNotFoundError("rpg_proposal_not_found")
+        return self._proposal_from_row(row)
 
     def _events_by_ids(self, conn: Any, owner_user_id: int, event_ids: list[int]) -> list[RPGSessionEvent]:
         return [self._get_event_with_conn(conn, owner_user_id, event_id) for event_id in event_ids]

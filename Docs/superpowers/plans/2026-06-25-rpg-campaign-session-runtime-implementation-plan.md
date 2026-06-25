@@ -1445,7 +1445,7 @@ git commit -m "feat: add RPG dice and check resolution"
 - Modify: `tldw_Server_API/app/core/DB_Management/RPG_DB.py`
 - Test: `tldw_Server_API/tests/RPG/test_rpg_service.py`
 
-- [ ] **Step 1: Write failing service authority tests**
+- [x] **Step 1: Write failing service authority tests**
 
 ```python
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -1522,13 +1522,13 @@ def test_apply_proposal_is_atomic_and_advances_snapshot_once():
     assert snapshot.quests["q1"]["title"] == "Find Ada"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_service.py -v`
 
 Expected: FAIL because `RPGService` does not exist.
 
-- [ ] **Step 3: Implement authority decisions**
+- [x] **Step 3: Implement authority decisions**
 
 ```python
 # tldw_Server_API/app/core/RPG/authority.py
@@ -1559,7 +1559,7 @@ def decide_authority(source_type: str, event_type: str, authority_settings: dict
     return AuthorityDecision(action="proposal", reason=f"{source_type}_{event_type}_requires_review")
 ```
 
-- [ ] **Step 4: Implement service result types and orchestration**
+- [x] **Step 4: Implement service result types and orchestration**
 
 ```python
 # tldw_Server_API/app/core/RPG/service.py
@@ -1785,7 +1785,7 @@ def _commit_validated_events(
     return RecordEventsResult(committed_events=committed.events, proposal=None)
 ```
 
-- [ ] **Step 5: Add repository proposal and snapshot methods**
+- [x] **Step 5: Add repository proposal and snapshot methods**
 
 Add these methods to `RPGRepository`. Each method filters by `owner_user_id` and raises `RPGNotFoundError` when a row is absent.
 
@@ -1843,13 +1843,13 @@ def commit_events_and_snapshot(
 
 `create_campaign()`, `create_session()`, `create_proposal()`, and `mark_proposal_rejected()` must also use `rpg_idempotency_records` with operation scopes such as `campaigns`, `campaign:{campaign_id}:sessions`, `session:{session_id}:proposals`, and `proposal:{proposal_id}:reject`. Replays return the stored response JSON and conflicting payload hashes raise `RPGConflictError("idempotency_key_conflict")`.
 
-- [ ] **Step 6: Run focused service tests**
+- [x] **Step 6: Run focused service tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_service.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/RPG/authority.py tldw_Server_API/app/core/RPG/proposals.py tldw_Server_API/app/core/RPG/service.py tldw_Server_API/app/core/RPG/__init__.py tldw_Server_API/app/core/DB_Management/RPG_DB.py tldw_Server_API/tests/RPG/test_rpg_service.py
