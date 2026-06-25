@@ -1,0 +1,1 @@
+"""Core RPG runtime primitives."""
