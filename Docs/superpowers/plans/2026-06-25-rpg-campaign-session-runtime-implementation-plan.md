@@ -2585,7 +2585,7 @@ git commit -m "feat: add RPG rules context builder"
 - Modify: `tldw_Server_API/app/core/MCP_unified/server.py`
 - Test: `tldw_Server_API/tests/RPG/test_rpg_mcp_module.py`
 
-- [ ] **Step 1: Write failing MCP module tests**
+- [x] **Step 1: Write failing MCP module tests**
 
 ```python
 import pytest
@@ -2630,13 +2630,13 @@ Add protocol-level MCP authorization tests that drive `MCPProtocol.process_reque
 - wildcard RPG permission: `rpg.*` or the configured wildcard form exposes read and write tools as executable.
 - `allowed_tools` filtering: context metadata with an unrelated allow-list hides or denies all RPG tools, and `allowed_tools=["rpg.sessions.get"]` leaves only that read tool executable.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_mcp_module.py -v`
 
 Expected: FAIL because `RPGModule` does not exist.
 
-- [ ] **Step 3: Implement MCP tool definitions and read-only adapter listing**
+- [x] **Step 3: Implement MCP tool definitions and read-only adapter listing**
 
 ```python
 # tldw_Server_API/app/core/MCP_unified/modules/implementations/rpg_module.py
@@ -2775,7 +2775,7 @@ async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context:
     raise ValueError(f"Unknown RPG tool: {tool_name}")
 ```
 
-- [ ] **Step 4: Add optional server registration**
+- [x] **Step 4: Add optional server registration**
 
 ```python
 # tldw_Server_API/app/core/MCP_unified/server.py
@@ -2795,7 +2795,7 @@ if self._env_flag_enabled("MCP_ENABLE_RPG_MODULE"):
 
 Place this block beside other optional modules, before the final registration loop.
 
-- [ ] **Step 5: Add tests for registered tool metadata**
+- [x] **Step 5: Add tests for registered tool metadata**
 
 Add this registry test:
 
@@ -2809,18 +2809,20 @@ async def test_rpg_module_write_tool_classification():
     assert module.is_write_tool_def(tools["rpg.context.build"]) is False
 ```
 
-- [ ] **Step 6: Run focused MCP tests**
+- [x] **Step 6: Run focused MCP tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_mcp_module.py tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_and_category.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/modules/implementations/rpg_module.py tldw_Server_API/app/core/MCP_unified/server.py tldw_Server_API/tests/RPG/test_rpg_mcp_module.py
 git commit -m "feat: add RPG MCP module"
 ```
+
+Status note: Task 9 implemented an optional RPG MCP module with read-only adapter/session/rules/context tools, write-classified event/proposal tools, authenticated ChaCha DB context binding, idempotency enforcement, fail-closed direct validation, protocol authorization coverage, and `MCP_ENABLE_RPG_MODULE` registration. Final verification passed: `python -m pytest tldw_Server_API/tests/RPG tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_and_category.py tldw_Server_API/app/core/MCP_unified/tests/test_web_search_module_registration.py -q` reported 75 passed; `python -m compileall -q ...` passed; `python -m bandit -r ... -f json -o /tmp/bandit_rpg_mcp.json` reported 0 results/errors/skips; `git diff --check` passed.
 
 ### Task 10: Documentation, Regression Checks, And Security Scan
 

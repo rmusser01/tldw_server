@@ -779,7 +779,21 @@ class MCPServer:
                 })
                 logger.info("MCP_ENABLE_SANDBOX_MODULE=true; queuing SandboxModule for registration")
 
-            # 8) Optional: Browser CDP module - enabled by explicit flag or configured CDP URL.
+            # 8) Optional: RPG runtime module - disabled by default.
+            if self._env_flag_enabled("MCP_ENABLE_RPG_MODULE"):
+                if not any(m.get("id") == "rpg" for m in modules_to_load if isinstance(m, dict)):
+                    modules_to_load.append({
+                        "id": "rpg",
+                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.rpg_module:RPGModule",
+                        "enabled": True,
+                        "name": "RPG",
+                        "version": "1.0.0",
+                        "department": "management",
+                        "settings": {},
+                    })
+                    logger.info("MCP_ENABLE_RPG_MODULE=true; queuing RPGModule for registration")
+
+            # 9) Optional: Browser CDP module - enabled by explicit flag or configured CDP URL.
             browser_cdp_url = os.getenv("MCP_BROWSER_CDP_URL", "").strip()
             browser_cdp_disabled = self._env_flag_explicitly_disabled("MCP_ENABLE_BROWSER_CDP_MODULE")
             browser_cdp_enabled = self._env_flag_enabled("MCP_ENABLE_BROWSER_CDP_MODULE")
