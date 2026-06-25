@@ -760,6 +760,28 @@ describe("WritingPlayground phase1 baseline", () => {
     expect(updatePayload?.payload?.prompt).not.toBe("Scene body should not leak")
   })
 
+  it("blocks generation while a selected scene is still binding", async () => {
+    mockState.storageValues.set("selectedModel", "mock-model")
+    seedWritingSession({ prompt: "Session draft should not generate" })
+    useWritingPlaygroundStore.setState({
+      activeProjectId: "project-1",
+      activeNodeId: "scene-1",
+      activeNodeType: "scene"
+    })
+
+    render(<WritingPlayground />)
+
+    const generate = screen.getByTestId("writing-topbar-generate")
+    await waitFor(() => {
+      expect(generate).toBeDisabled()
+    })
+
+    fireEvent.click(generate)
+
+    expect(mockState.sendCalls).toHaveLength(0)
+    expect(mockState.streamCalls).toHaveLength(0)
+  })
+
   it("initializes the workflow preset from the active session payload", async () => {
     mockState.storageValues.set("selectedModel", "mock-model")
     mockState.sendResponses.push(structuredReplacement("Voice-preserved line."))

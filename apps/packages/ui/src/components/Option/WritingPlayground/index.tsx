@@ -759,11 +759,49 @@ export const WritingPlayground = () => {
   } = inspectorPanels
 
   // =====================================================================
+  // Generation history (unique)
+  // =====================================================================
+  const syncGenerationHistory = React.useCallback(() => {
+    setCanUndoGeneration(generationUndoRef.current.length > 0)
+    setCanRedoGeneration(generationRedoRef.current.length > 0)
+  }, [])
+
+  const pushGenerationHistory = React.useCallback(
+    (before: string, after: string) => {
+      if (before === after) return
+      generationUndoRef.current.push({ before, after })
+      generationRedoRef.current = []
+      syncGenerationHistory()
+    },
+    [syncGenerationHistory]
+  )
+
+  const applyHistoryText = React.useCallback(
+    (nextText: string) => {
+      if (activeSessionDetail || isSceneBound) {
+        applyEditorValue(nextText)
+      } else {
+        setEditorText(nextText)
+      }
+    },
+    [activeSessionDetail, applyEditorValue, isSceneBound]
+  )
+
+  // =====================================================================
   // Generation logic (unique - not in hooks)
   // =====================================================================
   const handleGenerate = React.useCallback(
     async (overrideText?: string) => {
     if (isGenerating || isRevisionGenerating) return
+    if (isSceneEditorPending) {
+      message.info(
+        t(
+          "option:writingPlayground.sceneBindingPending",
+          "Wait for the selected scene to load."
+        )
+      )
+      return
+    }
     if (!activeSessionDetail) {
       message.info(
         t("option:writingPlayground.selectSession", "Select a session to begin.")
@@ -959,14 +997,17 @@ export const WritingPlayground = () => {
     },
     [
       activeSessionDetail,
+      applyHistoryText,
       chatMode,
       editorText,
       effectiveTemplate,
       hasChat,
       isGenerating,
       isRevisionGenerating,
+      isSceneEditorPending,
       isSceneBound,
       isOnline,
+      pushGenerationHistory,
       selectedModel,
       settings,
       requestedLogprobsExplicitlyUnsupported,
@@ -1265,35 +1306,6 @@ export const WritingPlayground = () => {
     [applyEditorValue, editorText, effectiveTemplate, getCurrentEditorAdapter, t]
   )
 
-  // =====================================================================
-  // Generation history (unique)
-  // =====================================================================
-  const syncGenerationHistory = React.useCallback(() => {
-    setCanUndoGeneration(generationUndoRef.current.length > 0)
-    setCanRedoGeneration(generationRedoRef.current.length > 0)
-  }, [])
-
-  const pushGenerationHistory = React.useCallback(
-    (before: string, after: string) => {
-      if (before === after) return
-      generationUndoRef.current.push({ before, after })
-      generationRedoRef.current = []
-      syncGenerationHistory()
-    },
-    [syncGenerationHistory]
-  )
-
-  const applyHistoryText = React.useCallback(
-    (nextText: string) => {
-      if (activeSessionDetail || isSceneBound) {
-        applyEditorValue(nextText)
-      } else {
-        setEditorText(nextText)
-      }
-    },
-    [activeSessionDetail, applyEditorValue, isSceneBound]
-  )
-
   const applyRevisionEditorText = React.useCallback(
     (nextText: string): { applied: true } | { applied: false; reason: string } => {
       if (editorMode === "tiptap") {
@@ -1442,6 +1454,15 @@ export const WritingPlayground = () => {
       presetId?: WritingRevisionPresetId | null
       presetInstruction?: string | null
     }): Promise<WritingRevisionProposal | null> => {
+      if (isSceneEditorPending) {
+        message.info(
+          t(
+            "option:writingPlayground.sceneBindingPending",
+            "Wait for the selected scene to load."
+          )
+        )
+        return null
+      }
       if (!activeSessionDetail) {
         message.info(
           t("option:writingPlayground.selectSession", "Select a session to begin.")
@@ -1497,6 +1518,7 @@ export const WritingPlayground = () => {
       buildRevisionRequestOptions,
       editorText,
       hasChat,
+      isSceneEditorPending,
       isOnline,
       selectedModel,
       t
@@ -1541,7 +1563,7 @@ export const WritingPlayground = () => {
 
   const handleRevisionRequest = React.useCallback(
     async (request: WritingActionBarRequest) => {
-      if (isGenerating || isRevisionGenerating) return
+      if (isGenerating || isRevisionGenerating || isSceneEditorPending) return
       const target = resolveFreshRevisionTarget(request)
       if (!target) return
 
@@ -1575,6 +1597,7 @@ export const WritingPlayground = () => {
       createRevisionProposal,
       isGenerating,
       isRevisionGenerating,
+      isSceneEditorPending,
       persistRevisionPreset,
       resolveFreshRevisionTarget,
       revisionState,
@@ -1584,7 +1607,7 @@ export const WritingPlayground = () => {
 
   const handleRegenerateRevision = React.useCallback(
     async (proposal: WritingRevisionProposal) => {
-      if (isGenerating || isRevisionGenerating) return
+      if (isGenerating || isRevisionGenerating || isSceneEditorPending) return
       setIsRevisionGenerating(true)
       try {
         await revisionState.regenerateRevision(proposal.id, async (source) => {
@@ -1629,6 +1652,7 @@ export const WritingPlayground = () => {
       createRevisionProposal,
       isGenerating,
       isRevisionGenerating,
+      isSceneEditorPending,
       revisionState,
       selectedRevisionPresetId,
       t
@@ -1970,11 +1994,17 @@ export const WritingPlayground = () => {
     Boolean(selectedModel) &&
     hasChat &&
     !isGenerating &&
-    !isRevisionGenerating
+    !isRevisionGenerating &&
+    !isSceneEditorPending
   const generateDisabledReason = React.useMemo(() => {
     if (isGenerating) return null
     if (isRevisionGenerating)
       return t("option:writingPlayground.disabledRevisionBusy", "Revision request in progress")
+    if (isSceneEditorPending)
+      return t(
+        "option:writingPlayground.disabledSceneBindingPending",
+        "Wait for the selected scene to load"
+      )
     if (!activeSessionDetail)
       return t("option:writingPlayground.disabledNoSession", "Select a session first")
     if (!selectedModel)
@@ -1990,6 +2020,7 @@ export const WritingPlayground = () => {
     isGenerating,
     isOnline,
     isRevisionGenerating,
+    isSceneEditorPending,
     selectedModel,
     t
   ])
