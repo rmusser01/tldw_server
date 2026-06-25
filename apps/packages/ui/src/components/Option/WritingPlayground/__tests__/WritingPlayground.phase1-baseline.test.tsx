@@ -602,6 +602,61 @@ describe("WritingPlayground phase1 baseline", () => {
     expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument()
   })
 
+  it("keeps a bound scene from being reclaimed by the active session prompt", async () => {
+    seedWritingSession({ prompt: "Session draft should not win" })
+    useWritingPlaygroundStore.setState({
+      activeProjectId: "project-1",
+      activeNodeId: "scene-1",
+      activeNodeType: "scene"
+    })
+    mockState.queryData.set(mockState.queryKey(["manuscript-scene", "scene-1"]), {
+      id: "scene-1",
+      chapter_id: "chapter-1",
+      project_id: "project-1",
+      title: "Scene 1",
+      sort_order: 1,
+      content: sceneRichContent("Saved scene text"),
+      content_plain: "Saved scene text",
+      synopsis: null,
+      word_count: 3,
+      pov_character_id: null,
+      status: "draft",
+      created_at: "2026-06-23T12:00:00Z",
+      last_modified: "2026-06-23T12:00:00Z",
+      deleted: false,
+      client_id: "test-client",
+      version: 3
+    })
+
+    render(<WritingPlayground />)
+
+    await waitFor(() => {
+      expect(getEditor()).toHaveValue("Saved scene text")
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(getEditor()).toHaveValue("Saved scene text")
+
+    fireEvent.change(getEditor(), {
+      target: { value: "Edited scene text" }
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(getEditor()).toHaveValue("Edited scene text")
+    expect(screen.getByTestId("writing-scene-save-status")).toHaveTextContent(
+      "Scene unsaved"
+    )
+    expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument()
+  })
+
   it("initializes the workflow preset from the active session payload", async () => {
     mockState.storageValues.set("selectedModel", "mock-model")
     mockState.sendResponses.push(structuredReplacement("Voice-preserved line."))

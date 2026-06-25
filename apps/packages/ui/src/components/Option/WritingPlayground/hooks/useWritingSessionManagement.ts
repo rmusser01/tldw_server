@@ -60,6 +60,7 @@ export interface UseWritingSessionManagementDeps {
   apiProviderOverride: string | undefined
   setApiProvider: (provider: string) => void
   isGenerating: boolean
+  suspendEditorPromptSync?: boolean
   t: TFunction
 }
 
@@ -113,6 +114,7 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     apiProviderOverride,
     setApiProvider,
     isGenerating,
+    suspendEditorPromptSync = false,
     t
   } = deps
 
@@ -582,8 +584,10 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     )
     const lastLoadedId = lastLoadedSessionIdRef.current
     if (activeSessionDetail.id !== lastLoadedId) {
-      setEditorText(nextPrompt)
-      editorPromptRichRef.current = nextPromptRich
+      if (!suspendEditorPromptSync) {
+        setEditorText(nextPrompt)
+        editorPromptRichRef.current = nextPromptRich
+      }
       setSettings(nextSettings)
       setStopStringsInput(nextSettings.stop.join("\n"))
       setBannedTokensInput(
@@ -622,10 +626,12 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       return
     }
     if (!isDirty) {
-      if (editorText !== nextPrompt) {
+      if (!suspendEditorPromptSync && editorText !== nextPrompt) {
         setEditorText(nextPrompt)
       }
-      editorPromptRichRef.current = nextPromptRich
+      if (!suspendEditorPromptSync) {
+        editorPromptRichRef.current = nextPromptRich
+      }
       if (!areSettingsEqual(settings, nextSettings)) {
         setSettings(nextSettings)
         setStopStringsInput(nextSettings.stop.join("\n"))
@@ -675,6 +681,7 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     selectedModel,
     setApiProvider,
     setSelectedModel,
+    suspendEditorPromptSync,
     settings
   ])
 

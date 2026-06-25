@@ -359,7 +359,9 @@ export const WritingPlayground = () => {
     isOnline, hasWriting, activeSessionId, activeSessionName,
     setActiveSessionId, setActiveSessionName, sessionUsageMap, setSessionUsageMap,
     selectedModel, setSelectedModel, apiProviderOverride, setApiProvider,
-    isGenerating: isWritingRequestBusy, t
+    isGenerating: isWritingRequestBusy,
+    suspendEditorPromptSync: activeNodeType === "scene" && Boolean(activeNodeId),
+    t
   })
   const {
     sessions, sessionsLoading, sessionsFetching, sessionsError,
