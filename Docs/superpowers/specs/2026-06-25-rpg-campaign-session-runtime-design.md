@@ -37,6 +37,7 @@ External references reviewed:
 7. V1 snapshots model a play-ready core: scene, party/actors, resources, clocks, notes, recap, quests, NPCs, inventory, locations, factions, linked rules references, and unresolved rulings.
 8. V1 exposes both REST APIs and MCP tools.
 9. Authority is mixed: deterministic/manual actions may commit directly, while model-derived state changes become proposals unless a session explicitly enables auto-commit.
+10. Rules adapters and snippet packs are version-pinned. `dnd5e_srd` in v1 means the D&D SRD 5.1 ruleset, not a moving "latest SRD" alias. SRD 5.2.1 / 5.5e support should be a separate adapter or content-pack key.
 
 ## Goals
 
@@ -64,7 +65,7 @@ Introduce a dedicated backend module:
 - Core package: `tldw_Server_API/app/core/RPG/`
 - API endpoint: `tldw_Server_API/app/api/v1/endpoints/rpg.py`
 - API schemas: `tldw_Server_API/app/api/v1/schemas/rpg_schemas.py`
-- Persistence repository: a focused RPG repository integrated with per-user ChaChaNotes DB access.
+- Persistence repository: a focused `RPG_DB.py`/repository initialized from the per-user ChaChaNotes DB, similar to VN Play, rather than broad RPG SQL added directly into `ChaChaNotes_DB.py`.
 - Router key: `rpg`, mounted under `/api/v1/rpg`.
 
 The source of truth is an append-only session ledger. Cached snapshots are derived state. The service appends validated typed events transactionally and then runs a deterministic reducer to update the cached snapshot. If event append and snapshot update cannot both succeed, the transaction rolls back.
@@ -106,8 +107,8 @@ Each `RuleAdapter` exposes:
 
 V1 bundled adapters:
 
-- `dnd5e_srd`: D&D 5e SRD-oriented mechanics and citations.
-- `pf2e`: Pathfinder 2e-oriented mechanics with conservative content handling. Bundled snippets must be verified as license-compatible before inclusion; when uncertain, ship metadata and citation links rather than text.
+- `dnd5e_srd`: D&D SRD 5.1-oriented mechanics and citations. The adapter and bundled content pack must pin source version metadata and must not silently track D&D Beyond's latest SRD page. SRD 5.2.1 / 5.5e support should use a distinct key such as `dnd_srd_5_2_1`.
+- `pf2e`: Pathfinder 2e-oriented mechanics with conservative content handling. V1 should start with mechanics metadata and citation links. Bundled PF2e prose requires an explicit source/license inventory before inclusion; when uncertain, ship metadata and citation links rather than text.
 - `fate`: Fate-oriented mechanics covering aspects/tags, stress, consequences, approaches/skills where configured, and Fate-style outcomes.
 
 The Fate adapter is a contract test for non-d20 assumptions. Core code must support Fate-style aspects, stress/consequences, and ladder-like outcomes without forcing d20 fields.
@@ -130,6 +131,8 @@ Bundled snippets must be short, source-attributed, and license-aware. Each snipp
 - `trust_level`
 - `content_hash`
 - `snippet_id`
+- `source_version`
+- `content_pack_version`
 
 User-ingested rules packs are not copied into RPG tables. RPG records store references to existing ingestion/RAG/media identifiers, selected trust levels, and campaign/session binding metadata. Rule lookup must treat retrieved rule text as quoted reference material, not instructions. Context builders must isolate rules excerpts from system/developer instructions and include citations in returned diagnostics.
 
@@ -254,6 +257,8 @@ Suggested `rpg_session_proposals` fields:
 
 Proposal commits append validated typed events. Proposals may show a patch preview, but no proposal applies arbitrary snapshot patches directly.
 
+Proposal apply may append multiple events. It must be one atomic operation: validate the proposal status and base sequence, validate every proposed event, append all accepted events, then run the reducer once. Partial proposal commits are not allowed.
+
 Roll/check events require explicit provenance:
 
 - server-rolled
@@ -261,7 +266,7 @@ Roll/check events require explicit provenance:
 - imported
 - model-suggested
 
-Server rolls should store expression, normalized formula, result parts, total, random source metadata where practical, adapter interpretation, rule references, and citation metadata.
+Server rolls should store expression, normalized formula, result parts, total, random source metadata where practical, adapter interpretation, rule references, and citation metadata. Committed roll results are the replay authority. Do not store reusable RNG state or seeds that would make future rolls predictable.
 
 ## Optimistic Concurrency And Idempotency
 
@@ -405,6 +410,7 @@ Service responsibilities:
 - Enforce optimistic concurrency.
 - Apply authority policy.
 - Append typed events transactionally.
+- Apply multi-event proposal commits atomically with a single concurrency check and no partial writes.
 - Run the reducer after successful event append.
 - Rebuild snapshots from the ledger for admin/test repair flows.
 - Resolve rules lookup through bundled packs and linked user rules packs.
@@ -459,8 +465,10 @@ Testing should validate deterministic state behavior and security boundaries, no
 Core unit tests:
 
 - Adapter registry lists `dnd5e_srd`, `pf2e`, and `fate`.
+- D&D adapter tests verify SRD 5.1 source-version pinning and prevent silent movement to SRD 5.2.1 / 5.5e content.
 - Each adapter exposes required metadata, license details, mechanics schema, and snippet attribution.
-- Bundled snippets fail validation without source title, URL, license, license URL, attribution, trust level, and adapter key.
+- Bundled snippets fail validation without source title, URL, license, license URL, attribution, trust level, adapter key, source version, and content-pack version.
+- PF2e bundled-prose tests require an explicit source/license inventory; mechanics-only PF2e metadata may ship without bundled prose.
 - D&D/PF2e dice/check helpers work for expected d20-style patterns.
 - Fate tests prove aspects/tags, stress, consequences, and non-d20 outcomes work through the common adapter contract.
 - Event validation rejects unknown event types and malformed payloads.
@@ -470,6 +478,7 @@ Core unit tests:
 - Old snapshot/reducer versions are detected and routed to rebuild/compatibility behavior.
 - Proposals cannot mutate snapshots until applied.
 - Applying proposals appends typed events and preserves audit/source metadata.
+- Applying multi-event proposals is atomic: all events commit and reduce together, or none do.
 - Authority policy routes model-derived writes to proposals unless auto-commit is enabled.
 - Idempotency replay returns the original result and conflicting payloads fail.
 - Stale expected sequence fails with conflict.
@@ -479,6 +488,7 @@ API tests:
 - Campaign/session CRUD is owner-scoped and soft-delete/archive aware.
 - Mutating endpoints require idempotency.
 - REST permission matrix covers `rpg.read`, `rpg.write`, and `rpg.admin`.
+- AuthNZ/privilege registry tests cover the new RPG permission names and ensure they are grantable.
 - Event append updates snapshot version and last event sequence.
 - Roll simulation does not append an event; committed roll does.
 - Rules lookup respects adapter, campaign, session, source, and trust filters.
@@ -506,8 +516,9 @@ Security and verification:
 Phase 1: Core ledger and adapters
 
 - Add RPG package structure, repository, schemas, service, and route registration.
+- Add AuthNZ privilege/permission registry entries for `rpg.read`, `rpg.write`, `rpg.admin`, and future-facing `rpg.rules.write`.
 - Implement campaign/session CRUD.
-- Implement adapter registry for D&D 5e SRD, Pathfinder 2e, and Fate.
+- Implement adapter registry for D&D SRD 5.1, Pathfinder 2e, and Fate.
 - Implement typed event append, reducer, cached snapshots, idempotency, and optimistic concurrency.
 - Implement dice/check helpers and roll simulation/commit.
 
@@ -534,6 +545,7 @@ Phase 4: Reference docs and examples
 
 Future specs can build on this runtime with:
 
+- D&D SRD 5.2.1 / 5.5e adapter or content-pack support under a separate key.
 - GM orchestration loop.
 - Quest/NPC/location/faction tracker agents.
 - Combat assistant and initiative/encounter helpers.

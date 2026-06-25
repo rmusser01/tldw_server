@@ -13,7 +13,7 @@ documentation:
 modified_files:
 - Docs/superpowers/specs/2026-06-25-rpg-campaign-session-runtime-design.md
 - backlog/tasks/task-12017 - Design-RPG-campaign-session-runtime-harness.md
-updated_date: 2026-06-25 02:14
+updated_date: 2026-06-25 02:20
 ---
 
 ## Description
@@ -42,12 +42,13 @@ Brainstorm and document a backend-first RPG/TTRPG harness design for tldw_server
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Spec written to Docs/superpowers/specs/2026-06-25-rpg-campaign-session-runtime-design.md. Self-review performed for unresolved markers/placeholders, contradictions, ambiguous scope, and whitespace issues. Verification: `rg -n "TBD|TODO|FIXME|placeholder|unclear|\?\?\?|\[ \]" Docs/superpowers/specs/2026-06-25-rpg-campaign-session-runtime-design.md` returned no matches; `git diff --check -- Docs/superpowers/specs/2026-06-25-rpg-campaign-session-runtime-design.md "backlog/tasks/task-12017 - Design-RPG-campaign-session-runtime-harness.md"` passed. Bandit skipped because this task only adds documentation and Backlog metadata, with no Python code changes.
+Follow-up design review amendments added: pinned `dnd5e_srd` to SRD 5.1, deferred SRD 5.2.1/5.5e to a separate key, tightened PF2e bundled prose requirements, clarified the `RPG_DB.py` repository boundary, required atomic multi-event proposal apply, tightened committed roll randomness provenance, and added AuthNZ privilege registry rollout/testing coverage. Verification repeated: unresolved-marker scan returned no matches and `git diff --check` passed for the spec/task scope.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Documented the approved RPG/TTRPG campaign/session runtime design. The spec defines the backend-first architecture, append-only event ledger, cached snapshots, D&D 5e SRD/PF2e/Fate rules adapter boundary, conservative rules-content licensing constraints, REST and MCP surfaces, authority policy, service behavior, error handling, testing strategy, and phased rollout. No implementation code was changed.
+Documented and amended the approved RPG/TTRPG campaign/session runtime design. The spec defines the backend-first architecture, append-only event ledger, cached snapshots, pinned D&D SRD 5.1/PF2e/Fate rules adapter boundary, conservative rules-content licensing constraints, REST and MCP surfaces, authority policy, service behavior, error handling, testing strategy, permission rollout, and phased implementation path. No implementation code was changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -56,6 +57,6 @@ Documented the approved RPG/TTRPG campaign/session runtime design. The spec defi
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
