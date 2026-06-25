@@ -623,6 +623,29 @@ def test_duplicate_annotation_suppression_preserves_repeated_text_at_distinct_of
     assert retained == [distinct_anchor_candidate]
 
 
+def test_duplicate_annotation_suppression_dedupes_candidates_in_same_batch(mdb, manuscript):
+    scene = mdb.get_scene(manuscript["scene_id"])
+    anchor_start = scene["content_plain"].index("gamma")
+    candidate = {
+        "target_type": "scene",
+        "target_id": manuscript["scene_id"],
+        "category": "clarity",
+        "source": "ai_scene_review",
+        "body": "Clarify this moment.",
+        "scene_version": scene["version"],
+        "anchor_start": anchor_start,
+        "anchor_end": anchor_start + len("gamma"),
+        "selected_text": "gamma",
+    }
+
+    retained = mdb.suppress_duplicate_annotation_candidates(
+        manuscript["project_id"],
+        [candidate, dict(candidate)],
+    )
+
+    assert retained == [candidate]
+
+
 def test_sync_log_records_create_update_and_delete_for_annotations(mdb, manuscript):
     annotation_id = mdb.create_annotation(
         project_id=manuscript["project_id"],

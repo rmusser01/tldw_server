@@ -96,6 +96,12 @@ def enqueue_scene_annotation_review_job(
     review_focus: str | None = None,
 ) -> dict[str, Any]:
     """Create a Jobs row for a manuscript scene annotation review."""
+    normalized_owner_user_id = str(owner_user_id).strip()
+    if not normalized_owner_user_id:
+        raise WritingAnnotationReviewEnqueueError(
+            "Manuscript scene annotation review requires an owner.",
+            error_code="writing_annotation_review_owner_missing",
+        )
     payload = build_scene_annotation_review_job_payload(
         project_id=project_id,
         scene_id=scene_id,
@@ -112,9 +118,9 @@ def enqueue_scene_annotation_review_job(
             queue=writing_annotation_review_jobs_queue(),
             job_type=WRITING_SCENE_ANNOTATION_REVIEW_JOB_TYPE,
             payload=payload,
-            owner_user_id=str(owner_user_id).strip(),
+            owner_user_id=normalized_owner_user_id,
             max_retries=3,
-            idempotency_key=_scene_annotation_review_idempotency_key(payload),
+            idempotency_key=_scene_annotation_review_idempotency_key(payload, normalized_owner_user_id),
         )
     except Exception as exc:
         raise WritingAnnotationReviewEnqueueError() from exc
@@ -286,9 +292,11 @@ def _resolve_scene_review_anchor(text: str, entry: dict[str, Any]) -> dict[str, 
     }
 
 
-def _scene_annotation_review_idempotency_key(payload: dict[str, Any]) -> str:
+def _scene_annotation_review_idempotency_key(payload: dict[str, Any], owner_user_id: str) -> str:
+    owner_digest = hashlib.sha256(f"owner_user_id:{owner_user_id}".encode("utf-8")).hexdigest()[:16]
     key_material = json.dumps(
         {
+            "owner_digest": owner_digest,
             "category_filters": payload.get("category_filters") or [],
             "review_focus": payload.get("review_focus") or "",
             "provider": payload["provider"],
@@ -301,7 +309,7 @@ def _scene_annotation_review_idempotency_key(payload: dict[str, Any]) -> str:
     digest = hashlib.sha256(key_material.encode("utf-8")).hexdigest()[:16]
     return (
         "writing-scene-annotation-review:"
-        f"{payload['scene_id']}:v{payload['scene_version']}:"
+        f"owner{owner_digest}:{payload['scene_id']}:v{payload['scene_version']}:"
         f"{payload['provider']}:{payload['model']}:max{payload['max_comments']}:{digest}"
     )
 

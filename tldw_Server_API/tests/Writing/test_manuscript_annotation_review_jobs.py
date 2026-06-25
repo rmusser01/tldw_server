@@ -11,6 +11,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.ManuscriptDB import ManuscriptDBHelper
+from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Writing.manuscript_annotation_jobs import (
     WRITING_JOBS_DOMAIN,
     WRITING_SCENE_ANNOTATION_REVIEW_JOB_TYPE,
@@ -169,6 +170,62 @@ def test_enqueue_review_job_uses_writing_domain_owner_metadata_and_stable_idempo
     assert "openai" in created["idempotency_key"]
     assert "gpt-4o-mini" in created["idempotency_key"]
     assert "5" in created["idempotency_key"]
+
+
+def test_enqueue_review_job_real_manager_scopes_idempotency_by_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("WRITING_ANNOTATION_REVIEW_JOBS_QUEUE", raising=False)
+    jobs = JobManager(db_path=tmp_path / "review-jobs.sqlite")
+    owner_a = "owner-alpha-secret@example.com"
+    owner_b = "owner-beta-secret@example.com"
+
+    first = enqueue_scene_annotation_review_job(
+        job_manager=jobs,
+        owner_user_id=owner_a,
+        project_id="project-1",
+        scene_id="scene-1",
+        scene_version=7,
+        provider="openai",
+        model="gpt-4o-mini",
+        max_comments=5,
+        category_filters=["clarity"],
+        review_focus="Focus on promises and payoff.",
+    )
+    same_owner = enqueue_scene_annotation_review_job(
+        job_manager=jobs,
+        owner_user_id=owner_a,
+        project_id="project-1",
+        scene_id="scene-1",
+        scene_version=7,
+        provider="openai",
+        model="gpt-4o-mini",
+        max_comments=5,
+        category_filters=["clarity"],
+        review_focus="Focus on promises and payoff.",
+    )
+    different_owner = enqueue_scene_annotation_review_job(
+        job_manager=jobs,
+        owner_user_id=owner_b,
+        project_id="project-1",
+        scene_id="scene-1",
+        scene_version=7,
+        provider="openai",
+        model="gpt-4o-mini",
+        max_comments=5,
+        category_filters=["clarity"],
+        review_focus="Focus on promises and payoff.",
+    )
+
+    assert same_owner["id"] == first["id"]
+    assert different_owner["id"] != first["id"]
+    assert first["owner_user_id"] == owner_a
+    assert different_owner["owner_user_id"] == owner_b
+    assert "owner_user_id" not in first["payload"]
+    assert "owner_user_id" not in different_owner["payload"]
+    assert owner_a not in first["idempotency_key"]
+    assert owner_b not in different_owner["idempotency_key"]
 
 
 @pytest.mark.asyncio

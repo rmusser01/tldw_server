@@ -1677,7 +1677,7 @@ class ManuscriptDBHelper:
         project_id: str,
         candidates: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Return candidates that do not match an existing open annotation."""
+        """Return candidates that do not duplicate existing or retained annotations."""
         if not candidates:
             return []
         with self.db.transaction() as conn:
@@ -1691,11 +1691,14 @@ class ManuscriptDBHelper:
                 (project_id,),
             ).fetchall()
         existing = {self._annotation_duplicate_key(row) for row in existing_rows}
-        return [
-            candidate
-            for candidate in candidates
-            if self._annotation_duplicate_key(candidate) not in existing
-        ]
+        retained: list[dict[str, Any]] = []
+        for candidate in candidates:
+            duplicate_key = self._annotation_duplicate_key(candidate)
+            if duplicate_key in existing:
+                continue
+            retained.append(candidate)
+            existing.add(duplicate_key)
+        return retained
 
     def create_version(self, entity_type: str, entity_id: str, *, label: str | None = None) -> dict[str, Any]:
         """Create a manual manuscript/chapter/scene snapshot."""

@@ -6228,6 +6228,7 @@ class JobManager:
         lease_seconds: int,
         worker_id: str,
         owner_user_id: str | None = None,
+        job_type: str | None = None,
         limit: int = 1,
     ) -> list[dict[str, Any]]:
         """Acquire up to `limit` jobs. Simple loop over acquire_next_job for now."""
@@ -6240,6 +6241,7 @@ class JobManager:
                 lease_seconds=lease_seconds,
                 worker_id=worker_id,
                 owner_user_id=owner_user_id,
+                job_type=job_type,
             )
             if not j:
                 break
