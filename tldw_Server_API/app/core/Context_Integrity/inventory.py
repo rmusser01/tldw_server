@@ -140,6 +140,10 @@ def _not_directory_error(path: Path) -> OSError:
     return OSError(errno.ENOTDIR, "Path is not a directory", str(path))
 
 
+def _symlink_directory_component_error(path: Path) -> OSError:
+    return OSError(errno.ELOOP, "Directory path component is a symlink", str(path))
+
+
 def _unsupported_fd_error(feature: str) -> OSError:
     return OSError(errno.ENOTSUP, f"Required fd-relative filesystem support is unavailable: {feature}")
 
@@ -203,6 +207,20 @@ def _open_dir_no_follow_fd(path: Path) -> int:
             os.close(fd)
 
 
+def _open_cwd_no_follow_fd() -> int:
+    fd = os.open(".", _dir_open_flags())
+    opened_successfully = False
+    try:
+        opened_stat = os.fstat(fd)
+        if not stat.S_ISDIR(opened_stat.st_mode):
+            raise _not_directory_error(Path("."))
+        opened_successfully = True
+        return fd
+    finally:
+        if not opened_successfully:
+            os.close(fd)
+
+
 def _stat_child_no_follow(*, dir_fd: int, name: str, path: Path) -> os.stat_result:
     _require_fd_traversal_support()
     try:
@@ -227,6 +245,45 @@ def _open_child_dir_no_follow_fd(dir_fd: int, name: str, path: Path) -> int:
             initial_stat.st_ino,
         ):
             raise _path_changed_error(path)
+        opened_successfully = True
+        return fd
+    finally:
+        if not opened_successfully:
+            os.close(fd)
+
+
+def _open_directory_path_no_follow_fd(path: Path) -> int:
+    _require_fd_traversal_support()
+    if path.is_absolute():
+        fd = _open_dir_no_follow_fd(Path(path.anchor))
+        parts = path.parts[1:]
+        current_path = Path(path.anchor)
+    else:
+        fd = _open_cwd_no_follow_fd()
+        parts = path.parts
+        current_path = Path(".")
+
+    opened_successfully = False
+    try:
+        for part in parts:
+            if part in ("", "."):
+                continue
+            if part == "..":
+                raise OSError(errno.EINVAL, "Parent path traversal is not supported", str(path))
+
+            child_path = current_path / part
+            child_stat = _stat_child_no_follow(dir_fd=fd, name=part, path=child_path)
+            if stat.S_ISLNK(child_stat.st_mode):
+                raise _symlink_directory_component_error(child_path)
+            if not stat.S_ISDIR(child_stat.st_mode):
+                raise _not_directory_error(child_path)
+
+            child_fd = _open_child_dir_no_follow_fd(fd, part, child_path)
+            old_fd = fd
+            fd = child_fd
+            os.close(old_fd)
+            current_path = child_path
+
         opened_successfully = True
         return fd
     finally:
@@ -687,28 +744,14 @@ def inventory_env_prompt_overrides_with_findings(
         asset_id = f"prompt_file:{source_label}:{path.name}"
         metadata = {"path": str(path), "source_label": source_label}
         try:
-            parent = path.parent.resolve(strict=True)
-        except OSError as exc:
-            findings.append(
-                _verification_error(
-                    asset_id=asset_id,
-                    source_type="prompt_file",
-                    summary=f"Unable to resolve prompt override parent: {exc.__class__.__name__}.",
-                    path=path.parent,
-                    details={"error": str(exc)},
-                )
-            )
-            continue
-
-        try:
-            parent_fd = _open_dir_no_follow_fd(parent)
+            parent_fd = _open_directory_path_no_follow_fd(path.parent)
         except OSError as exc:
             findings.append(
                 _verification_error(
                     asset_id=asset_id,
                     source_type="prompt_file",
                     summary=f"Unable to open prompt override parent: {exc.__class__.__name__}.",
-                    path=parent,
+                    path=path.parent,
                     details={"error": str(exc)},
                 )
             )

@@ -276,11 +276,35 @@ def test_inventory_user_skill_reads_files_without_path_reader(monkeypatch, tmp_p
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("---\nname: demo\n---\nBody", encoding="utf-8")
     (skill_dir / "ref.md").write_text("reference", encoding="utf-8")
+    fd_reader_paths: list[Path] = []
+    original_fd_reader = inventory._read_regular_file_from_dir_fd
 
-    def fail_path_reader(*args: object, **kwargs: object) -> bytes:
-        pytest.fail("path-based inventory reader was called")
+    def is_inventory_path(path: Path) -> bool:
+        try:
+            path.relative_to(skill_dir)
+        except ValueError:
+            return False
+        return True
 
-    monkeypatch.setattr(inventory, "_read_regular_file", fail_path_reader, raising=False)
+    def fail_path_read_bytes(self: Path) -> bytes:
+        if is_inventory_path(self):
+            pytest.fail(f"path-based read_bytes was called for {self}")
+        return original_path_read_bytes(self)
+
+    def fail_path_open(self: Path, *args: object, **kwargs: object) -> object:
+        if is_inventory_path(self):
+            pytest.fail(f"path-based open was called for {self}")
+        return original_path_open(self, *args, **kwargs)
+
+    def counting_fd_reader(*args: object, **kwargs: object) -> bytes | None:
+        fd_reader_paths.append(kwargs["path"])
+        return original_fd_reader(*args, **kwargs)
+
+    original_path_read_bytes = Path.read_bytes
+    original_path_open = Path.open
+    monkeypatch.setattr(Path, "read_bytes", fail_path_read_bytes)
+    monkeypatch.setattr(Path, "open", fail_path_open)
+    monkeypatch.setattr(inventory, "_read_regular_file_from_dir_fd", counting_fd_reader)
 
     result = inventory.inventory_user_skills_with_findings(
         user_id=1,
@@ -289,6 +313,7 @@ def test_inventory_user_skill_reads_files_without_path_reader(monkeypatch, tmp_p
 
     assert [asset.asset_id for asset in result.assets] == ["skill:user:1/demo"]
     assert result.findings == ()
+    assert {path.name for path in fd_reader_paths} == {"SKILL.md", "ref.md"}
 
 
 def test_inventory_user_skill_fifo_supporting_file_reports_error_without_opening(
@@ -494,16 +519,41 @@ def test_inventory_prompt_files_reads_files_without_path_reader(monkeypatch, tmp
     prompts = tmp_path / "Prompts"
     prompts.mkdir()
     (prompts / "root.md").write_text("root prompt", encoding="utf-8")
+    fd_reader_paths: list[Path] = []
+    original_fd_reader = inventory._read_regular_file_from_dir_fd
 
-    def fail_path_reader(*args: object, **kwargs: object) -> bytes:
-        pytest.fail("path-based inventory reader was called")
+    def is_inventory_path(path: Path) -> bool:
+        try:
+            path.relative_to(prompts)
+        except ValueError:
+            return False
+        return True
 
-    monkeypatch.setattr(inventory, "_read_regular_file", fail_path_reader, raising=False)
+    def fail_path_read_bytes(self: Path) -> bytes:
+        if is_inventory_path(self):
+            pytest.fail(f"path-based read_bytes was called for {self}")
+        return original_path_read_bytes(self)
+
+    def fail_path_open(self: Path, *args: object, **kwargs: object) -> object:
+        if is_inventory_path(self):
+            pytest.fail(f"path-based open was called for {self}")
+        return original_path_open(self, *args, **kwargs)
+
+    def counting_fd_reader(*args: object, **kwargs: object) -> bytes | None:
+        fd_reader_paths.append(kwargs["path"])
+        return original_fd_reader(*args, **kwargs)
+
+    original_path_read_bytes = Path.read_bytes
+    original_path_open = Path.open
+    monkeypatch.setattr(Path, "read_bytes", fail_path_read_bytes)
+    monkeypatch.setattr(Path, "open", fail_path_open)
+    monkeypatch.setattr(inventory, "_read_regular_file_from_dir_fd", counting_fd_reader)
 
     result = inventory.inventory_prompt_files_with_findings(prompts_dir=prompts)
 
     assert [asset.asset_id for asset in result.assets] == ["prompt_file:root.md"]
     assert result.findings == ()
+    assert [path.name for path in fd_reader_paths] == ["root.md"]
 
 
 def test_inventory_prompt_files_fifo_reports_error_without_opening(monkeypatch, tmp_path) -> None:
@@ -573,6 +623,36 @@ def test_inventory_env_prompt_overrides_reports_symlink_without_hashing_target(t
     outside.write_text("changed outside prompt", encoding="utf-8")
     second = inventory_env_prompt_overrides_with_findings(
         environ={"TLDW_PROMPT_FILE_CHAT__SYSTEM": str(override)}
+    )
+
+    assert first.assets == second.assets == ()
+    assert [finding.state for finding in first.findings] == ["verification_error"]
+    assert (
+        first.findings[0].asset_id
+        == "prompt_file:env:TLDW_PROMPT_FILE_CHAT__SYSTEM:override.md"
+    )
+
+
+def test_inventory_env_prompt_overrides_reports_symlinked_parent_without_hashing_target(
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import (
+        inventory_env_prompt_overrides_with_findings,
+    )
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    override = outside / "override.md"
+    override.write_text("outside prompt", encoding="utf-8")
+    link = tmp_path / "linked_parent"
+    _symlink_or_skip(link, outside, target_is_directory=True)
+
+    first = inventory_env_prompt_overrides_with_findings(
+        environ={"TLDW_PROMPT_FILE_CHAT__SYSTEM": str(link / "override.md")}
+    )
+    override.write_text("changed outside prompt", encoding="utf-8")
+    second = inventory_env_prompt_overrides_with_findings(
+        environ={"TLDW_PROMPT_FILE_CHAT__SYSTEM": str(link / "override.md")}
     )
 
     assert first.assets == second.assets == ()
