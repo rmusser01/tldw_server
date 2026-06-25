@@ -2137,19 +2137,26 @@ def regenerate_study_pack(
             "source_items": source_items,
         }
     )
-    job = jm.create_job(
-        domain=STUDY_PACKS_DOMAIN,
-        queue=study_pack_jobs_queue(),
-        job_type=STUDY_PACKS_JOB_TYPE,
-        payload=build_study_pack_job_payload(
-            request,
-            regenerate_from_pack_id=pack_id,
-            expected_version=int(pack["version"]) if pack.get("version") is not None else None,
-        ),
-        owner_user_id=str(current_user.id),
-        priority=5,
-        max_retries=2,
-    )
+    try:
+        job = jm.create_job(
+            domain=STUDY_PACKS_DOMAIN,
+            queue=study_pack_jobs_queue(),
+            job_type=STUDY_PACKS_JOB_TYPE,
+            payload=build_study_pack_job_payload(
+                request,
+                regenerate_from_pack_id=pack_id,
+                expected_version=int(pack["version"]) if pack.get("version") is not None else None,
+            ),
+            owner_user_id=str(current_user.id),
+            priority=5,
+            max_retries=2,
+        )
+    except ValueError as exc:
+        logger.warning("Study-pack regeneration payload rejected for pack {}: {}", pack_id, exc)
+        raise HTTPException(
+            status_code=400,
+            detail="Study pack regeneration payload is too large to enqueue.",
+        ) from exc
     return StudyPackJobAcceptedResponse(job=_serialize_study_pack_job(job))
 
 

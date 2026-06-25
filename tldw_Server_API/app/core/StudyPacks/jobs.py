@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
+
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackCreateJobRequest
 
 STUDY_PACKS_DOMAIN = "study_packs"
 STUDY_PACKS_JOB_TYPE = "study_pack_generate"
+_DEFAULT_REGENERATION_EXCERPT_CHARS = 12_000
+_REGENERATION_EXCERPT_CHARS_ENV = "STUDY_PACK_MAX_EVIDENCE_CHARS_PER_SOURCE"
 
 
 def study_pack_jobs_queue() -> str:
@@ -63,30 +68,106 @@ def build_study_pack_job_result(
     return result
 
 
-def extract_study_pack_source_items(source_bundle_json: Any) -> list[dict[str, str]]:
-    """Recover minimal source selections from a persisted study-pack bundle."""
+def _clean_text(value: Any) -> str:
+    """Coerce optional values into stripped text."""
 
-    if isinstance(source_bundle_json, dict):
-        items = source_bundle_json.get("items")
-    elif isinstance(source_bundle_json, list):
-        items = source_bundle_json
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _compact_mapping(value: Any) -> dict[str, Any]:
+    """Return a locator mapping without empty fields."""
+
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): item
+        for key, item in value.items()
+        if item not in (None, "", [], {})
+    }
+
+
+def _max_regeneration_excerpt_chars() -> int:
+    """Return the maximum persisted evidence hint copied into regeneration jobs."""
+
+    configured_limit = _clean_text(os.getenv(_REGENERATION_EXCERPT_CHARS_ENV))
+    if not configured_limit:
+        return _DEFAULT_REGENERATION_EXCERPT_CHARS
+    try:
+        parsed_limit = int(configured_limit)
+    except ValueError:
+        logger.warning(
+            "Ignoring invalid {} value {!r}; using default {}",
+            _REGENERATION_EXCERPT_CHARS_ENV,
+            configured_limit,
+            _DEFAULT_REGENERATION_EXCERPT_CHARS,
+        )
+        return _DEFAULT_REGENERATION_EXCERPT_CHARS
+    if parsed_limit <= 0:
+        logger.warning(
+            "Ignoring non-positive {} value {}; using default {}",
+            _REGENERATION_EXCERPT_CHARS_ENV,
+            parsed_limit,
+            _DEFAULT_REGENERATION_EXCERPT_CHARS,
+        )
+        return _DEFAULT_REGENERATION_EXCERPT_CHARS
+    return parsed_limit
+
+
+def _bound_regeneration_excerpt(excerpt_text: str, locator: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Bound regenerated excerpt hints and annotate locator metadata when truncated."""
+
+    max_chars = _max_regeneration_excerpt_chars()
+    if len(excerpt_text) <= max_chars:
+        return excerpt_text, locator
+    bounded_locator = dict(locator)
+    bounded_locator["excerpt_truncated"] = True
+    bounded_locator["excerpt_original_chars"] = len(excerpt_text)
+    return excerpt_text[:max_chars], bounded_locator
+
+
+def extract_study_pack_source_items(source_bundle_json: Any) -> list[dict[str, Any]]:
+    """Recover source selections from a persisted study-pack bundle."""
+
+    bundle_payload = source_bundle_json
+    if isinstance(bundle_payload, str):
+        try:
+            bundle_payload = json.loads(bundle_payload)
+        except json.JSONDecodeError:
+            bundle_payload = None
+
+    if isinstance(bundle_payload, dict):
+        items = bundle_payload.get("items")
+    elif isinstance(bundle_payload, list):
+        items = bundle_payload
     else:
         items = None
 
-    normalized: list[dict[str, str]] = []
+    normalized: list[dict[str, Any]] = []
     for item in items or []:
         if not isinstance(item, dict):
             continue
-        source_type = str(item.get("source_type") or "").strip()
-        source_id = str(item.get("source_id") or "").strip()
+        source_type = _clean_text(item.get("source_type"))
+        source_id = _clean_text(item.get("source_id"))
         if not source_type or not source_id:
             continue
-        normalized.append(
-            {
-                "source_type": source_type,
-                "source_id": source_id,
-            }
-        )
+        source_item: dict[str, Any] = {
+            "source_type": source_type,
+            "source_id": source_id,
+        }
+        label = _clean_text(item.get("label"))
+        if label:
+            source_item["label"] = label
+        locator = _compact_mapping(item.get("locator"))
+        excerpt_text = _clean_text(item.get("excerpt_text")) or _clean_text(item.get("evidence_text"))
+        if excerpt_text:
+            excerpt_text, locator = _bound_regeneration_excerpt(excerpt_text, locator)
+        if locator:
+            source_item["locator"] = locator
+        if excerpt_text:
+            source_item["excerpt_text"] = excerpt_text
+        normalized.append(source_item)
     return normalized
 
 
