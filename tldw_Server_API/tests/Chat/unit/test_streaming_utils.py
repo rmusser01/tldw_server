@@ -66,6 +66,26 @@ def test_create_chat_streaming_response_forwards_request_fields():
     }
 
 
+def test_create_chat_streaming_response_preserves_factory_defaults():
+    captured = {}
+
+    def fake_stream_factory(**kwargs):
+        captured.update(kwargs)
+        return "stream-result"
+
+    result = create_chat_streaming_response(
+        request=StreamingPipelineRequest(
+            stream=object(),
+            conversation_id="conv-1",
+            model_name="model-1",
+        ),
+        stream_factory=fake_stream_factory,
+    )
+
+    assert result == "stream-result"
+    assert set(captured) == {"stream", "conversation_id", "model_name"}
+
+
 class TestStreamingResponseHandler:
     """Test StreamingResponseHandler class."""
 

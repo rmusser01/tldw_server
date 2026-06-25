@@ -36,19 +36,29 @@ def create_chat_streaming_response(
     stream_factory: Callable[..., Any],
 ) -> Any:
     """Create a streaming response through the injected stream factory."""
-    return stream_factory(
-        stream=request.stream,
-        conversation_id=request.conversation_id,
-        model_name=request.model_name,
-        save_callback=request.save_callback,
-        finalize_callback=request.finalize_callback,
-        idle_timeout=request.idle_timeout,
-        heartbeat_interval=request.heartbeat_interval,
-        text_transform=request.text_transform,
-        before_success_callback=request.before_success_callback,
-        system_message_id=request.system_message_id,
-        continuation_metadata=request.continuation_metadata,
+    factory_kwargs: dict[str, Any] = {
+        "stream": request.stream,
+        "conversation_id": request.conversation_id,
+        "model_name": request.model_name,
+    }
+    optional_kwargs = {
+        "save_callback": request.save_callback,
+        "finalize_callback": request.finalize_callback,
+        "idle_timeout": request.idle_timeout,
+        "heartbeat_interval": request.heartbeat_interval,
+        "text_transform": request.text_transform,
+        "before_success_callback": request.before_success_callback,
+        "system_message_id": request.system_message_id,
+        "continuation_metadata": request.continuation_metadata,
+    }
+    factory_kwargs.update(
+        {
+            key: value
+            for key, value in optional_kwargs.items()
+            if value is not None
+        }
     )
+    return stream_factory(**factory_kwargs)
 
 
 __all__ = [
