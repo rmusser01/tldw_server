@@ -87,3 +87,34 @@ def test_resolve_slide_asset_rejects_oversized_files_before_read(tmp_path, monke
         )
 
     assert exc.value.code == "slide_asset_too_large"
+
+
+def test_resolve_slide_asset_enforces_default_size_limit_before_read(tmp_path, monkeypatch):
+    file_path = tmp_path / "cover.png"
+    file_path.write_bytes(b"x" * (MAX_RESOLVED_SLIDE_ASSET_BYTES + 1))
+
+    fake_db = SimpleNamespace(
+        get_output_artifact=lambda output_id: SimpleNamespace(
+            id=output_id,
+            format="png",
+            storage_path="cover.png",
+            metadata_json=None,
+            title="Cover",
+            type="generated_image",
+        ),
+        resolve_output_storage_path=lambda path_value: str(path_value),
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Slides.slides_assets._resolve_output_path_for_user",
+        lambda user_id, path_value: file_path,
+    )
+    monkeypatch.setattr(
+        Path,
+        "read_bytes",
+        lambda self: (_ for _ in ()).throw(AssertionError("read_bytes should not be called")),
+    )
+
+    with pytest.raises(SlidesAssetError) as exc:
+        resolve_slide_asset("output:123", collections_db=fake_db, user_id=1)
+
+    assert exc.value.code == "slide_asset_too_large"

@@ -74,7 +74,7 @@ def resolve_slide_asset(
     *,
     collections_db: Any | None = None,
     user_id: int | None = None,
-    max_bytes: int | None = None,
+    max_bytes: int | None = MAX_RESOLVED_SLIDE_ASSET_BYTES,
 ) -> dict[str, Any]:
     """Resolve a slide asset reference into file-backed bytes and metadata."""
 
@@ -106,6 +106,8 @@ def resolve_slide_asset(
         metadata=metadata,
     )
     raw_bytes = file_path.read_bytes()
+    if isinstance(max_bytes, int) and max_bytes > 0 and len(raw_bytes) > max_bytes:
+        raise SlidesAssetError("slide_asset_too_large")
     return {
         "asset_ref": asset_ref,
         "mime": mime,

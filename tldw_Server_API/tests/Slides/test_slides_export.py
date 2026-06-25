@@ -1,3 +1,6 @@
+import builtins
+import importlib
+import importlib.util
 import io
 import zipfile
 
@@ -7,6 +10,7 @@ from tldw_Server_API.app.core.Slides.slides_export import (
     SlidesAssetsMissingError,
     SlidesExportInputError,
     _normalize_pdf_options,
+    _sanitize_markdown,
     export_presentation_bundle,
     export_presentation_markdown,
 )
@@ -81,6 +85,64 @@ def test_export_bundle_includes_assets(tmp_path):
         assert "assets/custom.css" in index_html
         assert "data:image/png;base64," in index_html
         assert "alt=\"Logo\"" in index_html
+
+
+def test_export_bundle_escapes_settings_for_inline_script(tmp_path):
+    assets_dir = _build_assets(tmp_path)
+    bundle = export_presentation_bundle(
+        title="Deck",
+        slides=[
+            {
+                "order": 0,
+                "layout": "content",
+                "title": "Slide",
+                "content": "Hello",
+                "speaker_notes": None,
+                "metadata": {},
+            }
+        ],
+        theme="black",
+        settings={"transition": "</script><script>alert(1)</script>", "controls": True},
+        custom_css=None,
+        assets_dir=assets_dir,
+    )
+
+    with zipfile.ZipFile(io.BytesIO(bundle)) as zf:
+        index_html = zf.read("index.html").decode("utf-8")
+
+    assert "</script><script>alert(1)</script>" not in index_html
+    assert "\\u003c/script\\u003e\\u003cscript\\u003ealert(1)\\u003c/script\\u003e" in index_html
+
+
+def test_sanitize_markdown_uses_bleach_without_css_sanitizer():
+    html = _sanitize_markdown("- one")
+
+    assert "<ul>" in html
+    assert "<li>one</li>" in html
+    assert "&lt;ul" not in html
+
+
+def test_slides_export_reraises_unexpected_css_sanitizer_import_errors(monkeypatch):
+    import tldw_Server_API.app.core.Slides.slides_export as slides_export_module
+
+    original_import = builtins.__import__
+    spec = importlib.util.spec_from_file_location(
+        "tldw_Server_API.app.core.Slides._slides_export_import_probe",
+        slides_export_module.__file__,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    probe_module = importlib.util.module_from_spec(spec)
+
+    def _raise_for_css_sanitizer(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "bleach.css_sanitizer":
+            raise RuntimeError("unexpected import failure")
+        return original_import(name, globals, locals, fromlist, level)
+
+    with monkeypatch.context() as patch_context:
+        patch_context.setattr(builtins, "__import__", _raise_for_css_sanitizer)
+        with pytest.raises(RuntimeError, match="unexpected import failure"):
+            spec.loader.exec_module(probe_module)
 
 
 @pytest.mark.unit

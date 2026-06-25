@@ -1,8 +1,11 @@
 import json
+import sqlite3
+import threading
+import time
 
 import pytest
 
-from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabase, ConflictError
+from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabase, ConflictError, InputError
 
 
 def _sample_slides() -> str:
@@ -191,6 +194,163 @@ def test_slides_db_search(tmp_path):
     assert total == 1
     assert rows[0].title == "Search Deck"
     db.close_connection()
+
+
+def test_slides_db_search_rejects_malformed_fts_query(tmp_path):
+    db_path = tmp_path / "Slides.db"
+    db = SlidesDatabase(db_path=db_path, client_id="tester")
+    db.create_presentation(
+        presentation_id=None,
+        title="Search Deck",
+        description=None,
+        theme="black",
+        marp_theme=None,
+        settings=None,
+        studio_data=None,
+        slides=_sample_slides(),
+        slides_text="alpha beta gamma",
+        source_type="manual",
+        source_ref=None,
+        source_query=None,
+        custom_css=None,
+    )
+
+    with pytest.raises(InputError):
+        db.search_presentations(query='"unterminated', limit=10, offset=0, include_deleted=False)
+
+    db.close_connection()
+
+
+def test_slides_db_search_rejects_unknown_fts_column(tmp_path):
+    db_path = tmp_path / "Slides.db"
+    db = SlidesDatabase(db_path=db_path, client_id="tester")
+    db.create_presentation(
+        presentation_id=None,
+        title="Search Deck",
+        description=None,
+        theme="black",
+        marp_theme=None,
+        settings=None,
+        studio_data=None,
+        slides=_sample_slides(),
+        slides_text="alpha beta gamma",
+        source_type="manual",
+        source_ref=None,
+        source_query=None,
+        custom_css=None,
+    )
+
+    with pytest.raises(InputError):
+        db.search_presentations(query="unknown_column:alpha", limit=10, offset=0, include_deleted=False)
+
+    db.close_connection()
+
+
+def test_slides_db_search_does_not_map_non_fts_operational_errors(tmp_path, monkeypatch):
+    db_path = tmp_path / "Slides.db"
+    db = SlidesDatabase(db_path=db_path, client_id="tester")
+
+    class LockedConnection:
+        def execute(self, *args, **kwargs):
+            raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(db, "get_connection", lambda: LockedConnection())
+
+    with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+        db.search_presentations(query="alpha", limit=10, offset=0, include_deleted=False)
+
+    db.close_connection()
+
+
+def test_create_presentation_rolls_back_when_sync_log_fails(tmp_path, monkeypatch):
+    db_path = tmp_path / "Slides.db"
+    db = SlidesDatabase(db_path=db_path, client_id="tester")
+
+    def _fail_sync_log(*args, **kwargs):
+        raise RuntimeError("sync log failed")
+
+    monkeypatch.setattr(SlidesDatabase, "_insert_sync_log", _fail_sync_log)
+
+    with pytest.raises(RuntimeError, match="sync log failed"):
+        db.create_presentation(
+            presentation_id="pres_sync_atomic",
+            title="Deck",
+            description=None,
+            theme="black",
+            marp_theme=None,
+            settings=None,
+            studio_data=None,
+            slides=_sample_slides(),
+            slides_text="Deck Intro A B",
+            source_type="manual",
+            source_ref=None,
+            source_query=None,
+            custom_css=None,
+        )
+
+    with pytest.raises(KeyError):
+        db.get_presentation_by_id("pres_sync_atomic", include_deleted=True)
+
+    db.close_connection()
+
+
+def test_slides_db_schema_initialization_serializes_column_migrations(tmp_path, monkeypatch):
+    db_path = tmp_path / "Slides.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE presentations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT,
+                theme TEXT DEFAULT 'black',
+                settings TEXT,
+                slides TEXT NOT NULL,
+                slides_text TEXT NOT NULL,
+                source_type TEXT,
+                source_ref TEXT,
+                source_query TEXT,
+                custom_css TEXT,
+                created_at DATETIME NOT NULL,
+                last_modified DATETIME NOT NULL,
+                deleted INTEGER DEFAULT 0,
+                client_id TEXT NOT NULL,
+                version INTEGER DEFAULT 1
+            )
+            """
+        )
+    SlidesDatabase._schema_init_paths.discard(str(db_path.resolve()))
+
+    def _slow_marp_theme_migration(conn):
+        columns = conn.execute("PRAGMA table_info(presentations)").fetchall()
+        if any(col["name"] == "marp_theme" for col in columns):
+            return
+        time.sleep(0.05)
+        conn.execute("ALTER TABLE presentations ADD COLUMN marp_theme TEXT")
+
+    monkeypatch.setattr(
+        SlidesDatabase,
+        "_ensure_marp_theme_column",
+        staticmethod(_slow_marp_theme_migration),
+    )
+
+    errors: list[BaseException] = []
+
+    def _open_database(client_id: str) -> None:
+        try:
+            db = SlidesDatabase(db_path=db_path, client_id=client_id)
+            db.close_connection()
+        except BaseException as exc:  # pragma: no cover - assertion reports details below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_open_database, args=(f"tester-{index}",)) for index in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert errors == []
 
 
 def test_slides_db_soft_delete_restore(tmp_path):

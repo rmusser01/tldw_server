@@ -71,7 +71,10 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 from tldw_Server_API.app.core.Slides.slides_db import ConflictError, InputError, SlidesDatabase, VisualStyleRow
-from tldw_Server_API.app.core.Slides.slides_assets import resolve_slide_asset
+from tldw_Server_API.app.core.Slides.slides_assets import (
+    MAX_RESOLVED_SLIDE_ASSET_BYTES,
+    resolve_slide_asset,
+)
 from tldw_Server_API.app.core.Slides.slides_export import (
     SlidesAssetsMissingError,
     SlidesExportError,
@@ -146,6 +149,12 @@ _SETTINGS_ALLOWLIST: dict[str, tuple[type, ...]] = {
     "loop": (bool,),
     "rtl": (bool,),
     "navigationMode": (str,),
+}
+
+_SETTINGS_STRING_ENUMS: dict[str, set[str]] = {
+    "transition": {"none", "fade", "slide", "convex", "concave", "zoom"},
+    "backgroundTransition": {"none", "fade", "slide", "convex", "concave", "zoom"},
+    "navigationMode": {"default", "linear", "grid"},
 }
 
 _ETAG_RE = re.compile(r'^(W/)?"v(?P<version>\d+)"$')
@@ -379,6 +388,9 @@ def _validate_settings(settings: dict[str, Any] | None) -> dict[str, Any] | None
         if value is None:
             continue
         if not isinstance(value, expected):
+            raise HTTPException(status_code=422, detail=f"invalid_settings: {key}")
+        allowed_values = _SETTINGS_STRING_ENUMS.get(key)
+        if allowed_values is not None and str(value).strip() not in allowed_values:
             raise HTTPException(status_code=422, detail=f"invalid_settings: {key}")
     return settings
 
@@ -1243,7 +1255,10 @@ async def search_presentations(
     include_deleted: bool = Query(False),
     db: SlidesDatabase = Depends(get_slides_db_for_user),
 ) -> PresentationSearchResponse:
-    rows, total = db.search_presentations(query=q, limit=limit, offset=offset, include_deleted=include_deleted)
+    try:
+        rows, total = db.search_presentations(query=q, limit=limit, offset=offset, include_deleted=include_deleted)
+    except InputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return PresentationSearchResponse(
         presentations=[_build_summary(row) for row in rows],
         total=total,
@@ -2302,6 +2317,7 @@ async def export_presentation(
             asset_ref,
             collections_db=collections_db,
             user_id=user_id,
+            max_bytes=MAX_RESOLVED_SLIDE_ASSET_BYTES,
         )
     try:
         metrics = get_metrics_registry()
