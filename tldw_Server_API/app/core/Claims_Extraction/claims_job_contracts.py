@@ -27,6 +27,19 @@ SENSITIVE_PAYLOAD_KEYS = {
     "secret",
     "token",
 }
+CLAIMS_REBUILD_MEDIA_PAYLOAD_KEYS = {"version", "owner_user_id", "media_id"}
+CLAIMS_REVIEW_NOTIFICATION_PAYLOAD_KEYS = {
+    "version",
+    "owner_user_id",
+    "notification_ids",
+}
+CLAIMS_ALERT_DELIVERY_PAYLOAD_KEYS = {
+    "version",
+    "owner_user_id",
+    "event_id",
+    "alert_id",
+    "channel",
+}
 
 
 class ClaimsJobError(RuntimeError):
@@ -76,8 +89,25 @@ def _reject_sensitive_keys(payload: dict[str, Any]) -> None:
         )
 
 
+def _reject_unknown_keys(payload: dict[str, Any], allowed_keys: set[str]) -> None:
+    present = sorted(set(payload).difference(allowed_keys), key=str)
+    if present:
+        unknown_keys = ", ".join(str(key) for key in present)
+        raise ClaimsJobError(
+            f"claims job payload contains unknown keys: {unknown_keys}",
+            retryable=False,
+            failure_code="claims_invalid_payload",
+        )
+
+
 def _owner_user_id(value: Any) -> str:
-    owner = str(value or "").strip()
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ClaimsJobError(
+            "claims job payload missing real owner_user_id",
+            retryable=False,
+            failure_code="claims_missing_owner",
+        )
+    owner = str(value).strip()
     if not owner or owner == "0":
         raise ClaimsJobError(
             "claims job payload missing real owner_user_id",
@@ -134,6 +164,7 @@ def _version(payload: dict[str, Any]) -> int:
 def validate_rebuild_media_payload(value: Any) -> dict[str, Any]:
     payload = _normalize_dict(value)
     _reject_sensitive_keys(payload)
+    _reject_unknown_keys(payload, CLAIMS_REBUILD_MEDIA_PAYLOAD_KEYS)
     return {
         "version": _version(payload),
         "owner_user_id": _owner_user_id(payload.get("owner_user_id")),
@@ -144,6 +175,7 @@ def validate_rebuild_media_payload(value: Any) -> dict[str, Any]:
 def validate_review_notification_payload(value: Any) -> dict[str, Any]:
     payload = _normalize_dict(value)
     _reject_sensitive_keys(payload)
+    _reject_unknown_keys(payload, CLAIMS_REVIEW_NOTIFICATION_PAYLOAD_KEYS)
     version = _version(payload)
     owner_user_id = _owner_user_id(payload.get("owner_user_id"))
     raw_ids = payload.get("notification_ids")
@@ -170,6 +202,7 @@ def validate_review_notification_payload(value: Any) -> dict[str, Any]:
 def validate_alert_delivery_payload(value: Any) -> dict[str, Any]:
     payload = _normalize_dict(value)
     _reject_sensitive_keys(payload)
+    _reject_unknown_keys(payload, CLAIMS_ALERT_DELIVERY_PAYLOAD_KEYS)
     version = _version(payload)
     owner_user_id = _owner_user_id(payload.get("owner_user_id"))
     channel = str(payload.get("channel") or "").strip().lower()
@@ -188,9 +221,9 @@ def validate_alert_delivery_payload(value: Any) -> dict[str, Any]:
     }
 
 
-def skipped_result(reason: str, **extra: Any) -> dict[str, Any]:
-    return {"outcome": "skipped", "reason": str(reason), **extra}
+def skipped_result(reason: str, /, **extra: Any) -> dict[str, Any]:
+    return {**extra, "outcome": "skipped", "reason": str(reason)}
 
 
 def ok_result(**extra: Any) -> dict[str, Any]:
-    return {"outcome": "ok", **extra}
+    return {**extra, "outcome": "ok"}
