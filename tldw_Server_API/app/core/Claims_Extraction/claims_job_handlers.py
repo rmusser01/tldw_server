@@ -51,18 +51,43 @@ def _payload(job: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _assert_owner(job: dict[str, Any], owner_user_id: str) -> None:
-    row_owner = str(job.get("owner_user_id") or "").strip()
-    if not row_owner or row_owner != str(owner_user_id):
-        raise ClaimsJobError(
-            "claims job owner mismatch",
-            retryable=False,
-            failure_code="claims_owner_scope_violation",
-        )
+def _owner_scope_error(message: str = "claims job owner mismatch") -> ClaimsJobError:
+    return ClaimsJobError(
+        message,
+        retryable=False,
+        failure_code="claims_owner_scope_violation",
+    )
 
 
-def _db_path(owner_user_id: str) -> str:
-    return str(get_user_media_db_path(int(owner_user_id)))
+def _canonical_owner_user_id(value: Any) -> str:
+    if isinstance(value, bool):
+        raise _owner_scope_error("claims job owner must be a canonical positive integer")
+    if isinstance(value, int):
+        if value <= 0:
+            raise _owner_scope_error("claims job owner must be a canonical positive integer")
+        return str(value)
+    if not isinstance(value, str):
+        raise _owner_scope_error("claims job owner must be a canonical positive integer")
+
+    text = value.strip()
+    if text != value or not text or not text.isascii() or not text.isdigit():
+        raise _owner_scope_error("claims job owner must be a canonical positive integer")
+    if text == "0" or (len(text) > 1 and text.startswith("0")):
+        raise _owner_scope_error("claims job owner must be a canonical positive integer")
+    return text
+
+
+def _assert_owner(job: dict[str, Any], owner_user_id: Any) -> str:
+    row_owner = _canonical_owner_user_id(job.get("owner_user_id"))
+    payload_owner = _canonical_owner_user_id(owner_user_id)
+    if row_owner != payload_owner:
+        raise _owner_scope_error()
+    return payload_owner
+
+
+def _db_path(owner_user_id: Any) -> str:
+    canonical_owner = _canonical_owner_user_id(owner_user_id)
+    return str(get_user_media_db_path(int(canonical_owner)))
 
 
 def _payload_dict(row: dict[str, Any]) -> dict[str, Any]:
@@ -109,7 +134,7 @@ def _already_delivered(db: Any, *, owner_user_id: str, event_id: int, alert_id: 
 
 
 def _deliver_alert(payload: dict[str, Any]) -> dict[str, Any]:
-    owner_user_id = payload["owner_user_id"]
+    owner_user_id = _canonical_owner_user_id(payload["owner_user_id"])
     db_path = _db_path(owner_user_id)
     try:
         with managed_media_database(
@@ -181,17 +206,17 @@ async def process_claims_job(job: dict[str, Any]) -> dict[str, Any]:
     job_type = str(job.get("job_type") or "").strip()
     if job_type == CLAIMS_REBUILD_MEDIA_JOB_TYPE:
         payload = validate_rebuild_media_payload(_payload(job))
-        _assert_owner(job, payload["owner_user_id"])
+        owner_user_id = _assert_owner(job, payload["owner_user_id"])
         return rebuild_claims_for_media(
-            db_path=_db_path(payload["owner_user_id"]),
+            db_path=_db_path(owner_user_id),
             media_id=payload["media_id"],
         )
     if job_type == CLAIMS_DELIVER_REVIEW_NOTIFICATION_JOB_TYPE:
         payload = validate_review_notification_payload(_payload(job))
-        _assert_owner(job, payload["owner_user_id"])
+        owner_user_id = _assert_owner(job, payload["owner_user_id"])
         result = deliver_claim_review_notifications_now(
-            db_path=_db_path(payload["owner_user_id"]),
-            owner_user_id=payload["owner_user_id"],
+            db_path=_db_path(owner_user_id),
+            owner_user_id=owner_user_id,
             notification_ids=payload["notification_ids"],
         )
         if result.get("outcome") == "failed":

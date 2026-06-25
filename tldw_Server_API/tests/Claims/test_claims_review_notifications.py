@@ -175,6 +175,7 @@ def test_deliver_claim_review_notifications_now_returns_success_contract(monkeyp
             return [
                 {
                     "id": 7,
+                    "user_id": "1",
                     "kind": "review_update",
                     "payload_json": json.dumps({"claim_text": "A.", "new_status": "approved"}),
                     "created_at": "2026-03-16T00:00:00Z",
@@ -182,6 +183,7 @@ def test_deliver_claim_review_notifications_now_returns_success_contract(monkeyp
                 },
                 {
                     "id": 2,
+                    "user_id": "1",
                     "kind": "review_assignment",
                     "payload_json": json.dumps({"claim_text": "B.", "new_status": "pending"}),
                     "created_at": "2026-03-17T00:00:00Z",
@@ -257,6 +259,7 @@ def test_deliver_claim_review_notifications_now_marks_only_pending_notifications
             return [
                 {
                     "id": 2,
+                    "user_id": "1",
                     "kind": "review_update",
                     "payload_json": json.dumps({"claim_text": "Already delivered", "new_status": "approved"}),
                     "created_at": "2026-03-16T00:00:00Z",
@@ -264,6 +267,7 @@ def test_deliver_claim_review_notifications_now_marks_only_pending_notifications
                 },
                 {
                     "id": 7,
+                    "user_id": "1",
                     "kind": "review_update",
                     "payload_json": json.dumps({"claim_text": "Needs delivery", "new_status": "approved"}),
                     "created_at": "2026-03-17T00:00:00Z",
@@ -318,6 +322,7 @@ def test_deliver_claim_review_notifications_now_skips_already_delivered(monkeypa
             return [
                 {
                     "id": 7,
+                    "user_id": "1",
                     "kind": "review_update",
                     "payload_json": json.dumps({"claim_text": "A.", "new_status": "approved"}),
                     "created_at": "2026-03-16T00:00:00Z",
@@ -347,6 +352,118 @@ def test_deliver_claim_review_notifications_now_skips_already_delivered(monkeypa
     )
 
     assert result == {"outcome": "skipped", "reason": "already_delivered", "notification_ids": [7]}
+
+
+def test_deliver_claim_review_notifications_now_filters_mixed_owner_rows(monkeypatch, tmp_path):
+    class _FakeDb:
+        def __init__(self) -> None:
+            self.marked_ids: list[int] = []
+
+        def get_claims_monitoring_settings(self, user_id):
+            assert user_id == "1"
+            return {
+                "enabled": True,
+                "slack_webhook_url": None,
+                "webhook_url": None,
+                "email_recipients": "review@example.com",
+            }
+
+        def get_claim_notifications_by_ids(self, notification_ids):
+            assert notification_ids == [2, 7]
+            return [
+                {
+                    "id": 2,
+                    "user_id": "2",
+                    "kind": "review_update",
+                    "payload_json": json.dumps({"claim_text": "Wrong owner", "new_status": "approved"}),
+                    "created_at": "2026-03-16T00:00:00Z",
+                    "delivered_at": None,
+                },
+                {
+                    "id": 7,
+                    "user_id": "1",
+                    "kind": "review_update",
+                    "payload_json": json.dumps({"claim_text": "Right owner", "new_status": "approved"}),
+                    "created_at": "2026-03-17T00:00:00Z",
+                    "delivered_at": None,
+                },
+            ]
+
+        def mark_claim_notifications_delivered(self, notification_ids):
+            self.marked_ids.extend(notification_ids)
+            return len(notification_ids)
+
+    fake_db = _FakeDb()
+    email_calls: list[dict[str, object]] = []
+
+    @contextmanager
+    def _fake_managed_media_database(*_args, **_kwargs):
+        yield fake_db
+
+    def _fake_deliver_review_email_sync(**kwargs):
+        email_calls.append(kwargs)
+        return True
+
+    monkeypatch.setattr(claims_notifications, "managed_media_database", _fake_managed_media_database)
+    monkeypatch.setattr(claims_notifications, "_deliver_review_email_sync", _fake_deliver_review_email_sync)
+
+    result = claims_notifications.deliver_claim_review_notifications_now(
+        db_path=str(tmp_path / "claims-review.db"),
+        owner_user_id="1",
+        notification_ids=[7, 2],
+    )
+
+    assert result == {"outcome": "ok", "notification_ids": [2, 7], "delivered": 1}
+    assert fake_db.marked_ids == [7]
+    assert email_calls and "Right owner" in email_calls[0]["text_body"]
+    assert "Wrong owner" not in email_calls[0]["text_body"]
+
+
+def test_deliver_claim_review_notifications_now_skips_mismatched_owner_rows(monkeypatch, tmp_path):
+    class _FakeDb:
+        def get_claims_monitoring_settings(self, user_id):
+            assert user_id == "1"
+            return {
+                "enabled": True,
+                "slack_webhook_url": None,
+                "webhook_url": None,
+                "email_recipients": "review@example.com",
+            }
+
+        def get_claim_notifications_by_ids(self, notification_ids):
+            assert notification_ids == [7]
+            return [
+                {
+                    "id": 7,
+                    "user_id": "2",
+                    "kind": "review_update",
+                    "payload_json": json.dumps({"claim_text": "Wrong owner", "new_status": "approved"}),
+                    "created_at": "2026-03-16T00:00:00Z",
+                    "delivered_at": None,
+                }
+            ]
+
+        def mark_claim_notifications_delivered(self, notification_ids):
+            raise AssertionError(f"Mismatched rows should not be marked: {notification_ids}")
+
+    @contextmanager
+    def _fake_managed_media_database(*_args, **_kwargs):
+        yield _FakeDb()
+
+    monkeypatch.setattr(claims_notifications, "managed_media_database", _fake_managed_media_database)
+    monkeypatch.setattr(
+        claims_notifications,
+        "_deliver_review_email_sync",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError(f"Email should not be delivered: {kwargs}")),
+    )
+
+    result = claims_notifications.deliver_claim_review_notifications_now(
+        db_path=str(tmp_path / "claims-review.db"),
+        owner_user_id="1",
+        notification_ids=[7],
+    )
+
+    assert result == {"outcome": "skipped", "reason": "notifications_owner_mismatch", "notification_ids": [7]}
 
 
 def test_deliver_claim_review_notifications_now_ignores_invalid_notification_ids(monkeypatch, tmp_path):
@@ -404,6 +521,7 @@ def test_dispatch_claim_review_notifications_uses_managed_media_database(monkeyp
             return [
                 {
                     "id": 7,
+                    "user_id": "1",
                     "kind": "review_update",
                     "payload_json": json.dumps({"claim_text": "A.", "new_status": "approved"}),
                     "created_at": "2026-03-16T00:00:00Z",

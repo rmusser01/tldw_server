@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import html
 import json
 import random
@@ -431,9 +430,13 @@ def deliver_claim_review_notifications_now(
         if not rows:
             return {"outcome": "skipped", "reason": "notifications_missing", "notification_ids": normalized_ids}
 
+        owner_rows = [row for row in rows if str(row.get("user_id")) == str(owner_user_id)]
+        if not owner_rows:
+            return {"outcome": "skipped", "reason": "notifications_owner_mismatch", "notification_ids": normalized_ids}
+
         pending_id_set: set[int] = set()
         notifications: list[dict[str, Any]] = []
-        for row in rows:
+        for row in owner_rows:
             if row.get("delivered_at"):
                 continue
             notifications.append(_normalize_notification_row(row))
