@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.Chat.tool_auto_exec import (
     ToolExecutionBatchResult,
     ToolExecutionRecord,
 )
+from tldw_Server_API.app.core.Chat.tool_execution_service import request_declares_local_tool_use
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     StructuredGenerationParseError,
 )
@@ -169,6 +170,36 @@ def _install_owned_worker_drain_probe(
 
     monkeypatch.setattr(bounded_daemon_module, "_drain_owned_task", probe)
     return drain_entered
+class _KeywordModeration:
+    class _Policy:
+        enabled = True
+        output_enabled = True
+        output_action = "redact"
+
+    def __init__(self, *, keyword: str) -> None:
+        self.keyword = keyword
+
+    def get_effective_policy(self, *_args, **_kwargs):
+        return self._Policy()
+
+    def evaluate_action_with_match(self, text, *_args, **_kwargs):
+        if self.keyword in str(text):
+            return (
+                "redact",
+                str(text).replace(self.keyword, "[redacted]"),
+                "keyword",
+                "default",
+                (0, len(self.keyword)),
+            )
+        return ("pass", None, None, None, None)
+
+    def check_text(self, text, *_args, **_kwargs):
+        if self.keyword in str(text):
+            return (True, "keyword")
+        return (False, None)
+
+    def redact_text(self, text, *_args, **_kwargs):
+        return str(text).replace(self.keyword, "[redacted]")
 
 
 def _build_llm_response_with_tool_calls() -> dict[str, Any]:
@@ -479,10 +510,12 @@ async def _run_execute_non_stream_call(
     cleaned_args_overrides: dict[str, Any] | None = None,
     metrics: Any | None = None,
     provider_manager: Any | None = None,
+    queue_execution_enabled: bool = False,
     enable_provider_fallback: bool = False,
     refresh_provider_params=None,
     on_success=None,
     conversation_id: str = "conv-123",
+    moderation_getter=None,
 ) -> dict[str, Any]:
     cleaned_args = {
         "api_endpoint": "openai",
@@ -521,11 +554,11 @@ async def _run_execute_non_stream_call(
         audit_service=None,
         audit_context=None,
         client_id=conversation_id,
-        queue_execution_enabled=False,
+        queue_execution_enabled=queue_execution_enabled,
         enable_provider_fallback=enable_provider_fallback,
         llm_call_func=llm_call_func,
         refresh_provider_params=refresh_provider_params or (lambda *_args, **_kwargs: None),
-        moderation_getter=lambda: _NoModeration(),
+        moderation_getter=moderation_getter or (lambda: _NoModeration()),
         on_success=on_success,
     )
 
@@ -714,6 +747,209 @@ async def test_non_stream_loop_mode_disables_legacy_autoexec(monkeypatch: pytest
     assert len(saved_payloads) == 1
     assert saved_payloads[0]["role"] == "assistant"
     assert "tldw_tool_results" not in response
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_tool_autoexec_rejects_multi_choice_before_provider_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider_called = False
+
+    def llm_call_func():
+        nonlocal provider_called
+        provider_called = True
+        return _build_llm_response_with_tool_calls()
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-1"
+
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _run_execute_non_stream_call(
+            llm_call_func=llm_call_func,
+            save_message_fn=save_message_fn,
+            cleaned_args_overrides={
+                "n": 2,
+                "tool_choice": "auto",
+                "tools": [{"type": "function", "function": {"name": "notes.search", "parameters": {}}}],
+            },
+        )
+
+    assert provider_called is False
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == {
+        "code": "unsupported_multi_choice_tool_autoexec",
+        "message": "Local tool auto-execution supports one assistant choice per request.",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_tool_autoexec_rejects_multi_choice_before_queue_admission(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider_called = False
+
+    def llm_call_func():
+        nonlocal provider_called
+        provider_called = True
+        return _build_llm_response_with_tool_calls()
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-1"
+
+    class _FakeActiveQueue:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.enqueued = False
+
+        async def enqueue(self, *_args, **_kwargs):
+            self.enqueued = True
+            return _build_llm_response_with_tool_calls()
+
+    fake_queue = _FakeActiveQueue()
+
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+    monkeypatch.setattr(chat_service, "get_request_queue", lambda: fake_queue)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _run_execute_non_stream_call(
+            llm_call_func=llm_call_func,
+            save_message_fn=save_message_fn,
+            queue_execution_enabled=True,
+            cleaned_args_overrides={
+                "n": 2,
+                "tools": [{"type": "function", "function": {"name": "notes.search", "parameters": {}}}],
+            },
+        )
+
+    assert fake_queue.enqueued is False
+    assert provider_called is False
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == {
+        "code": "unsupported_multi_choice_tool_autoexec",
+        "message": "Local tool auto-execution supports one assistant choice per request.",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_tool_autoexec_allows_multi_choice_when_autoexec_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_log_llm_usage(**_kwargs):
+        return None
+
+    monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
+    monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: False)
+
+    provider_called = False
+
+    def llm_call_func():
+        nonlocal provider_called
+        provider_called = True
+        return _build_llm_response_with_tool_calls()
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-1"
+
+    response = await _run_execute_non_stream_call(
+        llm_call_func=llm_call_func,
+        save_message_fn=save_message_fn,
+        cleaned_args_overrides={
+            "n": 2,
+            "tools": [{"type": "function", "function": {"name": "notes.search", "parameters": {}}}],
+        },
+    )
+
+    assert provider_called is True
+    assert response["choices"][0]["message"]["tool_calls"][0]["function"]["name"] == "notes.search"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_tool_autoexec_allows_multi_choice_without_request_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_log_llm_usage(**_kwargs):
+        return None
+
+    monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
+    monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+
+    provider_called = False
+
+    def llm_call_func():
+        nonlocal provider_called
+        provider_called = True
+        return {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "plain response"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        }
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-1"
+
+    response = await _run_execute_non_stream_call(
+        llm_call_func=llm_call_func,
+        save_message_fn=save_message_fn,
+        cleaned_args_overrides={"n": 2},
+    )
+
+    assert provider_called is True
+    assert response["choices"][0]["message"]["content"] == "plain response"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_tool_autoexec_allows_multi_choice_tool_choice_without_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_log_llm_usage(**_kwargs):
+        return None
+
+    monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
+    monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+
+    provider_called = False
+
+    def llm_call_func():
+        nonlocal provider_called
+        provider_called = True
+        return {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "plain response"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        }
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-1"
+
+    response = await _run_execute_non_stream_call(
+        llm_call_func=llm_call_func,
+        save_message_fn=save_message_fn,
+        cleaned_args_overrides={"n": 2, "tool_choice": "auto"},
+    )
+
+    assert provider_called is True
+    assert response["choices"][0]["message"]["content"] == "plain response"
+
+
+@pytest.mark.unit
+def test_request_declares_local_tool_use_ignores_choice_without_definitions() -> None:
+    assert request_declares_local_tool_use({"tool_choice": "auto"}) is False
+    assert request_declares_local_tool_use({"tool_choice": "none"}) is False
+    assert request_declares_local_tool_use({"tool_choice": "auto", "tools": []}) is False
+    assert request_declares_local_tool_use({"tool_choice": "auto", "tools": [{"type": "function"}]}) is True
+    assert request_declares_local_tool_use({"function_call": "auto"}) is False
+    assert request_declares_local_tool_use({"function_call": "none"}) is False
+    assert request_declares_local_tool_use({"function_call": "auto", "functions": []}) is False
+    assert request_declares_local_tool_use({"function_call": "auto", "functions": [{"name": "notes_search"}]}) is True
 
 
 @pytest.mark.asyncio
@@ -2418,6 +2654,136 @@ async def test_cancelled_continuation_drains_real_adapter_before_classify_mark_a
     ]
 
 
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_non_stream_auto_continue_redacts_continuation_before_return_and_persist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_log_llm_usage(**_kwargs):
+        return None
+
+    monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
+    monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+    monkeypatch.setattr(chat_service, "get_chat_max_tool_calls", lambda: 2)
+    monkeypatch.setattr(chat_service, "get_chat_tool_timeout_ms", lambda: 3500)
+    monkeypatch.setattr(chat_service, "get_chat_tool_allow_catalog", lambda: ["notes.*"])
+    monkeypatch.setattr(chat_service, "should_attach_tool_idempotency", lambda: True)
+    monkeypatch.setattr(chat_service, "should_auto_continue_tools_once", lambda: True)
+
+    async def fake_autoexec(**_kwargs):
+        rec = ToolExecutionRecord(
+            tool_call_id="c1",
+            tool_name="notes.search",
+            ok=True,
+            result={"ok": 1},
+            module="notes",
+            content='{"ok":true}',
+        )
+        return ToolExecutionBatchResult(
+            requested_calls=1,
+            processed_calls=1,
+            execution_attempts=1,
+            executed_calls=1,
+            truncated=False,
+            results=[rec],
+        )
+
+    monkeypatch.setattr(chat_service, "execute_assistant_tool_calls", fake_autoexec)
+
+    async def fake_followup_call(**_kwargs):
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Final answer includes unsafe-token",
+                    },
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_followup_call)
+
+    saved_payloads: list[dict[str, Any]] = []
+
+    async def save_message_fn(_db, _conv_id, payload, use_transaction=True):
+        saved_payloads.append(payload)
+        return f"m-{len(saved_payloads)}"
+
+    response = await _run_execute_non_stream_call(
+        llm_call_func=_build_llm_response_with_tool_calls,
+        save_message_fn=save_message_fn,
+        moderation_getter=lambda: _KeywordModeration(keyword="unsafe-token"),
+    )
+
+    assert [p["role"] for p in saved_payloads] == ["assistant", "tool", "assistant"]
+    assert saved_payloads[2]["content"] == "Final answer includes [redacted]"
+    assert response["choices"][0]["message"]["content"] == "Final answer includes [redacted]"
+    assert response["tldw_tool_auto_continue"] == {"attempted": True, "succeeded": True}
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_non_stream_auto_continue_redacts_raw_string_continuation_before_return_and_persist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_log_llm_usage(**_kwargs):
+        return None
+
+    monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
+    monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+    monkeypatch.setattr(chat_service, "get_chat_max_tool_calls", lambda: 2)
+    monkeypatch.setattr(chat_service, "get_chat_tool_timeout_ms", lambda: 3500)
+    monkeypatch.setattr(chat_service, "get_chat_tool_allow_catalog", lambda: ["notes.*"])
+    monkeypatch.setattr(chat_service, "should_attach_tool_idempotency", lambda: True)
+    monkeypatch.setattr(chat_service, "should_auto_continue_tools_once", lambda: True)
+    monkeypatch.setattr(chat_service, "should_force_normalize_string_responses", lambda: False)
+
+    async def fake_autoexec(**_kwargs):
+        rec = ToolExecutionRecord(
+            tool_call_id="c1",
+            tool_name="notes.search",
+            ok=True,
+            result={"ok": 1},
+            module="notes",
+            content='{"ok":true}',
+        )
+        return ToolExecutionBatchResult(
+            requested_calls=1,
+            processed_calls=1,
+            execution_attempts=1,
+            executed_calls=1,
+            truncated=False,
+            results=[rec],
+        )
+
+    monkeypatch.setattr(chat_service, "execute_assistant_tool_calls", fake_autoexec)
+
+    async def fake_followup_call(**_kwargs):
+        return "Final answer includes secret"
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_followup_call)
+
+    saved_payloads: list[dict[str, Any]] = []
+
+    async def save_message_fn(_db, _conv_id, payload, use_transaction=True):
+        saved_payloads.append(payload)
+        return f"m-{len(saved_payloads)}"
+
+    response = await _run_execute_non_stream_call(
+        llm_call_func=_build_llm_response_with_tool_calls,
+        save_message_fn=save_message_fn,
+        moderation_getter=lambda: _KeywordModeration(keyword="secret"),
+    )
+
+    assert [p["role"] for p in saved_payloads] == ["assistant", "tool", "assistant"]
+    assert saved_payloads[2]["content"] == "Final answer includes [redacted]"
+    assert response == "Final answer includes [redacted]"
+
+
 @pytest.mark.unit
 def test_emit_chat_run_first_tool_path_metrics_omits_ineligible_reason_for_strict_collectors(
     monkeypatch: pytest.MonkeyPatch,
@@ -2692,6 +3058,63 @@ async def test_non_stream_provider_fallback_refreshes_run_first_metric_context(
     assert metrics.completion_calls[0]["provider"] == "anthropic"
     assert metrics.completion_calls[0]["model"] == "claude-3-7-sonnet"
     assert metrics.completion_calls[0]["cohort"] == "out_of_cohort"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_tool_autoexec_rejects_multi_choice_fallback_args_before_provider_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_log_llm_usage(**_kwargs):
+        return None
+
+    fallback_provider_called = False
+
+    async def fake_fallback_call(**_kwargs):
+        nonlocal fallback_provider_called
+        fallback_provider_called = True
+        return {
+            "choices": [{"message": {"role": "assistant", "content": "Fallback response"}}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        }
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-1"
+
+    monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
+    monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_fallback_call)
+
+    provider_manager = _ProviderManagerStub("anthropic")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _run_execute_non_stream_call(
+            llm_call_func=lambda: (_ for _ in ()).throw(chat_service.ChatAPIError("primary failed")),
+            save_message_fn=save_message_fn,
+            provider_manager=provider_manager,
+            enable_provider_fallback=True,
+            refresh_provider_params=lambda fallback_provider: (
+                {
+                    "api_endpoint": fallback_provider,
+                    "api_key": "fallback-key",
+                    "messages_payload": [{"role": "user", "content": "hi"}],
+                    "model": "claude-3-7-sonnet",
+                    "streaming": False,
+                    "n": 2,
+                    "tools": [{"type": "function", "function": {"name": "notes.search", "parameters": {}}}],
+                },
+                "claude-3-7-sonnet",
+            ),
+        )
+
+    assert fallback_provider_called is False
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == {
+        "code": "unsupported_multi_choice_tool_autoexec",
+        "message": "Local tool auto-execution supports one assistant choice per request.",
+    }
+    assert provider_manager.failures == [("openai", "ChatAPIError")]
 
 
 @pytest.mark.asyncio

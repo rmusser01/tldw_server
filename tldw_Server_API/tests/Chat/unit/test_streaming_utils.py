@@ -6,7 +6,8 @@ import json
 import threading
 import time
 from collections.abc import AsyncIterator
-from unittest.mock import AsyncMock, patch
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from loguru import logger
@@ -21,6 +22,76 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     StreamingResponseHandler,
     create_streaming_response_with_timeout,
 )
+from tldw_Server_API.app.core.Chat.streaming_pipeline import (
+    StreamingPipelineRequest,
+    create_chat_streaming_response,
+)
+
+
+def test_create_chat_streaming_response_forwards_request_fields():
+    stream = object()
+    save_callback = object()
+    finalize_callback = object()
+    text_transform = object()
+    before_success_callback = object()
+    continuation_metadata = {"parent_message_id": "msg-1"}
+    captured = {}
+
+    def fake_stream_factory(**kwargs):
+        captured.update(kwargs)
+        return "stream-result"
+
+    result = create_chat_streaming_response(
+        request=StreamingPipelineRequest(
+            stream=stream,
+            conversation_id="conv-1",
+            model_name="model-1",
+            save_callback=save_callback,
+            finalize_callback=finalize_callback,
+            idle_timeout=12.5,
+            heartbeat_interval=3.0,
+            text_transform=text_transform,
+            before_success_callback=before_success_callback,
+            system_message_id="sys-1",
+            continuation_metadata=continuation_metadata,
+        ),
+        stream_factory=fake_stream_factory,
+    )
+
+    assert result == "stream-result"
+    assert captured == {
+        "stream": stream,
+        "conversation_id": "conv-1",
+        "model_name": "model-1",
+        "save_callback": save_callback,
+        "finalize_callback": finalize_callback,
+        "idle_timeout": 12.5,
+        "heartbeat_interval": 3.0,
+        "text_transform": text_transform,
+        "before_success_callback": before_success_callback,
+        "system_message_id": "sys-1",
+        "continuation_metadata": continuation_metadata,
+    }
+
+
+def test_create_chat_streaming_response_preserves_factory_defaults():
+    captured = {}
+
+    def fake_stream_factory(**kwargs):
+        captured.update(kwargs)
+        return "stream-result"
+
+    result = create_chat_streaming_response(
+        request=StreamingPipelineRequest(
+            stream=object(),
+            conversation_id="conv-1",
+            model_name="model-1",
+        ),
+        stream_factory=fake_stream_factory,
+    )
+
+    assert result == "stream-result"
+    assert set(captured) == {"stream", "conversation_id", "model_name"}
 
 
 async def _collect_handler_wire(handler, stream) -> str:

@@ -18,23 +18,25 @@ Env flags:
 - CHAT_COMMANDS_MAX_CHARS: max chars in command output (default: 300)
 - CHAT_COMMAND_INJECTION_MODE: 'system', 'preface', or 'replace' (default: 'system')
 - DEFAULT_LOCATION: fallback location for /weather (default: '')
-- CHAT_COMMANDS_REQUIRE_PERMISSIONS: force command RBAC in every auth mode
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import inspect
 import os
 import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Callable, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Chat.command_authorization import (
+    authorize_command,
+    build_command_authorization_context,
+)
 from tldw_Server_API.app.core.Chat.rate_limiter import TokenBucket
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.Context_Integrity.resolver import ContextIntegrityBlocked
@@ -66,7 +68,6 @@ try:
 except ImportError:  # pragma: no cover - fallback if AuthNZ is trimmed in tests
 
     def _user_has_permission(user_id: int, permission: str) -> bool:  # type: ignore
-        logger.warning("AuthNZ RBAC unavailable; denying chat command permission check for {}", permission)
         return False
 
 
@@ -189,25 +190,9 @@ def is_single_user_mode() -> bool:
     code should prefer env/config-driven enforcement.
     """
     try:
-        env_mode = str(os.getenv("AUTH_MODE", "")).strip().lower()
-        if env_mode:
-            return env_mode == "single_user"
-        cp = _cfg()
-        if cp and cp.has_section("AuthNZ"):
-            raw_mode = cp.get("AuthNZ", "auth_mode", fallback="multi_user")
-            return str(raw_mode).strip().lower() == "single_user"
+        return str(os.getenv("AUTH_MODE", "")).strip().lower() == "single_user"
     except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS:
         return False
-    return False
-
-
-def _should_enforce_command_rbac(spec: "CommandSpec") -> bool:
-    """Return whether a command's permission metadata must be enforced."""
-    if not spec.required_permission:
-        return False
-    if _cfg_bool("CHAT_COMMANDS_REQUIRE_PERMISSIONS", "require_permissions", False):
-        return True
-    return bool(spec.rbac_required and not is_single_user_mode())
 
 
 def get_injection_mode() -> str:
@@ -289,7 +274,7 @@ class CommandResult:
     metadata: dict[str, Any]
 
 
-Handler = Callable[[CommandContext, Optional[str]], CommandResult | Awaitable[CommandResult]]
+Handler = Callable[[CommandContext, Optional[str]], CommandResult]
 
 
 @dataclass
@@ -465,35 +450,26 @@ async def async_dispatch_command(ctx: CommandContext, command: str, args: str | 
             )
         )
 
-    # RBAC: enforced for RBAC-marked commands in multi-user mode, with an
-    # explicit flag available to force the same checks in single-user mode.
-    rbac_enforced = _should_enforce_command_rbac(spec)
-    if rbac_enforced and spec.required_permission:
-        permitted = False
-        details = {"checked": True, "required_permission": spec.required_permission}
+    decision = authorize_command(
+        spec=spec,
+        context=build_command_authorization_context(ctx),
+        permission_checker=_user_has_permission,
+    )
+    if not decision.allowed:
+        log_counter("chat_command_error", labels={"command": cmd, "reason": "permission_denied"})
         try:
-            if ctx.auth_user_id is not None:
-                permitted = bool(_user_has_permission(int(ctx.auth_user_id), spec.required_permission))
-            else:
-                permitted = False
+            increment_counter("chat_command_errors_total", labels={"command": cmd, "reason": "permission_denied"})
+            increment_counter("chat_command_invoked_total", labels={"command": cmd, "status": "denied"})
         except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS:
-            permitted = False
-        if not permitted:
-            log_counter("chat_command_error", labels={"command": cmd, "reason": "permission_denied"})
-            try:
-                increment_counter("chat_command_errors_total", labels={"command": cmd, "reason": "permission_denied"})
-                increment_counter("chat_command_invoked_total", labels={"command": cmd, "status": "denied"})
-            except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS:
-                pass
-            details.update({"permitted": False})
-            return _finalize_result(
-                CommandResult(
-                    ok=False,
-                    command=cmd,
-                    content=f"Permission denied for /{cmd}",
-                    metadata={"error": "permission_denied", **details},
-                )
+            pass
+        return _finalize_result(
+            CommandResult(
+                ok=False,
+                command=cmd,
+                content=f"Permission denied for /{cmd}",
+                metadata={"error": "permission_denied", **decision.metadata},
             )
+        )
 
     # Global per-command and per-user per-command rate limiting (safe, lock-respecting)
     global_bucket = _acquire_global_bucket(cmd)
@@ -536,18 +512,17 @@ async def async_dispatch_command(ctx: CommandContext, command: str, args: str | 
 
     try:
         res = spec.handler(ctx, args)
-        if inspect.isawaitable(res):  # future-proof if handlers become async
+        if asyncio.iscoroutine(res):  # future-proof if handlers become async
             res = await res  # type: ignore[assignment]
         if not isinstance(res, CommandResult):
             raise TypeError(f"Command handler for /{cmd} returned {type(res)}")
         # annotate result metadata with RBAC info when applicable
-        if rbac_enforced and spec.required_permission:
+        if decision.metadata.get("checked"):
             with contextlib.suppress(_COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS):
                 res.metadata = {
                     **(res.metadata or {}),
                     "rbac": {
-                        "checked": True,
-                        "required_permission": spec.required_permission,
+                        **decision.metadata,
                         "permitted": True,
                     },
                 }
@@ -610,7 +585,7 @@ def _time_handler(ctx: CommandContext, args: str | None) -> CommandResult:
         )
 
 
-async def _weather_handler(ctx: CommandContext, args: str | None) -> CommandResult:
+def _weather_handler(ctx: CommandContext, args: str | None) -> CommandResult:
     location = (args or "").strip()
     if not location:
         location = _cfg_str("DEFAULT_LOCATION", "default_location", "").strip()
@@ -621,7 +596,7 @@ async def _weather_handler(ctx: CommandContext, args: str | None) -> CommandResu
         # Backward-compatible: some tests patch a zero-arg seam
         client = get_weather_client()
     try:
-        result = await asyncio.to_thread(client.get_current, location=location or None)
+        result = client.get_current(location=location or None)
         metadata = dict(getattr(result, "metadata", {}) or {})
         if result.ok:
             return CommandResult(ok=True, command="weather", content=result.summary, metadata=metadata)

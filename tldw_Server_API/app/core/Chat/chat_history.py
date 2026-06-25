@@ -167,8 +167,13 @@ def save_chat_history_to_db_wrapper(
                 associated_character_id,
                 final_character_name_for_title,
             )
-            try:
-                with db.transaction():
+
+        try:
+            conv_version_for_update: int | None = None
+            conv_title_for_update: str | None = None
+
+            with db.transaction():
+                if not is_new_conversation:
                     existing_conv_details = db.get_conversation_by_id(current_conversation_id)
                     if not existing_conv_details:
                         logging.error("Cannot resave: Conversation %s not found.", current_conversation_id)
@@ -196,41 +201,25 @@ def save_chat_history_to_db_wrapper(
                             "Error: Mismatch in character association for resaving chat. The conversation belongs to a different character.",
                         )
 
-                    existing_messages = db.get_messages_for_conversation(
+                    conv_version_for_update = existing_conv_details.get("version")
+                    conv_title_for_update = existing_conv_details.get("title")
+
+                if not chatbot_history:
+                    logging.warning("Chatbot history is empty; nothing to save. Returning current conversation ID.")
+                    return current_conversation_id, "No chat history to save."
+
+                if not is_new_conversation:
+                    existing_messages_for_replacement = db.get_messages_for_conversation(
                         current_conversation_id, limit=10000, order_by_timestamp="ASC"
                     )
                     logging.info(
                         "Found %s existing messages to soft-delete for conv %s.",
-                        len(existing_messages),
+                        len(existing_messages_for_replacement),
                         current_conversation_id,
                     )
-                    for msg in existing_messages:
+                    for msg in existing_messages_for_replacement:
                         db.soft_delete_message(msg["id"], msg["version"])
-            except (InputError, ConflictError, CharactersRAGDBError) as exc:
-                logging.error(
-                    "Error preparing existing conversation %s for resave: %s",
-                    current_conversation_id,
-                    exc,
-                    exc_info=True,
-                )
-                return current_conversation_id, f"Error during resave prep: {exc}"
 
-        try:
-            if not chatbot_history:
-                logging.warning("Chatbot history is empty; nothing to save. Returning current conversation ID.")
-                return current_conversation_id, "No chat history to save."
-
-            # For existing conversations, fetch version BEFORE the transaction to avoid
-            # double-read with stale version issues (Issue #11)
-            conv_version_for_update: int | None = None
-            conv_title_for_update: str | None = None
-            if not is_new_conversation:
-                pre_fetch_conv = db.get_conversation_by_id(current_conversation_id)
-                if pre_fetch_conv:
-                    conv_version_for_update = pre_fetch_conv.get("version")
-                    conv_title_for_update = pre_fetch_conv.get("title")
-
-            with db.transaction():
                 message_save_count = 0
                 for index, message_obj in enumerate(chatbot_history):
                     sender = message_obj.get("role")
