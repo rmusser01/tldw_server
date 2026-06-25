@@ -50,12 +50,13 @@ def verify_inventory(
         if approved_digest == asset.digest:
             continue
 
-        state = "changed_approved_executable" if asset.executable else "changed_approved_non_executable"
+        approved_executable = bool(entry.get("executable", False))
+        state = "changed_approved_executable" if approved_executable else "changed_approved_non_executable"
         findings.append(
             ContextIntegrityFinding(
                 asset_id=asset_id,
                 state=state,
-                severity="error" if asset.executable else "warning",
+                severity="error" if approved_executable else "warning",
                 summary=f"Approved context asset changed: {asset.display_name}",
                 remediation="Review the diff and approve a new manifest version or restore the asset.",
                 source_type=asset.source_type,

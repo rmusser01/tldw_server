@@ -41,6 +41,29 @@ def test_verifier_detects_changed_executable_asset() -> None:
     assert findings[0].severity == "error"
 
 
+def test_verifier_uses_approved_executable_flag_for_changed_asset() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.verifier import verify_inventory
+
+    findings = verify_inventory(
+        current_assets=[_asset("skill:user:1/demo", "sha256:current", executable=False)],
+        approved_entries=[
+            {
+                "asset_id": "skill:user:1/demo",
+                "source_type": "skill_file",
+                "digest": "sha256:approved",
+                "display_name": "demo",
+                "executable": True,
+                "required": False,
+                "owner_scope": "user:1",
+            }
+        ],
+    )
+
+    assert len(findings) == 1
+    assert findings[0].state == "changed_approved_executable"
+    assert findings[0].severity == "error"
+
+
 def test_verifier_detects_changed_non_executable_asset() -> None:
     from tldw_Server_API.app.core.Context_Integrity.verifier import verify_inventory
 
