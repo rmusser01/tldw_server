@@ -4,8 +4,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 
-from tldw_Server_API.app.core.Claims_Extraction import claims_service
-from tldw_Server_API.app.core.Claims_Extraction import claims_notifications
+from tldw_Server_API.app.core.Claims_Extraction import claims_alert_delivery, claims_notifications, claims_service
 from tldw_Server_API.app.core.Claims_Extraction.claims_notifications import dispatch_claim_review_notifications
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
@@ -509,12 +508,7 @@ def test_dispatch_claims_alert_notifications_uses_bounded_submission(monkeypatch
         submissions.append({"fn": fn, "args": args, "kwargs": kwargs})
         return True
 
-    class _RawThread:
-        def __init__(self, **kwargs) -> None:
-            raise AssertionError(f"Raw notification thread should not be created: {kwargs}")
-
     monkeypatch.setattr(claims_service, "submit_claims_notification_delivery", _submit)
-    monkeypatch.setattr(claims_service.threading, "Thread", _RawThread)
     db_path = str(tmp_path / "claims-alert.db")
 
     claims_service._dispatch_claims_alert_notifications(
@@ -534,7 +528,7 @@ def test_dispatch_claims_alert_notifications_uses_bounded_submission(monkeypatch
     )
 
     assert len(submissions) == 2
-    assert submissions[0]["fn"] is claims_service._deliver_claims_alert_webhook
+    assert submissions[0]["fn"] is claims_alert_delivery.deliver_claims_alert_webhook
     assert submissions[0]["kwargs"]["channel"] == "slack"
-    assert submissions[1]["fn"] is claims_service._deliver_claims_alert_webhook
+    assert submissions[1]["fn"] is claims_alert_delivery.deliver_claims_alert_webhook
     assert submissions[1]["kwargs"]["channel"] == "webhook"

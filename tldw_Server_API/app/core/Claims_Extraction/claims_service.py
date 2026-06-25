@@ -6,11 +6,9 @@ import html
 import io
 import json
 import math
-import random
 import socket
 import sqlite3
 import ssl
-import threading
 import time
 from contextlib import contextmanager, suppress
 from datetime import date, datetime, timedelta, timezone
@@ -30,6 +28,16 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.Claims_Extraction.alignment import align_claim_span
+from tldw_Server_API.app.core.Claims_Extraction.claims_alert_delivery import (
+    build_claims_alert_delivery_payload,
+    deliver_claims_alert_webhook,
+)
+from tldw_Server_API.app.core.Claims_Extraction.claims_alert_delivery import (
+    format_claims_alert_ratio as _format_ratio,
+)
+from tldw_Server_API.app.core.Claims_Extraction.claims_alert_delivery import (
+    normalize_claims_alert_channels as _normalize_channels,
+)
 from tldw_Server_API.app.core.Claims_Extraction.claims_clustering import rebuild_claim_clusters_embeddings
 from tldw_Server_API.app.core.Claims_Extraction.claims_embeddings import claim_embedding_id
 from tldw_Server_API.app.core.Claims_Extraction.claims_notifications import (
@@ -41,7 +49,6 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service import ge
 from tldw_Server_API.app.core.Claims_Extraction.monitoring import (
     record_claims_alert_email_delivery,
     record_claims_review_metrics,
-    record_claims_webhook_delivery,
 )
 from tldw_Server_API.app.core.Claims_Extraction.output_parser import coerce_llm_response_text
 from tldw_Server_API.app.core.Claims_Extraction.runtime_config import (
@@ -53,8 +60,9 @@ from tldw_Server_API.app.core.Claims_Extraction.runtime_config import (
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
-from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.exceptions import EgressPolicyError, RetryExhaustedError
 from tldw_Server_API.app.core.Setup import setup_manager
 
@@ -327,23 +335,6 @@ def _parse_email_recipients(raw_value: str | None) -> list[str]:
     return [item.strip() for item in text.split(",") if item.strip()]
 
 
-def _normalize_channels(raw_value: Any | None) -> dict[str, bool]:
-    if isinstance(raw_value, dict):
-        data = raw_value
-    else:
-        data = {}
-        if raw_value:
-            try:
-                data = json.loads(str(raw_value))
-            except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-                data = {}
-    return {
-        "slack": bool(data.get("slack")),
-        "webhook": bool(data.get("webhook")),
-        "email": bool(data.get("email")),
-    }
-
-
 def _normalize_alert_row(row: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(row)
     normalized["email_recipients"] = _parse_email_recipients(row.get("email_recipients"))
@@ -599,16 +590,6 @@ def _enqueue_claim_rebuild_if_needed(*, media_id: int, db_path: str) -> None:
         pass
 
 
-def _format_ratio(value: float | None) -> str:
-    """Return a human-friendly ratio string for alert messages."""
-    if value is None:
-        return "n/a"
-    try:
-        return f"{float(value) * 100:.2f}%"
-    except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-        return "n/a"
-
-
 def _build_alert_channels(
     payload: dict[str, Any],
     existing: dict[str, Any] | None = None,
@@ -638,178 +619,6 @@ def _build_alert_channels(
         "email": bool(channels.get("email")),
     }
 
-
-def _classify_httpx_exception(exc: Exception, msg: str) -> str | None:
-    module = getattr(exc.__class__, "__module__", "")
-    if not module.startswith("httpx"):
-        return None
-    name = exc.__class__.__name__
-    if "Timeout" in name:
-        return "timeout"
-    if "Connect" in name:
-        if isinstance(getattr(exc, "__cause__", None), ssl.SSLError):
-            return "tls"
-        if isinstance(getattr(exc, "__cause__", None), socket.gaierror):
-            return "dns"
-        if "name or service not known" in msg or "dns" in msg:
-            return "dns"
-    return None
-
-
-def _classify_webhook_exception(exc: Exception) -> str:
-    if isinstance(exc, EgressPolicyError):
-        return "invalid_url"
-    if isinstance(exc, RetryExhaustedError):
-        return "timeout"
-    msg = str(exc).lower()
-    if "timeout" in msg:
-        return "timeout"
-    if isinstance(exc, ssl.SSLError) or "ssl" in msg or "tls" in msg:
-        return "tls"
-    if isinstance(exc, socket.gaierror) or "name or service not known" in msg:
-        return "dns"
-    httpx_class = _classify_httpx_exception(exc, msg)
-    if httpx_class:
-        return httpx_class
-    return "other"
-
-
-def _record_webhook_event(
-    *,
-    db_path: str,
-    user_id: str,
-    channel: str,
-    status: str,
-    attempt: int,
-    reason: str | None = None,
-    status_code: int | None = None,
-    alert_id: int | None = None,
-) -> None:
-    try:
-        with managed_media_database(
-            client_id=str(settings.get("SERVER_CLIENT_ID", "SERVER_API_V1")),
-            db_path=db_path,
-            suppress_init_exceptions=_CLAIMS_NONCRITICAL_EXCEPTIONS,
-            suppress_close_exceptions=_CLAIMS_NONCRITICAL_EXCEPTIONS,
-        ) as db:
-            payload = {
-                "channel": channel,
-                "status": status,
-                "attempt": int(attempt),
-            }
-            if reason:
-                payload["reason"] = reason
-            if status_code is not None:
-                payload["status_code"] = int(status_code)
-            if alert_id is not None:
-                payload["alert_id"] = int(alert_id)
-            db.insert_claims_monitoring_event(
-                user_id=str(user_id),
-                event_type="webhook_delivery",
-                severity="info" if status == "success" else "warning",
-                payload_json=json.dumps(payload),
-            )
-    except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-        pass
-
-
-def _deliver_claims_alert_webhook(
-    *,
-    url: str,
-    payload: dict[str, Any],
-    channel: str,
-    db_path: str,
-    user_id: str,
-    alert_id: int | None = None,
-) -> None:
-    try:
-        from tldw_Server_API.app.core.http_client import RetryPolicy, create_client, fetch
-    except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-        return
-    backoff_schedule = [5, 15, 45, 120, 300]
-    max_attempts = 5
-    for attempt in range(1, max_attempts + 1):
-        if attempt > 1:
-            base_delay = backoff_schedule[min(attempt - 2, len(backoff_schedule) - 1)]
-            jitter = random.uniform(0.8, 1.2)  # nosec B311
-            time.sleep(max(0.0, base_delay * jitter))
-        start_ts = time.time()
-        try:
-            with create_client(timeout=5.0) as client:
-                response = fetch(
-                    method="POST",
-                    url=url,
-                    client=client,
-                    headers={"Content-Type": "application/json"},
-                    json=payload,
-                    timeout=5.0,
-                    retry=RetryPolicy(attempts=1, retry_on_unsafe=False),
-                )
-            status_code = int(getattr(response, "status_code", 0) or 0)
-            duration = time.time() - start_ts
-            if 200 <= status_code < 300:
-                logger.info(
-                    'Claims webhook delivered channel={} attempt={} status={}',
-                    channel,
-                    attempt,
-                    status_code,
-                )
-                record_claims_webhook_delivery(status="success", latency_s=duration)
-                _record_webhook_event(
-                    db_path=db_path,
-                    user_id=user_id,
-                    channel=channel,
-                    status="success",
-                    attempt=attempt,
-                    status_code=status_code,
-                    alert_id=alert_id,
-                )
-                return
-            if 400 <= status_code < 500:
-                reason = "http_4xx"
-            elif 500 <= status_code < 600:
-                reason = "http_5xx"
-            else:
-                reason = "other"
-            logger.warning(
-                'Claims webhook failed channel={} attempt={} status={} reason={}',
-                channel,
-                attempt,
-                status_code,
-                reason,
-            )
-            record_claims_webhook_delivery(status="failure", reason=reason, latency_s=duration)
-            _record_webhook_event(
-                db_path=db_path,
-                user_id=user_id,
-                channel=channel,
-                status="failure",
-                attempt=attempt,
-                reason=reason,
-                status_code=status_code,
-                alert_id=alert_id,
-            )
-        except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
-            reason = _classify_webhook_exception(exc)
-            duration = time.time() - start_ts
-            logger.warning(
-                'Claims webhook failed channel={} attempt={} reason={}',
-                channel,
-                attempt,
-                reason,
-            )
-            record_claims_webhook_delivery(status="failure", reason=reason, latency_s=duration)
-            _record_webhook_event(
-                db_path=db_path,
-                user_id=user_id,
-                channel=channel,
-                status="failure",
-                attempt=attempt,
-                reason=reason,
-                alert_id=alert_id,
-            )
-        if attempt >= max_attempts:
-            return
 
 def _claims_monitoring_system_user_id() -> int:
     try:
@@ -904,18 +713,10 @@ def _dispatch_claims_alert_notifications(
     webhook_url = config_row.get("webhook_url")
     alert_id = config_row.get("id")
     if channels.get("slack") and slack_url:
-        slack_payload = {
-            "text": (
-                "Claims alert: unsupported ratio "
-                f"{_format_ratio(payload.get('window_ratio'))} "
-                f"(threshold {_format_ratio(payload.get('threshold'))}, "
-                f"baseline {_format_ratio(payload.get('baseline_ratio'))})"
-            )
-        }
         submit_claims_notification_delivery(
-            _deliver_claims_alert_webhook,
+            deliver_claims_alert_webhook,
             url=str(slack_url),
-            payload=slack_payload,
+            payload=build_claims_alert_delivery_payload(channel="slack", event_payload=payload),
             channel="slack",
             db_path=db_path,
             user_id=user_id,
@@ -923,9 +724,9 @@ def _dispatch_claims_alert_notifications(
         )
     if channels.get("webhook") and webhook_url:
         submit_claims_notification_delivery(
-            _deliver_claims_alert_webhook,
+            deliver_claims_alert_webhook,
             url=str(webhook_url),
-            payload=payload,
+            payload=build_claims_alert_delivery_payload(channel="webhook", event_payload=payload),
             channel="webhook",
             db_path=db_path,
             user_id=user_id,
