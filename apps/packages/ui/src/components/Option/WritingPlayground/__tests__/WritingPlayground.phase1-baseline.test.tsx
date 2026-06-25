@@ -16,6 +16,7 @@ const mockState = vi.hoisted(() => ({
   queryData: new Map<string, unknown>(),
   queryKey: (queryKey: unknown) =>
     JSON.stringify(Array.isArray(queryKey) ? queryKey : [queryKey]),
+  executeMutations: false,
   resolveApiProviderForModel: vi.fn(async () => null as string | null),
   streamCalls: [] as Array<{ messages: unknown[]; options: Record<string, unknown> }>,
   sendCalls: [] as Array<{ messages: unknown[]; options: Record<string, unknown> }>,
@@ -47,11 +48,38 @@ vi.mock("@tanstack/react-query", () => {
       isFetching: false,
       error: null
     }),
-    useMutation: () => ({
-      mutate: vi.fn(),
-      mutateAsync: vi.fn(),
-      isPending: false
-    }),
+    useMutation: (options?: {
+      mutationFn?: (variables: unknown) => unknown | Promise<unknown>
+      onMutate?: (variables: unknown) => unknown
+      onSuccess?: (
+        data: unknown,
+        variables: unknown,
+        context: unknown
+      ) => void
+      onError?: (
+        error: unknown,
+        variables: unknown,
+        context: unknown
+      ) => void
+    }) => {
+      const mutate = vi.fn(async (variables: unknown) => {
+        if (!mockState.executeMutations) return undefined
+        const context = options?.onMutate?.(variables)
+        try {
+          const result = await options?.mutationFn?.(variables)
+          options?.onSuccess?.(result, variables, context)
+          return result
+        } catch (error) {
+          options?.onError?.(error, variables, context)
+          throw error
+        }
+      })
+      return {
+        mutate,
+        mutateAsync: mutate,
+        isPending: false
+      }
+    },
     useQueryClient: () => ({
       invalidateQueries: vi.fn(),
       setQueryData: vi.fn()
@@ -233,6 +261,7 @@ import { WritingPlayground } from "../index"
 import { WRITING_REVISION_PRESETS } from "../writing-revision-presets"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useWritingPlaygroundStore } from "@/store/writing-playground"
+import { updateWritingSession } from "@/services/writing-playground"
 
 const DEFAULT_WRITING_CAPABILITIES = {
   server: {
@@ -355,11 +384,13 @@ const latestRevisionPrompt = () => {
 beforeEach(() => {
   mockState.storageValues.clear()
   mockState.queryData.clear()
+  mockState.executeMutations = false
   mockState.resolveApiProviderForModel.mockReset()
   mockState.resolveApiProviderForModel.mockResolvedValue(null)
   mockState.streamCalls.length = 0
   mockState.sendCalls.length = 0
   mockState.sendResponses.length = 0
+  vi.mocked(updateWritingSession).mockReset()
 
   mockState.queryData.set(
     mockState.queryKey(["writing-capabilities"]),
@@ -401,6 +432,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   cleanup()
 })
 
@@ -655,6 +687,77 @@ describe("WritingPlayground phase1 baseline", () => {
       "Scene unsaved"
     )
     expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument()
+  })
+
+  it("preserves the session prompt when settings autosave while a scene is bound", async () => {
+    mockState.executeMutations = true
+    vi.mocked(updateWritingSession).mockImplementation(
+      async (sessionId, patch, expectedVersion) =>
+        ({
+          id: sessionId,
+          name: "Auto Session",
+          payload: patch.payload ?? {},
+          schema_version: patch.schema_version ?? 1,
+          version_parent_id: null,
+          created_at: "2026-03-16T12:00:00Z",
+          last_modified: "2026-03-16T12:00:01Z",
+          deleted: false,
+          client_id: "test-client",
+          version: expectedVersion + 1
+        }) as Awaited<ReturnType<typeof updateWritingSession>>
+    )
+    seedWritingSession({ prompt: "Session draft should stay" })
+    useWritingPlaygroundStore.setState({
+      activeProjectId: "project-1",
+      activeNodeId: "scene-1",
+      activeNodeType: "scene"
+    })
+    mockState.queryData.set(mockState.queryKey(["manuscript-scene", "scene-1"]), {
+      id: "scene-1",
+      chapter_id: "chapter-1",
+      project_id: "project-1",
+      title: "Scene 1",
+      sort_order: 1,
+      content: sceneRichContent("Scene body should not leak"),
+      content_plain: "Scene body should not leak",
+      synopsis: null,
+      word_count: 5,
+      pov_character_id: null,
+      status: "draft",
+      created_at: "2026-06-23T12:00:00Z",
+      last_modified: "2026-06-23T12:00:00Z",
+      deleted: false,
+      client_id: "test-client",
+      version: 3
+    })
+
+    render(<WritingPlayground />)
+
+    await waitFor(() => {
+      expect(getEditor()).toHaveValue("Scene body should not leak")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle settings" }))
+    const streamingToggle = await screen.findByLabelText("Streaming")
+    vi.useFakeTimers()
+    fireEvent.click(streamingToggle)
+
+    await act(async () => {
+      vi.advanceTimersByTime(800)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    vi.useRealTimers()
+
+    await waitFor(() => {
+      expect(updateWritingSession).toHaveBeenCalled()
+    })
+    const [, updatePayload] = vi.mocked(updateWritingSession).mock.calls.at(-1) ?? []
+    expect(updatePayload?.payload).toMatchObject({
+      prompt: "Session draft should stay",
+      settings: expect.objectContaining({ token_streaming: false })
+    })
+    expect(updatePayload?.payload?.prompt).not.toBe("Scene body should not leak")
   })
 
   it("initializes the workflow preset from the active session payload", async () => {
