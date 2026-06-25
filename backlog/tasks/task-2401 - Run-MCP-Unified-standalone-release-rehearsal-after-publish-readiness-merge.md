@@ -51,6 +51,12 @@ Safe publishing prerequisite check:
 Blocker before live upload:
 - A maintainer needs to create protected GitHub Actions environments named `testpypi` and `pypi`, then add environment secrets `MCP_UNIFIED_TESTPYPI_API_TOKEN` and `MCP_UNIFIED_PYPI_API_TOKEN`. This keeps the existing token-based publish workflow intact; no secret values were accessed or logged.
 
+Update 2026-06-24:
+- Created the GitHub Actions environment `testpypi` and stored the environment secret name `MCP_UNIFIED_TESTPYPI_API_TOKEN` from the local token file without logging the token value.
+- Verified non-secret repo state with `gh secret list --env testpypi --repo rmusser01/tldw_server --json name,updatedAt`, which returned `MCP_UNIFIED_TESTPYPI_API_TOKEN`.
+- Verified `gh api repos/rmusser01/tldw_server/environments --jq '{total_count, environments: [.environments[].name]}'` now returns `testpypi` and `tldw with API Keys`.
+- The production `pypi` environment and `MCP_UNIFIED_PYPI_API_TOKEN` remain unconfigured until a production PyPI token is available.
+
 Bandit: skipped because no code or workflow files were changed in this rehearsal branch; only the Backlog evidence record changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
