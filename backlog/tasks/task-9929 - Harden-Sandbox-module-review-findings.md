@@ -3,16 +3,17 @@ id: TASK-9929
 title: Harden Sandbox module review findings
 status: Done
 assignee: []
-created_date: '2026-06-23 11:27'
-updated_date: '2026-06-23 11:51'
+created_date: 2026-06-23 11:27
+updated_date: 2026-06-25 02:06
 labels:
-  - sandbox
-  - security
-  - review
+- sandbox
+- security
+- review
 dependencies: []
 references:
-  - tldw_Server_API/app/core/Sandbox
-  - Docs/superpowers/plans/2026-06-23-sandbox-review-hardening.md
+- tldw_Server_API/app/core/Sandbox
+- Docs/superpowers/plans/2026-06-23-sandbox-review-hardening.md
+- https://github.com/rmusser01/tldw_server/pull/2509
 priority: high
 ---
 
@@ -64,3 +65,9 @@ Verification:
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Hardened Sandbox snapshot restore, Docker runner, artifact storage, and Lima/Firecracker guest script/env handling for the validated review findings. Added focused regression coverage for each reproduced defect and documented the non-behavior runtime-dispatch concern as deferred refactor work. Focused Sandbox tests, compileall, and diff check passed; Bandit has no errors and only the existing low-severity subprocess baseline remains in the touched Sandbox scope.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+PR opened: https://github.com/rmusser01/tldw_server/pull/2509
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
