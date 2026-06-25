@@ -9,6 +9,7 @@ pytestmark = pytest.mark.unit
 
 
 def _manager_with_config(config: TTSConfig) -> TTSConfigManager:
+    """Build a TTSConfigManager around an in-memory config for tests."""
     manager = TTSConfigManager.__new__(TTSConfigManager)
     manager.yaml_path = None
     manager.config_txt_path = None
@@ -19,6 +20,7 @@ def _manager_with_config(config: TTSConfig) -> TTSConfigManager:
 
 
 def test_to_dict_redacts_provider_api_keys_by_default():
+    """Verify serialized TTS config redacts provider API keys by default."""
     manager = _manager_with_config(
         TTSConfig(
             providers={
@@ -38,6 +40,7 @@ def test_to_dict_redacts_provider_api_keys_by_default():
 
 
 def test_save_yaml_redacts_provider_api_keys_by_default(tmp_path):
+    """Verify ad hoc YAML export redacts provider API keys by default."""
     manager = _manager_with_config(
         TTSConfig(
             providers={
@@ -55,6 +58,7 @@ def test_save_yaml_redacts_provider_api_keys_by_default(tmp_path):
 
 
 def test_save_yaml_refuses_redacted_canonical_config(tmp_path):
+    """Verify canonical config saves cannot accidentally persist redacted secrets."""
     manager = _manager_with_config(
         TTSConfig(
             providers={
@@ -69,6 +73,7 @@ def test_save_yaml_refuses_redacted_canonical_config(tmp_path):
 
 
 def test_save_yaml_can_persist_canonical_config_with_explicit_secrets(tmp_path):
+    """Verify canonical config saves can include secrets only when explicit."""
     manager = _manager_with_config(
         TTSConfig(
             providers={
@@ -85,6 +90,7 @@ def test_save_yaml_can_persist_canonical_config_with_explicit_secrets(tmp_path):
 
 
 def test_env_overrides_ignore_non_tts_anthropic_api_key(monkeypatch):
+    """Verify generic Anthropic API keys are ignored by TTS env overrides."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-secret")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)

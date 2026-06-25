@@ -112,6 +112,7 @@ def test_request_overrides_default_for_same_speaker():
 
 @pytest.mark.unit
 def test_vibevoice_adapter_initializes_model_state_lock():
+    """Verify VibeVoice creates an async lock for model state changes."""
     adapter = VibeVoiceAdapter({})
 
     assert isinstance(adapter._model_state_lock, asyncio.Lock)
@@ -120,6 +121,7 @@ def test_vibevoice_adapter_initializes_model_state_lock():
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_generate_complete_forwards_generation_config(monkeypatch):
+    """Verify non-streaming generation forwards per-request generation config."""
     adapter = VibeVoiceAdapter({})
     request = TTSRequest(text="Speaker 1: hello", voice="speaker_1", format=AudioFormat.WAV)
     generation_config = {"cfg_scale": 1.7, "speakers_to_voices": {"1": "alice"}}
@@ -132,6 +134,7 @@ async def test_generate_complete_forwards_generation_config(monkeypatch):
         voice_reference_path=None,
         gen_config=None,
     ):
+        """Capture arguments passed into the streaming implementation."""
         seen["request"] = request_arg
         seen["voice"] = voice_arg
         seen["speaker_id"] = speaker_id_arg
@@ -157,21 +160,26 @@ async def test_generate_complete_forwards_generation_config(monkeypatch):
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_generate_canonicalizes_lowercase_requested_variant(monkeypatch):
+    """Verify lowercase variant requests are mapped to canonical model names."""
     adapter = VibeVoiceAdapter({})
     adapter.available_voices = {"speaker_1": "/voices/speaker.wav"}
     seen: dict[str, object] = {}
 
     async def fake_ensure_initialized():
+        """Pretend the adapter is initialized for generation."""
         return True
 
     async def fake_ensure_model_variant(variant):
+        """Capture the canonical variant selected by generation."""
         seen["variant"] = variant
         adapter.variant = variant
 
     def fake_stream(_request, _voice, _speaker_id, _voice_reference_path=None, gen_config=None):
+        """Return a tiny async stream while recording generation config."""
         seen["gen_config"] = gen_config
 
         async def _chunks():
+            """Yield a single audio chunk for the fake stream."""
             yield b"chunk"
 
         return _chunks()
@@ -199,13 +207,16 @@ async def test_generate_canonicalizes_lowercase_requested_variant(monkeypatch):
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_reload_model_for_q8_variant_recomputes_quantization(monkeypatch):
+    """Verify Q8 variant reload disables external quantization flags."""
     adapter = VibeVoiceAdapter({"vibevoice_device": "cuda", "vibevoice_use_quantization": True})
     adapter.use_quantization = True
 
     async def fake_cleanup_resources():
+        """Pretend cleanup completed before reinitialization."""
         return None
 
     async def fake_initialize():
+        """Pretend model initialization completed after reload."""
         return True
 
     monkeypatch.setattr(adapter, "_cleanup_resources", fake_cleanup_resources)

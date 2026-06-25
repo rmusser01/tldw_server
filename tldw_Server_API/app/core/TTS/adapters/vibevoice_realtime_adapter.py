@@ -55,6 +55,7 @@ class _PinnedWebSocketResolver:
     """Aiohttp-compatible resolver that pins a validated host to known IPs."""
 
     def __init__(self, hostname: str, resolved_ips: tuple[str, ...]) -> None:
+        """Store the validated hostname and IP addresses for websocket pinning."""
         self._hostname = hostname.strip().rstrip(".").lower()
         self._resolved_ips = resolved_ips
 
@@ -296,6 +297,8 @@ class VibeVoiceRealtimeAdapter(TTSAdapter):
 
 
 class _VibeVoiceRealtimeWebSocketSession(RealtimeTTSSession):
+    """Manage a validated websocket-backed VibeVoice realtime TTS session."""
+
     def __init__(
         self,
         *,
@@ -317,9 +320,11 @@ class _VibeVoiceRealtimeWebSocketSession(RealtimeTTSSession):
 
     @property
     def error(self) -> Optional[Exception]:
+        """Return the terminal backend or transport error, if one occurred."""
         return self._error
 
     async def start(self) -> None:
+        """Validate outbound websocket policy and open the realtime backend session."""
         validation = await asyncio.to_thread(_validate_websocket_egress, self._ws_url)
 
         try:
@@ -392,6 +397,7 @@ class _VibeVoiceRealtimeWebSocketSession(RealtimeTTSSession):
         await self._ws.send_json(payload)
 
     async def _recv_loop(self) -> None:
+        """Forward backend audio frames into the consumer queue until the session ends."""
         try:
             if not self._ws:
                 return

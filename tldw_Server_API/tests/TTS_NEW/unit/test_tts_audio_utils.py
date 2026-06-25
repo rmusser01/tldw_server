@@ -101,12 +101,14 @@ def test_convert_audio_fallback_log_sanitizes_exception_text(monkeypatch):
 
 
 def test_convert_audio_strict_failure_raises_without_returning_original(monkeypatch):
+    """Verify strict conversion failure raises instead of returning source bytes."""
     processor = audio_utils.AudioProcessor.__new__(audio_utils.AudioProcessor)
     processor.ffmpeg_available = False
     processor.librosa_available = True
     audio_bytes = b"original audio"
 
     def fail_load(*args, **kwargs):
+        """Raise from the fallback decoder to simulate conversion failure."""
         raise RuntimeError("decode failed")
 
     fake_librosa = types.SimpleNamespace(load=fail_load)
@@ -119,15 +121,20 @@ def test_convert_audio_strict_failure_raises_without_returning_original(monkeypa
 
 
 def test_process_voice_reference_uses_strict_conversion(monkeypatch):
+    """Verify voice-reference conversion requests strict failure behavior."""
     seen: dict[str, object] = {}
 
     class FailingConversionProcessor:
+        """AudioProcessor stub that records strict conversion options."""
+
         PROVIDER_REQUIREMENTS = {"higgs": {"sample_rate": 24000}}
 
         def decode_base64_audio(self, _base64_audio):
+            """Return decoded reference bytes for the conversion path."""
             return b"raw-reference"
 
         def convert_audio(self, audio_bytes, **kwargs):
+            """Record conversion arguments and simulate a conversion failure."""
             seen["audio_bytes"] = audio_bytes
             seen["strict"] = kwargs.get("strict")
             raise RuntimeError("conversion failed")

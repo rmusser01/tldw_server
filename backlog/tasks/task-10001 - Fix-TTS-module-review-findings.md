@@ -4,13 +4,31 @@ title: Fix TTS module review findings
 status: Done
 assignee: []
 created_date: 2026-06-23 21:55
-updated_date: 2026-06-25 02:19
+updated_date: 2026-06-25 02:52
 labels:
 - tts
 - security
 - review
 dependencies: []
 priority: high
+modified_files:
+- IMPLEMENTATION_PLAN_tts_review_fixes.md
+- tldw_Server_API/app/core/TTS/adapters/chatterbox_adapter.py
+- tldw_Server_API/app/core/TTS/adapters/dia_adapter.py
+- tldw_Server_API/app/core/TTS/adapters/higgs_adapter.py
+- tldw_Server_API/app/core/TTS/adapters/kokoro_adapter.py
+- tldw_Server_API/app/core/TTS/adapters/vibevoice_adapter.py
+- tldw_Server_API/app/core/TTS/adapters/vibevoice_realtime_adapter.py
+- tldw_Server_API/app/core/TTS/audio_converter.py
+- tldw_Server_API/app/core/TTS/audio_utils.py
+- tldw_Server_API/app/core/TTS/tts_config.py
+- tldw_Server_API/app/core/TTS/utils.py
+- tldw_Server_API/tests/TTS/test_vibevoice_adapter_unit.py
+- tldw_Server_API/tests/TTS/unit/test_audio_converter_time_stretch.py
+- tldw_Server_API/tests/TTS/unit/test_local_adapter_async_offload.py
+- tldw_Server_API/tests/TTS/unit/test_tts_config_security.py
+- tldw_Server_API/tests/TTS/unit/test_vibevoice_realtime_adapter_security.py
+- tldw_Server_API/tests/TTS_NEW/unit/test_tts_audio_utils.py
 ---
 
 ## Description
@@ -53,7 +71,7 @@ Fresh verification passed after the review follow-up: Ruff touched Python scope;
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed the original TTS review findings and the PR #2484 follow-up comments. The follow-up hardens VibeVoice variant switching and stream lock scope, pins realtime websocket DNS results after egress validation, prevents sensitive websocket URL details and canonical TTS config secrets from being leaked or overwritten, exposes timeout overrides for long-running audio converter operations, and strengthens regression tests so the fixes are covered by behavior checks rather than source-string checks.
+Fixed the original TTS review findings and the PR #2484 follow-up comments. The follow-up hardens VibeVoice variant switching and stream lock scope, pins realtime websocket DNS results after egress validation, prevents sensitive websocket URL details and canonical TTS config secrets from being leaked or overwritten, exposes timeout overrides for long-running audio converter operations, documents changed helpers/tests to satisfy the PR docstring coverage gate, and strengthens regression tests so the fixes are covered by behavior checks rather than source-string checks.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -68,3 +86,10 @@ Fixed the original TTS review findings and the PR #2484 follow-up comments. The 
 - [x] #7 Focused regression tests cover the repaired review findings.
 - [x] #8 Bandit runs on touched TTS production scope.
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Reopened for PR #2484 final comment pass: address remaining unresolved review threads and CodeRabbit docstring coverage warning on the current pushed branch.
+Final PR #2484 comment pass: added docstrings to changed TTS helper/test definitions flagged by the bot coverage warning, confirmed changed-span docstring coverage at 104/104 (100.0%), reran Ruff, py_compile, git diff --check, focused TTS pytest batches (51 passed and 77 passed), and Bandit touched production TTS scope with errors=[] and results_count=0 in /tmp/bandit_tts_review_fixes_docstrings.json.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

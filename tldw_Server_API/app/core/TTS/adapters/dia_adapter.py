@@ -432,6 +432,7 @@ class DiaAdapter(TTSAdapter):
                     provider=self.provider_name,
                 )
             def _generate_outputs():
+                """Run Dia model generation without blocking the event loop."""
                 with torch_mod.no_grad():
                     return self.model.generate(**inputs, **gen_kwargs)
 

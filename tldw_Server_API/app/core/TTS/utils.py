@@ -71,6 +71,7 @@ async def run_tts_blocking_call(func: Callable[..., Any], /, *args: Any, **kwarg
 async def run_tts_blocking_next(iterator: Iterator[Any], sentinel: Any) -> Any:
     """Fetch the next item from a synchronous iterator without blocking the event loop."""
     def _next_item() -> Any:
+        """Return the next iterator item or the sentinel when exhausted."""
         try:
             return next(iterator)
         except StopIteration:

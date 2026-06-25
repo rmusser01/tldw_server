@@ -45,22 +45,29 @@ async def test_time_stretch_builds_ffmpeg_command(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_convert_format_kills_subprocess_on_timeout(monkeypatch, tmp_path):
+    """Verify timed-out format conversion kills the child process."""
     class HangingProcess:
+        """Fake subprocess that never completes unless killed."""
+
         def __init__(self):
+            """Initialize fake process state."""
             self.returncode = None
             self.killed = False
 
         async def communicate(self):
+            """Simulate a subprocess communicate call that hangs."""
             await ac_mod.asyncio.sleep(5)
             return b"", b""
 
         def kill(self):
+            """Record that timeout cleanup killed the subprocess."""
             self.killed = True
             self.returncode = -9
 
     process = HangingProcess()
 
     async def fake_exec(*_cmd, **_kwargs):
+        """Return the hanging process instead of launching ffmpeg."""
         return process
 
     monkeypatch.setattr(ac_mod.asyncio, "create_subprocess_exec", fake_exec)
@@ -85,13 +92,16 @@ async def test_convert_format_kills_subprocess_on_timeout(monkeypatch, tmp_path)
 
 @pytest.mark.asyncio
 async def test_long_running_converter_methods_forward_timeout_override(monkeypatch, tmp_path):
+    """Verify long-running converter helpers pass through timeout overrides."""
     calls: list[float] = []
 
     async def fake_run_subprocess(_cmd, *, timeout_seconds=None):
+        """Record each timeout passed to the subprocess wrapper."""
         calls.append(timeout_seconds)
         return 0, b"", b'{"input_i": -23.0}'
 
     async def fake_duration(_path):
+        """Return a stable duration for chapter metadata generation."""
         return 1.0
 
     monkeypatch.setattr(ac_mod.AudioConverter, "_run_subprocess", staticmethod(fake_run_subprocess))

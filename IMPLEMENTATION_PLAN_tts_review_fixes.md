@@ -34,3 +34,10 @@
 **Success Criteria**: Focused tests pass, Bandit reports no new actionable findings in touched production code, and task notes/final summary are updated.
 **Tests**: `python -m pytest ...`, `python -m bandit -r ...`, `git diff --check`.
 **Status**: Complete
+
+## Stage 6: PR Review Thread Closeout
+
+**Goal**: Address the remaining PR #2484 review-thread state after rebasing on latest `dev`.
+**Success Criteria**: Changed-span docstring coverage is above the bot threshold, unresolved functional comments are verified against current code, and review threads are resolved after push.
+**Tests**: Changed-span docstring coverage script, Ruff, `py_compile`, focused TTS pytest batches, Bandit touched production scope, `git diff --check`.
+**Status**: Complete

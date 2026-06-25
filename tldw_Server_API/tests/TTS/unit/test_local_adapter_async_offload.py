@@ -29,6 +29,7 @@ def _code_object_references_name(func, name: str) -> bool:
 
 
 def test_blocking_local_generation_paths_use_thread_offload_helper():
+    """Verify local generation paths reference shared async offload helpers."""
     assert chatterbox_adapter.run_tts_blocking_call is tts_utils.run_tts_blocking_call
     assert dia_adapter.run_tts_blocking_call is tts_utils.run_tts_blocking_call
     assert higgs_adapter.run_tts_blocking_call is tts_utils.run_tts_blocking_call

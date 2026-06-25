@@ -116,6 +116,7 @@ class AudioConverter:
         target_format: str,
         **kwargs,
     ) -> bool:
+        """Concatenate audio files into the requested target format using ffmpeg."""
         if not input_paths:
             logger.error("No input files provided for concatenation")
             return False
@@ -159,6 +160,7 @@ class AudioConverter:
         metadata: Optional[dict[str, str]] = None,
         timeout_seconds: Any = None,
     ) -> bool:
+        """Package concatenated audio files into an M4B with chapter metadata."""
         if not input_paths:
             logger.error("No input files provided for M4B packaging")
             return False

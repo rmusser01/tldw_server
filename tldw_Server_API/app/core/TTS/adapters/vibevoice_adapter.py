@@ -161,6 +161,7 @@ class VibeVoiceAdapter(TTSAdapter):
         return variant_lookup.get(variant.strip().lower())
 
     def __init__(self, config: Optional[dict[str, Any]] = None):
+        """Initialize VibeVoice model state, generation defaults, and voice discovery."""
         super().__init__(config)
 
         # Model variant selection (1.5B or 7B)
@@ -1037,6 +1038,7 @@ class VibeVoiceAdapter(TTSAdapter):
                     generation_config['top_k'] = top_k
 
                 def _generate_outputs():
+                    """Run VibeVoice generation with cancellation and bounded token output."""
                     with torch_mod.no_grad():
                         self._check_cancellation()
                         return self.model.generate(

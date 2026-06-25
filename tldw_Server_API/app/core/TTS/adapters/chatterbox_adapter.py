@@ -27,15 +27,15 @@ import numpy as np
 # Third-party Imports
 from loguru import logger
 
-from ..tts_exceptions import (
-    TTSModelLoadError,
-)
-from ..utils import parse_bool, run_tts_blocking_call
 from ..chatterbox_catalog import (
     CHATTERBOX_LANGUAGE_CODES,
     ChatterboxModelFamily,
     resolve_chatterbox_model_family,
 )
+from ..tts_exceptions import (
+    TTSModelLoadError,
+)
+from ..utils import parse_bool, run_tts_blocking_call
 
 # Local Imports
 from .base import AudioFormat, ProviderStatus, TTSAdapter, TTSCapabilities, TTSRequest, TTSResponse, VoiceInfo
@@ -878,7 +878,7 @@ class ChatterboxAdapter(TTSAdapter):
         if callable(to_device):
             with contextlib.suppress(*_CHATTERBOX_RUNTIME_EXCEPTIONS):
                 conditionals = to_device(self.device)
-        setattr(model, "conds", conditionals)
+        model.conds = conditionals
 
     async def _prepare_cached_conditionals(
         self,
@@ -1020,9 +1020,9 @@ class ChatterboxAdapter(TTSAdapter):
 
         if converted is not None:
             with contextlib.suppress(*_CHATTERBOX_RUNTIME_EXCEPTIONS):
-                setattr(model, "t3", converted)
+                model.t3 = converted
         with contextlib.suppress(*_CHATTERBOX_RUNTIME_EXCEPTIONS):
-            setattr(model, "_tldw_bf16_prepared", True)
+            model._tldw_bf16_prepared = True
 
     def _bf16_autocast_context(self):
         """Return a torch autocast context for BF16 generation, or a no-op context."""
@@ -1074,6 +1074,7 @@ class ChatterboxAdapter(TTSAdapter):
 
             # Generate full waveform tensor (1, N)
             def _generate_audio_tensor():
+                """Generate a Chatterbox waveform tensor for the selected model family."""
                 with self._bf16_autocast_context():
                     if family is ChatterboxModelFamily.MULTILINGUAL:
                         return model.generate(

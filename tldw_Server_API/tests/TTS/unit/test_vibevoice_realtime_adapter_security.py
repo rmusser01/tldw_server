@@ -15,9 +15,11 @@ pytestmark = pytest.mark.unit
 
 @pytest.mark.asyncio
 async def test_realtime_websocket_session_rejects_egress_denied_url(monkeypatch):
+    """Verify realtime websocket startup rejects URLs denied by egress policy."""
     calls: list[str] = []
 
     def fake_evaluate_url_policy(url: str, **_kwargs):
+        """Return a denied policy result while recording the normalized URL."""
         calls.append(url)
         return URLPolicyResult(False, "blocked by test policy")
 
@@ -42,7 +44,9 @@ async def test_realtime_websocket_session_rejects_egress_denied_url(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_realtime_websocket_egress_denial_redacts_sensitive_url(monkeypatch):
+    """Verify egress denial details do not expose websocket credentials."""
     def fake_evaluate_url_policy(url: str, **_kwargs):
+        """Assert policy evaluation receives the sanitized origin URL."""
         assert url == "https://example.test"
         return URLPolicyResult(False, "blocked by test policy")
 
@@ -69,9 +73,11 @@ async def test_realtime_websocket_egress_denial_redacts_sensitive_url(monkeypatc
 
 
 def test_validate_websocket_egress_returns_resolved_ips_for_pinning(monkeypatch):
+    """Verify websocket egress validation returns resolved IPs for pinning."""
     calls: list[str] = []
 
     def fake_evaluate_url_policy(url: str, **_kwargs):
+        """Return an allowed policy result with a resolved public IP."""
         calls.append(url)
         return URLPolicyResult(True, None, ("93.184.216.34",))
 
@@ -87,6 +93,7 @@ def test_validate_websocket_egress_returns_resolved_ips_for_pinning(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_pinned_websocket_resolver_uses_validated_ips():
+    """Verify the pinned resolver only resolves the validated hostname."""
     resolver = rt_module._PinnedWebSocketResolver("public.example.test", ("93.184.216.34",))
 
     resolved = await resolver.resolve("public.example.test", 443)

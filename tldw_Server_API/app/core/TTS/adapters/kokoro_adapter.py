@@ -20,6 +20,8 @@ from typing import Any, Optional
 import numpy as np
 from loguru import logger
 
+from ...testing import env_flag_enabled, is_explicit_pytest_runtime, is_test_mode
+from ...Utils.torch_import_guard import safe_import_torch
 from ..phoneme_overrides import (
     PhonemeOverrideEntry,
     apply_overrides_to_text,
@@ -35,8 +37,6 @@ from ..tts_exceptions import (
     TTSProviderNotConfiguredError,
 )
 from ..tts_resource_manager import get_resource_manager as _get_resource_manager
-from ...testing import env_flag_enabled, is_explicit_pytest_runtime, is_test_mode
-from ...Utils.torch_import_guard import safe_import_torch
 from ..tts_validation import validate_tts_request
 from ..utils import parse_bool, run_tts_blocking_next
 
@@ -542,6 +542,7 @@ class KokoroAdapter(TTSAdapter):
 
                 if callable(orig_create_audio) and not getattr(_konnx.Kokoro, "_tldw_speed_patch", False):
                     def _patched_create_audio(self_k, phonemes, voice, speed):
+                        """Create Kokoro ONNX audio while passing speed with a compatible dtype."""
                         from kokoro_onnx.config import MAX_PHONEME_LENGTH, SAMPLE_RATE  # type: ignore
                         from kokoro_onnx.log import log as _log  # type: ignore
 
@@ -913,6 +914,7 @@ class KokoroAdapter(TTSAdapter):
                     sentinel = object()
 
                     async def _async_wrap():
+                        """Adapt Kokoro ONNX's synchronous stream iterator for async streaming."""
                         while True:
                             item = await run_tts_blocking_next(sync_iterator, sentinel)
                             if item is sentinel:
@@ -963,6 +965,7 @@ class KokoroAdapter(TTSAdapter):
                 sentinel = object()
 
                 async def _async_iter():
+                    """Adapt Kokoro PyTorch's synchronous stream iterator for async streaming."""
                     while True:
                         result = await run_tts_blocking_next(sync_iterator, sentinel)
                         if result is sentinel:
