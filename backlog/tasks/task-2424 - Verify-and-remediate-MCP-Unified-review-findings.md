@@ -4,7 +4,7 @@ title: Verify and remediate MCP Unified review findings
 status: Done
 assignee: []
 created_date: 2026-06-23 18:27
-updated_date: 2026-06-25 02:47
+updated_date: 2026-06-25 03:00
 labels:
 - review
 - mcp
@@ -108,6 +108,8 @@ Task 13 cleanup/final review complete. Usage search found the remaining protocol
 Integration cleanup before commit: expanded the verification scope to include the earlier validated MCP Unified fixes and the protocol.py refactor together. Fixed a brittle fs.glob size-unavailable test shim so it raises on the intended follow_symlinks=False metadata read, and applied Ruff import/type cleanup in the expanded MCP touched test scope. Verification passed after cleanup: py_compile for touched MCP implementation files, expanded pytest slice 384 passed, Ruff F/I/UP passed, and Bandit commit-scope scan wrote /tmp/bandit_mcp_unified_final_commit_scope.json with no command-level failures.
 PR opened against dev: https://github.com/rmusser01/tldw_server/pull/2513
 PR #2513 rebased onto latest origin/dev and review comments addressed. Validated/fixed: Loguru formatting comments in server/runtime/reporting/security/protocol touched paths; config now uses sys.stderr instead of os.sys.stderr; runtime/reporting no longer silently pass on noncritical rate-limit/metrics/audit failures; RedisError fallback no longer defines a local custom exception; new tool_execution classes/dependency bundles gained docstrings; new async coordinator/idempotency tests gained required unit markers and missing type hints; fs.write_text now advertises and explicitly enforces the overwrite preimage contract. Verification after rebase and fixes passed: py_compile, expanded MCP pytest slice 384 passed, Ruff F/I/UP, Bandit 0 findings, and git diff --check origin/dev..HEAD.
+Reopened after PR #2513 follow-up check: GitHub review threads still show unresolved conversations. Re-verifying code-backed fixes and applying a small marker/type-hint cleanup in the changed idempotency/category tests before resolving threads and waiting for checks.
+Follow-up PR issue cleanup completed: verified unresolved GitHub review threads against the current code, tightened idempotency/category test marker and type-hint coverage, and reran verification. Results: py_compile on the edited test file passed; test_idempotency_and_category.py passed 14 tests; expanded focused MCP slice passed 384 tests; Ruff F/I/UP passed for the edited test file; git diff --check passed; Bandit touched production scope reported 0 findings in /tmp/bandit_mcp_unified_pr_all_issues.json.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
