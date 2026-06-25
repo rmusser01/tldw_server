@@ -751,7 +751,7 @@ passed
 - Modify `tldw_Server_API/tests/Chunking/test_process_text_components.py`
 - Modify `tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py`
 
-- [ ] **Step 1: Add finalization helper**
+- [x] **Step 1: Add finalization helper**
 
 Create:
 
@@ -778,14 +778,14 @@ Move current finalization behavior:
 - compute `chunk_content_hash` with `hashlib.md5(..., usedforsecurity=False)`;
 - set `origin` to `unified_chunker`.
 
-- [ ] **Step 2: Wire finalization into the active method**
+- [x] **Step 2: Wire finalization into the active method**
 
 Replace local prefix restoration and final output loop with:
 
 ```python
 out = finalize_chunks(
     original_text=text,
-    chunks=norm_chunks,
+    chunks=dispatched_chunks,
     prepared=prepared,
     resolved=resolved,
 )
@@ -793,7 +793,7 @@ out = finalize_chunks(
 
 Keep normalization duration metrics around the helper call.
 
-- [ ] **Step 3: Add metadata helper tests**
+- [x] **Step 3: Add metadata helper tests**
 
 Cover:
 
@@ -803,8 +803,9 @@ Cover:
 - existing `start_time` and `end_time` are not overwritten;
 - relative position uses the original input length after frontmatter stripping;
 - content hash is present for ordinary text.
+- malformed/invalid `timecode_map` is ignored without raising.
 
-- [ ] **Step 4: Run focused checks**
+- [x] **Step 4: Run focused checks**
 
 Command:
 

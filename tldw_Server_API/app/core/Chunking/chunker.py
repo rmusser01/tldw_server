@@ -26,6 +26,7 @@ from .exceptions import ChunkingError, InvalidChunkingMethodError, InvalidInputE
 from .llm_context import _LLM_UNSET, llm_override_scope
 from .option_utils import _coerce_bool_option
 from .process_text.dispatch import dispatch_chunks
+from .process_text.metadata import finalize_chunks
 from .process_text.preparation import (
     _parse_frontmatter,
     _prepare_frontmatter_options,
@@ -2297,9 +2298,6 @@ class Chunker:
         )
         opts = prepared.options
         processed_text = prepared.processed_text
-        prefix_offset = prepared.prefix_offset
-        json_meta = prepared.json_meta
-        header_text = prepared.header_text
         observe_histogram("chunker_frontmatter_duration_seconds", time.perf_counter() - fm_start, labels=labels)
 
         # Recheck size constraints after optional trimming
@@ -2310,152 +2308,28 @@ class Chunker:
         prepared = extract_header(prepared)
         opts = prepared.options
         processed_text = prepared.processed_text
-        prefix_offset = prepared.prefix_offset
-        json_meta = prepared.json_meta
-        header_text = prepared.header_text
         observe_histogram("chunker_header_extract_seconds", time.perf_counter() - hdr_start, labels=labels)
 
         # Resolve main parameters
         resolved = resolve_process_options(self, processed_text, opts)
         method = resolved.method
-        method_lower = resolved.method_lower
-        max_size = resolved.max_size
-        overlap = resolved.overlap
         language = resolved.language
-        adaptive = resolved.adaptive
         hierarchical = resolved.hierarchical
         hier_template = resolved.hier_template
         multi_level = resolved.multi_level
-        code_mode_for_method = resolved.code_mode_for_method
 
-        norm_chunks: list[dict[str, Any]] = []
         chunk_start = time.perf_counter()
         with llm_override_scope(self, llm_call_func, llm_config):
             dispatched_chunks = dispatch_chunks(self, processed_text, resolved)
-        norm_chunks = [
-            {"text": chunk.text, "metadata": dict(chunk.metadata)}
-            for chunk in dispatched_chunks
-        ]
         observe_histogram("chunker_chunking_duration_seconds", time.perf_counter() - chunk_start, labels=labels)
 
-        # Normalize offsets back to original input coordinates when we stripped a prefix.
-        if prefix_offset:
-            for item in norm_chunks:
-                if not isinstance(item, dict):
-                    continue
-                md = item.get('metadata')
-                if not isinstance(md, dict):
-                    continue
-                for key in ('start_offset', 'end_offset', 'start_char', 'end_char'):
-                    val = md.get(key)
-                    if isinstance(val, int):
-                        md[key] = val + prefix_offset
-
-        total = len(norm_chunks)
-        out: list[dict[str, Any]] = []
         norm_start = time.perf_counter()
-        # Optional timecode mapping for media transcripts: offsets are in original input coordinates.
-        time_segments = None
-        try:
-            segs = opts.get('timecode_map')
-            if isinstance(segs, list):
-                # Expect list of {start_offset,end_offset,start_time,end_time}
-                val = []
-                for s in segs:
-                    if not isinstance(s, dict):
-                        continue
-                    so = s.get('start_offset')
-                    eo = s.get('end_offset')
-                    st = s.get('start_time')
-                    et = s.get('end_time')
-                    if isinstance(so, int) and isinstance(eo, int) and (isinstance(st, (int, float)) and isinstance(et, (int, float))):
-                        val.append((so, eo, float(st), float(et)))
-                time_segments = sorted(val, key=lambda x: x[0]) if val else None
-        except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-            time_segments = None
-        for i, item in enumerate(norm_chunks):
-            # Normalize
-            txt = item.get('text') if isinstance(item, dict) else str(item)
-            md = dict(item.get('metadata') or {}) if isinstance(item, dict) else {}
-
-            # Base metadata
-            md.setdefault('chunk_index', i + 1)
-            md.setdefault('total_chunks', total)
-            md.setdefault('chunk_method', method)
-            # Standardized keys while retaining legacy for compatibility
-            md.setdefault('max_size_setting', max_size)
-            md.setdefault('overlap_setting', overlap)
-            md.setdefault('max_size', max_size)
-            md.setdefault('overlap', overlap)
-            md.setdefault('language', language)
-            md.setdefault('adaptive_chunking_used', adaptive)
-            if method_lower in ('code', 'code_ast'):
-                effective_code_mode = code_mode_for_method
-                if effective_code_mode is None:
-                    effective_code_mode = 'ast' if method_lower == 'code_ast' else 'auto'
-                md.setdefault('code_mode_used', effective_code_mode)
-
-            # Relative position using offsets when present
-            try:
-                start = md.get('start_offset')
-                end = md.get('end_offset')
-                if isinstance(start, int) and isinstance(end, int) and end > start:
-                    mid = 0.5 * (float(start) + float(end))
-                    # Offsets are in original input coordinates, so relative_position uses the original length.
-                    rel = mid / max(1.0, float(len(text)))
-                    if time_segments is not None and ('start_time' not in md or 'end_time' not in md):
-                        try:
-                            chunk_start = int(start)
-                            chunk_end = int(end)
-                            chunk_start_time = None
-                            chunk_end_time = None
-                            for (so, eo, st, et) in time_segments:
-                                if chunk_end <= so:
-                                    break
-                                if chunk_start >= eo:
-                                    continue
-                                overlap_start = max(chunk_start, so)
-                                overlap_end = min(chunk_end, eo)
-                                if overlap_end <= overlap_start:
-                                    continue
-                                seg_len = max(1.0, float(eo - so))
-                                seg_duration = float(et - st)
-                                frac_start = (overlap_start - so) / seg_len
-                                frac_end = (overlap_end - so) / seg_len
-                                mapped_start = st + frac_start * seg_duration
-                                mapped_end = st + frac_end * seg_duration
-                                if chunk_start_time is None:
-                                    chunk_start_time = mapped_start
-                                chunk_end_time = mapped_end
-                                if overlap_end >= chunk_end:
-                                    # We covered the chunk end; can stop
-                                    break
-                            if chunk_start_time is not None and 'start_time' not in md:
-                                md['start_time'] = round(chunk_start_time, 3)
-                            if chunk_end_time is not None and 'end_time' not in md:
-                                md['end_time'] = round(chunk_end_time, 3)
-                        except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                            pass
-                else:
-                    rel = (i + 1) / total if total > 0 else 0.0
-            except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                rel = (i + 1) / total if total > 0 else 0.0
-            md.setdefault('relative_position', rel)
-
-            # Document-level metadata if we extracted any
-            if json_meta:
-                md.setdefault('initial_document_json_metadata', json_meta)
-            if header_text:
-                md.setdefault('initial_document_header_text', header_text)
-
-            # Content hash
-            with suppress(_CHUNKER_NONCRITICAL_EXCEPTIONS):
-                md.setdefault('chunk_content_hash', hashlib.md5(txt.encode('utf-8'), usedforsecurity=False).hexdigest())
-
-            # Mark origin
-            md.setdefault('origin', 'unified_chunker')
-
-            out.append({'text': txt, 'metadata': md})
+        out = finalize_chunks(
+            original_text=text,
+            chunks=dispatched_chunks,
+            prepared=prepared,
+            resolved=resolved,
+        )
         observe_histogram("chunker_normalization_seconds", time.perf_counter() - norm_start, labels=labels)
         # Output metrics
         total_bytes = sum(len(c['text']) for c in out)

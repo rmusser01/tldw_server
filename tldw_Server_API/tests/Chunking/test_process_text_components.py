@@ -34,6 +34,8 @@ from tldw_Server_API.app.core.Chunking.process_text.preparation import (
 )
 from tldw_Server_API.app.core.Chunking.process_text import dispatch as process_dispatch
 from tldw_Server_API.app.core.Chunking.process_text.dispatch import dispatch_chunks
+from tldw_Server_API.app.core.Chunking.process_text import metadata as process_metadata
+from tldw_Server_API.app.core.Chunking.process_text.metadata import finalize_chunks
 from tldw_Server_API.app.core.Chunking.process_text import models
 from tldw_Server_API.app.core.Chunking.process_text.models import (
     NormalizedChunk,
@@ -80,6 +82,19 @@ def _resolved_for_dispatch(**overrides: Any) -> ResolvedProcessOptions:
     }
     values.update(overrides)
     return ResolvedProcessOptions(**values)
+
+
+def _prepared_for_finalize(**overrides: Any) -> PreparedText:
+    values: dict[str, Any] = {
+        "original_text": "alpha beta",
+        "processed_text": "alpha beta",
+        "prefix_offset": 0,
+        "json_meta": {},
+        "header_text": "",
+        "options": {},
+    }
+    values.update(overrides)
+    return PreparedText(**values)
 
 
 def test_llm_override_scope_restores_missing_attribute_after_exception() -> None:
@@ -214,6 +229,10 @@ def test_process_text_options_module_does_not_import_chunker() -> None:
 
 def test_process_text_dispatch_module_does_not_import_chunker() -> None:
     _assert_no_chunker_imports(process_dispatch)
+
+
+def test_process_text_metadata_module_does_not_import_chunker() -> None:
+    _assert_no_chunker_imports(process_metadata)
 
 
 @pytest.mark.parametrize(
@@ -776,3 +795,177 @@ def test_dispatch_chunks_multi_level_fallback_clamps_offsets(
     assert chunks[0].metadata["start_offset"] == 0
     assert chunks[0].metadata["end_offset"] == 5
     assert chunks[0].metadata["paragraph_index"] == 0
+
+
+def test_finalize_chunks_restores_prefix_offset_to_all_offset_keys() -> None:
+    rows = finalize_chunks(
+        original_text="0123456789alpha beta",
+        chunks=[
+            NormalizedChunk(
+                text="alpha",
+                metadata={
+                    "start_offset": 1,
+                    "end_offset": 6,
+                    "start_char": 2,
+                    "end_char": 7,
+                },
+            )
+        ],
+        prepared=_prepared_for_finalize(prefix_offset=10),
+        resolved=_resolved_for_dispatch(),
+    )
+
+    metadata = rows[0]["metadata"]
+    assert metadata["start_offset"] == 11
+    assert metadata["end_offset"] == 16
+    assert metadata["start_char"] == 12
+    assert metadata["end_char"] == 17
+
+
+def test_finalize_chunks_preserves_strategy_metadata_defaults() -> None:
+    rows = finalize_chunks(
+        original_text="alpha",
+        chunks=[
+            NormalizedChunk(
+                text="alpha",
+                metadata={
+                    "chunk_index": 99,
+                    "total_chunks": 88,
+                    "chunk_method": "strategy-method",
+                    "max_size": 1234,
+                    "overlap": 42,
+                    "language": "strategy-language",
+                    "adaptive_chunking_used": True,
+                    "relative_position": 0.75,
+                    "chunk_content_hash": "strategy-hash",
+                    "origin": "strategy-origin",
+                },
+            )
+        ],
+        prepared=_prepared_for_finalize(),
+        resolved=_resolved_for_dispatch(max_size=100, overlap=0),
+    )
+
+    metadata = rows[0]["metadata"]
+    assert metadata["chunk_index"] == 99
+    assert metadata["total_chunks"] == 88
+    assert metadata["chunk_method"] == "strategy-method"
+    assert metadata["max_size"] == 1234
+    assert metadata["overlap"] == 42
+    assert metadata["language"] == "strategy-language"
+    assert metadata["adaptive_chunking_used"] is True
+    assert metadata["relative_position"] == 0.75
+    assert metadata["chunk_content_hash"] == "strategy-hash"
+    assert metadata["origin"] == "strategy-origin"
+
+
+def test_finalize_chunks_maps_missing_start_and_end_times() -> None:
+    rows = finalize_chunks(
+        original_text="x" * 100,
+        chunks=[
+            NormalizedChunk(
+                text="middle",
+                metadata={"start_offset": 25, "end_offset": 75},
+            )
+        ],
+        prepared=_prepared_for_finalize(
+            original_text="x" * 100,
+            processed_text="x" * 100,
+            options={
+                "timecode_map": [
+                    {"start_offset": 50, "end_offset": 100, "start_time": 5.0, "end_time": 10.0},
+                    {"start_offset": 0, "end_offset": 50, "start_time": 0.0, "end_time": 5.0},
+                ]
+            },
+        ),
+        resolved=_resolved_for_dispatch(),
+    )
+
+    assert rows[0]["metadata"]["start_time"] == 2.5
+    assert rows[0]["metadata"]["end_time"] == 7.5
+
+
+def test_finalize_chunks_does_not_overwrite_existing_times() -> None:
+    rows = finalize_chunks(
+        original_text="x" * 100,
+        chunks=[
+            NormalizedChunk(
+                text="middle",
+                metadata={"start_offset": 25, "end_offset": 75, "start_time": 111.0, "end_time": 222.0},
+            )
+        ],
+        prepared=_prepared_for_finalize(
+            original_text="x" * 100,
+            processed_text="x" * 100,
+            options={
+                "timecode_map": [
+                    {"start_offset": 0, "end_offset": 100, "start_time": 0.0, "end_time": 10.0},
+                ]
+            },
+        ),
+        resolved=_resolved_for_dispatch(),
+    )
+
+    assert rows[0]["metadata"]["start_time"] == 111.0
+    assert rows[0]["metadata"]["end_time"] == 222.0
+
+
+def test_finalize_chunks_relative_position_uses_original_input_length() -> None:
+    frontmatter = '{"meta": "x", "__tldw_frontmatter__": true}\n\n'
+    body = "Body text"
+    rows = finalize_chunks(
+        original_text=frontmatter + body,
+        chunks=[
+            NormalizedChunk(
+                text=body,
+                metadata={"start_offset": 0, "end_offset": len(body)},
+            )
+        ],
+        prepared=_prepared_for_finalize(
+            original_text=frontmatter + body,
+            processed_text=body,
+            prefix_offset=len(frontmatter),
+            json_meta={"meta": "x"},
+        ),
+        resolved=_resolved_for_dispatch(),
+    )
+
+    expected_midpoint = len(frontmatter) + (len(body) / 2.0)
+    assert rows[0]["metadata"]["relative_position"] == expected_midpoint / len(frontmatter + body)
+    assert rows[0]["metadata"]["initial_document_json_metadata"] == {"meta": "x"}
+
+
+def test_finalize_chunks_adds_content_hash_for_ordinary_text() -> None:
+    rows = finalize_chunks(
+        original_text="alpha",
+        chunks=[NormalizedChunk(text="alpha", metadata={})],
+        prepared=_prepared_for_finalize(original_text="alpha", processed_text="alpha"),
+        resolved=_resolved_for_dispatch(),
+    )
+
+    assert rows[0]["metadata"]["chunk_content_hash"] == "2c1743a391305fbf367df8e4f069f9f9"
+
+
+def test_finalize_chunks_ignores_invalid_timecode_map_without_raising() -> None:
+    rows = finalize_chunks(
+        original_text="alpha beta",
+        chunks=[
+            NormalizedChunk(
+                text="alpha",
+                metadata={"start_offset": 0, "end_offset": 5},
+            )
+        ],
+        prepared=_prepared_for_finalize(
+            options={
+                "timecode_map": [
+                    "not-a-segment",
+                    {"start_offset": "0", "end_offset": 5, "start_time": 0.0, "end_time": 1.0},
+                    {"start_offset": 0, "end_offset": 5, "start_time": "0", "end_time": 1.0},
+                ]
+            },
+        ),
+        resolved=_resolved_for_dispatch(),
+    )
+
+    assert "start_time" not in rows[0]["metadata"]
+    assert "end_time" not in rows[0]["metadata"]
