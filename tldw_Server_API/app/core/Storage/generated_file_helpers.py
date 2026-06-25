@@ -38,6 +38,7 @@ from typing import Any
 import aiofiles
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError as AuthNZStorageError
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import (
     FILE_CATEGORY_IMAGE,
     FILE_CATEGORY_MINDMAP,
@@ -54,6 +55,8 @@ from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import (
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
 from tldw_Server_API.app.services.storage_quota_service import get_storage_service
+
+MAX_GENERATED_FILE_SIZE_BYTES = 10 * 1024 * 1024 * 1024  # 10 GB
 
 # MIME type mappings
 AUDIO_MIME_TYPES = {
@@ -135,6 +138,47 @@ async def _save_file(
     return file_path
 
 
+def _validate_generated_file_size(file_size_bytes: int) -> None:
+    """Reject generated files above the storage service's per-file maximum."""
+    if file_size_bytes > MAX_GENERATED_FILE_SIZE_BYTES:
+        raise AuthNZStorageError(
+            f"File size {file_size_bytes / (1024 * 1024 * 1024):.2f} GB exceeds "
+            f"maximum allowed size of {MAX_GENERATED_FILE_SIZE_BYTES / (1024 * 1024 * 1024):.0f} GB"
+        )
+
+
+async def _preflight_generated_file_write(
+    *,
+    user_id: int,
+    file_size_bytes: int,
+    org_id: int | None,
+    team_id: int | None,
+    check_quota: bool,
+) -> Any:
+    """Resolve the storage service and check size/quota before writing bytes."""
+    _validate_generated_file_size(file_size_bytes)
+    service = await get_storage_service()
+    if check_quota:
+        check_combined_quota = getattr(service, "check_combined_quota", None)
+        if callable(check_combined_quota):
+            await check_combined_quota(
+                user_id,
+                file_size_bytes,
+                org_id=org_id,
+                team_id=team_id,
+                raise_on_exceed=True,
+            )
+        else:
+            check_user_quota = getattr(service, "check_quota", None)
+            if callable(check_user_quota):
+                await check_user_quota(
+                    user_id=user_id,
+                    new_bytes=file_size_bytes,
+                    raise_on_exceed=True,
+                )
+    return service
+
+
 async def save_and_register_tts_audio(
     *,
     user_id: int,
@@ -172,10 +216,17 @@ async def save_and_register_tts_audio(
     Returns:
         File record dict with id, uuid, storage_path, etc.
     """
+    service = await _preflight_generated_file_write(
+        user_id=user_id,
+        file_size_bytes=len(audio_bytes),
+        org_id=org_id,
+        team_id=team_id,
+        check_quota=check_quota,
+    )
+
     # Generate filename
     filename = _generate_filename("tts_audio", audio_format)
     category_folder = "tts_audio"
-    _get_date_folder()
 
     # Save file
     file_path = await _save_file(user_id, audio_bytes, category_folder, filename)
@@ -204,7 +255,6 @@ async def save_and_register_tts_audio(
 
     # Register with storage service
     try:
-        service = await get_storage_service()
         file_record = await service.register_generated_file(
             user_id=user_id,
             filename=filename,
@@ -270,6 +320,14 @@ async def save_and_register_image(
     Returns:
         File record dict
     """
+    service = await _preflight_generated_file_write(
+        user_id=user_id,
+        file_size_bytes=len(image_bytes),
+        org_id=org_id,
+        team_id=team_id,
+        check_quota=check_quota,
+    )
+
     filename = _generate_filename("image", image_format)
     category_folder = "images"
 
@@ -287,7 +345,6 @@ async def save_and_register_image(
     mime_type = IMAGE_MIME_TYPES.get(image_format.lower(), "image/png")
 
     try:
-        service = await get_storage_service()
         file_record = await service.register_generated_file(
             user_id=user_id,
             filename=filename,
@@ -339,6 +396,14 @@ async def save_and_register_vn_asset_image(
     VN asset metadata remains in the user's ChaChaNotes database; the image bytes
     and quota accounting are tracked through generated-file storage.
     """
+    service = await _preflight_generated_file_write(
+        user_id=user_id,
+        file_size_bytes=len(image_bytes),
+        org_id=org_id,
+        team_id=team_id,
+        check_quota=check_quota,
+    )
+
     filename = _generate_filename(f"vn_asset_{item_id}", image_format)
     category_folder = "vn_assets"
 
@@ -360,7 +425,6 @@ async def save_and_register_vn_asset_image(
     mime_type = IMAGE_MIME_TYPES.get(image_format.lower(), "image/png")
 
     try:
-        service = await get_storage_service()
         file_record = await service.register_generated_file(
             user_id=user_id,
             filename=filename,
@@ -421,6 +485,14 @@ async def save_and_register_voice_clone(
     Returns:
         File record dict
     """
+    service = await _preflight_generated_file_write(
+        user_id=user_id,
+        file_size_bytes=len(voice_data),
+        org_id=org_id,
+        team_id=team_id,
+        check_quota=check_quota,
+    )
+
     filename = _generate_filename(f"voice_{voice_name}", voice_format)
     category_folder = "voice_clones"
 
@@ -436,7 +508,6 @@ async def save_and_register_voice_clone(
     if provider:
         file_tags.append(f"provider:{provider}")
 
-    service = await get_storage_service()
     try:
         file_record = await service.register_generated_file(
             user_id=user_id,
@@ -501,6 +572,14 @@ async def save_and_register_spreadsheet(
     Returns:
         File record dict
     """
+    service = await _preflight_generated_file_write(
+        user_id=user_id,
+        file_size_bytes=len(spreadsheet_bytes),
+        org_id=org_id,
+        team_id=team_id,
+        check_quota=check_quota,
+    )
+
     filename = _generate_filename("spreadsheet", spreadsheet_format)
     category_folder = "spreadsheets"
 
@@ -511,7 +590,6 @@ async def save_and_register_spreadsheet(
 
     mime_type = SPREADSHEET_MIME_TYPES.get(spreadsheet_format.lower(), "application/octet-stream")
 
-    service = await get_storage_service()
     try:
         file_record = await service.register_generated_file(
             user_id=user_id,
@@ -577,6 +655,14 @@ async def save_and_register_mindmap(
     Returns:
         File record dict
     """
+    service = await _preflight_generated_file_write(
+        user_id=user_id,
+        file_size_bytes=len(mindmap_bytes),
+        org_id=org_id,
+        team_id=team_id,
+        check_quota=check_quota,
+    )
+
     prefix = f"mindmap_{title.replace(' ', '_')[:20]}" if title else "mindmap"
     filename = _generate_filename(prefix, mindmap_format)
     category_folder = "mindmaps"
@@ -595,7 +681,6 @@ async def save_and_register_mindmap(
     }
     mime_type = mime_map.get(mindmap_format.lower(), "application/octet-stream")
 
-    service = await get_storage_service()
     try:
         file_record = await service.register_generated_file(
             user_id=user_id,

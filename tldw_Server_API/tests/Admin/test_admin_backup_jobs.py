@@ -17,6 +17,62 @@ class _BackupResult:
     path: str
 
 
+def test_backup_schedule_jobs_storage_import_is_compatibility_shim() -> None:
+    from tldw_Server_API.app.core.Admin_Backups import backup_schedule_jobs as canonical
+    from tldw_Server_API.app.core.Storage import backup_schedule_jobs as storage_shim
+
+    assert storage_shim.BACKUP_SCHEDULE_DOMAIN == canonical.BACKUP_SCHEDULE_DOMAIN
+    assert storage_shim.BACKUP_SCHEDULE_JOB_TYPE == canonical.BACKUP_SCHEDULE_JOB_TYPE
+    assert storage_shim.build_backup_schedule_job_payload is canonical.build_backup_schedule_job_payload
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({}, "missing_schedule_id"),
+        ({"schedule_id": "1"}, "missing_run_id"),
+        ({"schedule_id": "1", "run_id": "2"}, "missing_dataset"),
+        (
+            {
+                "schedule_id": "1",
+                "run_id": "2",
+                "dataset": "media",
+                "scheduled_for": "not-a-date",
+            },
+            "invalid_scheduled_for",
+        ),
+        (
+            {
+                "schedule_id": "1",
+                "run_id": "2",
+                "dataset": "media",
+                "scheduled_for": "2026-06-24T00:00:00Z",
+                "target_user_id": "not-an-int",
+            },
+            "invalid_target_user_id",
+        ),
+        (
+            {
+                "schedule_id": "1",
+                "run_id": "2",
+                "dataset": "media",
+                "scheduled_for": "2026-06-24T00:00:00Z",
+                "retention_count": "not-an-int",
+            },
+            "invalid_retention_count",
+        ),
+    ],
+)
+def test_parse_backup_schedule_job_payload_uses_validation_error(payload, message) -> None:
+    from tldw_Server_API.app.core.Admin_Backups.backup_schedule_jobs import (
+        parse_backup_schedule_job_payload,
+    )
+    from tldw_Server_API.app.core.exceptions import ValidationError
+
+    with pytest.raises(ValidationError, match=message):
+        parse_backup_schedule_job_payload(payload)
+
+
 @pytest.fixture()
 async def backup_jobs_repo(tmp_path, monkeypatch: pytest.MonkeyPatch):
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
