@@ -263,6 +263,16 @@ const DEFAULT_WRITING_CAPABILITIES = {
   }
 }
 
+const sceneRichContent = (text: string) => ({
+  type: "doc",
+  content: [
+    {
+      type: "paragraph",
+      content: [{ type: "text", text }]
+    }
+  ]
+})
+
 const structuredReplacement = (replacement: string, title = "Rewrite selection") =>
   JSON.stringify({
     title,
@@ -546,6 +556,50 @@ describe("WritingPlayground phase1 baseline", () => {
         screen.getByTestId("writing-status-selected-word-count")
       ).toHaveTextContent("2 selected")
     })
+  })
+
+  it("keeps scene edits separate from session dirty state", async () => {
+    seedWritingSession({ prompt: "Saved scene text" })
+    useWritingPlaygroundStore.setState({
+      activeProjectId: "project-1",
+      activeNodeId: "scene-1",
+      activeNodeType: "scene"
+    })
+    mockState.queryData.set(mockState.queryKey(["manuscript-scene", "scene-1"]), {
+      id: "scene-1",
+      chapter_id: "chapter-1",
+      project_id: "project-1",
+      title: "Scene 1",
+      sort_order: 1,
+      content: sceneRichContent("Saved scene text"),
+      content_plain: "Saved scene text",
+      synopsis: null,
+      word_count: 3,
+      pov_character_id: null,
+      status: "draft",
+      created_at: "2026-06-23T12:00:00Z",
+      last_modified: "2026-06-23T12:00:00Z",
+      deleted: false,
+      client_id: "test-client",
+      version: 3
+    })
+
+    render(<WritingPlayground />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("writing-scene-save-status")).toHaveTextContent(
+        "Scene saved"
+      )
+    })
+
+    fireEvent.change(getEditor(), {
+      target: { value: "Edited scene text" }
+    })
+
+    expect(screen.getByTestId("writing-scene-save-status")).toHaveTextContent(
+      "Scene unsaved"
+    )
+    expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument()
   })
 
   it("initializes the workflow preset from the active session payload", async () => {

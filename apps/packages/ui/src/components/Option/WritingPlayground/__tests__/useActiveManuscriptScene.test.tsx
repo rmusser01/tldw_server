@@ -213,6 +213,44 @@ describe("useActiveManuscriptScene", () => {
     expect(result.current.binding.isSceneDirty).toBe(false)
   })
 
+  it("plain text edits save matching rich JSON instead of stale scene content", async () => {
+    const scene = makeScene()
+    const expectedRichContent = sceneContent("Plain edited scene")
+    const savedScene = makeScene({
+      content: expectedRichContent as Record<string, unknown>,
+      content_plain: "Plain edited scene",
+      version: 4
+    })
+    vi.mocked(getManuscriptScene).mockResolvedValue(scene)
+    vi.mocked(updateManuscriptScene).mockResolvedValue(savedScene)
+
+    const { result } = renderActiveSceneHook({
+      activeNodeId: "scene-1",
+      activeNodeType: "scene"
+    })
+
+    await waitFor(() => {
+      expect(result.current.binding.sceneId).toBe("scene-1")
+    })
+
+    act(() => {
+      result.current.setEditorText("Plain edited scene")
+    })
+
+    await act(async () => {
+      await result.current.binding.saveScene()
+    })
+
+    expect(updateManuscriptScene).toHaveBeenCalledWith(
+      "scene-1",
+      {
+        content_plain: "Plain edited scene",
+        content: expectedRichContent
+      },
+      3
+    )
+  })
+
   it("annotation range actions are disabled when editor text differs from saved scene text", async () => {
     vi.mocked(getManuscriptScene).mockResolvedValue(makeScene())
 

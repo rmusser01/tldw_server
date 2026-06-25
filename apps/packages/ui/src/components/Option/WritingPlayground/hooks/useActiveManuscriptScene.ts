@@ -71,6 +71,20 @@ const getCurrentContentSignature = (
     ? serializeTipTapContent(tipTapContent)
     : binding.savedContentSignature
 
+const resolveSaveContent = (
+  binding: SceneBindingState,
+  editorText: string,
+  tipTapContent: JSONContent | null
+): JSONContent => {
+  if (
+    tipTapContent &&
+    serializeTipTapContent(tipTapContent) !== binding.savedContentSignature
+  ) {
+    return tipTapContent
+  }
+  return resolveTipTapDocument(editorText, null)
+}
+
 const isBindingDirty = (
   binding: SceneBindingState | null,
   editorText: string,
@@ -144,7 +158,7 @@ export function useActiveManuscriptScene({
   const saveScene = React.useCallback(async () => {
     if (!binding) return null
 
-    const content = tipTapContent ?? resolveTipTapDocument(editorText, null)
+    const content = resolveSaveContent(binding, editorText, tipTapContent)
     const savedScene = (await updateManuscriptScene(
       binding.scene.id,
       {

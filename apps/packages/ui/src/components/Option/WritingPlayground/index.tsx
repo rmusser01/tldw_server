@@ -193,6 +193,38 @@ const { Paragraph } = Typography
 const SECRET_FIELD_PATTERN =
   /(api[_-]?key|authorization|auth[_-]?token|secret|password|token)/i
 
+type ApplyPromptValue =
+  ReturnType<typeof useWritingSessionManagement>["applyPromptValue"]
+type EditorValueUpdateOptions = Parameters<ApplyPromptValue>[1]
+type EditorSelection = { start: number; end: number }
+
+const getEditorSelection = (
+  options?: EditorValueUpdateOptions
+): EditorSelection | undefined => {
+  if (!options) return undefined
+  if (
+    "start" in options &&
+    "end" in options &&
+    typeof options.start === "number" &&
+    typeof options.end === "number"
+  ) {
+    return { start: options.start, end: options.end }
+  }
+  return options.selection
+}
+
+const getEditorPromptRich = (
+  options?: EditorValueUpdateOptions
+): JSONContent | null | undefined => {
+  if (
+    !options ||
+    !Object.prototype.hasOwnProperty.call(options, "promptRich")
+  ) {
+    return undefined
+  }
+  return (options as { promptRich?: JSONContent | null }).promptRich ?? null
+}
+
 const sanitizeRevisionValue = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(sanitizeRevisionValue)
   if (!value || typeof value !== "object") return value
@@ -378,6 +410,24 @@ export const WritingPlayground = () => {
     isSceneDirty,
     saveScene: saveActiveScene
   } = activeManuscriptScene
+
+  const applyEditorValue = React.useCallback(
+    (nextValue: string, options?: EditorValueUpdateOptions) => {
+      if (!isSceneBound) {
+        return applyPromptValue(nextValue, options)
+      }
+      const selection = getEditorSelection(options)
+      const promptRichOption = getEditorPromptRich(options)
+      const promptRich =
+        promptRichOption === undefined
+          ? resolveTipTapDocument(nextValue, null)
+          : promptRichOption
+      setEditorText(nextValue)
+      setTipTapContent(promptRich)
+      return selection
+    },
+    [applyPromptValue, isSceneBound, setEditorText, setTipTapContent]
+  )
 
   const textareaEditorAdapter = React.useMemo(
     () => createTextareaEditorAdapter(editorRef),
@@ -801,7 +851,9 @@ export const WritingPlayground = () => {
     generationSessionIdRef.current = activeSessionDetail.id
     generationCancelledRef.current = false
     setIsGenerating(true)
-    setIsDirty(true)
+    if (!isSceneBound) {
+      setIsDirty(true)
+    }
     setResponseLogprobs([])
     setResponseInspectorQuery("")
     setResponseInspectorSort("sequence")
@@ -907,6 +959,7 @@ export const WritingPlayground = () => {
       hasChat,
       isGenerating,
       isRevisionGenerating,
+      isSceneBound,
       isOnline,
       selectedModel,
       settings,
@@ -1120,7 +1173,7 @@ export const WritingPlayground = () => {
       const currentValue = editorText
       const selection = getCurrentEditorAdapter()?.getSelection()
       if (!selection) {
-        applyPromptValue(currentValue + placeholder, {
+        applyEditorValue(currentValue + placeholder, {
           start: currentValue.length + placeholder.length,
           end: currentValue.length + placeholder.length
         })
@@ -1129,9 +1182,9 @@ export const WritingPlayground = () => {
       const start = selection.start
       const end = selection.end
       const { nextValue, cursor } = applyPlaceholderAtRange(currentValue, start, end, placeholder)
-      applyPromptValue(nextValue, { start: cursor, end: cursor })
+      applyEditorValue(nextValue, { start: cursor, end: cursor })
     },
-    [applyPromptValue, editorText, getCurrentEditorAdapter]
+    [applyEditorValue, editorText, getCurrentEditorAdapter]
   )
 
   const fillSelectionAtCursor = React.useCallback(() => {
@@ -1144,15 +1197,15 @@ export const WritingPlayground = () => {
       return
     }
     const { nextValue, cursor } = applyPlaceholderAtRange(currentValue, start, end, "{fill}")
-    applyPromptValue(nextValue, { start: cursor, end: cursor })
-  }, [applyPromptValue, editorText, getCurrentEditorAdapter, t])
+    applyEditorValue(nextValue, { start: cursor, end: cursor })
+  }, [applyEditorValue, editorText, getCurrentEditorAdapter, t])
 
   const insertTokenTextAtCursor = React.useCallback(
     (tokenText: string) => {
       const currentValue = editorText
       const selection = getCurrentEditorAdapter()?.getSelection()
       if (!selection) {
-        applyPromptValue(currentValue + tokenText, {
+        applyEditorValue(currentValue + tokenText, {
           start: currentValue.length + tokenText.length,
           end: currentValue.length + tokenText.length
         })
@@ -1161,10 +1214,10 @@ export const WritingPlayground = () => {
       const start = selection.start
       const end = selection.end
       const { nextValue, cursor } = applyTextAtRange(currentValue, start, end, tokenText)
-      applyPromptValue(nextValue, { start: cursor, end: cursor })
+      applyEditorValue(nextValue, { start: cursor, end: cursor })
       message.success(t("option:writingPlayground.tokenInspectorInsertSuccess", "Token text inserted."))
     },
-    [applyPromptValue, editorText, getCurrentEditorAdapter, t]
+    [applyEditorValue, editorText, getCurrentEditorAdapter, t]
   )
 
   const insertTemplateBlock = React.useCallback(
@@ -1201,9 +1254,9 @@ export const WritingPlayground = () => {
       const nextValue =
         currentValue.slice(0, start) + block.prefix + selected + block.suffix + currentValue.slice(end)
       const cursor = start + block.prefix.length + selected.length
-      applyPromptValue(nextValue, { start: cursor, end: cursor })
+      applyEditorValue(nextValue, { start: cursor, end: cursor })
     },
-    [applyPromptValue, editorText, effectiveTemplate, getCurrentEditorAdapter, t]
+    [applyEditorValue, editorText, effectiveTemplate, getCurrentEditorAdapter, t]
   )
 
   // =====================================================================
@@ -1226,13 +1279,13 @@ export const WritingPlayground = () => {
 
   const applyHistoryText = React.useCallback(
     (nextText: string) => {
-      if (activeSessionDetail) {
-        applyPromptValue(nextText)
+      if (activeSessionDetail || isSceneBound) {
+        applyEditorValue(nextText)
       } else {
         setEditorText(nextText)
       }
     },
-    [activeSessionDetail, applyPromptValue]
+    [activeSessionDetail, applyEditorValue, isSceneBound]
   )
 
   const applyRevisionEditorText = React.useCallback(
@@ -1771,8 +1824,8 @@ export const WritingPlayground = () => {
     const nextValue =
       editorText.slice(0, match.start) + replacement + editorText.slice(match.end)
     const cursor = match.start + replacement.length
-    applyPromptValue(nextValue, { start: cursor, end: cursor })
-  }, [activeMatchIndex, applyPromptValue, editorText, matchCase, replaceQuery, searchMatches, searchQuery, useRegex])
+    applyEditorValue(nextValue, { start: cursor, end: cursor })
+  }, [activeMatchIndex, applyEditorValue, editorText, matchCase, replaceQuery, searchMatches, searchQuery, useRegex])
 
   const replaceAll = React.useCallback(() => {
     if (!searchQuery.trim()) return
@@ -1780,7 +1833,7 @@ export const WritingPlayground = () => {
       const regex = buildRegex(searchQuery, { global: true, matchCase })
       if (!regex) return
       const nextValue = editorText.replace(regex, replaceQuery)
-      applyPromptValue(nextValue)
+      applyEditorValue(nextValue)
       return
     }
     const source = matchCase ? editorText : editorText.toLowerCase()
@@ -1797,8 +1850,8 @@ export const WritingPlayground = () => {
       result += editorText.slice(idx, found) + replaceQuery
       idx = found + query.length
     }
-    applyPromptValue(result)
-  }, [applyPromptValue, editorText, matchCase, replaceQuery, searchQuery, useRegex])
+    applyEditorValue(result)
+  }, [applyEditorValue, editorText, matchCase, replaceQuery, searchQuery, useRegex])
 
   // =====================================================================
   // Menus (unique)
@@ -1874,9 +1927,9 @@ export const WritingPlayground = () => {
   // =====================================================================
   const handlePromptChange = React.useCallback(
     (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-      applyPromptValue(event.target.value)
+      applyEditorValue(event.target.value)
     },
-    [applyPromptValue]
+    [applyEditorValue]
   )
 
   const promptChunkData = React.useMemo(() => {
@@ -3033,7 +3086,7 @@ export const WritingPlayground = () => {
                           onContentChange={(json, plain) => {
                             editorTextChangedByTipTap.current = true
                             setTipTapContent(json)
-                            applyPromptValue(plain, { promptRich: json })
+                            applyEditorValue(plain, { promptRich: json })
                           }}
                           onAdapterReady={(adapter) => {
                             setActiveEditorAdapter(adapter)
@@ -3067,7 +3120,7 @@ export const WritingPlayground = () => {
                                 onContentChange={(json, plain) => {
                                   editorTextChangedByTipTap.current = true
                                   setTipTapContent(json)
-                                  applyPromptValue(plain, { promptRich: json })
+                                  applyEditorValue(plain, { promptRich: json })
                                 }}
                                 onAdapterReady={(adapter) => {
                                   setActiveEditorAdapter(adapter)
