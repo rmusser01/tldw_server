@@ -746,6 +746,7 @@ def test_mcp_unified_standalone_pyproject_matches_release_metadata() -> None:
         "mcp_unified.filesystem_locks",
         "mcp_unified.gateway",
         "mcp_unified.interfaces",
+        "mcp_unified.policy_grants",
         "mcp_unified.profiles",
         "mcp_unified.smoke",
         "mcp_unified.storage",
@@ -964,9 +965,11 @@ def test_mcp_unified_standalone_artifacts_include_package_docs(
     assert "mcp_unified/README.md" in wheel_members  # nosec B101
     assert "mcp_unified/USER_GUIDE.md" in wheel_members  # nosec B101
     assert "mcp_unified/filesystem_locks/__init__.py" in wheel_members  # nosec B101
+    assert "mcp_unified/policy_grants/__init__.py" in wheel_members  # nosec B101
     assert "src/mcp_unified/README.md" in sdist_members  # nosec B101
     assert "src/mcp_unified/USER_GUIDE.md" in sdist_members  # nosec B101
     assert "src/mcp_unified/filesystem_locks/__init__.py" in sdist_members  # nosec B101
+    assert "src/mcp_unified/policy_grants/__init__.py" in sdist_members  # nosec B101
 
 
 def _load_workflow(path: Path) -> dict[str, object]:
