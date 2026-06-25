@@ -239,6 +239,70 @@ def test_deliver_claim_review_notifications_now_returns_success_contract(monkeyp
     ]
 
 
+def test_deliver_claim_review_notifications_now_marks_only_pending_notifications(monkeypatch, tmp_path):
+    class _FakeDb:
+        def __init__(self) -> None:
+            self.marked_ids: list[int] = []
+
+        def get_claims_monitoring_settings(self, user_id):
+            assert user_id == "1"
+            return {
+                "enabled": True,
+                "slack_webhook_url": None,
+                "webhook_url": None,
+                "email_recipients": "review@example.com",
+            }
+
+        def get_claim_notifications_by_ids(self, notification_ids):
+            assert notification_ids == [2, 7]
+            return [
+                {
+                    "id": 2,
+                    "kind": "review_update",
+                    "payload_json": json.dumps({"claim_text": "Already delivered", "new_status": "approved"}),
+                    "created_at": "2026-03-16T00:00:00Z",
+                    "delivered_at": "2026-03-16T00:01:00Z",
+                },
+                {
+                    "id": 7,
+                    "kind": "review_update",
+                    "payload_json": json.dumps({"claim_text": "Needs delivery", "new_status": "approved"}),
+                    "created_at": "2026-03-17T00:00:00Z",
+                    "delivered_at": None,
+                },
+            ]
+
+        def mark_claim_notifications_delivered(self, notification_ids):
+            self.marked_ids.extend(notification_ids)
+            return len(notification_ids)
+
+    fake_db = _FakeDb()
+    email_calls: list[dict[str, object]] = []
+
+    @contextmanager
+    def _fake_managed_media_database(*_args, **_kwargs):
+        yield fake_db
+
+    def _fake_deliver_review_email_sync(**kwargs):
+        email_calls.append(kwargs)
+        return True
+
+    monkeypatch.setattr(claims_notifications, "managed_media_database", _fake_managed_media_database)
+    monkeypatch.setattr(claims_notifications, "_deliver_review_email_sync", _fake_deliver_review_email_sync)
+
+    result = claims_notifications.deliver_claim_review_notifications_now(
+        db_path=str(tmp_path / "claims-review.db"),
+        owner_user_id="1",
+        notification_ids=[7, 2],
+    )
+
+    assert result == {"outcome": "ok", "notification_ids": [2, 7], "delivered": 1}
+    assert fake_db.marked_ids == [7]
+    assert email_calls and email_calls[0]["subject"] == "Claims review notifications (1)"
+    assert "Needs delivery" in email_calls[0]["text_body"]
+    assert "Already delivered" not in email_calls[0]["text_body"]
+
+
 def test_deliver_claim_review_notifications_now_skips_already_delivered(monkeypatch, tmp_path):
     class _FakeDb:
         def get_claims_monitoring_settings(self, user_id):
@@ -284,6 +348,41 @@ def test_deliver_claim_review_notifications_now_skips_already_delivered(monkeypa
     )
 
     assert result == {"outcome": "skipped", "reason": "already_delivered", "notification_ids": [7]}
+
+
+def test_deliver_claim_review_notifications_now_ignores_invalid_notification_ids(monkeypatch, tmp_path):
+    managed_calls: list[dict[str, object]] = []
+
+    @contextmanager
+    def _fake_managed_media_database(*_args, **_kwargs):
+        managed_calls.append({"called": True})
+
+        class _FakeDb:
+            def get_claims_monitoring_settings(self, user_id):
+                assert user_id == "1"
+                return {}
+
+        yield _FakeDb()
+
+    monkeypatch.setattr(claims_notifications, "managed_media_database", _fake_managed_media_database)
+
+    result = claims_notifications.deliver_claim_review_notifications_now(
+        db_path=str(tmp_path / "claims-review.db"),
+        owner_user_id="1",
+        notification_ids=[True, False, "invalid", -2, 0, None],
+    )
+
+    assert result == {"outcome": "skipped", "reason": "no_notification_ids", "notification_ids": []}
+    assert managed_calls == []
+
+    result = claims_notifications.deliver_claim_review_notifications_now(
+        db_path=str(tmp_path / "claims-review.db"),
+        owner_user_id="1",
+        notification_ids=[True, "5", 5, 0, -1, "bad"],
+    )
+
+    assert result == {"outcome": "skipped", "reason": "no_channels", "notification_ids": [5]}
+    assert managed_calls == [{"called": True}]
 
 
 def test_dispatch_claim_review_notifications_uses_managed_media_database(monkeypatch, tmp_path):
@@ -366,7 +465,7 @@ def test_dispatch_claim_review_notifications_uses_managed_media_database(monkeyp
     assert managed_calls == [
         {
             "client_id": claims_notifications.settings.get("SERVER_CLIENT_ID", "SERVER_API_V1"),
-            "initialize": False,
+            "initialize": True,
             "kwargs": {
                 "db_path": db_path,
                 "suppress_init_exceptions": claims_notifications._CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS,

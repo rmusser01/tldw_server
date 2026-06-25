@@ -390,7 +390,12 @@ def _build_review_email_bodies(notifications: list[dict[str, Any]]) -> tuple[str
 def _normalize_notification_ids(notification_ids: list[int]) -> list[int]:
     normalized: set[int] = set()
     for raw_id in notification_ids:
-        notif_id = int(raw_id)
+        if isinstance(raw_id, bool):
+            continue
+        try:
+            notif_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
         if notif_id > 0:
             normalized.add(notif_id)
     return sorted(normalized)
@@ -401,6 +406,7 @@ def deliver_claim_review_notifications_now(
     db_path: str,
     owner_user_id: str,
     notification_ids: list[int],
+    initialize: bool = False,
 ) -> dict[str, Any]:
     normalized_ids = _normalize_notification_ids(notification_ids)
     if not normalized_ids:
@@ -409,7 +415,7 @@ def deliver_claim_review_notifications_now(
     with managed_media_database(
         client_id=str(settings.get("SERVER_CLIENT_ID", "SERVER_API_V1")),
         db_path=str(db_path),
-        initialize=False,
+        initialize=initialize,
         suppress_init_exceptions=_CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS,
         suppress_close_exceptions=_CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS,
     ) as db:
@@ -425,9 +431,24 @@ def deliver_claim_review_notifications_now(
         if not rows:
             return {"outcome": "skipped", "reason": "notifications_missing", "notification_ids": normalized_ids}
 
-        notifications = [_normalize_notification_row(row) for row in rows if not row.get("delivered_at")]
+        pending_id_set: set[int] = set()
+        notifications: list[dict[str, Any]] = []
+        for row in rows:
+            if row.get("delivered_at"):
+                continue
+            notifications.append(_normalize_notification_row(row))
+            raw_row_id = row.get("id")
+            if isinstance(raw_row_id, bool):
+                continue
+            try:
+                pending_id = int(raw_row_id)
+            except (TypeError, ValueError):
+                continue
+            if pending_id in normalized_ids:
+                pending_id_set.add(pending_id)
         if not notifications:
             return {"outcome": "skipped", "reason": "already_delivered", "notification_ids": normalized_ids}
+        pending_ids = [notification_id for notification_id in normalized_ids if notification_id in pending_id_set]
 
         payload = _build_review_digest_payload(user_id=str(owner_user_id), notifications=notifications)
         delivered = False
@@ -472,7 +493,7 @@ def deliver_claim_review_notifications_now(
         if not delivered:
             return {"outcome": "failed", "reason": "delivery_failed", "notification_ids": normalized_ids}
 
-        marked = db.mark_claim_notifications_delivered(normalized_ids)
+        marked = db.mark_claim_notifications_delivered(pending_ids)
         return {"outcome": "ok", "notification_ids": normalized_ids, "delivered": int(marked)}
 
 
@@ -491,6 +512,7 @@ def dispatch_claim_review_notifications(
                 db_path=db_path,
                 owner_user_id=owner_user_id,
                 notification_ids=notification_ids,
+                initialize=True,
             )
         except _CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug(f"Claims review notification delivery failed: {exc}")
