@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -15,6 +17,18 @@ def _entry(asset_id: str, digest: str = "sha256:a") -> dict[str, object]:
         "required": False,
         "owner_scope": "user:1",
     }
+
+
+def _resign(signed: dict[str, Any], signer: Any) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.manifest import _manifest_digest, _stable_json
+
+    manifest = signed["manifest"]
+    assert isinstance(manifest, dict)
+    payload = _stable_json(manifest)
+    signed["manifest_digest"] = _manifest_digest(payload)
+    signature = signed["signature"]
+    assert isinstance(signature, dict)
+    signature["value"] = signer.sign(payload)
 
 
 def test_manifest_roundtrip_verifies_signature() -> None:
@@ -44,6 +58,72 @@ def test_manifest_tamper_is_rejected() -> None:
     signer = HmacManifestSigner(key_id="test-key", secret=b"secret")
     signed = create_signed_manifest(sequence=1, entries=[_entry("skill:user:1/demo")], signer=signer)
     signed["manifest"]["entries"][0]["digest"] = "sha256:evil"
+
+    with pytest.raises(ManifestSignatureError):
+        verify_signed_manifest(signed, signer=signer)
+
+
+def test_manifest_rejects_unsupported_signature_algorithm() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.manifest import (
+        HmacManifestSigner,
+        ManifestSignatureError,
+        create_signed_manifest,
+        verify_signed_manifest,
+    )
+
+    signer = HmacManifestSigner(key_id="test-key", secret=b"secret")
+    signed = create_signed_manifest(sequence=1, entries=[_entry("skill:user:1/demo")], signer=signer)
+    signed["signature"]["alg"] = "none"
+
+    with pytest.raises(ManifestSignatureError):
+        verify_signed_manifest(signed, signer=signer)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "missing_schema_version",
+        "non_int_schema_version",
+        "bool_schema_version",
+        "missing_sequence",
+        "non_int_sequence",
+        "bool_sequence",
+        "missing_entries",
+        "none_entries",
+    ],
+)
+def test_manifest_rejects_malformed_payload_that_is_correctly_signed(case: str) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.manifest import (
+        HmacManifestSigner,
+        ManifestSignatureError,
+        create_signed_manifest,
+        verify_signed_manifest,
+    )
+
+    signer = HmacManifestSigner(key_id="test-key", secret=b"secret")
+    signed = create_signed_manifest(sequence=1, entries=[_entry("skill:user:1/demo")], signer=signer)
+    manifest = signed["manifest"]
+    assert isinstance(manifest, dict)
+
+    if case == "missing_schema_version":
+        del manifest["schema_version"]
+    elif case == "non_int_schema_version":
+        manifest["schema_version"] = "1"
+    elif case == "bool_schema_version":
+        manifest["schema_version"] = True
+    elif case == "missing_sequence":
+        del manifest["sequence"]
+    elif case == "non_int_sequence":
+        manifest["sequence"] = "1"
+    elif case == "bool_sequence":
+        manifest["sequence"] = True
+    elif case == "missing_entries":
+        del manifest["entries"]
+    elif case == "none_entries":
+        manifest["entries"] = None
+    else:
+        raise AssertionError(f"unhandled case: {case}")
+    _resign(signed, signer)
 
     with pytest.raises(ManifestSignatureError):
         verify_signed_manifest(signed, signer=signer)

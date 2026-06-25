@@ -13,6 +13,8 @@ from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
     _stable_json as _canonical_stable_json,
 )
 
+_SIGNATURE_ALGORITHM = "hmac-sha256"
+
 
 class ManifestSignatureError(ValueError):
     """Raised when a manifest signature cannot be verified."""
@@ -67,6 +69,24 @@ def _manifest_digest(payload: bytes) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
+def _require_int_field(manifest: Mapping[str, Any], field_name: str) -> int:
+    if field_name not in manifest:
+        raise ManifestSignatureError(f"manifest {field_name} is required")
+    value = manifest[field_name]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ManifestSignatureError(f"manifest {field_name} must be an integer")
+    return value
+
+
+def _require_entries(manifest: Mapping[str, Any]) -> list[Any]:
+    if "entries" not in manifest:
+        raise ManifestSignatureError("manifest entries are required")
+    entries = manifest["entries"]
+    if not isinstance(entries, list):
+        raise ManifestSignatureError("manifest entries must be a list")
+    return entries
+
+
 def create_signed_manifest(
     *,
     sequence: int,
@@ -84,7 +104,7 @@ def create_signed_manifest(
     return {
         "manifest": manifest,
         "signature": {
-            "alg": "hmac-sha256",
+            "alg": _SIGNATURE_ALGORITHM,
             "key_id": signer.key_id,
             "value": signer.sign(payload),
         },
@@ -102,6 +122,8 @@ def verify_signed_manifest(
     signature = signed_manifest.get("signature")
     if not isinstance(manifest, dict) or not isinstance(signature, dict):
         raise ManifestSignatureError("signed manifest is malformed")
+    if signature.get("alg") != _SIGNATURE_ALGORITHM:
+        raise ManifestSignatureError("manifest signature algorithm mismatch")
     if signature.get("key_id") != signer.key_id:
         raise ManifestSignatureError("manifest key id mismatch")
 
@@ -114,16 +136,15 @@ def verify_signed_manifest(
     if not isinstance(signature_value, str) or not signer.verify(payload, signature_value):
         raise ManifestSignatureError("manifest signature mismatch")
 
-    sequence = int(manifest.get("sequence") or 0)
+    _require_int_field(manifest, "schema_version")
+    sequence = _require_int_field(manifest, "sequence")
     if anti_rollback_anchor and (
         sequence < anti_rollback_anchor.sequence
         or (sequence == anti_rollback_anchor.sequence and expected_digest != anti_rollback_anchor.manifest_digest)
     ):
         raise ManifestRollbackError("manifest rollback detected")
 
-    entries = manifest.get("entries") or []
-    if not isinstance(entries, list):
-        raise ManifestSignatureError("manifest entries must be a list")
+    entries = _require_entries(manifest)
     return VerifiedManifest(
         sequence=sequence,
         manifest_digest=expected_digest,
