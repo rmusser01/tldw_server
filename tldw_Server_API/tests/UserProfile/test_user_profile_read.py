@@ -59,6 +59,20 @@ def test_user_profile_effective_config(auth_headers) -> None:
     assert not payload.get("section_errors", {}).get("effective_config")
 
 
+def test_user_profile_preferences_section_returns_success(auth_headers) -> None:
+    with TestClient(app) as client:
+        resp = client.get(
+            "/api/v1/users/me/profile",
+            params={"sections": "preferences"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200  # nosec B101 - pytest assertion
+        payload = resp.json()
+
+    assert isinstance(payload.get("preferences"), dict)  # nosec B101 - pytest assertion
+    assert not payload.get("section_errors", {}).get("preferences")  # nosec B101 - pytest assertion
+
+
 def test_admin_user_profile_default(auth_headers) -> None:
     with TestClient(app) as client:
         user_id = _get_user_id(client, auth_headers)
