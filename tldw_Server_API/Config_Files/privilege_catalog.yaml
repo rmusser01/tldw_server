@@ -85,6 +85,21 @@ scopes:
     ownership_predicates:
       - same_org
     doc_url: https://docs.example.com/privileges/any
+  - id: rpg
+    description: Generic token scope bucket for RPG campaign and session APIs.
+    resource_tags:
+      - rpg
+      - ttrpg
+    sensitivity_tier: moderate
+    rate_limit_class: standard
+    default_roles:
+      - admin
+      - analyst
+      - developer
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/rpg
   - id: rpg.rules.read
     description: View bundled RPG rules adapter metadata and bounded rule lookup results.
     resource_tags:

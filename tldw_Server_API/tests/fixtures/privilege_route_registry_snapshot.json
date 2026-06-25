@@ -3836,7 +3836,7 @@
           "type": "dependency"
         }
       ],
-      "description": "Returns available chat slash commands with their descriptions. When permission enforcement is enabled, commands requiring a permission are filtered by the current user's privileges in multi-user mode.",
+      "description": "Returns available chat slash commands with their descriptions. Commands requiring a permission are filtered by the current user's privileges.",
       "endpoint": "tldw_Server_API.app.api.v1.endpoints.chat.list_chat_commands",
       "methods": [
         "GET"
@@ -6084,7 +6084,7 @@
           "type": "dependency"
         }
       ],
-      "description": "Returns available chat slash commands with their descriptions. When permission enforcement is enabled, commands requiring a permission are filtered by the current user's privileges in multi-user mode.",
+      "description": "Returns available chat slash commands with their descriptions. Commands requiring a permission are filtered by the current user's privileges.",
       "endpoint": "tldw_Server_API.app.api.v1.endpoints.chat.list_chat_commands",
       "methods": [
         "GET"
@@ -7376,6 +7376,492 @@
       "tags": [
         "rag-unified",
         "rag-unified"
+      ]
+    }
+  ],
+  "rpg": [
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.create_campaign",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_campaign",
+      "path": "/api/v1/rpg/campaigns",
+      "rate_limit_resources": [
+        "rpg.campaigns.manage"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.create_session",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_session",
+      "path": "/api/v1/rpg/campaigns/{campaign_id}/sessions",
+      "rate_limit_resources": [
+        "rpg.sessions.manage"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.list_adapters",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_adapters",
+      "path": "/api/v1/rpg/rules/adapters",
+      "rate_limit_resources": [
+        "rpg.rules.read"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.get_adapter",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_adapter",
+      "path": "/api/v1/rpg/rules/adapters/{adapter_key}",
+      "rate_limit_resources": [
+        "rpg.rules.read"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.record_events",
+      "methods": [
+        "POST"
+      ],
+      "name": "record_events",
+      "path": "/api/v1/rpg/sessions/{session_id}/events",
+      "rate_limit_resources": [
+        "rpg.sessions.manage"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.apply_proposal",
+      "methods": [
+        "POST"
+      ],
+      "name": "apply_proposal",
+      "path": "/api/v1/rpg/sessions/{session_id}/proposals/{proposal_id}/apply",
+      "rate_limit_resources": [
+        "rpg.proposals.review"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.reject_proposal",
+      "methods": [
+        "POST"
+      ],
+      "name": "reject_proposal",
+      "path": "/api/v1/rpg/sessions/{session_id}/proposals/{proposal_id}/reject",
+      "rate_limit_resources": [
+        "rpg.proposals.review"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    }
+  ],
+  "rpg.campaigns.manage": [
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.create_campaign",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_campaign",
+      "path": "/api/v1/rpg/campaigns",
+      "rate_limit_resources": [
+        "rpg.campaigns.manage"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    }
+  ],
+  "rpg.proposals.review": [
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.apply_proposal",
+      "methods": [
+        "POST"
+      ],
+      "name": "apply_proposal",
+      "path": "/api/v1/rpg/sessions/{session_id}/proposals/{proposal_id}/apply",
+      "rate_limit_resources": [
+        "rpg.proposals.review"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.reject_proposal",
+      "methods": [
+        "POST"
+      ],
+      "name": "reject_proposal",
+      "path": "/api/v1/rpg/sessions/{session_id}/proposals/{proposal_id}/reject",
+      "rate_limit_resources": [
+        "rpg.proposals.review"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    }
+  ],
+  "rpg.rules.read": [
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.list_adapters",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_adapters",
+      "path": "/api/v1/rpg/rules/adapters",
+      "rate_limit_resources": [
+        "rpg.rules.read"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.get_adapter",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_adapter",
+      "path": "/api/v1/rpg/rules/adapters/{adapter_key}",
+      "rate_limit_resources": [
+        "rpg.rules.read"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    }
+  ],
+  "rpg.sessions.manage": [
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.create_session",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_session",
+      "path": "/api/v1/rpg/campaigns/{campaign_id}/sessions",
+      "rate_limit_resources": [
+        "rpg.sessions.manage"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.record_events",
+      "methods": [
+        "POST"
+      ],
+      "name": "record_events",
+      "path": "/api/v1/rpg/sessions/{session_id}/events",
+      "rate_limit_resources": [
+        "rpg.sessions.manage"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
       ]
     }
   ],

@@ -2207,13 +2207,13 @@ git commit -m "feat: expose RPG REST runtime"
 - Modify: `tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json`
 - Test: `tldw_Server_API/tests/PrivilegeCatalog/test_endpoint_scope_catalog_sync.py`
 
-- [ ] **Step 1: Run privilege sync tests before catalog edits**
+- [x] **Step 1: Run privilege sync tests before catalog edits**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrivilegeCatalog/test_endpoint_scope_catalog_sync.py -v`
 
-Expected: FAIL with missing `rpg.*` endpoint IDs after Task 6 is complete.
+Original expectation: FAIL with missing `rpg.*` endpoint IDs after Task 6 is complete. Actual follow-up status: Task 6 already added the concrete RPG endpoint scope entries, so this step served as a baseline check before adding the generic `rpg` token scope and regenerating the route snapshot.
 
-- [ ] **Step 2: Add RPG scopes and endpoint IDs to the catalog**
+- [x] **Step 2: Add RPG scopes and endpoint IDs to the catalog**
 
 Add these entries under `scopes:` in `tldw_Server_API/Config_Files/privilege_catalog.yaml`:
 
@@ -2345,19 +2345,19 @@ Add these entries under `scopes:` in `tldw_Server_API/Config_Files/privilege_cat
     doc_url: https://docs.example.com/privileges/rpg-snapshots-admin
 ```
 
-- [ ] **Step 3: Regenerate route registry snapshot**
+- [x] **Step 3: Regenerate route registry snapshot**
 
 Run: `source .venv/bin/activate && python Helper_Scripts/update_privilege_registry_snapshot.py`
 
 Expected: `tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json` is updated and includes RPG routes with their endpoint IDs.
 
-- [ ] **Step 4: Run privilege catalog tests**
+- [x] **Step 4: Run privilege catalog tests**
 
 Run: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrivilegeCatalog/test_endpoint_scope_catalog_sync.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/Config_Files/privilege_catalog.yaml tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json
