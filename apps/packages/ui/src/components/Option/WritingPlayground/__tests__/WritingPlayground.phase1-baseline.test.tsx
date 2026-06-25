@@ -360,6 +360,37 @@ const seedWritingSession = (
   )
 }
 
+const seedManuscriptStructure = () => {
+  mockState.queryData.set(
+    mockState.queryKey(["manuscript-structure", "project-1"]),
+    {
+      parts: [],
+      unassigned_chapters: [
+        {
+          id: "chapter-1",
+          title: "Chapter 1",
+          word_count: 4,
+          version: 1,
+          scenes: [
+            {
+              id: "scene-1",
+              title: "Scene A",
+              word_count: 2,
+              version: 3
+            },
+            {
+              id: "scene-2",
+              title: "Scene B",
+              word_count: 2,
+              version: 1
+            }
+          ]
+        }
+      ]
+    }
+  )
+}
+
 const getEditor = () =>
   screen.getByPlaceholderText("Start writing your prompt...") as HTMLTextAreaElement
 
@@ -861,6 +892,138 @@ describe("WritingPlayground phase1 baseline", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /apply/i }))
     expect(getEditor()).toHaveValue("Intro. The old sentence. Outro.")
+  })
+
+  it("blocks manuscript node switching while generation is pending", async () => {
+    mockState.storageValues.set("selectedModel", "mock-model")
+    let resolveResponse: (value: string) => void = () => {}
+    mockState.sendResponses.push(
+      new Promise<string>((resolve) => {
+        resolveResponse = resolve
+      })
+    )
+    seedWritingSession({
+      prompt: "Session draft.",
+      settings: { token_streaming: false }
+    })
+    seedManuscriptStructure()
+    useWritingPlaygroundStore.setState({
+      activeProjectId: "project-1",
+      activeNodeId: "scene-1",
+      activeNodeType: "scene"
+    })
+    mockState.queryData.set(mockState.queryKey(["manuscript-scene", "scene-1"]), {
+      id: "scene-1",
+      chapter_id: "chapter-1",
+      project_id: "project-1",
+      title: "Scene A",
+      sort_order: 1,
+      content: sceneRichContent("Scene A text"),
+      content_plain: "Scene A text",
+      synopsis: null,
+      word_count: 3,
+      pov_character_id: null,
+      status: "draft",
+      created_at: "2026-06-23T12:00:00Z",
+      last_modified: "2026-06-23T12:00:00Z",
+      deleted: false,
+      client_id: "test-client",
+      version: 3
+    })
+
+    render(<WritingPlayground />)
+
+    await waitFor(() => {
+      expect(getEditor()).toHaveValue("Scene A text")
+    })
+    fireEvent.click(screen.getByText("Manuscript"))
+    fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+
+    await waitFor(() => {
+      expect(mockState.sendCalls).toHaveLength(1)
+    })
+
+    fireEvent.click(screen.getByText("Scene B (2w)"))
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(useWritingPlaygroundStore.getState().activeNodeId).toBe("scene-1")
+    expect(getEditor()).toHaveValue("Scene A text")
+
+    await act(async () => {
+      resolveResponse("Generated ending.")
+    })
+    await waitFor(() => {
+      expect(getEditor()).toHaveValue("Scene A textGenerated ending.")
+    })
+  })
+
+  it("blocks manuscript node switching while a revision request is pending", async () => {
+    mockState.storageValues.set("selectedModel", "mock-model")
+    let resolveResponse: (value: string) => void = () => {}
+    mockState.sendResponses.push(
+      new Promise<string>((resolve) => {
+        resolveResponse = resolve
+      })
+    )
+    seedWritingSession({ prompt: "Session draft." })
+    seedManuscriptStructure()
+    useWritingPlaygroundStore.setState({
+      activeProjectId: "project-1",
+      activeNodeId: "scene-1",
+      activeNodeType: "scene"
+    })
+    mockState.queryData.set(mockState.queryKey(["manuscript-scene", "scene-1"]), {
+      id: "scene-1",
+      chapter_id: "chapter-1",
+      project_id: "project-1",
+      title: "Scene A",
+      sort_order: 1,
+      content: sceneRichContent("Scene A sentence."),
+      content_plain: "Scene A sentence.",
+      synopsis: null,
+      word_count: 3,
+      pov_character_id: null,
+      status: "draft",
+      created_at: "2026-06-23T12:00:00Z",
+      last_modified: "2026-06-23T12:00:00Z",
+      deleted: false,
+      client_id: "test-client",
+      version: 3
+    })
+
+    render(<WritingPlayground />)
+
+    await waitFor(() => {
+      expect(getEditor()).toHaveValue("Scene A sentence.")
+    })
+    selectEditorText(getEditor(), "Scene A sentence.")
+    fireEvent.click(screen.getByText("Manuscript"))
+    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
+
+    await waitFor(() => {
+      expect(mockState.sendCalls).toHaveLength(1)
+    })
+
+    fireEvent.click(screen.getByText("Scene B (2w)"))
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(useWritingPlaygroundStore.getState().activeNodeId).toBe("scene-1")
+    expect(getEditor()).toHaveValue("Scene A sentence.")
+
+    await act(async () => {
+      resolveResponse(structuredReplacement("Scene A replacement."))
+    })
+    await waitFor(() => {
+      expect(screen.getByText("Scene A replacement.")).toBeInTheDocument()
+    })
   })
 
   it("initializes the workflow preset from the active session payload", async () => {

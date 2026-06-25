@@ -2085,6 +2085,17 @@ export const WritingPlayground = () => {
       nodeId: string | null
       nodeType: "part" | "chapter" | "scene" | null
     }) => {
+      const isSameSelection =
+        nodeId === activeNodeId && nodeType === activeNodeType
+      if (!isSameSelection && (isGenerating || isRevisionGenerating)) {
+        message.info(
+          t(
+            "option:writingPlayground.manuscriptSwitchBusy",
+            "Wait for the current writing request to finish before switching manuscript nodes."
+          )
+        )
+        return false
+      }
       if (
         !isSceneBound ||
         !isSceneDirty
@@ -2139,7 +2150,11 @@ export const WritingPlayground = () => {
       })
     },
     [
+      activeNodeId,
+      activeNodeType,
       activeSceneId,
+      isGenerating,
+      isRevisionGenerating,
       isSceneBound,
       isSceneDirty,
       saveActiveScene,
