@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from typing import Any, Mapping
 
 from tldw_Server_API.app.core.config import settings
@@ -24,20 +25,33 @@ def _settings_map(settings_obj: Mapping[str, Any] | None = None) -> Mapping[str,
     return settings_obj if settings_obj is not None else settings
 
 
+def _setting_value(
+    key: str,
+    default: Any = None,
+    settings_obj: Mapping[str, Any] | None = None,
+) -> Any:
+    if settings_obj is not None:
+        return settings_obj.get(key, default)
+    env_value = os.getenv(key)
+    if env_value is not None:
+        return env_value
+    return _settings_map().get(key, default)
+
+
 def _truthy(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def claims_jobs_enabled(settings_obj: Mapping[str, Any] | None = None) -> bool:
-    return _truthy(_settings_map(settings_obj).get("CLAIMS_JOBS_ENABLED", False))
+    return _truthy(_setting_value("CLAIMS_JOBS_ENABLED", False, settings_obj))
 
 
 def claims_jobs_worker_enabled(settings_obj: Mapping[str, Any] | None = None) -> bool:
-    return _truthy(_settings_map(settings_obj).get("CLAIMS_JOBS_WORKER_ENABLED", False))
+    return _truthy(_setting_value("CLAIMS_JOBS_WORKER_ENABLED", False, settings_obj))
 
 
 def claims_jobs_queue(settings_obj: Mapping[str, Any] | None = None) -> str:
-    queue = str(_settings_map(settings_obj).get("CLAIMS_JOBS_QUEUE", CLAIMS_JOBS_DEFAULT_QUEUE)).strip()
+    queue = str(_setting_value("CLAIMS_JOBS_QUEUE", CLAIMS_JOBS_DEFAULT_QUEUE, settings_obj)).strip()
     return queue or CLAIMS_JOBS_DEFAULT_QUEUE
 
 
@@ -46,7 +60,8 @@ def _max_retries(
     default: int = 3,
     settings_obj: Mapping[str, Any] | None = None,
 ) -> int:
-    return coerce_int(_settings_map(settings_obj).get(key), default)
+    retries = coerce_int(_setting_value(key, None, settings_obj), default)
+    return int(default) if retries < 0 else retries
 
 
 def _manager(job_manager: JobManager | None = None) -> JobManager:
@@ -69,6 +84,7 @@ def enqueue_claims_rebuild_media(
     *,
     media_id: int,
     owner_user_id: str,
+    idempotency_scope: str | None = None,
     job_manager: JobManager | None = None,
     settings_obj: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -80,6 +96,8 @@ def enqueue_claims_rebuild_media(
         }
     )
     manager = _manager(job_manager)
+    scope = str(idempotency_scope).strip() if idempotency_scope is not None else ""
+    idempotency_key = f"claims:rebuild:{payload['owner_user_id']}:{payload['media_id']}:{scope}" if scope else None
     created = manager.create_job(
         domain=CLAIMS_JOBS_DOMAIN,
         queue=claims_jobs_queue(settings_obj),
@@ -88,7 +106,7 @@ def enqueue_claims_rebuild_media(
         owner_user_id=payload["owner_user_id"],
         priority=5,
         max_retries=_max_retries("CLAIMS_JOBS_MAX_RETRIES_REBUILD", 3, settings_obj),
-        idempotency_key=f"claims:rebuild:{payload['owner_user_id']}:{payload['media_id']}",
+        idempotency_key=idempotency_key,
     )
     return _refresh(manager, created)
 
