@@ -164,6 +164,20 @@ def test_review_payload_reports_missing_owner_before_invalid_notification_ids() 
     assert excinfo.value.failure_code == "claims_missing_owner"  # nosec B101
 
 
+def test_review_payload_reports_missing_owner_before_unknown_keys() -> None:
+    with pytest.raises(contracts.ClaimsJobError) as excinfo:
+        contracts.validate_review_notification_payload(
+            {
+                "version": 1,
+                "owner_user_id": "0",
+                "notification_ids": [3],
+                "body": "x",
+            }
+        )
+
+    assert excinfo.value.failure_code == "claims_missing_owner"  # nosec B101
+
+
 def test_alert_payload_rejects_unsupported_channel() -> None:
     with pytest.raises(contracts.ClaimsJobError) as excinfo:
         contracts.validate_alert_delivery_payload(
@@ -188,6 +202,22 @@ def test_alert_payload_reports_missing_owner_before_unsupported_channel() -> Non
                 "event_id": 55,
                 "alert_id": 9,
                 "channel": "email",
+            }
+        )
+
+    assert excinfo.value.failure_code == "claims_missing_owner"  # nosec B101
+
+
+def test_alert_payload_reports_missing_owner_before_unknown_keys() -> None:
+    with pytest.raises(contracts.ClaimsJobError) as excinfo:
+        contracts.validate_alert_delivery_payload(
+            {
+                "version": 1,
+                "owner_user_id": "0",
+                "event_id": 55,
+                "alert_id": 9,
+                "channel": "webhook",
+                "body": "x",
             }
         )
 

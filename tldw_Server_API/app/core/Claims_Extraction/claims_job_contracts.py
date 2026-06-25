@@ -164,10 +164,12 @@ def _version(payload: dict[str, Any]) -> int:
 def validate_rebuild_media_payload(value: Any) -> dict[str, Any]:
     payload = _normalize_dict(value)
     _reject_sensitive_keys(payload)
+    version = _version(payload)
+    owner_user_id = _owner_user_id(payload.get("owner_user_id"))
     _reject_unknown_keys(payload, CLAIMS_REBUILD_MEDIA_PAYLOAD_KEYS)
     return {
-        "version": _version(payload),
-        "owner_user_id": _owner_user_id(payload.get("owner_user_id")),
+        "version": version,
+        "owner_user_id": owner_user_id,
         "media_id": _positive_int(payload.get("media_id"), "media_id"),
     }
 
@@ -175,9 +177,9 @@ def validate_rebuild_media_payload(value: Any) -> dict[str, Any]:
 def validate_review_notification_payload(value: Any) -> dict[str, Any]:
     payload = _normalize_dict(value)
     _reject_sensitive_keys(payload)
-    _reject_unknown_keys(payload, CLAIMS_REVIEW_NOTIFICATION_PAYLOAD_KEYS)
     version = _version(payload)
     owner_user_id = _owner_user_id(payload.get("owner_user_id"))
+    _reject_unknown_keys(payload, CLAIMS_REVIEW_NOTIFICATION_PAYLOAD_KEYS)
     raw_ids = payload.get("notification_ids")
     if not isinstance(raw_ids, list):
         raise ClaimsJobError(
@@ -202,9 +204,9 @@ def validate_review_notification_payload(value: Any) -> dict[str, Any]:
 def validate_alert_delivery_payload(value: Any) -> dict[str, Any]:
     payload = _normalize_dict(value)
     _reject_sensitive_keys(payload)
-    _reject_unknown_keys(payload, CLAIMS_ALERT_DELIVERY_PAYLOAD_KEYS)
     version = _version(payload)
     owner_user_id = _owner_user_id(payload.get("owner_user_id"))
+    _reject_unknown_keys(payload, CLAIMS_ALERT_DELIVERY_PAYLOAD_KEYS)
     channel = str(payload.get("channel") or "").strip().lower()
     if channel not in CLAIMS_ALERT_JOB_CHANNELS:
         raise ClaimsJobError(
