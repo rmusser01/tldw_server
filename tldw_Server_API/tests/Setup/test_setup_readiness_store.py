@@ -7,6 +7,7 @@ import pytest
 
 from tldw_Server_API.app.core.Setup import readiness_store
 from tldw_Server_API.app.core.Setup.readiness_store import SetupReadinessStore
+from tldw_Server_API.app.core.exceptions import SetupLockTimeoutError
 
 
 def test_readiness_store_defaults_to_not_started(tmp_path):
@@ -101,3 +102,14 @@ def test_readiness_store_update_preserves_concurrent_fields(tmp_path, monkeypatc
     readiness = store.load()
     assert readiness["selected_profile_id"] == "local_performance"
     assert readiness["operation_id"] == "op-1"
+
+
+def test_readiness_store_lock_timeout_uses_setup_exception(tmp_path, monkeypatch):
+    readiness_path = tmp_path / "setup_readiness.json"
+    readiness_path.with_name("setup_readiness.json.lock").write_text("locked", encoding="utf-8")
+    monkeypatch.setattr(readiness_store, "_READINESS_LOCK_TIMEOUT_SECONDS", 0.0)
+    monkeypatch.setattr(readiness_store, "_READINESS_LOCK_STALE_SECONDS", 300.0)
+
+    with pytest.raises(SetupLockTimeoutError, match="setup readiness lock"):
+        with readiness_store._readiness_file_lock(readiness_path):
+            pytest.fail("lock should not be acquired")

@@ -7,9 +7,12 @@ file handling logic across routers or UI layers.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
+import tempfile
+import time
 from configparser import ConfigParser
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -19,6 +22,7 @@ from typing import Any, Callable
 from loguru import logger
 
 from tldw_Server_API.app.core.config_paths import resolve_config_file, resolve_config_root
+from tldw_Server_API.app.core.exceptions import SetupLockTimeoutError
 from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.core.Utils.Utils import get_project_root
 
@@ -63,6 +67,8 @@ _OPTIONAL_EMPTY_VALUE_FIELDS = {
 _provider_catalog_update_fields: set[tuple[str, str]] | None = None
 
 _remote_access_hook: Callable[[bool], None] | None = None
+_CONFIG_LOCK_TIMEOUT_SECONDS = 10.0
+_CONFIG_LOCK_STALE_SECONDS = 300.0
 
 
 def register_remote_access_hook(callback: Callable[[bool], None]) -> None:
@@ -576,43 +582,106 @@ def update_config(updates: dict[str, dict[str, Any]], *, create_backup: bool = T
     if not updates:
         raise ValueError("No updates provided for configuration")
 
-    parser = _load_config_parser()
     config_path = get_config_file_path()
+    remote_access_value: bool | None = None
 
-    # Validate sections/keys and types against existing config
-    _validate_updates(parser, updates)
+    with _config_file_lock(config_path):
+        parser = _load_config_parser()
 
-    # Stage updates into the in-memory parser so that downstream hooks can read booleans
-    for section, items in updates.items():
-        if not parser.has_section(section):
-            parser.add_section(section)
-        for key, value in items.items():
-            parser.set(section, key, _coerce_to_string(value))
+        # Validate sections/keys and types against existing config
+        _validate_updates(parser, updates)
 
-    backup_path = None
-    if create_backup:
-        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-        backup_path = config_path.with_suffix(config_path.suffix + f".pre-setup-{timestamp}.bak")
-        shutil.copy2(config_path, backup_path)
-        logger.info(f"Created backup of config.txt at {backup_path}")
+        # Stage updates into the in-memory parser so that downstream hooks can read booleans
+        for section, items in updates.items():
+            if not parser.has_section(section):
+                parser.add_section(section)
+            for key, value in items.items():
+                parser.set(section, key, _coerce_to_string(value))
 
-    # Write changes back while preserving comments and unrelated formatting
-    _write_config_preserving_comments(config_path, updates)
+        backup_path = None
+        if create_backup:
+            timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+            backup_path = config_path.with_suffix(config_path.suffix + f".pre-setup-{timestamp}.bak")
+            shutil.copy2(config_path, backup_path)
+            logger.info(f"Created backup of config.txt at {backup_path}")
+
+        # Write changes back while preserving comments and unrelated formatting
+        _write_config_preserving_comments(config_path, updates)
+
+        if (
+            _remote_access_hook
+            and SETUP_SECTION in updates
+            and REMOTE_ACCESS_FIELD in updates[SETUP_SECTION]
+        ):
+            remote_access_value = parser.getboolean(SETUP_SECTION, REMOTE_ACCESS_FIELD, fallback=False)
 
     logger.info("Configuration file updated via setup manager (comments preserved)")
 
-    if (
-        _remote_access_hook
-        and SETUP_SECTION in updates
-        and REMOTE_ACCESS_FIELD in updates[SETUP_SECTION]
-    ):
+    if remote_access_value is not None:
         try:
-            new_value = parser.getboolean(SETUP_SECTION, REMOTE_ACCESS_FIELD, fallback=False)
-            _remote_access_hook(new_value)
+            _remote_access_hook(remote_access_value)
         except Exception:  # noqa: BLE001
             logger.exception("Failed to propagate remote setup access change")
 
     return backup_path
+
+
+@contextlib.contextmanager
+def _config_file_lock(config_path: Path):
+    lock_path = config_path.with_name(f"{config_path.name}.lock")
+    deadline = time.monotonic() + _CONFIG_LOCK_TIMEOUT_SECONDS
+    fd: int | None = None
+    while fd is None:
+        try:
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            os.write(fd, str(os.getpid()).encode("ascii", errors="ignore"))
+        except FileExistsError:
+            with contextlib.suppress(FileNotFoundError):
+                if time.time() - lock_path.stat().st_mtime > _CONFIG_LOCK_STALE_SECONDS:
+                    lock_path.unlink()
+                    continue
+            if time.monotonic() >= deadline:
+                raise SetupLockTimeoutError(f"Timed out waiting for setup config lock: {lock_path}")
+            time.sleep(0.05)
+    try:
+        yield
+    finally:
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        with contextlib.suppress(FileNotFoundError):
+            lock_path.unlink()
+
+
+def _write_text_atomically(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: str | None = None
+    existing_mode: int | None = None
+    with contextlib.suppress(FileNotFoundError):
+        existing_mode = path.stat().st_mode
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            newline="",
+            dir=path.parent,
+            prefix=f"{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+            tmp_path = handle.name
+        if existing_mode is not None:
+            os.chmod(tmp_path, existing_mode & 0o7777)
+        os.replace(tmp_path, path)
+    except Exception:
+        if tmp_path:
+            with contextlib.suppress(FileNotFoundError):
+                Path(tmp_path).unlink()
+        raise
 
 
 def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict[str, Any]]) -> None:
@@ -707,8 +776,7 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
             for key, value in items.items():
                 out_lines.append(f"{key} = {value}{default_line_ending}")
 
-    with config_path.open("w", encoding="utf-8", newline="") as handle:
-        handle.write("".join(out_lines))
+    _write_text_atomically(config_path, "".join(out_lines))
 
 
 def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) -> None:

@@ -110,6 +110,8 @@ def _merge_install_plan(target: dict[str, Any], source: InstallPlan) -> None:
     for key in ("huggingface", "custom", "onnx"):
         for model in source_embeddings.get(key, []):
             _append_unique(target["embeddings"][key], model)
+    if source_embeddings.get("trusted_custom_model_acknowledged"):
+        target["embeddings"]["trusted_custom_model_acknowledged"] = True
 
 
 def _model_dump(model: Any) -> dict[str, Any]:
@@ -264,6 +266,8 @@ def _preview_embeddings_lane(
     if provider == "huggingface":
         target = "custom" if _truthy(lane.get("trusted_custom_model")) else "huggingface"
         _append_unique(install_plan["embeddings"][target], model)
+        if target == "custom":
+            install_plan["embeddings"]["trusted_custom_model_acknowledged"] = True
     elif provider == "onnx":
         _append_unique(install_plan["embeddings"]["onnx"], model)
 

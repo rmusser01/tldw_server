@@ -1,5 +1,7 @@
 import pytest
 import sys
+import threading
+import time
 
 from tldw_Server_API.app.core.Setup import install_manager
 from tldw_Server_API.app.core.Setup import audio_readiness_store
@@ -166,6 +168,42 @@ def test_audio_readiness_save_keeps_existing_file_when_atomic_replace_fails(tmp_
 
     assert readiness_path.read_text(encoding="utf-8") == initial_contents
     assert list(tmp_path.glob("audio_readiness.json.*.tmp")) == []
+
+
+def test_audio_readiness_update_preserves_concurrent_fields(tmp_path, monkeypatch):
+    readiness_path = tmp_path / "audio_readiness.json"
+    store = AudioReadinessStore(readiness_path)
+    first_load_started = threading.Event()
+    original_load = store.load
+    load_calls = 0
+
+    def slow_first_load():
+        nonlocal load_calls
+        load_calls += 1
+        data = original_load()
+        if load_calls == 1:
+            first_load_started.set()
+            time.sleep(0.05)
+        return data
+
+    monkeypatch.setattr(store, "load", slow_first_load)
+
+    first = threading.Thread(target=lambda: store.update(selected_bundle_id="cpu_local"))
+    second = threading.Thread(
+        target=lambda: store.update(imported_packs=[{"pack_path": "audio_packs/custom.json"}])
+    )
+
+    first.start()
+    assert first_load_started.wait(timeout=1)
+    second.start()
+    first.join(timeout=1)
+    second.join(timeout=1)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    readiness = store.load()
+    assert readiness["selected_bundle_id"] == "cpu_local"
+    assert readiness["imported_packs"] == [{"pack_path": "audio_packs/custom.json"}]
 
 
 def test_resolve_readiness_file_candidate_failure_log_is_sanitized(tmp_path, monkeypatch):
