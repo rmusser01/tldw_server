@@ -686,7 +686,7 @@ def store_claims(
                             owner_user_id=str(owner_user_id),
                             notification_ids=notification_ids,
                         )
-                    except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
+                    except _CLAIMS_STORE_EXCEPTIONS as exc:
                         logger.debug("Failed to enqueue claims review assignment notification job: {}", exc)
                 else:
                     from tldw_Server_API.app.core.Claims_Extraction.claims_notifications import (

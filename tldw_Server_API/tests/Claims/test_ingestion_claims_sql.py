@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import tempfile
 
 from tldw_Server_API.app.core.Chunking import chunk_for_embedding
@@ -137,7 +138,7 @@ def test_store_claims_review_assignment_notifications_use_jobs(monkeypatch):
     assert enqueued == [{"owner_user_id": "1", "notification_ids": [101, 102]}]
 
 
-def test_store_claims_review_assignment_job_enqueue_failure_does_not_rollback(monkeypatch):
+def test_store_claims_review_assignment_job_sqlite_enqueue_failure_does_not_rollback(monkeypatch):
     from tldw_Server_API.app.core.Claims_Extraction import claims_jobs, claims_notifications
 
     temp_dir = tempfile.mkdtemp(prefix="claims_assignment_jobs_failure_")
@@ -154,7 +155,7 @@ def test_store_claims_review_assignment_job_enqueue_failure_does_not_rollback(mo
     monkeypatch.setattr(
         claims_jobs,
         "enqueue_claims_review_notification",
-        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("jobs unavailable")),
+        lambda **_kwargs: (_ for _ in ()).throw(sqlite3.Error("jobs database unavailable")),
     )
     monkeypatch.setattr(
         claims_notifications,
