@@ -16,6 +16,9 @@ from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
 _SIGNATURE_ALGORITHM = "hmac-sha256"
 _SUPPORTED_SCHEMA_VERSION = 1
 _BASE64URL_SIGNATURE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+_REQUIRED_ENTRY_STRING_FIELDS = ("asset_id", "source_type", "digest", "display_name", "owner_scope")
+_NON_EMPTY_ENTRY_STRING_FIELDS = frozenset(("asset_id", "source_type", "digest", "display_name"))
+_REQUIRED_ENTRY_BOOL_FIELDS = ("executable", "required")
 
 
 class ManifestSignatureError(ValueError):
@@ -91,6 +94,48 @@ def _require_int_field(manifest: Mapping[str, Any], field_name: str) -> int:
     return value
 
 
+def _require_entry_string(entry: Mapping[str, Any], field_name: str) -> None:
+    if field_name not in entry:
+        raise ManifestSignatureError(f"manifest entry {field_name} is required")
+    value = entry[field_name]
+    if not isinstance(value, str):
+        raise ManifestSignatureError(f"manifest entry {field_name} must be a string")
+    if field_name in _NON_EMPTY_ENTRY_STRING_FIELDS and not value:
+        raise ManifestSignatureError(f"manifest entry {field_name} must not be empty")
+
+
+def _require_entry_bool(entry: Mapping[str, Any], field_name: str) -> None:
+    if field_name not in entry:
+        raise ManifestSignatureError(f"manifest entry {field_name} is required")
+    if not isinstance(entry[field_name], bool):
+        raise ManifestSignatureError(f"manifest entry {field_name} must be a boolean")
+
+
+def _validate_optional_entry_fields(entry: Mapping[str, Any]) -> None:
+    if "path" in entry and entry["path"] is not None and not isinstance(entry["path"], str):
+        raise ManifestSignatureError("manifest entry path must be a string or null")
+    if "metadata" in entry:
+        metadata = entry["metadata"]
+        if not isinstance(metadata, Mapping):
+            raise ManifestSignatureError("manifest entry metadata must be an object")
+        for key in metadata:
+            if not isinstance(key, str):
+                raise ManifestSignatureError("manifest entry metadata keys must be strings")
+        try:
+            _stable_json({"metadata": metadata})
+        except (TypeError, ValueError) as exc:
+            raise ManifestSignatureError("manifest entry metadata is not canonicalizable") from exc
+
+
+def _validate_entry_schema(entry: Mapping[str, Any]) -> dict[str, Any]:
+    for field_name in _REQUIRED_ENTRY_STRING_FIELDS:
+        _require_entry_string(entry, field_name)
+    for field_name in _REQUIRED_ENTRY_BOOL_FIELDS:
+        _require_entry_bool(entry, field_name)
+    _validate_optional_entry_fields(entry)
+    return dict(entry)
+
+
 def _require_entries(manifest: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
     if "entries" not in manifest:
         raise ManifestSignatureError("manifest entries are required")
@@ -104,7 +149,7 @@ def _require_entries(manifest: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
         for key in entry:
             if not isinstance(key, str):
                 raise ManifestSignatureError("manifest entry keys must be strings")
-        verified_entries.append(dict(entry))
+        verified_entries.append(_validate_entry_schema(entry))
     return tuple(verified_entries)
 
 

@@ -221,6 +221,54 @@ def test_manifest_rejects_malformed_entry_that_is_correctly_signed(entry: object
         verify_signed_manifest(signed, signer=signer)
 
 
+@pytest.mark.parametrize(
+    "case",
+    [
+        "missing_digest",
+        "missing_source_type",
+        "asset_id_none",
+        "executable_string",
+        "empty_asset_id",
+        "metadata_scalar",
+    ],
+)
+def test_manifest_rejects_malformed_entry_schema_that_is_correctly_signed(case: str) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.manifest import (
+        HmacManifestSigner,
+        ManifestSignatureError,
+        create_signed_manifest,
+        verify_signed_manifest,
+    )
+
+    signer = HmacManifestSigner(key_id="test-key", secret=b"secret")
+    signed = create_signed_manifest(sequence=1, entries=[_entry("skill:user:1/demo")], signer=signer)
+    manifest = signed["manifest"]
+    assert isinstance(manifest, dict)
+    entries = manifest["entries"]
+    assert isinstance(entries, list)
+    entry = entries[0]
+    assert isinstance(entry, dict)
+
+    if case == "missing_digest":
+        del entry["digest"]
+    elif case == "missing_source_type":
+        del entry["source_type"]
+    elif case == "asset_id_none":
+        entry["asset_id"] = None
+    elif case == "executable_string":
+        entry["executable"] = "true"
+    elif case == "empty_asset_id":
+        entry["asset_id"] = ""
+    elif case == "metadata_scalar":
+        entry["metadata"] = "not-a-mapping"
+    else:
+        raise AssertionError(f"unhandled case: {case}")
+    _resign(signed, signer)
+
+    with pytest.raises(ManifestSignatureError):
+        verify_signed_manifest(signed, signer=signer)
+
+
 def test_anti_rollback_anchor_rejects_older_valid_manifest() -> None:
     from tldw_Server_API.app.core.Context_Integrity.manifest import (
         AntiRollbackAnchor,
