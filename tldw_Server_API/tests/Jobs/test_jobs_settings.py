@@ -1,11 +1,51 @@
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 import pytest
 
 from tldw_Server_API.app.core.Jobs.settings import JobsSettingMode, JobsSettings
 
 
 pytestmark = pytest.mark.unit
+
+
+def _literal_jobs_env_keys(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text())
+    keys: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        is_env_reader = (
+            isinstance(node.func, ast.Attribute) and node.func.attr == "getenv"
+        ) or (
+            isinstance(node.func, ast.Name) and node.func.id == "env_flag_enabled"
+        )
+        if not is_env_reader:
+            continue
+        if not node.args:
+            continue
+        first_arg = node.args[0]
+        if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str) and first_arg.value.startswith("JOBS_"):
+            keys.add(first_arg.value)
+    return keys
+
+
+def _literal_jobs_quota_bases(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text())
+    keys: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Attribute) or node.func.attr != "_quota_get":
+            continue
+        if not node.args:
+            continue
+        first_arg = node.args[0]
+        if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str) and first_arg.value.startswith("JOBS_"):
+            keys.add(first_arg.value)
+    return keys
 
 
 def test_jobs_settings_snapshots_construction_time_values() -> None:
@@ -87,11 +127,11 @@ def test_jobs_settings_refresh_reads_new_booleans_and_allowed_queues() -> None:
 
     assert refreshed.events_outbox_enabled is True
     assert refreshed.counters_enabled is False
-    assert refreshed.allowed_queues_for_domain(None) == ["default", "high"]
-    assert refreshed.allowed_queues_for_domain("chatbooks") == ["default", "high", "import", "export"]
+    assert refreshed.allowed_queue_extras_for_domain(None) == ["default", "high"]
+    assert refreshed.allowed_queue_extras_for_domain("chatbooks") == ["default", "high", "import", "export"]
 
 
-def test_jobs_settings_allowed_queues_are_domain_aware() -> None:
+def test_jobs_settings_allowed_queue_extras_are_domain_aware() -> None:
     settings = JobsSettings.from_env(
         {
             "JOBS_ALLOWED_QUEUES": "default,low",
@@ -99,11 +139,11 @@ def test_jobs_settings_allowed_queues_are_domain_aware() -> None:
         }
     )
 
-    assert settings.allowed_queues_for_domain(None) == ["default", "low"]
-    assert settings.allowed_queues_for_domain("chatbooks") == ["default", "low", "export", "import"]
+    assert settings.allowed_queue_extras_for_domain(None) == ["default", "low"]
+    assert settings.allowed_queue_extras_for_domain("chatbooks") == ["default", "low", "export", "import"]
 
 
-def test_jobs_settings_allowed_queues_remove_duplicates() -> None:
+def test_jobs_settings_allowed_queue_extras_remove_duplicates() -> None:
     settings = JobsSettings.from_env(
         {
             "JOBS_ALLOWED_QUEUES": "default,low,default",
@@ -111,16 +151,48 @@ def test_jobs_settings_allowed_queues_remove_duplicates() -> None:
         }
     )
 
-    assert settings.allowed_queues_for_domain("chatbooks") == ["default", "low", "export"]
+    assert settings.allowed_queue_extras_for_domain("chatbooks") == ["default", "low", "export"]
 
 
 def test_jobs_settings_classifies_known_keys() -> None:
     assert JobsSettings.setting_mode("JOBS_DB_URL") is JobsSettingMode.CONSTRUCTION_TIME
     assert JobsSettings.setting_mode("JOBS_DB_PATH") is JobsSettingMode.CONSTRUCTION_TIME
+    assert JobsSettings.setting_mode("JOBS_TEST_NOW_EPOCH") is JobsSettingMode.CONSTRUCTION_TIME
     assert JobsSettings.setting_mode("JOBS_MAX_JSON_BYTES") is JobsSettingMode.SNAPSHOT_REFRESHABLE
     assert JobsSettings.setting_mode("JOBS_LEASE_MAX_SECONDS") is JobsSettingMode.SNAPSHOT_REFRESHABLE
     assert JobsSettings.setting_mode("JOBS_EVENTS_OUTBOX") is JobsSettingMode.SNAPSHOT_REFRESHABLE
     assert JobsSettings.setting_mode("JOBS_COUNTERS_ENABLED") is JobsSettingMode.SNAPSHOT_REFRESHABLE
-    assert JobsSettings.setting_mode("JOBS_ALLOWED_QUEUES") is JobsSettingMode.OPERATION_TIME
-    assert JobsSettings.setting_mode("JOBS_ALLOWED_QUEUES_CHATBOOKS") is JobsSettingMode.OPERATION_TIME
-    assert JobsSettings.setting_mode("JOBS_UNKNOWN") is JobsSettingMode.OPERATION_TIME
+    assert JobsSettings.setting_mode("JOBS_ALLOWED_QUEUES") is JobsSettingMode.SNAPSHOT_REFRESHABLE
+    assert JobsSettings.setting_mode("JOBS_ALLOWED_QUEUES_CHATBOOKS") is JobsSettingMode.SNAPSHOT_REFRESHABLE
+    assert JobsSettings.setting_mode("JOBS_ALLOWED_JOB_TYPES_CHATBOOKS") is JobsSettingMode.OPERATION_TIME
+    assert JobsSettings.setting_mode("JOBS_QUOTA_MAX_INFLIGHT") is JobsSettingMode.OPERATION_TIME
+    assert JobsSettings.setting_mode("JOBS_QUOTA_MAX_INFLIGHT_CHATBOOKS_USER_1") is JobsSettingMode.OPERATION_TIME
+    assert JobsSettings.setting_mode("JOBS_PG_ACQUIRE_PRIORITY_DESC_DOMAINS") is JobsSettingMode.OPERATION_TIME
+    assert JobsSettings.setting_mode("JOBS_SQLITE_ACQUIRE_TIE_BREAK") is JobsSettingMode.OPERATION_TIME
+    assert JobsSettings.setting_mode("JOBS_ACQUIRE_TIE_BREAK_CHATBOOKS") is JobsSettingMode.OPERATION_TIME
+    assert JobsSettings.setting_mode("JOBS_UNKNOWN") is JobsSettingMode.UNCLASSIFIED
+
+
+def test_jobs_settings_classifies_current_manager_and_admin_env_keys() -> None:
+    paths = [
+        Path("tldw_Server_API/app/core/Jobs/manager.py"),
+        Path("tldw_Server_API/app/api/v1/endpoints/jobs_admin.py"),
+    ]
+    keys = {key for path in paths for key in _literal_jobs_env_keys(path)}
+    keys.update(key for path in paths for key in _literal_jobs_quota_bases(path))
+    keys.update(
+        {
+            "JOBS_PG_ACQUIRE_PRIORITY_DESC_DOMAINS",
+            "JOBS_POSTGRES_ACQUIRE_PRIORITY_DESC_DOMAINS",
+            "JOBS_SQLITE_ACQUIRE_PRIORITY_DESC_DOMAINS",
+            "JOBS_PG_ACQUIRE_TIE_BREAK",
+            "JOBS_SQLITE_ACQUIRE_TIE_BREAK",
+            "JOBS_PG_ACQUIRE_TIE_BREAK_CHATBOOKS",
+            "JOBS_ACQUIRE_TIE_BREAK_CHATBOOKS",
+        }
+    )
+
+    assert keys
+    assert {
+        key for key in keys if JobsSettings.setting_mode(key) is JobsSettingMode.UNCLASSIFIED
+    } == set()

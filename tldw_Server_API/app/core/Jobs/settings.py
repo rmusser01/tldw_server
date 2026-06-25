@@ -12,6 +12,7 @@ class JobsSettingMode(str, Enum):
     CONSTRUCTION_TIME = "construction_time"
     SNAPSHOT_REFRESHABLE = "snapshot_refreshable"
     OPERATION_TIME = "operation_time"
+    UNCLASSIFIED = "unclassified"
 
 
 def _env_value(env: Mapping[str, str], key: str, default: str | None = None) -> str | None:
@@ -49,20 +50,91 @@ class JobsSettings:
     lease_max_seconds: int = 3_600
     events_outbox_enabled: bool = False
     counters_enabled: bool = False
-    allowed_queues: tuple[str, ...] = ()
-    allowed_queues_by_domain: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    allowed_queue_extras: tuple[str, ...] = ()
+    allowed_queue_extras_by_domain: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
-    CONSTRUCTION_TIME_KEYS = frozenset({"JOBS_DB_URL", "JOBS_DB_PATH"})
+    CONSTRUCTION_TIME_KEYS = frozenset(
+        {"JOBS_BACKEND", "JOBS_DB_URL", "JOBS_DB_PATH", "JOBS_PG_SKIP_SCHEMA_INIT", "JOBS_TEST_NOW_EPOCH"}
+    )
     SNAPSHOT_REFRESHABLE_KEYS = frozenset(
         {
+            "JOBS_ALLOWED_QUEUES",
             "JOBS_MAX_JSON_BYTES",
             "JOBS_LEASE_MAX_SECONDS",
             "JOBS_EVENTS_OUTBOX",
             "JOBS_COUNTERS_ENABLED",
+            "JOBS_LEASE_SECONDS",
+            "JOBS_LEASE_RENEW_SECONDS",
+            "JOBS_LEASE_RENEW_JITTER_SECONDS",
+            "JOBS_RENEW_JITTER_SECONDS",
+            "JOBS_RENEW_THRESHOLD_SECONDS",
+            "JOBS_LEASE_RENEW_THRESHOLD_SECONDS",
         }
     )
-    OPERATION_TIME_KEYS = frozenset({"JOBS_ALLOWED_QUEUES"})
-    OPERATION_TIME_PREFIXES = ("JOBS_ALLOWED_QUEUES_",)
+    SNAPSHOT_REFRESHABLE_PREFIXES = ("JOBS_ALLOWED_QUEUES_",)
+    OPERATION_TIME_KEYS = frozenset(
+        {
+            "JOBS_EVENTS_ENABLED",
+            "JOBS_EXPOSE_PROGRESS",
+            "JOBS_REQUIRE_CONFIRM",
+            "JOBS_REQUIRE_COMPLETION_TOKEN",
+            "JOBS_ENFORCE_LEASE_ACK",
+            "JOBS_DISABLE_LEASE_ENFORCEMENT",
+            "JOBS_ENCRYPT",
+            "JOBS_OWNER_STRICT",
+            "JOBS_EVENTS_POLL_INTERVAL",
+            "JOBS_METRICS_GAUGES_ENABLED",
+            "JOBS_METRICS_RECONCILE_ENABLE",
+            "JOBS_UPDATE_GAUGES_ON_PRUNE",
+            "JOBS_WEBHOOKS_ENABLED",
+            "JOBS_ADAPTIVE_LEASE_ENABLE",
+            "JOBS_ADAPTIVE_LEASE_MIN_SECONDS",
+            "JOBS_ADAPTIVE_LEASE_HEADROOM",
+            "JOBS_ADAPTIVE_LEASE_WINDOW_HOURS",
+            "JOBS_ACQUIRE_TIE_BREAK",
+            "JOBS_ACQUIRE_PRIORITY_DESC_DOMAINS",
+            "JOBS_SQLITE_SINGLE_UPDATE_ACQUIRE",
+            "JOBS_PG_SINGLE_UPDATE_ACQUIRE",
+            "JOBS_ADMIN_COMPLETE_QUEUED_ALLOW_DOMAINS",
+            "JOBS_ALLOWED_JOB_TYPES",
+            "JOBS_ARCHIVE_BEFORE_DELETE",
+            "JOBS_ARCHIVE_COMPRESS",
+            "JOBS_ARCHIVE_COMPRESS_DROP_JSON",
+            "JOBS_DOMAIN_RBAC_PRINCIPAL",
+            "JOBS_DOMAIN_SCOPED_RBAC",
+            "JOBS_GAUGES_DEBOUNCE_MS",
+            "JOBS_JSON_TRUNCATE",
+            "JOBS_MAX_PER_ORG",
+            "JOBS_MAX_PER_USER",
+            "JOBS_PG_RLS_DEBUG",
+            "JOBS_PG_RLS_ROLE",
+            "JOBS_QUARANTINE_THRESHOLD",
+            "JOBS_QUOTA_MAX_INFLIGHT",
+            "JOBS_QUOTA_MAX_QUEUED",
+            "JOBS_QUOTA_SUBMITS_PER_MIN",
+            "JOBS_RBAC_FORCE",
+            "JOBS_REQUIRE_DOMAIN_FILTER",
+            "JOBS_SECRET_DENY_KEYS",
+            "JOBS_SECRET_PATTERNS",
+            "JOBS_SECRET_REDACT",
+            "JOBS_SECRET_REJECT",
+            "JOBS_SSE_TEST_MAX_SECONDS",
+        }
+    )
+    OPERATION_TIME_PREFIXES = (
+        "JOBS_ACQUIRE_TIE_BREAK_",
+        "JOBS_ALLOWED_JOB_TYPES_",
+        "JOBS_DOMAIN_ALLOWLIST_",
+        "JOBS_ENCRYPT_",
+        "JOBS_PG_ACQUIRE_",
+        "JOBS_POSTGRES_ACQUIRE_",
+        "JOBS_POSTGRESQL_ACQUIRE_",
+        "JOBS_QUOTA_MAX_INFLIGHT_",
+        "JOBS_QUOTA_MAX_QUEUED_",
+        "JOBS_QUOTA_SUBMITS_PER_MIN_",
+        "JOBS_RETENTION_DAYS_",
+        "JOBS_SQLITE_ACQUIRE_",
+    )
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "JobsSettings":
@@ -82,19 +154,19 @@ class JobsSettings:
             lease_max_seconds=_env_int(source, "JOBS_LEASE_MAX_SECONDS", 3_600),
             events_outbox_enabled=_env_bool(source, "JOBS_EVENTS_OUTBOX", False),
             counters_enabled=_env_bool(source, "JOBS_COUNTERS_ENABLED", False),
-            allowed_queues=_split_csv(_env_value(source, "JOBS_ALLOWED_QUEUES", "")),
-            allowed_queues_by_domain=tuple(domain_queues),
+            allowed_queue_extras=_split_csv(_env_value(source, "JOBS_ALLOWED_QUEUES", "")),
+            allowed_queue_extras_by_domain=tuple(domain_queues),
         )
 
     def refresh(self, env: Mapping[str, str] | None = None) -> "JobsSettings":
         refreshed = type(self).from_env(env)
         return replace(refreshed, db_url=self.db_url, db_path=self.db_path)
 
-    def allowed_queues_for_domain(self, domain: str | None) -> list[str]:
-        values = list(self.allowed_queues)
+    def allowed_queue_extras_for_domain(self, domain: str | None) -> list[str]:
+        values = list(self.allowed_queue_extras)
         normalized_domain = str(domain or "").strip().lower()
         if normalized_domain:
-            for configured_domain, queues in self.allowed_queues_by_domain:
+            for configured_domain, queues in self.allowed_queue_extras_by_domain:
                 if configured_domain == normalized_domain:
                     values.extend(queues)
                     break
@@ -115,11 +187,13 @@ class JobsSettings:
             return JobsSettingMode.CONSTRUCTION_TIME
         if normalized in cls.SNAPSHOT_REFRESHABLE_KEYS:
             return JobsSettingMode.SNAPSHOT_REFRESHABLE
+        if any(normalized.startswith(prefix) for prefix in cls.SNAPSHOT_REFRESHABLE_PREFIXES):
+            return JobsSettingMode.SNAPSHOT_REFRESHABLE
         if normalized in cls.OPERATION_TIME_KEYS:
             return JobsSettingMode.OPERATION_TIME
         if any(normalized.startswith(prefix) for prefix in cls.OPERATION_TIME_PREFIXES):
             return JobsSettingMode.OPERATION_TIME
-        return JobsSettingMode.OPERATION_TIME
+        return JobsSettingMode.UNCLASSIFIED
 
 
 __all__ = ["JobsSettingMode", "JobsSettings"]
