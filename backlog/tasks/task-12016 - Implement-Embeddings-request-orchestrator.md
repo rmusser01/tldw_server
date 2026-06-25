@@ -26,7 +26,7 @@ modified_files:
 - tldw_Server_API/tests/Embeddings_isolated/test_provider_resolution.py
 - tldw_Server_API/tests/Embeddings_isolated/test_embedding_policy.py
 - tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py
-updated_date: 2026-06-25 02:08
+updated_date: 2026-06-25 02:14
 ---
 
 ## Description
@@ -150,6 +150,7 @@ Final focused verification:
 Known skips/blockers: none for the focused Embeddings scope. Existing warnings remain in the selected test suite. Unrelated untracked watchlist template files remain untouched and unstaged.
 Final pre-PR review found two issues to verify and address before PR creation: postprocessed orchestrator vectors may share legacy-compatible cache keys across request policies, and adapter-enabled execution may disable provider cache reads even when no adapter serves the request. Reopening task to add regression tests and fixes.
 Post-review fixes completed: orchestrator cache now stores provider-native numeric vectors and applies dimension policy per request on cache hits; adapter execution is split into an explicit adapter-only attempt so real adapter output bypasses provider cache while absent adapter output falls through to provider preflight/cache. Added regressions in isolated orchestrator and endpoint parity coverage. Verification after fixes: focused Embeddings suite -> 171 passed, 1827 warnings; compileall on touched production/test files -> passed with no output; Bandit on touched production files -> 0 results, no errors; git diff --check -> passed with no output. Fresh re-review subagent could not complete due usage limit, so a local final review was performed against cache semantics, adapter behavior, fallback writeback, and credential/preflight ordering; no remaining blocking issue found.
+- Draft PR created against `dev`: https://github.com/rmusser01/tldw_server/pull/2512
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
