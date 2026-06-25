@@ -8,6 +8,7 @@ from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingRequestContext,
 )
 from tldw_Server_API.app.core.Embeddings.orchestrator import (
+    EmbeddingExecutorOutput,
     EmbeddingExecutionResult,
     EmbeddingRequestOrchestrator,
 )
@@ -66,6 +67,40 @@ class RecordingExecutor:
         return self.vectors
 
 
+class AdapterAwareExecutor(RecordingExecutor):
+    def __init__(
+        self,
+        vectors: list[list[float]] | None = None,
+        *,
+        adapter_output: EmbeddingExecutorOutput | None = None,
+        adapter_calls_return_none: bool = False,
+    ) -> None:
+        super().__init__(vectors=vectors)
+        self.adapter_output = adapter_output
+        self.adapter_calls_return_none = adapter_calls_return_none
+        self.adapter_calls: list[dict[str, object]] = []
+
+    async def create_adapter(
+        self,
+        texts: list[str],
+        *,
+        provider: str,
+        model: str,
+        dimensions: int | None,
+    ) -> EmbeddingExecutorOutput | None:
+        self.adapter_calls.append(
+            {
+                "texts": texts,
+                "provider": provider,
+                "model": model,
+                "dimensions": dimensions,
+            }
+        )
+        if self.adapter_calls_return_none:
+            return None
+        return self.adapter_output
+
+
 def _count_tokens(text: str, model: str) -> int:
     del model
     return len(text.split())
@@ -120,6 +155,7 @@ def _orchestrator(
     settings_fallback_model_map: dict[str, object] | None = None,
     dimension_policy: str = "reduce",
     provider_preflight=None,
+    execution_path: str = "legacy",
 ) -> EmbeddingRequestOrchestrator:
     return EmbeddingRequestOrchestrator(
         count_tokens=_count_tokens,
@@ -139,6 +175,7 @@ def _orchestrator(
         dimension_policy=dimension_policy,
         backend_identity_resolver=lambda provider, model: f"{provider}:{model}:backend",
         provider_preflight=provider_preflight,
+        execution_path=execution_path,  # type: ignore[arg-type]
     )
 
 
@@ -194,7 +231,7 @@ async def test_execute_full_cache_hit_skips_executor_and_preserves_order():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_execute_partial_cache_hit_executes_only_misses_and_writes_canonical_vectors():
+async def test_execute_partial_cache_hit_executes_only_misses_and_writes_provider_native_vectors():
     cache = RecordingCache(
         {
             "hit|huggingface|sentence-transformers/all-MiniLM-L6-v2|2|huggingface:sentence-transformers/all-MiniLM-L6-v2:backend": [
@@ -225,9 +262,88 @@ async def test_execute_partial_cache_hit_executes_only_misses_and_writes_canonic
         "miss|huggingface|sentence-transformers/all-MiniLM-L6-v2|2|"
         "huggingface:sentence-transformers/all-MiniLM-L6-v2:backend"
     )
-    assert cached_value == [0.25, 0.75]
+    assert cached_value == [0.25, 0.75, 0.5]
     assert all(isinstance(item, float) for item in cached_value)
     assert result.response_headers["X-Embeddings-Dimensions-Policy"] == "reduce"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_dimension_policy_is_applied_to_provider_native_cache_hits_per_request():
+    cache = RecordingCache()
+    executor = RecordingExecutor(vectors=[[0.25, 0.75]])
+    orchestrator = _orchestrator(
+        cache=cache,
+        executor=executor,
+        dimension_policy="pad",
+    )
+    first = orchestrator.prepare(
+        "policy-sensitive",
+        _context(dimensions=4, encoding_format="float"),
+    )
+
+    first_result = await orchestrator.execute(first)
+
+    assert first_result.vectors == [[0.25, 0.75, 0.0, 0.0]]
+    set_key, cached_value = cache.set_calls[0]
+    assert cached_value == [0.25, 0.75]
+
+    second_executor = RecordingExecutor(vectors=[[9.0, 9.0, 9.0, 9.0]])
+    second_orchestrator = _orchestrator(
+        cache=cache,
+        executor=second_executor,
+        dimension_policy="pad",
+    )
+    second = second_orchestrator.prepare(
+        "policy-sensitive",
+        _context(dimensions=4, encoding_format="base64"),
+    )
+
+    second_result = await second_orchestrator.execute(second)
+
+    assert cache.get_keys[-1] == set_key
+    assert second_result.vectors == [[0.25, 0.75]]
+    assert second_result.response_headers["X-Embeddings-Dimensions-Policy"] == "reduce"
+    assert second_executor.calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_adapter_preferred_path_uses_provider_cache_when_adapter_returns_no_vectors():
+    cache = RecordingCache(
+        {
+            "cached adapter miss|openai|text-embedding-3-small|"
+            "openai:text-embedding-3-small:backend": [0.5, 0.25],
+        }
+    )
+    executor = AdapterAwareExecutor(
+        vectors=[[9.0, 9.0]],
+        adapter_calls_return_none=True,
+    )
+    orchestrator = _orchestrator(
+        cache=cache,
+        executor=executor,
+        execution_path="adapter",
+    )
+    prepared = orchestrator.prepare(
+        "cached adapter miss",
+        _context(model="text-embedding-3-small", provider="openai"),
+    )
+
+    result = await orchestrator.execute(prepared)
+
+    assert result.vectors == [[0.5, 0.25]]
+    assert result.cache_hits == 1
+    assert result.cache_misses == 0
+    assert executor.adapter_calls == [
+        {
+            "texts": ["cached adapter miss"],
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "dimensions": None,
+        }
+    ]
+    assert executor.calls == []
 
 
 @pytest.mark.unit
@@ -441,7 +557,7 @@ async def test_base64_encoding_format_still_caches_float_vectors_not_encoded_val
 
     cached_value = cache.set_calls[0][1]
     assert result.vectors == [[0.25, 0.75]]
-    assert cached_value == [0.25, 0.75]
+    assert cached_value == [0.25, 0.75, 0.5]
     assert all(isinstance(item, float) for item in cached_value)
     assert all(not isinstance(item, str) for item in cached_value)
 
@@ -614,7 +730,7 @@ async def test_base64_requested_dimensions_force_reduce_even_when_configured_pol
     result = await orchestrator.execute(prepared)
 
     assert result.vectors == [[0.25, 0.75]]
-    assert cache.set_calls[0][1] == [0.25, 0.75]
+    assert cache.set_calls[0][1] == [0.25, 0.75, 0.5]
     assert result.response_headers["X-Embeddings-Dimensions-Policy"] == "reduce"
 
 

@@ -26,7 +26,7 @@ modified_files:
 - tldw_Server_API/tests/Embeddings_isolated/test_provider_resolution.py
 - tldw_Server_API/tests/Embeddings_isolated/test_embedding_policy.py
 - tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py
-updated_date: 2026-06-24 22:43
+updated_date: 2026-06-25 02:08
 ---
 
 ## Description
@@ -148,12 +148,14 @@ Final focused verification:
 - `git diff --check` -> passed with no output.
 
 Known skips/blockers: none for the focused Embeddings scope. Existing warnings remain in the selected test suite. Unrelated untracked watchlist template files remain untouched and unstaged.
+Final pre-PR review found two issues to verify and address before PR creation: postprocessed orchestrator vectors may share legacy-compatible cache keys across request policies, and adapter-enabled execution may disable provider cache reads even when no adapter serves the request. Reopening task to add regression tests and fixes.
+Post-review fixes completed: orchestrator cache now stores provider-native numeric vectors and applies dimension policy per request on cache hits; adapter execution is split into an explicit adapter-only attempt so real adapter output bypasses provider cache while absent adapter output falls through to provider preflight/cache. Added regressions in isolated orchestrator and endpoint parity coverage. Verification after fixes: focused Embeddings suite -> 171 passed, 1827 warnings; compileall on touched production/test files -> passed with no output; Bandit on touched production files -> 0 results, no errors; git diff --check -> passed with no output. Fresh re-review subagent could not complete due usage limit, so a local final review was performed against cache semantics, adapter behavior, fallback writeback, and credential/preflight ordering; no remaining blocking issue found.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the Embeddings request orchestrator refactor behind `EMBEDDINGS_ORCHESTRATOR_ENABLED`. Added pure request types, input normalization, provider resolution, policy, and orchestrator modules; preserved endpoint compatibility shims and legacy default behavior; wired a feature-flagged orchestrator endpoint path; added characterization, isolated core, endpoint parity, policy, fallback, cache, BYOK, adapter, RG, and error-shape coverage; and completed focused verification plus Bandit with zero findings.
+Implemented the Embeddings request orchestrator refactor behind `EMBEDDINGS_ORCHESTRATOR_ENABLED`. Added pure request types, input normalization, provider resolution, policy, and orchestrator modules; preserved endpoint compatibility shims and legacy default behavior; wired a feature-flagged orchestrator endpoint path; added characterization, isolated core, endpoint parity, policy, fallback, cache, BYOK, adapter, RG, and error-shape coverage. Post-review fixes now keep orchestrator cache entries provider-native with per-request dimension policy on cache hits, and split adapter execution so absent adapter output falls through to provider preflight/cache while real adapter output bypasses provider cache. Focused verification and Bandit completed with zero findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

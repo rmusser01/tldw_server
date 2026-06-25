@@ -1093,7 +1093,7 @@ async def test_executor_uses_adapter_registry_before_provider_execution(monkeypa
         user_metadata=None,
     )
 
-    vectors = await executor.create(
+    vectors = await executor.create_adapter(
         ["one", "two"],
         provider="openai",
         model="text-embedding-3-small",
@@ -1147,6 +1147,43 @@ def test_orchestrator_adapter_path_preserves_adapter_vector_scale(client, monkey
     assert provider_call.await_count == 0
     assert cache_get.await_count == 0
     assert cache_set.await_count == 0
+    credentials.touch_last_used.assert_awaited_once()
+
+
+def test_orchestrator_adapter_enabled_uses_provider_cache_when_no_adapter_serves(client, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "true")
+    monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "true")
+    credentials = FakeCredentials(api_key="provider-key", source="user")
+
+    async def fake_resolve(*_args, **_kwargs):
+        return credentials
+
+    class FakeRegistry:
+        def get_adapter(self, provider):
+            assert provider == "openai"
+            return None
+
+    provider_call = AsyncMock(side_effect=AssertionError("provider path should not be called"))
+    cache_get = AsyncMock(return_value=[1.0, 0.0])
+    cache_set = AsyncMock()
+    monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
+    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr(mod, "create_embeddings_with_circuit_breaker", provider_call)
+    monkeypatch.setattr(mod.embedding_cache, "get", cache_get)
+    monkeypatch.setattr(mod.embedding_cache, "set", cache_set)
+
+    response = client.post(
+        "/api/v1/embeddings",
+        json={"model": "text-embedding-3-small", "input": "cached adapter miss"},
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["data"][0]["embedding"] == [1.0, 0.0]
+    assert cache_get.await_count == 1
+    assert cache_set.await_count == 0
+    assert provider_call.await_count == 0
     credentials.touch_last_used.assert_awaited_once()
 
 

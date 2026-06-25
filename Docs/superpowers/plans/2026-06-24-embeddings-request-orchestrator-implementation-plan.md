@@ -642,6 +642,18 @@ Verification:
 - `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Embeddings/request_types.py tldw_Server_API/app/core/Embeddings/input_normalizer.py tldw_Server_API/app/core/Embeddings/provider_resolution.py tldw_Server_API/app/core/Embeddings/embedding_policy.py tldw_Server_API/app/core/Embeddings/orchestrator.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py -f json -o /tmp/bandit_embeddings_orchestrator.json` -> 0 results, no errors.
 - `git diff --check` -> passed with no output.
 
+### Post-Review Fixes
+
+- [x] Cache provider-native numeric vectors and apply dimension policy to cached values per request.
+- [x] Split adapter execution into an explicit adapter-only attempt so real adapter output bypasses provider cache, while absent adapter output falls through to provider preflight/cache.
+- [x] Add regressions for policy-sensitive cache hits, adapter-enabled provider cache fallback, and endpoint adapter/cache integration.
+
+Verification:
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Embeddings_isolated/test_request_types.py tldw_Server_API/tests/Embeddings_isolated/test_input_normalizer.py tldw_Server_API/tests/Embeddings_isolated/test_provider_resolution.py tldw_Server_API/tests/Embeddings_isolated/test_embedding_policy.py tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_characterization.py tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py tldw_Server_API/tests/Embeddings/test_embeddings_v5_unit.py tldw_Server_API/tests/Embeddings/test_embeddings_dimensions_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_token_arrays.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback_model_map.py tldw_Server_API/tests/Embeddings/test_batch_rate_headers.py` -> 171 passed, 1827 warnings.
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m compileall -q tldw_Server_API/app/core/Embeddings/request_types.py tldw_Server_API/app/core/Embeddings/input_normalizer.py tldw_Server_API/app/core/Embeddings/provider_resolution.py tldw_Server_API/app/core/Embeddings/embedding_policy.py tldw_Server_API/app/core/Embeddings/orchestrator.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py tldw_Server_API/tests/Embeddings_isolated/test_embedding_orchestrator.py tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py` -> passed with no output.
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Embeddings/request_types.py tldw_Server_API/app/core/Embeddings/input_normalizer.py tldw_Server_API/app/core/Embeddings/provider_resolution.py tldw_Server_API/app/core/Embeddings/embedding_policy.py tldw_Server_API/app/core/Embeddings/orchestrator.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py -f json -o /tmp/bandit_embeddings_orchestrator_review_fixes_final.json` -> 0 results, no errors.
+- `git diff --check` -> passed with no output.
+
 ## Review Checkpoints
 
 - [x] After Task 1, review characterization results before extraction. Confirm each behavior is marked as contract or compatibility.

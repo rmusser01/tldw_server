@@ -2264,20 +2264,6 @@ class _EndpointEmbeddingExecutor:
         credentials = await self._resolve_provider_credentials(provider)
         self._ensure_provider_key(provider, model, credentials)
 
-        adapter_vectors = await self._try_adapter_execution(
-            texts,
-            provider=provider,
-            model=model,
-            dimensions=dimensions,
-            credentials=credentials,
-        )
-        if adapter_vectors is not None:
-            await self._touch_credentials(credentials, provider)
-            return EmbeddingExecutorOutput(
-                adapter_vectors,
-                embeddings_from_adapter=True,
-            )
-
         try:
             vectors = await self._create_provider_batches(
                 texts,
@@ -2368,6 +2354,42 @@ class _EndpointEmbeddingExecutor:
         self._validate_vector_count(vectors, expected=len(texts), provider=provider, model=model)
         await self._touch_credentials(credentials, provider)
         return vectors
+
+    async def create_adapter(
+        self,
+        texts: list[str],
+        *,
+        provider: str,
+        model: str,
+        dimensions: int | None,
+    ) -> EmbeddingExecutorOutput | None:
+        provider = (provider or "").strip().lower()
+        try:
+            EmbeddingProvider(provider)
+        except ValueError as exc:
+            raise EmbeddingPolicyError(
+                "unknown_provider",
+                f"Unknown provider: {provider}",
+                provider=provider,
+                model=model,
+            ) from exc
+
+        credentials = await self._resolve_provider_credentials(provider)
+        self._ensure_provider_key(provider, model, credentials)
+        adapter_vectors = await self._try_adapter_execution(
+            texts,
+            provider=provider,
+            model=model,
+            dimensions=dimensions,
+            credentials=credentials,
+        )
+        if adapter_vectors is not None:
+            await self._touch_credentials(credentials, provider)
+            return EmbeddingExecutorOutput(
+                adapter_vectors,
+                embeddings_from_adapter=True,
+            )
+        return None
 
     async def _resolve_provider_credentials(
         self,
