@@ -187,3 +187,27 @@ def test_legacy_history_replacement_rolls_back_deletes_when_insert_fails():
     assert status.startswith("Error saving messages:")
     assert active_message_ids == ["old-1"]
     assert db.added_messages == []
+
+
+class MissingConversationDB(ExistingConversationDB):
+    def get_conversation_by_id(self, _conversation_id):
+        return None
+
+
+def test_legacy_history_empty_existing_conversation_still_validates_target():
+    db = MissingConversationDB()
+
+    conv_id, status = save_chat_history_to_db_wrapper(
+        db=db,
+        chatbot_history=[],
+        conversation_id="missing",
+        media_content_for_char_assoc=None,
+        media_name_for_char_assoc=None,
+        character_name_for_chat=DEFAULT_CHARACTER_NAME,
+    )
+
+    assert conv_id == "missing"
+    assert "not found for resaving" in status
+    assert db.fetch_transaction_ids == []
+    assert db.soft_delete_transaction_ids == []
+    assert db.add_message_transaction_ids == []
