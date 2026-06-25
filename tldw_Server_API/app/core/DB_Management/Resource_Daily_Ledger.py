@@ -170,6 +170,133 @@ class ResourceDailyLedger:
             logger.error(f"ResourceDailyLedger.add failed: {e}")
             raise
 
+    async def consume_if_available(self, entry: LedgerEntry, daily_cap: int) -> tuple[bool, int]:
+        """
+        Add a ledger entry only when it fits within the daily cap.
+
+        Returns ``(allowed, remaining_after_units)``. Duplicate ``op_id`` values
+        are treated as already consumed and return the current remaining value.
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        day = self._to_day_utc(entry.occurred_at)
+        cap = int(max(0, daily_cap))
+        units = int(max(0, entry.units))
+        is_pg = await self._using_postgres_backend()
+        try:
+            async with self.db_pool.transaction() as conn:
+                if is_pg:
+                    day_param: date = date.fromisoformat(day)
+                    lock_key = (
+                        f"{entry.entity_scope}:{entry.entity_value}:"
+                        f"{entry.category}:{day}"
+                    )
+                    await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", lock_key)
+                    existing = await conn.fetchval(
+                        """
+                        SELECT 1 FROM resource_daily_ledger
+                        WHERE day_utc = $1 AND entity_scope = $2 AND entity_value = $3
+                          AND category = $4 AND op_id = $5
+                        LIMIT 1
+                        """,
+                        day_param,
+                        entry.entity_scope,
+                        entry.entity_value,
+                        entry.category,
+                        entry.op_id,
+                    )
+                    used = int(
+                        await conn.fetchval(
+                            """
+                            SELECT COALESCE(SUM(units), 0)
+                            FROM resource_daily_ledger
+                            WHERE day_utc = $1 AND entity_scope = $2 AND entity_value = $3 AND category = $4
+                            """,
+                            day_param,
+                            entry.entity_scope,
+                            entry.entity_value,
+                            entry.category,
+                        )
+                        or 0
+                    )
+                    if existing:
+                        return True, max(0, cap - used)
+                    remaining_before = max(0, cap - used)
+                    if units > remaining_before:
+                        return False, remaining_before
+                    await conn.execute(
+                        """
+                        INSERT INTO resource_daily_ledger
+                          (day_utc, entity_scope, entity_value, category, units, op_id, occurred_at, created_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+                        ON CONFLICT (day_utc, entity_scope, entity_value, category, op_id) DO NOTHING
+                        """,
+                        day_param,
+                        entry.entity_scope,
+                        entry.entity_value,
+                        entry.category,
+                        units,
+                        entry.op_id,
+                        entry.occurred_at,
+                    )
+                    return True, max(0, remaining_before - units)
+
+                existing_cursor = await conn.execute(
+                    """
+                    SELECT 1 FROM resource_daily_ledger
+                    WHERE day_utc = ? AND entity_scope = ? AND entity_value = ?
+                      AND category = ? AND op_id = ?
+                    LIMIT 1
+                    """,
+                    day,
+                    entry.entity_scope,
+                    entry.entity_value,
+                    entry.category,
+                    entry.op_id,
+                )
+                existing = await existing_cursor.fetchone()
+                used_cursor = await conn.execute(
+                    """
+                    SELECT COALESCE(SUM(units), 0)
+                    FROM resource_daily_ledger
+                    WHERE day_utc = ? AND entity_scope = ? AND entity_value = ? AND category = ?
+                    """,
+                    day,
+                    entry.entity_scope,
+                    entry.entity_value,
+                    entry.category,
+                )
+                used_row = await used_cursor.fetchone()
+                used = int((used_row[0] if used_row else 0) or 0)
+                if existing:
+                    return True, max(0, cap - used)
+                remaining_before = max(0, cap - used)
+                if units > remaining_before:
+                    return False, remaining_before
+                await conn.execute(
+                    """
+                    INSERT INTO resource_daily_ledger
+                      (day_utc, entity_scope, entity_value, category, units, op_id, occurred_at, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    """,
+                    day,
+                    entry.entity_scope,
+                    entry.entity_value,
+                    entry.category,
+                    units,
+                    entry.op_id,
+                    entry.occurred_at.isoformat(),
+                )
+                return True, max(0, remaining_before - units)
+        except Exception as e:
+            logger.error(f"ResourceDailyLedger.consume_if_available failed: {e}")
+            raise
+
+    async def add_if_within_daily_cap(self, entry: LedgerEntry, daily_cap: int) -> tuple[bool, int]:
+        """Backward-compatible alias for atomic capped ledger consumption."""
+        return await self.consume_if_available(entry, daily_cap=daily_cap)
+
     async def total_for_day(self, entity_scope: str, entity_value: str, category: str, day_utc: str | None = None) -> int:
         if not self._initialized:
             await self.initialize()

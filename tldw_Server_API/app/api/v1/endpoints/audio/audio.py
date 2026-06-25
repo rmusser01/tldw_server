@@ -235,6 +235,9 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     check_daily_minutes_allow as check_daily_minutes_allow,
 )
 from tldw_Server_API.app.core.Usage.audio_quota import (
+    consume_daily_minutes as consume_daily_minutes,
+)
+from tldw_Server_API.app.core.Usage.audio_quota import (
     finish_stream as finish_stream,
 )
 

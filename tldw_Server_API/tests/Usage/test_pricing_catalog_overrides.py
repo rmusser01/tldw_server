@@ -69,6 +69,30 @@ def test_pricing_overrides_env_preserves_estimated_metadata(monkeypatch):
     assert "qwen-new-current" in catalog._catalog["qwen"]
 
 
+def test_pricing_partial_match_prefers_most_specific_model(monkeypatch):
+    monkeypatch.setenv(
+        "PRICING_OVERRIDES",
+        json.dumps(
+            {
+                "OpenAI": {
+                    "gpt-4": {"prompt": 0.030, "completion": 0.060},
+                    "gpt-4o-mini": {"prompt": 0.00015, "completion": 0.0006},
+                }
+            }
+        ),
+    )
+
+    from tldw_Server_API.app.core.Usage.pricing_catalog import PricingCatalog
+
+    catalog = PricingCatalog()
+
+    prompt_rate, completion_rate, estimated = catalog.get_rates("openai", "gpt-4o-mini-future")
+
+    assert prompt_rate == pytest.approx(0.00015)
+    assert completion_rate == pytest.approx(0.0006)
+    assert estimated is True
+
+
 def test_pricing_overrides_env_parse_warning_is_sanitized(monkeypatch):
     mod = importlib.import_module("tldw_Server_API.app.core.Usage.pricing_catalog")
     monkeypatch.setenv("PRICING_OVERRIDES", "{invalid")

@@ -17,12 +17,15 @@ import asyncio
 import configparser
 import contextlib
 import os
+import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from functools import lru_cache
 
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
+from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError as AuthNZDatabaseError
 
 try:
     from tldw_Server_API.app.core.Metrics.metrics_manager import MetricDefinition, MetricType, get_metrics_registry
@@ -80,7 +83,6 @@ except ImportError:  # pragma: no cover
     LedgerEntry = None  # type: ignore
 
 _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
@@ -99,6 +101,15 @@ _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     configparser.Error,
 )
+
+
+_DailyMinutesConsumeFn = Callable[..., Awaitable[tuple[bool, float | None]]]
+_DailyMinutesCheckFn = Callable[[int, float], Awaitable[tuple[bool, float | None]]]
+_DailyMinutesAddFn = Callable[[int, float], Awaitable[None]]
+
+
+class AudioQuotaStoreUnavailable(AuthNZDatabaseError):
+    """Raised when canonical daily-minute quota storage is unavailable."""
 
 
 # Default tier limits (can be extended later via configuration or DB)
@@ -148,6 +159,8 @@ _rg_stream_handles: dict[int, list[str]] = {}
 _rg_job_handles: dict[int, list[str]] = {}
 _rg_job_handle_locks: dict[int, asyncio.Lock] = {}
 _rg_job_handle_locks_lock = asyncio.Lock()
+_audio_minutes_consume_locks: dict[int, asyncio.Lock] = {}
+_audio_minutes_consume_locks_lock = asyncio.Lock()
 _rg_audio_init_error: str | None = None
 _rg_audio_init_error_logged = False
 _rg_audio_fallback_logged = False
@@ -333,6 +346,17 @@ async def _cleanup_job_handle_lock(user_id: int) -> None:
         lock = _rg_job_handle_locks.get(uid)
         if lock and not lock.locked():
             _rg_job_handle_locks.pop(uid, None)
+
+
+async def _get_audio_minutes_consume_lock(user_id: int) -> asyncio.Lock:
+    """Return the per-user lock used by fallback minute consumption."""
+    uid = int(user_id)
+    async with _audio_minutes_consume_locks_lock:
+        lock = _audio_minutes_consume_locks.get(uid)
+        if lock is None:
+            lock = asyncio.Lock()
+            _audio_minutes_consume_locks[uid] = lock
+        return lock
 
 
 async def _cleanup_stream_handles(user_id: int) -> None:
@@ -610,11 +634,10 @@ async def _get_daily_ledger() -> ResourceDailyLedger | None:
     Lazily initialize the shared ResourceDailyLedger for audio minutes.
 
     When available, the ledger is the canonical source of truth for daily
-    minutes caps: callers write new usage via ``add_daily_minutes`` and read
-    remaining quota via ``_ledger_remaining_minutes``. The legacy
-    ``audio_usage_daily`` table is consulted only for a one-time backfill on
-    first use (per process) and as a fallback when the ledger cannot be
-    initialized.
+    minutes caps: callers write new usage via ``add_daily_minutes`` or
+    ``consume_daily_minutes`` and read remaining quota via
+    ``_ledger_remaining_minutes``. The legacy ``audio_usage_daily`` table is
+    consulted only for a one-time backfill on first use (per process).
     """
     global _daily_ledger
     # If the ledger implementation is not available, skip silently.
@@ -711,26 +734,55 @@ async def _backfill_audio_usage_daily_to_ledger(ledger: ResourceDailyLedger) -> 
         )
 
 
-async def add_daily_minutes(user_id: int, minutes: float) -> None:
-    if minutes <= 0:
-        return
-    day = datetime.now(timezone.utc).date().isoformat()
+def _audio_minutes_units(minutes: float) -> int:
+    return int(max(0, round(float(minutes) * 60.0)))
 
-    # Record against the shared ResourceDailyLedger; this is the canonical
-    # source of truth for audio daily minutes. Legacy audio_usage_daily
-    # counters are no longer written to and remain as compatibility state
-    # only for pre-upgrade rows.
-    units = int(max(0, round(float(minutes) * 60.0)))
+
+def _audio_minutes_op_id(user_id: int, day: str, units: int, operation_id: str | None = None) -> str:
+    if operation_id is not None:
+        op_id = str(operation_id).strip()
+        if op_id:
+            return op_id
+    return f"audio-minutes:{int(user_id)}:{day}:{int(units)}:{uuid.uuid4().hex}"
+
+
+async def _require_daily_ledger() -> ResourceDailyLedger:
+    ledger = await _get_daily_ledger()
+    if ledger is None or LedgerEntry is None:
+        raise AudioQuotaStoreUnavailable("audio quota daily ledger is unavailable")
+    return ledger
+
+
+def _build_audio_minutes_entry(user_id: int, units: int, operation_id: str | None = None) -> LedgerEntry:
+    day = datetime.now(timezone.utc).date().isoformat()
+    return LedgerEntry(  # type: ignore[call-arg, return-value]
+        entity_scope="user",
+        entity_value=str(int(user_id)),
+        category="minutes",
+        units=int(units),
+        op_id=_audio_minutes_op_id(user_id=int(user_id), day=day, units=int(units), operation_id=operation_id),
+        occurred_at=datetime.now(timezone.utc),
+    )
+
+
+async def add_daily_minutes(
+    user_id: int,
+    minutes: float,
+    *,
+    operation_id: str | None = None,
+    op_id: str | None = None,
+) -> None:
+    units = _audio_minutes_units(minutes)
+    if units <= 0:
+        return
+
     try:
         ledger = await _get_daily_ledger()
-        if ledger is not None and LedgerEntry is not None and units > 0:
-            entry = LedgerEntry(  # type: ignore[call-arg]
-                entity_scope="user",
-                entity_value=str(int(user_id)),
-                category="minutes",
+        if ledger is not None and LedgerEntry is not None:
+            entry = _build_audio_minutes_entry(
+                user_id=int(user_id),
                 units=units,
-                op_id=f"audio-minutes:{int(user_id)}:{day}:{units}",
-                occurred_at=datetime.now(timezone.utc),
+                operation_id=operation_id or op_id,
             )
             try:
                 await ledger.add(entry)
@@ -741,6 +793,115 @@ async def add_daily_minutes(user_id: int, minutes: float) -> None:
 
     # Legacy audio_usage_daily writes have been removed; usage is tracked
     # solely via ResourceDailyLedger for new events.
+
+
+async def consume_daily_minutes(
+    user_id: int,
+    minutes_requested: float,
+    *,
+    operation_id: str | None = None,
+    op_id: str | None = None,
+) -> tuple[bool, float | None]:
+    """
+    Atomically enforce and record audio daily-minute usage.
+
+    Returns ``(allowed, remaining_after)``. ``remaining_after`` is ``None`` for
+    unlimited tiers. If the canonical ledger is unavailable, raises
+    ``AudioQuotaStoreUnavailable`` so API layers can use bounded fail-open.
+    """
+    units = _audio_minutes_units(minutes_requested)
+    if units <= 0:
+        return await check_daily_minutes_allow(user_id, 0.0)
+
+    limits = await get_limits_for_user(user_id)
+    limit = limits.get("daily_minutes")
+
+    if limit is None:
+        await add_daily_minutes(user_id, minutes_requested, operation_id=operation_id or op_id)
+        return True, None
+
+    ledger = await _require_daily_ledger()
+    entry = _build_audio_minutes_entry(user_id=int(user_id), units=units, operation_id=operation_id or op_id)
+    cap_units = _audio_minutes_units(float(limit))
+    if cap_units <= 0:
+        _metrics_increment("audio_quota_violations_total", {"type": "daily_minutes"})
+        return False, 0.0
+
+    try:
+        consume_if_available = getattr(ledger, "consume_if_available", None)
+        if callable(consume_if_available):
+            allowed, remaining_units = await consume_if_available(entry, daily_cap=cap_units)
+            if not allowed:
+                _metrics_increment("audio_quota_violations_total", {"type": "daily_minutes"})
+            return bool(allowed), float(max(0, int(remaining_units))) / 60.0
+
+        # Compatibility fallback for tests/lightweight fakes. Real
+        # ResourceDailyLedger provides consume_if_available for DB-backed
+        # atomicity; this lock avoids same-process races when that API is not
+        # present.
+        consume_lock = await _get_audio_minutes_consume_lock(int(user_id))
+        async with consume_lock:
+            remaining_units = await ledger.remaining_for_day(
+                entity_scope="user",
+                entity_value=str(int(user_id)),
+                category="minutes",
+                daily_cap=cap_units,
+            )
+            if units > remaining_units:
+                _metrics_increment("audio_quota_violations_total", {"type": "daily_minutes"})
+                return False, float(max(0, int(remaining_units))) / 60.0
+            await ledger.add(entry)
+            return True, float(max(0, int(remaining_units) - units)) / 60.0
+    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("Audio quotas consume failed")
+        raise AudioQuotaStoreUnavailable("audio quota daily ledger consume failed") from exc
+
+
+async def consume_daily_minutes_if_allowed(
+    user_id: int,
+    minutes: float,
+    *,
+    op_id: str | None = None,
+    operation_id: str | None = None,
+) -> tuple[bool, float | None]:
+    return await consume_daily_minutes(
+        user_id=user_id,
+        minutes_requested=minutes,
+        operation_id=operation_id or op_id,
+    )
+
+
+async def consume_daily_minutes_with_legacy_fallback(
+    user_id: int,
+    minutes: float,
+    *,
+    operation_id: str | None = None,
+    consume_fn: _DailyMinutesConsumeFn | None = None,
+    check_fn: _DailyMinutesCheckFn | None = None,
+    add_fn: _DailyMinutesAddFn | None = None,
+) -> tuple[bool, float | None]:
+    """
+    Consume daily minutes, preserving legacy check/add overrides for callers.
+
+    Endpoint modules historically expose quota helpers as monkeypatchable shim
+    points. This keeps the compatibility decision in core while allowing those
+    callers to supply their resolved helper functions.
+    """
+    resolved_consume = consume_fn or consume_daily_minutes
+    resolved_check = check_fn or check_daily_minutes_allow
+    resolved_add = add_fn or add_daily_minutes
+
+    legacy_quota_override = resolved_consume is consume_daily_minutes and (
+        resolved_check is not check_daily_minutes_allow
+        or resolved_add is not add_daily_minutes
+    )
+    if legacy_quota_override:
+        allowed, remaining_after = await resolved_check(user_id, minutes)
+        if allowed:
+            await resolved_add(user_id, minutes)
+        return allowed, remaining_after
+
+    return await resolved_consume(user_id, minutes, operation_id=operation_id)
 
 
 async def _ledger_remaining_minutes(user_id: int, daily_limit_minutes: float) -> float | None:
@@ -822,7 +983,7 @@ async def can_start_job(user_id: int) -> tuple[bool, str]:
                 categories={"jobs": {"units": 1}},  # type: ignore[call-arg]
                 tags={"policy_id": policy_id, "endpoint": "audio.jobs"},
             )
-            dec, handle_id = await gov.reserve(req, op_id=f"audio-job:{entity}")
+            dec, handle_id = await gov.reserve(req, op_id=f"audio-job:{entity}:{uuid.uuid4().hex}")
             if not dec.allowed or not handle_id:
                 _metrics_increment("audio_quota_violations_total", {"type": "concurrent_jobs"})
                 return False, "Concurrent job limit reached"
@@ -913,7 +1074,7 @@ async def can_start_stream(user_id: int) -> tuple[bool, str]:
                 categories={"streams": {"units": 1}},  # type: ignore[call-arg]
                 tags={"policy_id": policy_id, "endpoint": "audio.stream"},
             )
-            dec, handle_id = await gov.reserve(req, op_id=f"audio-stream:{entity}")
+            dec, handle_id = await gov.reserve(req, op_id=f"audio-stream:{entity}:{uuid.uuid4().hex}")
             if not dec.allowed or not handle_id:
                 _metrics_increment("audio_quota_violations_total", {"type": "concurrent_streams"})
                 return False, "Concurrent streams limit reached"
@@ -984,7 +1145,10 @@ async def check_daily_minutes_allow(user_id: int, minutes_requested: float) -> t
     if limit is None:
         return True, None
 
-    # Prefer the shared ResourceDailyLedger when available to enforce daily caps.
+    # Enforce new usage against the shared ResourceDailyLedger. Legacy
+    # audio_usage_daily rows are backfilled into the ledger during
+    # initialization and are not a safe fallback after new writes moved to the
+    # ledger-only path.
     ledger_remaining = await _ledger_remaining_minutes(user_id=int(user_id), daily_limit_minutes=float(limit))
     if ledger_remaining is not None:
         if minutes_requested > ledger_remaining:
@@ -992,13 +1156,7 @@ async def check_daily_minutes_allow(user_id: int, minutes_requested: float) -> t
             return False, max(0.0, ledger_remaining)
         return True, ledger_remaining - minutes_requested
 
-    # Fallback to legacy audio_usage_daily enforcement.
-    used = await get_daily_minutes_used(user_id)
-    remaining = float(limit) - float(used)
-    if minutes_requested > remaining:
-        _metrics_increment("audio_quota_violations_total", {"type": "daily_minutes"})
-        return False, max(0.0, remaining)
-    return True, remaining - minutes_requested
+    raise AudioQuotaStoreUnavailable("audio quota daily ledger is unavailable")
 
 
 def bytes_to_seconds(byte_count: int, sample_rate: int) -> float:
