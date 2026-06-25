@@ -872,7 +872,9 @@ def test_process_text_restores_prefix_before_normalization_metric(
     assert rows[0]["metadata"]["initial_document_json_metadata"] == {"meta": "x"}
     assert events.index("chunker_chunking_duration_seconds") < events.index("restore")
     assert events.index("restore") < events.index("chunker_normalization_seconds")
-    assert ("finalize", 0, prefix_offset) in events
+    finalize_event = ("finalize", 0, prefix_offset)
+    assert finalize_event in events
+    assert events.index(finalize_event) < events.index("chunker_normalization_seconds")
 
 
 def test_finalize_chunks_restores_prefix_offset_to_all_offset_keys() -> None:
