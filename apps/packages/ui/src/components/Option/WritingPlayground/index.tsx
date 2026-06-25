@@ -34,6 +34,7 @@ import {
   MoreHorizontal,
   Pencil,
   Redo2,
+  Save,
   Search,
   Settings,
   Square,
@@ -148,6 +149,7 @@ import {
 } from "./writing-editor-adapter"
 import {
   useWritingSessionManagement,
+  useActiveManuscriptScene,
   useWritingTemplateLibrary,
   useWritingGenerationSettings,
   useWritingContextComposition,
@@ -228,10 +230,9 @@ export const WritingPlayground = () => {
     focusMode,
     setFocusMode,
     activeNodeId,
-    setActiveNodeId,
+    activeNodeType,
     setAnalysisModalOpen,
   } = useWritingPlaygroundStore()
-  // TODO Phase 2: React to activeNodeId changes to load scene content into editor
   const [selectedModel, setSelectedModel] = useStorage<string>("selectedModel")
   const apiProviderOverride = useStoreChatModelSettings(
     (state) => state.apiProvider
@@ -360,6 +361,24 @@ export const WritingPlayground = () => {
     canCreateSession, canRenameSession
   } = sessionMgmt
 
+  const activeManuscriptScene = useActiveManuscriptScene({
+    activeNodeId,
+    activeNodeType,
+    editorText,
+    setEditorText,
+    tipTapContent,
+    setTipTapContent,
+    isOnline
+  })
+  const {
+    scene: activeScene,
+    sceneId: activeSceneId,
+    isSceneBound,
+    isSceneLoading,
+    isSceneDirty,
+    saveScene: saveActiveScene
+  } = activeManuscriptScene
+
   const textareaEditorAdapter = React.useMemo(
     () => createTextareaEditorAdapter(editorRef),
     []
@@ -410,7 +429,6 @@ export const WritingPlayground = () => {
   React.useEffect(() => {
     if (editorMode !== "tiptap") {
       setActiveEditorAdapter(textareaEditorAdapter)
-      setTipTapContent(null)
       editorTextChangedByTipTap.current = false
       return
     }
@@ -419,7 +437,11 @@ export const WritingPlayground = () => {
       setTipTapContent(
         resolveTipTapDocument(
           editorText,
-          getPromptRichFromPayload(activeSessionDetail?.payload)
+          (activeScene?.content as
+            | JSONContent
+            | null
+            | undefined) ??
+            getPromptRichFromPayload(activeSessionDetail?.payload)
         )
       )
     }
@@ -427,6 +449,7 @@ export const WritingPlayground = () => {
   }, [
     activeSessionDetail?.id,
     activeSessionDetail?.payload,
+    activeScene?.content,
     editorMode,
     editorText,
     setActiveEditorAdapter,
@@ -1934,6 +1957,106 @@ export const WritingPlayground = () => {
     return null
   }, [activeSessionId, isDirty, isGenerating, lastSavedAt, saveSessionMutation.isPending, t])
 
+  const sceneSaveStatusLabel = React.useMemo(() => {
+    if (!isSceneBound) return null
+    if (isSceneLoading) {
+      return t("option:writingPlayground.sceneLoadingLabel", "Scene loading...")
+    }
+    return isSceneDirty
+      ? t("option:writingPlayground.sceneUnsavedLabel", "Scene unsaved")
+      : t("option:writingPlayground.sceneSavedLabel", "Scene saved")
+  }, [isSceneBound, isSceneDirty, isSceneLoading, t])
+
+  const handleSaveActiveScene = React.useCallback(async () => {
+    try {
+      const savedScene = await saveActiveScene()
+      if (!savedScene) return
+      message.success(
+        t("option:writingPlayground.sceneSaveSuccess", "Scene saved.")
+      )
+    } catch (error) {
+      const detail =
+        error instanceof Error
+          ? error.message
+          : t("option:error", "Error")
+      message.error(
+        t("option:writingPlayground.sceneSaveError", "Scene save failed: {{detail}}", {
+          detail
+        })
+      )
+    }
+  }, [saveActiveScene, t])
+
+  const handleBeforeManuscriptNodeSelect = React.useCallback(
+    async ({
+      nodeId,
+      nodeType
+    }: {
+      nodeId: string | null
+      nodeType: "part" | "chapter" | "scene" | null
+    }) => {
+      if (
+        !isSceneBound ||
+        !isSceneDirty
+      ) {
+        return true
+      }
+      if (
+        nodeType === "scene" &&
+        nodeId === activeSceneId
+      ) {
+        return true
+      }
+
+      return await new Promise<boolean>((resolve) => {
+        Modal.confirm({
+          title: t(
+            "option:writingPlayground.sceneSwitchSaveTitle",
+            "Save scene changes?"
+          ),
+          content: t(
+            "option:writingPlayground.sceneSwitchSaveBody",
+            "Save the current scene before switching."
+          ),
+          okText: t(
+            "option:writingPlayground.sceneSwitchSaveAction",
+            "Save and switch"
+          ),
+          cancelText: t("common:cancel", "Cancel"),
+          onOk: async () => {
+            try {
+              const savedScene = await saveActiveScene()
+              resolve(Boolean(savedScene))
+            } catch (error) {
+              const detail =
+                error instanceof Error
+                  ? error.message
+                  : t("option:error", "Error")
+              message.error(
+                t(
+                  "option:writingPlayground.sceneSaveError",
+                  "Scene save failed: {{detail}}",
+                  { detail }
+                )
+              )
+              resolve(false)
+            }
+          },
+          onCancel: () => {
+            resolve(false)
+          }
+        })
+      })
+    },
+    [
+      activeSceneId,
+      isSceneBound,
+      isSceneDirty,
+      saveActiveScene,
+      t
+    ]
+  )
+
   const shouldRenderWritingModalHost =
     extraBodyJsonModalOpen ||
     contextPreviewModalOpen ||
@@ -2598,7 +2721,10 @@ export const WritingPlayground = () => {
       </div>
       <div className="flex-1 overflow-y-auto px-2 py-1">
         {libraryView === "manuscript" ? (
-          <ManuscriptTreePanel isOnline={isOnline} />
+          <ManuscriptTreePanel
+            isOnline={isOnline}
+            onBeforeSelectNode={handleBeforeManuscriptNodeSelect}
+          />
         ) : (
         sessionsLoading ? (<Skeleton active />) : sessionsError ? (
           <DesignSystemAlert
@@ -2835,6 +2961,31 @@ export const WritingPlayground = () => {
                       }} trigger={["click"]}>
                         <Button size="small" icon={<Activity className="h-3.5 w-3.5" />}>{t("option:writingPlayground.analysisButton", "Analysis")}</Button>
                       </Dropdown>
+                      {isSceneBound ? (
+                        <Tooltip
+                          title={t(
+                            "option:writingPlayground.sceneSaveAction",
+                            "Save scene"
+                          )}
+                        >
+                          <Button
+                            size="small"
+                            icon={<Save className="h-3.5 w-3.5" />}
+                            aria-label={t(
+                              "option:writingPlayground.sceneSaveAction",
+                              "Save scene"
+                            )}
+                            disabled={
+                              isGenerating ||
+                              isSceneLoading ||
+                              !isSceneDirty
+                            }
+                            onClick={() => {
+                              void handleSaveActiveScene()
+                            }}
+                          />
+                        </Tooltip>
+                      ) : null}
                       <Button size="small" icon={searchOpen ? <X className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />} onClick={() => setSearchOpen((open) => !open)} title={searchOpen ? t("option:writingPlayground.searchClose", "Close search") : t("option:writingPlayground.searchToggle", "Find")} />
                     </div>
                     <WritingActionBar
@@ -3055,6 +3206,11 @@ export const WritingPlayground = () => {
                 </Tag>
               )}
               <div className="flex-1" />
+              {sceneSaveStatusLabel ? (
+                <span data-testid="writing-scene-save-status">
+                  {sceneSaveStatusLabel}
+                </span>
+              ) : null}
               {saveStatusLabel && (<span>{saveStatusLabel}</span>)}
               <span className="text-text-muted/60">{t("option:writingPlayground.shortcutsHint", "Ctrl+Enter to generate")}</span>
             </div>

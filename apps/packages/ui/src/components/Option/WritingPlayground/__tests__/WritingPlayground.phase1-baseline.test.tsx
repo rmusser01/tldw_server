@@ -136,10 +136,16 @@ vi.mock("@/services/writing-playground", () => ({
   getWritingDefaults: vi.fn(),
   getWritingWordcloud: vi.fn(),
   getWritingSession: vi.fn(),
+  getManuscriptScene: vi.fn(),
+  getManuscriptStructure: vi.fn(),
   importWritingSnapshot: vi.fn(),
+  listManuscriptProjects: vi.fn(),
   listWritingSessions: vi.fn(),
   listWritingTemplates: vi.fn(),
   listWritingThemes: vi.fn(),
+  createManuscriptProject: vi.fn(),
+  reorderManuscriptItems: vi.fn(),
+  updateManuscriptScene: vi.fn(),
   tokenizeWritingText: vi.fn(),
   updateWritingSession: vi.fn(),
   updateWritingTemplate: vi.fn(),
@@ -376,6 +382,9 @@ beforeEach(() => {
   useWritingPlaygroundStore.setState({
     activeSessionId: null,
     activeSessionName: null,
+    activeProjectId: null,
+    activeNodeId: null,
+    activeNodeType: null,
     editorMode: "plain"
   })
   useStoreChatModelSettings.getState().reset()

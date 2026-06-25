@@ -7,14 +7,27 @@ import { BookOpen, FileText, FolderOpen, Layers, Plus } from "lucide-react"
 import { useWritingPlaygroundStore } from "@/store/writing-playground"
 import { getManuscriptStructure, listManuscriptProjects, createManuscriptProject, reorderManuscriptItems } from "@/services/writing-playground"
 
+type ManuscriptTreeNodeType = "part" | "chapter" | "scene" | null
+
+type ManuscriptTreeSelection = {
+  nodeId: string | null
+  nodeType: ManuscriptTreeNodeType
+}
+
 type ManuscriptTreePanelProps = {
   isOnline: boolean
+  onBeforeSelectNode?: (
+    selection: ManuscriptTreeSelection
+  ) => boolean | Promise<boolean>
 }
 
 // Extended DataNode that carries the entity's version for reorder
 type VersionedDataNode = DataNode & { version?: number; entityType?: "part" | "chapter" | "scene" }
 
-export function ManuscriptTreePanel({ isOnline }: ManuscriptTreePanelProps) {
+export function ManuscriptTreePanel({
+  isOnline,
+  onBeforeSelectNode
+}: ManuscriptTreePanelProps) {
   const activeProjectId = useWritingPlaygroundStore((s) => s.activeProjectId)
   const setActiveProjectId = useWritingPlaygroundStore((s) => s.setActiveProjectId)
   const activeNodeId = useWritingPlaygroundStore((s) => s.activeNodeId)
@@ -90,6 +103,26 @@ export function ManuscriptTreePanel({ isOnline }: ManuscriptTreePanelProps) {
     }
   }, [activeProjectId, nodeVersionMap, queryClient])
 
+  const selectNode = useCallback(
+    async (nodeId: string | null, nodeType: ManuscriptTreeNodeType) => {
+      const allowed = await onBeforeSelectNode?.({ nodeId, nodeType })
+      if (allowed === false) return false
+      setActiveNodeId(nodeId)
+      setActiveNodeType(nodeType)
+      return true
+    },
+    [onBeforeSelectNode, setActiveNodeId, setActiveNodeType]
+  )
+
+  const selectProject = useCallback(
+    async (projectId: string | null) => {
+      const allowed = await selectNode(null, null)
+      if (!allowed) return
+      setActiveProjectId(projectId)
+    },
+    [selectNode, setActiveProjectId]
+  )
+
   if (!activeProjectId) {
     const projects = (projectsData as any)?.projects || []
     return (
@@ -110,8 +143,7 @@ export function ManuscriptTreePanel({ isOnline }: ManuscriptTreePanelProps) {
                 try {
                   const result = await createManuscriptProject({ title: "Untitled Project" }) as any
                   if (result?.id) {
-                    setActiveNodeId(null)
-                    setActiveProjectId(result.id)
+                    await selectProject(result.id)
                   }
                   queryClient.invalidateQueries({ queryKey: ["manuscript-projects"] })
                 } catch (err) {
@@ -129,8 +161,7 @@ export function ManuscriptTreePanel({ isOnline }: ManuscriptTreePanelProps) {
                 key={p.id}
                 className="cursor-pointer rounded-md px-2 py-2 hover:bg-gray-100 dark:hover:bg-gray-800"
                 onClick={() => {
-                  setActiveNodeId(null)
-                  setActiveProjectId(p.id)
+                  void selectProject(p.id)
                 }}
               >
                 <Typography.Text className="text-sm">{p.title}</Typography.Text>
@@ -160,8 +191,7 @@ export function ManuscriptTreePanel({ isOnline }: ManuscriptTreePanelProps) {
           type="secondary"
           className="cursor-pointer text-xs hover:underline"
           onClick={() => {
-            setActiveNodeId(null)
-            setActiveProjectId(null)
+            void selectProject(null)
           }}
         >
           &larr; All Projects
@@ -173,8 +203,10 @@ export function ManuscriptTreePanel({ isOnline }: ManuscriptTreePanelProps) {
           selectedKeys={activeNodeId ? [activeNodeId] : []}
           onSelect={(keys) => {
             const key = (keys[0] as string) || null
-            setActiveNodeId(key)
-            setActiveNodeType(key ? nodeVersionMap.get(key)?.entityType ?? null : null)
+            void selectNode(
+              key,
+              key ? nodeVersionMap.get(key)?.entityType ?? null : null
+            )
           }}
           draggable
           onDrop={handleDrop}

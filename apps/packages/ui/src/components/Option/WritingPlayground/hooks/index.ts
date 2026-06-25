@@ -1,5 +1,7 @@
 export { useWritingSessionManagement } from "./useWritingSessionManagement"
 export type { UseWritingSessionManagementDeps } from "./useWritingSessionManagement"
+export { useActiveManuscriptScene } from "./useActiveManuscriptScene"
+export type { ActiveManuscriptSceneBinding } from "./useActiveManuscriptScene"
 
 export { useWritingTemplateLibrary } from "./useWritingTemplateLibrary"
 export type { UseWritingTemplateLibraryDeps } from "./useWritingTemplateLibrary"
