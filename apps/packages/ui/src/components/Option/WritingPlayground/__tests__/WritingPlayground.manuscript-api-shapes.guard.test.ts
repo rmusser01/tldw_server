@@ -48,6 +48,33 @@ describe("Writing playground manuscript API shape guards", () => {
     expect(serviceSource).toContain("): Promise<ManuscriptResearchResponse>")
   })
 
+  it("types manuscript annotation service contracts and review provider payloads explicitly", () => {
+    const serviceSource = readWritingPlaygroundRootSource("writing-playground.ts")
+    const annotationTypesStart = serviceSource.indexOf("export type ManuscriptAnnotationTargetType")
+    const annotationTypesEnd = serviceSource.indexOf("const sessionsClient")
+    const annotationTypesSource = serviceSource.slice(annotationTypesStart, annotationTypesEnd)
+
+    expect(annotationTypesStart).toBeGreaterThanOrEqual(0)
+    expect(annotationTypesEnd).toBeGreaterThan(annotationTypesStart)
+    expect(annotationTypesSource).toContain("export type ManuscriptAnnotationResponse")
+    expect(annotationTypesSource).toContain("export type ManuscriptAnnotationListResponse")
+    expect(annotationTypesSource).toContain("export type ManuscriptAnnotationCreateInput")
+    expect(annotationTypesSource).toContain("export type ManuscriptAnnotationUpdateInput")
+    expect(annotationTypesSource).toContain("export type ManuscriptSelectedTextAnnotationReviewRequest")
+    expect(annotationTypesSource).toContain("export type ManuscriptSceneAnnotationReviewRequest")
+    expect(annotationTypesSource).toContain("export type ManuscriptSceneAnnotationReviewJobResponse")
+    expect(annotationTypesSource).toContain("provider: string")
+    expect(annotationTypesSource).toContain("model: string")
+    expect(annotationTypesSource).not.toContain("Record<string, unknown>")
+    expect(annotationTypesSource).not.toContain("api_provider")
+    expect(annotationTypesSource).not.toContain("apiProvider")
+    expect(annotationTypesSource).not.toContain("llm_provider")
+    expect(annotationTypesSource).not.toContain("llmProvider")
+    expect(serviceSource).toContain("): Promise<ManuscriptAnnotationListResponse>")
+    expect(serviceSource).toContain("): Promise<ManuscriptAnnotationResponse>")
+    expect(serviceSource).toContain("): Promise<ManuscriptSceneAnnotationReviewJobResponse>")
+  })
+
   it("exports manuscript scene and research response types only once", () => {
     const serviceSource = readWritingPlaygroundRootSource("writing-playground.ts")
 
