@@ -15,7 +15,7 @@ modified_files:
 - tldw_Server_API/app/core/UserProfiles/planner.py
 - tldw_Server_API/tests/UserProfile/test_profile_update_planner.py
 - backlog/tasks/task-12016.4 - Add-UserProfiles-update-planner-seam.md
-updated_date: 2026-06-24 23:11
+updated_date: 2026-06-25 02:42
 ---
 
 ## Description
@@ -40,6 +40,7 @@ Task 1 complete. Commit daf9cbd0b added legacy v1 profile contract characterizat
 Task 2 complete after review loop. Commits 144d82312 and 1a7157899 added typed contracts, hardened immutable payload/rejected handling, and strengthened tests. Spec re-review approved with no gaps; code-quality re-review approved with no findings. Controller reran `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/UserProfile/test_profile_contracts.py -q`: 3 passed, 19 warnings. Controller ran Bandit on contracts.py: 0 findings.
 Task 3 complete after review loop. Commits f18e0166f and 04a21329a added domain error taxonomy, preserved v1 compatibility buckets, stabilized mixed domain error precedence, and pinned direct-vs-legacy not-found details. Spec re-review approved with no gaps; code-quality re-review approved with no blocking findings. Controller reran mapping + update + legacy characterization suite: 28 passed, 897 warnings. Controller ran Bandit on touched production error-mapping files: exit code 0.
 Task 4 complete. Commit fecff0896 added ProfileUpdatePlanner and planner tests, including forced dry-run delegation. Spec review approved with no gaps; code-quality review approved with no blocking findings. Controller reran planner + profile update tests: 20 passed, 742 warnings. Controller ran Bandit on planner.py: exit code 0.
+Task 5 complete after review loop. Commits c337c4203, 1cd84f290a, and 42607769e9 added the command-service seam, defensive legacy command result, and shared core legacy skip classifier used by both command_service.py and profile_errors.py. Controller verification after the final fix: focused command/error mapping suite 25 passed, broader UserProfiles compatibility suite 49 passed, Bandit on touched command/error/mapper production files reported no results or errors. Spec and quality re-reviews approved with no remaining issues.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
