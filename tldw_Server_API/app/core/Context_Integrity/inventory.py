@@ -304,7 +304,7 @@ def inventory_user_skills_with_findings(*, user_id: int, skills_root: Path) -> I
     return InventoryResult(assets=tuple(assets), findings=tuple(findings))
 
 
-def inventory_user_skills(*, user_id: int, skills_root: Path) -> list[ContextAssetDescriptor]:
+def inventory_user_skills(user_id: int, skills_root: Path) -> list[ContextAssetDescriptor]:
     """Inventory per-user skill directories."""
     return list(inventory_user_skills_with_findings(user_id=user_id, skills_root=skills_root).assets)
 
@@ -381,7 +381,7 @@ def inventory_prompt_files_with_findings(*, prompts_dir: Path) -> InventoryResul
     return InventoryResult(assets=tuple(assets), findings=tuple(findings))
 
 
-def inventory_prompt_files(*, prompts_dir: Path) -> list[ContextAssetDescriptor]:
+def inventory_prompt_files(prompts_dir: Path) -> list[ContextAssetDescriptor]:
     """Inventory config prompt files under a Prompts directory."""
     return list(inventory_prompt_files_with_findings(prompts_dir=prompts_dir).assets)
 
@@ -460,7 +460,6 @@ def inventory_env_prompt_overrides_with_findings(
 
 
 def inventory_env_prompt_overrides(
-    *,
     environ: Mapping[str, str] | None = None,
 ) -> list[ContextAssetDescriptor]:
     """Inventory configured prompt override files from TLDW_PROMPT_FILE_* vars."""

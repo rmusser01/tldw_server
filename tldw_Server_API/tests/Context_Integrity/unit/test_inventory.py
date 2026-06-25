@@ -30,6 +30,18 @@ def test_inventory_user_skill_directory_includes_supporting_files(tmp_path) -> N
     assert assets[0].source_type == "skill_file"
 
 
+def test_inventory_user_skills_accepts_positional_public_arguments(tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import inventory_user_skills
+
+    skill_dir = tmp_path / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: demo\n---\nBody", encoding="utf-8")
+
+    assets = inventory_user_skills(1, tmp_path / "skills")
+
+    assert [asset.asset_id for asset in assets] == ["skill:user:1/demo"]
+
+
 def test_inventory_user_skill_digest_changes_when_supporting_file_changes(tmp_path) -> None:
     from tldw_Server_API.app.core.Context_Integrity.inventory import inventory_user_skills
 
@@ -81,6 +93,18 @@ def test_inventory_prompt_files_finds_supported_extensions(tmp_path) -> None:
 
     assert [asset.asset_id for asset in assets] == ["prompt_file:rag.prompts.yaml"]
     assert assets[0].executable is False
+
+
+def test_inventory_prompt_files_accepts_positional_public_argument(tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import inventory_prompt_files
+
+    prompts = tmp_path / "Prompts"
+    prompts.mkdir()
+    (prompts / "rag.prompts.yaml").write_text("answer: prompt", encoding="utf-8")
+
+    assets = inventory_prompt_files(prompts)
+
+    assert [asset.asset_id for asset in assets] == ["prompt_file:rag.prompts.yaml"]
 
 
 def test_inventory_prompt_files_does_not_recurse_or_follow_symlink_escape(tmp_path) -> None:
@@ -140,6 +164,23 @@ def test_inventory_env_prompt_overrides_finds_configured_files(tmp_path) -> None
         "prompt_file:env:TLDW_PROMPT_FILE_CHAT__SYSTEM:override.md"
     ]
     assert assets[0].metadata["source_label"] == "env:TLDW_PROMPT_FILE_CHAT__SYSTEM"
+
+
+def test_inventory_env_prompt_overrides_accepts_positional_public_argument(tmp_path) -> None:
+    from tldw_Server_API.app.core.Context_Integrity.inventory import (
+        inventory_env_prompt_overrides,
+    )
+
+    override = tmp_path / "override.md"
+    override.write_text("override prompt", encoding="utf-8")
+
+    assets = inventory_env_prompt_overrides(
+        {"TLDW_PROMPT_FILE_CHAT__SYSTEM": str(override)}
+    )
+
+    assert [asset.asset_id for asset in assets] == [
+        "prompt_file:env:TLDW_PROMPT_FILE_CHAT__SYSTEM:override.md"
+    ]
 
 
 def test_inventory_env_prompt_overrides_reports_missing_and_ignores_other_vars(tmp_path) -> None:
