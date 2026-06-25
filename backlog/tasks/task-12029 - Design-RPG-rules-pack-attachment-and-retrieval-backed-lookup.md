@@ -1,7 +1,7 @@
 ---
 id: TASK-12029
 title: Design RPG rules-pack attachment and retrieval-backed lookup
-status: To Do
+status: In Progress
 created_date: 2026-06-25 15:08
 labels:
 - design
@@ -17,6 +17,11 @@ references:
 documentation:
 - tldw_Server_API/app/core/RPG/README.md
 - Docs/superpowers/specs/2026-06-25-rpg-campaign-session-runtime-design.md
+- Docs/superpowers/specs/2026-06-25-rpg-rules-pack-attachment-retrieval-design.md
+updated_date: 2026-06-25 22:29
+modified_files:
+- Docs/superpowers/specs/2026-06-25-rpg-rules-pack-attachment-retrieval-design.md
+- backlog/tasks/task-12029 - Design-RPG-rules-pack-attachment-and-retrieval-backed-lookup.md
 ---
 
 ## Description
@@ -27,12 +32,12 @@ Design the next RPG runtime feature: attaching user-provided rules-pack referenc
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Design defines how campaigns and sessions attach, list, update, and remove user rules-pack references without duplicating rules prose into RPG tables
-- [ ] #2 Design specifies how RPG rules lookup blends built-in citation-only references with user-provided retrieval/RAG results, including citation/attribution fields and ranking/fallback behavior
-- [ ] #3 Design specifies how the session context builder includes retrieved user rules snippets within existing context bounds and diagnostics
-- [ ] #4 Design covers REST and MCP surface changes, AuthNZ privileges, idempotency/concurrency behavior for attachment writes, and failure modes
-- [ ] #5 Design documents licensing/privacy constraints for user-provided rules content and makes clear that bundled adapters remain mechanics-metadata/citation-only
-- [ ] #6 Design includes a test and verification plan for repository/service/API/MCP behavior, retrieval mocking, privilege catalog sync, Bandit, and focused regression coverage
+- [x] #1 Design defines how campaigns and sessions attach, list, update, and remove user rules-pack references without duplicating rules prose into RPG tables
+- [x] #2 Design specifies how RPG rules lookup blends built-in citation-only references with user-provided retrieval/RAG results, including citation/attribution fields and ranking/fallback behavior
+- [x] #3 Design specifies how the session context builder includes retrieved user rules snippets within existing context bounds and diagnostics
+- [x] #4 Design covers REST and MCP surface changes, AuthNZ privileges, idempotency/concurrency behavior for attachment writes, and failure modes
+- [x] #5 Design documents licensing/privacy constraints for user-provided rules content and makes clear that bundled adapters remain mechanics-metadata/citation-only
+- [x] #6 Design includes a test and verification plan for repository/service/API/MCP behavior, retrieval mocking, privilege catalog sync, Bandit, and focused regression coverage
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -44,7 +49,8 @@ Design the next RPG runtime feature: attaching user-provided rules-pack referenc
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+2026-06-25: Brainstorming complete. Approved design direction: hybrid direct media/media-collection references now with registry-compatible schema later; sessions copy campaign refs at creation; rules lookup is snippet/citation-first with opt-in generated answer mode; misses fall back only to bundled citation-only references; no broad RAG/web fallback.
+2026-06-25: Wrote approved design spec at Docs/superpowers/specs/2026-06-25-rpg-rules-pack-attachment-retrieval-design.md. Self-review checked for placeholders, contradictory scope, ambiguous retrieval behavior, and licensing overclaims. `git diff --check` passed. Bandit is not applicable because this step changed only Markdown/backlog task metadata, not Python code.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -56,9 +62,9 @@ Design the next RPG runtime feature: attaching user-provided rules-pack referenc
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
