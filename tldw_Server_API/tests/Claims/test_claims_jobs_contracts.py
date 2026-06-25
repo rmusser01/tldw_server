@@ -4,7 +4,6 @@ import pytest
 
 from tldw_Server_API.app.core.Claims_Extraction import claims_job_contracts as contracts
 
-
 pytestmark = pytest.mark.unit
 
 

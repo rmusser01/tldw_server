@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import os
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.Jobs.manager import JobManager

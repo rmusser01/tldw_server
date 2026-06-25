@@ -6,6 +6,7 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_job_contracts import (
     CLAIMS_DELIVER_REVIEW_NOTIFICATION_JOB_TYPE,
     CLAIMS_JOBS_DOMAIN,
     CLAIMS_REBUILD_MEDIA_JOB_TYPE,
+    ClaimsJobError,
 )
 
 pytestmark = pytest.mark.unit
@@ -103,7 +104,7 @@ def test_claims_jobs_queue_uses_default_for_blank_environment(monkeypatch) -> No
 def test_enqueue_alert_delivery_rejects_email_channel() -> None:
     fake = FakeJobManager()
 
-    with pytest.raises(Exception):
+    with pytest.raises(ClaimsJobError):
         claims_jobs.enqueue_claims_alert_delivery(
             owner_user_id="1",
             event_id=10,
