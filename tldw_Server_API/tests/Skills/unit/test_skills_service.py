@@ -9,10 +9,13 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
 from tldw_Server_API.app.core.Skills.exceptions import (
     SkillConflictError,
     SkillNotFoundError,
     SkillParseError,
+    SkillsError,
+    SkillStorageError,
     SkillValidationError,
 )
 from tldw_Server_API.app.core.Skills.skills_service import SkillMetadata, SkillsService
@@ -394,6 +397,48 @@ New content here.
             await service.update_skill("version-test", content="Again", expected_version=1)
 
     @pytest.mark.asyncio
+    async def test_update_skill_registry_conflict_restores_original_skill_file(self, service, monkeypatch):
+        """A registry conflict must not leave the staged SKILL.md content on disk."""
+        created = await service.create_skill("rollback-test", "Original content")
+        skill_file = service._get_skill_dir("rollback-test") / "SKILL.md"
+        original_disk_content = skill_file.read_text(encoding="utf-8")
+
+        def _conflict_update(*_args, **_kwargs):
+            raise ConflictError("simulated stale version", entity="skill_registry", entity_id="rollback-test")
+
+        monkeypatch.setattr(service._get_db(), "update_skill_registry", _conflict_update)
+
+        with pytest.raises(SkillConflictError):
+            await service.update_skill(
+                "rollback-test",
+                content="Updated content",
+                expected_version=created["version"],
+            )
+
+        assert skill_file.read_text(encoding="utf-8") == original_disk_content
+
+    @pytest.mark.asyncio
+    async def test_update_skill_unexpected_registry_error_restores_original_skill_file(self, service, monkeypatch):
+        """Unexpected registry failures must also restore staged SKILL.md content."""
+        created = await service.create_skill("rollback-unexpected", "Original content")
+        skill_file = service._get_skill_dir("rollback-unexpected") / "SKILL.md"
+        original_disk_content = skill_file.read_text(encoding="utf-8")
+
+        def _unexpected_update(*_args, **_kwargs):
+            raise RuntimeError("simulated registry timeout")
+
+        monkeypatch.setattr(service._get_db(), "update_skill_registry", _unexpected_update)
+
+        with pytest.raises(SkillsError, match="simulated registry timeout"):
+            await service.update_skill(
+                "rollback-unexpected",
+                content="Updated content",
+                expected_version=created["version"],
+            )
+
+        assert skill_file.read_text(encoding="utf-8") == original_disk_content
+
+    @pytest.mark.asyncio
     async def test_delete_skill(self, service):
         """Test deleting a skill."""
         await service.create_skill("delete-test", "Content")
@@ -425,6 +470,80 @@ New content here.
         # Try to delete with stale version
         with pytest.raises(SkillConflictError):
             await service.delete_skill("delete-version", expected_version=1)
+
+    @pytest.mark.asyncio
+    async def test_delete_skill_registry_conflict_keeps_skill_directory(self, service, monkeypatch):
+        """A delete conflict must not remove the skill directory before the DB delete lands."""
+        created = await service.create_skill("delete-rollback", "Content")
+        skill_dir = service._get_skill_dir("delete-rollback")
+
+        def _conflict_delete(*_args, **_kwargs):
+            raise ConflictError("simulated stale delete", entity="skill_registry", entity_id="delete-rollback")
+
+        monkeypatch.setattr(service._get_db(), "mark_skill_registry_deleted", _conflict_delete)
+
+        with pytest.raises(SkillConflictError):
+            await service.delete_skill("delete-rollback", expected_version=created["version"])
+
+        assert skill_dir.exists()
+        assert (skill_dir / "SKILL.md").read_text(encoding="utf-8") == "Content"
+
+    @pytest.mark.asyncio
+    async def test_delete_skill_directory_failure_restores_registry(self, service, monkeypatch):
+        """A directory deletion failure must not leave the skill hidden in the registry."""
+        created = await service.create_skill("delete-restore", "Content")
+        skill_dir = service._get_skill_dir("delete-restore")
+
+        from tldw_Server_API.app.core.Skills import skills_service as skills_service_mod
+
+        original_rmtree = skills_service_mod.shutil.rmtree
+
+        def _fail_rmtree(path, *args, **kwargs):
+            if Path(path) == skill_dir:
+                raise OSError("simulated directory lock")
+            return original_rmtree(path, *args, **kwargs)
+
+        monkeypatch.setattr(skills_service_mod.shutil, "rmtree", _fail_rmtree)
+
+        with pytest.raises(SkillStorageError, match="simulated directory lock"):
+            await service.delete_skill("delete-restore", expected_version=created["version"])
+
+        row = service._get_db().get_skill_registry("delete-restore", include_deleted=False)
+        assert row is not None
+        assert skill_dir.exists()
+        assert (skill_dir / "SKILL.md").read_text(encoding="utf-8") == "Content"
+
+    @pytest.mark.asyncio
+    async def test_update_skill_supporting_files_only_bumps_version(self, service):
+        """Supporting-file-only changes are skill bundle mutations and must be versioned."""
+        created = await service.create_skill(
+            "support-version",
+            "Content",
+            supporting_files={"guide.md": "v1"},
+        )
+
+        updated = await service.update_skill(
+            "support-version",
+            supporting_files={"guide.md": "v2"},
+            expected_version=created["version"],
+        )
+
+        assert updated["version"] == created["version"] + 1
+        assert updated["supporting_files"]["guide.md"] == "v2"
+
+    @pytest.mark.asyncio
+    async def test_update_skill_supporting_file_write_failure_raises_storage_error(self, service, monkeypatch):
+        """Supporting-file write failures must not be reported as successful updates."""
+        await service.create_skill("support-failure", "Content")
+        bad_path = service.skills_dir / "missing-parent" / "new.md"
+
+        monkeypatch.setattr(service, "_safe_supporting_path", lambda *_args, **_kwargs: bad_path)
+
+        with pytest.raises(SkillStorageError):
+            await service.update_skill(
+                "support-failure",
+                supporting_files={"new.md": "new content"},
+            )
 
     @pytest.mark.asyncio
     async def test_import_skill(self, service):
@@ -781,6 +900,36 @@ Content""")
         zip_data = buffer.getvalue()
 
         with pytest.raises(SkillValidationError, match="path traversal"):
+            await service.import_from_zip(zip_data)
+
+    @pytest.mark.asyncio
+    async def test_import_from_zip_rejects_oversized_skill_md(self, service):
+        """Zip import must enforce the SKILL.md content cap before writing files."""
+        import zipfile
+        from io import BytesIO
+
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr("large-skill/SKILL.md", "x" * 500_001)
+        zip_data = buffer.getvalue()
+
+        with pytest.raises(SkillValidationError, match="SKILL.md.*500KB"):
+            await service.import_from_zip(zip_data)
+
+    @pytest.mark.asyncio
+    async def test_import_from_zip_rejects_too_many_entries(self, service):
+        """Zip import should reject archives with excessive entry counts before reads."""
+        import zipfile
+        from io import BytesIO
+
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr("many-entries/SKILL.md", "Content")
+            for i in range(100):
+                zf.writestr(f"many-entries/extra-{i}.md", "x")
+        zip_data = buffer.getvalue()
+
+        with pytest.raises(SkillValidationError, match="too many entries"):
             await service.import_from_zip(zip_data)
 
 

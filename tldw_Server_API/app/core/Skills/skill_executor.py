@@ -169,7 +169,7 @@ class SkillExecutor:
             Filtered list of tool definitions
         """
         if not allowed_tools:
-            return all_tools  # No restriction
+            return []
 
         # Extract base tool names from patterns
         allowed_base_names = set()
@@ -415,8 +415,7 @@ class SkillExecutor:
             t for t in tool_defs
             if not isinstance(t, dict) or t.get("canExecute", True)
         ]
-        if allowed_tools:
-            tool_defs = self.filter_tools_for_skill(tool_defs, allowed_tools)
+        tool_defs = self.filter_tools_for_skill(tool_defs, allowed_tools)
         llm_tools = self._normalize_tool_definitions(tool_defs)
 
         system_prompt = (
@@ -449,6 +448,14 @@ class SkillExecutor:
                 final_output = self._extract_response_text(response)
                 break
 
+            if not llm_tools:
+                final_output = (
+                    self._extract_response_text(response)
+                    or "Tool calls were requested but no tools are allowed for this skill."
+                )
+                logger.warning(f"Tool calls requested but no tools are allowed for skill fork '{skill_name}'.")
+                break
+
             if tool_executor is None:
                 final_output = self._extract_response_text(response)
                 logger.warning("Tool calls requested but no executor available for skill fork.")
@@ -471,7 +478,7 @@ class SkillExecutor:
                         client_id=context.client_id if context else None,
                         tool_name=tool_name,
                         arguments=tool_args,
-                        allowed_tools=allowed_tools or None,
+                        allowed_tools=allowed_tools,
                     )
                     result_payload = json.dumps(result, default=str)
                 except ToolExecutionError as e:

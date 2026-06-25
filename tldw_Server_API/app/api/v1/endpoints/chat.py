@@ -203,8 +203,8 @@ from tldw_Server_API.app.core.Moderation.supervised_policy import (
     bootstrap_guardian_moderation_runtime,
 )
 from tldw_Server_API.app.core.Skills.context_integration import (
-    add_skill_tool_to_tools_list,
-    build_system_message_with_skills,
+    add_skill_tool_to_tools_list_async,
+    build_system_message_with_skills_async,
 )
 from tldw_Server_API.app.core.Utils.chunked_image_processor import get_image_processor
 
@@ -2437,7 +2437,7 @@ async def create_chat_completion(
             provider_hint = request_data.api_provider or _get_default_provider()
             request_data.tools = validate_tool_definitions(tools_as_dicts, provider=provider_hint)
         if user_base_dir is not None and current_user and getattr(current_user, "id", None) is not None:
-            request_data.tools = add_skill_tool_to_tools_list(
+            request_data.tools = await add_skill_tool_to_tools_list_async(
                 request_data.tools,
                 user_id=current_user.id,
                 base_path=user_base_dir,
@@ -3621,7 +3621,7 @@ async def create_chat_completion(
                     persona_debug_meta["budget_adjustment_reason"] = persona_budget_adjustment_reason
 
             if user_base_dir is not None and current_user and getattr(current_user, "id", None) is not None:
-                final_system_message = build_system_message_with_skills(
+                final_system_message = await build_system_message_with_skills_async(
                     final_system_message,
                     current_user.id,
                     user_base_dir,

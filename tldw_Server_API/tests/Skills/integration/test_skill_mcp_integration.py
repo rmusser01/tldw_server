@@ -96,6 +96,35 @@ class TestBuildSystemMessageWithSkills:
         )
         assert result == "Base message"
 
+    @pytest.mark.asyncio
+    async def test_async_variant_uses_async_context_payload(self, monkeypatch, temp_env):
+        """Async chat paths should not call the synchronous Skills context scan."""
+        env = temp_env
+
+        async def _fake_async_payload(self):
+            return {
+                "available_skills": [{"name": "async-skill"}],
+                "context_text": "<available-skills>\n- async-skill: Async context\n</available-skills>",
+            }
+
+        def _unexpected_sync_payload(self):
+            raise AssertionError("async Skills context must not call sync payload")
+
+        monkeypatch.setattr(SkillsService, "get_context_payload_async", _fake_async_payload)
+        monkeypatch.setattr(SkillsService, "get_context_payload", _unexpected_sync_payload)
+
+        from tldw_Server_API.app.core.Skills.context_integration import build_system_message_with_skills_async
+
+        result = await build_system_message_with_skills_async(
+            "Base message",
+            env["user_id"],
+            env["base_path"],
+            db=env["db"],
+        )
+
+        assert result.startswith("Base message")
+        assert "async-skill" in result
+
 
 class TestGetSkillToolDefinition:
     def test_has_correct_schema(self):
@@ -196,3 +225,39 @@ class TestAddSkillToolToToolsList:
 
         assert "Skill" not in tool_names
         assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_async_variant_uses_async_context_payload(self, monkeypatch, temp_env):
+        """Async tool injection should use the async Skills service method."""
+        env = temp_env
+
+        async def _fake_async_payload(self):
+            return {
+                "available_skills": [{"name": "async-tool-skill"}],
+                "context_text": "<available-skills />",
+            }
+
+        def _unexpected_sync_payload(self):
+            raise AssertionError("async Skills tool injection must not call sync payload")
+
+        monkeypatch.setattr(SkillsService, "get_context_payload_async", _fake_async_payload)
+        monkeypatch.setattr(SkillsService, "get_context_payload", _unexpected_sync_payload)
+
+        from tldw_Server_API.app.core.Skills.context_integration import add_skill_tool_to_tools_list_async
+
+        result = await add_skill_tool_to_tools_list_async(
+            [{"type": "function", "function": {"name": "Read"}}],
+            env["user_id"],
+            env["base_path"],
+            db=env["db"],
+        )
+
+        tool_names = []
+        for tool in result:
+            func = tool.get("function", {})
+            name = func.get("name") or tool.get("name")
+            if name:
+                tool_names.append(name)
+
+        assert "Skill" in tool_names
+        assert "Read" in tool_names
