@@ -2590,6 +2590,13 @@ git commit -m "feat: expose context integrity admin status"
 
 ## Task 9: Focused Integration And Security Verification
 
+**Status**: Complete. No verification fixes were needed.
+
+**Verification**:
+- Core Context Integrity unit suite: `.venv/bin/python -m pytest tldw_Server_API/tests/Context_Integrity/unit -q` passed with `116 passed, 6 warnings`.
+- Broader focused suite: `.venv/bin/python -m pytest tldw_Server_API/tests/Services/test_startup_context_integrity.py tldw_Server_API/tests/Services/test_lifespan_startup_sequence.py tldw_Server_API/tests/Services/test_lifespan_shutdown_sequence.py tldw_Server_API/tests/AuthNZ_SQLite/test_admin_context_integrity_sqlite.py tldw_Server_API/tests/Skills/unit/test_skills_service.py tldw_Server_API/tests/Skills/integration/test_skills_api.py tldw_Server_API/tests/Skills/integration/test_skill_mcp_integration.py tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py tldw_Server_API/tests/Utils/test_prompt_loader_paths.py tldw_Server_API/tests/Utils/test_prompt_loader_env_overrides.py -q` passed with `158 passed, 7 warnings`.
+- Combined Bandit touched scope: `.venv/bin/python -m bandit -r tldw_Server_API/app/core/Context_Integrity tldw_Server_API/app/services/startup_context_integrity.py tldw_Server_API/app/services/lifespan_startup_sequence.py tldw_Server_API/app/services/lifespan_shutdown_sequence.py tldw_Server_API/app/core/Skills/skills_service.py tldw_Server_API/app/core/Skills/context_integration.py tldw_Server_API/app/core/Chat/command_router.py tldw_Server_API/app/api/v1/endpoints/skills.py tldw_Server_API/app/core/Utils/prompt_loader.py tldw_Server_API/app/api/v1/endpoints/admin/context_integrity.py -f json -o /tmp/bandit_context_integrity_foundation.json` exited 0 with zero findings.
+
 **Files:**
 - Modify only files touched by prior tasks if verification reveals defects.
 
