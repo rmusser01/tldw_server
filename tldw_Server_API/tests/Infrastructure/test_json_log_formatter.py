@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -25,6 +25,7 @@ def _make_record(**overrides) -> dict:
     return base
 
 
+@pytest.mark.unit
 class TestJsonLogFormat:
     def test_basic_format(self) -> None:
         record = _make_record()
@@ -62,3 +63,12 @@ class TestJsonLogFormat:
         # Should be ISO-8601-ish with microseconds and Z suffix
         assert ts.endswith("Z")
         assert "T" in ts
+
+    def test_timestamp_is_converted_to_utc_before_z_suffix(self) -> None:
+        record = _make_record(
+            time=datetime(2026, 3, 14, 12, 0, 0, tzinfo=timezone(timedelta(hours=-7)))
+        )
+
+        parsed = json.loads(json_log_format(record))
+
+        assert parsed["timestamp"] == "2026-03-14T19:00:00.000000Z"
