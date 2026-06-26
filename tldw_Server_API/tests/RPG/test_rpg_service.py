@@ -313,6 +313,33 @@ def test_create_session_validates_explicit_rules_refs():
     assert session.active_rules_pack_refs[0]["ref_id"] == "media_item:7"  # nosec B101
 
 
+def test_create_session_replays_explicit_rules_refs_before_source_validation():
+    validator = FakeRulesSourceValidator()
+    service = _service(validator)
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-explicit-replay")
+    refs = [{"source_type": "media_item", "source_id": 7}]
+
+    first = service.create_session(
+        campaign.id,
+        "Opening",
+        adapter_key="fate",
+        idempotency_key="session-explicit-replay",
+        active_rules_pack_refs=refs,
+    )
+    validator.readable = False
+    second = service.create_session(
+        campaign.id,
+        "Opening",
+        adapter_key="fate",
+        idempotency_key="session-explicit-replay",
+        active_rules_pack_refs=refs,
+    )
+
+    assert second.id == first.id  # nosec B101
+    assert [ref["ref_id"] for ref in second.active_rules_pack_refs] == ["media_item:7"]  # nosec B101
+    assert validator.media_item_calls == [(42, 7)]  # nosec B101
+
+
 @pytest.mark.asyncio
 async def test_replace_campaign_rules_pack_refs_validates_each_enabled_source():
     validator = FakeRulesSourceValidator()

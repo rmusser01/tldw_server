@@ -120,6 +120,16 @@ class RPGService:
                 "active_rules_pack_refs": active_refs_request,
             }
         )
+        replay = self.repo.replay_create_session(
+            owner_user_id=self.owner_user_id,
+            campaign_id=campaign_id,
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_hash,
+            source_type="user",
+        )
+        if replay is not None:
+            return replay
+        self._validate_explicit_session_rules_pack_refs(active_rules_pack_refs, active_refs)
         return self.repo.create_session(
             owner_user_id=self.owner_user_id,
             campaign_id=campaign_id,
@@ -460,14 +470,23 @@ class RPGService:
             return []
 
         normalized = self._normalize_rules_pack_refs(active_rules_pack_refs, existing_refs=[])
-        if any(ref.enabled for ref in normalized):
+        return [rules_pack_ref_to_dict(ref) for ref in normalized]
+
+    def _validate_explicit_session_rules_pack_refs(
+        self,
+        active_rules_pack_refs: list[dict[str, Any]] | None,
+        active_refs: list[dict[str, Any]],
+    ) -> None:
+        if not active_rules_pack_refs:
+            return
+        refs = [rules_pack_ref_from_dict(ref) for ref in active_refs]
+        if any(ref.enabled for ref in refs):
             try:
                 asyncio.get_running_loop()
             except RuntimeError:
-                asyncio.run(self._validate_rules_pack_refs(normalized))
+                asyncio.run(self._validate_rules_pack_refs(refs))
             else:
                 raise RPGValidationError("rules_source_validation_requires_async_context")
-        return [rules_pack_ref_to_dict(ref) for ref in normalized]
 
     def _session_rules_pack_refs_request(
         self,

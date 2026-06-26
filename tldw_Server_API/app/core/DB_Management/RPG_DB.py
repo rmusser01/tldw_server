@@ -333,6 +333,31 @@ class RPGRepository:
         with self.db.transaction() as conn:
             return self._get_campaign_with_conn(conn, owner_user_id, campaign_id)
 
+    def replay_create_session(
+        self,
+        owner_user_id: int,
+        campaign_id: int,
+        idempotency_key: str,
+        request_payload_hash: str,
+        source_type: str,
+    ) -> RPGSession | None:
+        self._validate_source_type(source_type)
+        operation_scope = f"campaign:{campaign_id}:sessions"
+        with self.db.transaction() as conn:
+            replay = self._find_idempotency_record(
+                conn,
+                owner_user_id=owner_user_id,
+                session_id=None,
+                source_type=source_type,
+                operation_scope=operation_scope,
+                idempotency_key=idempotency_key,
+            )
+            if replay is None:
+                return None
+            self._ensure_replay_hash(replay, request_payload_hash)
+            session_id = int(self._from_json(self._row_value(replay, "response_json"))["session_id"])
+            return self._get_session_with_conn(conn, owner_user_id, session_id)
+
     def replay_campaign_rules_pack_refs(
         self,
         owner_user_id: int,
