@@ -109,6 +109,15 @@ async def test_async_factory_raises_when_redis_package_missing_and_fallback_disa
         )
 
 
+@pytest.mark.asyncio
+async def test_async_factory_raises_when_redis_package_missing_by_default(monkeypatch):
+    monkeypatch.setattr(rf, "aioredis", None)
+    monkeypatch.setattr(rf, "_import_error", ImportError("redis missing"))
+
+    with pytest.raises(RuntimeError, match="redis\\[asyncio\\] is required"):
+        await rf.create_async_redis_client(context="missing_package")
+
+
 def test_sync_factory_falls_back_when_redis_package_missing(monkeypatch):
     monkeypatch.setattr(rf, "redis", None)
     monkeypatch.setattr(rf, "_import_error", ImportError("redis missing"))
@@ -121,6 +130,14 @@ def test_sync_factory_falls_back_when_redis_package_missing(monkeypatch):
     assert client.ping() is True
     client.set("missing:sync", "ok")
     assert client.get("missing:sync") == "ok"
+
+
+def test_sync_factory_raises_when_redis_package_missing_by_default(monkeypatch):
+    monkeypatch.setattr(rf, "redis", None)
+    monkeypatch.setattr(rf, "_import_error", ImportError("redis missing"))
+
+    with pytest.raises(RuntimeError, match="redis client is required"):
+        rf.create_sync_redis_client(context="missing_package")
 
 
 @pytest.mark.asyncio

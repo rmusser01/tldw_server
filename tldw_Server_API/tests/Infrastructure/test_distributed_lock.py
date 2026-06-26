@@ -31,15 +31,15 @@ class TestFileLockAcquireRelease:
 
         assert lock.acquire() is True
         assert lock_path.exists()
-        # Lock file should contain our PID.
+        # Lock file should contain a per-owner token prefixed by our PID.
         assert lock._fd is not None
         os.lseek(lock._fd, 0, os.SEEK_SET)
         content = os.read(lock._fd, 64).decode().strip()
-        assert content == str(os.getpid())
+        assert content.startswith(f"{os.getpid()}:")
 
         lock.release()
-        # Lock file removed after release.
-        assert not lock_path.exists()
+        # Lock file is kept so release cannot unlink a new owner.
+        assert lock_path.exists()
 
     def test_acquire_creates_parent_dirs(self, tmp_path: Path) -> None:
         lock_path = tmp_path / "sub" / "dir" / "test.lock"
@@ -53,6 +53,45 @@ class TestFileLockAcquireRelease:
         lock.release()
         lock.release()  # Should not raise.
 
+    def test_release_leaves_lock_file_to_avoid_reacquire_unlink_race(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        lock_path = tmp_path / "release-keeps-file.lock"
+        lock = FileLock(lock_path, timeout=2)
+
+        assert lock.acquire() is True
+        lock.release()
+
+        assert lock_path.exists()
+
+    def test_release_does_not_unlink_same_process_reacquired_lock(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        lock_path = tmp_path / "same-process-reacquire.lock"
+        first = FileLock(lock_path, timeout=2)
+        second = FileLock(lock_path, timeout=2)
+        assert first.acquire() is True
+        first_fd = first._fd
+        assert first_fd is not None
+        reacquired: list[bool] = []
+        real_close = distributed_lock_module.os.close
+
+        def _close_and_reacquire(fd: int) -> None:
+            real_close(fd)
+            if fd == first_fd and not reacquired:
+                reacquired.append(second.acquire())
+
+        monkeypatch.setattr(distributed_lock_module.os, "close", _close_and_reacquire)
+        try:
+            first.release()
+            assert reacquired == [True]
+            assert lock_path.exists()
+        finally:
+            second.release()
+
 
 class TestFileLockContextManager:
     """Context manager protocol."""
@@ -62,7 +101,7 @@ class TestFileLockContextManager:
         with FileLock(lock_path, timeout=5) as lock:
             assert lock_path.exists()
             assert isinstance(lock, FileLock)
-        assert not lock_path.exists()
+        assert lock_path.exists()
 
     def test_context_manager_raises_on_timeout(self, tmp_path: Path) -> None:
         lock_path = tmp_path / "timeout.lock"
@@ -97,10 +136,13 @@ class TestFileLockConcurrency:
         lock2.release()
 
 
-class TestFileLockStaleLock:
-    """Stale lock detection based on dead PID."""
+class TestFileLockResidualFiles:
+    """Residual lock files should not affect native lock ownership."""
 
-    def test_breaks_stale_lock_dead_pid(self, tmp_path: Path) -> None:
+    def test_acquires_when_previous_lock_file_has_dead_pid_record(
+        self,
+        tmp_path: Path,
+    ) -> None:
         lock_path = tmp_path / "stale.lock"
         # Write a PID that almost certainly doesn't exist.
         lock_path.write_text("999999999\n")
@@ -109,7 +151,7 @@ class TestFileLockStaleLock:
         assert lock.acquire() is True
         lock.release()
 
-    def test_breaks_stale_lock_old_file(self, tmp_path: Path) -> None:
+    def test_acquires_when_previous_lock_file_is_old(self, tmp_path: Path) -> None:
         lock_path = tmp_path / "old.lock"
         lock_path.write_text(f"{os.getpid()}\n")
         # Set mtime far in the past.
@@ -120,12 +162,31 @@ class TestFileLockStaleLock:
         assert lock.acquire() is True
         lock.release()
 
-    def test_does_not_break_old_lock_when_owner_pid_is_alive(self, tmp_path: Path) -> None:
+    def test_does_not_break_old_lock_when_owner_pid_is_alive(
+        self,
+        tmp_path: Path,
+    ) -> None:
         lock_path = tmp_path / "live-old.lock"
         holder = FileLock(lock_path, timeout=2, stale_timeout=9999)
         assert holder.acquire() is True
         old_time = time.time() - 1000
         os.utime(str(lock_path), (old_time, old_time))
+
+        try:
+            contender = FileLock(lock_path, timeout=0.2, stale_timeout=0.01)
+            assert contender.acquire() is False
+            assert lock_path.exists()
+        finally:
+            holder.release()
+
+    def test_does_not_unlink_locked_file_even_when_recorded_pid_is_dead(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        lock_path = tmp_path / "locked-dead-pid.lock"
+        holder = FileLock(lock_path, timeout=2, stale_timeout=9999)
+        assert holder.acquire() is True
+        lock_path.write_text("999999999\n")
 
         try:
             contender = FileLock(lock_path, timeout=0.2, stale_timeout=0.01)

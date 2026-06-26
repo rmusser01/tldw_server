@@ -1,4 +1,5 @@
 import os
+import threading
 
 import pytest
 from fastapi import HTTPException
@@ -107,26 +108,31 @@ class TestEgressPolicy:
         assert egress._resolve_host_ips("example.com") == ["93.184.216.34"]
         assert calls == []
 
-    def test_getaddrinfo_uses_bounded_executor(self, monkeypatch):
-        seen: dict[str, object] = {}
-        expected = [
-            (egress.socket.AF_INET, egress.socket.SOCK_STREAM, 0, "", ("93.184.216.34", 443)),
-        ]
+    def test_dns_timeout_limits_outstanding_resolver_threads(self, monkeypatch):
+        release = threading.Event()
+        started = 0
+        started_lock = threading.Lock()
+        resolver_slots = threading.BoundedSemaphore(2)
 
-        class _FakeFuture:
-            def result(self, timeout):
-                seen["timeout"] = timeout
-                return expected
+        def _blocked_getaddrinfo(*_args, **_kwargs):
+            nonlocal started
+            with started_lock:
+                started += 1
+            release.wait(timeout=5)
+            return []
 
-        class _FakeExecutor:
-            _max_workers = 2
+        monkeypatch.setattr(egress, "_DNS_RESOLVER_SLOTS", resolver_slots, raising=False)
+        monkeypatch.setattr(egress.socket, "getaddrinfo", _blocked_getaddrinfo)
 
-            def submit(self, func, *args, **kwargs):
-                seen["submitted"] = (func, args, kwargs)
-                return _FakeFuture()
-
-        monkeypatch.setattr(egress, "_DNS_RESOLVER_EXECUTOR", _FakeExecutor())
-
-        assert egress._getaddrinfo_with_timeout("example.com", timeout_s=0.25) == expected
-        assert seen["timeout"] == 0.25
-        assert seen["submitted"]
+        try:
+            results = [
+                egress._getaddrinfo_with_timeout(
+                    f"example-{idx}.invalid",
+                    timeout_s=0.01,
+                )
+                for idx in range(5)
+            ]
+            assert results == [[], [], [], [], []]
+            assert started <= 2
+        finally:
+            release.set()

@@ -160,7 +160,7 @@ async def create_async_redis_client(
     *,
     preferred_url: str | None = None,
     decode_responses: bool = True,
-    fallback_to_fake: bool = True,
+    fallback_to_fake: bool = False,
     context: str = "default",
     redis_kwargs: dict | None = None,
 ):
@@ -171,7 +171,8 @@ async def create_async_redis_client(
         preferred_url: Explicit URL to prioritize (e.g., embeddings queue).
         decode_responses: Whether to decode bytes into str.
         fallback_to_fake: If True, transparently fallback to an in-memory stub when
-            the real server is unreachable.
+            the real server is unreachable. Production-sensitive callers should
+            leave this disabled unless they explicitly support per-process memory.
         context: Human-readable label for logging (helps trace callers).
 
     Returns:
@@ -279,7 +280,7 @@ def create_sync_redis_client(
     *,
     preferred_url: str | None = None,
     decode_responses: bool = True,
-    fallback_to_fake: bool = True,
+    fallback_to_fake: bool = False,
     context: str = "default",
     redis_kwargs: dict | None = None,
 ):

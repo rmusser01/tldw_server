@@ -150,6 +150,36 @@ async def test_tenant_quota_429(monkeypatch):
     assert second.headers.get("Retry-After") == "1"
 
 
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_tenant_quota_fails_closed_when_redis_unavailable(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as ep
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _redis_unavailable():
+        raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(ep, "_is_embeddings_backpressure_redis_enabled", lambda: False)
+    monkeypatch.setattr(ep, "_tenant_rps_runtime", lambda: 1)
+    monkeypatch.setattr(ep, "_should_enforce_tenant_rps", lambda _request: True)
+    monkeypatch.setattr(ep, "_get_redis_client", _redis_unavailable)
+
+    user = User(
+        id="tenant1",
+        username="tenant1",
+        email="tenant1@example.test",
+        is_active=True,
+        is_admin=False,
+    )
+    request = SimpleNamespace(state=SimpleNamespace())
+
+    result = await ep._check_backpressure_and_quotas(request, user)
+
+    assert result is not None
+    assert result.status_code == 503
+    assert "tenant quota" in str(result.detail).lower()
+
+
 @pytest.mark.unit
 def test_embeddings_batch_route_has_rbac_rate_limit_parity():
     app = reload_app_main().app

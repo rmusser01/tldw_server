@@ -3,7 +3,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import socket
-from concurrent import futures
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -23,11 +23,9 @@ PROFILENAME = "WORKFLOWS_EGRESS_PROFILE"  # strict | permissive | custom
 # Webhook-specific per-tenant allow/deny controls
 WEBHOOK_ALLOWLIST_ENV = "WORKFLOWS_WEBHOOK_ALLOWLIST"
 WEBHOOK_DENYLIST_ENV = "WORKFLOWS_WEBHOOK_DENYLIST"
-DNS_RESOLVER_MAX_WORKERS = 4
-_DNS_RESOLVER_EXECUTOR = futures.ThreadPoolExecutor(
-    max_workers=DNS_RESOLVER_MAX_WORKERS,
-    thread_name_prefix="tldw-egress-dns",
-)
+
+_DNS_RESOLVER_MAX_OUTSTANDING = 8
+_DNS_RESOLVER_SLOTS = threading.BoundedSemaphore(_DNS_RESOLVER_MAX_OUTSTANDING)
 
 
 PRIVATE_RANGES = [
@@ -105,18 +103,43 @@ def _host_matches_allowlist(host: str, allowlist: Sequence[str]) -> bool:
 
 
 def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
-    future = _DNS_RESOLVER_EXECUTOR.submit(
-        socket.getaddrinfo,
-        host,
-        None,
-        family=socket.AF_UNSPEC,  # both IPv4 and IPv6
-        type=socket.SOCK_STREAM,
-    )
-    try:
-        return list(future.result(timeout=timeout_s))
-    except (futures.TimeoutError, OSError, ValueError):
-        future.cancel()
+    if not _DNS_RESOLVER_SLOTS.acquire(blocking=False):
         return []
+
+    result: list[list[tuple]] = []
+    error: list[BaseException] = []
+
+    def _worker() -> None:
+        try:
+            result.append(
+                socket.getaddrinfo(
+                    host,
+                    None,
+                    family=socket.AF_UNSPEC,  # both IPv4 and IPv6
+                    type=socket.SOCK_STREAM,
+                )
+            )
+        except (OSError, ValueError) as exc:
+            error.append(exc)
+        finally:
+            try:
+                _DNS_RESOLVER_SLOTS.release()
+            except ValueError:
+                pass
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    try:
+        thread.start()
+    except RuntimeError:
+        try:
+            _DNS_RESOLVER_SLOTS.release()
+        except ValueError:
+            pass
+        return []
+    thread.join(timeout_s)
+    if thread.is_alive() or error:
+        return []
+    return result[0] if result else []
 
 
 def _resolve_host_ips(host: str) -> list[str]:
