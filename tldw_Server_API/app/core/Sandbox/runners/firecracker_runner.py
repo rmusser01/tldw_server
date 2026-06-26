@@ -198,7 +198,7 @@ def _write_env_file(workspace: str, env: dict[str, str]) -> None:
         if not _ENV_KEY_RE.fullmatch(key):
             continue
         val = str(v).replace("\n", " ")
-        lines.append(f"{key}={shlex.quote(val)}")
+        lines.append(f"export {key}={shlex.quote(val)}")
     if lines:
         Path(workspace, ".env").write_text("\n".join(lines) + "\n", encoding="utf-8")
 

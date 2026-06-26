@@ -42,6 +42,7 @@ _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     json.JSONDecodeError,
 )
+_ARTIFACT_OPENAT_SUPPORTED = os.open in os.supports_dir_fd and os.mkdir in os.supports_dir_fd
 
 _OWNER_ONLY_DIR_MODE = stat.S_IRWXU
 
@@ -1242,6 +1243,56 @@ class SandboxOrchestrator:
         except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS:
             return None
 
+    def _open_artifact_file_for_write(self, art_dir: Path, rel: str) -> int | None:
+        parts = list(Path(rel).parts)
+        if not parts or any(part in ("", ".", "..") for part in parts):
+            return None
+        if not _ARTIFACT_OPENAT_SUPPORTED:
+            return self._open_artifact_file_for_write_by_path(art_dir, rel)
+
+        nofollow = getattr(os, "O_NOFOLLOW", 0)
+        directory = getattr(os, "O_DIRECTORY", 0)
+        dir_flags = os.O_RDONLY | directory | nofollow
+        current_fd: int | None = None
+        try:
+            if art_dir.is_symlink():
+                return None
+            art_dir.mkdir(mode=_OWNER_ONLY_DIR_MODE, parents=True, exist_ok=True)
+            current_fd = os.open(str(art_dir), dir_flags)
+            if not stat.S_ISDIR(os.fstat(current_fd).st_mode):
+                return None
+            for part in parts[:-1]:
+                try:
+                    os.mkdir(part, _OWNER_ONLY_DIR_MODE, dir_fd=current_fd)
+                except FileExistsError:
+                    pass
+                next_fd = os.open(part, dir_flags, dir_fd=current_fd)
+                if not stat.S_ISDIR(os.fstat(next_fd).st_mode):
+                    os.close(next_fd)
+                    return None
+                os.close(current_fd)
+                current_fd = next_fd
+            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | nofollow
+            return os.open(parts[-1], flags, 0o600, dir_fd=current_fd)
+        except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS:
+            return None
+        finally:
+            if current_fd is not None:
+                with contextlib.suppress(_SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS):
+                    os.close(current_fd)
+
+    def _open_artifact_file_for_write_by_path(self, art_dir: Path, rel: str) -> int | None:
+        full = self._prepare_artifact_write_path(art_dir, rel)
+        if full is None:
+            return None
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            return os.open(str(full), flags, 0o600)
+        except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS:
+            return None
+
     def store_artifacts(self, run_id: str, items: dict[str, bytes]) -> None:
         # Enforce caps and persist to filesystem under run's artifacts directory
         owner = None
@@ -1285,13 +1336,9 @@ class SandboxOrchestrator:
         for path, data in selected.items():
             rel = self._safe_rel(path)
             try:
-                full = self._prepare_artifact_write_path(art_dir, rel)
-                if full is None:
+                fd = self._open_artifact_file_for_write(art_dir, rel)
+                if fd is None:
                     raise ValueError("artifact_path_rejected")
-                flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-                if hasattr(os, "O_NOFOLLOW"):
-                    flags |= os.O_NOFOLLOW
-                fd = os.open(str(full), flags, 0o600)
                 with os.fdopen(fd, "wb") as f:
                     f.write(data)
             except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS as e:
@@ -1319,6 +1366,10 @@ class SandboxOrchestrator:
         art_dir = self._artifact_dir((owner or "unknown"), run_id)
         result: dict[str, int] = {}
         if art_dir.exists() and not art_dir.is_symlink():
+            try:
+                resolved_root = art_dir.resolve()
+            except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS:
+                return result
             for root, dirs, files in os.walk(art_dir):
                 root_path = Path(root)
                 safe_dirs: list[str] = []
@@ -1328,7 +1379,6 @@ class SandboxOrchestrator:
                         if dir_path.is_symlink():
                             continue
                         resolved_dir = dir_path.resolve()
-                        resolved_root = art_dir.resolve()
                         if resolved_dir == resolved_root or resolved_root in resolved_dir.parents:
                             safe_dirs.append(dirname)
                     except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS:

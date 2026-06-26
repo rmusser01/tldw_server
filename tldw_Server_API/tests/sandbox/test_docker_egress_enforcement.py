@@ -17,7 +17,9 @@ from tldw_Server_API.app.core.Sandbox.models import RunSpec, RuntimeType
 
 @pytest.mark.unit
 @pytest.mark.sandbox_real_docker
-def test_docker_runner_uses_network_none_when_allowlist_enforced_non_granular(monkeypatch):
+def test_docker_runner_uses_network_none_when_allowlist_enforced_non_granular(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
      # Make docker appear available and ensure execution path is taken
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")
     # Build a spec with allowlist policy
@@ -61,7 +63,7 @@ def test_docker_runner_uses_network_none_when_allowlist_enforced_non_granular(mo
 
 @pytest.mark.unit
 @pytest.mark.sandbox_real_docker
-def test_docker_runner_creates_dedicated_network_when_granular_enabled(monkeypatch):
+def test_docker_runner_creates_dedicated_network_when_granular_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")
     spec = RunSpec(
         session_id=None,
@@ -189,7 +191,7 @@ def test_docker_runner_fails_closed_when_granular_egress_rules_fail(monkeypatch:
 
 
 @pytest.mark.integration
-def test_apply_iptables_rules_on_supported_hosts(monkeypatch):
+def test_apply_iptables_rules_on_supported_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
      # Only run when explicitly allowed
     if os.getenv("SANDBOX_TEST_ALLOW_IPTABLES_MUTATION") not in {"1", "true", "on", "yes"}:
         pytest.skip("iptables mutation not enabled")

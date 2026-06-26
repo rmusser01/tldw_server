@@ -73,15 +73,31 @@ class DockerRunner:
         idx = 0
         while idx < len(cmd):
             token = cmd[idx]
+            if token.startswith("--env="):
+                assignment = token.split("=", 1)[1]
+                redacted.append(f"--env={DockerRunner._redact_env_assignment(assignment)}")
+                idx += 1
+                continue
             redacted.append(token)
             if token in {"-e", "--env"} and idx + 1 < len(cmd):
                 assignment = str(cmd[idx + 1])
-                key = assignment.split("=", 1)[0].strip() or "<env>"
-                redacted.append(f"{key}=<redacted>")
+                redacted.append(DockerRunner._redact_env_assignment(assignment))
                 idx += 2
                 continue
             idx += 1
         return redacted
+
+    @staticmethod
+    def _redact_env_assignment(assignment: str) -> str:
+        if "=" not in assignment:
+            return assignment
+        key = assignment.split("=", 1)[0].strip() or "<env>"
+        return f"{key}=<redacted>"
+
+    @staticmethod
+    def _format_docker_failure(action: str, exc: subprocess.CalledProcessError, cmd: list[str]) -> str:
+        redacted_cmd = " ".join(DockerRunner._redact_docker_command([str(part) for part in cmd]))
+        return f"{action} failed (exit {exc.returncode}; cmd: {redacted_cmd})"
 
     @staticmethod
     def _docker_version() -> str | None:
@@ -618,9 +634,10 @@ class DockerRunner:
             _cleanup_staged_inputs()
             self._cleanup_egress_resources(egress_net_name, egress_label, cleanup_rules=False)
             self._clear_run_tracking(run_id)
+            failure = self._format_docker_failure("docker create", e, cmd)
             if security_opts:
-                raise RuntimeError(f"docker create failed with configured security options: {e}") from e
-            raise RuntimeError(f"docker create failed: {e}") from e
+                raise RuntimeError(f"{failure} with configured security options") from e
+            raise RuntimeError(failure) from e
 
         # Register container for cancellation
         try:
@@ -718,8 +735,8 @@ class DockerRunner:
                 logger.debug(f"egress allowlist: iptables apply failed: {e}")
                 _abort_egress_setup(f"egress allowlist setup failed: {e}", e)
             try:
-                # argv-only Docker control call; cid is returned by docker create.
-                subprocess.check_call(  # nosec
+                # argv-only Docker exec; cid is from docker create, command is constant.
+                subprocess.check_call(  # nosec B603 B607
                     ["docker", "exec", cid, "sh", "-lc", "touch /tmp/tldw-egress-ready"],
                     timeout=3,
                 )

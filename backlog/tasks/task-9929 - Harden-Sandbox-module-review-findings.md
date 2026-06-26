@@ -4,7 +4,7 @@ title: Harden Sandbox module review findings
 status: Done
 assignee: []
 created_date: 2026-06-23 11:27
-updated_date: 2026-06-25 02:06
+updated_date: 2026-06-26 06:30
 labels:
 - sandbox
 - security
@@ -70,4 +70,5 @@ Hardened Sandbox snapshot restore, Docker runner, artifact storage, and Lima/Fir
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PR opened: https://github.com/rmusser01/tldw_server/pull/2509
+Rebased PR branch on latest origin/dev and addressed PR review feedback: Docker create failure messages now redact env values, Docker env redaction preserves --env names without inline values, Firecracker env files export variables to child commands, artifact writes use fd-relative openat-style traversal to close parent symlink race windows, artifact listing resolves root once, new artifact test module has docstrings, modified monkeypatch fixtures are typed, and Docker readiness-gate nosec is narrowed to explicit Bandit IDs. Verification after fixes: focused Sandbox suite 38 passed/1 skipped; compileall passed; git diff --check passed; Ruff passed on touched production files; Bandit JSON errors=0, high=0, medium=0, docker readiness findings=[] with existing low-severity subprocess baseline remaining.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
