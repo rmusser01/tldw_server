@@ -2,7 +2,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
-from tldw_Server_API.app.core.RPG.errors import RPGConflictError
+from tldw_Server_API.app.core.RPG.errors import RPGConflictError, RPGNotFoundError
 
 
 def _repo() -> RPGRepository:
@@ -89,6 +89,180 @@ def test_create_session_replays_same_idempotency_key_without_duplicate_session()
 
     assert second.id == first.id  # nosec B101
     assert repo.get_latest_snapshot(owner_user_id=42, session_id=second.id).snapshot_version == 0  # nosec B101
+
+
+def test_get_campaign_returns_owner_scoped_campaign():
+    repo = _repo()
+    campaign = _campaign(repo, owner_user_id=42)
+
+    fetched = repo.get_campaign(owner_user_id=42, campaign_id=campaign.id)
+
+    assert fetched.id == campaign.id  # nosec B101
+    assert fetched.owner_user_id == 42  # nosec B101
+    with pytest.raises(RPGNotFoundError, match="rpg_campaign_not_found"):
+        repo.get_campaign(owner_user_id=43, campaign_id=campaign.id)
+
+
+def test_replace_campaign_rules_pack_refs_requires_expected_version():
+    repo = _repo()
+    campaign = _campaign(repo)
+
+    with pytest.raises(RPGConflictError, match="stale_rules_pack_ref_version"):
+        repo.replace_campaign_rules_pack_refs(
+            owner_user_id=42,
+            campaign_id=campaign.id,
+            rules_pack_refs=[{"source_type": "media_item", "source_id": 7}],
+            expected_version=campaign.version + 1,
+            idempotency_key="campaign-refs",
+            request_payload_hash="hash-campaign-refs",
+            source_type="user",
+        )
+
+
+def test_replace_campaign_rules_pack_refs_increments_version():
+    repo = _repo()
+    campaign = _campaign(repo)
+
+    result = repo.replace_campaign_rules_pack_refs(
+        owner_user_id=42,
+        campaign_id=campaign.id,
+        rules_pack_refs=[{"source_type": "media_item", "source_id": 7, "display_name": "Rules"}],
+        expected_version=campaign.version,
+        idempotency_key="campaign-refs",
+        request_payload_hash="hash-campaign-refs",
+        source_type="user",
+    )
+    updated = repo.get_campaign(owner_user_id=42, campaign_id=campaign.id)
+
+    assert result.version == campaign.version + 1  # nosec B101
+    assert updated.version == campaign.version + 1  # nosec B101
+    assert updated.linked_rules_pack_refs[0]["ref_id"] == "media_item:7"  # nosec B101
+    assert result.refs[0].display_name == "Rules"  # nosec B101
+
+
+def test_replace_campaign_rules_pack_refs_replays_idempotency_key():
+    repo = _repo()
+    campaign = _campaign(repo)
+    payload = [{"source_type": "media_item", "source_id": 7}]
+
+    first = repo.replace_campaign_rules_pack_refs(
+        42,
+        campaign.id,
+        payload,
+        campaign.version,
+        "campaign-refs",
+        "hash-campaign-refs",
+        "user",
+    )
+    second = repo.replace_campaign_rules_pack_refs(
+        42,
+        campaign.id,
+        payload,
+        campaign.version,
+        "campaign-refs",
+        "hash-campaign-refs",
+        "user",
+    )
+
+    assert second.replayed is True  # nosec B101
+    assert second.version == first.version  # nosec B101
+    assert [ref.ref_id for ref in second.refs] == [ref.ref_id for ref in first.refs]  # nosec B101
+
+
+def test_replace_campaign_rules_pack_refs_rejects_idempotency_payload_mismatch():
+    repo = _repo()
+    campaign = _campaign(repo)
+    payload = [{"source_type": "media_item", "source_id": 7}]
+
+    repo.replace_campaign_rules_pack_refs(
+        42,
+        campaign.id,
+        payload,
+        campaign.version,
+        "campaign-refs",
+        "hash-campaign-refs",
+        "user",
+    )
+
+    with pytest.raises(RPGConflictError, match="idempotency"):
+        repo.replace_campaign_rules_pack_refs(
+            42,
+            campaign.id,
+            payload,
+            campaign.version,
+            "campaign-refs",
+            "hash-campaign-refs-changed",
+            "user",
+        )
+
+
+def test_replace_session_rules_pack_refs_requires_expected_version():
+    repo = _repo()
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
+
+    with pytest.raises(RPGConflictError, match="stale_rules_pack_ref_version"):
+        repo.replace_session_rules_pack_refs(
+            owner_user_id=42,
+            session_id=session.id,
+            rules_pack_refs=[{"source_type": "media_collection", "source_id": 3}],
+            expected_version=session.version + 1,
+            idempotency_key="session-refs",
+            request_payload_hash="hash-session-refs",
+            source_type="user",
+        )
+
+
+def test_replace_session_rules_pack_refs_increments_version():
+    repo = _repo()
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
+
+    result = repo.replace_session_rules_pack_refs(
+        owner_user_id=42,
+        session_id=session.id,
+        rules_pack_refs=[{"source_type": "media_collection", "source_id": 3}],
+        expected_version=session.version,
+        idempotency_key="session-refs",
+        request_payload_hash="hash-session-refs",
+        source_type="user",
+    )
+    updated = repo.get_session(owner_user_id=42, session_id=session.id)
+
+    assert result.version == session.version + 1  # nosec B101
+    assert updated.version == session.version + 1  # nosec B101
+    assert updated.active_rules_pack_refs[0]["ref_id"] == "media_collection:3"  # nosec B101
+    assert result.refs[0].ref_id == "media_collection:3"  # nosec B101
+
+
+def test_replace_session_rules_pack_refs_replays_idempotency_key():
+    repo = _repo()
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
+    payload = [{"source_type": "media_collection", "source_id": 3}]
+
+    first = repo.replace_session_rules_pack_refs(
+        42,
+        session.id,
+        payload,
+        session.version,
+        "session-refs",
+        "hash-session-refs",
+        "user",
+    )
+    second = repo.replace_session_rules_pack_refs(
+        42,
+        session.id,
+        payload,
+        session.version,
+        "session-refs",
+        "hash-session-refs",
+        "user",
+    )
+
+    assert second.replayed is True  # nosec B101
+    assert second.version == first.version  # nosec B101
+    assert [ref.ref_id for ref in second.refs] == [ref.ref_id for ref in first.refs]  # nosec B101
 
 
 def test_commit_events_assigns_sequences_and_updates_snapshot_cursor():

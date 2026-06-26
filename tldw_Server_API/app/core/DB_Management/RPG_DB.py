@@ -26,6 +26,13 @@ from tldw_Server_API.app.core.RPG.models import (
     RPGSourceType,
 )
 from tldw_Server_API.app.core.RPG.proposals import RPGProposalRecord
+from tldw_Server_API.app.core.RPG.rules.refs import (
+    RulesPackRef,
+    RulesPackRefReplacementResult,
+    normalize_rules_pack_ref_payloads,
+    rules_pack_ref_from_dict,
+    rules_pack_ref_to_dict,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,6 +328,136 @@ class RPGRepository:
     def get_session(self, owner_user_id: int, session_id: int) -> RPGSession:
         with self.db.transaction() as conn:
             return self._get_session_with_conn(conn, owner_user_id, session_id)
+
+    def get_campaign(self, owner_user_id: int, campaign_id: int) -> RPGCampaign:
+        with self.db.transaction() as conn:
+            return self._get_campaign_with_conn(conn, owner_user_id, campaign_id)
+
+    def replace_campaign_rules_pack_refs(
+        self,
+        owner_user_id: int,
+        campaign_id: int,
+        rules_pack_refs: list[dict[str, Any]],
+        expected_version: int,
+        idempotency_key: str,
+        request_payload_hash: str,
+        source_type: str,
+    ) -> RulesPackRefReplacementResult:
+        self._validate_source_type(source_type)
+        operation_scope = f"campaign:{campaign_id}:rules_pack_refs"
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        with self.db.transaction() as conn:
+            replay = self._find_idempotency_record(
+                conn,
+                owner_user_id=owner_user_id,
+                session_id=None,
+                source_type=source_type,
+                operation_scope=operation_scope,
+                idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                self._ensure_replay_hash(replay, request_payload_hash)
+                return self._rules_pack_ref_replacement_result_from_response(replay, replayed=True)
+
+            campaign = self._get_campaign_with_conn(conn, owner_user_id, campaign_id)
+            if campaign.version != expected_version:
+                raise RPGConflictError("stale_rules_pack_ref_version")
+
+            refs = normalize_rules_pack_ref_payloads(
+                rules_pack_refs,
+                existing_refs=campaign.linked_rules_pack_refs,
+                now=now_dt,
+            )
+            refs_json = [rules_pack_ref_to_dict(ref) for ref in refs]
+            next_version = expected_version + 1
+            cursor = conn.execute(
+                """
+                UPDATE rpg_campaigns
+                SET linked_rules_pack_refs_json = ?, version = version + 1, updated_at = ?
+                WHERE id = ? AND owner_user_id = ? AND version = ?
+                """,
+                (self._to_json(refs_json), now, campaign_id, owner_user_id, expected_version),
+            )
+            if cursor.rowcount != 1:
+                raise RPGConflictError("stale_rules_pack_ref_version")
+            response = {"refs": refs_json, "version": next_version}
+            self._insert_idempotency_record(
+                conn,
+                owner_user_id=owner_user_id,
+                session_id=None,
+                source_type=source_type,
+                operation_scope=operation_scope,
+                idempotency_key=idempotency_key,
+                request_payload_hash=request_payload_hash,
+                event_ids=[],
+                response=response,
+                created_at=now,
+            )
+            return RulesPackRefReplacementResult(refs=refs, version=next_version)
+
+    def replace_session_rules_pack_refs(
+        self,
+        owner_user_id: int,
+        session_id: int,
+        rules_pack_refs: list[dict[str, Any]],
+        expected_version: int,
+        idempotency_key: str,
+        request_payload_hash: str,
+        source_type: str,
+    ) -> RulesPackRefReplacementResult:
+        self._validate_source_type(source_type)
+        operation_scope = f"session:{session_id}:rules_pack_refs"
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        with self.db.transaction() as conn:
+            replay = self._find_idempotency_record(
+                conn,
+                owner_user_id=owner_user_id,
+                session_id=session_id,
+                source_type=source_type,
+                operation_scope=operation_scope,
+                idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                self._ensure_replay_hash(replay, request_payload_hash)
+                return self._rules_pack_ref_replacement_result_from_response(replay, replayed=True)
+
+            session = self._get_session_with_conn(conn, owner_user_id, session_id)
+            if session.version != expected_version:
+                raise RPGConflictError("stale_rules_pack_ref_version")
+
+            refs = normalize_rules_pack_ref_payloads(
+                rules_pack_refs,
+                existing_refs=session.active_rules_pack_refs,
+                now=now_dt,
+            )
+            refs_json = [rules_pack_ref_to_dict(ref) for ref in refs]
+            next_version = expected_version + 1
+            cursor = conn.execute(
+                """
+                UPDATE rpg_sessions
+                SET active_rules_pack_refs_json = ?, version = version + 1, updated_at = ?
+                WHERE id = ? AND owner_user_id = ? AND version = ?
+                """,
+                (self._to_json(refs_json), now, session_id, owner_user_id, expected_version),
+            )
+            if cursor.rowcount != 1:
+                raise RPGConflictError("stale_rules_pack_ref_version")
+            response = {"refs": refs_json, "version": next_version}
+            self._insert_idempotency_record(
+                conn,
+                owner_user_id=owner_user_id,
+                session_id=session_id,
+                source_type=source_type,
+                operation_scope=operation_scope,
+                idempotency_key=idempotency_key,
+                request_payload_hash=request_payload_hash,
+                event_ids=[],
+                response=response,
+                created_at=now,
+            )
+            return RulesPackRefReplacementResult(refs=refs, version=next_version)
 
     def get_event(self, owner_user_id: int, event_id: int) -> RPGSessionEvent:
         with self.db.transaction() as conn:
@@ -827,6 +964,23 @@ class RPGRepository:
 
     def _events_by_ids(self, conn: Any, owner_user_id: int, event_ids: list[int]) -> list[RPGSessionEvent]:
         return [self._get_event_with_conn(conn, owner_user_id, event_id) for event_id in event_ids]
+
+    def _rules_pack_ref_replacement_result_from_response(
+        self,
+        row: Any,
+        *,
+        replayed: bool,
+    ) -> RulesPackRefReplacementResult:
+        response = self._from_json(self._row_value(row, "response_json"), {})
+        stored_refs = response.get("refs", [])
+        refs: list[RulesPackRef] = []
+        if isinstance(stored_refs, list):
+            refs = [rules_pack_ref_from_dict(ref) for ref in stored_refs if isinstance(ref, dict)]
+        return RulesPackRefReplacementResult(
+            refs=refs,
+            version=int(response.get("version", 0)),
+            replayed=replayed,
+        )
 
     def _find_idempotency_record(
         self,
