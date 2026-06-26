@@ -24,6 +24,10 @@ from typing import Any, Optional
 from loguru import logger
 
 from tldw_Server_API.app.core.Infrastructure.distributed_lock import acquire_migration_lock
+from tldw_Server_API.app.core.testing import (
+    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
+)
+from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
 
 from tldw_Server_API.app.core.DB_Management.DB_Backups import (
     _sqlite_error_is_busy,
@@ -125,6 +129,11 @@ class DatabaseMigrator:
         # Backup directory
         self.backup_dir = str(self._db_dir / "backups")
         os.makedirs(self.backup_dir, exist_ok=True)
+
+    @staticmethod
+    def _allow_redis_file_lock_fallback() -> bool:
+        """Allow Redis lock fallback only in explicit test runtimes."""
+        return _is_test_mode() or _is_explicit_pytest_runtime()
 
     @staticmethod
     def _sqlite_column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
@@ -538,6 +547,7 @@ class DatabaseMigrator:
             lock_name="db_migration",
             redis_url=redis_url,
             timeout=60,
+            allow_file_fallback_on_redis_error=self._allow_redis_file_lock_fallback(),
         ):
             return self._migrate_to_version_locked(target_version, create_backup)
 

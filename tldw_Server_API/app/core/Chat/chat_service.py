@@ -4806,7 +4806,10 @@ async def execute_streaming_call(
         # existing tracked generator, filtering provider [DONE] and emitting our own.
         from tldw_Server_API.app.core.Streaming.streams import SSEStream
 
-        sse_stream = SSEStream(labels={"component": "chat", "endpoint": "chat_completions_stream"})
+        sse_stream = SSEStream(
+            labels={"component": "chat", "endpoint": "chat_completions_stream"},
+            provider_control_passthru=True,
+        )
         done_seen = False
 
         async def _produce():
