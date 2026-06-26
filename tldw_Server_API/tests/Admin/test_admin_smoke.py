@@ -150,7 +150,7 @@ def _force_backend(pg: bool):
 
 def test_admin_smoke_roles_permissions_sqlite_and_pg():
 
-    with _fresh_client() as client:
+    with _fresh_client(test_mode=True) as client:
         # First run: SQLite branch
         r_roles = client.get("/api/v1/admin/roles")
         if r_roles.status_code != 200:
