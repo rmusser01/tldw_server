@@ -266,8 +266,9 @@ const TtsPlaygroundPage: React.FC = () => {
   }
 
   const isTtsDisabled = ttsSettings?.ttsEnabled === false
+  const isServerAudioUnavailable = isTldw && !hasAudio
   const handlePlay = async () => {
-    if (!text.trim() || isTtsDisabled) return
+    if (!text.trim() || isTtsDisabled || isServerAudioUnavailable) return
     stopBrowserSpeech()
     clearSegments()
     setActiveSegmentIndex(null)
@@ -439,13 +440,18 @@ const TtsPlaygroundPage: React.FC = () => {
       )
     : !text.trim()
       ? t("playground:tts.playDisabledNoText", "Enter text to enable Play.")
-      : ttsSettings?.ttsProvider === "elevenlabs" &&
-          !isElevenLabsConfigured
+      : isServerAudioUnavailable
         ? t(
-            "playground:tts.playDisabledElevenLabs",
-            "Add an ElevenLabs API key, voice, and model to enable Play."
+            "playground:tts.playDisabledServerAudioUnavailable",
+            "Open Speech Settings or switch to Browser TTS before generating audio."
           )
-        : null
+        : ttsSettings?.ttsProvider === "elevenlabs" &&
+            !isElevenLabsConfigured
+          ? t(
+              "playground:tts.playDisabledElevenLabs",
+              "Add an ElevenLabs API key, voice, and model to enable Play."
+            )
+          : null
   const isPlayDisabled = isGenerating || Boolean(playDisabledReason)
   const canStop =
     provider === "browser"

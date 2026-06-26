@@ -1,6 +1,6 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import TtsPlaygroundPage from "@/components/Option/TTS/TtsPlaygroundPage"
@@ -191,5 +191,36 @@ describe("TtsPlaygroundPage defaults", () => {
     expect(screen.getByText(/Open Speech Settings/)).toBeInTheDocument()
     expect(screen.getByText(/Browser/)).toBeInTheDocument()
     expect(container.querySelectorAll(".ant-alert")).toHaveLength(0)
+  })
+
+  it("keeps Play disabled when tldw server TTS setup is required", async () => {
+    providerDataState.hasAudio = false
+    providerDataState.tldwVoiceCatalog = []
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false
+        }
+      }
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TtsPlaygroundPage />
+      </QueryClientProvider>
+    )
+
+    await screen.findByTestId("tts-no-provider-recovery")
+
+    fireEvent.change(screen.getByTestId("tts-text-input"), {
+      target: { value: "Generate this with server TTS." }
+    })
+
+    expect(screen.getByTestId("tts-play-button")).toBeDisabled()
+    expect(
+      screen.getByText(
+        /Open Speech Settings or switch to Browser TTS before generating audio\./
+      )
+    ).toBeInTheDocument()
   })
 })
