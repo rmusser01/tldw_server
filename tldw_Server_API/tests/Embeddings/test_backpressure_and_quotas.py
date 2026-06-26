@@ -200,10 +200,29 @@ async def test_ingest_tenant_quota_fails_closed_when_redis_unavailable(
     async def _redis_unavailable() -> None:
         raise RuntimeError("redis unavailable")
 
+    class _CapturedLogger:
+        def __init__(self) -> None:
+            self.bound: dict[str, object] = {}
+            self.opt_kwargs: dict[str, object] = {}
+            self.warning_message: str | None = None
+
+        def bind(self, **kwargs: object) -> "_CapturedLogger":
+            self.bound.update(kwargs)
+            return self
+
+        def opt(self, **kwargs: object) -> "_CapturedLogger":
+            self.opt_kwargs.update(kwargs)
+            return self
+
+        def warning(self, message: str, *_args: object, **_kwargs: object) -> None:
+            self.warning_message = message
+
+    captured_logger = _CapturedLogger()
     monkeypatch.setenv("INGEST_TENANT_RPS", "1")
     monkeypatch.delenv("EMBEDDINGS_TENANT_RPS", raising=False)
     monkeypatch.setattr(bp, "_get_redis_client", _redis_unavailable)
     monkeypatch.setattr(bp, "is_single_user_profile_mode", lambda: False)
+    monkeypatch.setattr(bp, "logger", captured_logger)
 
     user = User(id="tenant1", username="tenant1", email="tenant1@example.test", is_active=True, is_admin=False)
     request = SimpleNamespace(state=SimpleNamespace())
@@ -214,6 +233,11 @@ async def test_ingest_tenant_quota_fails_closed_when_redis_unavailable(
     assert exc_info.value.status_code == 503
     assert "tenant quota" in str(exc_info.value.detail).lower()
     assert exc_info.value.headers == {"Retry-After": "1"}
+    assert captured_logger.bound["tenant_id"] == "tenant1"
+    assert captured_logger.bound["exception_type"] == "RuntimeError"
+    assert captured_logger.bound["event"] == "ingest_tenant_quota_redis_unavailable"
+    assert isinstance(captured_logger.opt_kwargs["exception"], RuntimeError)
+    assert captured_logger.warning_message == "Ingest tenant quota Redis unavailable; failing closed"
 
 
 @pytest.mark.unit

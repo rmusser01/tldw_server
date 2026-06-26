@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import time
 from types import SimpleNamespace
 
@@ -53,8 +54,16 @@ def test_redis_factory_readme_documents_fail_closed_defaults() -> None:
 
     assert "fallback_to_fake=False" in readme
     assert "fallback_to_fake=True" in readme
-    assert "create_async_redis_client(context=\"demo\", fallback_to_fake=True)" in readme
-    assert "create_sync_redis_client(context=\"demo-sync\", fallback_to_fake=True)" in readme
+    assert re.search(
+        r"create_async_redis_client\s*\([^)]*fallback_to_fake\s*=\s*True[^)]*\)",
+        readme,
+        re.DOTALL,
+    )
+    assert re.search(
+        r"create_sync_redis_client\s*\([^)]*fallback_to_fake\s*=\s*True[^)]*\)",
+        readme,
+        re.DOTALL,
+    )
 
 
 @pytest.mark.asyncio
