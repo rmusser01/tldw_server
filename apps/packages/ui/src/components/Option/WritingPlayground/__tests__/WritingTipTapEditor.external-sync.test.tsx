@@ -107,14 +107,14 @@ describe("WritingTipTapEditor external sync", () => {
     })
 
     act(() => {
-      adapterRef.current?.setSelection({ start: 6, end: 10 })
+      adapterRef.current?.setSelection({ start: 7, end: 11 })
     })
 
     await waitFor(() => {
-      expect(adapterRef.current?.getSelectedText("Alpha\nBeta")).toBe("Beta")
+      expect(adapterRef.current?.getSelectedText("Alpha\n\nBeta")).toBe("Beta")
     })
     await waitFor(() => {
-      expect(selectionChanges.at(-1)).toEqual({ start: 6, end: 10 })
+      expect(selectionChanges.at(-1)).toEqual({ start: 7, end: 11 })
     })
   })
 })

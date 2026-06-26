@@ -27,12 +27,16 @@ describe("writing editor adapter", () => {
       }
     })
     const adapter = createTipTapEditorAdapter(editor)
+    const plainText = tipTapJsonToPlainText(editor.getJSON())
+    const start = plainText.indexOf("Beta")
 
-    adapter?.setSelection({ start: 6, end: 10 })
+    expect(plainText).toBe("Alpha\n\nBeta")
+
+    adapter?.setSelection({ start, end: start + "Beta".length })
 
     const { from, to } = editor.state.selection
     expect(editor.state.doc.textBetween(from, to, "\n", "\n")).toBe("Beta")
-    expect(adapter?.getSelection()).toEqual({ start: 6, end: 10 })
+    expect(adapter?.getSelection()).toEqual({ start, end: start + "Beta".length })
 
     editor.destroy()
   })
@@ -59,7 +63,7 @@ describe("writing editor adapter", () => {
     const plainText = tipTapJsonToPlainText(editor.getJSON())
     const start = plainText.indexOf("Beta")
 
-    expect(plainText).toBe("Alpha\n\n***\nBeta")
+    expect(plainText).toBe("Alpha\n\n***\n\nBeta")
 
     adapter?.setSelection({ start, end: start + "Beta".length })
 
@@ -88,8 +92,12 @@ describe("writing editor adapter", () => {
       }
     })
     const adapter = createTipTapEditorAdapter(editor)
+    const plainText = tipTapJsonToPlainText(editor.getJSON())
+    const start = plainText.indexOf("Beta")
 
-    adapter?.setSelection({ start: 6, end: 10 })
+    expect(plainText).toBe("Alpha\n\nBeta")
+
+    adapter?.setSelection({ start, end: start + "Beta".length })
     const { from } = editor.state.selection
     const coordsAtPos = vi
       .spyOn(editor.view, "coordsAtPos")
@@ -107,7 +115,7 @@ describe("writing editor adapter", () => {
       }))
 
     expect(adapter?.measureRange).toBeTypeOf("function")
-    expect(adapter?.measureRange?.({ start: 6, end: 10 })).toEqual({
+    expect(adapter?.measureRange?.({ start, end: start + "Beta".length })).toEqual({
       top: 24,
       bottom: 82,
       height: 58

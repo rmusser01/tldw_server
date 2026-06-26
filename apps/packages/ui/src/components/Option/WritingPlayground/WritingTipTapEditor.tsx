@@ -76,6 +76,7 @@ export function WritingTipTapEditor({
     extensions,
     content: content || EMPTY_TIPTAP_DOCUMENT,
     editable,
+    immediatelyRender: false,
     onUpdate: handleUpdate,
     onSelectionUpdate: handleSelectionUpdate,
   })

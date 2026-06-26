@@ -46,7 +46,7 @@ const normalizeUnboundedSelection = (
   return start <= end ? { start, end } : { start: end, end: start }
 }
 
-const TIPTAP_SCENE_BREAK_TEXT = "\n***\n"
+const TIPTAP_SCENE_BREAK_TEXT = "***"
 
 type TipTapNode = Editor["state"]["doc"]
 
@@ -104,6 +104,20 @@ const pushTipTapMappingPoint = (
   points.push({ position, offset })
 }
 
+const isEmptyTipTapTextBlock = (node: TipTapNode): boolean =>
+  (node.type.name === "paragraph" || node.type.name === "heading") &&
+  node.content.size === 0
+
+const getTipTapBlockSeparatorLength = (
+  previousNode: TipTapNode | null,
+  nextNode: TipTapNode,
+): number => {
+  if (!previousNode) return 0
+  return isEmptyTipTapTextBlock(previousNode) || isEmptyTipTapTextBlock(nextNode)
+    ? 1
+    : 2
+}
+
 const appendTipTapNodeMappings = (
   node: TipTapNode,
   position: number,
@@ -148,11 +162,6 @@ const appendTipTapNodeMappings = (
   })
 
   pushTipTapMappingPoint(points, position + node.nodeSize - 1, nextOffset)
-
-  if (node.type.name === "paragraph" || node.type.name === "heading") {
-    nextOffset += 1
-  }
-
   pushTipTapMappingPoint(points, position + node.nodeSize, nextOffset)
   return nextOffset
 }
@@ -162,9 +171,16 @@ const getTipTapPositionOffsetPoints = (
 ): TipTapPositionOffsetPoint[] => {
   const points: TipTapPositionOffsetPoint[] = [{ position: 0, offset: 0 }]
   let offset = 0
+  let previousNode: TipTapNode | null = null
 
   editor.state.doc.forEach((childNode, childOffset) => {
+    const separatorLength = getTipTapBlockSeparatorLength(previousNode, childNode)
+    for (let index = 1; index <= separatorLength; index += 1) {
+      pushTipTapMappingPoint(points, childOffset, offset + index)
+    }
+    offset += separatorLength
     offset = appendTipTapNodeMappings(childNode, childOffset, offset, points)
+    previousNode = childNode
   })
 
   return points.sort((a, b) => a.position - b.position || a.offset - b.offset)

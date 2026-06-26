@@ -2,7 +2,8 @@ import type { JSONContent } from "@tiptap/react"
 import { describe, expect, it } from "vitest"
 import {
   plainTextToTipTapJson,
-  resolveTipTapDocument
+  resolveTipTapDocument,
+  tipTapJsonToPlainText
 } from "../writing-tiptap-utils"
 
 const RICH_DOC: JSONContent = {
@@ -24,5 +25,42 @@ describe("writing tiptap utils", () => {
     expect(resolveTipTapDocument("plain fallback", null)).toEqual(
       plainTextToTipTapJson("plain fallback")
     )
+  })
+
+  it("serializes adjacent rich paragraphs with blank-line paragraph delimiters", () => {
+    expect(
+      tipTapJsonToPlainText({
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "First paragraph." }]
+          },
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "Second paragraph." }]
+          }
+        ]
+      })
+    ).toBe("First paragraph.\n\nSecond paragraph.")
+  })
+
+  it("serializes scene breaks as standalone manuscript blocks", () => {
+    expect(
+      tipTapJsonToPlainText({
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "Before" }]
+          },
+          { type: "sceneBreak" },
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "After" }]
+          }
+        ]
+      })
+    ).toBe("Before\n\n***\n\nAfter")
   })
 })

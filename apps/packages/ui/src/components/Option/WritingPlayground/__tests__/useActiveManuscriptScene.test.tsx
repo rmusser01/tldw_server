@@ -21,6 +21,7 @@ type NodeType = "part" | "chapter" | "scene" | null
 type HookProps = {
   activeNodeId: string | null
   activeNodeType: NodeType
+  editorMode?: "plain" | "tiptap"
   initialEditorText?: string
   initialTipTapContent?: JSONContent | null
 }
@@ -88,7 +89,8 @@ function renderActiveSceneHook(initialProps: HookProps) {
         editorText,
         setEditorText,
         tipTapContent,
-        setTipTapContent
+        setTipTapContent,
+        editorMode: props.editorMode
       })
 
       return {
@@ -132,7 +134,8 @@ describe("useActiveManuscriptScene", () => {
 
     const { result } = renderActiveSceneHook({
       activeNodeId: "scene-1",
-      activeNodeType: "scene"
+      activeNodeType: "scene",
+      editorMode: "plain"
     })
 
     await waitFor(() => {
@@ -268,6 +271,28 @@ describe("useActiveManuscriptScene", () => {
     })
 
     expect(result.current.binding.canCreateRangeAnnotation).toBe(false)
+  })
+
+  it("keeps range annotations enabled in plain mode when only stale rich content differs", async () => {
+    vi.mocked(getManuscriptScene).mockResolvedValue(makeScene())
+
+    const { result } = renderActiveSceneHook({
+      activeNodeId: "scene-1",
+      activeNodeType: "scene",
+      editorMode: "plain"
+    })
+
+    await waitFor(() => {
+      expect(result.current.binding.canCreateRangeAnnotation).toBe(true)
+    })
+
+    act(() => {
+      result.current.setTipTapContent(sceneContent("Stale rich editor state"))
+    })
+
+    expect(result.current.editorText).toBe("Saved scene text")
+    expect(result.current.binding.isSceneDirty).toBe(false)
+    expect(result.current.binding.canCreateRangeAnnotation).toBe(true)
   })
 
   it("preserves dirty editor content when a different active manuscript scene is selected", async () => {

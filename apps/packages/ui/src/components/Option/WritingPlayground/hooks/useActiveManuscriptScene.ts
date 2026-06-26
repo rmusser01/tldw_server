@@ -10,6 +10,7 @@ import {
 import { resolveTipTapDocument } from "../writing-tiptap-utils"
 
 type ManuscriptNodeType = "part" | "chapter" | "scene" | null
+type ManuscriptEditorMode = "plain" | "tiptap"
 
 export type ActiveManuscriptSceneBinding = {
   scene: ManuscriptSceneResponse | null
@@ -30,6 +31,7 @@ type UseActiveManuscriptSceneDeps = {
   setEditorText: (nextText: string) => void
   tipTapContent: JSONContent | null
   setTipTapContent: (nextContent: JSONContent | null) => void
+  editorMode?: ManuscriptEditorMode
   isOnline?: boolean
 }
 
@@ -74,9 +76,11 @@ const getCurrentContentSignature = (
 const resolveSaveContent = (
   binding: SceneBindingState,
   editorText: string,
-  tipTapContent: JSONContent | null
+  tipTapContent: JSONContent | null,
+  trackRichContent: boolean
 ): JSONContent => {
   if (
+    trackRichContent &&
     tipTapContent &&
     serializeTipTapContent(tipTapContent) !== binding.savedContentSignature
   ) {
@@ -88,9 +92,11 @@ const resolveSaveContent = (
 const isBindingDirty = (
   binding: SceneBindingState | null,
   editorText: string,
-  tipTapContent: JSONContent | null
+  tipTapContent: JSONContent | null,
+  trackRichContent: boolean
 ): boolean => {
   if (!binding) return false
+  if (!trackRichContent) return editorText !== binding.savedPlainText
   return (
     editorText !== binding.savedPlainText ||
     getCurrentContentSignature(binding, tipTapContent) !==
@@ -105,6 +111,7 @@ export function useActiveManuscriptScene({
   setEditorText,
   tipTapContent,
   setTipTapContent,
+  editorMode = "tiptap",
   isOnline = true
 }: UseActiveManuscriptSceneDeps): ActiveManuscriptSceneBinding {
   const queryClient = useQueryClient()
@@ -123,15 +130,18 @@ export function useActiveManuscriptScene({
     activeNodeType === "scene" &&
     Boolean(activeNodeId) &&
     binding?.scene.id === activeNodeId
+  const trackRichContent = editorMode === "tiptap"
   const isSceneDirty = bindingMatchesActiveScene
-    ? isBindingDirty(binding, editorText, tipTapContent)
+    ? isBindingDirty(binding, editorText, tipTapContent, trackRichContent)
     : false
 
   React.useEffect(() => {
     if (activeNodeType === "scene" || !binding) return
-    if (isBindingDirty(binding, editorText, tipTapContent)) return
+    if (isBindingDirty(binding, editorText, tipTapContent, trackRichContent)) {
+      return
+    }
     setBinding(null)
-  }, [activeNodeType, binding, editorText, tipTapContent])
+  }, [activeNodeType, binding, editorText, tipTapContent, trackRichContent])
 
   React.useEffect(() => {
     const scene = sceneQuery.data ?? null
@@ -172,7 +182,12 @@ export function useActiveManuscriptScene({
       return null
     }
 
-    const content = resolveSaveContent(binding, editorText, tipTapContent)
+    const content = resolveSaveContent(
+      binding,
+      editorText,
+      tipTapContent,
+      trackRichContent
+    )
     const savedScene = (await updateManuscriptScene(
       binding.scene.id,
       {
@@ -202,7 +217,8 @@ export function useActiveManuscriptScene({
     queryClient,
     setEditorText,
     setTipTapContent,
-    tipTapContent
+    tipTapContent,
+    trackRichContent
   ])
 
   const reloadScene = React.useCallback(() => {
