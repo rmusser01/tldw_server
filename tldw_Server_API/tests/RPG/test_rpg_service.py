@@ -232,6 +232,46 @@ def test_create_session_copies_campaign_rules_refs_when_request_omits_refs():
     assert session.active_rules_pack_refs[0]["ref_id"] == "media_item:7"  # nosec B101
 
 
+def test_create_session_replays_omitted_rules_refs_after_campaign_refs_change():
+    service = _service()
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-replay-omitted-rules")
+    service.repo.replace_campaign_rules_pack_refs(
+        owner_user_id=42,
+        campaign_id=campaign.id,
+        rules_pack_refs=[{"source_type": "media_item", "source_id": 7}],
+        expected_version=campaign.version,
+        idempotency_key="campaign-replay-omitted-rules-ref-1",
+        request_payload_hash="arranged-1",
+        source_type="user",
+    )
+
+    first = service.create_session(
+        campaign.id,
+        "Opening",
+        adapter_key="fate",
+        idempotency_key="session-replay-omitted-rules",
+    )
+    service.repo.replace_campaign_rules_pack_refs(
+        owner_user_id=42,
+        campaign_id=campaign.id,
+        rules_pack_refs=[{"source_type": "media_item", "source_id": 8}],
+        expected_version=2,
+        idempotency_key="campaign-replay-omitted-rules-ref-2",
+        request_payload_hash="arranged-2",
+        source_type="user",
+    )
+
+    second = service.create_session(
+        campaign.id,
+        "Opening",
+        adapter_key="fate",
+        idempotency_key="session-replay-omitted-rules",
+    )
+
+    assert second.id == first.id  # nosec B101
+    assert [ref["ref_id"] for ref in second.active_rules_pack_refs] == ["media_item:7"]  # nosec B101
+
+
 def test_create_session_uses_explicit_empty_rules_refs():
     service = _service()
     campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-empty-rules")
@@ -295,6 +335,33 @@ async def test_replace_campaign_rules_pack_refs_validates_each_enabled_source():
 
 
 @pytest.mark.asyncio
+async def test_replace_campaign_rules_pack_refs_replays_before_source_validation():
+    validator = FakeRulesSourceValidator()
+    service = _service(validator)
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-replay-rules")
+    refs = [{"source_type": "media_item", "source_id": 7}]
+
+    first = await service.replace_campaign_rules_pack_refs(
+        campaign.id,
+        refs,
+        expected_version=campaign.version,
+        idempotency_key="campaign-replay-rules-ref",
+    )
+    validator.readable = False
+    second = await service.replace_campaign_rules_pack_refs(
+        campaign.id,
+        refs,
+        expected_version=campaign.version,
+        idempotency_key="campaign-replay-rules-ref",
+    )
+
+    assert first.replayed is False  # nosec B101
+    assert second.replayed is True  # nosec B101
+    assert [ref.ref_id for ref in second.refs] == ["media_item:7"]  # nosec B101
+    assert validator.media_item_calls == [(42, 7)]  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_replace_session_rules_pack_refs_validates_each_enabled_source():
     validator = FakeRulesSourceValidator()
     service = _service(validator)
@@ -319,6 +386,39 @@ async def test_replace_session_rules_pack_refs_validates_each_enabled_source():
     assert validator.media_item_calls == [(42, 7)]  # nosec B101
     assert validator.media_collection_calls == [(42, 3)]  # nosec B101
     assert [ref.ref_id for ref in result.refs] == ["media_item:7", "media_collection:3"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_replace_session_rules_pack_refs_replays_before_source_validation():
+    validator = FakeRulesSourceValidator()
+    service = _service(validator)
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-session-replay")
+    session = service.create_session(
+        campaign.id,
+        "Opening",
+        adapter_key="fate",
+        idempotency_key="session-replay-rules",
+    )
+    refs = [{"source_type": "media_collection", "source_id": 3}]
+
+    first = await service.replace_session_rules_pack_refs(
+        session.id,
+        refs,
+        expected_version=session.version,
+        idempotency_key="session-replay-rules-ref",
+    )
+    validator.readable = False
+    second = await service.replace_session_rules_pack_refs(
+        session.id,
+        refs,
+        expected_version=session.version,
+        idempotency_key="session-replay-rules-ref",
+    )
+
+    assert first.replayed is False  # nosec B101
+    assert second.replayed is True  # nosec B101
+    assert [ref.ref_id for ref in second.refs] == ["media_collection:3"]  # nosec B101
+    assert validator.media_collection_calls == [(42, 3)]  # nosec B101
 
 
 @pytest.mark.asyncio

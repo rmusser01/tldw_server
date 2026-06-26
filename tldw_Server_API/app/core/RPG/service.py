@@ -109,6 +109,7 @@ class RPGService:
         authority_settings = {"model_auto_commit": False, "mcp_auto_commit": False}
         campaign = self.repo.get_campaign(owner_user_id=self.owner_user_id, campaign_id=campaign_id)
         active_refs = self._prepare_session_rules_pack_refs(active_rules_pack_refs, campaign)
+        active_refs_request = self._session_rules_pack_refs_request(active_rules_pack_refs, active_refs)
         request_hash = canonical_request_hash(
             {
                 "campaign_id": campaign_id,
@@ -116,7 +117,7 @@ class RPGService:
                 "adapter_key": adapter.adapter_key,
                 "adapter_version": adapter.adapter_version,
                 "authority_settings": authority_settings,
-                "active_rules_pack_refs": active_refs,
+                "active_rules_pack_refs": active_refs_request,
             }
         )
         return self.repo.create_session(
@@ -159,7 +160,6 @@ class RPGService:
         campaign = self.repo.get_campaign(owner_user_id=self.owner_user_id, campaign_id=campaign_id)
         normalized = self._normalize_rules_pack_refs(refs, campaign.linked_rules_pack_refs)
         normalized_dicts = [rules_pack_ref_to_dict(ref) for ref in normalized]
-        await self._validate_rules_pack_refs(normalized)
         request_hash = canonical_request_hash(
             {
                 "target_type": "campaign",
@@ -169,6 +169,16 @@ class RPGService:
                 "source_type": source_type,
             }
         )
+        replay = self.repo.replay_campaign_rules_pack_refs(
+            owner_user_id=self.owner_user_id,
+            campaign_id=campaign_id,
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_hash,
+            source_type=source_type,
+        )
+        if replay is not None:
+            return replay
+        await self._validate_rules_pack_refs(normalized)
         return self.repo.replace_campaign_rules_pack_refs(
             owner_user_id=self.owner_user_id,
             campaign_id=campaign_id,
@@ -191,7 +201,6 @@ class RPGService:
         session = self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
         normalized = self._normalize_rules_pack_refs(refs, session.active_rules_pack_refs)
         normalized_dicts = [rules_pack_ref_to_dict(ref) for ref in normalized]
-        await self._validate_rules_pack_refs(normalized)
         request_hash = canonical_request_hash(
             {
                 "target_type": "session",
@@ -201,6 +210,16 @@ class RPGService:
                 "source_type": source_type,
             }
         )
+        replay = self.repo.replay_session_rules_pack_refs(
+            owner_user_id=self.owner_user_id,
+            session_id=session_id,
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_hash,
+            source_type=source_type,
+        )
+        if replay is not None:
+            return replay
+        await self._validate_rules_pack_refs(normalized)
         return self.repo.replace_session_rules_pack_refs(
             owner_user_id=self.owner_user_id,
             session_id=session_id,
@@ -449,6 +468,18 @@ class RPGService:
             else:
                 raise RPGValidationError("rules_source_validation_requires_async_context")
         return [rules_pack_ref_to_dict(ref) for ref in normalized]
+
+    def _session_rules_pack_refs_request(
+        self,
+        active_rules_pack_refs: list[dict[str, Any]] | None,
+        active_refs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if active_rules_pack_refs is None:
+            return {"mode": "campaign_default"}
+        if not active_rules_pack_refs:
+            return {"mode": "explicit", "refs": []}
+        refs = [rules_pack_ref_from_dict(ref) for ref in active_refs]
+        return {"mode": "explicit", "refs": self._rules_pack_ref_request_dicts(refs)}
 
     @staticmethod
     def _normalize_rules_pack_refs(
