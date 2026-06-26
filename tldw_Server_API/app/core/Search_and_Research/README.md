@@ -8,7 +8,7 @@ where the real code lives.
 
 ## Start Here
 
-- Package marker: `__Init__.py`.
+- Package marker: `__init__.py`.
 - Web search endpoint: `app/api/v1/endpoints/research.py` (`/research/websearch`).
 - Paper search endpoint: `app/api/v1/endpoints/paper_search.py`.
 - Web search core: `app/core/WebSearch/` and
