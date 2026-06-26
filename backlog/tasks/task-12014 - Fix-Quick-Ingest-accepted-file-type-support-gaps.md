@@ -1,7 +1,7 @@
 ---
 id: TASK-12014
 title: Fix Quick Ingest accepted file type support gaps
-status: In Progress
+status: Done
 labels:
 - quick-ingest
 - upload
@@ -54,7 +54,7 @@ Changes:
 - Extension Quick Ingest e2e regression coverage now includes a matrix test that asserts every advertised explicit upload extension is present in the bundled file input, confirms `.doc`/`application/msword` are excluded, selects representative files for all advertised extensions, and verifies each selected file reaches the test ingest-job submission path. This is regression coverage only and is not counted as UAT.
 
 Verification:
-- `python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_conversion.py -q` -> 43 passed, 1 xfailed.
+- `python -m pytest tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_conversion.py -q` -> 44 passed, 1 xfailed.
 - `python -m pytest tldw_Server_API/tests/Media_Ingestion_Modification/test_url_acceptance_endpoints.py -q` -> 30 passed.
 - `bunx vitest run src/components/Common/QuickIngest/__tests__/constants.test.ts src/services/tldw/__tests__/media-routing.test.ts` -> 2 files passed, 15 tests passed.
 - `bunx vitest run src/components/Common/QuickIngest/__tests__/constants.test.ts src/services/tldw/__tests__/media-routing.test.ts src/components/Common/QuickIngest/__tests__/FileDropZone.acceptance.test.tsx` -> 3 files passed, 17 tests passed.
@@ -67,14 +67,15 @@ Verification:
 - Real job/media persistence from that run: `.pdf`, `.txt`, `.rtf`, `.docx`, `.md`, `.markdown`, `.html`, `.htm`, `.xml`, `.json`, and `.epub` completed and appeared in `Media_DB_v2.db`; `.docx` persisted as media ID 19.
 - Direct CDP exposed a real `.xhtml` backend rejection when MIME detection returned `application/xml`; this patch fixed it and a follow-up real upload completed as job 49, media ID 27.
 - Direct CDP also exposed a real default audio/video processing blocker: jobs 38-48 were queued for accepted audio/video file types but completed with processing errors because the configured default `parakeet-tdt-0.6b-v3-onnx` path loads one ONNX graph from a multi-graph RNNT export and fails before persistence. A follow-up real audio upload with explicit `transcription_model=whisper-large-v3` completed as job 50, media ID 28, confirming upload/file-type support works when the configured STT provider is usable.
+- Direct CDP rendered Media Library verification passed after materializing workspace frontend dependencies with `bun install` at `apps/`; `/media` showed persisted UAT items including `tldw-cdp-uat-1782443002442`, and screenshot evidence was captured at `/tmp/tldw-media-library-cdp.png`.
 
-Remaining limitation from real UAT: default audio/video ingestion with the current Parakeet ONNX batch default is not a pass. The root cause is the STT runtime implementation/configuration, not Quick Ingest file selection or upload validation; fixing Parakeet ONNX multi-graph decoding is outside this file-type support PR.
+Remaining limitation from real UAT: default audio/video ingestion with the current Parakeet ONNX batch default is not a pass. The root cause is the STT runtime implementation/configuration, not Quick Ingest file selection or upload validation; fixing Parakeet ONNX multi-graph decoding is tracked separately outside this file-type support PR.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed Quick Ingest accepted-file-type mismatches from UAT. Backend validation now accepts .markdown, HTML/XHTML/XML/JSON document uploads through the document path, application/ogg for Ogg audio, and video/avi for AVI. Document conversion now handles .markdown and .xhtml. Legacy binary .doc is removed from advertised UI upload support and backend document validation until a real parser is added. Added backend, shared UI, and browser-extension e2e regression coverage for the accepted-file contract. Direct CDP UAT against the real extension/server/worker verified document and ebook persistence, found and fixed the `.xhtml` MIME rejection, and identified the current Parakeet ONNX default as a separate real audio/video processing blocker.
+Fixed Quick Ingest accepted-file-type mismatches from UAT. Backend validation now accepts .markdown, HTML/XHTML/XML/JSON document uploads through the document path, application/ogg for Ogg audio, and video/avi for AVI. Document conversion now handles .markdown and .xhtml. Legacy binary .doc is removed from advertised UI upload support and backend document validation until a real parser is added. Added backend, shared UI, and browser-extension e2e regression coverage for the accepted-file contract. Direct CDP UAT against the real extension/server/worker verified document and ebook persistence, found and fixed the `.xhtml` MIME rejection, verified persisted items render in the Media Library view, and identified the current Parakeet ONNX default as a separate real audio/video processing blocker.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

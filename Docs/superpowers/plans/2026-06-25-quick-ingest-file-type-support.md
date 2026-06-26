@@ -38,8 +38,8 @@
 
 ## Stage 7: Direct CDP UAT
 **Goal**: Exercise the built browser extension against the real FastAPI server, media-ingest worker, and SQLite media library without mocks.
-**Success Criteria**: CDP-driven file selection queues every advertised accepted upload extension, excludes `.doc`, and real job/media persistence is verified for processable file types.
-**Tests**: Direct Chrome DevTools Protocol harness using `DOM.setFileInputFiles`, real `/api/v1/media/ingest/jobs`, real worker, and Jobs/Media SQLite queries.
+**Success Criteria**: CDP-driven file selection queues every advertised accepted upload extension, excludes `.doc`, real job/media persistence is verified for processable file types, and persisted items render in the Media Library view.
+**Tests**: Direct Chrome DevTools Protocol harness using `DOM.setFileInputFiles`, real `/api/v1/media/ingest/jobs`, real worker, Jobs/Media SQLite queries, and direct CDP rendered `/media` verification.
 **Status**: Complete
 
 Notes:
@@ -47,3 +47,4 @@ Notes:
 - Real document/ebook persistence passed; `.docx` persisted as media ID 19.
 - Direct CDP exposed `.xhtml` MIME detection as `application/xml`; fixed in `Upload_Sink.py` and verified by real upload job 49/media ID 27.
 - Direct CDP also exposed a real default audio/video processing blocker in the configured Parakeet ONNX batch STT path. A real audio upload with explicit `transcription_model=whisper-large-v3` completed as job 50/media ID 28, confirming upload support when STT is usable. The default Parakeet ONNX multi-graph runtime issue is outside this file-type support patch.
+- Direct CDP rendered Media Library verification passed after materializing workspace frontend dependencies with `bun install` at `apps/`; `/media` showed persisted UAT items including `tldw-cdp-uat-1782443002442`, and screenshot evidence was captured at `/tmp/tldw-media-library-cdp.png`.
