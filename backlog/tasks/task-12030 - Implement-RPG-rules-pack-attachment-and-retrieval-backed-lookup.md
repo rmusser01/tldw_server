@@ -1,7 +1,7 @@
 ---
 id: TASK-12030
 title: Implement RPG rules-pack attachment and retrieval-backed lookup
-status: To Do
+status: In Progress
 created_date: 2026-06-25 23:29
 dependencies:
 - TASK-12029
@@ -15,6 +15,13 @@ priority: high
 documentation:
 - Docs/superpowers/specs/2026-06-25-rpg-rules-pack-attachment-retrieval-design.md
 - Docs/superpowers/plans/2026-06-25-rpg-rules-pack-attachment-retrieval-implementation-plan.md
+updated_date: 2026-06-26 01:23
+modified_files:
+- tldw_Server_API/app/core/RPG/rules/refs.py
+- tldw_Server_API/app/core/DB_Management/RPG_DB.py
+- tldw_Server_API/tests/RPG/test_rpg_rules_refs.py
+- tldw_Server_API/tests/RPG/test_rpg_db.py
+- backlog/tasks/task-12030 - Implement-RPG-rules-pack-attachment-and-retrieval-backed-lookup.md
 ---
 
 ## Description
@@ -25,7 +32,7 @@ Implement the approved RPG rules-pack attachment feature from TASK-12029. Campai
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Campaigns and sessions can list and replace normalized media_item/media_collection rules-pack refs with whole-list writes, expected_version checks, idempotency replay, and server-owned timestamps.
+- [x] #1 Campaigns and sessions can list and replace normalized media_item/media_collection rules-pack refs with whole-list writes, expected_version checks, idempotency replay, and server-owned timestamps.
 - [ ] #2 New REST endpoints expose campaign/session rules-pack ref list and replace operations with RPG permissions plus media.read requirements.
 - [ ] #3 Session creation copies campaign refs by default while explicit session refs can diverge from campaign refs.
 - [ ] #4 Rules lookup blends user-provided scoped retrieval snippets with bundled citation-only references, reports diagnostics, and never falls back to broad RAG or web search.
@@ -38,7 +45,8 @@ Implement the approved RPG rules-pack attachment feature from TASK-12029. Campai
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+2026-06-25: Began subagent-driven implementation from Docs/superpowers/plans/2026-06-25-rpg-rules-pack-attachment-retrieval-implementation-plan.md. Worktree verified clean on branch codex/rpg-runtime before runtime code edits.
+2026-06-25: Completed implementation plan Task 1. Commits: 607ec4fe5c (rules-pack ref model and repository replacement) and 1b3ffa4cdb (strict enabled validation plus session idempotency mismatch coverage). RED checks showed missing refs module/repository methods, then strict enabled failures; GREEN verification: `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_rules_refs.py tldw_Server_API/tests/RPG/test_rpg_db.py -v` -> 38 passed, 88 existing warnings. Spec compliance reviewer approved Task 1. Code quality reviewer found one minor enabled-coercion hardening issue; follow-up fixed it and re-review approved. Worker-reported Bandit on touched Task 1 scope had no findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
