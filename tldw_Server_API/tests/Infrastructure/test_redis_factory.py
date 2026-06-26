@@ -46,7 +46,8 @@ def test_sync_stub_core_commands():
     assert client.delete("k1", "k2") == 2
 
 
-def test_redis_factory_readme_documents_fail_closed_defaults():
+@pytest.mark.unit
+def test_redis_factory_readme_documents_fail_closed_defaults() -> None:
     readme_path = Path(rf.__file__).with_name("README.md")
     readme = readme_path.read_text(encoding="utf-8")
 
@@ -120,8 +121,10 @@ async def test_async_factory_raises_when_redis_package_missing_and_fallback_disa
         )
 
 
-@pytest.mark.asyncio
-async def test_async_factory_raises_when_redis_package_missing_by_default(monkeypatch):
+@pytest.mark.unit
+async def test_async_factory_raises_when_redis_package_missing_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(rf, "aioredis", None)
     monkeypatch.setattr(rf, "_import_error", ImportError("redis missing"))
 
@@ -143,7 +146,10 @@ def test_sync_factory_falls_back_when_redis_package_missing(monkeypatch):
     assert client.get("missing:sync") == "ok"
 
 
-def test_sync_factory_raises_when_redis_package_missing_by_default(monkeypatch):
+@pytest.mark.unit
+def test_sync_factory_raises_when_redis_package_missing_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(rf, "redis", None)
     monkeypatch.setattr(rf, "_import_error", ImportError("redis missing"))
 

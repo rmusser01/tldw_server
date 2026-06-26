@@ -31,11 +31,7 @@ class TestFileLockAcquireRelease:
 
         assert lock.acquire() is True
         assert lock_path.exists()
-        # Lock file should contain a per-owner token prefixed by our PID.
         assert lock._fd is not None
-        os.lseek(lock._fd, 0, os.SEEK_SET)
-        content = os.read(lock._fd, 64).decode().strip()
-        assert content.startswith(f"{os.getpid()}:")
 
         lock.release()
         # Lock file is kept so release cannot unlink a new owner.

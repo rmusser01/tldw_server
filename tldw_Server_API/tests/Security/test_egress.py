@@ -108,13 +108,17 @@ class TestEgressPolicy:
         assert egress._resolve_host_ips("example.com") == ["93.184.216.34"]
         assert calls == []
 
-    def test_dns_timeout_limits_outstanding_resolver_threads(self, monkeypatch):
+    def test_dns_timeout_limits_outstanding_resolver_threads(
+        self: "TestEgressPolicy",
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         release = threading.Event()
         started = 0
         started_lock = threading.Lock()
         resolver_slots = threading.BoundedSemaphore(2)
+        warnings: list[tuple[str, tuple[object, ...]]] = []
 
-        def _blocked_getaddrinfo(*_args, **_kwargs):
+        def _blocked_getaddrinfo(*_args: object, **_kwargs: object) -> list[object]:
             nonlocal started
             with started_lock:
                 started += 1
@@ -123,6 +127,11 @@ class TestEgressPolicy:
 
         monkeypatch.setattr(egress, "_DNS_RESOLVER_SLOTS", resolver_slots, raising=False)
         monkeypatch.setattr(egress.socket, "getaddrinfo", _blocked_getaddrinfo)
+        monkeypatch.setattr(
+            egress.logger,
+            "warning",
+            lambda message, *args, **_kwargs: warnings.append((message, args)),
+        )
 
         try:
             results = [
@@ -134,5 +143,25 @@ class TestEgressPolicy:
             ]
             assert results == [[], [], [], [], []]
             assert started <= 2
+            assert any("slots exhausted" in message for message, _args in warnings)
         finally:
             release.set()
+
+    def test_dns_timeout_logs_resolver_errors(
+        self: "TestEgressPolicy",
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        debug_logs: list[tuple[str, tuple[object, ...]]] = []
+
+        def _failing_getaddrinfo(*_args: object, **_kwargs: object) -> list[object]:
+            raise OSError("resolver failed")
+
+        monkeypatch.setattr(egress.socket, "getaddrinfo", _failing_getaddrinfo)
+        monkeypatch.setattr(
+            egress.logger,
+            "debug",
+            lambda message, *args, **_kwargs: debug_logs.append((message, args)),
+        )
+
+        assert egress._getaddrinfo_with_timeout("example.invalid", timeout_s=0.5) == []
+        assert any("DNS resolver failed" in message for message, _args in debug_logs)

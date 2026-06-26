@@ -156,13 +156,14 @@ async def test_tenant_quota_429(monkeypatch):
     assert second.headers.get("Retry-After") == "1"
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
-async def test_tenant_quota_fails_closed_when_redis_unavailable(monkeypatch):
+async def test_tenant_quota_fails_closed_when_redis_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as ep
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
-    async def _redis_unavailable():
+    async def _redis_unavailable() -> None:
         raise RuntimeError("redis unavailable")
 
     monkeypatch.setattr(ep, "_is_embeddings_backpressure_redis_enabled", lambda: False)
@@ -183,18 +184,20 @@ async def test_tenant_quota_fails_closed_when_redis_unavailable(monkeypatch):
 
     assert result is not None
     assert result.status_code == 503
+    assert result.headers["Retry-After"] == "1"
     assert "tenant quota" in str(result.detail).lower()
 
 
-@pytest.mark.asyncio
 @pytest.mark.unit
-async def test_ingest_tenant_quota_fails_closed_when_redis_unavailable(monkeypatch):
+async def test_ingest_tenant_quota_fails_closed_when_redis_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from fastapi import HTTPException, Response
 
     from tldw_Server_API.app.api.v1.API_Deps import backpressure as bp
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
-    async def _redis_unavailable():
+    async def _redis_unavailable() -> None:
         raise RuntimeError("redis unavailable")
 
     monkeypatch.setenv("INGEST_TENANT_RPS", "1")

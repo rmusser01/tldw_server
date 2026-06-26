@@ -590,8 +590,15 @@ async def _check_backpressure_and_quotas(request: Request, user: User) -> HTTPEx
                 with suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
                     if client2 is not None:
                         await ensure_async_client_closed(client2)
-    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-        logger.warning("Embeddings tenant quota Redis unavailable; failing closed")
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
+        user_id = getattr(user, "id", "anon")
+        request_state = getattr(request, "state", None)
+        request_id = getattr(request_state, "request_id", None)
+        logger.opt(exception=exc).warning(
+            "Embeddings tenant quota Redis unavailable for user_id={} request_id={}; failing closed",
+            user_id,
+            request_id,
+        )
         return HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Tenant quota temporarily unavailable",

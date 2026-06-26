@@ -201,7 +201,11 @@ async def guard_backpressure_and_quota(
                 except _BACKPRESSURE_NONCRITICAL_EXCEPTIONS:
                     pass
         except _BACKPRESSURE_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning("Ingest tenant quota Redis unavailable; failing closed")
+            tenant_id = getattr(current_user, "id", "anon")
+            logger.opt(exception=exc).warning(
+                "Ingest tenant quota Redis unavailable for tenant_id={}; failing closed",
+                tenant_id,
+            )
             raise HTTPException(
                 status_code=503,
                 detail="Tenant quota temporarily unavailable",

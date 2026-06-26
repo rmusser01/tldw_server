@@ -109,13 +109,6 @@ class FileLock:
                     0o644,
                 )
                 _acquire_platform_file_lock(fd)
-                # Include the PID for stale detection and a per-acquire token so
-                # same-process reacquisition cannot be mistaken for this owner.
-                owner_token = f"{os.getpid()}:{uuid.uuid4().hex}"
-                os.ftruncate(fd, 0)
-                os.lseek(fd, 0, os.SEEK_SET)
-                os.write(fd, f"{owner_token}\n".encode())
-                os.fsync(fd)
                 self._fd = fd
                 logger.debug("FileLock acquired: {}", self.path)
                 return True
