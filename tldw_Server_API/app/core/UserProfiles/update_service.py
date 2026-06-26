@@ -110,7 +110,7 @@ class UserProfileUpdateService:
                             repo = UserProfileOverridesRepo(self._db_pool)
                             await repo.ensure_tables()
                             repo_holder["repo"] = repo
-                        await repo.delete_override(user_id=user_id, key=key)
+                        await repo.delete_override(user_id=user_id, key=key, db_conn=db_conn)
                     result.applied.append(key)
                     continue
                 result.skipped.append({"key": key, "message": "null_not_allowed"})
@@ -239,6 +239,7 @@ class UserProfileUpdateService:
                     key=key,
                     value=value,
                     updated_by=updated_by,
+                    db_conn=db_conn,
                 )
             return True
 
@@ -254,6 +255,7 @@ class UserProfileUpdateService:
                     key=key,
                     value=value,
                     updated_by=updated_by,
+                    db_conn=db_conn,
                 )
                 try:
                     from tldw_Server_API.app.core.Evaluations.user_rate_limiter import (
@@ -302,6 +304,7 @@ class UserProfileUpdateService:
                     key=key,
                     value=value,
                     updated_by=updated_by,
+                    db_conn=db_conn,
                 )
             return True
 

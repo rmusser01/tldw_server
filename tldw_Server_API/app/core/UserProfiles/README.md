@@ -35,6 +35,14 @@ UserProfiles assembles readable and editable user profile state from AuthNZ iden
 - AuthNZ repositories provide user, membership, permission, and quota context.
 - `app/core/Usage/audio_quota.py` and prompt-studio quota configuration read profile or quota-related state.
 
+## Contract Refactor Notes
+
+The profile API is organized around typed read/update commands, planner output,
+and compatibility response mappers. Existing v1 routes preserve legacy response
+shape. Clean v2 profile routes use atomic single-update semantics and omit
+legacy single-update `skipped` fields. Bulk remains the only public profile
+write surface with per-user partial reporting.
+
 ## Architecture Notes
 
 ### Core Flow

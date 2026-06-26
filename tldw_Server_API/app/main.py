@@ -2551,6 +2551,15 @@ else:
 
     logger.info("Auth router consolidated: endpoints/auth.py")
     # Tools router included above with prefix f"{API_V1_PREFIX}"; avoid duplicate nested path
+
+if not _ULTRA_MINIMAL_APP:
+    try:
+        from tldw_Server_API.app.api.v2.router import api_v2_router
+
+        include_router_idempotent(app, api_v2_router)
+    except _IMPORT_EXCEPTIONS as _api_v2_err:
+        logger.warning(f"Failed to include API v2 router: {_api_v2_err}")
+
 # Register control-plane metrics endpoints (works in both minimal and full modes)
 if _shared_env_flag_enabled("ENABLE_ADMIN_E2E_TEST_MODE"):
     try:
