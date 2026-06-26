@@ -71,8 +71,8 @@ class FileLock:
     Parameters:
         path: Path to the lock file.
         timeout: Maximum seconds to wait for lock acquisition.
-        stale_timeout: Retained for API compatibility. File locks are only
-            broken when the recorded owning PID is confirmed dead.
+        stale_timeout: Retained for API compatibility. Native file locks are
+            expected to be released by the platform when the owner exits.
     """
 
     def __init__(
@@ -109,11 +109,6 @@ class FileLock:
                     0o644,
                 )
                 _acquire_platform_file_lock(fd)
-                # Write our PID so stale detection works from other processes.
-                os.ftruncate(fd, 0)
-                os.lseek(fd, 0, os.SEEK_SET)
-                os.write(fd, f"{os.getpid()}\n".encode())
-                os.fsync(fd)
                 self._fd = fd
                 logger.debug("FileLock acquired: {}", self.path)
                 return True
@@ -125,18 +120,18 @@ class FileLock:
                 except OSError:
                     pass
 
-                # Try to break stale locks on first failure.
-                if attempt == 1:
-                    self._break_stale_lock()
-
                 if time.monotonic() >= deadline:
                     return False
 
                 time.sleep(min(0.1, max(0, deadline - time.monotonic())))
 
     def release(self) -> None:
-        """Release the lock and remove the lock file."""
-        owned_pid = str(os.getpid())
+        """Release the lock.
+
+        The lock file is intentionally left in place. Removing it during normal
+        release creates a race where another owner can acquire the path and then
+        have its active lock file unlinked by the previous releaser.
+        """
         if self._fd is not None:
             try:
                 _release_platform_file_lock(self._fd)
@@ -147,43 +142,6 @@ class FileLock:
             except OSError:
                 pass
             self._fd = None
-        # Best-effort removal of the lock file, without unlinking a file that
-        # another process already acquired and rewrote after our unlock.
-        try:
-            if self.path.read_text().strip() == owned_pid:
-                self.path.unlink(missing_ok=True)
-        except OSError:
-            pass
-
-    # ------------------------------------------------------------------
-    # Stale lock detection
-    # ------------------------------------------------------------------
-
-    def _break_stale_lock(self) -> None:
-        """Remove the lock file only when the recorded owning PID is dead."""
-        try:
-            if not self.path.exists():
-                return
-
-            # Check if the PID is still alive.
-            try:
-                content = self.path.read_text().strip()
-                pid = int(content)
-            except (OSError, ValueError):
-                return
-
-            try:
-                os.kill(pid, 0)  # Signal 0 — just check existence.
-            except ProcessLookupError:
-                logger.warning(
-                    "Breaking stale lock (PID {} dead): {}", pid, self.path
-                )
-                self.path.unlink(missing_ok=True)
-            except PermissionError:
-                # Process exists but we can't signal it — lock is NOT stale.
-                pass
-        except OSError:
-            pass
 
     # ------------------------------------------------------------------
     # Context manager

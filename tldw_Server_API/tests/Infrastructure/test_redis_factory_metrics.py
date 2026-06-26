@@ -85,7 +85,10 @@ async def test_async_client_fallback_records_metrics(monkeypatch):
     )
     before_fallbacks = len(_metric_entries(registry, "infra_redis_fallback_total"))
 
-    client = await rf.create_async_redis_client(context="tests-async-fallback")
+    client = await rf.create_async_redis_client(
+        context="tests-async-fallback",
+        fallback_to_fake=True,
+    )
 
     assert isinstance(client, rf.InMemoryAsyncRedis)
 

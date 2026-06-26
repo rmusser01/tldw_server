@@ -139,7 +139,13 @@ async def test_tenant_quota_429(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("EMBEDDINGS_TENANT_RPS", "1")
 
-    user = User(id="tenant1", username="tenant1", email="tenant1@example.test", is_active=True, is_admin=False)
+    user = User(
+        id="tenant1",
+        username="tenant1",
+        email="tenant1@example.test",
+        is_active=True,
+        is_admin=False,
+    )
     request = SimpleNamespace(state=SimpleNamespace())
 
     assert await ep._check_backpressure_and_quotas(request, user) is None
@@ -148,6 +154,99 @@ async def test_tenant_quota_429(monkeypatch):
     assert second is not None
     assert second.status_code == 429
     assert second.headers.get("Retry-After") == "1"
+
+
+@pytest.mark.unit
+async def test_tenant_quota_fails_closed_when_redis_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Embeddings tenant quota returns 503 when Redis quota state is unavailable."""
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as ep
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _redis_unavailable() -> None:
+        """Simulate quota Redis being unavailable."""
+        raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(ep, "_is_embeddings_backpressure_redis_enabled", lambda: False)
+    monkeypatch.setattr(ep, "_tenant_rps_runtime", lambda: 1)
+    monkeypatch.setattr(ep, "_should_enforce_tenant_rps", lambda _request: True)
+    monkeypatch.setattr(ep, "_get_redis_client", _redis_unavailable)
+
+    user = User(
+        id="tenant1",
+        username="tenant1",
+        email="tenant1@example.test",
+        is_active=True,
+        is_admin=False,
+    )
+    request = SimpleNamespace(state=SimpleNamespace())
+
+    result = await ep._check_backpressure_and_quotas(request, user)
+
+    assert result is not None
+    assert result.status_code == 503
+    assert result.headers["Retry-After"] == "1"
+    assert "tenant quota" in str(result.detail).lower()
+
+
+@pytest.mark.unit
+async def test_ingest_tenant_quota_fails_closed_when_redis_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ingest tenant quota returns 503 with structured logs when Redis is unavailable."""
+    from fastapi import HTTPException, Response
+
+    from tldw_Server_API.app.api.v1.API_Deps import backpressure as bp
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _redis_unavailable() -> None:
+        """Simulate quota Redis being unavailable."""
+        raise RuntimeError("redis unavailable")
+
+    class _CapturedLogger:
+        """Capture Loguru bind/opt/warning calls for structured-log assertions."""
+
+        def __init__(self) -> None:
+            self.bound: dict[str, object] = {}
+            self.opt_kwargs: dict[str, object] = {}
+            self.warning_message: str | None = None
+
+        def bind(self, **kwargs: object) -> "_CapturedLogger":
+            """Store structured fields passed through logger.bind."""
+            self.bound.update(kwargs)
+            return self
+
+        def opt(self, **kwargs: object) -> "_CapturedLogger":
+            """Store options passed through logger.opt."""
+            self.opt_kwargs.update(kwargs)
+            return self
+
+        def warning(self, message: str, *_args: object, **_kwargs: object) -> None:
+            """Store the warning message for assertions."""
+            self.warning_message = message
+
+    captured_logger = _CapturedLogger()
+    monkeypatch.setenv("INGEST_TENANT_RPS", "1")
+    monkeypatch.delenv("EMBEDDINGS_TENANT_RPS", raising=False)
+    monkeypatch.setattr(bp, "_get_redis_client", _redis_unavailable)
+    monkeypatch.setattr(bp, "is_single_user_profile_mode", lambda: False)
+    monkeypatch.setattr(bp, "logger", captured_logger)
+
+    user = User(id="tenant1", username="tenant1", email="tenant1@example.test", is_active=True, is_admin=False)
+    request = SimpleNamespace(state=SimpleNamespace())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await bp.guard_backpressure_and_quota(request, Response(), user)
+
+    assert exc_info.value.status_code == 503
+    assert "tenant quota" in str(exc_info.value.detail).lower()
+    assert exc_info.value.headers == {"Retry-After": "1"}
+    assert captured_logger.bound["tenant_id"] == "tenant1"
+    assert captured_logger.bound["exception_type"] == "RuntimeError"
+    assert captured_logger.bound["event"] == "ingest_tenant_quota_redis_unavailable"
+    assert isinstance(captured_logger.opt_kwargs["exception"], RuntimeError)
+    assert captured_logger.warning_message == "Ingest tenant quota Redis unavailable; failing closed"
 
 
 @pytest.mark.unit

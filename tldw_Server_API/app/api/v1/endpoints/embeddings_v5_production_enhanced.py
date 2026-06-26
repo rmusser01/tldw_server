@@ -567,8 +567,9 @@ async def _check_backpressure_and_quotas(request: Request, user: User) -> HTTPEx
         tenant_rps = _tenant_rps_runtime()
 
         if _should_enforce_tenant_rps(request) and tenant_rps > 0:
-            client2 = await _get_redis_client()
+            client2 = None
             try:
+                client2 = await _get_redis_client()
                 # Use a single rolling key with 1-second TTL to avoid flakiness across second boundaries
                 key = f"embeddings:tenant:rps:{getattr(user, 'id', 'anon')}"
                 current = await client2.incr(key)
@@ -587,9 +588,23 @@ async def _check_backpressure_and_quotas(request: Request, user: User) -> HTTPEx
                             pass
             finally:
                 with suppress(_EMBEDDINGS_NONCRITICAL_EXCEPTIONS):
-                    await ensure_async_client_closed(client2)
-    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-        pass
+                    if client2 is not None:
+                        await ensure_async_client_closed(client2)
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
+        user_id = getattr(user, "id", "anon")
+        request_state = getattr(request, "state", None)
+        request_id = getattr(request_state, "request_id", None)
+        logger.bind(
+            user_id=str(user_id),
+            request_id=str(request_id) if request_id is not None else None,
+            exception_type=type(exc).__name__,
+            event="embeddings_tenant_quota_redis_unavailable",
+        ).opt(exception=exc).warning("Embeddings tenant quota Redis unavailable; failing closed")
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Tenant quota temporarily unavailable",
+            headers={"Retry-After": "1"},
+        )
     return None
 
 

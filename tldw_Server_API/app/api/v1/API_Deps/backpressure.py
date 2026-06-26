@@ -200,6 +200,18 @@ async def guard_backpressure_and_quota(
                     response.headers["X-RateLimit-Remaining"] = str(remaining)
                 except _BACKPRESSURE_NONCRITICAL_EXCEPTIONS:
                     pass
+        except _BACKPRESSURE_NONCRITICAL_EXCEPTIONS as exc:
+            tenant_id = getattr(current_user, "id", "anon")
+            logger.bind(
+                tenant_id=str(tenant_id),
+                exception_type=type(exc).__name__,
+                event="ingest_tenant_quota_redis_unavailable",
+            ).opt(exception=exc).warning("Ingest tenant quota Redis unavailable; failing closed")
+            raise HTTPException(
+                status_code=503,
+                detail="Tenant quota temporarily unavailable",
+                headers={"Retry-After": "1"},
+            ) from exc
         finally:
             try:
                 if client2 is not None:

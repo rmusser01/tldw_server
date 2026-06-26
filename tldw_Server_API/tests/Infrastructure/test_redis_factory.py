@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+import re
 import time
 from types import SimpleNamespace
 
@@ -43,6 +45,26 @@ def test_sync_stub_core_commands():
     assert client.dbsize() >= 4
 
     assert client.delete("k1", "k2") == 2
+
+
+@pytest.mark.unit
+def test_redis_factory_readme_documents_fail_closed_defaults() -> None:
+    """README examples document fail-closed defaults and explicit fake fallback."""
+    readme_path = Path(rf.__file__).with_name("README.md")
+    readme = readme_path.read_text(encoding="utf-8")
+
+    assert "fallback_to_fake=False" in readme
+    assert "fallback_to_fake=True" in readme
+    assert re.search(
+        r"create_async_redis_client\s*\([^)]*fallback_to_fake\s*=\s*True[^)]*\)",
+        readme,
+        re.DOTALL,
+    )
+    assert re.search(
+        r"create_sync_redis_client\s*\([^)]*fallback_to_fake\s*=\s*True[^)]*\)",
+        readme,
+        re.DOTALL,
+    )
 
 
 @pytest.mark.asyncio
@@ -109,6 +131,18 @@ async def test_async_factory_raises_when_redis_package_missing_and_fallback_disa
         )
 
 
+@pytest.mark.unit
+async def test_async_factory_raises_when_redis_package_missing_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Async Redis factory fails closed by default when redis is unavailable."""
+    monkeypatch.setattr(rf, "aioredis", None)
+    monkeypatch.setattr(rf, "_import_error", ImportError("redis missing"))
+
+    with pytest.raises(RuntimeError, match="redis\\[asyncio\\] is required"):
+        await rf.create_async_redis_client(context="missing_package")
+
+
 def test_sync_factory_falls_back_when_redis_package_missing(monkeypatch):
     monkeypatch.setattr(rf, "redis", None)
     monkeypatch.setattr(rf, "_import_error", ImportError("redis missing"))
@@ -121,6 +155,18 @@ def test_sync_factory_falls_back_when_redis_package_missing(monkeypatch):
     assert client.ping() is True
     client.set("missing:sync", "ok")
     assert client.get("missing:sync") == "ok"
+
+
+@pytest.mark.unit
+def test_sync_factory_raises_when_redis_package_missing_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sync Redis factory fails closed by default when redis is unavailable."""
+    monkeypatch.setattr(rf, "redis", None)
+    monkeypatch.setattr(rf, "_import_error", ImportError("redis missing"))
+
+    with pytest.raises(RuntimeError, match="redis client is required"):
+        rf.create_sync_redis_client(context="missing_package")
 
 
 @pytest.mark.asyncio
