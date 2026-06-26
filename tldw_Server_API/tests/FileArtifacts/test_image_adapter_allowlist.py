@@ -66,6 +66,35 @@ def test_modelstudio_mode_control_does_not_bypass_other_keys():
     assert issues[0].path == "extra_params.foo"
 
 
+@pytest.mark.parametrize("cfg_scale", [float("nan"), float("inf"), float("-inf")])
+def test_image_adapter_rejects_non_finite_cfg_scale(monkeypatch, cfg_scale):
+    cfg = SimpleNamespace(
+        max_prompt_length=1000,
+        max_width=1024,
+        max_height=1024,
+        max_pixels=1024 * 1024,
+        max_steps=50,
+        sd_cpp_allowed_extra_params=[],
+        swarmui_allowed_extra_params=[],
+        openrouter_image_allowed_extra_params=[],
+        novita_image_allowed_extra_params=[],
+        together_image_allowed_extra_params=[],
+        modelstudio_image_allowed_extra_params=[],
+    )
+    monkeypatch.setattr(image_adapter_module, "get_image_generation_config", lambda: cfg)
+
+    issues = ImageAdapter().validate(
+        {
+            "backend": "modelstudio",
+            "prompt": "draw a fox",
+            "cfg_scale": cfg_scale,
+            "extra_params": {},
+        }
+    )
+
+    assert any(issue.code == "image_params_invalid" and issue.path == "cfg_scale" for issue in issues)
+
+
 def test_image_adapter_normalize_preserves_reference_file_provenance(monkeypatch):
     cfg = SimpleNamespace(
         max_prompt_length=1000,

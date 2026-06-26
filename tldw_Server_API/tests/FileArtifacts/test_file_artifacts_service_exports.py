@@ -15,8 +15,14 @@ from tldw_Server_API.app.api.v1.schemas.file_artifacts_schemas import (
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.File_Artifacts.adapters.base import ExportResult
+from tldw_Server_API.app.core.File_Artifacts.adapters.data_table_adapter import DataTableAdapter
+from tldw_Server_API.app.core.File_Artifacts.adapters.xlsx_adapter import XlsxAdapter
 from tldw_Server_API.app.core.File_Artifacts.file_artifacts_service import FileArtifactsService
-from tldw_Server_API.app.core.exceptions import FileArtifactsError, FileArtifactsJobError
+from tldw_Server_API.app.core.exceptions import (
+    FileArtifactsError,
+    FileArtifactsJobError,
+    FileArtifactsValidationError,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -49,6 +55,77 @@ def _count_file_artifacts(cdb: CollectionsDatabase) -> int:
         (cdb.user_id,),
     )
     return int(res.rows[0]["count"]) if res.rows else 0
+
+
+def test_data_table_json_export_rejects_duplicate_columns() -> None:
+    adapter = DataTableAdapter()
+    structured = adapter.normalize({"columns": ["Name", "Name"], "rows": [["Ada", 95]]})
+
+    with pytest.raises(FileArtifactsValidationError, match="duplicate_columns"):
+        adapter.export(structured, format="json")
+
+
+def test_xlsx_validate_rejects_excel_invalid_sheet_name() -> None:
+    adapter = XlsxAdapter()
+    structured = adapter.normalize(
+        {
+            "sheets": [
+                {
+                    "name": "Bad/Name",
+                    "columns": ["Value"],
+                    "rows": [[1]],
+                }
+            ]
+        }
+    )
+
+    issues = adapter.validate(structured)
+
+    assert any(issue.code == "sheet_name_invalid" for issue in issues)
+
+
+def test_enforce_limits_caps_caller_rows_to_server_max(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FILES_MAX_ROWS", "1")
+    service = FileArtifactsService(MagicMock(), user_id=1)
+    options = FileCreateOptions(persist=True, max_rows=999)
+
+    with pytest.raises(FileArtifactsValidationError, match="row_limit_exceeded"):
+        service._enforce_limits("data_table", {"columns": ["A"], "rows": [[1], [2]]}, options)
+
+
+def test_enforce_limits_caps_caller_cells_to_server_max(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FILES_MAX_CELLS", "1")
+    service = FileArtifactsService(MagicMock(), user_id=1)
+    options = FileCreateOptions(persist=True, max_cells=999)
+
+    with pytest.raises(FileArtifactsValidationError, match="cell_limit_exceeded"):
+        service._enforce_limits("data_table", {"columns": ["A", "B"], "rows": [[1, 2]]}, options)
+
+
+@pytest.mark.asyncio
+async def test_finalize_export_caps_caller_max_bytes_to_server_max(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FILES_MAX_BYTES", "4")
+    cdb = MagicMock()
+    cdb.update_file_artifact_export = MagicMock()
+    service = FileArtifactsService(cdb, user_id=1)
+    monkeypatch.setattr(service, "_write_export_file", AsyncMock(return_value=("file_1.csv", 5)))
+    monkeypatch.setattr(service, "_register_generated_file_export", AsyncMock())
+
+    with pytest.raises(FileArtifactsValidationError, match="export_size_exceeded"):
+        await service._finalize_export(
+            file_id=1,
+            export_req=FileExportRequest(format="csv", mode="url", async_mode="sync"),
+            export_result=ExportResult(status="ready", content_type="text/csv", content=b"12345"),
+            options=FileCreateOptions(persist=True, max_bytes=999),
+            file_type="data_table",
+        )
+
+
+def test_export_ttl_caps_caller_value_to_server_max(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FILES_EXPORT_TTL_MAX_SECONDS", "30")
+    options = FileCreateOptions(persist=True, export_ttl_seconds=999)
+
+    assert FileArtifactsService._resolve_export_ttl_seconds(options) == 30
 
 
 @pytest.mark.asyncio
@@ -314,3 +391,104 @@ async def test_jobs_worker_failure_logs_omit_raw_file_id_and_errors(monkeypatch:
     assert "975318642" not in rendered_log_calls
     assert "/private/raw-worker-export-token" not in rendered_log_calls
     assert "/private/raw-worker-reset-token" not in rendered_log_calls
+
+
+@pytest.mark.asyncio
+async def test_jobs_worker_marks_runtime_export_failures_retryable(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.File_Artifacts import jobs_worker as worker_mod
+
+    row = SimpleNamespace(
+        export_status="pending",
+        export_storage_path=None,
+        export_format="csv",
+        export_bytes=None,
+        export_content_type=None,
+        export_job_id="job-1",
+        file_type="data_table",
+        structured_json=json.dumps({"columns": ["Name"], "rows": [["Ada"]]}),
+    )
+    cdb = MagicMock()
+    cdb.get_file_artifact.return_value = row
+
+    class _CdbContext:
+        def __enter__(self):
+            return cdb
+
+        def __exit__(self, *_args):
+            return False
+
+    class _Service:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def get_adapter(self, file_type: str):
+            return SimpleNamespace(file_type=file_type, export_formats={"csv"})
+
+        async def export_artifact_for_job(self, **_kwargs):
+            raise RuntimeError("transient storage outage /private/raw-worker-token")
+
+    monkeypatch.setattr(worker_mod.CollectionsDatabase, "for_user", lambda **_kwargs: _CdbContext())
+    monkeypatch.setattr(worker_mod, "FileArtifactsService", _Service)
+
+    with pytest.raises(FileArtifactsJobError) as exc_info:
+        await worker_mod._handle_export_job(
+            {
+                "job_type": "file_artifact_export",
+                "owner_user_id": "1",
+                "payload": {"file_id": 1, "export_format": "csv", "user_id": "1"},
+            }
+        )
+
+    assert exc_info.value.retryable is True
+    assert str(exc_info.value) == "file_artifact_export_failed"
+    assert "/private/raw-worker-token" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_jobs_worker_keeps_validation_failures_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.File_Artifacts import jobs_worker as worker_mod
+
+    row = SimpleNamespace(
+        export_status="pending",
+        export_storage_path=None,
+        export_format="csv",
+        export_bytes=None,
+        export_content_type=None,
+        export_job_id="job-1",
+        file_type="data_table",
+        structured_json=json.dumps({"columns": ["Name"], "rows": [["Ada"]]}),
+    )
+    cdb = MagicMock()
+    cdb.get_file_artifact.return_value = row
+
+    class _CdbContext:
+        def __enter__(self):
+            return cdb
+
+        def __exit__(self, *_args):
+            return False
+
+    class _Service:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def get_adapter(self, file_type: str):
+            return SimpleNamespace(file_type=file_type, export_formats={"csv"})
+
+        async def export_artifact_for_job(self, **_kwargs):
+            raise FileArtifactsValidationError("row_limit_exceeded")
+
+    monkeypatch.setattr(worker_mod.CollectionsDatabase, "for_user", lambda **_kwargs: _CdbContext())
+    monkeypatch.setattr(worker_mod, "FileArtifactsService", _Service)
+
+    with pytest.raises(FileArtifactsJobError) as exc_info:
+        await worker_mod._handle_export_job(
+            {
+                "job_type": "file_artifact_export",
+                "owner_user_id": "1",
+                "payload": {"file_id": 1, "export_format": "csv", "user_id": "1"},
+            }
+        )
+
+    assert exc_info.value.retryable is False
+    assert str(exc_info.value) == "row_limit_exceeded"

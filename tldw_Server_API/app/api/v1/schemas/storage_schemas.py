@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, default_offset_pagination_aliases
 
 # File categories
-FileCategory = Literal["tts_audio", "stt_audio", "image", "voice_clone", "mindmap", "spreadsheet"]
+FileCategory = Literal["tts_audio", "stt_audio", "image", "voice_clone", "mindmap", "spreadsheet", "export"]
 
 # Source features
 SourceFeature = Literal["tts", "stt", "image_gen", "voice_studio", "mindmap", "data_tables", "export", "vn_assets"]
