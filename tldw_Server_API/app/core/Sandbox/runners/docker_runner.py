@@ -68,6 +68,38 @@ class DockerRunner:
         return is_truthy(v)
 
     @staticmethod
+    def _redact_docker_command(cmd: list[str]) -> list[str]:
+        redacted: list[str] = []
+        idx = 0
+        while idx < len(cmd):
+            token = cmd[idx]
+            if token.startswith("--env="):
+                assignment = token.split("=", 1)[1]
+                redacted.append(f"--env={DockerRunner._redact_env_assignment(assignment)}")
+                idx += 1
+                continue
+            redacted.append(token)
+            if token in {"-e", "--env"} and idx + 1 < len(cmd):
+                assignment = str(cmd[idx + 1])
+                redacted.append(DockerRunner._redact_env_assignment(assignment))
+                idx += 2
+                continue
+            idx += 1
+        return redacted
+
+    @staticmethod
+    def _redact_env_assignment(assignment: str) -> str:
+        if "=" not in assignment:
+            return assignment
+        key = assignment.split("=", 1)[0].strip() or "<env>"
+        return f"{key}=<redacted>"
+
+    @staticmethod
+    def _format_docker_failure(action: str, exc: subprocess.CalledProcessError, cmd: list[str]) -> str:
+        redacted_cmd = " ".join(DockerRunner._redact_docker_command([str(part) for part in cmd]))
+        return f"{action} failed (exit {exc.returncode}; cmd: {redacted_cmd})"
+
+    @staticmethod
     def _docker_version() -> str | None:
         try:
             out = subprocess.check_output(["docker", "version", "--format", "{{.Server.Version}}"], text=True, timeout=2).strip()
@@ -200,7 +232,15 @@ class DockerRunner:
             return False
 
     def start_run(self, run_id: str, spec: RunSpec, session_workspace: str | None = None) -> RunStatus:
-        logger.debug(f"DockerRunner.start_run called with spec: {spec}")
+        env_keys = sorted(str(key) for key in (spec.env or {}))
+        logger.debug(
+            "DockerRunner.start_run called runtime={} image={!r} command_len={} env_keys={} network_policy={!r}",
+            spec.runtime,
+            spec.base_image,
+            len(spec.command or []),
+            env_keys,
+            spec.network_policy,
+        )
         # Fake mode for tests/CI without Docker
         if self._truthy(os.getenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC")):
             now = datetime.utcnow()
@@ -535,6 +575,8 @@ class DockerRunner:
             cmd += ["-p", f"{host_ip}:{host_port}:{container_port}"]
         if needs_ssh_caps:
             cmd += ["--cap-add", "SYS_CHROOT", "--cap-add", "SETUID", "--cap-add", "SETGID"]
+        if net_policy == "allowlist" and enforced and granular:
+            cmd += ["--entrypoint", ""]
 
         image = spec.base_image or "python:3.11-slim"
         cmd.append(image)
@@ -544,17 +586,20 @@ class DockerRunner:
         # Run in shell to ensure environment and path; safely quote user command
         import shlex
         user_cmd = " ".join(shlex.quote(x) for x in list(spec.command))
-        # In granular enforcement mode, add a short delay to allow host iptables to be applied
-        delay_prefix = "sleep 1 && " if (net_policy == "allowlist" and enforced and granular) else ""
+        egress_gate_prefix = (
+            "while [ ! -f /tmp/tldw-egress-ready ]; do sleep 0.05; done && "
+            if (net_policy == "allowlist" and enforced and granular)
+            else ""
+        )
         staged_input_prefix = (
             "cp -R /tldw-staged-workspace/. /workspace/ && "
             if staged_input_dir
             else ""
         )
-        shell_str = f"mkdir -p /workspace && {staged_input_prefix}{delay_prefix}exec {user_cmd}"
+        shell_str = f"mkdir -p /workspace && {staged_input_prefix}{egress_gate_prefix}exec {user_cmd}"
         cmd += ["sh", "-lc", shell_str]
 
-        logger.info(f"Starting docker run: {' '.join(cmd)}")
+        logger.info(f"Starting docker run: {' '.join(self._redact_docker_command(cmd))}")
         started = datetime.utcnow()
         hub = get_hub()
         max_log = None
@@ -596,22 +641,13 @@ class DockerRunner:
                 resource_usage=usage,
             )
         except subprocess.CalledProcessError as e:
-            # If security opts were provided, retry without them for portability (e.g., profile not loaded)
+            _cleanup_staged_inputs()
+            self._cleanup_egress_resources(egress_net_name, egress_label, cleanup_rules=False)
+            self._clear_run_tracking(run_id)
+            failure = self._format_docker_failure("docker create", e, cmd)
             if security_opts:
-                try:
-                    logger.warning(f"docker create failed with security options; retrying without them: {e}")
-                    cmd_wo_sec = [c for c in cmd if c not in security_opts]
-                    cid = subprocess.check_output(cmd_wo_sec, text=True).strip()
-                except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e2:
-                    _cleanup_staged_inputs()
-                    self._cleanup_egress_resources(egress_net_name, egress_label, cleanup_rules=False)
-                    self._clear_run_tracking(run_id)
-                    raise RuntimeError(f"docker create failed (without security opts): {e2}") from e2
-            else:
-                _cleanup_staged_inputs()
-                self._cleanup_egress_resources(egress_net_name, egress_label, cleanup_rules=False)
-                self._clear_run_tracking(run_id)
-                raise RuntimeError(f"docker create failed: {e}") from e
+                raise RuntimeError(f"{failure} with configured security options") from e
+            raise RuntimeError(failure) from e
 
         # Register container for cancellation
         try:
@@ -666,6 +702,16 @@ class DockerRunner:
             self._clear_run_tracking(run_id)
             raise RuntimeError(f"docker start failed: {e}") from e
 
+        def _abort_egress_setup(message: str, exc: BaseException | None = None) -> None:
+            _cleanup_staged_inputs()
+            with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
+                subprocess.check_call(["docker", "rm", "-f", cid])
+            self._cleanup_tracked_egress_resources(run_id, cleanup_rules=True)
+            self._clear_run_tracking(run_id)
+            if exc is not None:
+                raise RuntimeError(message) from exc
+            raise RuntimeError(message)
+
         # If granular egress allowlist is enabled, inspect container IP and apply host iptables rules
         container_ip: str | None = None
         if net_policy == "allowlist" and enforced and granular:
@@ -682,6 +728,9 @@ class DockerRunner:
                             break
             except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"egress allowlist: docker inspect for IP failed: {e}")
+                _abort_egress_setup(f"egress allowlist setup failed: docker inspect failed: {e}", e)
+            if not container_ip:
+                _abort_egress_setup("egress allowlist setup failed: no container IP found")
             # Resolve allowlist with wildcard/suffix support and apply atomically
             try:
                 raw = os.getenv("SANDBOX_EGRESS_ALLOWLIST") or getattr(app_settings, "SANDBOX_EGRESS_ALLOWLIST", "")
@@ -689,12 +738,21 @@ class DockerRunner:
                 raw = ""
             allow_targets: list[str] = expand_allowlist_to_targets(raw)
             try:
-                if container_ip:
-                    apply_egress_rules_atomic(container_ip, allow_targets, egress_label)
-                else:
-                    logger.debug("egress allowlist: no container IP found; skipping iptables application")
+                rules = apply_egress_rules_atomic(container_ip, allow_targets, egress_label)
+                if not rules:
+                    _abort_egress_setup("egress allowlist setup failed: no rules were installed")
             except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"egress allowlist: iptables apply failed: {e}")
+                _abort_egress_setup(f"egress allowlist setup failed: {e}", e)
+            try:
+                # argv-only Docker exec; cid is from docker create, command is constant.
+                subprocess.check_call(  # nosec B603 B607
+                    ["docker", "exec", cid, "sh", "-lc", "touch /tmp/tldw-egress-ready"],
+                    timeout=3,
+                )
+            except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as e:
+                logger.debug(f"egress allowlist: readiness gate release failed: {e}")
+                _abort_egress_setup(f"egress allowlist setup failed: readiness gate release failed: {e}", e)
 
         # Publish start event
         with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
