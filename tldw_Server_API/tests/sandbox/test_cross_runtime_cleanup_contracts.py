@@ -127,6 +127,16 @@ def test_firecracker_entry_script_exports_env_to_user_command(tmp_path: Path) ->
     assert "SAFE_VALUE=visible-in-child" in (tmp_path / "run.log").read_text(encoding="utf-8")
 
 
+def test_lima_entry_script_exports_env_to_user_command(tmp_path: Path) -> None:
+    LimaRunner._write_env_file(str(tmp_path), {"SAFE_VALUE": "visible-in-child"})
+    LimaRunner._write_entry_script(str(tmp_path), ["/usr/bin/env"])
+
+    result = _run_entry_script_with_local_workspace(tmp_path)
+
+    assert result.returncode == 0
+    assert "SAFE_VALUE=visible-in-child" in (tmp_path / "run.log").read_text(encoding="utf-8")
+
+
 def test_lima_real_run_cleans_run_dir_when_setup_fails_after_workspace_create(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

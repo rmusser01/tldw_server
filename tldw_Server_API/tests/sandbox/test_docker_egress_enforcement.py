@@ -101,6 +101,9 @@ def test_docker_runner_creates_dedicated_network_when_granular_enabled(monkeypat
     idx = create.index("--network")
     net_name = create[idx + 1]
     assert net_name.startswith("tldw_sbx_")
+    assert "--entrypoint" in create
+    entrypoint_idx = create.index("--entrypoint")
+    assert create[entrypoint_idx + 1] == ""
 
 
 @pytest.mark.unit
@@ -123,6 +126,36 @@ def test_apply_egress_rules_atomic_raises_when_fallback_rules_fail(monkeypatch: 
 
     assert any(call[:1] == ["iptables-restore"] for call in calls)
     assert any(call[:1] == ["iptables"] and "-j" in call and "DROP" in call for call in calls)
+
+
+@pytest.mark.unit
+def test_apply_egress_rules_atomic_cleans_partial_fallback_rules(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+    cleaned_labels: list[str] = []
+
+    def _partially_failing_run(args: list[str], **kwargs: object) -> SimpleNamespace:
+        del kwargs
+        calls.append(list(args))
+        if args[:1] == ["iptables-restore"]:
+            return SimpleNamespace(returncode=1)
+        if "-j" in args and args[args.index("-j") + 1] == "ACCEPT":
+            return SimpleNamespace(returncode=0)
+        if "-j" in args and args[args.index("-j") + 1] == "DROP":
+            return SimpleNamespace(returncode=1)
+        raise AssertionError(f"unexpected iptables call: {args!r}")
+
+    monkeypatch.setattr(network_policy_module.subprocess, "run", _partially_failing_run)
+    monkeypatch.setattr(network_policy_module, "delete_rules_by_label", lambda label: cleaned_labels.append(label))
+
+    with pytest.raises(RuntimeError, match="iptables"):
+        network_policy_module.apply_egress_rules_atomic(
+            "172.18.0.2",
+            ["1.1.1.1/32"],
+            "tldw-run-partial",
+        )
+
+    assert cleaned_labels == ["tldw-run-partial"]
+    assert any(call[:1] == ["iptables"] and "-j" in call and "ACCEPT" in call for call in calls)
 
 
 @pytest.mark.unit

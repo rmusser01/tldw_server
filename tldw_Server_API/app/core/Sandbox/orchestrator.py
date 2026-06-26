@@ -1197,7 +1197,7 @@ class SandboxOrchestrator:
 
     def _resolve_artifact_file(self, art_dir: Path, rel: str) -> Path | None:
         try:
-            if art_dir.is_symlink():
+            if self._artifact_path_has_symlink_ancestor(art_dir):
                 return None
             root = art_dir.resolve()
             full = art_dir / rel
@@ -1212,9 +1212,25 @@ class SandboxOrchestrator:
         except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS:
             return None
 
+    def _artifact_path_has_symlink_ancestor(self, art_dir: Path) -> bool:
+        try:
+            root = self._artifact_root().absolute()
+            candidate = art_dir.absolute()
+            relative = candidate.relative_to(root)
+            current = root
+            if current.is_symlink():
+                return True
+            for part in relative.parts:
+                current = current / part
+                if current.is_symlink():
+                    return True
+            return False
+        except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS:
+            return True
+
     def _prepare_artifact_write_path(self, art_dir: Path, rel: str) -> Path | None:
         try:
-            if art_dir.is_symlink():
+            if self._artifact_path_has_symlink_ancestor(art_dir):
                 return None
             root = art_dir.resolve()
             parts = list(Path(rel).parts)
@@ -1246,6 +1262,8 @@ class SandboxOrchestrator:
     def _open_artifact_file_for_write(self, art_dir: Path, rel: str) -> int | None:
         parts = list(Path(rel).parts)
         if not parts or any(part in ("", ".", "..") for part in parts):
+            return None
+        if self._artifact_path_has_symlink_ancestor(art_dir):
             return None
         if not _ARTIFACT_OPENAT_SUPPORTED:
             return self._open_artifact_file_for_write_by_path(art_dir, rel)
@@ -1365,7 +1383,7 @@ class SandboxOrchestrator:
             owner = None
         art_dir = self._artifact_dir((owner or "unknown"), run_id)
         result: dict[str, int] = {}
-        if art_dir.exists() and not art_dir.is_symlink():
+        if art_dir.exists() and not self._artifact_path_has_symlink_ancestor(art_dir):
             try:
                 resolved_root = art_dir.resolve()
             except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS:

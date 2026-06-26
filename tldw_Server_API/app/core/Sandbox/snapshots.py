@@ -68,6 +68,12 @@ class SnapshotManager:
         """Get the full path for a specific snapshot archive."""
         return self._snapshot_dir(session_id) / f"{snapshot_id}.tar.gz"
 
+    @staticmethod
+    def _has_symlink_ancestor(path: Path) -> bool:
+        """Return True when any existing parent component is a symlink."""
+        absolute = Path(os.path.abspath(path))
+        return any(parent.is_symlink() for parent in reversed(absolute.parents))
+
     def _metadata_path(self, session_id: str, snapshot_id: str) -> Path:
         """Get the path for a snapshot's metadata file."""
         return self._snapshot_dir(session_id) / f"{snapshot_id}.meta.json"
@@ -236,6 +242,8 @@ class SnapshotManager:
         workspace_root = Path(workspace_path)
         if workspace_root.is_symlink():
             raise ValueError("Refusing symlink workspace root")
+        if self._has_symlink_ancestor(workspace_root):
+            raise ValueError("Refusing symlink workspace ancestor")
         if workspace_root.exists():
             if not workspace_root.is_dir():
                 raise ValueError(f"Invalid workspace path: {workspace_path}")

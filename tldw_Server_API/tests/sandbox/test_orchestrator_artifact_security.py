@@ -84,6 +84,28 @@ def test_store_artifacts_rejects_symlink_artifact_root(monkeypatch: pytest.Monke
 
 
 @pytest.mark.unit
+def test_store_artifacts_rejects_symlink_run_ancestor(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A symlinked run ancestor must not become the trusted artifact root."""
+    orch = _orchestrator_with_artifact_root(monkeypatch, tmp_path)
+    run_id = "run-artifact-ancestor-link"
+    art_dir = orch._artifact_dir("artifact-user", run_id)
+    art_dir.parent.parent.mkdir(parents=True, exist_ok=True)
+    outside_run = tmp_path / "outside-run-ancestor"
+    outside_run.mkdir()
+    symlink_run = art_dir.parent
+    try:
+        os.symlink(str(outside_run), str(symlink_run))
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    orch.store_artifacts(run_id, {"leaked.txt": b"secret"})
+
+    assert not (outside_run / "artifacts" / "leaked.txt").exists()
+    assert orch.get_artifact(run_id, "leaked.txt") is None
+    assert orch.get_artifact_path(run_id, "leaked.txt") is None
+
+
+@pytest.mark.unit
 def test_get_artifact_path_rejects_symlink_file_escape(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Artifact reads and path resolution must reject symlinked files."""
     orch = _orchestrator_with_artifact_root(monkeypatch, tmp_path)

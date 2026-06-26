@@ -285,6 +285,14 @@ def apply_egress_rules_atomic(container_ip: str, targets: Sequence[str], label: 
         logger.debug("network policy: iptables DROP rule failed for {}: {}", container_ip, e)
         failures.append(f"DROP raised {e}")
     if failures:
+        try:
+            delete_rules_by_label(label)
+        except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as cleanup_exc:
+            logger.debug(
+                "network policy: failed to clean partial egress rules label={} error={}",
+                label,
+                cleanup_exc,
+            )
         raise RuntimeError(f"iptables egress rule application failed: {'; '.join(failures)}")
     return rule_specs
 

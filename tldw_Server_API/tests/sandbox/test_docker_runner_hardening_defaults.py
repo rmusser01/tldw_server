@@ -128,6 +128,29 @@ def test_docker_runner_redacts_env_values_from_logged_create_command(monkeypatch
 
 
 @pytest.mark.unit
+def test_docker_runner_redacts_env_values_from_start_debug_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The early RunSpec debug log should not print env values."""
+    fake_logger = _FakeLogger()
+    monkeypatch.setattr(docker_module, "logger", fake_logger)
+    spec = RunSpec(
+        session_id=None,
+        runtime=RuntimeType.docker,
+        base_image="python:3.11-slim",
+        command=["python", "-c", "print('ok')"],
+        timeout_sec=5,
+        network_policy="deny_all",
+        run_as_root=False,
+        read_only_root=True,
+        env={"API_TOKEN": "secret-token-value"},
+    )
+
+    _capture_docker_create_command(monkeypatch, spec)
+
+    logged = "\n".join(fake_logger.debug_messages)
+    assert "secret-token-value" not in logged
+
+
+@pytest.mark.unit
 def test_docker_runner_redacts_env_values_from_create_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """Docker create failures should not leak env values through exception strings."""
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")

@@ -232,7 +232,15 @@ class DockerRunner:
             return False
 
     def start_run(self, run_id: str, spec: RunSpec, session_workspace: str | None = None) -> RunStatus:
-        logger.debug(f"DockerRunner.start_run called with spec: {spec}")
+        env_keys = sorted(str(key) for key in (spec.env or {}))
+        logger.debug(
+            "DockerRunner.start_run called runtime={} image={!r} command_len={} env_keys={} network_policy={!r}",
+            spec.runtime,
+            spec.base_image,
+            len(spec.command or []),
+            env_keys,
+            spec.network_policy,
+        )
         # Fake mode for tests/CI without Docker
         if self._truthy(os.getenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC")):
             now = datetime.utcnow()
@@ -567,6 +575,8 @@ class DockerRunner:
             cmd += ["-p", f"{host_ip}:{host_port}:{container_port}"]
         if needs_ssh_caps:
             cmd += ["--cap-add", "SYS_CHROOT", "--cap-add", "SETUID", "--cap-add", "SETGID"]
+        if net_policy == "allowlist" and enforced and granular:
+            cmd += ["--entrypoint", ""]
 
         image = spec.base_image or "python:3.11-slim"
         cmd.append(image)
