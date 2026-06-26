@@ -26,7 +26,9 @@ modified_files:
 - backlog/tasks/task-2430 - Design-Moderation-PolicyCompiler-refactor.md
 - backlog/tasks/task-2431 - Plan-Moderation-PolicyCompiler-refactor-implementation.md
 - backlog/tasks/task-2432 - Implement-Moderation-PolicyCompiler-refactor.md
-updated_date: 2026-06-24 22:35
+updated_date: 2026-06-26 06:24
+references:
+- https://github.com/rmusser01/tldw_server/pull/2528
 ---
 
 ## Description
@@ -121,6 +123,7 @@ Final verification:
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented the compiler-first Moderation refactor. Added `PolicyCompiler` and supporting dataclasses for deterministic global and per-user policy assembly, blocklist parsing, regex safety checks, category/runtime override handling, quick-rule compilation, and sanitized compilation reports. Kept `ModerationService` as the public facade and I/O/logging/persistence boundary, preserving compatibility wrappers, lint output behavior, reload/settings/blocklist mutation paths, PII inclusion, and supervised overlay composition. Added focused compiler, service compatibility, recompile-trigger, and supervised overlay regression coverage. Final verification passed: compile checks, targeted pytest suite, diff whitespace check, Bandit on Moderation, mergeability check against `origin/dev`, and final independent review.
+Draft PR opened against `dev`: https://github.com/rmusser01/tldw_server/pull/2528
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
