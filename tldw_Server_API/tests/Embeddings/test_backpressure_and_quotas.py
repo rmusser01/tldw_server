@@ -139,7 +139,13 @@ async def test_tenant_quota_429(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("EMBEDDINGS_TENANT_RPS", "1")
 
-    user = User(id="tenant1", username="tenant1", email="tenant1@example.test", is_active=True, is_admin=False)
+    user = User(
+        id="tenant1",
+        username="tenant1",
+        email="tenant1@example.test",
+        is_active=True,
+        is_admin=False,
+    )
     request = SimpleNamespace(state=SimpleNamespace())
 
     assert await ep._check_backpressure_and_quotas(request, user) is None
@@ -178,6 +184,33 @@ async def test_tenant_quota_fails_closed_when_redis_unavailable(monkeypatch):
     assert result is not None
     assert result.status_code == 503
     assert "tenant quota" in str(result.detail).lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_ingest_tenant_quota_fails_closed_when_redis_unavailable(monkeypatch):
+    from fastapi import HTTPException, Response
+
+    from tldw_Server_API.app.api.v1.API_Deps import backpressure as bp
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _redis_unavailable():
+        raise RuntimeError("redis unavailable")
+
+    monkeypatch.setenv("INGEST_TENANT_RPS", "1")
+    monkeypatch.delenv("EMBEDDINGS_TENANT_RPS", raising=False)
+    monkeypatch.setattr(bp, "_get_redis_client", _redis_unavailable)
+    monkeypatch.setattr(bp, "is_single_user_profile_mode", lambda: False)
+
+    user = User(id="tenant1", username="tenant1", email="tenant1@example.test", is_active=True, is_admin=False)
+    request = SimpleNamespace(state=SimpleNamespace())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await bp.guard_backpressure_and_quota(request, Response(), user)
+
+    assert exc_info.value.status_code == 503
+    assert "tenant quota" in str(exc_info.value.detail).lower()
+    assert exc_info.value.headers == {"Retry-After": "1"}
 
 
 @pytest.mark.unit

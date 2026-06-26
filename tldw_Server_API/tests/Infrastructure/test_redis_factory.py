@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import time
 from types import SimpleNamespace
 
@@ -43,6 +44,16 @@ def test_sync_stub_core_commands():
     assert client.dbsize() >= 4
 
     assert client.delete("k1", "k2") == 2
+
+
+def test_redis_factory_readme_documents_fail_closed_defaults():
+    readme_path = Path(rf.__file__).with_name("README.md")
+    readme = readme_path.read_text(encoding="utf-8")
+
+    assert "fallback_to_fake=False" in readme
+    assert "fallback_to_fake=True" in readme
+    assert "create_async_redis_client(context=\"demo\", fallback_to_fake=True)" in readme
+    assert "create_sync_redis_client(context=\"demo-sync\", fallback_to_fake=True)" in readme
 
 
 @pytest.mark.asyncio

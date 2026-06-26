@@ -18,13 +18,15 @@ modified_files:
 - tldw_Server_API/app/core/Infrastructure/distributed_lock.py
 - tldw_Server_API/app/core/Security/egress.py
 - tldw_Server_API/app/core/Infrastructure/redis_factory.py
+- tldw_Server_API/app/core/Infrastructure/README.md
+- tldw_Server_API/app/api/v1/API_Deps/backpressure.py
 - tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py
 - tldw_Server_API/tests/Infrastructure/test_distributed_lock.py
 - tldw_Server_API/tests/Security/test_egress.py
 - tldw_Server_API/tests/Infrastructure/test_redis_factory.py
 - tldw_Server_API/tests/Infrastructure/test_redis_factory_metrics.py
 - tldw_Server_API/tests/Embeddings/test_backpressure_and_quotas.py
-updated_date: 2026-06-26 18:23
+updated_date: 2026-06-26 18:45
 ---
 
 ## Description
@@ -71,12 +73,30 @@ Verification in clean worktree:
 - `python -m bandit -r tldw_Server_API/app/core/Infrastructure/distributed_lock.py tldw_Server_API/app/core/Security/egress.py tldw_Server_API/app/core/Infrastructure/redis_factory.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py -f json -o /tmp/bandit_task_12021_clean_pr.json` -> 0 errors, 0 findings.
 
 Documentation: no user-facing docs change needed; this is internal hardening.
+Reopened after self-review before merge. Review follow-up items:
+- Ingest tenant quota path must convert Redis quota outages into controlled 503 responses after Redis fallback default changed to fail closed.
+- Redis factory README must reflect fallback_to_fake=False defaults and explicit opt-in examples.
+- Remove unused FileLock instance owner token state while retaining lock-file owner token metadata.
+Addressed all self-review findings before continuing:
+- Added red regression test for ingest tenant quota Redis outage; confirmed it failed with raw RuntimeError before the fix.
+- Added red README contract test for Redis factory fail-closed defaults and explicit fallback opt-in example; confirmed it failed before the docs update.
+- Changed ingest quota enforcement to raise controlled HTTP 503 with Retry-After when Redis quota state is unavailable.
+- Updated Infrastructure Redis factory README to document fallback_to_fake=False defaults and explicit fallback_to_fake=True examples.
+- Removed unused FileLock `_owner_token` instance state while retaining per-acquire token metadata in the lock file.
+
+Review follow-up verification:
+- Red run: `python -m pytest tldw_Server_API/tests/Embeddings/test_backpressure_and_quotas.py::test_ingest_tenant_quota_fails_closed_when_redis_unavailable tldw_Server_API/tests/Infrastructure/test_redis_factory.py::test_redis_factory_readme_documents_fail_closed_defaults -q` -> 2 failed for expected reasons.
+- Green focused run: same command -> 2 passed.
+- Full focused run: `python -m pytest tldw_Server_API/tests/Infrastructure/test_distributed_lock.py tldw_Server_API/tests/Embeddings/test_backpressure_and_quotas.py tldw_Server_API/tests/Security/test_egress.py tldw_Server_API/tests/Infrastructure/test_redis_factory.py tldw_Server_API/tests/Infrastructure/test_redis_factory_metrics.py tldw_Server_API/tests/test_minimal_deploy.py tldw_Server_API/tests/Resource_Governance/test_rg_fail_modes_across_categories.py -q` -> 62 passed.
+- `python -m py_compile tldw_Server_API/app/core/Infrastructure/distributed_lock.py tldw_Server_API/app/core/Security/egress.py tldw_Server_API/app/core/Infrastructure/redis_factory.py tldw_Server_API/app/api/v1/API_Deps/backpressure.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py` -> passed.
+- `git diff --check -- ...touched files...` -> passed.
+- `python -m bandit -r tldw_Server_API/app/core/Infrastructure/distributed_lock.py tldw_Server_API/app/core/Security/egress.py tldw_Server_API/app/core/Infrastructure/redis_factory.py tldw_Server_API/app/api/v1/API_Deps/backpressure.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py -f json -o /tmp/bandit_task_12021_review_followup.json` -> 0 errors, 0 findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created a clean PR branch from origin/dev and ported the TASK-12021 review fixes. The branch keeps file locks from unlinking active successors, preserves migration body exceptions, defaults Redis helper fallbacks to fail-closed behavior unless explicitly enabled, bounds egress DNS resolver work, and fails closed for embeddings tenant quota Redis outages. Focused tests, compile, diff hygiene, and Bandit all passed in the clean worktree.
+Created a clean PR branch from origin/dev, ported the TASK-12021 review fixes, and addressed the follow-up self-review findings. The branch keeps file locks from unlinking active successors, preserves migration body exceptions, defaults Redis helper fallbacks to fail-closed behavior unless explicitly enabled, bounds egress DNS resolver work, fails closed for embeddings and ingest tenant quota Redis outages, and updates Redis factory docs to match the new fallback contract. Focused tests, compile, diff hygiene, and Bandit all passed in the clean worktree.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

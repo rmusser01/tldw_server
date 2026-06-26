@@ -85,7 +85,6 @@ class FileLock:
         self.timeout = timeout
         self.stale_timeout = stale_timeout
         self._fd: Optional[int] = None
-        self._owner_token: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -118,7 +117,6 @@ class FileLock:
                 os.write(fd, f"{owner_token}\n".encode())
                 os.fsync(fd)
                 self._fd = fd
-                self._owner_token = owner_token
                 logger.debug("FileLock acquired: {}", self.path)
                 return True
             except OSError:
@@ -151,7 +149,6 @@ class FileLock:
             except OSError:
                 pass
             self._fd = None
-        self._owner_token = None
 
     # ------------------------------------------------------------------
     # Context manager
