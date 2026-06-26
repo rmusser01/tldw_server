@@ -38,6 +38,7 @@ import contextlib
 
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager, get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
+from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError as AuthNZDatabaseError
 from tldw_Server_API.app.core.AuthNZ.migrations import check_migration_status, ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.monitoring import get_authnz_monitor
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
@@ -65,6 +66,10 @@ _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS = (
     TypeError,
     ValueError,
     UnicodeDecodeError,
+)
+_AUTHNZ_SINGLE_USER_OPTIONAL_BACKFILL_EXCEPTIONS = (
+    *_AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS,
+    AuthNZDatabaseError,
 )
 
 #######################################################################################################################
@@ -708,13 +713,13 @@ async def ensure_single_user_rbac_seed_if_needed() -> None:
             except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS:
                 pass
 
-            if sqlite_is_memory:
+            if sqlite_is_memory or sqlite_fs_path:
                 async with pool.transaction() as conn:  # type: ignore[attr-defined]
                     try:
                         await ensure_sqlite_rbac_tables(conn)
                     except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as table_err:
                         logger.debug(
-                            "SQLite in-memory RBAC table creation skipped (tables may already exist): {}",
+                            "SQLite RBAC table creation skipped (tables may already exist): {}",
                             table_err,
                         )
                     with contextlib.suppress(_AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS):
@@ -814,7 +819,7 @@ async def ensure_single_user_rbac_seed_if_needed() -> None:
                     scope="admin",
                     is_virtual=False,
                 )
-        except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as role_assign_err:
+        except _AUTHNZ_SINGLE_USER_OPTIONAL_BACKFILL_EXCEPTIONS as role_assign_err:
             # Log at warning level with context so repeated failures surface operationally
             logger.warning(
                 "Single-user admin role assignment skipped in ensure_single_user_rbac_seed_if_needed "

@@ -18,7 +18,7 @@ class _StubAdapter:
     def __init__(self, payload):
         self._payload = payload
 
-    def chat(self, _request):
+    def chat(self, _request, **_kwargs):
         return {"choices": [{"message": {"content": json.dumps(self._payload)}}]}
 
 

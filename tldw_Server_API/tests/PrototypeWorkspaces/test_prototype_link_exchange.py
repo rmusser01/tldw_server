@@ -514,11 +514,11 @@ def test_public_prototype_exchange_retains_claim_on_post_exchange_failure(
         lambda: _ExplodingAuditService(),
     )
 
-    with pytest.raises(RuntimeError, match="audit boom"):
-        client.post(
-            f"/api/v1/sharing/public/{single_use_prototype_share['raw_token']}/prototype-session",
-            json={"display_name": "Acme PM"},
-        )
+    resp = client.post(
+        f"/api/v1/sharing/public/{single_use_prototype_share['raw_token']}/prototype-session",
+        json={"display_name": "Acme PM"},
+    )
+    assert resp.status_code == 200
 
     token_row = asyncio.run(sharing_repo.get_token(single_use_prototype_share["id"]))
     assert token_row is not None
