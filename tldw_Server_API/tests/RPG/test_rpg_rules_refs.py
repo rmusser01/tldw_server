@@ -6,6 +6,7 @@ from tldw_Server_API.app.core.RPG.errors import RPGValidationError
 from tldw_Server_API.app.core.RPG.rules.refs import (
     RulesPackRef,
     normalize_rules_pack_ref_payloads,
+    rules_pack_ref_from_dict,
     rules_pack_ref_to_dict,
 )
 
@@ -140,4 +141,31 @@ def test_normalize_rules_pack_refs_limits_metadata_to_json_object():
             [{"source_type": "media_item", "source_id": 8, "metadata": ["not", "object"]}],
             existing_refs=[],
             now=_now(),
+        )
+
+
+@pytest.mark.parametrize("enabled", [None, 0, 1, "false", [], {}])
+def test_normalize_rules_pack_refs_rejects_non_bool_enabled(enabled):
+    with pytest.raises(RPGValidationError, match="invalid_rules_pack_ref_enabled"):
+        normalize_rules_pack_ref_payloads(
+            [{"source_type": "media_item", "source_id": 7, "enabled": enabled}],
+            existing_refs=[],
+            now=_now(),
+        )
+
+
+@pytest.mark.parametrize("enabled", [None, 0, 1, "false", [], {}])
+def test_rules_pack_ref_from_dict_rejects_non_bool_enabled(enabled):
+    with pytest.raises(RPGValidationError, match="invalid_rules_pack_ref_enabled"):
+        rules_pack_ref_from_dict(
+            {
+                "ref_id": "media_item:7",
+                "source_type": "media_item",
+                "source_id": 7,
+                "display_name": "Rules",
+                "enabled": enabled,
+                "created_at": "2026-06-25T12:00:00Z",
+                "updated_at": "2026-06-25T12:00:00Z",
+                "metadata": {},
+            }
         )

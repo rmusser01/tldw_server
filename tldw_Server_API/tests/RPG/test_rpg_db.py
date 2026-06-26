@@ -265,6 +265,34 @@ def test_replace_session_rules_pack_refs_replays_idempotency_key():
     assert [ref.ref_id for ref in second.refs] == [ref.ref_id for ref in first.refs]  # nosec B101
 
 
+def test_replace_session_rules_pack_refs_rejects_idempotency_payload_mismatch():
+    repo = _repo()
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
+    payload = [{"source_type": "media_collection", "source_id": 3}]
+
+    repo.replace_session_rules_pack_refs(
+        42,
+        session.id,
+        payload,
+        session.version,
+        "session-refs",
+        "hash-session-refs",
+        "user",
+    )
+
+    with pytest.raises(RPGConflictError, match="idempotency"):
+        repo.replace_session_rules_pack_refs(
+            42,
+            session.id,
+            payload,
+            session.version,
+            "session-refs",
+            "hash-session-refs-changed",
+            "user",
+        )
+
+
 def test_commit_events_assigns_sequences_and_updates_snapshot_cursor():
     repo = _repo()
     campaign = _campaign(repo)

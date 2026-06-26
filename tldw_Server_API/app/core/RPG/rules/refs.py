@@ -60,7 +60,7 @@ def normalize_rules_pack_ref_payloads(
                 source_type=source_type,
                 source_id=source_id,
                 display_name=display_name,
-                enabled=payload.get("enabled", True) is not False,
+                enabled=_normalize_enabled(payload),
                 created_at=existing.created_at if existing is not None else now,
                 updated_at=now,
                 metadata=dict(metadata),
@@ -106,7 +106,7 @@ def rules_pack_ref_from_dict(data: dict[str, Any]) -> RulesPackRef:
         source_type=source_type,
         source_id=source_id,
         display_name=str(data.get("display_name") or "").strip() or ref_id,
-        enabled=data.get("enabled", True) is not False,
+        enabled=_normalize_enabled(data),
         created_at=_parse_datetime(data.get("created_at")),
         updated_at=_parse_datetime(data.get("updated_at")),
         metadata=dict(metadata),
@@ -134,6 +134,15 @@ def _normalize_source_id(source_id: Any) -> int:
     if isinstance(source_id, bool) or not isinstance(source_id, int) or source_id <= 0:
         raise RPGValidationError("invalid_rules_pack_ref_source_id")
     return source_id
+
+
+def _normalize_enabled(data: dict[str, Any]) -> bool:
+    if "enabled" not in data:
+        return True
+    enabled = data["enabled"]
+    if not isinstance(enabled, bool):
+        raise RPGValidationError("invalid_rules_pack_ref_enabled")
+    return enabled
 
 
 def _parse_datetime(value: Any) -> datetime:
