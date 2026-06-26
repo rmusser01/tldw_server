@@ -92,22 +92,24 @@ describe("AvailableModelsList", () => {
     ).not.toBeInTheDocument()
   })
 
-  it.each([
-    ["string errors", "Provider registry is offline"],
-    ["plain object message errors", { message: "Provider registry returned 502" }],
-  ])("keeps %s in request details", async (_name, error) => {
+  it("renders metadata load failures through shared recovery diagnostics", async () => {
+    const error = Object.assign(new Error("Provider registry is offline"), {
+      status: 503,
+    })
     mocks.getModelsMetadata.mockRejectedValue(error)
 
     renderWithQueryClient()
 
+    const recovery = await screen.findByTestId("models-catalog-load-recovery")
+    expect(recovery).toHaveAttribute("data-ds-component", "RecoveryCallout")
     expect(
-      await screen.findByText("Unable to load models from server")
+      screen.getByRole("heading", { name: "Unable to load models from server" })
     ).toBeInTheDocument()
-    expect(screen.getByText("Request details")).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        typeof error === "string" ? error : error.message
-      )
-    ).toBeInTheDocument()
+    expect(screen.getByText("GET")).toBeInTheDocument()
+    expect(screen.getByText("/api/v1/llm/models/metadata")).toBeInTheDocument()
+    expect(screen.getByText("503")).toBeInTheDocument()
+    expect(screen.getByText("Provider registry is offline")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+    expect(screen.queryByText("Request details")).toBeNull()
   })
 })

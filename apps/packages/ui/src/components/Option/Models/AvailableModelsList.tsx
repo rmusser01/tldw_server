@@ -1,12 +1,24 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Alert, Button, Card, Skeleton, Tag } from 'antd'
+import { Button, Card, Skeleton, Tag } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
 import { ProviderIcons } from '@/components/Common/ProviderIcon'
 import { getProviderDisplayName } from '@/utils/provider-registry'
+import { RecoveryCallout, buildCapabilityState } from '@/components/ui/state'
 
-type ProviderMap = Record<string, Array<{ id: string, context_length?: number, capabilities?: string[] }>>
+type ProviderModel = {
+  id: string
+  context_length?: number
+  capabilities?: string[]
+}
+
+type ProviderMap = Record<string, ProviderModel[]>
+
+const MODELS_METADATA_PATH = '/api/v1/llm/models/metadata'
+const SECRET_VALUE_PATTERN =
+  /\b(api[_-]?key|authorization|bearer|token|secret|password)(\s*[:=]\s*)([^\s,;]+)/gi
+const BEARER_VALUE_PATTERN = /\b(Bearer\s+)([A-Za-z0-9._~+/-]+)/g
 
 const isAbortLikeError = (error: unknown): boolean => {
   if (!error || typeof error !== "object") return false
@@ -25,20 +37,36 @@ const isAbortLikeError = (error: unknown): boolean => {
   )
 }
 
+const redactDiagnosticMessage = (value: string): string =>
+  value
+    .replace(BEARER_VALUE_PATTERN, '$1[redacted]')
+    .replace(SECRET_VALUE_PATTERN, '$1$2[redacted]')
+
 const getModelLoadErrorMessage = (error: unknown): string | null => {
   if (error instanceof Error && error.message.trim()) {
-    return error.message
+    return redactDiagnosticMessage(error.message)
   }
   if (typeof error === "string" && error.trim()) {
-    return error
+    return redactDiagnosticMessage(error)
   }
   if (error && typeof error === "object" && "message" in error) {
     const message = (error as { message?: unknown }).message
     if (typeof message === "string" && message.trim()) {
-      return message
+      return redactDiagnosticMessage(message)
     }
   }
   return null
+}
+
+const getModelLoadErrorStatus = (error: unknown): number | null => {
+  if (!error || typeof error !== 'object') return null
+  const candidate = error as {
+    status?: unknown
+    statusCode?: unknown
+    response?: { status?: unknown }
+  }
+  const status = candidate.status ?? candidate.statusCode ?? candidate.response?.status
+  return typeof status === 'number' && Number.isFinite(status) ? status : null
 }
 
 export const AvailableModelsList: React.FC = () => {
@@ -66,11 +94,22 @@ export const AvailableModelsList: React.FC = () => {
         throw new Error("Unexpected models metadata response")
       }
       const normalized: ProviderMap = {}
-      for (const item of modelList as any[]) {
-        const provider = String(item.provider || 'unknown')
-        const id = String(item.id || item.model || item.name)
-        const context_length = typeof item.context_length === 'number' ? item.context_length : (typeof item.contextLength === 'number' ? item.contextLength : undefined)
-        const capabilities = Array.isArray(item.capabilities) ? item.capabilities : (Array.isArray(item.features) ? item.features : undefined)
+      for (const item of modelList) {
+        const record =
+          item && typeof item === 'object' ? (item as Record<string, unknown>) : {}
+        const provider = String(record.provider || 'unknown')
+        const id = String(record.id || record.model || record.name)
+        const context_length =
+          typeof record.context_length === 'number'
+            ? record.context_length
+            : typeof record.contextLength === 'number'
+              ? record.contextLength
+              : undefined
+        const capabilities = Array.isArray(record.capabilities)
+          ? record.capabilities.map(String)
+          : Array.isArray(record.features)
+            ? record.features.map(String)
+            : undefined
         if (!normalized[provider]) normalized[provider] = []
         // Avoid duplicates
         if (!normalized[provider].some((m) => m.id === id)) {
@@ -91,34 +130,33 @@ export const AvailableModelsList: React.FC = () => {
 
   if (status === 'error') {
     const errorMessage = getModelLoadErrorMessage(error)
+    const recoveryState = buildCapabilityState({
+      featureName: 'Models',
+      capabilityName: 'model metadata catalog',
+      endpoint: MODELS_METADATA_PATH,
+      method: 'GET',
+      status: getModelLoadErrorStatus(error),
+      rawMessage: errorMessage ?? 'Model metadata request failed',
+      title: t('settings:models.loadErrorTitle', 'Unable to load models from server'),
+      message: t(
+        'settings:models.loadErrorBody',
+        'The models endpoint returned an error. Check your server URL and API key, then try again.'
+      )
+    })
     return (
-      <Alert
-        type="error"
-        showIcon
+      <RecoveryCallout
+        state={recoveryState.state}
         title={t('settings:models.loadErrorTitle', 'Unable to load models from server')}
-        description={
-          <div className="flex flex-col gap-2 text-xs">
-            <span>
-              {t(
-                'settings:models.loadErrorBody',
-                'The models endpoint returned an error. Check your server URL and API key, then try again.'
-              )}
-            </span>
-            {errorMessage ? (
-              <details>
-                <summary className="cursor-pointer font-medium">
-                  {t('settings:models.requestDetails', 'Request details')}
-                </summary>
-                <code className="mt-1 block whitespace-pre-wrap break-words rounded border border-border bg-surface2 px-2 py-1">
-                  {errorMessage}
-                </code>
-              </details>
-            ) : null}
-            <Button size="small" onClick={() => refetch()} loading={isFetching}>
-              {t('common:retry', 'Retry')}
-            </Button>
-          </div>
-        }
+        message={recoveryState.message}
+        diagnostics={recoveryState.diagnostics}
+        primaryAction={{
+          label: t('common:retry', 'Retry'),
+          onClick: () => {
+            void refetch()
+          },
+          loading: isFetching
+        }}
+        data-testid="models-catalog-load-recovery"
       />
     )
   }
@@ -134,12 +172,12 @@ export const AvailableModelsList: React.FC = () => {
             <div className="flex items-center gap-2">
               <ProviderIcons provider={provider} className="h-4 w-4" />
               <span>{getProviderDisplayName(provider)}</span>
-              <Tag>{(models as any[]).length}</Tag>
+              <Tag>{models.length}</Tag>
             </div>
           }
         >
           <div className="flex flex-col gap-2">
-            {(models as any[]).map((m: any) => (
+            {models.map((m) => (
               <div key={m.id} className="flex items-center gap-2 text-xs flex-wrap">
                 <Tag bordered>{m.id}</Tag>
                 {typeof m.context_length === 'number' && (
