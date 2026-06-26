@@ -53,6 +53,22 @@ describe("sanitizeServerErrorMessage", () => {
     expect(message).not.toContain("api_secret_value")
   })
 
+  it("redacts prefixed assignment-style secret keys", () => {
+    const message = sanitizeServerErrorMessage(
+      "access_token=access-secret refresh_token=refresh-secret client_secret=client-secret api-key=api-key-secret",
+      "fallback"
+    )
+
+    expect(message).toContain("access_token=[redacted-secret]")
+    expect(message).toContain("refresh_token=[redacted-secret]")
+    expect(message).toContain("client_secret=[redacted-secret]")
+    expect(message).toContain("api-key=[redacted-secret]")
+    expect(message).not.toContain("access-secret")
+    expect(message).not.toContain("refresh-secret")
+    expect(message).not.toContain("client-secret")
+    expect(message).not.toContain("api-key-secret")
+  })
+
   it("uses fallback when error content is empty", () => {
     expect(sanitizeServerErrorMessage("", "fallback message")).toBe(
       "fallback message"

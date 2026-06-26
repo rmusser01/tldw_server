@@ -24,6 +24,7 @@ import {
 import { cleanUrl } from "@/libs/clean-url"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { getDesignSystemState } from "@/design-system"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import { getCoreIssueLabel } from "./tldw-connection-status"
 
 type Check = {
@@ -132,6 +133,10 @@ const redactDiagnostics = (value: unknown): unknown => {
         SECRET_KEY_PATTERN.test(key) ? "[redacted]" : redactDiagnostics(nested)
       ])
     )
+  }
+
+  if (typeof value === "string") {
+    return sanitizeServerErrorMessage(value, value)
   }
 
   return value

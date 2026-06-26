@@ -7,6 +7,7 @@ import { UnifiedSetupWizard } from "@/components/Option/Onboarding/UnifiedSetupW
 import { SetupRequiredPanel } from "@/components/ui/state"
 import { useConnectionActions } from "@/hooks/useConnectionState"
 import { useSetupOnboarding } from "@/hooks/useSetupOnboarding"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import OptionLayout from "~/components/Layouts/Layout"
 import { isSetupStatusRequiringWizard } from "./setup-status"
 
@@ -59,12 +60,12 @@ const OptionSetup = () => {
                 await testConnectionFromOnboarding()
                 navigate("/settings/health")
               } catch (error) {
+                const fallbackMessage = t(
+                  "setupRoute.selfHostConnectionFailed",
+                  "Connection test failed. Check the server URL and API key, then try again."
+                )
                 setConnectionError(
-                  (error as Error)?.message ||
-                    t(
-                      "setupRoute.selfHostConnectionFailed",
-                      "Connection test failed. Check the server URL and API key, then try again."
-                    )
+                  sanitizeServerErrorMessage(error, fallbackMessage)
                 )
               } finally {
                 setTesting(false)
@@ -90,6 +91,7 @@ const OptionSetup = () => {
                 onChange={(event) => setApiKey(event.target.value)}
                 placeholder={t("setupRoute.apiKeyPlaceholder", "Enter your API key")}
                 type="password"
+                aria-describedby={showKeyHelp ? "setup-api-key-help" : undefined}
               />
             </label>
             {connectionError ? (
@@ -98,7 +100,10 @@ const OptionSetup = () => {
               </p>
             ) : null}
             {showKeyHelp ? (
-              <p className="rounded-md bg-surface2 p-3 text-sm text-text-muted">
+              <p
+                id="setup-api-key-help"
+                className="rounded-md bg-surface2 p-3 text-sm text-text-muted"
+              >
                 {t(
                   "setupRoute.keyHelp",
                   "For single-user installs, use the SINGLE_USER_API_KEY value from your server environment or the API key printed in the server startup output."
@@ -117,6 +122,7 @@ const OptionSetup = () => {
               <button
                 type="button"
                 className="inline-flex min-h-[36px] items-center justify-center rounded-md border border-border px-3.5 py-1.5 text-sm font-medium text-text hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+                aria-expanded={showKeyHelp}
                 onClick={() => setShowKeyHelp((value) => !value)}>
                 {t("setupRoute.keyHelpAction", "Where do I find my key?")}
               </button>

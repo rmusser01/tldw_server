@@ -55,6 +55,10 @@ export const getCoreIssueLabel = (
         "settings:tldw.connection.issueDegraded",
         "Feature checks degraded"
       )
+    default: {
+      const _exhaustive: never = issue
+      return _exhaustive
+    }
   }
 }
 

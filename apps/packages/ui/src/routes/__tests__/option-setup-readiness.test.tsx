@@ -2,7 +2,7 @@
 
 import React from "react"
 import { MemoryRouter } from "react-router-dom"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import OptionSetup from "../option-setup"
@@ -183,5 +183,64 @@ describe("OptionSetup readiness route", () => {
 
     expect(localStorage.getItem("assistant_setup_dismissed")).toBe("true")
     expect(mocks.navigate).toHaveBeenCalledWith("/chat")
+  })
+
+  it("associates API key help with the input and exposes toggle state", () => {
+    renderRoute()
+
+    const apiKeyInput = screen.getByLabelText("API Key")
+    const helpToggle = screen.getByRole("button", {
+      name: "Where do I find my key?"
+    })
+
+    expect(helpToggle).toHaveAttribute("aria-expanded", "false")
+    expect(apiKeyInput).not.toHaveAttribute("aria-describedby")
+
+    fireEvent.click(helpToggle)
+
+    expect(helpToggle).toHaveAttribute("aria-expanded", "true")
+    const help = screen.getByText(/SINGLE_USER_API_KEY/)
+    expect(help).toHaveAttribute("id", "setup-api-key-help")
+    expect(apiKeyInput).toHaveAttribute("aria-describedby", "setup-api-key-help")
+  })
+
+  it("saves self-host connection settings and opens health after a successful test", async () => {
+    renderRoute()
+
+    fireEvent.change(screen.getByLabelText("Server URL"), {
+      target: { value: " http://localhost:9000 " }
+    })
+    fireEvent.change(screen.getByLabelText("API Key"), {
+      target: { value: " secret-key " }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }))
+
+    await waitFor(() => {
+      expect(mocks.setConfigPartial).toHaveBeenCalledWith({
+        serverUrl: "http://localhost:9000",
+        authMode: "single-user",
+        apiKey: "secret-key"
+      })
+    })
+    expect(mocks.testConnectionFromOnboarding).toHaveBeenCalledTimes(1)
+    expect(mocks.navigate).toHaveBeenCalledWith("/settings/health")
+  })
+
+  it("sanitizes failed self-host connection test details before display", async () => {
+    mocks.testConnectionFromOnboarding.mockRejectedValueOnce(
+      new Error(
+        "POST /api/v1/health?access_token=raw-token failed from /Users/alice/.tldw/config.json with Bearer bearer-token-value"
+      )
+    )
+
+    renderRoute()
+
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }))
+
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("POST [server-endpoint] failed")
+    expect(alert).not.toHaveTextContent("raw-token")
+    expect(alert).not.toHaveTextContent("/Users/alice")
+    expect(alert).not.toHaveTextContent("bearer-token-value")
   })
 })

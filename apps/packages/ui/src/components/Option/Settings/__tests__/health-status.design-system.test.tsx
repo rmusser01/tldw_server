@@ -292,8 +292,13 @@ describe("HealthStatus design-system states", () => {
         apiKey: "secret-test-key",
         nested: {
           Authorization: "Bearer secret-token",
-          cookie: "session=secret-cookie"
-        }
+          cookie: "session=secret-cookie",
+          message:
+            "refresh_token=refresh-secret-value failed with Bearer bearer-secret-value"
+        },
+        trace:
+          "POST /api/v1/health?access_token=secret-query from /Users/alice/.tldw/config.json",
+        supportUrl: "https://localhost:8000/api/v1/health"
       }
     })
 
@@ -309,5 +314,10 @@ describe("HealthStatus design-system states", () => {
     expect(copied).not.toContain("secret-test-key")
     expect(copied).not.toContain("secret-token")
     expect(copied).not.toContain("secret-cookie")
+    expect(copied).not.toContain("secret-query")
+    expect(copied).not.toContain("/Users/alice")
+    expect(copied).not.toContain("https://localhost:8000")
+    expect(copied).not.toContain("refresh-secret-value")
+    expect(copied).not.toContain("bearer-secret-value")
   })
 })

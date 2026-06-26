@@ -15,7 +15,9 @@ test.describe("Stage 4 accessibility controls", () => {
     })
     await waitForAppShell(page, LOAD_TIMEOUT)
 
-    const trigger = page.getByRole("button", { name: "Open command palette" })
+    const trigger = page.getByRole("button", {
+      name: "Search - Open command palette"
+    })
     await expect(trigger).toBeVisible({ timeout: LOAD_TIMEOUT })
     await expect(trigger).toHaveAttribute("title", "Search")
 

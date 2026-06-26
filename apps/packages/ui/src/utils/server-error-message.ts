@@ -42,7 +42,7 @@ export const sanitizeServerErrorMessage = (
     "[redacted-path]"
   )
   cleaned = cleaned.replace(
-    /\b(token|api[_-]?key|secret)\s*=\s*([^\s)]+)/gi,
+    /\b([A-Za-z0-9_-]*(?:token|api[_-]?key|secret|password|authorization))\s*=\s*([^\s)]+)/gi,
     "$1=[redacted-secret]"
   )
   cleaned = cleaned.replace(

@@ -73,7 +73,7 @@ def test_user_profile_preferences_section_returns_success(auth_headers) -> None:
         payload = resp.json()
 
     assert isinstance(payload.get("preferences"), dict)  # nosec B101 - pytest assertion
-    assert not payload.get("section_errors", {}).get("preferences")  # nosec B101 - pytest assertion
+    assert "preferences" not in payload.get("section_errors", {})  # nosec B101 - pytest assertion
 
 
 def test_admin_user_profile_default(auth_headers) -> None:

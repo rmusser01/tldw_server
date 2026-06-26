@@ -111,6 +111,8 @@ export function ChatHeader({
     t("common:shortcuts.openCommandPalette", "Open command palette")
   )
   const commandPaletteTitle = toText(t("common:search", "Search"))
+  const commandPaletteAccessibleLabel =
+    `${commandPaletteTitle} - ${commandPaletteLabel}`
   const showSavedChatAction = Boolean(onStartSavedChat)
   const showTemporaryChatAction = Boolean(onStartTemporaryChat)
   const showCharacterChatAction = Boolean(onStartCharacterChat)
@@ -276,7 +278,7 @@ export function ChatHeader({
           <button
             type="button"
             onClick={onOpenCommandPalette}
-            aria-label={commandPaletteLabel}
+            aria-label={commandPaletteAccessibleLabel}
             className={`hidden items-center gap-2 rounded-md px-3 py-1.5 text-xs text-text-muted transition hover:bg-surface2 hover:text-text sm:inline-flex ${focusRingClasses}`}
             title={commandPaletteTitle}
             data-testid="chat-header-command-palette-trigger"
