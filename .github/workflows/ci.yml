@@ -601,6 +601,7 @@ jobs:
           - name: core-utils-tooling
             paths: >-
               tldw_Server_API/tests/Helper_Scripts
+              tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
               tldw_Server_API/tests/helpers
               tldw_Server_API/tests/http_client
@@ -1053,6 +1054,7 @@ jobs:
           - name: media-audio
             paths: >-
               tldw_Server_API/tests/Audio
+              tldw_Server_API/tests/Audio_Studio
               tldw_Server_API/tests/AudioJobs
               tldw_Server_API/tests/STT
               tldw_Server_API/tests/TTS
@@ -1332,6 +1334,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_evaluation_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_audit_adapter.py
               tldw_Server_API/tests/Evaluations/test_evaluations_backend_dual.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_core_hardening.py
               tldw_Server_API/tests/Evaluations/test_evaluations_benchmarks_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_crud_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_datasets_*.py
@@ -1404,6 +1407,7 @@ jobs:
           - name: product-watchlists-core
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
+              tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -1520,6 +1524,7 @@ jobs:
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
               tldw_Server_API/tests/Services/test_tts_*.py
+              tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py
               tldw_Server_API/tests/Services/test_workflows_*.py
               tldw_Server_API/tests/Services/test_xml_*.py
           - name: platform-sandbox-admin-artifacts
@@ -1970,6 +1975,7 @@ jobs:
           - name: core-utils-tooling
             paths: >-
               tldw_Server_API/tests/Helper_Scripts
+              tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
               tldw_Server_API/tests/helpers
               tldw_Server_API/tests/http_client
@@ -2422,6 +2428,7 @@ jobs:
           - name: media-audio
             paths: >-
               tldw_Server_API/tests/Audio
+              tldw_Server_API/tests/Audio_Studio
               tldw_Server_API/tests/AudioJobs
               tldw_Server_API/tests/STT
               tldw_Server_API/tests/TTS
@@ -2701,6 +2708,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_evaluation_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_audit_adapter.py
               tldw_Server_API/tests/Evaluations/test_evaluations_backend_dual.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_core_hardening.py
               tldw_Server_API/tests/Evaluations/test_evaluations_benchmarks_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_crud_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_datasets_*.py
@@ -2773,6 +2781,7 @@ jobs:
           - name: product-watchlists-core
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
+              tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -2889,6 +2898,7 @@ jobs:
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
               tldw_Server_API/tests/Services/test_tts_*.py
+              tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py
               tldw_Server_API/tests/Services/test_workflows_*.py
               tldw_Server_API/tests/Services/test_xml_*.py
           - name: platform-sandbox-admin-artifacts
@@ -3212,6 +3222,7 @@ jobs:
           - name: core-utils-tooling
             paths: >-
               tldw_Server_API/tests/Helper_Scripts
+              tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
               tldw_Server_API/tests/helpers
               tldw_Server_API/tests/http_client
@@ -3664,6 +3675,7 @@ jobs:
           - name: media-audio
             paths: >-
               tldw_Server_API/tests/Audio
+              tldw_Server_API/tests/Audio_Studio
               tldw_Server_API/tests/AudioJobs
               tldw_Server_API/tests/STT
               tldw_Server_API/tests/TTS
@@ -3943,6 +3955,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_evaluation_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_audit_adapter.py
               tldw_Server_API/tests/Evaluations/test_evaluations_backend_dual.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_core_hardening.py
               tldw_Server_API/tests/Evaluations/test_evaluations_benchmarks_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_crud_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_datasets_*.py
@@ -4015,6 +4028,7 @@ jobs:
           - name: product-watchlists-core
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
+              tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -4131,6 +4145,7 @@ jobs:
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
               tldw_Server_API/tests/Services/test_tts_*.py
+              tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py
               tldw_Server_API/tests/Services/test_workflows_*.py
               tldw_Server_API/tests/Services/test_xml_*.py
           - name: platform-sandbox-admin-artifacts
@@ -4378,6 +4393,7 @@ jobs:
           - name: core-utils-tooling
             paths: >-
               tldw_Server_API/tests/Helper_Scripts
+              tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
               tldw_Server_API/tests/helpers
               tldw_Server_API/tests/http_client
@@ -4830,6 +4846,7 @@ jobs:
           - name: media-audio
             paths: >-
               tldw_Server_API/tests/Audio
+              tldw_Server_API/tests/Audio_Studio
               tldw_Server_API/tests/AudioJobs
               tldw_Server_API/tests/STT
               tldw_Server_API/tests/TTS
@@ -5109,6 +5126,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_evaluation_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_audit_adapter.py
               tldw_Server_API/tests/Evaluations/test_evaluations_backend_dual.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_core_hardening.py
               tldw_Server_API/tests/Evaluations/test_evaluations_benchmarks_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_crud_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_datasets_*.py
@@ -5181,6 +5199,7 @@ jobs:
           - name: product-watchlists-core
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
+              tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -5297,6 +5316,7 @@ jobs:
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
               tldw_Server_API/tests/Services/test_tts_*.py
+              tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py
               tldw_Server_API/tests/Services/test_workflows_*.py
               tldw_Server_API/tests/Services/test_xml_*.py
           - name: platform-sandbox-admin-artifacts
@@ -5545,6 +5565,7 @@ jobs:
           - name: core-utils-tooling
             paths: >-
               tldw_Server_API/tests/Helper_Scripts
+              tldw_Server_API/tests/Context_Integrity
               tldw_Server_API/tests/Utils
               tldw_Server_API/tests/helpers
               tldw_Server_API/tests/http_client
@@ -5997,6 +6018,7 @@ jobs:
           - name: media-audio
             paths: >-
               tldw_Server_API/tests/Audio
+              tldw_Server_API/tests/Audio_Studio
               tldw_Server_API/tests/AudioJobs
               tldw_Server_API/tests/STT
               tldw_Server_API/tests/TTS
@@ -6276,6 +6298,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_evaluation_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_audit_adapter.py
               tldw_Server_API/tests/Evaluations/test_evaluations_backend_dual.py
+              tldw_Server_API/tests/Evaluations/test_evaluations_core_hardening.py
               tldw_Server_API/tests/Evaluations/test_evaluations_benchmarks_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_crud_*.py
               tldw_Server_API/tests/Evaluations/test_evaluations_datasets_*.py
@@ -6348,6 +6371,7 @@ jobs:
           - name: product-watchlists-core
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
+              tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -6464,6 +6488,7 @@ jobs:
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
               tldw_Server_API/tests/Services/test_tts_*.py
+              tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py
               tldw_Server_API/tests/Services/test_workflows_*.py
               tldw_Server_API/tests/Services/test_xml_*.py
           - name: platform-sandbox-admin-artifacts

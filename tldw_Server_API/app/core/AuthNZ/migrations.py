@@ -5332,6 +5332,7 @@ def apply_authnz_migrations(db_path: Path, target_version: int = None) -> None:
         lock_name="authnz_migration",
         redis_url=redis_url,
         timeout=60,
+        allow_file_fallback_on_redis_error=_is_test_mode(),
     ):
         _apply_authnz_migrations_locked(db_path, target_version)
 

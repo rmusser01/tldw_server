@@ -1,7 +1,10 @@
+from contextlib import contextmanager
+from pathlib import Path
 import sqlite3
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ import migrations as authnz_migrations
 from tldw_Server_API.app.core.AuthNZ.migrations import (
     migration_001_create_users_table,
     migration_003_create_api_keys_table,
@@ -85,3 +88,55 @@ def test_migration_088_skips_existing_columns_and_adds_missing_columns() -> None
     columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_log)").fetchall()}
     assert "cached_input_tokens" in columns
     assert "raw_usage_metadata_json" in columns
+
+
+def test_apply_authnz_migrations_allows_redis_file_fallback_in_test_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    recorded_lock_kwargs: dict[str, object] = {}
+    recorded_apply_args: dict[str, object] = {}
+
+    @contextmanager
+    def fake_acquire_migration_lock(**kwargs: object):
+        recorded_lock_kwargs.update(kwargs)
+        yield object()
+
+    def fake_apply_locked(db_path: Path, target_version: int | None = None) -> None:
+        recorded_apply_args["db_path"] = db_path
+        recorded_apply_args["target_version"] = target_version
+
+    db_path = tmp_path / "users.db"
+    monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:1/0")
+    monkeypatch.setattr(authnz_migrations, "_is_test_mode", lambda: True)
+    monkeypatch.setattr(authnz_migrations, "acquire_migration_lock", fake_acquire_migration_lock)
+    monkeypatch.setattr(authnz_migrations, "_apply_authnz_migrations_locked", fake_apply_locked)
+
+    authnz_migrations.apply_authnz_migrations(db_path, target_version=7)
+
+    assert recorded_lock_kwargs["redis_url"] == "redis://127.0.0.1:1/0"
+    assert recorded_lock_kwargs["lock_dir"] == str(tmp_path)
+    assert recorded_lock_kwargs["allow_file_fallback_on_redis_error"] is True
+    assert recorded_apply_args == {"db_path": db_path, "target_version": 7}
+
+
+def test_apply_authnz_migrations_keeps_redis_fail_closed_outside_test_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    recorded_lock_kwargs: dict[str, object] = {}
+
+    @contextmanager
+    def fake_acquire_migration_lock(**kwargs: object):
+        recorded_lock_kwargs.update(kwargs)
+        yield object()
+
+    db_path = tmp_path / "users.db"
+    monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:1/0")
+    monkeypatch.setattr(authnz_migrations, "_is_test_mode", lambda: False)
+    monkeypatch.setattr(authnz_migrations, "acquire_migration_lock", fake_acquire_migration_lock)
+    monkeypatch.setattr(authnz_migrations, "_apply_authnz_migrations_locked", lambda *_args, **_kwargs: None)
+
+    authnz_migrations.apply_authnz_migrations(db_path)
+
+    assert recorded_lock_kwargs["allow_file_fallback_on_redis_error"] is False

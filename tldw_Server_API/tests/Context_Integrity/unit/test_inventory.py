@@ -805,6 +805,24 @@ def test_inventory_prompt_files_reads_files_without_path_reader(monkeypatch, tmp
     assert [path.name for path in fd_reader_paths] == ["root.md"]
 
 
+def test_inventory_prompt_files_falls_back_when_fd_traversal_is_unavailable(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.core.Context_Integrity import inventory
+
+    prompts = tmp_path / "Prompts"
+    prompts.mkdir()
+    (prompts / "root.md").write_text("root prompt", encoding="utf-8")
+    (prompts / "ignore.bin").write_bytes(b"no")
+    monkeypatch.setattr(inventory.os, "supports_fd", set())
+
+    result = inventory.inventory_prompt_files_with_findings(prompts_dir=prompts)
+
+    assert [asset.asset_id for asset in result.assets] == ["prompt_file:root.md"]
+    assert result.findings == ()
+
+
 def test_inventory_prompt_files_fifo_reports_error_without_opening(monkeypatch, tmp_path) -> None:
     from tldw_Server_API.app.core.Context_Integrity import inventory
 
@@ -837,6 +855,26 @@ def test_inventory_env_prompt_overrides_finds_configured_files(tmp_path) -> None
         "prompt_file:env:TLDW_PROMPT_FILE_CHAT__SYSTEM:override.md"
     ]
     assert assets[0].metadata["source_label"] == "env:TLDW_PROMPT_FILE_CHAT__SYSTEM"
+
+
+def test_inventory_env_prompt_overrides_falls_back_when_fd_traversal_is_unavailable(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.core.Context_Integrity import inventory
+
+    override = tmp_path / "override.md"
+    override.write_text("override prompt", encoding="utf-8")
+    monkeypatch.setattr(inventory.os, "supports_fd", set())
+
+    result = inventory.inventory_env_prompt_overrides_with_findings(
+        environ={"TLDW_PROMPT_FILE_CHAT__SYSTEM": str(override)}
+    )
+
+    assert [asset.asset_id for asset in result.assets] == [
+        "prompt_file:env:TLDW_PROMPT_FILE_CHAT__SYSTEM:override.md"
+    ]
+    assert result.findings == ()
 
 
 def test_inventory_env_prompt_overrides_accepts_positional_public_argument(tmp_path) -> None:

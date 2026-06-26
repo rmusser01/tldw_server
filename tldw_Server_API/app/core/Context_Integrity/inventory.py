@@ -146,6 +146,10 @@ def _unsupported_fd_error(feature: str) -> OSError:
     return OSError(errno.ENOTSUP, f"Required fd-relative filesystem support is unavailable: {feature}")
 
 
+def _is_fd_support_unavailable(exc: OSError) -> bool:
+    return exc.errno == errno.ENOTSUP and "fd-relative filesystem support" in str(exc)
+
+
 def _require_fd_traversal_support() -> None:
     if os.listdir not in getattr(os, "supports_fd", set()):
         raise _unsupported_fd_error("os.listdir(fd)")
@@ -349,6 +353,50 @@ def _read_regular_file_from_dir_fd(
         return None
 
 
+def _read_regular_file_portable(
+    *,
+    path: Path,
+    asset_id: str,
+    source_type: ContextAssetSource,
+    findings: list[ContextIntegrityFinding],
+) -> bytes | None:
+    try:
+        initial_stat = path.lstat()
+        if stat.S_ISLNK(initial_stat.st_mode):
+            findings.append(
+                _symlink_finding(
+                    asset_id=asset_id,
+                    source_type=source_type,
+                    path=path,
+                    root=None,
+                )
+            )
+            return None
+        if not stat.S_ISREG(initial_stat.st_mode):
+            raise _not_regular_error(path)
+
+        content = path.read_bytes()
+        final_stat = path.lstat()
+        if (
+            not stat.S_ISREG(final_stat.st_mode)
+            or (initial_stat.st_dev, initial_stat.st_ino)
+            != (final_stat.st_dev, final_stat.st_ino)
+        ):
+            raise _path_changed_error(path)
+        return content
+    except OSError as exc:
+        findings.append(
+            _verification_error(
+                asset_id=asset_id,
+                source_type=source_type,
+                summary=f"Unable to read context file: {exc.__class__.__name__}.",
+                path=path,
+                details={"error": str(exc)},
+            )
+        )
+        return None
+
+
 def _read_skill_file_map_fd(
     *,
     dir_fd: int,
@@ -443,6 +491,100 @@ def _read_skill_file_map_fd(
             files[relative] = content
 
     return files
+
+
+def _inventory_prompt_files_portable(prompts_dir: Path) -> InventoryResult:
+    root_asset_id = f"prompt_file:{prompts_dir.name}"
+    root_ok, root_finding = _validate_inventory_root(
+        root=prompts_dir,
+        asset_id=root_asset_id,
+        source_type="prompt_file",
+    )
+    if not root_ok:
+        return InventoryResult(
+            assets=(),
+            findings=(root_finding,) if root_finding is not None else (),
+        )
+
+    assets: list[ContextAssetDescriptor] = []
+    findings: list[ContextIntegrityFinding] = []
+    try:
+        entries = sorted(prompts_dir.iterdir(), key=lambda entry: entry.name)
+    except OSError as exc:
+        return InventoryResult(
+            assets=(),
+            findings=(
+                _verification_error(
+                    asset_id=root_asset_id,
+                    source_type="prompt_file",
+                    summary=f"Unable to scan prompt directory: {exc.__class__.__name__}.",
+                    path=prompts_dir,
+                    details={"error": str(exc)},
+                ),
+            ),
+        )
+
+    for path in entries:
+        asset_id = f"prompt_file:{path.name}"
+        try:
+            entry_stat = path.lstat()
+        except OSError as exc:
+            findings.append(
+                _verification_error(
+                    asset_id=asset_id,
+                    source_type="prompt_file",
+                    summary=f"Unable to inspect prompt path: {exc.__class__.__name__}.",
+                    path=path,
+                    details={"error": str(exc)},
+                )
+            )
+            continue
+
+        if stat.S_ISLNK(entry_stat.st_mode):
+            findings.append(
+                _symlink_finding(
+                    asset_id=asset_id,
+                    source_type="prompt_file",
+                    path=path,
+                    root=prompts_dir,
+                )
+            )
+            continue
+        if stat.S_ISDIR(entry_stat.st_mode):
+            continue
+        if path.suffix.lower() not in _PROMPT_SUFFIXES:
+            continue
+
+        prompt_bytes = _read_regular_file_portable(
+            path=path,
+            asset_id=asset_id,
+            source_type="prompt_file",
+            findings=findings,
+        )
+        if prompt_bytes is None:
+            continue
+
+        metadata = {"path": path.name}
+        digest = canonical_filesystem_digest(
+            source_type="prompt_file",
+            asset_id=asset_id,
+            files={path.name: prompt_bytes},
+            metadata=metadata,
+        )
+        assets.append(
+            ContextAssetDescriptor(
+                asset_id=asset_id,
+                source_type="prompt_file",
+                digest=digest,
+                display_name=path.name,
+                executable=False,
+                owner_scope="system",
+                path=str(path),
+                metadata=metadata,
+            )
+        )
+
+    return InventoryResult(assets=tuple(assets), findings=tuple(findings))
 
 
 def _open_root_fd_or_result(
@@ -607,6 +749,13 @@ def inventory_user_skills(user_id: int, skills_root: Path) -> list[ContextAssetD
 
 def inventory_prompt_files_with_findings(*, prompts_dir: Path) -> InventoryResult:
     """Inventory config prompt files under a Prompts directory with findings."""
+    try:
+        _require_fd_traversal_support()
+    except OSError as exc:
+        if _is_fd_support_unavailable(exc):
+            return _inventory_prompt_files_portable(prompts_dir)
+        raise
+
     root_asset_id = f"prompt_file:{prompts_dir.name}"
     root_fd, root_result = _open_root_fd_or_result(
         root=prompts_dir,
@@ -741,6 +890,48 @@ def inventory_env_prompt_overrides_with_findings(
         source_label = f"env:{env_name}"
         asset_id = f"prompt_file:{source_label}:{path.name}"
         metadata = {"path": str(path), "source_label": source_label}
+        try:
+            _require_fd_traversal_support()
+        except OSError as exc:
+            if not _is_fd_support_unavailable(exc):
+                raise
+            root_ok, root_finding = _validate_inventory_root(
+                root=path.parent,
+                asset_id=asset_id,
+                source_type="prompt_file",
+            )
+            if not root_ok:
+                if root_finding is not None:
+                    findings.append(root_finding)
+                continue
+            prompt_bytes = _read_regular_file_portable(
+                path=path,
+                asset_id=asset_id,
+                source_type="prompt_file",
+                findings=findings,
+            )
+            if prompt_bytes is None:
+                continue
+            digest = canonical_filesystem_digest(
+                source_type="prompt_file",
+                asset_id=asset_id,
+                files={path.name: prompt_bytes},
+                metadata=metadata,
+            )
+            assets.append(
+                ContextAssetDescriptor(
+                    asset_id=asset_id,
+                    source_type="prompt_file",
+                    digest=digest,
+                    display_name=env_name,
+                    executable=False,
+                    owner_scope="system",
+                    path=str(path),
+                    metadata=metadata,
+                )
+            )
+            continue
+
         try:
             parent_fd = _open_directory_path_no_follow_fd(path.parent)
         except OSError as exc:
