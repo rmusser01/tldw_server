@@ -218,7 +218,7 @@ DEFAULT_MEDIA_TYPE_CONFIG = {
     },
     "html": {
         "allowed_extensions": {'.html', '.htm', '.xhtml'},
-        "allowed_mimetypes": {'text/html', 'application/xhtml+xml'},
+        "allowed_mimetypes": {'text/html', 'application/xhtml+xml', 'text/xml', 'application/xml'},
         "max_size_mb": 5,
         "sanitize": bool(media_config.get('sanitize_html_uploads', True)),
     },

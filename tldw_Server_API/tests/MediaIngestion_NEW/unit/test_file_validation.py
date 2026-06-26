@@ -231,6 +231,28 @@ class TestMimeTypeDetection:
         assert result.is_valid, result.issues
 
     @pytest.mark.unit
+    def test_xhtml_validates_when_detected_as_application_xml(self, tmp_path):
+        """XHTML uploads may be detected as XML by MIME sniffing libraries."""
+        upload_path = tmp_path / "page.xhtml"
+        upload_path.write_text(
+            '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body>ok</body></html>',
+            encoding="utf-8",
+        )
+
+        validator = FileValidator()
+        validator.magic_available = False
+        validator.python_magic_available = False
+
+        with patch("mimetypes.guess_type", return_value=("application/xml", None)):
+            result = validator.validate_file(
+                upload_path,
+                original_filename=upload_path.name,
+                media_type_key="html",
+            )
+
+        assert result.is_valid, result.issues
+
+    @pytest.mark.unit
     def test_legacy_doc_not_advertised_as_supported_document_upload(self, tmp_path):
         """Legacy binary .doc should be rejected until a real parser/converter exists."""
         doc_path = tmp_path / "legacy.doc"
