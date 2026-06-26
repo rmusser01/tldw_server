@@ -1183,6 +1183,35 @@ async def _wait_for_run_completion(
         await asyncio.sleep(poll_interval)
 
 
+async def _wait_for_run_visibility(
+    db: WorkflowsDatabase,
+    run_id: str,
+    *,
+    grace_seconds: float | None = None,
+    poll_interval: float = 0.02,
+) -> Any | None:
+    """Return a run, tolerating a short post-submit visibility lag."""
+    run = db.get_run(run_id)
+    if run is not None:
+        return run
+
+    if grace_seconds is None:
+        grace_seconds = 1.0 if (is_explicit_pytest_runtime() or is_test_mode()) else 0.1
+    grace_seconds = max(0.0, grace_seconds)
+    if grace_seconds <= 0.0:
+        return None
+
+    deadline = time.monotonic() + grace_seconds
+    while True:
+        now = time.monotonic()
+        if now >= deadline:
+            return None
+        await asyncio.sleep(min(poll_interval, max(0.0, deadline - now)))
+        run = db.get_run(run_id)
+        if run is not None:
+            return run
+
+
 def _build_rate_limit_headers(limit: int, remaining: int, reset_epoch: int) -> dict[str, str]:
     """Return a dict including both legacy X-RateLimit-* and RFC-style RateLimit-* headers.
 
@@ -2437,7 +2466,7 @@ async def get_run(
     request: Request,
     audit_service=Depends(get_audit_service_for_user),
 ):
-    run = db.get_run(run_id)
+    run = await _wait_for_run_visibility(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     # Tenant isolation
@@ -2531,7 +2560,7 @@ async def get_run_events(
     response: Response,
 ):
     # Enforce tenant isolation and owner/admin
-    run = db.get_run(run_id)
+    run = await _wait_for_run_visibility(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     tenant_id = str(getattr(current_user, "tenant_id", "default"))

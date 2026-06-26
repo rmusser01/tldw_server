@@ -17,7 +17,11 @@ from tldw_Server_API.app.core.Workflows.engine import WorkflowEngine, WorkflowSc
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowRun, WorkflowsDatabase
 from tldw_Server_API.app.api.v1.schemas.workflows import RunRequest
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
-from tldw_Server_API.app.api.v1.endpoints.workflows import _wait_for_run_completion, run_saved
+from tldw_Server_API.app.api.v1.endpoints.workflows import (
+    _wait_for_run_completion,
+    _wait_for_run_visibility,
+    run_saved,
+)
 
 
 TERMINAL_STATES = {"succeeded", "failed", "cancelled"}
@@ -372,6 +376,22 @@ def test_wait_for_run_completion_tolerates_transient_missing_run():
             db,
             "transient-run",
             timeout_seconds=1.0,
+            poll_interval=0.001,
+        )
+    )
+
+    assert run.status == "succeeded"
+    assert db.calls == 2
+
+
+def test_wait_for_run_visibility_tolerates_transient_missing_run():
+    db = _TransientMissingRunDB()
+
+    run = asyncio.run(
+        _wait_for_run_visibility(
+            db,
+            "transient-run",
+            grace_seconds=1.0,
             poll_interval=0.001,
         )
     )
