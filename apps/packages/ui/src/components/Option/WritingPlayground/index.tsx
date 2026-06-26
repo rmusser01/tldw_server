@@ -34,6 +34,7 @@ import {
   MoreHorizontal,
   Pencil,
   Redo2,
+  Save,
   Search,
   Settings,
   Square,
@@ -51,6 +52,7 @@ import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { TldwChatService } from "@/services/tldw/TldwChat"
 import {
   getWritingCapabilities,
+  type ManuscriptAnnotationResponse,
   type WritingSessionListItem,
   type WritingTemplateResponse,
   type WritingThemeResponse
@@ -59,6 +61,7 @@ import { useStoreChatModelSettings } from "@/store/model"
 import { useWritingPlaygroundStore } from "@/store/writing-playground"
 import { cn } from "@/libs/utils"
 import { markdownToText } from "@/utils/markdown-to-text"
+import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 import {
   buildExtraBodyPayload,
   parseStringListInput
@@ -98,6 +101,9 @@ import { CharacterWorldTab } from "./CharacterWorldTab"
 import { ResearchTab } from "./ResearchTab"
 import { AIAgentTab } from "./AIAgentTab"
 import { FeedbackTab } from "./FeedbackTab"
+import { WritingAnnotationsTab } from "./WritingAnnotationsTab"
+import { WritingAnnotationMarginRail } from "./WritingAnnotationMarginRail"
+import { codePointOffsetToUtf16Offset } from "./writing-annotation-anchor-utils"
 import { MOOD_COLORS } from "./feedback-constants"
 import { WritingAnalysisModalHost } from "./WritingAnalysisModalHost"
 import { WritingPlaygroundDiagnosticsPanel } from "./WritingPlaygroundDiagnosticsPanel"
@@ -111,11 +117,13 @@ import {
   WRITING_REVISION_PRESETS,
   getWritingRevisionPreset
 } from "./writing-revision-presets"
+import { resolveWritingAnnotationTargetContext } from "./writing-annotation-types"
 import {
   buildRevisionUserPrompt,
   parseRevisionModelResponse
 } from "./writing-revision-prompt-utils"
 import {
+  buildInsertionAnchor,
   confirmRevisionTarget,
   countWords,
   resolveRevisionTarget
@@ -148,12 +156,14 @@ import {
 } from "./writing-editor-adapter"
 import {
   useWritingSessionManagement,
+  useActiveManuscriptScene,
   useWritingTemplateLibrary,
   useWritingGenerationSettings,
   useWritingContextComposition,
   useWritingInspectorPanels,
   useWritingImportExport,
-  useWritingFeedback
+  useWritingFeedback,
+  useWritingAnnotations
 } from "./hooks"
 import { useWritingRevisions } from "./hooks/useWritingRevisions"
 import {
@@ -191,6 +201,46 @@ const { Paragraph } = Typography
 const SECRET_FIELD_PATTERN =
   /(api[_-]?key|authorization|auth[_-]?token|secret|password|token)/i
 
+type ApplyPromptValue =
+  ReturnType<typeof useWritingSessionManagement>["applyPromptValue"]
+type EditorValueUpdateOptions = Parameters<ApplyPromptValue>[1]
+type EditorSelection = { start: number; end: number }
+
+const getEditorSelection = (
+  options?: EditorValueUpdateOptions
+): EditorSelection | undefined => {
+  if (!options) return undefined
+  if (
+    "start" in options &&
+    "end" in options &&
+    typeof options.start === "number" &&
+    typeof options.end === "number"
+  ) {
+    return { start: options.start, end: options.end }
+  }
+  if (
+    "selection" in options &&
+    options.selection &&
+    typeof options.selection.start === "number" &&
+    typeof options.selection.end === "number"
+  ) {
+    return options.selection
+  }
+  return undefined
+}
+
+const getEditorPromptRich = (
+  options?: EditorValueUpdateOptions
+): JSONContent | null | undefined => {
+  if (
+    !options ||
+    !Object.prototype.hasOwnProperty.call(options, "promptRich")
+  ) {
+    return undefined
+  }
+  return (options as { promptRich?: JSONContent | null }).promptRich ?? null
+}
+
 const sanitizeRevisionValue = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(sanitizeRevisionValue)
   if (!value || typeof value !== "object") return value
@@ -200,6 +250,60 @@ const sanitizeRevisionValue = (value: unknown): unknown => {
       .filter(([key]) => !SECRET_FIELD_PATTERN.test(key))
       .map(([key, entryValue]) => [key, sanitizeRevisionValue(entryValue)])
   )
+}
+
+const resolveAnnotationRevisionRange = (
+  annotation: ManuscriptAnnotationResponse,
+  text: string
+): { start: number; end: number; beforeText: string } | null => {
+  if (
+    annotation.anchor_status !== "attached" &&
+    annotation.anchor_status !== "reattached"
+  ) {
+    return null
+  }
+
+  const codePointStart =
+    annotation.anchor_status === "reattached" &&
+    annotation.derived_start !== null &&
+    annotation.derived_start !== undefined
+      ? annotation.derived_start
+      : annotation.anchor_start
+  const codePointEnd =
+    annotation.anchor_status === "reattached" &&
+    annotation.derived_end !== null &&
+    annotation.derived_end !== undefined
+      ? annotation.derived_end
+      : annotation.anchor_end
+
+  if (
+    codePointStart === null ||
+    codePointStart === undefined ||
+    codePointEnd === null ||
+    codePointEnd === undefined
+  ) {
+    return null
+  }
+
+  const start = codePointOffsetToUtf16Offset(text, codePointStart)
+  const end = codePointOffsetToUtf16Offset(text, codePointEnd)
+  const normalizedStart = Math.min(start, end)
+  const normalizedEnd = Math.max(start, end)
+  if (normalizedEnd <= normalizedStart) return null
+
+  return {
+    start: normalizedStart,
+    end: normalizedEnd,
+    beforeText: text.slice(normalizedStart, normalizedEnd)
+  }
+}
+
+const buildAnnotationRevisionId = (annotationId: string): string => {
+  const randomId =
+    typeof globalThis.crypto?.randomUUID === "function"
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return `annotation-${annotationId}-revision-${randomId}`
 }
 
 const LazyWritingPlaygroundModalHost = React.lazy(() =>
@@ -228,11 +332,13 @@ export const WritingPlayground = () => {
     focusMode,
     setFocusMode,
     activeNodeId,
-    setActiveNodeId,
+    activeNodeType,
+    activeProjectId,
     setAnalysisModalOpen,
   } = useWritingPlaygroundStore()
-  // TODO Phase 2: React to activeNodeId changes to load scene content into editor
   const [selectedModel, setSelectedModel] = useStorage<string>("selectedModel")
+  const [annotationApiProvider, setAnnotationApiProvider] =
+    React.useState<string | undefined>()
   const apiProviderOverride = useStoreChatModelSettings(
     (state) => state.apiProvider
   )
@@ -251,6 +357,7 @@ export const WritingPlayground = () => {
   const [libraryView, setLibraryView] = React.useState<"sessions" | "manuscript">("sessions")
   const [tipTapContent, setTipTapContent] = React.useState<JSONContent | null>(null)
   const editorTextChangedByTipTap = React.useRef(false)
+  const lastAppliedTipTapSceneContentKeyRef = React.useRef<string | null>(null)
   const [editorView, setEditorView] = React.useState<EditorViewMode>("edit")
   const [searchOpen, setSearchOpen] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState("")
@@ -284,6 +391,11 @@ export const WritingPlayground = () => {
     )
   const [revisionSelection, setRevisionSelection] =
     React.useState<WritingEditorSelection | null>(null)
+  const [activeAnnotationId, setActiveAnnotationId] = React.useState<string | null>(null)
+  const [annotationRailAdapter, setAnnotationRailAdapter] =
+    React.useState<WritingEditorAdapter | null>(null)
+  const [annotationRailMeasurementVersion, setAnnotationRailMeasurementVersion] =
+    React.useState(0)
 
   // --- Refs (local only) ---
   const generationServiceRef = React.useRef(new TldwChatService())
@@ -326,7 +438,9 @@ export const WritingPlayground = () => {
     isOnline, hasWriting, activeSessionId, activeSessionName,
     setActiveSessionId, setActiveSessionName, sessionUsageMap, setSessionUsageMap,
     selectedModel, setSelectedModel, apiProviderOverride, setApiProvider,
-    isGenerating: isWritingRequestBusy, t
+    isGenerating: isWritingRequestBusy,
+    suspendEditorPromptSync: activeNodeType === "scene" && Boolean(activeNodeId),
+    t
   })
   const {
     sessions, sessionsLoading, sessionsFetching, sessionsError,
@@ -359,6 +473,48 @@ export const WritingPlayground = () => {
     applySessionPayloadPatch,
     canCreateSession, canRenameSession
   } = sessionMgmt
+
+  const activeManuscriptScene = useActiveManuscriptScene({
+    activeNodeId,
+    activeNodeType,
+    editorText,
+    setEditorText,
+    tipTapContent,
+    setTipTapContent,
+    isOnline
+  })
+  const {
+    scene: activeScene,
+    sceneId: activeSceneId,
+    sceneVersion: activeSceneVersion,
+    isSceneBound,
+    isSceneLoading,
+    isSceneDirty,
+    canCreateRangeAnnotation,
+    saveScene: saveActiveScene
+  } = activeManuscriptScene
+  const isSceneNodeSelected =
+    activeNodeType === "scene" && Boolean(activeNodeId)
+  const isSceneEditorPending = isSceneNodeSelected && !isSceneBound
+  const isEditorLocked = isGenerating || isSceneEditorPending
+
+  const applyEditorValue = React.useCallback(
+    (nextValue: string, options?: EditorValueUpdateOptions) => {
+      if (!isSceneNodeSelected) {
+        return applyPromptValue(nextValue, options)
+      }
+      const selection = getEditorSelection(options)
+      const promptRichOption = getEditorPromptRich(options)
+      const promptRich =
+        promptRichOption === undefined
+          ? resolveTipTapDocument(nextValue, null)
+          : promptRichOption
+      setEditorText(nextValue)
+      setTipTapContent(promptRich)
+      return selection
+    },
+    [applyPromptValue, isSceneNodeSelected, setEditorText, setTipTapContent]
+  )
 
   const textareaEditorAdapter = React.useMemo(
     () => createTextareaEditorAdapter(editorRef),
@@ -397,9 +553,31 @@ export const WritingPlayground = () => {
     []
   )
 
+  const bumpAnnotationRailMeasurementVersion = React.useCallback(() => {
+    setAnnotationRailMeasurementVersion((version) => version + 1)
+  }, [])
+
+  const handleTipTapContentChange = React.useCallback(
+    (json: JSONContent, plain: string) => {
+      editorTextChangedByTipTap.current = true
+      setTipTapContent(json)
+      applyEditorValue(plain, { promptRich: json })
+      bumpAnnotationRailMeasurementVersion()
+    },
+    [
+      applyEditorValue,
+      bumpAnnotationRailMeasurementVersion,
+      setTipTapContent
+    ]
+  )
+
   const setActiveEditorAdapter = React.useCallback(
     (adapter: WritingEditorAdapter | null) => {
       activeEditorAdapterRef.current = adapter
+      const measurableAdapter = adapter?.measureRange ? adapter : null
+      setAnnotationRailAdapter((current) =>
+        current === measurableAdapter ? current : measurableAdapter
+      )
       applyPendingEditorSelection(adapter)
       updateRevisionSelection(adapter?.getSelection() ?? null)
     },
@@ -410,23 +588,38 @@ export const WritingPlayground = () => {
   React.useEffect(() => {
     if (editorMode !== "tiptap") {
       setActiveEditorAdapter(textareaEditorAdapter)
-      setTipTapContent(null)
       editorTextChangedByTipTap.current = false
+      lastAppliedTipTapSceneContentKeyRef.current = null
       return
     }
 
     if (!editorTextChangedByTipTap.current) {
-      setTipTapContent(
-        resolveTipTapDocument(
-          editorText,
-          getPromptRichFromPayload(activeSessionDetail?.payload)
-        )
+      const activeSceneContentKey =
+        activeScene?.id && activeScene.version !== undefined
+          ? `${activeScene.id}:${activeScene.version}`
+          : null
+      const shouldSeedFromSceneContent =
+        activeSceneContentKey !== null &&
+        lastAppliedTipTapSceneContentKeyRef.current !== activeSceneContentKey
+      const richFallback = shouldSeedFromSceneContent
+        ? (activeScene?.content as JSONContent | null | undefined) ?? null
+        : getPromptRichFromPayload(activeSessionDetail?.payload)
+      const nextTipTapContent = resolveTipTapDocument(
+        editorText,
+        richFallback
       )
+      setTipTapContent(nextTipTapContent)
+      if (shouldSeedFromSceneContent) {
+        lastAppliedTipTapSceneContentKeyRef.current = activeSceneContentKey
+      }
     }
     editorTextChangedByTipTap.current = false
   }, [
     activeSessionDetail?.id,
     activeSessionDetail?.payload,
+    activeScene?.content,
+    activeScene?.id,
+    activeScene?.version,
     editorMode,
     editorText,
     setActiveEditorAdapter,
@@ -579,6 +772,46 @@ export const WritingPlayground = () => {
     selectedModel: selectedModel ?? undefined,
   })
 
+  const activeAnnotationTargetContext = React.useMemo(() => {
+    return resolveWritingAnnotationTargetContext({
+      projectId: activeProjectId,
+      activeNodeType,
+      activeNodeId,
+      activeSceneId
+    })
+  }, [activeNodeId, activeNodeType, activeProjectId, activeSceneId])
+  const annotations = useWritingAnnotations({
+    projectId: activeProjectId,
+    targetContext: activeAnnotationTargetContext,
+    enabled: isOnline && Boolean(activeProjectId)
+  })
+
+  React.useEffect(() => {
+    const modelId = selectedModel?.trim()
+    const explicitProvider = apiProviderOverride?.trim()
+    let cancelled = false
+
+    if (!modelId) {
+      setAnnotationApiProvider(undefined)
+      return
+    }
+    if (explicitProvider) {
+      setAnnotationApiProvider(explicitProvider)
+      return
+    }
+
+    setAnnotationApiProvider(undefined)
+    void resolveApiProviderForModel({ modelId }).then((provider) => {
+      if (!cancelled) {
+        setAnnotationApiProvider(provider ?? undefined)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [apiProviderOverride, selectedModel])
+
   // --- Diagnostics ---
   const showOffline = !isOnline
   const showUnsupported =
@@ -680,11 +913,49 @@ export const WritingPlayground = () => {
   } = inspectorPanels
 
   // =====================================================================
+  // Generation history (unique)
+  // =====================================================================
+  const syncGenerationHistory = React.useCallback(() => {
+    setCanUndoGeneration(generationUndoRef.current.length > 0)
+    setCanRedoGeneration(generationRedoRef.current.length > 0)
+  }, [])
+
+  const pushGenerationHistory = React.useCallback(
+    (before: string, after: string) => {
+      if (before === after) return
+      generationUndoRef.current.push({ before, after })
+      generationRedoRef.current = []
+      syncGenerationHistory()
+    },
+    [syncGenerationHistory]
+  )
+
+  const applyHistoryText = React.useCallback(
+    (nextText: string) => {
+      if (activeSessionDetail || isSceneBound) {
+        applyEditorValue(nextText)
+      } else {
+        setEditorText(nextText)
+      }
+    },
+    [activeSessionDetail, applyEditorValue, isSceneBound]
+  )
+
+  // =====================================================================
   // Generation logic (unique - not in hooks)
   // =====================================================================
   const handleGenerate = React.useCallback(
     async (overrideText?: string) => {
     if (isGenerating || isRevisionGenerating) return
+    if (isSceneEditorPending) {
+      message.info(
+        t(
+          "option:writingPlayground.sceneBindingPending",
+          "Wait for the selected scene to load."
+        )
+      )
+      return
+    }
     if (!activeSessionDetail) {
       message.info(
         t("option:writingPlayground.selectSession", "Select a session to begin.")
@@ -778,7 +1049,9 @@ export const WritingPlayground = () => {
     generationSessionIdRef.current = activeSessionDetail.id
     generationCancelledRef.current = false
     setIsGenerating(true)
-    setIsDirty(true)
+    if (!isSceneBound) {
+      setIsDirty(true)
+    }
     setResponseLogprobs([])
     setResponseInspectorQuery("")
     setResponseInspectorSort("sequence")
@@ -878,13 +1151,17 @@ export const WritingPlayground = () => {
     },
     [
       activeSessionDetail,
+      applyHistoryText,
       chatMode,
       editorText,
       effectiveTemplate,
       hasChat,
       isGenerating,
       isRevisionGenerating,
+      isSceneEditorPending,
+      isSceneBound,
       isOnline,
+      pushGenerationHistory,
       selectedModel,
       settings,
       requestedLogprobsExplicitlyUnsupported,
@@ -1097,7 +1374,7 @@ export const WritingPlayground = () => {
       const currentValue = editorText
       const selection = getCurrentEditorAdapter()?.getSelection()
       if (!selection) {
-        applyPromptValue(currentValue + placeholder, {
+        applyEditorValue(currentValue + placeholder, {
           start: currentValue.length + placeholder.length,
           end: currentValue.length + placeholder.length
         })
@@ -1106,9 +1383,9 @@ export const WritingPlayground = () => {
       const start = selection.start
       const end = selection.end
       const { nextValue, cursor } = applyPlaceholderAtRange(currentValue, start, end, placeholder)
-      applyPromptValue(nextValue, { start: cursor, end: cursor })
+      applyEditorValue(nextValue, { start: cursor, end: cursor })
     },
-    [applyPromptValue, editorText, getCurrentEditorAdapter]
+    [applyEditorValue, editorText, getCurrentEditorAdapter]
   )
 
   const fillSelectionAtCursor = React.useCallback(() => {
@@ -1121,15 +1398,15 @@ export const WritingPlayground = () => {
       return
     }
     const { nextValue, cursor } = applyPlaceholderAtRange(currentValue, start, end, "{fill}")
-    applyPromptValue(nextValue, { start: cursor, end: cursor })
-  }, [applyPromptValue, editorText, getCurrentEditorAdapter, t])
+    applyEditorValue(nextValue, { start: cursor, end: cursor })
+  }, [applyEditorValue, editorText, getCurrentEditorAdapter, t])
 
   const insertTokenTextAtCursor = React.useCallback(
     (tokenText: string) => {
       const currentValue = editorText
       const selection = getCurrentEditorAdapter()?.getSelection()
       if (!selection) {
-        applyPromptValue(currentValue + tokenText, {
+        applyEditorValue(currentValue + tokenText, {
           start: currentValue.length + tokenText.length,
           end: currentValue.length + tokenText.length
         })
@@ -1138,10 +1415,10 @@ export const WritingPlayground = () => {
       const start = selection.start
       const end = selection.end
       const { nextValue, cursor } = applyTextAtRange(currentValue, start, end, tokenText)
-      applyPromptValue(nextValue, { start: cursor, end: cursor })
+      applyEditorValue(nextValue, { start: cursor, end: cursor })
       message.success(t("option:writingPlayground.tokenInspectorInsertSuccess", "Token text inserted."))
     },
-    [applyPromptValue, editorText, getCurrentEditorAdapter, t]
+    [applyEditorValue, editorText, getCurrentEditorAdapter, t]
   )
 
   const insertTemplateBlock = React.useCallback(
@@ -1178,38 +1455,9 @@ export const WritingPlayground = () => {
       const nextValue =
         currentValue.slice(0, start) + block.prefix + selected + block.suffix + currentValue.slice(end)
       const cursor = start + block.prefix.length + selected.length
-      applyPromptValue(nextValue, { start: cursor, end: cursor })
+      applyEditorValue(nextValue, { start: cursor, end: cursor })
     },
-    [applyPromptValue, editorText, effectiveTemplate, getCurrentEditorAdapter, t]
-  )
-
-  // =====================================================================
-  // Generation history (unique)
-  // =====================================================================
-  const syncGenerationHistory = React.useCallback(() => {
-    setCanUndoGeneration(generationUndoRef.current.length > 0)
-    setCanRedoGeneration(generationRedoRef.current.length > 0)
-  }, [])
-
-  const pushGenerationHistory = React.useCallback(
-    (before: string, after: string) => {
-      if (before === after) return
-      generationUndoRef.current.push({ before, after })
-      generationRedoRef.current = []
-      syncGenerationHistory()
-    },
-    [syncGenerationHistory]
-  )
-
-  const applyHistoryText = React.useCallback(
-    (nextText: string) => {
-      if (activeSessionDetail) {
-        applyPromptValue(nextText)
-      } else {
-        setEditorText(nextText)
-      }
-    },
-    [activeSessionDetail, applyPromptValue]
+    [applyEditorValue, editorText, effectiveTemplate, getCurrentEditorAdapter, t]
   )
 
   const applyRevisionEditorText = React.useCallback(
@@ -1360,6 +1608,15 @@ export const WritingPlayground = () => {
       presetId?: WritingRevisionPresetId | null
       presetInstruction?: string | null
     }): Promise<WritingRevisionProposal | null> => {
+      if (isSceneEditorPending) {
+        message.info(
+          t(
+            "option:writingPlayground.sceneBindingPending",
+            "Wait for the selected scene to load."
+          )
+        )
+        return null
+      }
       if (!activeSessionDetail) {
         message.info(
           t("option:writingPlayground.selectSession", "Select a session to begin.")
@@ -1415,6 +1672,7 @@ export const WritingPlayground = () => {
       buildRevisionRequestOptions,
       editorText,
       hasChat,
+      isSceneEditorPending,
       isOnline,
       selectedModel,
       t
@@ -1459,7 +1717,7 @@ export const WritingPlayground = () => {
 
   const handleRevisionRequest = React.useCallback(
     async (request: WritingActionBarRequest) => {
-      if (isGenerating || isRevisionGenerating) return
+      if (isGenerating || isRevisionGenerating || isSceneEditorPending) return
       const target = resolveFreshRevisionTarget(request)
       if (!target) return
 
@@ -1493,6 +1751,7 @@ export const WritingPlayground = () => {
       createRevisionProposal,
       isGenerating,
       isRevisionGenerating,
+      isSceneEditorPending,
       persistRevisionPreset,
       resolveFreshRevisionTarget,
       revisionState,
@@ -1502,7 +1761,7 @@ export const WritingPlayground = () => {
 
   const handleRegenerateRevision = React.useCallback(
     async (proposal: WritingRevisionProposal) => {
-      if (isGenerating || isRevisionGenerating) return
+      if (isGenerating || isRevisionGenerating || isSceneEditorPending) return
       setIsRevisionGenerating(true)
       try {
         await revisionState.regenerateRevision(proposal.id, async (source) => {
@@ -1547,6 +1806,7 @@ export const WritingPlayground = () => {
       createRevisionProposal,
       isGenerating,
       isRevisionGenerating,
+      isSceneEditorPending,
       revisionState,
       selectedRevisionPresetId,
       t
@@ -1606,6 +1866,99 @@ export const WritingPlayground = () => {
       }
     },
     [t]
+  )
+
+  const handleAnnotationSuggestedFix = React.useCallback(
+    (annotation: ManuscriptAnnotationResponse) => {
+      const suggestedFix = annotation.suggested_fix
+      if (!suggestedFix?.trim()) return
+      if (!activeSessionId) {
+        message.info(
+          t("option:writingPlayground.selectSession", "Select a session to begin.")
+        )
+        return
+      }
+
+      const sourceText = activeScene?.content_plain ?? editorText
+      const range = resolveAnnotationRevisionRange(annotation, sourceText)
+      if (!range || !range.beforeText.trim()) {
+        message.info(
+          t(
+            "option:writingPlayground.annotationFixManual",
+            "Copy the suggested fix and apply it manually."
+          )
+        )
+        return
+      }
+
+      const proposal: WritingRevisionProposal = {
+        id: buildAnnotationRevisionId(annotation.id),
+        sessionId: activeSessionId,
+        action: "rewrite",
+        operation: "replace",
+        instruction: `Apply suggested fix from annotation ${annotation.id}.`,
+        target: {
+          mode: "selection",
+          start: range.start,
+          end: range.end,
+          beforeText: range.beforeText,
+          anchor: buildInsertionAnchor(sourceText, range.start),
+          label: `annotation ${annotation.id}`,
+          requiresConfirmation: false
+        },
+        replacementText: suggestedFix,
+        rationale: annotation.body,
+        title: `Suggested fix: ${annotation.category}`,
+        notes: [`Created from annotation ${annotation.id}`],
+        createdAt: new Date().toISOString(),
+        status: "pending"
+      }
+      revisionState.addRevision(proposal)
+    },
+    [
+      activeScene?.content_plain,
+      activeSessionId,
+      editorText,
+      revisionState,
+      t
+    ]
+  )
+
+  const handleCopyAnnotationSuggestedFix = React.useCallback(
+    async (annotation: ManuscriptAnnotationResponse) => {
+      const suggestedFix = annotation.suggested_fix
+      if (!suggestedFix?.trim()) return
+      try {
+        if (!navigator.clipboard) {
+          throw new Error("Clipboard unavailable.")
+        }
+        await navigator.clipboard.writeText(suggestedFix)
+        message.success(
+          t("option:writingPlayground.annotationFixCopied", "Suggested fix copied.")
+        )
+      } catch {
+        message.info(
+          t(
+            "option:writingPlayground.annotationFixManual",
+            "Copy the suggested fix and apply it manually."
+          )
+        )
+      }
+    },
+    [t]
+  )
+
+  const annotationMarginRail = (
+    <WritingAnnotationMarginRail
+      annotations={annotations.annotations}
+      adapter={editorMode === "tiptap" && editorView !== "preview" ? annotationRailAdapter : null}
+      documentText={editorText}
+      activeAnnotationId={activeAnnotationId}
+      measurementVersion={annotationRailMeasurementVersion}
+      onActiveAnnotationChange={setActiveAnnotationId}
+      onReviewSuggestedFix={handleAnnotationSuggestedFix}
+      onCopySuggestedFix={handleCopyAnnotationSuggestedFix}
+    />
   )
 
   const handleUndoGeneration = React.useCallback(() => {
@@ -1748,8 +2101,8 @@ export const WritingPlayground = () => {
     const nextValue =
       editorText.slice(0, match.start) + replacement + editorText.slice(match.end)
     const cursor = match.start + replacement.length
-    applyPromptValue(nextValue, { start: cursor, end: cursor })
-  }, [activeMatchIndex, applyPromptValue, editorText, matchCase, replaceQuery, searchMatches, searchQuery, useRegex])
+    applyEditorValue(nextValue, { start: cursor, end: cursor })
+  }, [activeMatchIndex, applyEditorValue, editorText, matchCase, replaceQuery, searchMatches, searchQuery, useRegex])
 
   const replaceAll = React.useCallback(() => {
     if (!searchQuery.trim()) return
@@ -1757,7 +2110,7 @@ export const WritingPlayground = () => {
       const regex = buildRegex(searchQuery, { global: true, matchCase })
       if (!regex) return
       const nextValue = editorText.replace(regex, replaceQuery)
-      applyPromptValue(nextValue)
+      applyEditorValue(nextValue)
       return
     }
     const source = matchCase ? editorText : editorText.toLowerCase()
@@ -1774,8 +2127,8 @@ export const WritingPlayground = () => {
       result += editorText.slice(idx, found) + replaceQuery
       idx = found + query.length
     }
-    applyPromptValue(result)
-  }, [applyPromptValue, editorText, matchCase, replaceQuery, searchQuery, useRegex])
+    applyEditorValue(result)
+  }, [applyEditorValue, editorText, matchCase, replaceQuery, searchQuery, useRegex])
 
   // =====================================================================
   // Menus (unique)
@@ -1851,9 +2204,9 @@ export const WritingPlayground = () => {
   // =====================================================================
   const handlePromptChange = React.useCallback(
     (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-      applyPromptValue(event.target.value)
+      applyEditorValue(event.target.value)
     },
-    [applyPromptValue]
+    [applyEditorValue]
   )
 
   const promptChunkData = React.useMemo(() => {
@@ -1888,11 +2241,17 @@ export const WritingPlayground = () => {
     Boolean(selectedModel) &&
     hasChat &&
     !isGenerating &&
-    !isRevisionGenerating
+    !isRevisionGenerating &&
+    !isSceneEditorPending
   const generateDisabledReason = React.useMemo(() => {
     if (isGenerating) return null
     if (isRevisionGenerating)
       return t("option:writingPlayground.disabledRevisionBusy", "Revision request in progress")
+    if (isSceneEditorPending)
+      return t(
+        "option:writingPlayground.disabledSceneBindingPending",
+        "Wait for the selected scene to load"
+      )
     if (!activeSessionDetail)
       return t("option:writingPlayground.disabledNoSession", "Select a session first")
     if (!selectedModel)
@@ -1908,6 +2267,7 @@ export const WritingPlayground = () => {
     isGenerating,
     isOnline,
     isRevisionGenerating,
+    isSceneEditorPending,
     selectedModel,
     t
   ])
@@ -1933,6 +2293,121 @@ export const WritingPlayground = () => {
     }
     return null
   }, [activeSessionId, isDirty, isGenerating, lastSavedAt, saveSessionMutation.isPending, t])
+
+  const sceneSaveStatusLabel = React.useMemo(() => {
+    if (!isSceneBound) return null
+    if (isSceneLoading) {
+      return t("option:writingPlayground.sceneLoadingLabel", "Scene loading...")
+    }
+    return isSceneDirty
+      ? t("option:writingPlayground.sceneUnsavedLabel", "Scene unsaved")
+      : t("option:writingPlayground.sceneSavedLabel", "Scene saved")
+  }, [isSceneBound, isSceneDirty, isSceneLoading, t])
+
+  const handleSaveActiveScene = React.useCallback(async () => {
+    try {
+      const savedScene = await saveActiveScene()
+      if (!savedScene) return
+      message.success(
+        t("option:writingPlayground.sceneSaveSuccess", "Scene saved.")
+      )
+    } catch (error) {
+      const detail =
+        error instanceof Error
+          ? error.message
+          : t("option:error", "Error")
+      message.error(
+        t("option:writingPlayground.sceneSaveError", "Scene save failed: {{detail}}", {
+          detail
+        })
+      )
+    }
+  }, [saveActiveScene, t])
+
+  const handleBeforeManuscriptNodeSelect = React.useCallback(
+    async ({
+      nodeId,
+      nodeType
+    }: {
+      nodeId: string | null
+      nodeType: "part" | "chapter" | "scene" | null
+    }) => {
+      const isSameSelection =
+        nodeId === activeNodeId && nodeType === activeNodeType
+      if (!isSameSelection && (isGenerating || isRevisionGenerating)) {
+        message.info(
+          t(
+            "option:writingPlayground.manuscriptSwitchBusy",
+            "Wait for the current writing request to finish before switching manuscript nodes."
+          )
+        )
+        return false
+      }
+      if (
+        !isSceneBound ||
+        !isSceneDirty
+      ) {
+        return true
+      }
+      if (
+        nodeType === "scene" &&
+        nodeId === activeSceneId
+      ) {
+        return true
+      }
+
+      return await new Promise<boolean>((resolve) => {
+        Modal.confirm({
+          title: t(
+            "option:writingPlayground.sceneSwitchSaveTitle",
+            "Save scene changes?"
+          ),
+          content: t(
+            "option:writingPlayground.sceneSwitchSaveBody",
+            "Save the current scene before switching."
+          ),
+          okText: t(
+            "option:writingPlayground.sceneSwitchSaveAction",
+            "Save and switch"
+          ),
+          cancelText: t("common:cancel", "Cancel"),
+          onOk: async () => {
+            try {
+              const savedScene = await saveActiveScene()
+              resolve(Boolean(savedScene))
+            } catch (error) {
+              const detail =
+                error instanceof Error
+                  ? error.message
+                  : t("option:error", "Error")
+              message.error(
+                t(
+                  "option:writingPlayground.sceneSaveError",
+                  "Scene save failed: {{detail}}",
+                  { detail }
+                )
+              )
+              resolve(false)
+            }
+          },
+          onCancel: () => {
+            resolve(false)
+          }
+        })
+      })
+    },
+    [
+      activeNodeId,
+      activeNodeType,
+      activeSceneId,
+      isGenerating,
+      isRevisionGenerating,
+      isSceneBound,
+      isSceneDirty,
+      saveActiveScene,
+      t
+    ]
+  )
 
   const shouldRenderWritingModalHost =
     extraBodyJsonModalOpen ||
@@ -2598,7 +3073,10 @@ export const WritingPlayground = () => {
       </div>
       <div className="flex-1 overflow-y-auto px-2 py-1">
         {libraryView === "manuscript" ? (
-          <ManuscriptTreePanel isOnline={isOnline} />
+          <ManuscriptTreePanel
+            isOnline={isOnline}
+            onBeforeSelectNode={handleBeforeManuscriptNodeSelect}
+          />
         ) : (
         sessionsLoading ? (<Skeleton active />) : sessionsError ? (
           <DesignSystemAlert
@@ -2654,6 +3132,23 @@ export const WritingPlayground = () => {
   const researchTabContent = <ResearchTab isOnline={isOnline} />
   const agentTabContent = <AIAgentTab isOnline={isOnline} />
   const feedbackTabContent = <FeedbackTab {...feedback} />
+  const activeChapterId =
+    activeNodeType === "chapter" ? activeNodeId : activeScene?.chapter_id ?? null
+  const annotationsTabContent = (
+    <WritingAnnotationsTab
+      annotationsHook={annotations}
+      projectId={activeProjectId}
+      activeChapterId={activeChapterId}
+      activeSceneId={activeSceneId}
+      activeSceneVersion={activeSceneVersion}
+      activeSceneText={editorText}
+      selection={revisionSelection}
+      canCreateRangeAnnotation={canCreateRangeAnnotation}
+      isSceneDirty={isSceneDirty}
+      selectedModel={selectedModel}
+      apiProvider={annotationApiProvider}
+    />
+  )
 
   const inspectorDrawerContent = (
     <div className="p-3">
@@ -2665,6 +3160,7 @@ export const WritingPlayground = () => {
           context: t("option:writingPlayground.sidebarContext", "Context"),
           setup: t("option:writingPlayground.sidebarSetup", "Setup"),
           inspect: t("option:writingPlayground.sidebarInspect", "Analysis"),
+          annotations: t("option:writingPlayground.sidebarAnnotations", "Annotations"),
           characters: t("option:writingPlayground.sidebarCharacters", "Characters"),
           research: t("option:writingPlayground.sidebarResearch", "Research"),
           agent: t("option:writingPlayground.sidebarAgent", "Agent"),
@@ -2707,6 +3203,7 @@ export const WritingPlayground = () => {
         context={contextTabContent}
         setup={setupTabContent}
         inspect={inspectTabContent}
+        annotations={annotationsTabContent}
         characters={charactersTabContent}
         research={researchTabContent}
         agent={agentTabContent}
@@ -2835,6 +3332,31 @@ export const WritingPlayground = () => {
                       }} trigger={["click"]}>
                         <Button size="small" icon={<Activity className="h-3.5 w-3.5" />}>{t("option:writingPlayground.analysisButton", "Analysis")}</Button>
                       </Dropdown>
+                      {isSceneBound ? (
+                        <Tooltip
+                          title={t(
+                            "option:writingPlayground.sceneSaveAction",
+                            "Save scene"
+                          )}
+                        >
+                          <Button
+                            size="small"
+                            icon={<Save className="h-3.5 w-3.5" />}
+                            aria-label={t(
+                              "option:writingPlayground.sceneSaveAction",
+                              "Save scene"
+                            )}
+                            disabled={
+                              isGenerating ||
+                              isSceneLoading ||
+                              !isSceneDirty
+                            }
+                            onClick={() => {
+                              void handleSaveActiveScene()
+                            }}
+                          />
+                        </Tooltip>
+                      ) : null}
                       <Button size="small" icon={searchOpen ? <X className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />} onClick={() => setSearchOpen((open) => !open)} title={searchOpen ? t("option:writingPlayground.searchClose", "Close search") : t("option:writingPlayground.searchToggle", "Find")} />
                     </div>
                     <WritingActionBar
@@ -2876,27 +3398,27 @@ export const WritingPlayground = () => {
                     )}
                   {editorView === "edit" && (
                     editorMode === "tiptap" ? (
-                      <React.Suspense fallback={<div className="p-4 text-sm text-gray-400">Loading editor...</div>}>
-                        <LazyWritingTipTapEditor
-                          content={tipTapContent}
-                          onContentChange={(json, plain) => {
-                            editorTextChangedByTipTap.current = true
-                            setTipTapContent(json)
-                            applyPromptValue(plain, { promptRich: json })
-                          }}
-                          onAdapterReady={(adapter) => {
-                            setActiveEditorAdapter(adapter)
-                          }}
-                          onSelectionChange={updateRevisionSelection}
-                          editable={!isGenerating}
-                          placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")}
-                          className={cn("flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}
-                        />
-                      </React.Suspense>
+                      <div className="flex flex-1 items-start gap-4">
+                        <React.Suspense fallback={<div className="p-4 text-sm text-gray-400">Loading editor...</div>}>
+                          <LazyWritingTipTapEditor
+                            content={tipTapContent}
+                            onContentChange={handleTipTapContentChange}
+                            onContentApplied={bumpAnnotationRailMeasurementVersion}
+                            onAdapterReady={(adapter) => {
+                              setActiveEditorAdapter(adapter)
+                            }}
+                            onSelectionChange={updateRevisionSelection}
+                            editable={!isEditorLocked}
+                            placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")}
+                            className={cn("min-w-0 flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}
+                          />
+                        </React.Suspense>
+                        {annotationMarginRail}
+                      </div>
                     ) : (
                       <Dropdown menu={{ items: editorMenuItems }} trigger={["contextMenu"]}>
                         <div className={cn("flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}>
-                            <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onClick={refreshRevisionSelection} onKeyUp={refreshRevisionSelection} onSelect={refreshRevisionSelection} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isGenerating} className="!resize-y" />
+                            <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onClick={refreshRevisionSelection} onKeyUp={refreshRevisionSelection} onSelect={refreshRevisionSelection} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isEditorLocked} className="!resize-y" />
                         </div>
                       </Dropdown>
                     )
@@ -2910,27 +3432,27 @@ export const WritingPlayground = () => {
                       <div className="flex flex-1 flex-col gap-4 lg:flex-row">
                         <div className={cn("flex-1", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}>
                           {editorMode === "tiptap" ? (
-                            <React.Suspense fallback={<div className="p-4 text-sm text-gray-400">Loading editor...</div>}>
-                              <LazyWritingTipTapEditor
-                                content={tipTapContent}
-                                onContentChange={(json, plain) => {
-                                  editorTextChangedByTipTap.current = true
-                                  setTipTapContent(json)
-                                  applyPromptValue(plain, { promptRich: json })
-                                }}
-                                onAdapterReady={(adapter) => {
-                                  setActiveEditorAdapter(adapter)
-                                }}
-                                onSelectionChange={updateRevisionSelection}
-                                editable={!isGenerating}
-                                placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")}
-                                className={cn("flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}
-                              />
-                            </React.Suspense>
+                            <div className="flex items-start gap-4">
+                              <React.Suspense fallback={<div className="p-4 text-sm text-gray-400">Loading editor...</div>}>
+                                <LazyWritingTipTapEditor
+                                  content={tipTapContent}
+                                  onContentChange={handleTipTapContentChange}
+                                  onContentApplied={bumpAnnotationRailMeasurementVersion}
+                                  onAdapterReady={(adapter) => {
+                                    setActiveEditorAdapter(adapter)
+                                  }}
+                                  onSelectionChange={updateRevisionSelection}
+                                  editable={!isEditorLocked}
+                                  placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")}
+                                  className={cn("min-w-0 flex-1 transition-all", isGenerating && "ring-2 ring-primary/50 ring-offset-1 animate-pulse rounded-md")}
+                                />
+                              </React.Suspense>
+                              {annotationMarginRail}
+                            </div>
                           ) : (
                             <Dropdown menu={{ items: editorMenuItems }} trigger={["contextMenu"]}>
                               <div>
-                                <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onClick={refreshRevisionSelection} onKeyUp={refreshRevisionSelection} onSelect={refreshRevisionSelection} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isGenerating} className="!resize-y" />
+                                <Input.TextArea ref={editorRef} value={editorText} onChange={handlePromptChange} onClick={refreshRevisionSelection} onKeyUp={refreshRevisionSelection} onSelect={refreshRevisionSelection} onScroll={() => syncScroll("editor")} placeholder={t("option:writingPlayground.editorPlaceholder", "Start writing your prompt...")} autoSize={{ minRows: 12 }} disabled={isEditorLocked} className="!resize-y" />
                               </div>
                             </Dropdown>
                           )}
@@ -2942,12 +3464,15 @@ export const WritingPlayground = () => {
                     )}
                     <WritingRevisionQueue
                       proposals={revisionState.revisions}
-                      onApply={(proposal) =>
+                      actionsDisabled={isSceneEditorPending}
+                      onApply={(proposal) => {
+                        if (isSceneEditorPending) return
                         revisionState.applyRevision(proposal.id)
-                      }
-                      onReject={(proposal) =>
+                      }}
+                      onReject={(proposal) => {
+                        if (isSceneEditorPending) return
                         revisionState.rejectRevision(proposal.id)
-                      }
+                      }}
                       onCopy={(proposal) => {
                         void handleCopyRevision(proposal)
                       }}
@@ -3055,6 +3580,11 @@ export const WritingPlayground = () => {
                 </Tag>
               )}
               <div className="flex-1" />
+              {sceneSaveStatusLabel ? (
+                <span data-testid="writing-scene-save-status">
+                  {sceneSaveStatusLabel}
+                </span>
+              ) : null}
               {saveStatusLabel && (<span>{saveStatusLabel}</span>)}
               <span className="text-text-muted/60">{t("option:writingPlayground.shortcutsHint", "Ctrl+Enter to generate")}</span>
             </div>

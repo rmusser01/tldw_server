@@ -16,6 +16,7 @@ const mockState = vi.hoisted(() => ({
   queryData: new Map<string, unknown>(),
   queryKey: (queryKey: unknown) =>
     JSON.stringify(Array.isArray(queryKey) ? queryKey : [queryKey]),
+  executeMutations: false,
   resolveApiProviderForModel: vi.fn(async () => null as string | null),
   streamCalls: [] as Array<{ messages: unknown[]; options: Record<string, unknown> }>,
   sendCalls: [] as Array<{ messages: unknown[]; options: Record<string, unknown> }>,
@@ -47,11 +48,38 @@ vi.mock("@tanstack/react-query", () => {
       isFetching: false,
       error: null
     }),
-    useMutation: () => ({
-      mutate: vi.fn(),
-      mutateAsync: vi.fn(),
-      isPending: false
-    }),
+    useMutation: (options?: {
+      mutationFn?: (variables: unknown) => unknown | Promise<unknown>
+      onMutate?: (variables: unknown) => unknown
+      onSuccess?: (
+        data: unknown,
+        variables: unknown,
+        context: unknown
+      ) => void
+      onError?: (
+        error: unknown,
+        variables: unknown,
+        context: unknown
+      ) => void
+    }) => {
+      const mutate = vi.fn(async (variables: unknown) => {
+        if (!mockState.executeMutations) return undefined
+        const context = options?.onMutate?.(variables)
+        try {
+          const result = await options?.mutationFn?.(variables)
+          options?.onSuccess?.(result, variables, context)
+          return result
+        } catch (error) {
+          options?.onError?.(error, variables, context)
+          throw error
+        }
+      })
+      return {
+        mutate,
+        mutateAsync: mutate,
+        isPending: false
+      }
+    },
     useQueryClient: () => ({
       invalidateQueries: vi.fn(),
       setQueryData: vi.fn()
@@ -136,10 +164,16 @@ vi.mock("@/services/writing-playground", () => ({
   getWritingDefaults: vi.fn(),
   getWritingWordcloud: vi.fn(),
   getWritingSession: vi.fn(),
+  getManuscriptScene: vi.fn(),
+  getManuscriptStructure: vi.fn(),
   importWritingSnapshot: vi.fn(),
+  listManuscriptProjects: vi.fn(),
   listWritingSessions: vi.fn(),
   listWritingTemplates: vi.fn(),
   listWritingThemes: vi.fn(),
+  createManuscriptProject: vi.fn(),
+  reorderManuscriptItems: vi.fn(),
+  updateManuscriptScene: vi.fn(),
   tokenizeWritingText: vi.fn(),
   updateWritingSession: vi.fn(),
   updateWritingTemplate: vi.fn(),
@@ -168,6 +202,11 @@ vi.mock("../WritingTipTapEditor", () => ({
       setSelection: (selection: { start: number; end: number }) => void
       getSelectedText: (currentValue: string) => string
       focus: () => void
+      measureRange?: (selection: { start: number; end: number }) => {
+        top: number
+        bottom: number
+        height: number
+      } | null
     }) => void
     onSelectionChange?: (selection: { start: number; end: number }) => void
     onContentChange: (json: Record<string, unknown>, plain: string) => void
@@ -175,6 +214,20 @@ vi.mock("../WritingTipTapEditor", () => ({
   }) => {
     const [selection, setSelection] = React.useState({ start: 0, end: 0 })
     const [value, setValue] = React.useState("")
+    const adapter = React.useMemo(
+      () => ({
+        getSelection: () => selection,
+        setSelection,
+        getSelectedText: (currentValue: string) =>
+          currentValue.slice(selection.start, selection.end),
+        focus: () => {},
+        measureRange: (range: { start: number; end: number }) =>
+          range.end > range.start
+            ? { top: 40 + range.start, bottom: 56 + range.start, height: 16 }
+            : null
+      }),
+      [selection]
+    )
 
     React.useEffect(() => {
       const text =
@@ -189,14 +242,8 @@ vi.mock("../WritingTipTapEditor", () => ({
     }, [content])
 
     React.useEffect(() => {
-      onAdapterReady({
-        getSelection: () => selection,
-        setSelection,
-        getSelectedText: (currentValue: string) =>
-          currentValue.slice(selection.start, selection.end),
-        focus: () => {}
-      })
-    }, [onAdapterReady, selection])
+      onAdapterReady(adapter)
+    }, [adapter, onAdapterReady])
 
     return (
       <textarea
@@ -224,9 +271,14 @@ vi.mock("../WritingTipTapEditor", () => ({
 }))
 
 import { WritingPlayground } from "../index"
+import { buildWritingAnnotationsQueryKey } from "../hooks/useWritingAnnotations"
 import { WRITING_REVISION_PRESETS } from "../writing-revision-presets"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useWritingPlaygroundStore } from "@/store/writing-playground"
+import {
+  updateWritingSession,
+  type ManuscriptAnnotationResponse
+} from "@/services/writing-playground"
 
 const DEFAULT_WRITING_CAPABILITIES = {
   server: {
@@ -256,6 +308,16 @@ const DEFAULT_WRITING_CAPABILITIES = {
     }
   }
 }
+
+const sceneRichContent = (text: string) => ({
+  type: "doc",
+  content: [
+    {
+      type: "paragraph",
+      content: [{ type: "text", text }]
+    }
+  ]
+})
 
 const structuredReplacement = (replacement: string, title = "Rewrite selection") =>
   JSON.stringify({
@@ -315,6 +377,112 @@ const seedWritingSession = (
   )
 }
 
+const seedManuscriptStructure = () => {
+  mockState.queryData.set(
+    mockState.queryKey(["manuscript-structure", "project-1"]),
+    {
+      parts: [],
+      unassigned_chapters: [
+        {
+          id: "chapter-1",
+          title: "Chapter 1",
+          word_count: 4,
+          version: 1,
+          scenes: [
+            {
+              id: "scene-1",
+              title: "Scene A",
+              word_count: 2,
+              version: 3
+            },
+            {
+              id: "scene-2",
+              title: "Scene B",
+              word_count: 2,
+              version: 1
+            }
+          ]
+        }
+      ]
+    }
+  )
+}
+
+const seedManuscriptScene = (
+  text: string,
+  overrides: Record<string, unknown> = {}
+) => {
+  mockState.queryData.set(mockState.queryKey(["manuscript-scene", "scene-1"]), {
+    id: "scene-1",
+    chapter_id: "chapter-1",
+    project_id: "project-1",
+    title: "Scene 1",
+    sort_order: 1,
+    content: sceneRichContent(text),
+    content_plain: text,
+    synopsis: null,
+    word_count: text.trim().split(/\s+/).filter(Boolean).length,
+    pov_character_id: null,
+    status: "draft",
+    created_at: "2026-06-23T12:00:00Z",
+    last_modified: "2026-06-23T12:00:00Z",
+    deleted: false,
+    client_id: "test-client",
+    version: 3,
+    ...overrides
+  })
+}
+
+const makeManuscriptAnnotation = (
+  overrides: Partial<ManuscriptAnnotationResponse> = {}
+): ManuscriptAnnotationResponse => ({
+  id: "annotation-1",
+  project_id: "project-1",
+  target_type: "scene",
+  target_id: "scene-1",
+  status: "open",
+  category: "clarity",
+  tags: [],
+  source: "user",
+  body: "Tighten this sentence.",
+  suggested_fix: null,
+  followup_note: null,
+  metadata: {},
+  scene_version: 3,
+  anchor_start: 0,
+  anchor_end: 6,
+  selected_text: "target",
+  anchor_status: "attached",
+  derived_start: null,
+  derived_end: null,
+  scene_level: false,
+  created_at: "2026-06-25T00:00:00Z",
+  last_modified: "2026-06-25T00:00:00Z",
+  deleted: false,
+  client_id: "test-client",
+  version: 1,
+  ...overrides
+})
+
+const seedManuscriptAnnotations = (
+  annotations: ManuscriptAnnotationResponse[]
+) => {
+  mockState.queryData.set(
+    mockState.queryKey(
+      buildWritingAnnotationsQueryKey({
+        projectId: "project-1",
+        targetContext: { targetType: "scene", targetId: "scene-1" }
+      })
+    ),
+    {
+      annotations,
+      total: annotations.length,
+      limit: 50,
+      offset: 0
+    }
+  )
+}
+
 const getEditor = () =>
   screen.getByPlaceholderText("Start writing your prompt...") as HTMLTextAreaElement
 
@@ -339,11 +507,13 @@ const latestRevisionPrompt = () => {
 beforeEach(() => {
   mockState.storageValues.clear()
   mockState.queryData.clear()
+  mockState.executeMutations = false
   mockState.resolveApiProviderForModel.mockReset()
   mockState.resolveApiProviderForModel.mockResolvedValue(null)
   mockState.streamCalls.length = 0
   mockState.sendCalls.length = 0
   mockState.sendResponses.length = 0
+  vi.mocked(updateWritingSession).mockReset()
 
   mockState.queryData.set(
     mockState.queryKey(["writing-capabilities"]),
@@ -376,12 +546,16 @@ beforeEach(() => {
   useWritingPlaygroundStore.setState({
     activeSessionId: null,
     activeSessionName: null,
+    activeProjectId: null,
+    activeNodeId: null,
+    activeNodeType: null,
     editorMode: "plain"
   })
   useStoreChatModelSettings.getState().reset()
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   cleanup()
 })
 
@@ -539,6 +713,411 @@ describe("WritingPlayground phase1 baseline", () => {
     })
   })
 
+  it("keeps scene edits separate from session dirty state", async () => {
+    seedWritingSession({ prompt: "Saved scene text" })
+    useWritingPlaygroundStore.setState({
+      activeProjectId: "project-1",
+      activeNodeId: "scene-1",
+      activeNodeType: "scene"
+    })
+    mockState.queryData.set(mockState.queryKey(["manuscript-scene", "scene-1"]), {
+      id: "scene-1",
+      chapter_id: "chapter-1",
+      project_id: "project-1",
+      title: "Scene 1",
+      sort_order: 1,
+      content: sceneRichContent("Saved scene text"),
+      content_plain: "Saved scene text",
+      synopsis: null,
+      word_count: 3,
+      pov_character_id: null,
+      status: "draft",
+      created_at: "2026-06-23T12:00:00Z",
+      last_modified: "2026-06-23T12:00:00Z",
+      deleted: false,
+      client_id: "test-client",
+      version: 3
+    })
+
+    render(<WritingPlayground />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("writing-scene-save-status")).toHaveTextContent(
+        "Scene saved"
+      )
+    })
+
+    fireEvent.change(getEditor(), {
+      target: { value: "Edited scene text" }
+    })
+
+    expect(screen.getByTestId("writing-scene-save-status")).toHaveTextContent(
+      "Scene unsaved"
+    )
+    expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument()
+  })
+
+  it("keeps a bound scene from being reclaimed by the active session prompt", async () => {
+    seedWritingSession({ prompt: "Session draft should not win" })
+    useWritingPlaygroundStore.setState({
+      activeProjectId: "project-1",
+      activeNodeId: "scene-1",
+      activeNodeType: "scene"
+    })
+    mockState.queryData.set(mockState.queryKey(["manuscript-scene", "scene-1"]), {
+      id: "scene-1",
+      chapter_id: "chapter-1",
+      project_id: "project-1",
+      title: "Scene 1",
+      sort_order: 1,
+      content: sceneRichContent("Saved scene text"),
+      content_plain: "Saved scene text",
+      synopsis: null,
+      word_count: 3,
+      pov_character_id: null,
+      status: "draft",
+      created_at: "2026-06-23T12:00:00Z",
+      last_modified: "2026-06-23T12:00:00Z",
+      deleted: false,
+      client_id: "test-client",
+      version: 3
+    })
+
+    render(<WritingPlayground />)
+
+    await waitFor(() => {
+      expect(getEditor()).toHaveValue("Saved scene text")
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(getEditor()).toHaveValue("Saved scene text")
+
+    fireEvent.change(getEditor(), {
+      target: { value: "Edited scene text" }
+    })
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(getEditor()).toHaveValue("Edited scene text")
+    expect(screen.getByTestId("writing-scene-save-status")).toHaveTextContent(
+      "Scene unsaved"
+    )
+    expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument()
+  })
+
+  it("preserves the session prompt when settings autosave while a scene is bound", async () => {
+    mockState.executeMutations = true
+    vi.mocked(updateWritingSession).mockImplementation(
+      async (sessionId, patch, expectedVersion) =>
+        ({
+          id: sessionId,
+          name: "Auto Session",
+          payload: patch.payload ?? {},
+          schema_version: patch.schema_version ?? 1,
+          version_parent_id: null,
+          created_at: "2026-03-16T12:00:00Z",
+          last_modified: "2026-03-16T12:00:01Z",
+          deleted: false,
+          client_id: "test-client",
+          version: expectedVersion + 1
+        }) as Awaited<ReturnType<typeof updateWritingSession>>
+    )
+    seedWritingSession({ prompt: "Session draft should stay" })
+    useWritingPlaygroundStore.setState({
+      activeProjectId: "project-1",
+      activeNodeId: "scene-1",
+      activeNodeType: "scene"
+    })
+    mockState.queryData.set(mockState.queryKey(["manuscript-scene", "scene-1"]), {
+      id: "scene-1",
+      chapter_id: "chapter-1",
+      project_id: "project-1",
+      title: "Scene 1",
+      sort_order: 1,
+      content: sceneRichContent("Scene body should not leak"),
+      content_plain: "Scene body should not leak",
+      synopsis: null,
+      word_count: 5,
+      pov_character_id: null,
+      status: "draft",
+      created_at: "2026-06-23T12:00:00Z",
+      last_modified: "2026-06-23T12:00:00Z",
+      deleted: false,
+      client_id: "test-client",
+      version: 3
+    })
+
+    render(<WritingPlayground />)
+
+    await waitFor(() => {
+      expect(getEditor()).toHaveValue("Scene body should not leak")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle settings" }))
+    const streamingToggle = await screen.findByLabelText("Streaming")
+    vi.useFakeTimers()
+    fireEvent.click(streamingToggle)
+
+    await act(async () => {
+      vi.advanceTimersByTime(800)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    vi.useRealTimers()
+
+    await waitFor(() => {
+      expect(updateWritingSession).toHaveBeenCalled()
+    })
+    const [, updatePayload] = vi.mocked(updateWritingSession).mock.calls.at(-1) ?? []
+    expect(updatePayload?.payload).toMatchObject({
+      prompt: "Session draft should stay",
+      settings: expect.objectContaining({ token_streaming: false })
+    })
+    expect(updatePayload?.payload?.prompt).not.toBe("Scene body should not leak")
+  })
+
+  it("restores the session prompt after leaving a scene during a settings autosave", async () => {
+    seedWritingSession({ prompt: "Session draft should return" })
+    useWritingPlaygroundStore.setState({
+      activeProjectId: "project-1",
+      activeNodeId: "scene-1",
+      activeNodeType: "scene"
+    })
+    mockState.queryData.set(mockState.queryKey(["manuscript-scene", "scene-1"]), {
+      id: "scene-1",
+      chapter_id: "chapter-1",
+      project_id: "project-1",
+      title: "Scene 1",
+      sort_order: 1,
+      content: sceneRichContent("Scene body should not leak"),
+      content_plain: "Scene body should not leak",
+      synopsis: null,
+      word_count: 5,
+      pov_character_id: null,
+      status: "draft",
+      created_at: "2026-06-23T12:00:00Z",
+      last_modified: "2026-06-23T12:00:00Z",
+      deleted: false,
+      client_id: "test-client",
+      version: 3
+    })
+
+    render(<WritingPlayground />)
+
+    await waitFor(() => {
+      expect(getEditor()).toHaveValue("Scene body should not leak")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle settings" }))
+    const streamingToggle = await screen.findByLabelText("Streaming")
+    fireEvent.click(streamingToggle)
+
+    act(() => {
+      useWritingPlaygroundStore.setState({
+        activeNodeId: "chapter-1",
+        activeNodeType: "chapter"
+      })
+    })
+
+    await waitFor(() => {
+      expect(getEditor()).toHaveValue("Session draft should return")
+    })
+  })
+
+  it("blocks generation while a selected scene is still binding", async () => {
+    mockState.storageValues.set("selectedModel", "mock-model")
+    seedWritingSession({ prompt: "Session draft should not generate" })
+    useWritingPlaygroundStore.setState({
+      activeProjectId: "project-1",
+      activeNodeId: "scene-1",
+      activeNodeType: "scene"
+    })
+
+    render(<WritingPlayground />)
+
+    const generate = screen.getByTestId("writing-topbar-generate")
+    await waitFor(() => {
+      expect(generate).toBeDisabled()
+    })
+
+    fireEvent.click(generate)
+
+    expect(mockState.sendCalls).toHaveLength(0)
+    expect(mockState.streamCalls).toHaveLength(0)
+  })
+
+  it("blocks revision queue mutations while a selected scene is still binding", async () => {
+    mockState.storageValues.set("selectedModel", "mock-model")
+    mockState.sendResponses.push(structuredReplacement("The sharper sentence."))
+    seedWritingSession({ prompt: "Intro. The old sentence. Outro." })
+
+    render(<WritingPlayground />)
+    const editor = getEditor()
+    selectEditorText(editor, "The old sentence.")
+
+    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText("The sharper sentence.")).toBeInTheDocument()
+    })
+
+    act(() => {
+      useWritingPlaygroundStore.setState({
+        activeProjectId: "project-1",
+        activeNodeId: "scene-1",
+        activeNodeType: "scene"
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /apply/i })).toBeDisabled()
+    })
+    expect(screen.getByRole("button", { name: /reject/i })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /regenerate/i })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole("button", { name: /apply/i }))
+    expect(getEditor()).toHaveValue("Intro. The old sentence. Outro.")
+  })
+
+  it("blocks manuscript node switching while generation is pending", async () => {
+    mockState.storageValues.set("selectedModel", "mock-model")
+    let resolveResponse: (value: string) => void = () => {}
+    mockState.sendResponses.push(
+      new Promise<string>((resolve) => {
+        resolveResponse = resolve
+      })
+    )
+    seedWritingSession({
+      prompt: "Session draft.",
+      settings: { token_streaming: false }
+    })
+    seedManuscriptStructure()
+    useWritingPlaygroundStore.setState({
+      activeProjectId: "project-1",
+      activeNodeId: "scene-1",
+      activeNodeType: "scene"
+    })
+    mockState.queryData.set(mockState.queryKey(["manuscript-scene", "scene-1"]), {
+      id: "scene-1",
+      chapter_id: "chapter-1",
+      project_id: "project-1",
+      title: "Scene A",
+      sort_order: 1,
+      content: sceneRichContent("Scene A text"),
+      content_plain: "Scene A text",
+      synopsis: null,
+      word_count: 3,
+      pov_character_id: null,
+      status: "draft",
+      created_at: "2026-06-23T12:00:00Z",
+      last_modified: "2026-06-23T12:00:00Z",
+      deleted: false,
+      client_id: "test-client",
+      version: 3
+    })
+
+    render(<WritingPlayground />)
+
+    await waitFor(() => {
+      expect(getEditor()).toHaveValue("Scene A text")
+    })
+    fireEvent.click(screen.getByText("Manuscript"))
+    fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+
+    await waitFor(() => {
+      expect(mockState.sendCalls).toHaveLength(1)
+    })
+
+    fireEvent.click(screen.getByText("Scene B (2w)"))
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(useWritingPlaygroundStore.getState().activeNodeId).toBe("scene-1")
+    expect(getEditor()).toHaveValue("Scene A text")
+
+    await act(async () => {
+      resolveResponse("Generated ending.")
+    })
+    await waitFor(() => {
+      expect(getEditor()).toHaveValue("Scene A textGenerated ending.")
+    })
+  })
+
+  it("blocks manuscript node switching while a revision request is pending", async () => {
+    mockState.storageValues.set("selectedModel", "mock-model")
+    let resolveResponse: (value: string) => void = () => {}
+    mockState.sendResponses.push(
+      new Promise<string>((resolve) => {
+        resolveResponse = resolve
+      })
+    )
+    seedWritingSession({ prompt: "Session draft." })
+    seedManuscriptStructure()
+    useWritingPlaygroundStore.setState({
+      activeProjectId: "project-1",
+      activeNodeId: "scene-1",
+      activeNodeType: "scene"
+    })
+    mockState.queryData.set(mockState.queryKey(["manuscript-scene", "scene-1"]), {
+      id: "scene-1",
+      chapter_id: "chapter-1",
+      project_id: "project-1",
+      title: "Scene A",
+      sort_order: 1,
+      content: sceneRichContent("Scene A sentence."),
+      content_plain: "Scene A sentence.",
+      synopsis: null,
+      word_count: 3,
+      pov_character_id: null,
+      status: "draft",
+      created_at: "2026-06-23T12:00:00Z",
+      last_modified: "2026-06-23T12:00:00Z",
+      deleted: false,
+      client_id: "test-client",
+      version: 3
+    })
+
+    render(<WritingPlayground />)
+
+    await waitFor(() => {
+      expect(getEditor()).toHaveValue("Scene A sentence.")
+    })
+    selectEditorText(getEditor(), "Scene A sentence.")
+    fireEvent.click(screen.getByText("Manuscript"))
+    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
+
+    await waitFor(() => {
+      expect(mockState.sendCalls).toHaveLength(1)
+    })
+
+    fireEvent.click(screen.getByText("Scene B (2w)"))
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(useWritingPlaygroundStore.getState().activeNodeId).toBe("scene-1")
+    expect(getEditor()).toHaveValue("Scene A sentence.")
+
+    await act(async () => {
+      resolveResponse(structuredReplacement("Scene A replacement."))
+    })
+    await waitFor(() => {
+      expect(screen.getByText("Scene A replacement.")).toBeInTheDocument()
+    })
+  })
+
   it("initializes the workflow preset from the active session payload", async () => {
     mockState.storageValues.set("selectedModel", "mock-model")
     mockState.sendResponses.push(structuredReplacement("Voice-preserved line."))
@@ -589,6 +1168,59 @@ describe("WritingPlayground phase1 baseline", () => {
     await waitFor(() => {
       expect(editor.value).toBe("Intro. The sharper sentence. Outro.")
     })
+  })
+
+  it("creates an annotation suggested-fix proposal without mutating editor text", async () => {
+    const sceneText = "Lead 😀 target tail"
+    const annotatedPrefix = "Lead 😀 "
+    const replacement = "  revised target\n"
+    mockState.storageValues.set("selectedModel", "mock-model")
+    useWritingPlaygroundStore.setState({
+      activeProjectId: "project-1",
+      activeNodeId: "scene-1",
+      activeNodeType: "scene",
+      editorMode: "tiptap"
+    })
+    seedWritingSession({ prompt: "Session draft should not win." })
+    seedManuscriptScene(sceneText)
+    seedManuscriptAnnotations([
+      makeManuscriptAnnotation({
+        id: "annotation-fix",
+        body: "Replace the weak noun.",
+        suggested_fix: replacement,
+        selected_text: "target",
+        anchor_start: Array.from(annotatedPrefix).length,
+        anchor_end: Array.from(`${annotatedPrefix}target`).length
+      })
+    ])
+
+    render(<WritingPlayground />)
+    const richEditor = await screen.findByLabelText("Mock rich editor")
+
+    await waitFor(() => {
+      expect(richEditor).toHaveValue(sceneText)
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Focus annotation annotation-fix" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Create revision" }))
+
+    const queue = screen.getByTestId("writing-revision-queue")
+    await waitFor(() => {
+      expect(within(queue).getByText("Suggested fix: clarity")).toBeInTheDocument()
+    })
+    expect(richEditor).toHaveValue(sceneText)
+    expect(screen.getByTestId("writing-revision-pending-count")).toHaveTextContent(
+      "1 pending"
+    )
+    expect(
+      within(queue).getByText((_, element) =>
+        element?.tagName === "PRE" && element.textContent === "target"
+      )
+    ).toBeInTheDocument()
+    expect(
+      within(queue).getByText((_, element) =>
+        element?.tagName === "PRE" && element.textContent === replacement
+      )
+    ).toBeInTheDocument()
   })
 
   it("continues from the selected text end and applies an insertion", async () => {

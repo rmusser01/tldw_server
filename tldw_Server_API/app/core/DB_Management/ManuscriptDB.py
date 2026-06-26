@@ -23,6 +23,7 @@ and follow the existing optimistic-locking / soft-delete conventions.
 import json  # noqa: E402
 import sqlite3  # noqa: E402
 import uuid  # noqa: E402
+from collections.abc import Mapping, Sequence  # noqa: E402
 from typing import Any  # noqa: E402
 
 from loguru import logger  # noqa: E402
@@ -31,6 +32,14 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (  # noqa: E40
     CharactersRAGDB,
     ConflictError,
     InputError,
+)
+from tldw_Server_API.app.core.Writing.manuscript_annotations import (  # noqa: E402
+    VALID_ANNOTATION_CATEGORIES,
+    VALID_ANNOTATION_SOURCES,
+    VALID_ANNOTATION_STATUSES,
+    VALID_TARGET_TYPES,
+    build_scene_anchor,
+    derive_scene_anchor_status,
 )
 
 # ---------------------------------------------------------------------------
@@ -103,6 +112,120 @@ _UPDATABLE_PLOT_HOLE_COLS = frozenset({
 _UPDATABLE_CITATION_COLS = frozenset({
     "source_type", "source_id", "source_title", "excerpt", "query_used", "anchor_offset",
 })
+_UPDATABLE_ANNOTATION_COLS = frozenset({
+    "status",
+    "category",
+    "tags",
+    "source",
+    "body",
+    "suggested_fix",
+    "followup_note",
+    "metadata",
+})
+_ANCHOR_STATUS_FILTER_CANDIDATE_CAP = 500
+_VALID_ANCHOR_STATUSES = frozenset({"scene_level", "attached", "reattached", "needs_review"})
+_ACTIVE_ANNOTATION_TARGET_SQL = """
+(
+    (
+        ma.target_type = 'project'
+        AND ma.target_id = ma.project_id
+        AND EXISTS (
+            SELECT 1
+              FROM manuscript_projects p
+             WHERE p.id = ma.project_id
+               AND p.deleted = 0
+        )
+    )
+    OR (
+        ma.target_type = 'chapter'
+        AND EXISTS (
+            SELECT 1
+              FROM manuscript_chapters c
+              JOIN manuscript_projects p
+                ON p.id = c.project_id
+               AND p.deleted = 0
+             WHERE c.id = ma.target_id
+               AND c.project_id = ma.project_id
+               AND c.deleted = 0
+        )
+    )
+    OR (
+        ma.target_type = 'scene'
+        AND EXISTS (
+            SELECT 1
+              FROM manuscript_scenes s
+              JOIN manuscript_chapters c
+                ON c.id = s.chapter_id
+               AND c.project_id = s.project_id
+               AND c.deleted = 0
+              JOIN manuscript_projects p
+                ON p.id = s.project_id
+               AND p.deleted = 0
+             WHERE s.id = ma.target_id
+               AND s.project_id = ma.project_id
+               AND s.deleted = 0
+        )
+    )
+)
+"""
+_GET_ANNOTATION_SQL = (
+    "SELECT ma.* FROM manuscript_annotations ma "  # nosec B608 - static query fragment; values are bound.
+    "WHERE ma.id = ? AND ma.deleted = 0 AND "
+    + _ACTIVE_ANNOTATION_TARGET_SQL
+)
+_LIST_ANNOTATIONS_WHERE_SQL = (
+    "ma.project_id = ? AND ma.deleted = 0 "
+    "AND (? IS NULL OR ma.target_type = ?) "
+    "AND (? IS NULL OR ma.target_id = ?) "
+    "AND (? IS NULL OR ma.status = ?) "
+    "AND (? IS NULL OR ma.category = ?) "
+    "AND (? IS NULL OR ma.source = ?) "
+    "AND "
+    + _ACTIVE_ANNOTATION_TARGET_SQL
+)
+_COUNT_ANNOTATIONS_SQL = (
+    "SELECT COUNT(*) AS cnt FROM manuscript_annotations ma "  # nosec B608 - static query fragment; values are bound.
+    "WHERE "
+    + _LIST_ANNOTATIONS_WHERE_SQL
+)
+_SELECT_ANNOTATIONS_PAGE_SQL = (
+    "SELECT ma.* FROM manuscript_annotations ma "  # nosec B608 - static query fragment; values are bound.
+    "WHERE "
+    + _LIST_ANNOTATIONS_WHERE_SQL
+    + " ORDER BY ma.last_modified DESC LIMIT ? OFFSET ?"
+)
+_SELECT_ANNOTATIONS_FOR_ANCHOR_FILTER_SQL = (
+    "SELECT ma.* FROM manuscript_annotations ma "  # nosec B608 - static query fragment; values are bound.
+    "WHERE "
+    + _LIST_ANNOTATIONS_WHERE_SQL
+    + " ORDER BY ma.last_modified DESC"
+)
+_UPDATE_ANNOTATION_SQL = """
+UPDATE manuscript_annotations
+   SET status = CASE WHEN ? THEN ? ELSE status END,
+       category = CASE WHEN ? THEN ? ELSE category END,
+       tags_json = CASE WHEN ? THEN ? ELSE tags_json END,
+       source = CASE WHEN ? THEN ? ELSE source END,
+       body = CASE WHEN ? THEN ? ELSE body END,
+       suggested_fix = CASE WHEN ? THEN ? ELSE suggested_fix END,
+       followup_note = CASE WHEN ? THEN ? ELSE followup_note END,
+       metadata_json = CASE WHEN ? THEN ? ELSE metadata_json END,
+       last_modified = ?,
+       version = ?,
+       client_id = ?
+ WHERE id = ? AND version = ? AND deleted = 0
+"""
+_ANNOTATION_DUPLICATE_KEY_FIELDS = (
+    "target_type",
+    "target_id",
+    "category",
+    "source",
+    "body",
+    "selected_text",
+    "scene_version",
+    "anchor_start",
+    "anchor_end",
+)
 
 
 def _word_count(text: str | None) -> int:
@@ -1145,6 +1268,520 @@ class ManuscriptDBHelper:
                     chapter_id=row["chapter_id"],
                     project_id=row["project_id"],
                 )
+
+    # ------------------------------------------------------------------
+    # Annotations
+    # ------------------------------------------------------------------
+
+    def _validate_annotation_enums(
+        self,
+        *,
+        target_type: str | None = None,
+        status: str | None = None,
+        category: str | None = None,
+        source: str | None = None,
+    ) -> None:
+        if target_type is not None and target_type not in VALID_TARGET_TYPES:
+            raise ValueError(f"Invalid annotation target_type: {target_type!r}")  # noqa: TRY003
+        if status is not None and status not in VALID_ANNOTATION_STATUSES:
+            raise ValueError(f"Invalid annotation status: {status!r}")  # noqa: TRY003
+        if category is not None and category not in VALID_ANNOTATION_CATEGORIES:
+            raise ValueError(f"Invalid annotation category: {category!r}")  # noqa: TRY003
+        if source is not None and source not in VALID_ANNOTATION_SOURCES:
+            raise ValueError(f"Invalid annotation source: {source!r}")  # noqa: TRY003
+
+    @staticmethod
+    def _validate_annotation_anchor_status(anchor_status: str | None) -> None:
+        if anchor_status is not None and anchor_status not in _VALID_ANCHOR_STATUSES:
+            raise ValueError(f"Invalid annotation anchor_status: {anchor_status!r}")  # noqa: TRY003
+
+    @staticmethod
+    def _validate_annotation_structured_fields(
+        *,
+        tags: Any | None = None,
+        metadata: Any | None = None,
+    ) -> None:
+        if tags is not None and not isinstance(tags, list):
+            raise ValueError("Annotation tags must be a list.")  # noqa: TRY003
+        if isinstance(tags, list) and any(not isinstance(tag, str) for tag in tags):
+            raise ValueError("Annotation tags must contain only strings.")  # noqa: TRY003
+        if metadata is not None and not isinstance(metadata, dict):
+            raise ValueError("Annotation metadata must be a dict.")  # noqa: TRY003
+
+    @staticmethod
+    def _annotation_duplicate_key(values: dict[str, Any] | Any) -> tuple[Any, ...]:
+        if hasattr(values, "get"):
+            return tuple(values.get(field) for field in _ANNOTATION_DUPLICATE_KEY_FIELDS)
+        return tuple(values[field] for field in _ANNOTATION_DUPLICATE_KEY_FIELDS)
+
+    def _validate_annotation_target(
+        self,
+        conn: Any,
+        project_id: str,
+        target_type: str,
+        target_id: str,
+    ) -> dict[str, Any] | None:
+        self._assert_active_project(conn, project_id)
+        if target_type == "project":
+            if target_id != project_id:
+                raise ConflictError("Project annotation target must match project_id")
+            return None
+        if target_type == "chapter":
+            return self._require_active_project_owned_row(
+                conn,
+                "manuscript_chapters",
+                target_id,
+                entity_label="Chapter",
+                action="annotation create",
+            )
+        return self._require_active_project_owned_row(
+            conn,
+            "manuscript_scenes",
+            target_id,
+            entity_label="Scene",
+            action="annotation create",
+        )
+
+    @staticmethod
+    def _annotation_has_range_fields(values: dict[str, Any]) -> bool:
+        return any(
+            values.get(key) is not None
+            for key in (
+                "scene_version",
+                "anchor_start",
+                "anchor_end",
+                "selected_text",
+                "document_fingerprint",
+                "anchor_prefix",
+                "anchor_suffix",
+            )
+        )
+
+    def _build_annotation_anchor(
+        self,
+        *,
+        target_type: str,
+        scene_row: dict[str, Any] | None,
+        scene_version: int | None,
+        anchor_start: int | None,
+        anchor_end: int | None,
+        selected_text: str | None,
+    ) -> dict[str, Any]:
+        if target_type != "scene":
+            values = {
+                "scene_version": scene_version,
+                "anchor_start": anchor_start,
+                "anchor_end": anchor_end,
+                "selected_text": selected_text,
+            }
+            if self._annotation_has_range_fields(values):
+                raise ValueError("Chapter and project annotations cannot include range fields.")  # noqa: TRY003
+            return {
+                "scene_version": None,
+                "anchor_start": None,
+                "anchor_end": None,
+                "selected_text": None,
+                "document_fingerprint": None,
+                "anchor_prefix": None,
+                "anchor_suffix": None,
+                "anchor_status": "scene_level",
+            }
+
+        if anchor_start is None and anchor_end is None and selected_text is None:
+            return {
+                "scene_version": None,
+                "anchor_start": None,
+                "anchor_end": None,
+                "selected_text": None,
+                "document_fingerprint": None,
+                "anchor_prefix": None,
+                "anchor_suffix": None,
+                "anchor_status": "scene_level",
+            }
+        if scene_row is None:
+            raise ConflictError("Scene annotation target is unavailable")
+        if scene_version is None or int(scene_version) != int(scene_row["version"]):
+            raise ConflictError("Annotation scene version does not match the saved scene version.")
+        if anchor_start is None or anchor_end is None or selected_text is None:
+            raise ValueError("Scene range annotations require start, end, selected text, and scene version.")  # noqa: TRY003
+
+        anchor = build_scene_anchor(
+            scene_row["content_plain"] or "",
+            start=anchor_start,
+            end=anchor_end,
+            scene_version=int(scene_version),
+        )
+        if anchor["selected_text"] != selected_text:
+            raise ValueError("Annotation selected text does not match the saved scene range.")  # noqa: TRY003
+        return dict(anchor)
+
+    def _annotation_row_to_dict(
+        self,
+        row: Any,
+        conn: Any | None = None,
+        scene_rows: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        data = dict(row)
+        try:
+            data["tags"] = json.loads(data.pop("tags_json") or "[]")
+        except (TypeError, ValueError):
+            data["tags"] = []
+        try:
+            data["metadata"] = json.loads(data.pop("metadata_json") or "{}")
+        except (TypeError, ValueError):
+            data["metadata"] = {}
+
+        derived = {"anchor_status": data.get("anchor_status") or "scene_level", "derived_start": None, "derived_end": None}
+        if data.get("target_type") == "scene":
+            scene_row = scene_rows.get(str(data["target_id"])) if scene_rows is not None else None
+            if scene_rows is None:
+                owns_conn = conn is None
+                if owns_conn:
+                    tx = self.db.transaction()
+                    conn = tx.__enter__()
+                else:
+                    tx = None
+                try:
+                    scene_row = conn.execute(
+                        "SELECT id, content_plain, version FROM manuscript_scenes WHERE id = ? AND deleted = 0",
+                        (data["target_id"],),
+                    ).fetchone()
+                finally:
+                    if owns_conn and tx is not None:
+                        tx.__exit__(None, None, None)
+            if scene_row is not None:
+                derived = derive_scene_anchor_status(
+                    data,
+                    scene_row["content_plain"] or "",
+                    current_scene_version=scene_row["version"],
+                )
+
+        data["anchor_status"] = derived["anchor_status"]
+        data["derived_start"] = derived["derived_start"]
+        data["derived_end"] = derived["derived_end"]
+        data["scene_level"] = data["anchor_status"] == "scene_level"
+        data["deleted"] = bool(data.get("deleted"))
+        return data
+
+    def _scene_rows_for_annotation_rows(self, conn: Any, rows: Sequence[Any]) -> dict[str, Any]:
+        """Return active scene rows needed to derive anchor status for annotation rows."""
+        scene_ids = sorted(
+            {
+                str(row["target_id"])
+                for row in rows
+                if row["target_type"] == "scene" and row["target_id"]
+            }
+        )
+        if not scene_ids:
+            return {}
+        placeholders = ", ".join("?" for _ in scene_ids)
+        scene_rows = conn.execute(
+            "SELECT id, content_plain, version FROM manuscript_scenes "
+            f"WHERE id IN ({placeholders}) AND deleted = 0",  # nosec B608 - placeholders are generated, values are bound.
+            tuple(scene_ids),
+        ).fetchall()
+        return {str(row["id"]): row for row in scene_rows}
+
+    def create_annotation(
+        self,
+        *,
+        project_id: str,
+        target_type: str,
+        target_id: str,
+        category: str,
+        source: str,
+        body: str,
+        status: str = "open",
+        tags: list[str] | None = None,
+        suggested_fix: str | None = None,
+        followup_note: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        scene_version: int | None = None,
+        anchor_start: int | None = None,
+        anchor_end: int | None = None,
+        selected_text: str | None = None,
+        annotation_id: str | None = None,
+    ) -> str:
+        """Create a manuscript annotation and return its ID."""
+        self._validate_annotation_enums(
+            target_type=target_type,
+            status=status,
+            category=category,
+            source=source,
+        )
+        self._validate_annotation_structured_fields(tags=tags, metadata=metadata)
+        aid = annotation_id or self._uuid()
+        now = self._now()
+
+        with self.db.transaction() as conn:
+            target_row = self._validate_annotation_target(conn, project_id, target_type, target_id)
+            if target_row is not None and target_row["project_id"] != project_id:
+                raise ConflictError(f"{target_type} {target_id!r} belongs to a different project")
+            anchor = self._build_annotation_anchor(
+                target_type=target_type,
+                scene_row=dict(target_row) if target_type == "scene" and target_row is not None else None,
+                scene_version=scene_version,
+                anchor_start=anchor_start,
+                anchor_end=anchor_end,
+                selected_text=selected_text,
+            )
+            conn.execute(
+                """
+                INSERT INTO manuscript_annotations (
+                    id, project_id, target_type, target_id, status, category,
+                    tags_json, source, body, suggested_fix, followup_note,
+                    metadata_json, scene_version, anchor_start, anchor_end,
+                    selected_text, document_fingerprint, anchor_prefix, anchor_suffix,
+                    anchor_status, created_at, last_modified, deleted, client_id, version
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1)
+                """,
+                (
+                    aid,
+                    project_id,
+                    target_type,
+                    target_id,
+                    status,
+                    category,
+                    json.dumps(tags or []),
+                    source,
+                    body,
+                    suggested_fix,
+                    followup_note,
+                    json.dumps(metadata or {}),
+                    anchor["scene_version"],
+                    anchor["anchor_start"],
+                    anchor["anchor_end"],
+                    anchor["selected_text"],
+                    anchor["document_fingerprint"],
+                    anchor["anchor_prefix"],
+                    anchor["anchor_suffix"],
+                    anchor["anchor_status"],
+                    now,
+                    now,
+                    self._client_id,
+                ),
+            )
+        return aid
+
+    def get_annotation(self, annotation_id: str) -> dict[str, Any] | None:
+        """Fetch a non-deleted annotation by ID."""
+        with self.db.transaction() as conn:
+            row = conn.execute(
+                _GET_ANNOTATION_SQL,
+                (annotation_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return self._annotation_row_to_dict(row, conn)
+
+    def list_annotations(
+        self,
+        project_id: str,
+        *,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        status: str | None = None,
+        category: str | None = None,
+        source: str | None = None,
+        anchor_status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List annotations for a project with optional filters.
+
+        Unbounded derived anchor-status filtering is capped at 500 candidate
+        rows because status is derived from current scene text in Python.
+        """
+        self._validate_annotation_enums(
+            target_type=target_type,
+            status=status,
+            category=category,
+            source=source,
+        )
+        self._validate_annotation_anchor_status(anchor_status)
+
+        params: list[Any] = [
+            project_id,
+            target_type,
+            target_type,
+            target_id,
+            target_id,
+            status,
+            status,
+            category,
+            category,
+            source,
+            source,
+        ]
+
+        with self.db.transaction() as conn:
+            if not self._project_is_active(conn, project_id):
+                return [], 0
+            if anchor_status is None:
+                total_row = conn.execute(
+                    _COUNT_ANNOTATIONS_SQL,
+                    params,
+                ).fetchone()
+                rows = conn.execute(
+                    _SELECT_ANNOTATIONS_PAGE_SQL,
+                    (*params, limit, offset),
+                ).fetchall()
+                scene_rows = self._scene_rows_for_annotation_rows(conn, rows)
+                return [
+                    self._annotation_row_to_dict(row, conn, scene_rows)
+                    for row in rows
+                ], int(total_row["cnt"] or 0)
+
+            total_row = conn.execute(
+                _COUNT_ANNOTATIONS_SQL,
+                params,
+            ).fetchone()
+            candidate_count = int(total_row["cnt"] or 0)
+            is_bounded_scene_target = target_type == "scene" and target_id is not None
+            if not is_bounded_scene_target and candidate_count > _ANCHOR_STATUS_FILTER_CANDIDATE_CAP:
+                raise ValueError(
+                    "Unbounded anchor_status annotation filter candidate set exceeds "
+                    f"{_ANCHOR_STATUS_FILTER_CANDIDATE_CAP} rows; add target_type='scene' and target_id."
+                )  # noqa: TRY003
+
+            rows = conn.execute(
+                _SELECT_ANNOTATIONS_FOR_ANCHOR_FILTER_SQL,
+                params,
+            ).fetchall()
+            scene_rows = self._scene_rows_for_annotation_rows(conn, rows)
+            candidates = [
+                self._annotation_row_to_dict(row, conn, scene_rows)
+                for row in rows
+            ]
+            filtered = [row for row in candidates if row["anchor_status"] == anchor_status]
+        return filtered[offset:offset + limit], len(filtered)
+
+    def update_annotation(
+        self,
+        annotation_id: str,
+        updates: dict[str, Any],
+        expected_version: int,
+    ) -> None:
+        """Update an annotation with optimistic locking."""
+        if not updates:
+            return
+        unknown = set(updates) - _UPDATABLE_ANNOTATION_COLS
+        if unknown:
+            raise ValueError(f"Unknown update column(s) for annotation: {unknown}")  # noqa: TRY003
+        self._validate_annotation_enums(
+            status=updates.get("status"),
+            category=updates.get("category"),
+            source=updates.get("source"),
+        )
+        self._validate_annotation_structured_fields(
+            tags=updates.get("tags") if "tags" in updates else None,
+            metadata=updates.get("metadata") if "metadata" in updates else None,
+        )
+
+        now = self._now()
+        next_version = expected_version + 1
+        update_values = {
+            "status": updates.get("status"),
+            "category": updates.get("category"),
+            "tags": json.dumps(updates.get("tags") or []) if "tags" in updates else None,
+            "source": updates.get("source"),
+            "body": updates.get("body"),
+            "suggested_fix": updates.get("suggested_fix"),
+            "followup_note": updates.get("followup_note"),
+            "metadata": json.dumps(updates.get("metadata") or {}) if "metadata" in updates else None,
+        }
+        params: list[Any] = []
+        for key in (
+            "status",
+            "category",
+            "tags",
+            "source",
+            "body",
+            "suggested_fix",
+            "followup_note",
+            "metadata",
+        ):
+            params.extend([key in updates, update_values[key]])
+        params.extend([now, next_version, self._client_id, annotation_id, expected_version])
+
+        with self.db.transaction() as conn:
+            row = conn.execute(
+                "SELECT project_id FROM manuscript_annotations WHERE id = ? AND deleted = 0",
+                (annotation_id,),
+            ).fetchone()
+            if row is None or not self._project_is_active(conn, row["project_id"]):
+                raise ConflictError(
+                    f"Annotation {annotation_id!r} update failed (version conflict or not found).",
+                    entity="manuscript_annotations",
+                    entity_id=annotation_id,
+                )
+            cur = conn.execute(
+                _UPDATE_ANNOTATION_SQL,
+                params,
+            )
+            if cur.rowcount == 0:
+                raise ConflictError(
+                    f"Annotation {annotation_id!r} update failed (version conflict or not found).",
+                    entity="manuscript_annotations",
+                    entity_id=annotation_id,
+                )
+
+    def soft_delete_annotation(self, annotation_id: str, expected_version: int) -> None:
+        """Soft-delete an annotation with optimistic locking."""
+        now = self._now()
+        next_version = expected_version + 1
+        with self.db.transaction() as conn:
+            row = conn.execute(
+                "SELECT project_id FROM manuscript_annotations WHERE id = ? AND deleted = 0",
+                (annotation_id,),
+            ).fetchone()
+            if row is None or not self._project_is_active(conn, row["project_id"]):
+                raise ConflictError(
+                    f"Annotation {annotation_id!r} delete failed (version conflict or not found).",
+                    entity="manuscript_annotations",
+                    entity_id=annotation_id,
+                )
+            cur = conn.execute(
+                "UPDATE manuscript_annotations "
+                "SET deleted = 1, last_modified = ?, version = ?, client_id = ? "
+                "WHERE id = ? AND version = ? AND deleted = 0",
+                (now, next_version, self._client_id, annotation_id, expected_version),
+            )
+            if cur.rowcount == 0:
+                raise ConflictError(
+                    f"Annotation {annotation_id!r} delete failed (version conflict or not found).",
+                    entity="manuscript_annotations",
+                    entity_id=annotation_id,
+                )
+
+    def suppress_duplicate_annotation_candidates(
+        self,
+        project_id: str,
+        candidates: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Return candidates that do not duplicate existing or retained annotations."""
+        if not candidates:
+            return []
+        with self.db.transaction() as conn:
+            existing_rows = conn.execute(
+                """
+                SELECT target_type, target_id, category, source, body, selected_text,
+                       scene_version, anchor_start, anchor_end
+                  FROM manuscript_annotations
+                 WHERE project_id = ? AND status = 'open' AND deleted = 0
+                """,
+                (project_id,),
+            ).fetchall()
+        existing = {self._annotation_duplicate_key(row) for row in existing_rows}
+        retained: list[dict[str, Any]] = []
+        for candidate in candidates:
+            duplicate_key = self._annotation_duplicate_key(candidate)
+            if duplicate_key in existing:
+                continue
+            retained.append(candidate)
+            existing.add(duplicate_key)
+        return retained
 
     def create_version(self, entity_type: str, entity_id: str, *, label: str | None = None) -> dict[str, Any]:
         """Create a manual manuscript/chapter/scene snapshot."""

@@ -2,6 +2,34 @@ import { bgRequest } from "@/services/background-proxy"
 import { buildQuery, createResourceClient } from "@/services/resource-client"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
 
+export type ManuscriptProjectResponse = {
+  id: string
+  title: string
+  subtitle?: string | null
+  author?: string | null
+  genre?: string | null
+  status: string
+  synopsis?: string | null
+  target_word_count?: number | null
+  settings: Record<string, unknown>
+  word_count: number
+  created_at: string
+  last_modified: string
+  deleted: boolean
+  client_id: string
+  version: number
+}
+
+export type ManuscriptProjectListResponse = {
+  projects: ManuscriptProjectResponse[]
+  total: number
+  limit: number
+  offset: number
+  has_more?: boolean | null
+  next_offset?: number | null
+  pagination?: ManuscriptOffsetPagination
+}
+
 export type ManuscriptSceneResponse = {
   id: string
   chapter_id: string
@@ -19,6 +47,37 @@ export type ManuscriptSceneResponse = {
   deleted: boolean
   client_id: string
   version: number
+}
+
+export type ManuscriptSceneSummary = Pick<
+  ManuscriptSceneResponse,
+  "id" | "title" | "sort_order" | "word_count" | "status" | "version"
+>
+
+export type ManuscriptChapterSummary = {
+  id: string
+  title: string
+  sort_order: number
+  part_id?: string | null
+  word_count: number
+  status: string
+  version: number
+  scenes: ManuscriptSceneSummary[]
+}
+
+export type ManuscriptPartSummary = {
+  id: string
+  title: string
+  sort_order: number
+  word_count: number
+  version: number
+  chapters: ManuscriptChapterSummary[]
+}
+
+export type ManuscriptStructureResponse = {
+  project_id: string
+  parts: ManuscriptPartSummary[]
+  unassigned_chapters: ManuscriptChapterSummary[]
 }
 
 export type ManuscriptCharacterResponse = {
@@ -149,6 +208,153 @@ export type ManuscriptResearchResult = {
 export type ManuscriptResearchResponse = {
   query: string
   results: ManuscriptResearchResult[]
+}
+
+export type ManuscriptAnnotationTargetType = "scene" | "chapter" | "project"
+export type ManuscriptAnnotationStatus = "open" | "resolved"
+export type ManuscriptAnnotationSource =
+  | "user"
+  | "ai_selected_text"
+  | "ai_scene_review"
+export type ManuscriptAnnotationCategory =
+  | "style"
+  | "clarity"
+  | "pacing"
+  | "continuity"
+  | "character"
+  | "worldbuilding"
+  | "structure"
+  | "research"
+  | "other"
+export type ManuscriptAnnotationAnchorStatus =
+  | "attached"
+  | "reattached"
+  | "needs_review"
+  | "scene_level"
+
+export type ManuscriptAnnotationMetadataValue =
+  | string
+  | number
+  | boolean
+  | null
+  | ManuscriptAnnotationMetadata
+  | ManuscriptAnnotationMetadataValue[]
+
+export type ManuscriptAnnotationMetadata = {
+  [key: string]: ManuscriptAnnotationMetadataValue
+}
+
+export type ManuscriptOffsetPagination = {
+  mode: "offset"
+  limit: number
+  offset: number
+  total?: number | null
+  has_more: boolean
+  next_offset?: number | null
+}
+
+export type ManuscriptAnnotationResponse = {
+  id: string
+  project_id: string
+  target_type: ManuscriptAnnotationTargetType
+  target_id: string
+  status: ManuscriptAnnotationStatus
+  category: ManuscriptAnnotationCategory
+  tags: string[]
+  source: ManuscriptAnnotationSource
+  body: string
+  suggested_fix?: string | null
+  followup_note?: string | null
+  metadata: ManuscriptAnnotationMetadata
+  scene_version?: number | null
+  anchor_start?: number | null
+  anchor_end?: number | null
+  selected_text?: string | null
+  anchor_status: ManuscriptAnnotationAnchorStatus
+  derived_start?: number | null
+  derived_end?: number | null
+  scene_level: boolean
+  created_at: string
+  last_modified: string
+  deleted: boolean
+  client_id: string
+  version: number
+}
+
+export type ManuscriptAnnotationListResponse = {
+  annotations: ManuscriptAnnotationResponse[]
+  total: number
+  limit: number
+  offset: number
+  has_more?: boolean | null
+  next_offset?: number | null
+  pagination: ManuscriptOffsetPagination
+}
+
+export type ManuscriptAnnotationListFilters = {
+  target_type?: ManuscriptAnnotationTargetType
+  target_id?: string
+  status?: ManuscriptAnnotationStatus
+  category?: ManuscriptAnnotationCategory
+  source?: ManuscriptAnnotationSource
+  anchor_status?: ManuscriptAnnotationAnchorStatus
+  limit?: number
+  offset?: number
+}
+
+export type ManuscriptAnnotationCreateInput = {
+  target_type: ManuscriptAnnotationTargetType
+  target_id: string
+  category: ManuscriptAnnotationCategory
+  body: string
+  tags?: string[]
+  suggested_fix?: string | null
+  followup_note?: string | null
+  metadata?: ManuscriptAnnotationMetadata
+  scene_version?: number | null
+  start?: number | null
+  end?: number | null
+  selected_text?: string | null
+}
+
+export type ManuscriptAnnotationUpdateInput = {
+  status?: ManuscriptAnnotationStatus
+  category?: ManuscriptAnnotationCategory
+  body?: string
+  tags?: string[] | null
+  suggested_fix?: string | null
+  followup_note?: string | null
+  metadata?: ManuscriptAnnotationMetadata | null
+}
+
+export type ManuscriptSelectedTextAnnotationReviewRequest = {
+  provider: string
+  model: string
+  scene_version: number
+  start: number
+  end: number
+  selected_text: string
+  category_hints?: ManuscriptAnnotationCategory[]
+  instruction?: string | null
+}
+
+export type ManuscriptSceneAnnotationReviewRequest = {
+  provider: string
+  model: string
+  scene_version: number
+  max_comments?: number
+  category_filters?: ManuscriptAnnotationCategory[]
+  review_focus?: string | null
+}
+
+export type ManuscriptSceneAnnotationReviewJobResponse = {
+  job_id: number
+  job_uuid?: string | null
+  status: string
+  job_type: string
+  project_id: string
+  scene_id: string
+  scene_version: number
 }
 
 const sessionsClient = createResourceClient({
@@ -831,16 +1037,18 @@ export async function listManuscriptProjects(params?: {
   status?: string
   limit?: number
   offset?: number
-}) {
-  return manuscriptProjectsClient.list(params)
+}): Promise<ManuscriptProjectListResponse> {
+  return manuscriptProjectsClient.list<ManuscriptProjectListResponse>(params)
 }
 
-export async function getManuscriptProject(id: string) {
-  return manuscriptProjectsClient.get(id)
+export async function getManuscriptProject(id: string): Promise<ManuscriptProjectResponse> {
+  return manuscriptProjectsClient.get<ManuscriptProjectResponse>(id)
 }
 
-export async function createManuscriptProject(data: Record<string, unknown>) {
-  return manuscriptProjectsClient.create(data)
+export async function createManuscriptProject(
+  data: Record<string, unknown>
+): Promise<ManuscriptProjectResponse> {
+  return manuscriptProjectsClient.create<ManuscriptProjectResponse>(data)
 }
 
 export async function updateManuscriptProject(
@@ -859,8 +1067,10 @@ export async function deleteManuscriptProject(id: string, version: number) {
   })
 }
 
-export async function getManuscriptStructure(projectId: string) {
-  return await bgRequest({
+export async function getManuscriptStructure(
+  projectId: string
+): Promise<ManuscriptStructureResponse> {
+  return await bgRequest<ManuscriptStructureResponse>({
     path: `/api/v1/writing/manuscripts/projects/${encodeURIComponent(projectId)}/structure` as AllowedPath,
     method: "GET",
   })
@@ -1106,6 +1316,101 @@ export async function createManuscriptCitation(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: data,
+  })
+}
+
+// ── Annotations ────────────────────────────────────────
+
+export async function listManuscriptAnnotations(
+  projectId: string,
+  filters: ManuscriptAnnotationListFilters = {},
+): Promise<ManuscriptAnnotationListResponse> {
+  const query = buildQuery({
+    target_type: filters.target_type,
+    target_id: filters.target_id,
+    status: filters.status,
+    category: filters.category,
+    source: filters.source,
+    anchor_status: filters.anchor_status,
+    limit: filters.limit,
+    offset: filters.offset,
+  })
+  return await bgRequest<ManuscriptAnnotationListResponse>({
+    path: `/api/v1/writing/manuscripts/projects/${encodeURIComponent(projectId)}/annotations${query}` as AllowedPath,
+    method: "GET",
+  })
+}
+
+export async function createManuscriptAnnotation(
+  input: ManuscriptAnnotationCreateInput,
+): Promise<ManuscriptAnnotationResponse> {
+  const body: ManuscriptAnnotationCreateInput = { ...input }
+  delete (body as ManuscriptAnnotationCreateInput & { source?: unknown }).source
+  return await bgRequest<ManuscriptAnnotationResponse>({
+    path: "/api/v1/writing/manuscripts/annotations",
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+  })
+}
+
+export async function getManuscriptAnnotation(
+  annotationId: string,
+): Promise<ManuscriptAnnotationResponse> {
+  return await bgRequest<ManuscriptAnnotationResponse>({
+    path: `/api/v1/writing/manuscripts/annotations/${encodeURIComponent(annotationId)}` as AllowedPath,
+    method: "GET",
+  })
+}
+
+export async function updateManuscriptAnnotation(
+  annotationId: string,
+  input: ManuscriptAnnotationUpdateInput,
+  version: number,
+): Promise<ManuscriptAnnotationResponse> {
+  return await bgRequest<ManuscriptAnnotationResponse>({
+    path: `/api/v1/writing/manuscripts/annotations/${encodeURIComponent(annotationId)}` as AllowedPath,
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...buildExpectedVersionHeaders(version),
+    },
+    body: input,
+  })
+}
+
+export async function deleteManuscriptAnnotation(
+  annotationId: string,
+  version: number,
+): Promise<void> {
+  await bgRequest<void>({
+    path: `/api/v1/writing/manuscripts/annotations/${encodeURIComponent(annotationId)}` as AllowedPath,
+    method: "DELETE",
+    headers: buildExpectedVersionHeaders(version),
+  })
+}
+
+export async function reviewManuscriptSelection(
+  sceneId: string,
+  input: ManuscriptSelectedTextAnnotationReviewRequest,
+): Promise<ManuscriptAnnotationResponse> {
+  return await bgRequest<ManuscriptAnnotationResponse>({
+    path: `/api/v1/writing/manuscripts/scenes/${encodeURIComponent(sceneId)}/annotations/review-selection` as AllowedPath,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: input,
+  })
+}
+
+export async function reviewManuscriptScene(
+  sceneId: string,
+  input: ManuscriptSceneAnnotationReviewRequest,
+): Promise<ManuscriptSceneAnnotationReviewJobResponse> {
+  return await bgRequest<ManuscriptSceneAnnotationReviewJobResponse>({
+    path: `/api/v1/writing/manuscripts/scenes/${encodeURIComponent(sceneId)}/annotations/review-scene` as AllowedPath,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: input,
   })
 }
 

@@ -258,6 +258,7 @@ class JobManager:
         "reading": ("reading-digest",),
         "vn_assets": ("generation",),
         "persona_visuals": ("generation",),
+        "writing": ("writing-review", "writing-ai"),
     }
 
     # --- Shutdown/acquisition gate (process-wide) ---
@@ -2482,6 +2483,7 @@ class JobManager:
         lease_seconds: int,
         worker_id: str,
         owner_user_id: str | None = None,
+        job_type: str | None = None,
     ) -> dict[str, Any] | None:
         """Atomically acquire the next eligible job and start a lease.
 
@@ -2490,13 +2492,16 @@ class JobManager:
 
         Reclaims expired processing jobs by allowing acquisition when
         `leased_until` is NULL or in the past.
+
+        When provided, `job_type` restricts acquisition to matching jobs in the
+        selected domain and queue.
         """
         # Honor global acquire gate for graceful shutdown
         _test_mode = _is_test_mode()
         if _test_mode:
             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                 logger.info(
-                    f"[JM TEST] acquire_next_job enter backend={self.backend} domain={domain} queue={queue} owner={owner_user_id} gate={JobManager._ACQUIRE_GATE_ENABLED} db={(str(self.db_path) if getattr(self, 'db_path', None) else self.db_url)}"
+                    f"[JM TEST] acquire_next_job enter backend={self.backend} domain={domain} queue={queue} job_type={job_type} owner={owner_user_id} gate={JobManager._ACQUIRE_GATE_ENABLED} db={(str(self.db_path) if getattr(self, 'db_path', None) else self.db_url)}"
                 )
         if JobManager._ACQUIRE_GATE_ENABLED:
             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
@@ -2547,7 +2552,7 @@ class JobManager:
             req = 0
         if req <= 0 and JobManager._is_truthy(os.getenv("JOBS_ADAPTIVE_LEASE_ENABLE", "")):
             try:
-                req = self._adaptive_lease_seconds(domain, queue, None)
+                req = self._adaptive_lease_seconds(domain, queue, job_type)
             except _JOB_NONCRITICAL_EXCEPTIONS:
                 req = 30
         lease_seconds = max(1, min(max_lease, int(req)))
@@ -2575,6 +2580,7 @@ class JobManager:
                             else:
                                 _order = f" ORDER BY priority {prio_dir}, COALESCE(available_at, created_at) ASC, id ASC LIMIT 1 FOR UPDATE SKIP LOCKED"
                             _cond_owner = " AND owner_user_id = %s" if owner_user_id else ""
+                            _cond_job_type = " AND job_type = %s" if job_type else ""
                             _sql = "".join(
                                 [
                                     "WITH picked AS (",
@@ -2584,6 +2590,7 @@ class JobManager:
                                     "  )",
                                     dep_cond,
                                     _cond_owner,
+                                    _cond_job_type,
                                     _order,
                                     ") ",
                                     "UPDATE jobs SET status='processing', started_at = COALESCE(started_at, NOW()), acquired_at = COALESCE(acquired_at, NOW()), leased_until = NOW() + (%s || ' seconds')::interval, worker_id = %s, lease_id = %s ",
@@ -2595,6 +2602,7 @@ class JobManager:
                                 (
                                     [domain, queue]
                                     + ([owner_user_id] if owner_user_id else [])
+                                    + ([job_type] if job_type else [])
                                     + [int(lease_seconds), worker_id, str(_uuid.uuid4())]
                                 ),
                             )
@@ -2615,6 +2623,9 @@ class JobManager:
                             if owner_user_id:
                                 base += " AND owner_user_id = %s"
                                 params.append(owner_user_id)
+                            if job_type:
+                                base += " AND job_type = %s"
+                                params.append(job_type)
                             # Stable ordering: allow env-based override
                             prio_dir = self._priority_dir_for(domain, backend="pg")
                             tie = self._tie_break_for(domain, backend="pg")
@@ -2742,6 +2753,9 @@ class JobManager:
                         if owner_user_id:
                             sub += " AND owner_user_id = ?"
                             params_sub.append(owner_user_id)
+                        if job_type:
+                            sub += " AND job_type = ?"
+                            params_sub.append(job_type)
                         # Ordering: env-based override; else default FIFO
                         prio_dir = self._priority_dir_for(domain, backend="sqlite")
                         tie = self._tie_break_for(domain, backend="sqlite")
@@ -2836,6 +2850,9 @@ class JobManager:
                         if owner_user_id:
                             base += " AND owner_user_id = ?"
                             params.append(owner_user_id)
+                        if job_type:
+                            base += " AND job_type = ?"
+                            params.append(job_type)
                         # Ordering: env-based override; otherwise default FIFO for most domains.
                         prio_dir = self._priority_dir_for(domain, backend="sqlite")
                         tie = self._tie_break_for(domain, backend="sqlite")
@@ -2849,10 +2866,16 @@ class JobManager:
                             # Only 'chatbooks' uses the dynamic tie-break by default; others stick to FIFO
                             if str(domain) == "chatbooks":
                                 try:
-                                    _r = conn.execute(
-                                        "SELECT 1 FROM jobs WHERE domain=? AND queue=? AND status='queued' AND (available_at IS NOT NULL AND available_at > DATETIME('now')) LIMIT 1",
-                                        (domain, queue),
-                                    ).fetchone()
+                                    if job_type:
+                                        _r = conn.execute(
+                                            "SELECT 1 FROM jobs WHERE domain=? AND queue=? AND job_type=? AND status='queued' AND (available_at IS NOT NULL AND available_at > DATETIME('now')) LIMIT 1",
+                                            (domain, queue, job_type),
+                                        ).fetchone()
+                                    else:
+                                        _r = conn.execute(
+                                            "SELECT 1 FROM jobs WHERE domain=? AND queue=? AND status='queued' AND (available_at IS NOT NULL AND available_at > DATETIME('now')) LIMIT 1",
+                                            (domain, queue),
+                                        ).fetchone()
                                     _has_sched = bool(_r)
                                 except _JOB_NONCRITICAL_EXCEPTIONS:
                                     _has_sched = False
@@ -6206,6 +6229,7 @@ class JobManager:
         lease_seconds: int,
         worker_id: str,
         owner_user_id: str | None = None,
+        job_type: str | None = None,
         limit: int = 1,
     ) -> list[dict[str, Any]]:
         """Acquire up to `limit` jobs. Simple loop over acquire_next_job for now."""
@@ -6218,6 +6242,7 @@ class JobManager:
                 lease_seconds=lease_seconds,
                 worker_id=worker_id,
                 owner_user_id=owner_user_id,
+                job_type=job_type,
             )
             if not j:
                 break

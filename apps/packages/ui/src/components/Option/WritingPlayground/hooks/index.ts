@@ -1,5 +1,7 @@
 export { useWritingSessionManagement } from "./useWritingSessionManagement"
 export type { UseWritingSessionManagementDeps } from "./useWritingSessionManagement"
+export { useActiveManuscriptScene } from "./useActiveManuscriptScene"
+export type { ActiveManuscriptSceneBinding } from "./useActiveManuscriptScene"
 
 export { useWritingTemplateLibrary } from "./useWritingTemplateLibrary"
 export type { UseWritingTemplateLibraryDeps } from "./useWritingTemplateLibrary"
@@ -18,3 +20,9 @@ export type { UseWritingImportExportDeps } from "./useWritingImportExport"
 
 export { useWritingFeedback } from "./useWritingFeedback"
 export type { UseWritingFeedbackReturn } from "./useWritingFeedback"
+
+export {
+  buildWritingAnnotationsQueryKey,
+  useWritingAnnotations
+} from "./useWritingAnnotations"
+export type { UseWritingAnnotationsResult } from "./useWritingAnnotations"

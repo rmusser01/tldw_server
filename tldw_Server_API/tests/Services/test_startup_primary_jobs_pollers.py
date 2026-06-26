@@ -52,6 +52,7 @@ def _specs_by_name(startup_pollers: Any) -> dict[str, Any]:
         "data_tables_jobs_task",
         "prompt_studio_jobs_task",
         "workspace_file_inventory_jobs_task",
+        "writing_annotation_review_jobs_task",
     ],
 )
 def test_primary_jobs_worker_specs_match_legacy_worker_contract(
@@ -79,6 +80,7 @@ def test_primary_jobs_worker_specs_use_expected_names() -> None:
         "data_tables_jobs_task",
         "prompt_studio_jobs_task",
         "workspace_file_inventory_jobs_task",
+        "writing_annotation_review_jobs_task",
     ]
 
 
@@ -96,6 +98,10 @@ def test_primary_jobs_worker_spec_factories_delegate_to_existing_worker_services
         (
             "workspace_file_inventory_jobs_task",
             "_run_workspace_file_inventory_jobs_worker_service",
+        ),
+        (
+            "writing_annotation_review_jobs_task",
+            "_run_writing_annotation_review_jobs_worker_service",
         ),
     ]:
         monkeypatch.setattr(
@@ -119,6 +125,10 @@ def test_primary_jobs_worker_spec_factories_delegate_to_existing_worker_services
             "workspace_file_inventory_jobs_task",
             "workspace_file_inventory_jobs_task-stop",
         ),
+        (
+            "writing_annotation_review_jobs_task",
+            "writing_annotation_review_jobs_task-stop",
+        ),
     ]
 
 
@@ -139,6 +149,7 @@ def test_primary_jobs_worker_spec_predicates_use_route_enabled(
         "DATA_TABLES_JOBS_WORKER_ENABLED",
         "PROMPT_STUDIO_JOBS_WORKER_ENABLED",
         "WORKSPACE_FILE_INVENTORY_JOBS_WORKER_ENABLED",
+        "WRITING_ANNOTATION_REVIEW_JOBS_WORKER_ENABLED",
     ]:
         monkeypatch.setenv(env_key, "true")
 
@@ -146,11 +157,13 @@ def test_primary_jobs_worker_spec_predicates_use_route_enabled(
     assert specs["data_tables_jobs_task"].enabled(context) is False
     assert specs["prompt_studio_jobs_task"].enabled(context) is False
     assert specs["workspace_file_inventory_jobs_task"].enabled(context) is False
+    assert specs["writing_annotation_review_jobs_task"].enabled(context) is False
     assert calls == [
         (("files",), {}),
         (("data-tables",), {}),
         (("prompt-studio",), {}),
         (("workspaces",), {}),
+        (("writing",), {}),
     ]
 
 
@@ -253,6 +266,13 @@ async def test_start_primary_jobs_pollers_combines_handles_in_order(
         calls.append("workspace-file-inventory")
         return ("workspace-file-inventory-stop", "workspace-file-inventory-task")
 
+    async def _record_writing_annotation_review(**kwargs: object) -> tuple[str, str]:
+        """Record that the Writing annotation review worker starter ran."""
+
+        del kwargs
+        calls.append("writing-annotation-review")
+        return ("writing-annotation-review-stop", "writing-annotation-review-task")
+
     monkeypatch.setattr(startup_pollers, "_start_core_jobs_worker", _record_core)
     monkeypatch.setattr(startup_pollers, "_start_files_jobs_worker", _record_files)
     monkeypatch.setattr(startup_pollers, "_start_data_tables_jobs_worker", _record_data_tables)
@@ -261,6 +281,11 @@ async def test_start_primary_jobs_pollers_combines_handles_in_order(
         startup_pollers,
         "_start_workspace_file_inventory_jobs_worker",
         _record_workspace_file_inventory,
+    )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_start_writing_annotation_review_jobs_worker",
+        _record_writing_annotation_review,
     )
 
     handles = await startup_pollers.start_primary_jobs_pollers(
@@ -271,7 +296,14 @@ async def test_start_primary_jobs_pollers_combines_handles_in_order(
         sidecar_mode=False,
     )
 
-    assert calls == ["core", "files", "data-tables", "prompt-studio", "workspace-file-inventory"]
+    assert calls == [
+        "core",
+        "files",
+        "data-tables",
+        "prompt-studio",
+        "workspace-file-inventory",
+        "writing-annotation-review",
+    ]
     assert handles.core_jobs_stop_event == "core-stop"
     assert handles.core_jobs_task == "core-task"
     assert handles.files_jobs_stop_event == "files-stop"
@@ -282,6 +314,8 @@ async def test_start_primary_jobs_pollers_combines_handles_in_order(
     assert handles.prompt_studio_jobs_task == "prompt-studio-task"
     assert handles.workspace_file_inventory_jobs_stop_event == "workspace-file-inventory-stop"
     assert handles.workspace_file_inventory_jobs_task == "workspace-file-inventory-task"
+    assert handles.writing_annotation_review_jobs_stop_event == "writing-annotation-review-stop"
+    assert handles.writing_annotation_review_jobs_task == "writing-annotation-review-task"
 
 
 @pytest.mark.asyncio
@@ -312,6 +346,11 @@ async def test_start_primary_jobs_pollers_passes_inventory_to_workers(
         "_start_workspace_file_inventory_jobs_worker",
         _record_worker("workspace-file-inventory"),
     )
+    monkeypatch.setattr(
+        startup_pollers,
+        "_start_writing_annotation_review_jobs_worker",
+        _record_worker("writing-annotation-review"),
+    )
 
     await startup_pollers.start_primary_jobs_pollers(
         app="app",
@@ -331,6 +370,7 @@ async def test_start_primary_jobs_pollers_passes_inventory_to_workers(
         "data-tables": worker_inventory,
         "prompt-studio": worker_inventory,
         "workspace-file-inventory": worker_inventory,
+        "writing-annotation-review": worker_inventory,
     }
 
 
@@ -440,6 +480,13 @@ async def test_start_core_jobs_worker_registers_with_worker_inventory_when_enabl
             "workspace_file_inventory_jobs_task",
             "workspace_file_inventory_jobs_task",
             "_run_workspace_file_inventory_jobs_worker_service",
+        ),
+        (
+            "_start_writing_annotation_review_jobs_worker",
+            "WRITING_ANNOTATION_REVIEW_JOBS_WORKER_ENABLED",
+            "writing_annotation_review_jobs_task",
+            "writing_annotation_review_jobs_task",
+            "_run_writing_annotation_review_jobs_worker_service",
         ),
     ],
 )
@@ -633,6 +680,74 @@ async def test_start_workspace_file_inventory_jobs_worker_registers_legacy_enabl
             "name": "workspace_file_inventory_jobs_task",
             "task": "workspace-inventory-task",
             "stop_event": "workspace-inventory-stop",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_start_writing_annotation_review_jobs_worker_registers_legacy_enabled_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup_pollers = _import_startup_primary_jobs_pollers()
+    registrations: list[dict[str, object]] = []
+    captured_stop_events: list[object] = []
+    created_coroutines: list[object] = []
+
+    monkeypatch.setattr(startup_pollers, "_make_event", lambda: "writing-review-stop")
+
+    def _create_task(coro: object) -> str:
+        created_coroutines.append(coro)
+        return "writing-review-task"
+
+    monkeypatch.setattr(startup_pollers, "_create_task", _create_task)
+    monkeypatch.setattr(
+        startup_pollers,
+        "_run_writing_annotation_review_jobs_worker_service",
+        lambda stop_event: captured_stop_events.append(stop_event) or "writing-review-coro",
+    )
+
+    def _register_owned_job_poller(app, owned_job_pollers, *, name, task, stop_event):
+        registrations.append(
+            {
+                "app": app,
+                "owned_job_pollers": owned_job_pollers,
+                "name": name,
+                "task": task,
+                "stop_event": stop_event,
+            }
+        )
+
+    route_checks: list[tuple[str, str]] = []
+    owned_job_pollers: list[object] = []
+    stop_event, task = await startup_pollers._start_writing_annotation_review_jobs_worker(
+        app="app",
+        owned_job_pollers=owned_job_pollers,
+        register_owned_job_poller=_register_owned_job_poller,
+        should_start_worker=lambda flag, route: route_checks.append((flag, route))
+        or (flag, route)
+        == (
+            "WRITING_ANNOTATION_REVIEW_JOBS_WORKER_ENABLED",
+            "writing_annotation_review_jobs_task",
+        ),
+    )
+
+    assert route_checks == [
+        (
+            "WRITING_ANNOTATION_REVIEW_JOBS_WORKER_ENABLED",
+            "writing_annotation_review_jobs_task",
+        )
+    ]
+    assert stop_event == "writing-review-stop"
+    assert task == "writing-review-task"
+    assert captured_stop_events == ["writing-review-stop"]
+    assert created_coroutines == ["writing-review-coro"]
+    assert registrations == [
+        {
+            "app": "app",
+            "owned_job_pollers": owned_job_pollers,
+            "name": "writing_annotation_review_jobs_task",
+            "task": "writing-review-task",
+            "stop_event": "writing-review-stop",
         }
     ]
 

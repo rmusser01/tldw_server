@@ -1,8 +1,11 @@
 import { Editor } from "@tiptap/core"
 import StarterKit from "@tiptap/starter-kit"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { SceneBreakExtension } from "../extensions/SceneBreakExtension"
-import { createTipTapEditorAdapter } from "../writing-editor-adapter"
+import {
+  createTextareaEditorAdapter,
+  createTipTapEditorAdapter
+} from "../writing-editor-adapter"
 import { tipTapJsonToPlainText } from "../writing-tiptap-utils"
 
 describe("writing editor adapter", () => {
@@ -65,5 +68,83 @@ describe("writing editor adapter", () => {
     expect(adapter?.getSelection()).toEqual({ start, end: start + 4 })
 
     editor.destroy()
+  })
+
+  it("exposes TipTap range measurement using mapped plain-text offsets", () => {
+    const editor = new Editor({
+      extensions: [StarterKit],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "Alpha" }]
+          },
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "Beta" }]
+          }
+        ]
+      }
+    })
+    const adapter = createTipTapEditorAdapter(editor)
+
+    adapter?.setSelection({ start: 6, end: 10 })
+    const { from } = editor.state.selection
+    const coordsAtPos = vi
+      .spyOn(editor.view, "coordsAtPos")
+      .mockImplementationOnce((position) => ({
+        top: position === from ? 24 : 64,
+        bottom: 40,
+        left: 0,
+        right: 0
+      }))
+      .mockImplementationOnce(() => ({
+        top: 64,
+        bottom: 82,
+        left: 0,
+        right: 0
+      }))
+
+    expect(adapter?.measureRange).toBeTypeOf("function")
+    expect(adapter?.measureRange?.({ start: 6, end: 10 })).toEqual({
+      top: 24,
+      bottom: 82,
+      height: 58
+    })
+    expect(coordsAtPos).toHaveBeenCalledWith(from)
+    expect(coordsAtPos).toHaveBeenCalledTimes(2)
+
+    coordsAtPos.mockRestore()
+    editor.destroy()
+  })
+
+  it("returns null for invalid or stale TipTap measurement ranges", () => {
+    const editor = new Editor({
+      extensions: [StarterKit],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "Alpha" }]
+          }
+        ]
+      }
+    })
+    const adapter = createTipTapEditorAdapter(editor)
+
+    expect(adapter?.measureRange?.({ start: 99, end: 104 })).toBeNull()
+    expect(adapter?.measureRange?.({ start: 2, end: 2 })).toBeNull()
+
+    editor.destroy()
+  })
+
+  it("does not expose textarea range measurement support", () => {
+    const textareaRef = { current: null }
+    const adapter = createTextareaEditorAdapter(textareaRef)
+
+    expect("measureRange" in adapter).toBe(false)
+    expect(adapter.measureRange).toBeUndefined()
   })
 })
