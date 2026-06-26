@@ -297,11 +297,11 @@ async def save_uploaded_files(
                     inferred_media_key = "ebook"
                 elif any(c in {".eml", ".mbox", ".pst", ".ost"} for c in candidates):
                     inferred_media_key = "email"
-                elif any(c in {".html", ".htm"} for c in candidates):
+                elif any(c in {".html", ".htm", ".xhtml"} for c in candidates):
                     inferred_media_key = "html"
                 elif any(c in {".xml", ".opml"} for c in candidates):
                     inferred_media_key = "xml"
-                elif any(c in {".txt", ".md", ".docx", ".rtf", ".json"} for c in candidates):
+                elif any(c in {".txt", ".md", ".markdown", ".docx", ".rtf", ".json"} for c in candidates):
                     inferred_media_key = "document"
                 elif any(
                     c
@@ -357,7 +357,7 @@ async def save_uploaded_files(
 
             max_cfg_bytes: int | None = None
             try:
-                size_key = inferred_media_key or expected_media_type_key
+                size_key = expected_media_type_key or inferred_media_key
                 cfg = validator.get_media_config(size_key)
                 if cfg:
                     if size_key == "archive":
@@ -477,7 +477,7 @@ async def save_uploaded_files(
                         )
                     except Exception:
                         inferred_media_key = None
-                    media_key_override = inferred_media_key or expected_media_type_key
+                    media_key_override = expected_media_type_key or inferred_media_key
                     validation_result = process_and_validate_file(
                         local_file_path,
                         validator,

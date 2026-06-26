@@ -69,7 +69,7 @@ const detectTypeFromExtension = (name: string): DetectedMediaType => {
   if (["mp4", "mkv", "avi", "mov", "webm", "wmv", "flv", "m4v"].includes(ext)) return "video"
   if (["pdf"].includes(ext)) return "pdf"
   if (["epub"].includes(ext)) return "ebook"
-  if (["doc", "docx", "txt", "rtf", "md", "markdown", "html", "htm", "xhtml", "xml", "json"].includes(ext)) return "document"
+  if (["docx", "txt", "rtf", "md", "markdown", "html", "htm", "xhtml", "xml", "json"].includes(ext)) return "document"
   return "unknown"
 }
 
@@ -87,7 +87,6 @@ const detectTypeFromMime = (mimeType: string | undefined): DetectedMediaType => 
     normalized.includes("xml") ||
     normalized.includes("json") ||
     normalized.includes("rtf") ||
-    normalized.includes("msword") ||
     normalized.includes("officedocument.wordprocessingml.document")
   ) {
     return "document"
@@ -113,7 +112,7 @@ export const detectTypeFromUrl = (url: string): DetectedMediaType => {
     if (["mp4", "mkv", "avi", "mov", "webm"].includes(ext)) return "video"
     if (ext === "pdf") return "pdf"
     if (["epub", "mobi"].includes(ext)) return "ebook"
-    if (["doc", "docx", "txt", "rtf", "md", "markdown"].includes(ext)) return "document"
+    if (["docx", "txt", "rtf", "md", "markdown", "xml", "json"].includes(ext)) return "document"
     // YouTube and common video platforms
     if (hostnameMatches(hostname, "youtube.com") || hostnameMatches(hostname, "youtu.be")) return "video"
     if (hostnameMatches(hostname, "vimeo.com")) return "video"
@@ -204,7 +203,7 @@ const validateQueueItem = (
 
   if (item.detectedType === "unknown") {
     errors.push(
-      "Unsupported file type. Quick Ingest supports PDF, EPUB, DOC/DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, and video."
+      "Unsupported file type. Quick Ingest supports PDF, EPUB, DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, and video."
     )
   }
 
@@ -586,7 +585,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         <Typography.Text className="text-[11px] text-text-subtle">
           {qi(
             "fileSizeLimits",
-            "Supported: PDF, EPUB, DOC/DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, video. Max file size: {{maxSize}}.",
+            "Supported: PDF, EPUB, DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, video. Max file size: {{maxSize}}.",
             { maxSize: QUICK_INGEST_MAX_FILE_SIZE_LABEL }
           )}
         </Typography.Text>

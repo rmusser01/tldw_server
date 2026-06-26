@@ -118,6 +118,50 @@ async def test_save_uploaded_files_enforces_fractional_size_limit(tmp_path: Path
 
 
 @pytest.mark.asyncio
+async def test_save_uploaded_files_explicit_media_type_overrides_filename_inference(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _RecordingValidator(_DummyValidator):
+        def __init__(self) -> None:
+            self.config_keys: list[Optional[str]] = []
+
+        def get_media_config(self, media_key: Optional[str]) -> Dict[str, Any]:
+            self.config_keys.append(media_key)
+            return {"max_size_mb": 50}
+
+    validation_media_keys: list[Optional[str]] = []
+
+    def _record_process_and_validate_file(*_args: Any, **kwargs: Any) -> bool:
+        validation_media_keys.append(kwargs.get("media_type_key_override"))
+        return True
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing.process_and_validate_file",
+        _record_process_and_validate_file,
+        raising=True,
+    )
+
+    validator = _RecordingValidator()
+    files: List[_DummyUploadFile] = [
+        _DummyUploadFile("page.xhtml", b"<html><body>document</body></html>"),
+    ]
+
+    processed, errors = await save_uploaded_files(
+        files=files,
+        temp_dir=tmp_path,
+        validator=validator,
+        allowed_extensions=[".xhtml"],
+        expected_media_type_key="document",
+    )
+
+    assert errors == []
+    assert len(processed) == 1
+    assert validator.config_keys == ["document"]
+    assert validation_media_keys == ["document"]
+
+
+@pytest.mark.asyncio
 async def test_run_batch_processor_counts_and_orders(tmp_path: Path) -> None:
     items = [
         ProcessItem(

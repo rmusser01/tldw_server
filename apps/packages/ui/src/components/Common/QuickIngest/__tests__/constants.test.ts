@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   DUPLICATE_SKIP_MESSAGE,
+  QUICK_INGEST_ACCEPT_STRING,
   isDbMessageDuplicate,
 } from "../constants"
 
@@ -54,5 +55,29 @@ describe("DUPLICATE_SKIP_MESSAGE", () => {
 
   it("mentions the Deep preset", () => {
     expect(DUPLICATE_SKIP_MESSAGE.toLowerCase()).toContain("deep")
+  })
+})
+
+describe("QUICK_INGEST_ACCEPT_STRING", () => {
+  const accepted = QUICK_INGEST_ACCEPT_STRING.split(",")
+
+  it("advertises only document formats supported by backend processing", () => {
+    expect(accepted).toEqual(
+      expect.arrayContaining([
+        ".pdf",
+        ".txt",
+        ".rtf",
+        ".docx",
+        ".md",
+        ".markdown",
+        ".html",
+        ".htm",
+        ".xhtml",
+        ".xml",
+        ".json"
+      ])
+    )
+    expect(accepted).not.toContain(".doc")
+    expect(accepted).not.toContain("application/msword")
   })
 })

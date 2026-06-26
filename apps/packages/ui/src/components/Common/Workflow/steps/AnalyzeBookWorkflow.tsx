@@ -93,7 +93,6 @@ const SUPPORTED_FILE_TYPES = [
   ".epub",
   ".txt",
   ".md",
-  ".doc",
   ".docx"
 ]
 
@@ -325,7 +324,7 @@ const SelectStep: React.FC = () => {
           <p className="ant-upload-hint text-xs text-text-muted">
             {t(
               "workflows:analyzeBook.supportedFormats",
-              "Supports PDF, EPUB, TXT, MD, DOC, DOCX"
+              "Supports PDF, EPUB, TXT, MD, DOCX"
             )}
           </p>
         </Dragger>
