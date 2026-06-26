@@ -29,3 +29,9 @@
 **Success Criteria**: Targeted tests pass; Bandit reports no new findings in touched backend paths.
 **Tests**: `python -m pytest ...`; `python -m bandit -r <touched backend paths>`.
 **Status**: Complete
+
+## Stage 6: Browser Extension Upload Coverage
+**Goal**: Add browser-extension-specific Quick Ingest coverage for the accepted file-type contract.
+**Success Criteria**: Extension e2e test asserts every advertised explicit upload extension is present, legacy `.doc` support is excluded, representative accepted files queue successfully, and submitted file names reach the mock ingest-job path.
+**Tests**: `npx playwright test tests/e2e/quick-ingest-file-upload.spec.ts --project=chromium-extension`; local execution recorded as environment-blocked because Chromium does not load MV3 extension targets in this automation environment.
+**Status**: Complete
