@@ -39,18 +39,31 @@ class MemoryStorage implements Storage {
 }
 
 const ensureLocalStorage = (): void => {
-  const storage =
-    typeof window.localStorage !== "undefined"
-      ? window.localStorage
-      : new MemoryStorage()
+  const isStorageLike = (value: unknown): value is Storage =>
+    !!value &&
+    typeof (value as Storage).clear === "function" &&
+    typeof (value as Storage).getItem === "function" &&
+    typeof (value as Storage).key === "function" &&
+    typeof (value as Storage).removeItem === "function" &&
+    typeof (value as Storage).setItem === "function"
 
-  if (typeof globalThis.localStorage === "undefined") {
-    Object.defineProperty(globalThis, "localStorage", {
+  const storage = isStorageLike(window.localStorage)
+    ? window.localStorage
+    : new MemoryStorage()
+
+  if (!isStorageLike(window.localStorage)) {
+    Object.defineProperty(window, "localStorage", {
       configurable: true,
       value: storage,
       writable: true
     })
   }
+
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: storage,
+    writable: true
+  })
 }
 
 ensureLocalStorage()

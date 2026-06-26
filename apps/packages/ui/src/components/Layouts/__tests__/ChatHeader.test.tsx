@@ -134,6 +134,7 @@ describe("ChatHeader shortcut toggle", () => {
       screen.getByRole("button", { name: "Collapse sidebar" }),
       screen.getByRole("button", { name: "Companion Home" }),
       screen.getByRole("button", { name: "Show shortcuts" }),
+      screen.getByRole("button", { name: "Search - Open command palette" }),
       screen.getByRole("button", { name: "New saved chat" }),
       screen.getByRole("button", { name: "Temporary chat (not saved)" }),
       screen.getByRole("button", { name: "Character chat" }),
@@ -148,6 +149,22 @@ describe("ChatHeader shortcut toggle", () => {
       expect(control.className).toContain("focus-visible:ring-offset-2")
       expect(control.className).toContain("focus-visible:ring-offset-bg")
     }
+  })
+
+  it("labels the search trigger as the command palette opener and keeps the shortcut hint visible", () => {
+    const props = createProps()
+    render(<ChatHeader {...props} />)
+
+    const trigger = screen.getByRole("button", {
+      name: "Search - Open command palette"
+    })
+
+    expect(trigger).toHaveAttribute("title", "Search")
+    expect(trigger).toHaveTextContent("Search")
+    expect(trigger).toHaveTextContent("Ctrl+K")
+
+    fireEvent.click(trigger)
+    expect(props.onOpenCommandPalette).toHaveBeenCalledTimes(1)
   })
 
   it("shows a theme toggle control and triggers toggle callback", () => {

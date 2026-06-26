@@ -418,7 +418,6 @@ export const ROUTE_METADATA = [
     group: "workspace",
     surface: "labs_beta",
     availability: webAndExtension,
-    smoke: "manual",
     nav: "secondary",
     requiresBackend: true,
     rationale: "Research workspace and source orchestration route."
@@ -668,6 +667,27 @@ export const ROUTE_METADATA = [
     rationale: "General settings route and sidepanel settings target."
   }),
   defineRoute({
+    path: "/settings/model",
+    label: "Model Settings",
+    group: "settings",
+    surface: "default_self_hosted",
+    availability: webAndExtension,
+    nav: "secondary",
+    requiresBackend: false,
+    rationale: "Model provider configuration route in the settings area."
+  }),
+  defineRoute({
+    path: "/settings/health",
+    label: "Health & Diagnostics",
+    group: "settings",
+    surface: "default_self_hosted",
+    availability: webAndExtension,
+    commandPalette: "show",
+    nav: "secondary",
+    requiresBackend: false,
+    rationale: "Connection diagnostics, health checks, and recovery route."
+  }),
+  defineRoute({
     path: "/settings/image-generation",
     label: "Image Generation Settings",
     group: "settings",
@@ -684,6 +704,15 @@ export const ROUTE_METADATA = [
     smoke: "manual",
     requiresBackend: true,
     rationale: "Admin landing route for operator-only workflows."
+  }),
+  defineRoute({
+    path: "/admin/server",
+    label: "Server Admin",
+    group: "settings",
+    surface: "admin_operator",
+    availability: webAndExtension,
+    requiresBackend: true,
+    rationale: "Operator server status, user, role, and maintenance route."
   }),
   defineRoute({
     path: "/admin/mlx",
@@ -1023,6 +1052,19 @@ for (const metadata of ROUTE_METADATA) {
   metadataByPath.set(normalizeRoutePath(metadata.path), metadata)
 }
 
+const COMMAND_PALETTE_LABEL_OVERRIDES = new Map<string, string>([
+  ["/chat", "Go to Chat"],
+  ["/knowledge", "Go to Knowledge"],
+  ["/media", "Go to Media"],
+  ["/notes", "Go to Notes"],
+  ["/prompts", "Go to Prompts"],
+  ["/flashcards", "Go to Flashcards"],
+  ["/documentation", "Go to Documentation"],
+  ["/settings", "Go to Settings"],
+  ["/settings/health", "Go to Health & Diagnostics"],
+  ["/mcp-hub", "Go to MCP Hub"]
+])
+
 export function getRouteMetadata(path: string): RouteMetadata | undefined {
   return metadataByPath.get(normalizeRoutePath(path))
 }
@@ -1075,9 +1117,12 @@ export function getCommandPaletteTarget(path: string): string {
 export function getRouteCommandPaletteLabel(
   route: RouteMetadata | string
 ): string {
-  return typeof route === "string"
-    ? getRouteMetadata(route)?.label ?? route
-    : route.label
+  const metadata = typeof route === "string" ? getRouteMetadata(route) : route
+  if (!metadata) return typeof route === "string" ? route : route.label
+  return (
+    COMMAND_PALETTE_LABEL_OVERRIDES.get(normalizeRoutePath(metadata.path)) ??
+    metadata.label
+  )
 }
 
 export function isAuditedRootRoute(path: string): boolean {

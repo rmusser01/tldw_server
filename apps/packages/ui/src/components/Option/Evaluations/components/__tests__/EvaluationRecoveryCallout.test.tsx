@@ -11,6 +11,8 @@ vi.mock("react-i18next", () => ({
     t: (key: string, options?: { defaultValue?: string }) =>
       key === "evaluations:recoveryDefaultMessage"
         ? "Translated recovery default"
+        : key === "common:diagnostics"
+          ? "Diagnostics"
         : options?.defaultValue || key
   })
 }))
@@ -31,6 +33,36 @@ describe("EvaluationRecoveryCallout", () => {
     expect(
       container.querySelector('[data-ds-component="RecoveryCallout"]')
     ).toBeInTheDocument()
+  })
+
+  it("classifies forbidden responses with the shared permission denied state", () => {
+    const { container } = render(
+      <EvaluationRecoveryCallout
+        title="Unable to load evaluations"
+        message="Use an admin account to view evaluations."
+        endpoint="/api/v1/evaluations"
+        response={{
+          ok: false,
+          status: 403,
+          error: { detail: "Missing evals:read scope" }
+        }}
+      />
+    )
+    const recovery = container.querySelector(
+      '[data-ds-component="RecoveryCallout"]'
+    )
+
+    expect(recovery).toBeInTheDocument()
+    expect(screen.getByText("Permission denied")).toBeInTheDocument()
+    expect(screen.getByText("Unable to load evaluations")).toBeInTheDocument()
+    expect(
+      screen.getByText("Use an admin account to view evaluations.")
+    ).toBeInTheDocument()
+    const diagnostics = screen.getByLabelText("Diagnostics")
+    expect(diagnostics).toHaveTextContent("/api/v1/evaluations")
+    expect(diagnostics).toHaveTextContent(
+      "HTTP 403: Missing evals:read scope"
+    )
   })
 
   it("extracts FastAPI detail fields from backend error payloads", () => {

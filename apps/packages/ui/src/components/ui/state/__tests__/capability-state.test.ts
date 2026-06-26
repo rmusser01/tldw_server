@@ -36,14 +36,42 @@ describe("capability-state", () => {
     expect(`${state.title} ${state.message}`).not.toContain(endpoint)
     expect(state.diagnostics).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ label: "Request path", value: endpoint, code: true }),
+        expect.objectContaining({ label: "Request path", value: "[server-endpoint]", code: true }),
         expect.objectContaining({ label: "Status", value: "404" }),
         expect.objectContaining({
           label: "Raw message",
-          value: `Request failed: 404 (GET ${endpoint})`
+          value: "Request failed: 404 (GET [server-endpoint])"
         })
       ])
     )
+  })
+
+  it("sanitizes diagnostic values before rendering recovery details", () => {
+    const state = buildCapabilityState({
+      featureName: "ACP Playground",
+      capabilityName: "ACP session orchestration",
+      endpoint: "/api/v1/acp/health?token=sk_endpoint_secret",
+      method: "GET",
+      serverUrl: "https://server.example.test/api/v1/acp?api_key=sk_server_secret",
+      rawMessage:
+        "Request failed: 500 (GET /api/v1/acp/health) token=sk_raw_secret /Users/alice/private/acp.json",
+      partialErrors: [
+        "Agent registry failed at /api/v1/agents?secret=sk_partial_secret /tmp/agent.log"
+      ]
+    })
+
+    const diagnosticText = state.diagnostics
+      ?.map((diagnostic) => renderedText(diagnostic.value))
+      .join(" ")
+
+    expect(diagnosticText).toContain("[server-endpoint]")
+    expect(diagnosticText).toContain("[server-url]")
+    expect(diagnosticText).toContain("[redacted-path]")
+    expect(diagnosticText).toContain("[redacted-secret]")
+    expect(diagnosticText).not.toContain("/api/v1")
+    expect(diagnosticText).not.toContain("/Users/alice")
+    expect(diagnosticText).not.toContain("/tmp/agent.log")
+    expect(diagnosticText).not.toContain("sk_")
   })
 
   it("maps auth and permission statuses to explicit recovery states", () => {
@@ -108,7 +136,7 @@ describe("capability-state", () => {
     expect(partial.state).toBe("degraded")
     expect(partial.message).not.toContain("/api/v1/watchlists/jobs")
     expect(partial.diagnostics?.map((diagnostic) => renderedText(diagnostic.value)).join(" ")).toContain(
-      "/api/v1/watchlists/jobs"
+      "[server-endpoint]"
     )
   })
 

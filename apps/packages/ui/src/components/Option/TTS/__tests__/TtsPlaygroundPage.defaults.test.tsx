@@ -1,12 +1,11 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import TtsPlaygroundPage from "@/components/Option/TTS/TtsPlaygroundPage"
 
 const DEFAULT_KITTEN_MODEL = "KittenML/kitten-tts-nano-0.8"
-const DEFAULT_KITTEN_VOICE = "Bella"
 
 const ttsSettingsState = vi.hoisted(() => ({
   data: {
@@ -23,6 +22,13 @@ const ttsSettingsState = vi.hoisted(() => ({
     playbackSpeed: 1,
     voice: ""
   } as Record<string, unknown>
+}))
+
+const providerDataState = vi.hoisted(() => ({
+  hasAudio: true,
+  tldwVoiceCatalog: [
+    { id: "Bella", name: "Bella", language: "en" }
+  ]
 }))
 
 vi.mock("@/services/tts", () => ({
@@ -43,12 +49,10 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/hooks/useTtsProviderData", () => ({
   useTtsProviderData: () => ({
-    hasAudio: true,
+    hasAudio: providerDataState.hasAudio,
     providersInfo: null,
     tldwTtsModels: [],
-    tldwVoiceCatalog: [
-      { id: "Bella", name: "Bella", language: "en" }
-    ],
+    tldwVoiceCatalog: providerDataState.tldwVoiceCatalog,
     elevenLabsData: null,
     elevenLabsLoading: false,
     elevenLabsError: null,
@@ -73,6 +77,14 @@ vi.mock("@/hooks/useTtsPlayground", () => ({
   })
 }))
 
+vi.mock("@/hooks/useServerCapabilities", () => ({
+  useServerCapabilities: () => ({
+    capabilities: {
+      ffmpegAvailable: true
+    }
+  })
+}))
+
 vi.mock("@/components/Option/TTS/TtsProviderCatalog", () => ({
   TtsProviderCatalog: () => <div data-testid="provider-catalog" />
 }))
@@ -87,6 +99,10 @@ vi.mock("@/components/Common/PageShell", () => ({
 
 describe("TtsPlaygroundPage defaults", () => {
   beforeEach(() => {
+    providerDataState.hasAudio = true
+    providerDataState.tldwVoiceCatalog = [
+      { id: "Bella", name: "Bella", language: "en" }
+    ]
     ttsSettingsState.data = {
       ttsProvider: "",
       tldwTtsModel: "",
@@ -147,6 +163,64 @@ describe("TtsPlaygroundPage defaults", () => {
 
     expect(
       screen.getByRole("heading", { level: 1, name: "Text to Speech" })
+    ).toBeInTheDocument()
+  })
+
+  it("renders a single shared setup state when the tldw server has no TTS provider", async () => {
+    providerDataState.hasAudio = false
+    providerDataState.tldwVoiceCatalog = []
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false
+        }
+      }
+    })
+
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <TtsPlaygroundPage />
+      </QueryClientProvider>
+    )
+
+    const statePanel = await screen.findByTestId("tts-no-provider-recovery")
+    expect(statePanel).toHaveAttribute("data-ds-component", "StatePanel")
+    expect(
+      screen.getAllByText("No TTS provider detected on your server")
+    ).toHaveLength(1)
+    expect(screen.getByText(/Open Speech Settings/)).toBeInTheDocument()
+    expect(screen.getByText(/Browser/)).toBeInTheDocument()
+    expect(container.querySelectorAll(".ant-alert")).toHaveLength(0)
+  })
+
+  it("keeps Play disabled when tldw server TTS setup is required", async () => {
+    providerDataState.hasAudio = false
+    providerDataState.tldwVoiceCatalog = []
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false
+        }
+      }
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TtsPlaygroundPage />
+      </QueryClientProvider>
+    )
+
+    await screen.findByTestId("tts-no-provider-recovery")
+
+    fireEvent.change(screen.getByTestId("tts-text-input"), {
+      target: { value: "Generate this with server TTS." }
+    })
+
+    expect(screen.getByTestId("tts-play-button")).toBeDisabled()
+    expect(
+      screen.getByText(
+        /Open Speech Settings or switch to Browser TTS before generating audio\./
+      )
     ).toBeInTheDocument()
   })
 })

@@ -82,6 +82,14 @@ const expectDesignSystemAlertForText = async (text: string | RegExp) => {
   return alert as HTMLElement
 }
 
+const expectRecoveryCalloutForText = async (text: string | RegExp) => {
+  const title = await screen.findByText(text)
+  const callout = title.closest('[data-ds-component="RecoveryCallout"]')
+
+  expect(callout).not.toBeNull()
+  return callout as HTMLElement
+}
+
 describe("MonitoringDashboardPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -350,16 +358,26 @@ describe("MonitoringDashboardPage", () => {
 
     render(<MonitoringDashboardPage />)
 
-    await waitFor(() => {
-      expect(screen.getByText("Sandbox diagnostics access denied")).toBeTruthy()
-    })
-    const alert = await expectDesignSystemAlertForText(
+    const callout = await expectRecoveryCalloutForText(
       "Sandbox diagnostics access denied"
     )
-    expect(alert).toHaveAttribute("role", "alert")
+    expect(callout).toHaveAttribute("role", "alert")
+    expect(callout).toHaveTextContent(
+      "You don't have permission to view sandbox runtime diagnostics."
+    )
     expect(screen.queryByText("Sandbox diagnostics unavailable")).toBeNull()
-    expect(screen.getByText(/Request failed: 403/)).toBeTruthy()
-    expect(screen.queryByText(/\/api\/v1\/sandbox\/admin\/runtime-diagnostics/)).toBeNull()
+
+    const diagnostics = within(callout).getByLabelText("Diagnostics")
+    expect(diagnostics).toHaveTextContent("GET")
+    expect(diagnostics).toHaveTextContent("[server-endpoint]")
+    expect(diagnostics).not.toHaveTextContent(
+      "/api/v1/sandbox/admin/runtime-diagnostics"
+    )
+    expect(diagnostics).toHaveTextContent("403")
+    expect(diagnostics).toHaveTextContent("Request failed: 403")
+    expect(
+      within(callout).getByRole("button", { name: "Retry diagnostics" })
+    ).toBeTruthy()
   })
 
   it("renders empty activity feedback through the design-system Alert primitive", async () => {

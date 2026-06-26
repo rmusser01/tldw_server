@@ -21,6 +21,7 @@ import {
 } from "@/utils/provider-registry"
 import { isAutoModelId } from "@/utils/resolve-api-provider"
 import { isConfiguredUsableModel } from "@/hooks/playground/modelSelectorUtils"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 
 interface RefreshResponse {
   ok: boolean
@@ -46,6 +47,9 @@ const getStatusCode = (error: unknown): number | null => {
   }
   return maybeStatus
 }
+
+const formatModelActionError = (error: unknown): string =>
+  sanitizeServerErrorMessage(error, "Unable to complete the model action.")
 
 const getRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null
@@ -380,22 +384,15 @@ export const ModelsBody = () => {
         })
       }
     } catch (e: unknown) {
-      console.error("[tldw] Failed to refresh models", e)
-      const rawMessage = e instanceof Error ? e.message : String(e)
-      const message =
-        rawMessage.length > 200 ? `${rawMessage.slice(0, 197)}...` : rawMessage
+      const safeMessage = formatModelActionError(e)
+      console.error("[tldw] Failed to refresh models", safeMessage)
       notification.error({
         message: t("settings:models.refreshFailed", { defaultValue: "Failed to refresh models" }),
-        description: message
+        description: safeMessage
       })
     } finally {
       setRefreshing(false)
     }
-  }
-
-  const _formatOauthError = (error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error)
-    return message.length > 220 ? `${message.slice(0, 217)}...` : message
   }
 
   const handleOpenAIOauthConnect = useCallback(async () => {
@@ -433,7 +430,7 @@ export const ModelsBody = () => {
           "settings:models.openaiOauth.connectFailed",
           "Failed to start OpenAI OAuth"
         ),
-        description: _formatOauthError(error)
+        description: formatModelActionError(error)
       })
     } finally {
       setOpenaiOauthAction(null)
@@ -466,7 +463,7 @@ export const ModelsBody = () => {
           "settings:models.openaiOauth.refreshFailed",
           "Failed to refresh OpenAI OAuth token"
         ),
-        description: _formatOauthError(error)
+        description: formatModelActionError(error)
       })
     } finally {
       setOpenaiOauthAction(null)
@@ -490,7 +487,7 @@ export const ModelsBody = () => {
           "settings:models.openaiOauth.disconnectFailed",
           "Failed to disconnect OpenAI OAuth"
         ),
-        description: _formatOauthError(error)
+        description: formatModelActionError(error)
       })
     } finally {
       setOpenaiOauthAction(null)
@@ -514,7 +511,7 @@ export const ModelsBody = () => {
           "settings:models.openaiOauth.switchApiKeyFailed",
           "Failed to switch to API key credential"
         ),
-        description: _formatOauthError(error)
+        description: formatModelActionError(error)
       })
     } finally {
       setOpenaiOauthAction(null)

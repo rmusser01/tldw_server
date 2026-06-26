@@ -8,6 +8,7 @@ import {
 } from "@/hooks/useConnectionState"
 import { ConnectionPhase } from "@/types/connection"
 import { useTranslation } from "react-i18next"
+import { getCoreIssueLabel } from "./tldw-connection-status"
 
 export default function HealthSummary() {
   const { t } = useTranslation(["settings"])
@@ -90,20 +91,32 @@ export default function HealthSummary() {
   let issueLabel: string | null = null
   let issueBody: string | null = null
 
-  if (uxState === "error_auth" || errorKind === "auth") {
-    issueLabel = t("healthSummary.issueAuth", "Authentication")
+  if (uxState === "configuring_url" || uxState === "unconfigured") {
+    issueLabel = getCoreIssueLabel(t, "missing_server_url")
+    issueBody = t(
+      "healthSummary.issueMissingServerHint",
+      "Add your tldw server URL in Settings → tldw server, then run diagnostics again."
+    )
+  } else if (uxState === "configuring_auth") {
+    issueLabel = getCoreIssueLabel(t, "missing_api_key")
+    issueBody = t(
+      "healthSummary.issueMissingApiKeyHint",
+      "Add your single-user API key in Settings → tldw server, then run diagnostics again."
+    )
+  } else if (uxState === "error_auth" || errorKind === "auth") {
+    issueLabel = getCoreIssueLabel(t, "invalid_api_key")
     issueBody = t(
       "healthSummary.issueAuthHint",
       "Your server responded but the API key or login is invalid. Fix your credentials in Settings → tldw server, then retry."
     )
   } else if (uxState === "error_unreachable" || errorKind === "unreachable") {
-    issueLabel = t("healthSummary.issueConnectivity", "Connectivity")
+    issueLabel = getCoreIssueLabel(t, "unreachable")
     issueBody = t(
       "healthSummary.issueConnectivityHint",
       "We couldn’t reach your tldw server. Check that it’s running, your browser has site access, and any proxies or firewalls allow the connection."
     )
   } else if (rag === "fail") {
-    issueLabel = t("healthSummary.issueRag", "Knowledge index")
+    issueLabel = getCoreIssueLabel(t, "degraded")
     issueBody = t(
       "healthSummary.issueRagHint",
       "Chat is available, but the knowledge index looks offline. Re-run indexing or inspect RAG components in the detailed diagnostics."

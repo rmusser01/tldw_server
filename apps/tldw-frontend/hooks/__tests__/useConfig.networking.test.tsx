@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const authStorageMocks = vi.hoisted(() => ({
@@ -18,6 +18,8 @@ describe('useConfig networking', () => {
     delete process.env.NEXT_PUBLIC_API_BASE_URL;
     delete process.env.NEXT_PUBLIC_API_VERSION;
     delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE;
+    delete process.env.NEXT_PUBLIC_X_API_KEY;
+    delete process.env.NEXT_PUBLIC_API_BEARER;
   });
 
   it('keeps a relative /api/v1 base in quickstart mode', async () => {
@@ -120,6 +122,103 @@ describe('useConfig networking', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('https://api.example.test/api/v1/config/docs-info', {
       credentials: 'omit',
+    });
+  });
+
+  it('hydrates single-user api keys from the canonical browser config', async () => {
+    process.env.NEXT_PUBLIC_API_URL = 'http://127.0.0.1:8000';
+    localStorage.setItem(
+      'tldwConfig',
+      JSON.stringify({
+        authMode: 'single-user',
+        apiKey: 'stored-api-key',
+        serverUrl: 'http://127.0.0.1:8123',
+      })
+    );
+
+    const { ConfigProvider, useConfig } = await import('@web/hooks/useConfig');
+
+    const { result } = renderHook(() => useConfig(), {
+      wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider>,
+    });
+
+    expect(result.current.config.xApiKey).toBe('stored-api-key');
+    expect(result.current.config.apiBaseHost).toBe('http://127.0.0.1:8123');
+
+    await waitFor(() => {
+      expect(authStorageMocks.setRuntimeApiKey).toHaveBeenLastCalledWith('stored-api-key');
+    });
+  });
+
+  it('persists single-user api keys to canonical and legacy browser storage', async () => {
+    process.env.NEXT_PUBLIC_API_URL = 'http://127.0.0.1:8000';
+    const { ConfigProvider, useConfig } = await import('@web/hooks/useConfig');
+
+    const { result } = renderHook(() => useConfig(), {
+      wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider>,
+    });
+
+    act(() => {
+      result.current.setXApiKey('saved-api-key');
+    });
+
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem('tldwConfig') ?? '{}')).toMatchObject({
+        authMode: 'single-user',
+        apiKey: 'saved-api-key',
+      });
+    });
+    expect(localStorage.getItem('apiKey')).toBe('saved-api-key');
+  });
+
+  it('refreshes live config after settings writes canonical tldw config', async () => {
+    process.env.NEXT_PUBLIC_API_URL = 'http://127.0.0.1:8000';
+    const { ConfigProvider, useConfig } = await import('@web/hooks/useConfig');
+
+    const { result } = renderHook(() => useConfig(), {
+      wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider>,
+    });
+
+    act(() => {
+      localStorage.setItem(
+        'tldwConfig',
+        JSON.stringify({
+          authMode: 'single-user',
+          apiKey: 'event-api-key',
+          serverUrl: 'http://127.0.0.1:8222',
+        })
+      );
+      window.dispatchEvent(new CustomEvent('tldw:config-updated'));
+    });
+
+    await waitFor(() => {
+      expect(result.current.config.xApiKey).toBe('event-api-key');
+      expect(result.current.config.apiBaseHost).toBe('http://127.0.0.1:8222');
+      expect(localStorage.getItem('apiKey')).toBe('event-api-key');
+    });
+  });
+
+  it('keeps environment api keys ahead of stale browser config', async () => {
+    process.env.NEXT_PUBLIC_API_URL = 'http://127.0.0.1:8000';
+    process.env.NEXT_PUBLIC_X_API_KEY = 'env-api-key';
+    localStorage.setItem(
+      'tldwConfig',
+      JSON.stringify({
+        authMode: 'single-user',
+        apiKey: 'stale-browser-key',
+      })
+    );
+
+    const { ConfigProvider, useConfig } = await import('@web/hooks/useConfig');
+
+    const { result } = renderHook(() => useConfig(), {
+      wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider>,
+    });
+
+    expect(result.current.config.xApiKey).toBe('env-api-key');
+
+    await waitFor(() => {
+      expect(authStorageMocks.setRuntimeApiKey).toHaveBeenLastCalledWith('env-api-key');
     });
   });
 });

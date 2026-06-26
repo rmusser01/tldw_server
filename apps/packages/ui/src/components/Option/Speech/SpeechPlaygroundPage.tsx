@@ -27,6 +27,7 @@ import {
 import { AudioSourcePicker } from "@/components/Common/AudioSourcePicker"
 import { PageShell } from "@/components/Common/PageShell"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
+import { StatePanel } from "@/components/ui/state"
 import WaveformCanvas from "@/components/Common/WaveformCanvas"
 import { inferTldwProviderFromModel, resolveTtsProviderContext } from "@/services/tts-provider"
 import { getTtsProviderLabel } from "@/services/tts-providers"
@@ -2958,33 +2959,37 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
 
                     {/* Error banners */}
                     {isTldw && !hasAudio && (
-                      <DesignSystemAlert
-                        variant="warning"
+                      <StatePanel
+                        state="setup_required"
                         title={t(
-                          "playground:tts.serverTtsUnavailableTitle",
-                          "Server text-to-speech is not connected"
+                          "playground:tts.noProviderTitle",
+                          "No TTS provider detected on your server"
                         )}
-                      >
-                        <div className="space-y-3">
+                        message={
                           <span>
                             {t(
-                              "playground:tts.serverTtsUnavailableBody",
-                              "Check the server connection and Speech settings before generating server TTS."
+                              "playground:tts.noProviderDescriptionStart",
+                              "Your tldw server doesn't have a TTS engine configured yet. "
                             )}
-                          </span>
-                          <div>
-                            <Link
-                              to="/settings/speech"
-                              className="inline-flex min-h-8 items-center rounded border border-border px-3 text-xs font-medium text-primary hover:text-primaryStrong"
-                            >
+                            <Link to="/settings/speech">
                               {t(
                                 "playground:tts.openSpeechSettings",
-                                "Open Speech settings"
+                                "Open Speech Settings"
                               )}
                             </Link>
-                          </div>
-                        </div>
-                      </DesignSystemAlert>
+                            {t(
+                              "playground:tts.noProviderDescriptionMiddle",
+                              " to configure one, or switch to "
+                            )}
+                            <strong>Browser</strong>
+                            {t(
+                              "playground:tts.noProviderDescriptionEnd",
+                              " TTS which works without any setup."
+                            )}
+                          </span>
+                        }
+                        data-testid="speech-tts-no-provider-recovery"
+                      />
                     )}
 
                     {showElevenLabsHint && (

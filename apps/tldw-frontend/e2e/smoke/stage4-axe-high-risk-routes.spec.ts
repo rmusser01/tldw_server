@@ -34,6 +34,26 @@ const HIGH_RISK_ROUTES: Stage4HighRiskRoute[] = [
     rationale: 'Primary assistant workflow combines composer, history, and live status controls.',
   },
   {
+    path: '/media',
+    name: 'Media',
+    rationale: 'Primary media library browsing combines search, filters, tables, and ingestion controls.',
+  },
+  {
+    path: '/settings/health',
+    name: 'Health & Diagnostics',
+    rationale: 'Connection diagnostics surface raw status details and recovery actions.',
+  },
+  {
+    path: '/admin/server',
+    name: 'Server Admin',
+    rationale: 'Operator server controls expose privileged status, user, role, and maintenance actions.',
+  },
+  {
+    path: '/scheduled-tasks',
+    name: 'Scheduled Tasks',
+    rationale: 'Automation schedule controls combine status, execution history, and recovery actions.',
+  },
+  {
     path: '/document-workspace',
     name: 'Document Workspace',
     rationale: 'Document editing, import, and export controls combine dense panels and forms.',

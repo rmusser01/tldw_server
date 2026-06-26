@@ -87,17 +87,22 @@ vi.mock("@/db", () => ({
 
 vi.mock("../ChatHeader", () => ({
   ChatHeader: ({
+    onOpenCommandPalette,
     onStartSavedChat,
     onStartTemporaryChat,
     onStartCharacterChat,
     activeCharacterName
   }: {
+    onOpenCommandPalette?: () => void
     onStartSavedChat?: () => void
     onStartTemporaryChat?: () => void
     onStartCharacterChat?: () => void
     activeCharacterName?: string | null
   }) => (
     <div>
+      <button type="button" onClick={() => onOpenCommandPalette?.()}>
+        Open command palette
+      </button>
       {onStartSavedChat ? (
         <button type="button" onClick={() => onStartSavedChat()}>
           New saved chat
@@ -230,5 +235,20 @@ describe("Header character mode sequencing", () => {
     expect(setTemporaryChatMock).toHaveBeenCalledWith(false)
     expect(setTemporaryChatMock).toHaveBeenCalledWith(true)
     expect(clearChatMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("dispatches the global command palette event from the header search trigger", () => {
+    const openListener = vi.fn()
+    window.addEventListener("tldw:open-command-palette", openListener)
+
+    try {
+      render(<Header />)
+
+      fireEvent.click(screen.getByRole("button", { name: "Open command palette" }))
+
+      expect(openListener).toHaveBeenCalledWith(expect.any(CustomEvent))
+    } finally {
+      window.removeEventListener("tldw:open-command-palette", openListener)
+    }
   })
 })

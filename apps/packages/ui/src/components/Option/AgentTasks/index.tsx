@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react"
-import { useTranslation } from "react-i18next"
 import {
   Button,
   Card,
@@ -11,7 +10,6 @@ import {
   Tag,
   Tooltip,
   Form,
-  Collapse,
 } from "antd"
 import {
   FolderPlus,
@@ -36,6 +34,8 @@ import { buildACPSetupIssues, normalizeACPHealthStatus, type ACPSetupIssue } fro
 import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
 import { Alert } from "@/components/ui/primitives/Alert"
 import { Badge as DesignSystemBadge } from "@/components/ui/primitives/Badge"
+import { RecoveryCallout, StatePanel, buildCapabilityState } from "@/components/ui/state"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 
 // Types matching the backend orchestration API
 type CanonicalWorkspaceLink = {
@@ -126,6 +126,13 @@ type ReviewItem = {
 
 type RunSummaryMode = "full" | "redacted"
 
+type RequestFailure = {
+  status?: number
+  rawMessage?: string
+  error?: unknown
+  path?: string
+}
+
 type TaskDetailItem = TaskItem & {
   reviews?: ReviewItem[]
 }
@@ -136,10 +143,10 @@ const AGENT_ORCHESTRATION_UNSUPPORTED_DESCRIPTION =
 const AGENT_ORCHESTRATION_UNSUPPORTED_CODE = "AGENT_ORCHESTRATION_UNSUPPORTED"
 const AGENT_ORCHESTRATION_PROJECTS_PATH = "/api/v1/agent-orchestration/projects"
 const AGENT_ORCHESTRATION_BASE_PATH = "/api/v1/agent-orchestration"
+const ACP_HEALTH_PATH = "/api/v1/acp/health"
 const CANONICAL_WORKSPACE_SOURCE = "research_workspace"
 const ALL_WORKSPACES_FILTER_VALUE = "__all_workspaces__"
 const LINKED_CANONICAL_WORKSPACE_STATUS = "linked"
-
 const STATUS_COLORS: Record<string, string> = {
   todo: "default",
   inprogress: "processing",
@@ -205,6 +212,19 @@ const normalizeListPayload = <T,>(payload: unknown, key: string): T[] => {
   return []
 }
 
+const buildProjectsRequestPath = (
+  workspaceFilterId: string | null
+): string => {
+  if (!workspaceFilterId) {
+    return AGENT_ORCHESTRATION_PROJECTS_PATH
+  }
+  const params = new URLSearchParams({
+    canonical_workspace_id: workspaceFilterId,
+    canonical_workspace_source: CANONICAL_WORKSPACE_SOURCE
+  })
+  return `${AGENT_ORCHESTRATION_PROJECTS_PATH}?${params.toString()}`
+}
+
 const buildProjectsRequestUrl = (
   apiBase: string,
   workspaceFilterId: string | null
@@ -247,12 +267,63 @@ const isUnsupportedError = (error: unknown): boolean =>
       (error as { code?: string }).code === AGENT_ORCHESTRATION_UNSUPPORTED_CODE
   )
 
-const readApiErrorMessage = async (response: Response): Promise<string> => {
-  const payload = await response.json().catch(() => null)
-  if (payload && typeof payload === "object" && typeof (payload as { detail?: unknown }).detail === "string") {
-    return (payload as { detail: string }).detail
+const readJsonOrNull = async (response: Response): Promise<unknown> => {
+  try {
+    return await response.json()
+  } catch {
+    return null
   }
-  return `HTTP ${response.status}`
+}
+
+const messageFromPayload = (payload: unknown): string | undefined => {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return undefined
+  }
+  const record = payload as Record<string, unknown>
+  const candidate = record.detail ?? record.message ?? record.error
+  return typeof candidate === "string" && candidate.trim()
+    ? sanitizeServerErrorMessage(candidate, candidate)
+    : undefined
+}
+
+const failureFromResponse = async (
+  response: Response,
+  fallback: string,
+  path?: string
+): Promise<RequestFailure> => {
+  const payload = await readJsonOrNull(response)
+  return {
+    status: response.status,
+    rawMessage: messageFromPayload(payload) ?? fallback,
+    path
+  }
+}
+
+const failureFromError = (
+  error: unknown,
+  fallback: string,
+  path?: string
+): RequestFailure => {
+  const statusCandidate = error as { status?: unknown; response?: { status?: unknown } }
+  const status =
+    typeof statusCandidate?.status === "number"
+      ? statusCandidate.status
+      : typeof statusCandidate?.response?.status === "number"
+        ? statusCandidate.response.status
+        : undefined
+  const rawMessage = sanitizeServerErrorMessage(error, fallback)
+
+  return {
+    status,
+    rawMessage,
+    error,
+    path
+  }
+}
+
+const readApiErrorMessage = async (response: Response): Promise<string> => {
+  const payload = await readJsonOrNull(response)
+  return messageFromPayload(payload) ?? `HTTP ${response.status}`
 }
 
 const ensureOrchestrationResponse = async (response: Response): Promise<void> => {
@@ -266,7 +337,6 @@ const ensureOrchestrationResponse = async (response: Response): Promise<void> =>
 }
 
 export const AgentTasksPage: React.FC = () => {
-  const { t } = useTranslation(["option", "common"])
   const { config: connectionConfig } = useCanonicalConnectionConfig()
   const location = useLocation()
   const navigate = useNavigate()
@@ -283,6 +353,8 @@ export const AgentTasksPage: React.FC = () => {
   const [taskDetail, setTaskDetail] = useState<TaskDetailItem | null>(null)
   const [taskDetailLoading, setTaskDetailLoading] = useState(false)
   const [projectsLoadedSuccessfully, setProjectsLoadedSuccessfully] = useState(false)
+  const [projectLoadFailure, setProjectLoadFailure] =
+    useState<RequestFailure | null>(null)
   const workspaceFilterId = useMemo(
     () => readWorkspaceFilterFromSearch(location.search),
     [location.search]
@@ -339,6 +411,7 @@ export const AgentTasksPage: React.FC = () => {
   const markUnsupported = useCallback(() => {
     setIsUnsupported(true)
     setError(null)
+    setProjectLoadFailure(null)
     setProjects([])
     setProjectsLoadedSuccessfully(false)
     setTasks([])
@@ -392,7 +465,7 @@ export const AgentTasksPage: React.FC = () => {
       setSetupIssues([])
       return
     }
-    const healthTransport = buildRequestTransport("/api/v1/acp/health")
+    const healthTransport = buildRequestTransport(ACP_HEALTH_PATH)
     if (!healthTransport) {
       return
     }
@@ -420,11 +493,13 @@ export const AgentTasksPage: React.FC = () => {
 
   const fetchProjects = useCallback(async () => {
     if (!apiBase) return
+    const projectsPath = buildProjectsRequestPath(workspaceFilterId)
     const requestId = fetchProjectsRequestIdRef.current + 1
     fetchProjectsRequestIdRef.current = requestId
     const isLatestRequest = () => fetchProjectsRequestIdRef.current === requestId
     setLoading(true)
     setError(null)
+    setProjectLoadFailure(null)
     setProjectsLoadedSuccessfully(false)
     try {
       const supported = await hasOrchestrationSupport()
@@ -437,10 +512,25 @@ export const AgentTasksPage: React.FC = () => {
       const res = await fetch(buildProjectsRequestUrl(apiBase, workspaceFilterId), {
         headers
       })
-      await ensureOrchestrationResponse(res)
+      if (!res.ok) {
+        if (res.status === 404) {
+          throw createUnsupportedError()
+        }
+        const failure = await failureFromResponse(
+          res,
+          `HTTP ${res.status}`,
+          projectsPath
+        )
+        if (!isLatestRequest()) return
+        setIsUnsupported(false)
+        setProjectsLoadedSuccessfully(false)
+        setProjectLoadFailure(failure)
+        return
+      }
       const data = await res.json()
       if (!isLatestRequest()) return
       setIsUnsupported(false)
+      setProjectLoadFailure(null)
       setProjects(normalizeListPayload<ProjectSummary>(data, "projects"))
       setProjectsLoadedSuccessfully(true)
     } catch (err) {
@@ -448,8 +538,11 @@ export const AgentTasksPage: React.FC = () => {
       if (isUnsupportedError(err)) {
         markUnsupported()
       } else {
+        setIsUnsupported(false)
         setProjectsLoadedSuccessfully(false)
-        setError(err instanceof Error ? err.message : "Failed to load projects")
+        setProjectLoadFailure(
+          failureFromError(err, "Failed to load projects", projectsPath)
+        )
       }
     } finally {
       if (isLatestRequest()) {
@@ -788,15 +881,52 @@ export const AgentTasksPage: React.FC = () => {
 
   const selectedProject = filteredProjects.find((p) => p.id === selectedProjectId)
 
+  const unsupportedRecoveryState = useMemo(
+    () =>
+      buildCapabilityState({
+        featureName: "Agent Tasks",
+        capabilityName: "agent orchestration",
+        endpoint: AGENT_ORCHESTRATION_PROJECTS_PATH,
+        method: "GET",
+        serverUrl: connectionConfig?.serverUrl,
+        reason: "unsupported",
+        title: AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE,
+        message: AGENT_ORCHESTRATION_UNSUPPORTED_DESCRIPTION
+      }),
+    [connectionConfig?.serverUrl]
+  )
+
+  const projectLoadRecoveryState = useMemo(
+    () =>
+      projectLoadFailure
+        ? buildCapabilityState({
+            featureName: "Agent tasks",
+            capabilityName: "agent task projects",
+            endpoint: projectLoadFailure.path ?? buildProjectsRequestPath(workspaceFilterId),
+            method: "GET",
+            serverUrl: connectionConfig?.serverUrl,
+            status: projectLoadFailure.status,
+            rawMessage: projectLoadFailure.rawMessage,
+            error: projectLoadFailure.error,
+            title: "Agent tasks could not load",
+            message:
+              "The agent task project list could not be loaded. Try again or open diagnostics."
+          })
+        : null,
+    [connectionConfig?.serverUrl, projectLoadFailure, workspaceFilterId]
+  )
+
   return (
     <div className="space-y-6">
       {isUnsupported && (
-        <Alert
-          variant="warning"
+        <RecoveryCallout
+          state={unsupportedRecoveryState.state}
           title={AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE}
+          message={AGENT_ORCHESTRATION_UNSUPPORTED_DESCRIPTION}
+          diagnostics={unsupportedRecoveryState.diagnostics}
+          data-testid="agent-tasks-unsupported-recovery"
         >
           <AgentTasksSetupDescription
-            body={AGENT_ORCHESTRATION_UNSUPPORTED_DESCRIPTION}
             issues={[
               {
                 code: "orchestration_routes_missing",
@@ -805,35 +935,56 @@ export const AgentTasksPage: React.FC = () => {
               }
             ]}
           />
-        </Alert>
+        </RecoveryCallout>
       )}
       {!isUnsupported && setupIssues.length > 0 && (
-        <Alert
-          variant="warning"
+        <StatePanel
+          state="setup_required"
           title="ACP setup needs attention"
+          message={
+            setupLoading
+              ? "Checking ACP setup state..."
+              : "Resolve these ACP setup items before dispatching production task runs."
+          }
+          data-testid="agent-tasks-acp-setup-state"
         >
-          <AgentTasksSetupDescription
-            body={
-              setupLoading
-                ? "Checking ACP setup state..."
-                : "Resolve these ACP setup items before dispatching production task runs."
-            }
-            issues={setupIssues}
-          />
-        </Alert>
+          <AgentTasksSetupDescription issues={setupIssues} />
+        </StatePanel>
       )}
       {!isUnsupported && workspaceSetupIssues.length > 0 && (
-        <Alert
-          variant="warning"
+        <StatePanel
+          state="setup_required"
           title="Workspace setup needs attention"
+          message="Resolve these workspace setup items before dispatching task runs."
+          data-testid="agent-tasks-workspace-setup-state"
         >
           <AgentTasksSetupDescription
-            body="Resolve these workspace setup items before dispatching task runs."
             issues={workspaceSetupIssues}
             showAgentRegistry={false}
             showResearchWorkspace
           />
-        </Alert>
+        </StatePanel>
+      )}
+      {!isUnsupported && projectLoadRecoveryState && (
+        <RecoveryCallout
+          state={projectLoadRecoveryState.state}
+          title={projectLoadRecoveryState.title}
+          message={projectLoadRecoveryState.message}
+          diagnostics={projectLoadRecoveryState.diagnostics}
+          primaryAction={{
+            label: "Try again",
+            onClick: () => {
+              void fetchProjects()
+            }
+          }}
+          secondaryActions={[
+            {
+              label: "Dismiss",
+              onClick: () => setProjectLoadFailure(null)
+            }
+          ]}
+          data-testid="agent-tasks-projects-load-recovery"
+        />
       )}
       {error && (
         <Alert
@@ -1120,7 +1271,7 @@ export const AgentTasksPage: React.FC = () => {
 }
 
 const AgentTasksSetupDescription: React.FC<{
-  body: string
+  body?: string
   issues: ACPSetupIssue[]
   showAgentRegistry?: boolean
   showResearchWorkspace?: boolean
@@ -1131,7 +1282,7 @@ const AgentTasksSetupDescription: React.FC<{
   showResearchWorkspace = false
 }) => (
   <div className="space-y-3">
-    <div>{body}</div>
+    {body ? <div>{body}</div> : null}
     <ul className="m-0 space-y-2 pl-4">
       {issues.map((issue) => (
         <li key={issue.code}>

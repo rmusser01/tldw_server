@@ -1,6 +1,10 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
-import { RecoveryCallout, type StateAction } from "@/components/ui/state"
+import {
+  RecoveryCallout,
+  buildCapabilityState,
+  type StateAction
+} from "@/components/ui/state"
 
 type ApiResponseLike = {
   ok?: boolean
@@ -80,6 +84,14 @@ export const EvaluationRecoveryCallout: React.FC<EvaluationRecoveryCalloutProps>
 }) => {
   const { t } = useTranslation()
   const detail = getEvaluationRecoveryDetail(error, response)
+  const capabilityState = buildCapabilityState({
+    featureName: "Evaluations",
+    capabilityName: "Evaluations API",
+    endpoint,
+    status: response?.status,
+    error,
+    rawMessage: detail ?? undefined
+  })
   const diagnostics = [
     {
       label: t("evaluations:recoveryRequestPathLabel", {
@@ -101,7 +113,7 @@ export const EvaluationRecoveryCallout: React.FC<EvaluationRecoveryCalloutProps>
 
   return (
     <RecoveryCallout
-      state="unavailable"
+      state={capabilityState.state}
       title={title}
       message={
         message ??

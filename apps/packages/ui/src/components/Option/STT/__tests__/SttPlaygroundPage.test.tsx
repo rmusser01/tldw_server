@@ -22,11 +22,13 @@ const storageValues: Record<string, unknown> = {
 
 let comparisonPanelProps: Record<string, unknown> | null = null
 let recordingStripProps: Record<string, unknown> | null = null
+let historyPanelProps: Record<string, unknown> | null = null
 const {
   getTranscriptionModelsMock,
   getTranscriptionModelHealthMock,
   transcribeAudioMock,
   createNoteMock,
+  getSttRecordingMock,
   notificationErrorMock,
   notificationSuccessMock,
   isTimeoutLikeErrorMock,
@@ -37,6 +39,7 @@ const {
   getTranscriptionModelHealthMock: vi.fn(),
   transcribeAudioMock: vi.fn(),
   createNoteMock: vi.fn(),
+  getSttRecordingMock: vi.fn(),
   notificationErrorMock: vi.fn(),
   notificationSuccessMock: vi.fn(),
   isTimeoutLikeErrorMock: vi.fn(),
@@ -45,7 +48,7 @@ const {
     current: null as null | {
       kind: string
       currentConfig: Record<string, unknown>
-      onApply: (config: Record<string, unknown>, preset: any) => void
+      onApply: (config: Record<string, unknown>, preset: unknown) => void
     }
   }
 }))
@@ -116,16 +119,17 @@ vi.mock("../ComparisonPanel", () => ({
 }))
 
 vi.mock("../HistoryPanel", () => ({
-  HistoryPanel: (_props: Record<string, unknown>) => (
-    <div data-testid="history-panel" />
-  )
+  HistoryPanel: (props: Record<string, unknown>) => {
+    historyPanelProps = props
+    return <div data-testid="history-panel" />
+  }
 }))
 
 vi.mock("@/components/Option/Audio/AudioPresetControls", () => ({
   AudioPresetControls: (props: {
     kind: string
     currentConfig: Record<string, unknown>
-    onApply: (config: Record<string, unknown>, preset: any) => void
+    onApply: (config: Record<string, unknown>, preset: unknown) => void
   }) => {
     audioPresetControlPropsRef.current = props
     return (
@@ -155,7 +159,7 @@ vi.mock("@/components/Option/Audio/AudioPresetControls", () => ({
 
 vi.mock("@/db/dexie/stt-recordings", () => ({
   saveSttRecording: vi.fn().mockResolvedValue("rec-1"),
-  getSttRecording: vi.fn(),
+  getSttRecording: (...args: unknown[]) => getSttRecordingMock(...args),
   deleteSttRecording: vi.fn()
 }))
 
@@ -167,6 +171,8 @@ describe("SttPlaygroundPage", () => {
   beforeEach(() => {
     comparisonPanelProps = null
     recordingStripProps = null
+    historyPanelProps = null
+    storageValues.sttComparisonHistory = []
     getTranscriptionModelsMock.mockReset()
     getTranscriptionModelsMock.mockResolvedValue({
       categories: {
@@ -199,6 +205,8 @@ describe("SttPlaygroundPage", () => {
     transcribeAudioMock.mockResolvedValue({ text: "test" })
     createNoteMock.mockReset()
     createNoteMock.mockResolvedValue({})
+    getSttRecordingMock.mockReset()
+    getSttRecordingMock.mockResolvedValue(null)
     notificationErrorMock.mockReset()
     notificationSuccessMock.mockReset()
     isTimeoutLikeErrorMock.mockReset()
@@ -416,8 +424,12 @@ describe("SttPlaygroundPage", () => {
     expect(handledSpace.defaultPrevented).toBe(true)
   })
 
-  it("preserves transcript text when saving to notes fails", async () => {
-    createNoteMock.mockRejectedValueOnce(new Error("Notes database unavailable"))
+  it("sanitizes save-to-notes failure notifications", async () => {
+    createNoteMock.mockRejectedValueOnce(
+      new Error(
+        "Request failed: 500 (POST /api/v1/notes) token=sk_secret_inline Authorization: Bearer sk-secret-inline /Users/alice/private/stt-note.json"
+      )
+    )
     render(<SttPlaygroundPage />)
 
     await waitFor(() => expect(comparisonPanelProps).not.toBeNull())
@@ -445,8 +457,67 @@ describe("SttPlaygroundPage", () => {
     expect(notificationErrorMock).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Error",
-        description: "Notes database unavailable"
+        description: expect.stringContaining("POST [server-endpoint]")
       })
     )
+    const payload = notificationErrorMock.mock.calls.at(-1)?.[0] as {
+      description?: string
+    }
+    expect(payload.description).toContain("[redacted-secret]")
+    expect(payload.description).toContain("[redacted-path]")
+    expect(payload.description).not.toContain("/api/v1/notes")
+    expect(payload.description).not.toContain("sk_secret_inline")
+    expect(payload.description).not.toContain("sk-secret-inline")
+    expect(payload.description).not.toContain("/Users/alice")
+  })
+
+  it("sanitizes recording history load failure notifications", async () => {
+    storageValues.sttComparisonHistory = [
+      {
+        id: "hist-1",
+        recordingId: "recording-1",
+        createdAt: "2026-06-26T12:00:00.000Z",
+        durationMs: 1200,
+        results: [
+          {
+            model: "whisper-1",
+            text: "Existing transcript"
+          }
+        ]
+      }
+    ]
+    getSttRecordingMock.mockRejectedValueOnce(
+      new Error(
+        "IndexedDB read failed (GET /api/v1/audio/transcriptions/history) secret=sk-history-secret /home/alice/stt-recording.webm"
+      )
+    )
+
+    render(<SttPlaygroundPage />)
+
+    await waitFor(() => expect(historyPanelProps).not.toBeNull())
+    const [entry] = historyPanelProps?.entries as Array<Record<string, unknown>>
+
+    await act(async () => {
+      await (
+        historyPanelProps?.onRecompare as (
+          entry: Record<string, unknown>
+        ) => Promise<void>
+      )(entry)
+    })
+
+    expect(notificationErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Error",
+        description: expect.stringContaining("GET [server-endpoint]")
+      })
+    )
+    const payload = notificationErrorMock.mock.calls.at(-1)?.[0] as {
+      description?: string
+    }
+    expect(payload.description).toContain("[redacted-secret]")
+    expect(payload.description).toContain("[redacted-path]")
+    expect(payload.description).not.toContain("/api/v1/audio/transcriptions/history")
+    expect(payload.description).not.toContain("sk-history-secret")
+    expect(payload.description).not.toContain("/home/alice")
   })
 })

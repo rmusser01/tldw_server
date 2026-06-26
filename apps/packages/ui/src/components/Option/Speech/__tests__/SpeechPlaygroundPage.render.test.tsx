@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 type QueryOptions = {
@@ -170,6 +170,21 @@ vi.mock("@tanstack/react-query", () => ({
 vi.mock("@/components/Common/PageShell", () => ({
   PageShell: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="speech-page-shell">{children}</div>
+  ),
+}))
+
+vi.mock("react-router-dom", () => ({
+  Link: ({
+    to,
+    children,
+    ...props
+  }: {
+    to: string
+    children: React.ReactNode
+  }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
   ),
 }))
 
@@ -599,6 +614,36 @@ describe("SpeechPlaygroundPage", () => {
       "Open Settings -> Speech"
     )
     expect(screen.getByDisplayValue("Draft narration remains editable")).toBeInTheDocument()
+  })
+
+  it("renders a shared setup state when server TTS has no provider", (): void => {
+    ttsSettingsRef.current = {
+      ...ttsSettingsRef.current,
+      ttsProvider: "tldw",
+      tldwTtsModel: "KittenML/kitten-tts-nano-0.8",
+      tldwTtsVoice: "Bella",
+    }
+    ttsProviderDataRef.current = {
+      ...ttsProviderDataRef.current,
+      hasAudio: false,
+      providersInfo: null,
+    }
+
+    const { container } = render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+
+    const statePanel = screen.getByTestId("speech-tts-no-provider-recovery")
+    expect(statePanel).toHaveAttribute("data-ds-component", "StatePanel")
+    expect(
+      screen.getAllByText("No TTS provider detected on your server")
+    ).toHaveLength(1)
+    expect(within(statePanel).getByText(/Open Speech Settings/)).toBeInTheDocument()
+    expect(within(statePanel).getByText(/Browser/)).toBeInTheDocument()
+    expect(screen.getByTestId("tts-provider-strip")).toHaveAttribute(
+      "data-provider",
+      "tldw"
+    )
+    expect(screen.getByTestId("tts-play-button")).toBeDisabled()
+    expect(container.querySelectorAll('[data-ds-component="Alert"]')).toHaveLength(0)
   })
 
   it("disables server TTS generation when the selected provider is not reported", (): void => {

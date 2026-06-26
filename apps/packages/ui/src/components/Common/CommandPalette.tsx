@@ -24,7 +24,6 @@ import {
   Eye,
   BrainCircuit,
   Activity,
-  X,
   Command,
   ArrowRight,
 } from "lucide-react"
@@ -116,12 +115,14 @@ export function CommandPalette({
   registerGlobalOpenShortcut = true,
   listenForOpenEvents = true,
 }: CommandPaletteProps) {
-  const [open, setOpen] = useState(() => (openSignal ?? 0) > 0)
+  const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [selectedIndex, setSelectedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
-  const lastOpenSignalRef = useRef(openSignal ?? 0)
+  const lastOpenSignalRef = useRef(0)
+  const focusReturnRef = useRef<HTMLElement | null>(null)
+  const wasOpenRef = useRef(false)
   const location = useLocation()
   const navigate = useNavigate()
   const { t } = useTranslation(["common", "settings"])
@@ -129,8 +130,29 @@ export function CommandPalette({
   const shortcutEnabled = location.pathname !== RESEARCH_WORKSPACE_PATH
   const { shortcuts: configuredShortcuts } = useShortcutConfig()
 
+  const rememberFocusBeforeOpen = useCallback(() => {
+    if (typeof document === "undefined") {
+      focusReturnRef.current = null
+      return
+    }
+    const activeElement = document.activeElement
+    focusReturnRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : null
+  }, [])
+
   const openPalette = useCallback(() => {
-    setOpen(true)
+    setOpen((currentOpen) => {
+      if (!currentOpen) {
+        rememberFocusBeforeOpen()
+      }
+      return true
+    })
+  }, [rememberFocusBeforeOpen])
+
+  const closePalette = useCallback(() => {
+    setOpen(false)
   }, [])
 
   // Register Cmd/Ctrl+K shortcut to open
@@ -160,30 +182,46 @@ export function CommandPalette({
   useShortcut({
     key: "Escape",
     modifiers: [],
-    action: () => setOpen(false),
+    action: closePalette,
     description: "Close command palette",
     allowInInput: true,
     enabled: open,
-  })
+  }, [closePalette, open])
 
   useIsomorphicLayoutEffect(() => {
     if (!listenForOpenEvents) {
       return
     }
-    const handleOpen = () => setOpen(true)
+    const handleOpen = () => openPalette()
     window.addEventListener("tldw:open-command-palette", handleOpen)
     return () => {
       window.removeEventListener("tldw:open-command-palette", handleOpen)
     }
-  }, [listenForOpenEvents])
+  }, [listenForOpenEvents, openPalette])
 
   useEffect(() => {
     const currentOpenSignal = openSignal ?? 0
     if (currentOpenSignal > lastOpenSignalRef.current) {
+      if (!open) {
+        rememberFocusBeforeOpen()
+      }
       setOpen(true)
     }
     lastOpenSignalRef.current = currentOpenSignal
-  }, [openSignal])
+  }, [open, openSignal, rememberFocusBeforeOpen])
+
+  useEffect(() => {
+    if (wasOpenRef.current && !open) {
+      const focusTarget = focusReturnRef.current
+      focusReturnRef.current = null
+      window.setTimeout(() => {
+        if (focusTarget?.isConnected) {
+          focusTarget.focus()
+        }
+      }, 0)
+    }
+    wasOpenRef.current = open
+  }, [open])
 
   // Build default commands
   const defaultCommands: CommandItem[] = useMemo(() => {
@@ -698,7 +736,7 @@ export function CommandPalette({
       {/* Backdrop */}
       <div
         className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
-        onClick={() => setOpen(false)}
+        onClick={closePalette}
       />
 
       {/* Palette */}
@@ -717,6 +755,7 @@ export function CommandPalette({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            aria-label={t("common:commandPalette.searchCommands", "Search commands")}
             placeholder={t("common:commandPalette.placeholder", "Type a command or search...")}
             className={cn(
               "flex-1 rounded-md bg-transparent text-base text-text placeholder:text-text-subtle",

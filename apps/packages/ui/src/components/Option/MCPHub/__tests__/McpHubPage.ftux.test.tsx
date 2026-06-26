@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
@@ -38,18 +39,45 @@ vi.mock("../CapabilityMappingsTab", () => ({
   CapabilityMappingsTab: () => <div>capability mappings tab</div>
 }))
 
+const serviceMocks = vi.hoisted(() => ({
+  getToolRegistrySummary: vi.fn()
+}))
+
+vi.mock("@/services/tldw/mcp-hub", () => ({
+  getToolRegistrySummary: serviceMocks.getToolRegistrySummary
+}))
+
 import { McpHubPage } from "../McpHubPage"
 
-const renderMcpHubPage = () =>
-  render(
-    <MemoryRouter initialEntries={["/mcp-hub"]}>
-      <McpHubPage />
-    </MemoryRouter>
+const renderMcpHubPage = () => {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false
+      }
+    }
+  })
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/mcp-hub"]}>
+        <McpHubPage />
+      </MemoryRouter>
+    </QueryClientProvider>
   )
+}
 
 describe("McpHubPage FTUX", () => {
   beforeEach(() => {
     localStorage.clear()
+    serviceMocks.getToolRegistrySummary.mockResolvedValue({
+      total_tools: 0,
+      modules: []
+    })
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
   })
 
   it("renders the subtitle with Model Context Protocol text", () => {

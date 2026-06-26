@@ -30,7 +30,7 @@ export const sanitizeServerErrorMessage = (
     /\b(GET|POST|PUT|PATCH|DELETE)\s+\/api\/v1\/[^\s)]+/gi,
     "$1 [server-endpoint]"
   )
-  cleaned = cleaned.replace(/\b\/api\/v1\/[^\s)]+/gi, "[server-endpoint]")
+  cleaned = cleaned.replace(/\/api\/v1\/[^\s)]+/gi, "[server-endpoint]")
   cleaned = cleaned.replace(/\bhttps?:\/\/[^\s)]+/gi, "[server-url]")
 
   cleaned = cleaned.replace(
@@ -40,6 +40,18 @@ export const sanitizeServerErrorMessage = (
   cleaned = cleaned.replace(
     /[A-Za-z]:\\(?:[^\\\s]+\\)+[^\\\s)]+/g,
     "[redacted-path]"
+  )
+  cleaned = cleaned.replace(
+    /\b([A-Za-z0-9_-]*(?:token|api[_-]?key|secret|password|authorization))\s*=\s*([^\s)]+)/gi,
+    "$1=[redacted-secret]"
+  )
+  cleaned = cleaned.replace(
+    /\bBearer\s+[A-Za-z0-9._~+/_=-]{6,}\b/gi,
+    "Bearer [redacted-secret]"
+  )
+  cleaned = cleaned.replace(
+    /\b(?:sk|rk|pk|api|token)[_-][A-Za-z0-9_-]{6,}\b/g,
+    "[redacted-secret]"
   )
 
   if (cleaned.length > MAX_ERROR_LENGTH) {

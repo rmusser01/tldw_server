@@ -71,11 +71,6 @@ const expectedShortcutLabel = (shortcut: {
     modifiers: toCommandModifiers(shortcut)
   })
 
-const LocationProbe = () => {
-  const location = useLocation()
-  return <span data-testid="current-route">{location.pathname}</span>
-}
-
 describe("CommandPalette shortcut hints", () => {
   const LocationProbe = () => {
     const location = useLocation()
@@ -246,6 +241,74 @@ describe("CommandPalette shortcut hints", () => {
     fireEvent.keyDown(window, { key: "k", ctrlKey: true })
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
+  })
+
+  it("focuses the palette search field and restores focus to the event opener on Escape", async () => {
+    render(
+      <MemoryRouter>
+        <button type="button">Open palette from header</button>
+        <CommandPalette
+          onNewChat={vi.fn()}
+          onToggleRag={vi.fn()}
+          onToggleWebSearch={vi.fn()}
+          onIngestPage={vi.fn()}
+          onSwitchModel={vi.fn()}
+          onToggleSidebar={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    const opener = screen.getByRole("button", { name: "Open palette from header" })
+    opener.focus()
+
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+
+    const searchInput = await screen.findByRole("textbox", {
+      name: "Search commands"
+    })
+    expect(searchInput).toHaveFocus()
+
+    fireEvent.keyDown(searchInput, { key: "k", ctrlKey: true })
+    expect(searchInput).toHaveFocus()
+
+    fireEvent.keyDown(document, { key: "Escape" })
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    )
+    await waitFor(() => expect(opener).toHaveFocus())
+  })
+
+  it("restores focus to the keyboard shortcut opener after closing", async () => {
+    render(
+      <MemoryRouter>
+        <input aria-label="composer" />
+        <CommandPalette
+          onNewChat={vi.fn()}
+          onToggleRag={vi.fn()}
+          onToggleWebSearch={vi.fn()}
+          onIngestPage={vi.fn()}
+          onSwitchModel={vi.fn()}
+          onToggleSidebar={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    const composer = screen.getByRole("textbox", { name: "composer" })
+    composer.focus()
+
+    fireEvent.keyDown(composer, { key: "k", ctrlKey: true })
+
+    expect(
+      await screen.findByRole("textbox", { name: "Search commands" })
+    ).toHaveFocus()
+
+    fireEvent.keyDown(document, { key: "Escape" })
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    )
+    await waitFor(() => expect(composer).toHaveFocus())
   })
 
   it("routes the Go to Chat command to the chat page", async () => {

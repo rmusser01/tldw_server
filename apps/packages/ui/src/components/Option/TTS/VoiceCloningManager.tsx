@@ -26,6 +26,7 @@ import {
 } from "@/services/tldw/voice-cloning"
 import { normalizeTtsProviderKey, toServerTtsProviderKey } from "@/services/tldw/tts-provider-keys"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 
 const { Text, Paragraph } = Typography
 
@@ -189,7 +190,7 @@ export const VoiceCloningManager: React.FC<VoiceCloningManagerProps> = ({
     onError: (error: unknown) => {
       notification.error({
         message: "Voice upload failed",
-        description: error instanceof Error ? error.message : "Unable to upload voice sample."
+        description: sanitizeServerErrorMessage(error, "Unable to upload voice sample.")
       })
     }
   })
@@ -211,7 +212,7 @@ export const VoiceCloningManager: React.FC<VoiceCloningManagerProps> = ({
     onError: (error: unknown) => {
       notification.error({
         message: "Voice encoding failed",
-        description: error instanceof Error ? error.message : "Unable to encode voice."
+        description: sanitizeServerErrorMessage(error, "Unable to encode voice.")
       })
     }
   })
@@ -229,7 +230,7 @@ export const VoiceCloningManager: React.FC<VoiceCloningManagerProps> = ({
     onError: (error: unknown) => {
       notification.error({
         message: "Delete failed",
-        description: error instanceof Error ? error.message : "Unable to delete voice."
+        description: sanitizeServerErrorMessage(error, "Unable to delete voice.")
       })
     }
   })
@@ -263,7 +264,7 @@ export const VoiceCloningManager: React.FC<VoiceCloningManagerProps> = ({
     } catch (error: unknown) {
       notification.error({
         message: "Preview failed",
-        description: error instanceof Error ? error.message : "Unable to generate preview."
+        description: sanitizeServerErrorMessage(error, "Unable to generate preview.")
       })
     } finally {
       setPreviewingId(null)

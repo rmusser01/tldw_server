@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -9,6 +10,12 @@ const mocks = vi.hoisted(() => ({
   fetchChatModels: vi.fn(),
   getOpenAIOAuthStatus: vi.fn(),
   listUserProviderKeys: vi.fn(),
+  startOpenAIOAuthAuthorize: vi.fn(),
+  sendMessage: vi.fn(),
+  warmCache: vi.fn(),
+  notificationError: vi.fn(),
+  notificationInfo: vi.fn(),
+  notificationSuccess: vi.fn(),
   selectedModelSetter: vi.fn(),
   defaultProviderSetter: vi.fn(),
 }))
@@ -40,9 +47,9 @@ vi.mock("@plasmohq/storage/hook", () => ({
 
 vi.mock("@/hooks/useAntdNotification", () => ({
   useAntdNotification: () => ({
-    error: vi.fn(),
-    info: vi.fn(),
-    success: vi.fn()
+    error: (...args: unknown[]) => mocks.notificationError(...args),
+    info: (...args: unknown[]) => mocks.notificationInfo(...args),
+    success: (...args: unknown[]) => mocks.notificationSuccess(...args)
   })
 }))
 
@@ -56,20 +63,21 @@ vi.mock("@/services/tldw", () => ({
       mocks.getOpenAIOAuthStatus(...args),
     listUserProviderKeys: (...args: unknown[]) =>
       mocks.listUserProviderKeys(...args),
-    startOpenAIOAuthAuthorize: vi.fn(),
+    startOpenAIOAuthAuthorize: (...args: unknown[]) =>
+      mocks.startOpenAIOAuthAuthorize(...args),
     refreshOpenAIOAuth: vi.fn(),
     disconnectOpenAIOAuth: vi.fn(),
     switchOpenAICredentialSource: vi.fn(),
   },
   tldwModels: {
-    warmCache: vi.fn()
+    warmCache: (...args: unknown[]) => mocks.warmCache(...args)
   }
 }))
 
 vi.mock("wxt/browser", () => ({
   browser: {
     runtime: {
-      sendMessage: vi.fn()
+      sendMessage: (...args: unknown[]) => mocks.sendMessage(...args)
     }
   }
 }))
@@ -128,6 +136,11 @@ describe("ModelsBody", () => {
         }
       ]
     })
+    mocks.startOpenAIOAuthAuthorize.mockResolvedValue({
+      auth_url: "https://example.test/oauth"
+    })
+    mocks.sendMessage.mockResolvedValue({ ok: true })
+    mocks.warmCache.mockResolvedValue(undefined)
   })
 
   it("puts defaults and provider readiness before the full catalog", async () => {
@@ -181,5 +194,77 @@ describe("ModelsBody", () => {
     renderModelsBody()
 
     expect(await screen.findByText("Unable to load account keys")).toBeInTheDocument()
+  })
+
+  it("sanitizes refresh failure notifications before showing them", async () => {
+    const user = userEvent.setup()
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    mocks.sendMessage.mockResolvedValue({ ok: false })
+    mocks.warmCache.mockRejectedValue(
+      new Error(
+        "Request failed: 500 (GET /api/v1/llm/models/metadata) token=sk_secret_inline Authorization: Bearer sk-secret-inline /Users/alice/private/model-cache.json"
+      )
+    )
+
+    try {
+      renderModelsBody()
+
+      await screen.findByText("Set your defaults")
+      await user.click(screen.getByRole("button", { name: "Refresh" }))
+
+      await waitFor(() => {
+        expect(mocks.notificationError).toHaveBeenCalled()
+      })
+      const payload = mocks.notificationError.mock.calls.at(-1)?.[0] as {
+        description?: string
+      }
+      const consoleOutput = consoleError.mock.calls
+        .flatMap((call) =>
+          call.map((entry) => entry instanceof Error ? entry.message : String(entry))
+        )
+        .join("\n")
+
+      expect(payload.description).toContain("GET [server-endpoint]")
+      expect(payload.description).toContain("[redacted-secret]")
+      expect(payload.description).toContain("[redacted-path]")
+      expect(payload.description).not.toContain("/api/v1/llm/models/metadata")
+      expect(payload.description).not.toContain("sk_secret_inline")
+      expect(payload.description).not.toContain("sk-secret-inline")
+      expect(payload.description).not.toContain("/Users/alice")
+      expect(consoleOutput).toContain("GET [server-endpoint]")
+      expect(consoleOutput).not.toContain("/api/v1/llm/models/metadata")
+      expect(consoleOutput).not.toContain("sk_secret_inline")
+      expect(consoleOutput).not.toContain("sk-secret-inline")
+      expect(consoleOutput).not.toContain("/Users/alice")
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
+  it("sanitizes OpenAI OAuth action failure notifications", async () => {
+    const user = userEvent.setup()
+    mocks.startOpenAIOAuthAuthorize.mockRejectedValue(
+      new Error(
+        "OAuth failed: POST /api/v1/openai/oauth/authorize api_key=sk-oauth-secret /home/alice/.config/openai.json"
+      )
+    )
+
+    renderModelsBody()
+
+    await user.click(await screen.findByRole("button", { name: "Connect OpenAI" }))
+
+    await waitFor(() => {
+      expect(mocks.notificationError).toHaveBeenCalled()
+    })
+    const payload = mocks.notificationError.mock.calls.at(-1)?.[0] as {
+      description?: string
+    }
+
+    expect(payload.description).toContain("POST [server-endpoint]")
+    expect(payload.description).toContain("api_key=[redacted-secret]")
+    expect(payload.description).toContain("[redacted-path]")
+    expect(payload.description).not.toContain("/api/v1/openai/oauth/authorize")
+    expect(payload.description).not.toContain("sk-oauth-secret")
+    expect(payload.description).not.toContain("/home/alice")
   })
 })

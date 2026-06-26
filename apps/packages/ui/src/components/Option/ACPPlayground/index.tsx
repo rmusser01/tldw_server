@@ -13,6 +13,12 @@ import { useACPSessionsStore } from "@/store/acp-sessions"
 import type { ACPPermissionTier } from "@/services/acp/types"
 import { ACPPlaygroundHeader } from "./ACPPlaygroundHeader"
 import { ACPChatPanel } from "./ACPChatPanel"
+import {
+  ACPPlaygroundRecovery,
+  normalizeACPHealthSnapshot,
+  shouldShowAcpPlaygroundRecovery,
+  type ACPHealthSnapshot
+} from "./ACPPlaygroundRecovery"
 
 const ACPSessionPanel = React.lazy(() =>
   import("./ACPSessionPanel").then((module) => ({ default: module.ACPSessionPanel }))
@@ -118,7 +124,11 @@ export const ACPPlayground: React.FC = () => {
   // Include the server URL in the query key so changing the ACP server
   // configuration invalidates the cached health status.
   const acpServerUrl = connectionConfig?.serverUrl ?? ""
-  const { data: healthData, isLoading: isHealthLoading } = useQuery({
+  const {
+    data: healthData,
+    isLoading: isHealthLoading,
+    refetch: refetchACPHealth
+  } = useQuery<ACPHealthSnapshot>({
     queryKey: ["acp", "health", acpServerUrl],
     queryFn: async () => {
       try {
@@ -128,9 +138,25 @@ export const ACPPlayground: React.FC = () => {
             headers: buildACPAuthHeaders(connectionConfig),
           }
         )
-        return resp.ok ? await resp.json() : { overall: "unavailable" }
-      } catch {
-        return { overall: "unavailable" }
+        let payload: unknown = null
+        try {
+          payload = await resp.json()
+        } catch {
+          payload = null
+        }
+        return resp.ok
+          ? normalizeACPHealthSnapshot(payload)
+          : normalizeACPHealthSnapshot(payload, {
+              overall: "unavailable",
+              status: resp.status,
+              rawMessage: `ACP health returned HTTP ${resp.status}`
+            })
+      } catch (error) {
+        return normalizeACPHealthSnapshot(null, {
+          overall: "unavailable",
+          rawMessage:
+            error instanceof Error ? error.message : "Failed to reach ACP health"
+        })
       }
     },
     enabled: !!connectionConfig,
@@ -338,9 +364,19 @@ export const ACPPlayground: React.FC = () => {
     }
   }
 
-  const pendingPermissions = activeSession?.pendingPermissions ?? []
+  const pendingPermissions = React.useMemo(
+    () => activeSession?.pendingPermissions ?? [],
+    [activeSession?.pendingPermissions]
+  )
   const hasPendingPermissions = pendingPermissions.length > 0
-  const panelFallback = <div className="py-6" data-testid="acp-panel-loading" />
+  const panelFallback = React.useMemo(
+    () => <div className="py-6" data-testid="acp-panel-loading" />,
+    []
+  )
+  const showAcpRecovery = shouldShowAcpPlaygroundRecovery({
+    healthData,
+    isHealthLoading
+  })
 
   const handleApprovePermission = React.useCallback((requestId: string, batchApproveTier?: ACPPermissionTier) => {
     try {
@@ -370,7 +406,7 @@ export const ACPPlayground: React.FC = () => {
         <ACPSessionPanel {...props} />
       </Suspense>
     ),
-    []
+    [panelFallback]
   )
 
   const renderAcpToolsPanel = React.useCallback(
@@ -379,7 +415,7 @@ export const ACPPlayground: React.FC = () => {
         <ACPToolsPanel {...props} />
       </Suspense>
     ),
-    []
+    [panelFallback]
   )
 
   const renderAcpWorkspacePanel = React.useCallback(
@@ -388,7 +424,7 @@ export const ACPPlayground: React.FC = () => {
         <ACPWorkspacePanel />
       </Suspense>
     ),
-    []
+    [panelFallback]
   )
 
   const renderAcpPermissionModal = React.useCallback(
@@ -467,6 +503,32 @@ export const ACPPlayground: React.FC = () => {
       children: renderAcpWorkspacePanel(),
     },
   ]
+
+  if (showAcpRecovery) {
+    return (
+      <div className="relative flex h-full flex-col bg-bg text-text">
+        <ACPPlaygroundHeader
+          leftPaneOpen={false}
+          rightPaneOpen={false}
+          onToggleLeftPane={handleToggleLeftPane}
+          onToggleRightPane={handleToggleRightPane}
+          hideToggles
+          acpHealthy={acpHealthy}
+          isHealthLoading={isHealthLoading}
+        />
+        <main className="flex min-h-0 flex-1 p-4">
+          <ACPPlaygroundRecovery
+            healthData={healthData}
+            isHealthLoading={isHealthLoading}
+            onRetry={() => {
+              void refetchACPHealth()
+            }}
+            serverUrl={connectionConfig?.serverUrl}
+          />
+        </main>
+      </div>
+    )
+  }
 
   // Mobile layout
   if (isMobile) {

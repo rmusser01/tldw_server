@@ -8,6 +8,9 @@ from fastapi import Request
 
 from tldw_Server_API.app.api.v1.endpoints import scheduled_tasks_control_plane
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.router_groups.content import iter_content_router_specs
+from tldw_Server_API.app.api.v1.router_groups.minimal import iter_minimal_optional_router_specs
+from tldw_Server_API.app.api.v1.router_groups.spec import RouterSpec
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.permissions import TASKS_CONTROL, TASKS_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
@@ -114,6 +117,30 @@ def _create_automation_definition(
     )
     assert definition_response.status_code == 201, definition_response.text  # nosec B101
     return definition_response.json()
+
+
+def _find_scheduled_tasks_router_spec(specs: list[RouterSpec]) -> RouterSpec:
+    """Return the scheduled-tasks router spec from a router group."""
+    for spec in specs:
+        if spec.name == "scheduled_tasks_control_plane":
+            return spec
+    raise AssertionError("scheduled_tasks_control_plane router spec is missing")
+
+
+@pytest.mark.unit
+def test_scheduled_tasks_router_groups_expose_control_plane_route() -> None:
+    """Verify router groups expose the scheduled-tasks control-plane route."""
+    minimal_spec = _find_scheduled_tasks_router_spec(list(iter_minimal_optional_router_specs()))
+    content_spec = _find_scheduled_tasks_router_spec(list(iter_content_router_specs()))
+
+    assert minimal_spec.prefix == "/api/v1"  # nosec B101 - pytest assertion
+    assert minimal_spec.route_key == ""  # nosec B101 - pytest assertion
+    assert content_spec.prefix == "/api/v1"  # nosec B101 - pytest assertion
+    assert content_spec.route_key == "scheduled-tasks"  # nosec B101 - pytest assertion
+
+    for spec in (minimal_spec, content_spec):
+        router = spec.resolve_router()
+        assert any(route.path == "/scheduled-tasks" for route in router.routes)  # nosec B101 - pytest assertion
 
 
 def test_scheduled_tasks_endpoint_combines_reminders_and_watchlist_jobs(scheduled_tasks_client, auth_headers):

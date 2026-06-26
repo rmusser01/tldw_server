@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { useStorage } from "@plasmohq/storage/hook"
 import { Trans, useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
-import { Button, Typography } from "antd"
+import { Typography } from "antd"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { PageShell } from "@/components/Common/PageShell"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
@@ -18,6 +18,7 @@ import type { ComparisonResult } from "@/hooks/useComparisonTranscribe"
 import { AudioReadinessStrip } from "@/components/Option/Audio/AudioReadinessStrip"
 import { AudioPresetControls } from "@/components/Option/Audio/AudioPresetControls"
 import { buildSttReadinessItems } from "@/components/Option/Audio/audio-readiness"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import {
   saveSttRecording,
   getSttRecording,
@@ -303,7 +304,10 @@ export const SttPlaygroundPage: React.FC = () => {
       } catch (e: unknown) {
         notification.error({
           message: t("error", "Error"),
-          description: e instanceof Error ? e.message : t("somethingWentWrong", "Something went wrong")
+          description: sanitizeServerErrorMessage(
+            e,
+            t("somethingWentWrong", "Something went wrong")
+          )
         })
       }
     },
@@ -327,7 +331,10 @@ export const SttPlaygroundPage: React.FC = () => {
       } catch (e: unknown) {
         notification.error({
           message: t("error", "Error"),
-          description: e instanceof Error ? e.message : t("playground:stt.loadFailed", "Failed to load recording")
+          description: sanitizeServerErrorMessage(
+            e,
+            t("playground:stt.loadFailed", "Failed to load recording")
+          )
         })
       }
     },
