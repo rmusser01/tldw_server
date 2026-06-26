@@ -49,6 +49,7 @@ def test_sync_stub_core_commands():
 
 @pytest.mark.unit
 def test_redis_factory_readme_documents_fail_closed_defaults() -> None:
+    """README examples document fail-closed defaults and explicit fake fallback."""
     readme_path = Path(rf.__file__).with_name("README.md")
     readme = readme_path.read_text(encoding="utf-8")
 
@@ -134,6 +135,7 @@ async def test_async_factory_raises_when_redis_package_missing_and_fallback_disa
 async def test_async_factory_raises_when_redis_package_missing_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Async Redis factory fails closed by default when redis is unavailable."""
     monkeypatch.setattr(rf, "aioredis", None)
     monkeypatch.setattr(rf, "_import_error", ImportError("redis missing"))
 
@@ -159,6 +161,7 @@ def test_sync_factory_falls_back_when_redis_package_missing(monkeypatch):
 def test_sync_factory_raises_when_redis_package_missing_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Sync Redis factory fails closed by default when redis is unavailable."""
     monkeypatch.setattr(rf, "redis", None)
     monkeypatch.setattr(rf, "_import_error", ImportError("redis missing"))
 

@@ -26,7 +26,7 @@ modified_files:
 - tldw_Server_API/tests/Infrastructure/test_redis_factory.py
 - tldw_Server_API/tests/Infrastructure/test_redis_factory_metrics.py
 - tldw_Server_API/tests/Embeddings/test_backpressure_and_quotas.py
-updated_date: 2026-06-26 22:33
+updated_date: 2026-06-26 22:40
 ---
 
 ## Description
@@ -106,12 +106,23 @@ Latest verification after these changes:
 - `python -m py_compile tldw_Server_API/app/core/Security/egress.py` -> passed.
 - `git diff --check -- tldw_Server_API/app/core/Security/egress.py tldw_Server_API/tests/Security/test_egress.py backlog/tasks/task-12021\ -\ Address-follow-up-infrastructure-and-security-review-findings.md` -> passed.
 - `python -m bandit -r tldw_Server_API/app/core/Security/egress.py -f json -o /tmp/bandit_task_12021_egress_final.json` -> 0 errors, 0 findings.
+Reopened for scoped PR pre-merge docstring warning pass. The remaining CodeRabbit warning is broad docstring coverage; apply concise docstrings only to new helper/test constructs introduced by this PR, avoiding unrelated repository-wide docstring churn.
+Scoped docstring warning pass:
+- Added concise docstrings to new egress DNS helper functions, the blocking resolver worker, new regression tests, and captured-logger fakes introduced by this PR.
+- Did not perform unrelated repository-wide docstring churn.
+
+Verification after docstring pass:
+- `python -m pytest tldw_Server_API/tests/Infrastructure/test_distributed_lock.py tldw_Server_API/tests/Embeddings/test_backpressure_and_quotas.py tldw_Server_API/tests/Security/test_egress.py tldw_Server_API/tests/Infrastructure/test_redis_factory.py tldw_Server_API/tests/Infrastructure/test_redis_factory_metrics.py tldw_Server_API/tests/test_minimal_deploy.py tldw_Server_API/tests/Resource_Governance/test_rg_fail_modes_across_categories.py -q` -> 65 passed.
+- `python -m py_compile tldw_Server_API/app/core/Security/egress.py tldw_Server_API/tests/Embeddings/test_backpressure_and_quotas.py tldw_Server_API/tests/Infrastructure/test_distributed_lock.py tldw_Server_API/tests/Infrastructure/test_redis_factory.py tldw_Server_API/tests/Security/test_egress.py` -> passed.
+- `git diff --check -- ...latest touched files...` -> passed.
+- `python -m ruff check tldw_Server_API/app/core/Security/egress.py tldw_Server_API/tests/Security/test_egress.py` -> passed.
+- `python -m bandit -r tldw_Server_API/app/core/Security/egress.py -f json -o /tmp/bandit_task_12021_docstring_pass.json` -> 0 errors, 0 findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created a clean PR branch from origin/dev, ported the TASK-12021 review fixes, and addressed the latest PR review comments through the egress DNS follow-up pass. The branch keeps file locks from unlinking active successors, verifies clean-base migration-lock body-exception behavior, defaults Redis helper fallbacks to fail-closed behavior unless explicitly enabled, fails closed for embeddings and ingest tenant quota Redis outages with structured contextual warning logs, updates Redis factory docs/tests to match the fallback contract without brittle exact-snippet assertions, and hardens egress DNS handling with structured logs, finite config validation, and timeout budgeting that accounts for resolver-slot wait time. Focused tests, Ruff, compile, diff hygiene, and Bandit passed in the clean worktree.
+Created a clean PR branch from origin/dev, ported the TASK-12021 review fixes, and addressed PR review comments through the egress DNS and docstring follow-up passes. The branch keeps file locks from unlinking active successors, verifies clean-base migration-lock body-exception behavior, defaults Redis helper fallbacks to fail-closed behavior unless explicitly enabled, fails closed for embeddings and ingest tenant quota Redis outages with structured contextual warning logs, updates Redis factory docs/tests to match the fallback contract without brittle exact-snippet assertions, hardens egress DNS handling with structured logs, finite config validation, and timeout budgeting that accounts for resolver-slot wait time, and adds concise docstrings to new helper/regression constructs introduced by the PR. Focused tests, Ruff, compile, diff hygiene, and Bandit passed in the clean worktree.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

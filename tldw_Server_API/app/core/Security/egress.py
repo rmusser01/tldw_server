@@ -35,6 +35,7 @@ _DNS_RESOLVER_SLOT_WAIT_SECONDS_DEFAULT = 0.05
 
 
 def _log_invalid_dns_config(name: str, raw: object, default: int | float, reason: str) -> None:
+    """Log invalid DNS resolver environment configuration with queryable fields."""
     logger.bind(
         env_var=name,
         raw_value=str(raw),
@@ -45,6 +46,7 @@ def _log_invalid_dns_config(name: str, raw: object, default: int | float, reason
 
 
 def _positive_int_env(name: str, default: int) -> int:
+    """Return a positive integer env override or the supplied default."""
     raw = os.getenv(name)
     if raw is None or str(raw).strip() == "":
         return default
@@ -60,6 +62,7 @@ def _positive_int_env(name: str, default: int) -> int:
 
 
 def _nonnegative_float_env(name: str, default: float) -> float:
+    """Return a finite non-negative float env override or the supplied default."""
     raw = os.getenv(name)
     if raw is None or str(raw).strip() == "":
         return default
@@ -156,6 +159,7 @@ def _host_matches_allowlist(host: str, allowlist: Sequence[str]) -> bool:
 
 
 def _dns_slot_wait_seconds(timeout_s: float) -> float:
+    """Bound DNS slot wait time by the caller's resolver timeout budget."""
     if not math.isfinite(timeout_s) or timeout_s <= 0:
         return 0.0
     configured = _nonnegative_float_env(
@@ -166,6 +170,7 @@ def _dns_slot_wait_seconds(timeout_s: float) -> float:
 
 
 def _release_dns_resolver_slot(host: str, reason: str) -> None:
+    """Release one DNS resolver slot and log impossible double-release cases."""
     try:
         _DNS_RESOLVER_SLOTS.release()
     except ValueError as exc:
@@ -178,10 +183,12 @@ def _release_dns_resolver_slot(host: str, reason: str) -> None:
 
 
 def _remaining_dns_budget(start_time: float, timeout_s: float) -> float:
+    """Return the remaining DNS timeout budget after elapsed wall-clock time."""
     return max(0.0, timeout_s - (time.monotonic() - start_time))
 
 
 def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
+    """Resolve a host with fail-closed timeout and DNS worker saturation guards."""
     if not math.isfinite(timeout_s) or timeout_s <= 0:
         logger.bind(
             host=host,
@@ -222,6 +229,7 @@ def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
     error: list[BaseException] = []
 
     def _worker() -> None:
+        """Run the blocking OS resolver and always release the resolver slot."""
         try:
             result.append(
                 socket.getaddrinfo(

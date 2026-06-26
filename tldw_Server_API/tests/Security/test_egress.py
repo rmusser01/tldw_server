@@ -10,6 +10,8 @@ pytestmark = pytest.mark.unit
 
 
 class _CapturedLogger:
+    """Capture Loguru bind/opt calls and messages for egress log assertions."""
+
     def __init__(self) -> None:
         self.current_bound: dict[str, object] = {}
         self.warning_logs: list[tuple[dict[str, object], str]] = []
@@ -17,17 +19,21 @@ class _CapturedLogger:
         self.opt_kwargs: list[dict[str, object]] = []
 
     def bind(self, **kwargs: object) -> "_CapturedLogger":
+        """Store fields from the latest logger.bind call."""
         self.current_bound = dict(kwargs)
         return self
 
     def opt(self, **kwargs: object) -> "_CapturedLogger":
+        """Store options from logger.opt calls."""
         self.opt_kwargs.append(dict(kwargs))
         return self
 
     def warning(self, message: str, *_args: object, **_kwargs: object) -> None:
+        """Record a warning with the current bound fields."""
         self.warning_logs.append((dict(self.current_bound), message))
 
     def debug(self, message: str, *_args: object, **_kwargs: object) -> None:
+        """Record a debug message with the current bound fields."""
         self.debug_logs.append((dict(self.current_bound), message))
 
 
@@ -132,6 +138,7 @@ class TestEgressPolicy:
         self: "TestEgressPolicy",
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """DNS resolution fails closed when all resolver worker slots are occupied."""
         release = threading.Event()
         started = 0
         started_lock = threading.Lock()
@@ -171,6 +178,7 @@ class TestEgressPolicy:
         self: "TestEgressPolicy",
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """Resolver exceptions are logged with structured host and exception fields."""
         captured_logger = _CapturedLogger()
 
         def _failing_getaddrinfo(*_args: object, **_kwargs: object) -> list[object]:
@@ -191,6 +199,7 @@ class TestEgressPolicy:
         self: "TestEgressPolicy",
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """NaN DNS slot wait configuration falls back to the safe default."""
         captured_logger = _CapturedLogger()
         monkeypatch.setenv(egress.DNS_RESOLVER_SLOT_WAIT_SECONDS_ENV, "nan")
         monkeypatch.setattr(egress, "logger", captured_logger)
@@ -207,6 +216,7 @@ class TestEgressPolicy:
         self: "TestEgressPolicy",
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """The resolver worker join only receives the remaining timeout budget."""
         captured_logger = _CapturedLogger()
         join_timeouts: list[float | None] = []
 

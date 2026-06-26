@@ -53,6 +53,7 @@ class TestFileLockAcquireRelease:
         self,
         tmp_path: Path,
     ) -> None:
+        """Release keeps the lock path so later owners cannot lose their inode."""
         lock_path = tmp_path / "release-keeps-file.lock"
         lock = FileLock(lock_path, timeout=2)
 
@@ -66,6 +67,7 @@ class TestFileLockAcquireRelease:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """A prior owner cannot unlink a lock reacquired during its close path."""
         lock_path = tmp_path / "same-process-reacquire.lock"
         first = FileLock(lock_path, timeout=2)
         second = FileLock(lock_path, timeout=2)
@@ -139,6 +141,7 @@ class TestFileLockResidualFiles:
         self,
         tmp_path: Path,
     ) -> None:
+        """Dead PID file contents do not prevent native lock acquisition."""
         lock_path = tmp_path / "stale.lock"
         # Write a PID that almost certainly doesn't exist.
         lock_path.write_text("999999999\n")
@@ -179,6 +182,7 @@ class TestFileLockResidualFiles:
         self,
         tmp_path: Path,
     ) -> None:
+        """A locked file is preserved even if its legacy PID record is stale."""
         lock_path = tmp_path / "locked-dead-pid.lock"
         holder = FileLock(lock_path, timeout=2, stale_timeout=9999)
         assert holder.acquire() is True

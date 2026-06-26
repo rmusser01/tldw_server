@@ -160,10 +160,12 @@ async def test_tenant_quota_429(monkeypatch):
 async def test_tenant_quota_fails_closed_when_redis_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Embeddings tenant quota returns 503 when Redis quota state is unavailable."""
     from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as ep
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _redis_unavailable() -> None:
+        """Simulate quota Redis being unavailable."""
         raise RuntimeError("redis unavailable")
 
     monkeypatch.setattr(ep, "_is_embeddings_backpressure_redis_enabled", lambda: False)
@@ -192,29 +194,36 @@ async def test_tenant_quota_fails_closed_when_redis_unavailable(
 async def test_ingest_tenant_quota_fails_closed_when_redis_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Ingest tenant quota returns 503 with structured logs when Redis is unavailable."""
     from fastapi import HTTPException, Response
 
     from tldw_Server_API.app.api.v1.API_Deps import backpressure as bp
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _redis_unavailable() -> None:
+        """Simulate quota Redis being unavailable."""
         raise RuntimeError("redis unavailable")
 
     class _CapturedLogger:
+        """Capture Loguru bind/opt/warning calls for structured-log assertions."""
+
         def __init__(self) -> None:
             self.bound: dict[str, object] = {}
             self.opt_kwargs: dict[str, object] = {}
             self.warning_message: str | None = None
 
         def bind(self, **kwargs: object) -> "_CapturedLogger":
+            """Store structured fields passed through logger.bind."""
             self.bound.update(kwargs)
             return self
 
         def opt(self, **kwargs: object) -> "_CapturedLogger":
+            """Store options passed through logger.opt."""
             self.opt_kwargs.update(kwargs)
             return self
 
         def warning(self, message: str, *_args: object, **_kwargs: object) -> None:
+            """Store the warning message for assertions."""
             self.warning_message = message
 
     captured_logger = _CapturedLogger()
