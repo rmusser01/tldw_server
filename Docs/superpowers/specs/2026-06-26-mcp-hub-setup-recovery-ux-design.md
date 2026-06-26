@@ -29,6 +29,10 @@ standalone extraction work explicitly keeps the first stage inside
   "No auth template", "no secret", or "Legacy Secret Fallback".
 - Experienced users need faster setup, explicit diagnostics, predictable
   refresh controls, and trustworthy error details.
+- MCP Hub diagnostics need enough deployment context to diagnose quickstart
+  versus advanced API-origin split-brain failures.
+- Local walkthrough and E2E setup need clearer isolation expectations so setup
+  tests do not unexpectedly touch repository runtime databases.
 - The design-system scan found literal `rgba(0,0,0,0.45)` color tokens in
   `ExternalServersTab.tsx` that should be moved to the design token system.
 
@@ -44,6 +48,8 @@ standalone extraction work explicitly keeps the first stage inside
   required.
 - Give experienced users sanitized diagnostics, operation timestamps, reason
   codes, and Audit handoff without exposing secrets.
+- Expose effective deployment mode, frontend API origin, health endpoint, and
+  setup-isolation guidance where they help diagnose setup failures.
 - Keep the first implementation as a reviewable PR-sized remediation slice.
 
 ## Non-Goals
@@ -172,6 +178,13 @@ type McpOperationState = {
   timeoutMs?: number;
 };
 
+type McpCredentialState =
+  | "not_required"
+  | "required_missing"
+  | "configured"
+  | "legacy_fallback"
+  | "unknown";
+
 type McpServerReadiness = {
   serverId: string;
   displayName?: string;
@@ -179,6 +192,7 @@ type McpServerReadiness = {
   displayState: McpDisplayState;
   primaryReasonCode?: McpReasonCode;
   reasonCodes: McpReasonCode[];
+  credentialState: McpCredentialState;
   toolCount: number;
   lastValidationAt?: string;
   lastDiscoveryAt?: string;
@@ -200,7 +214,9 @@ type McpHubReadiness = {
 ```
 
 `McpHubReadiness` handles the global first-run state where no `serverId` exists.
-`McpServerReadiness` is per-server only.
+`McpServerReadiness` is per-server only. `credentialState` is separate from
+problem reason codes so no-auth stdio can render as an intentional
+`not_required` state instead of masquerading as a missing credential.
 
 ## Preflight Versus Discovery
 
@@ -219,6 +235,9 @@ Preflight is static validation. It can run before save. It may check:
 - auth/secret binding completeness.
 
 Preflight must not launch arbitrary stdio commands or contact remote servers.
+For stdio, safe command facts mean static checks such as missing command,
+obvious invalid path, or executable-on-PATH hint. They must not invoke a shell,
+expand user-controlled command strings, or execute the target process.
 
 ### Discovery Refresh
 
@@ -228,6 +247,8 @@ action. It must:
 
 - require existing MCP Hub mutation/admin permissions;
 - respect RBAC and owner scope;
+- respect existing outbound/runtime safety policy for configured external
+  servers;
 - use timeouts;
 - serialize per server;
 - expose operation metadata for UI polling/recovery;
@@ -298,6 +319,7 @@ uses the transitional server-level secret flow.
 Add a diagnostics/details drawer for experienced users. It should show:
 
 - display state and reason codes;
+- credential state;
 - transport and sanitized endpoint/command facts;
 - tool count;
 - last validation time;
@@ -319,6 +341,17 @@ containing credentials. Redaction should be layered:
 
 Validation, save, discovery, credential repair, and refresh actions should
 produce sanitized audit records and never log secrets.
+
+Add a small Hub environment diagnostics area, either inside the diagnostics
+drawer or near Setup, with:
+
+- effective deployment mode;
+- frontend API origin;
+- health endpoint URL and latest result;
+- detected quickstart/advanced origin mismatch when known;
+- setup isolation guidance for local walkthroughs and E2E runs.
+
+This area must not expose API keys, JWTs, cookies, or secret-bearing headers.
 
 ## Phasing
 
@@ -344,7 +377,9 @@ Acceptance:
 - stale/empty Tool Catalog states offer valid actions;
 - no-auth stdio does not render as missing credentials;
 - mapper tests cover display state, primary reason, secondary reasons, and
-  allowed actions.
+  allowed actions;
+- credential state is derived explicitly, including `not_required` and
+  `legacy_fallback`.
 
 ### Phase 2: First-Success Setup Flow
 
@@ -374,6 +409,8 @@ Add sanitized diagnostics:
 - operation metadata;
 - timestamps;
 - reason codes;
+- credential state;
+- deployment mode, API origin, health endpoint, and setup isolation guidance;
 - redacted last error;
 - Audit tab link.
 
@@ -381,6 +418,9 @@ Acceptance:
 
 - experienced users can diagnose auth/runtime/discovery failures without
   inspecting browser/API state;
+- users can diagnose quickstart versus advanced API-origin split-brain from MCP
+  Hub or shared diagnostics;
+- local walkthrough/E2E setup isolation expectations are documented or linked;
 - redaction tests cover headers, env vars, URL query strings, args, and raw JSON;
 - RBAC/audit behavior is covered for validation and discovery actions.
 
@@ -408,6 +448,8 @@ Acceptance:
 ## Testing Strategy
 
 - Unit-test the readiness mapper with each display state and reason combination.
+- Unit-test credential-state derivation for not-required, required-missing,
+  configured, and legacy-fallback cases.
 - Component-test server rows and Tool Catalog recovery actions.
 - Add API tests for discovery refresh and readiness response if backend contract
   changes are required.
@@ -428,6 +470,11 @@ Acceptance:
   only if cheap; otherwise demote to navigation.
 - Chat handoff can cause scope creep. Mitigation: only link to downstream use
   locations when current readiness data supports the claim.
+- Deployment split-brain can look like an MCP failure. Mitigation: expose
+  effective deployment mode, API origin, and health endpoint diagnostics in the
+  setup/recovery surface.
+- Local walkthroughs can touch unintended runtime databases. Mitigation:
+  document or verify setup isolation expectations in the implementation slice.
 
 ## Open Questions For Implementation Planning
 
