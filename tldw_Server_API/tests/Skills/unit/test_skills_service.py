@@ -1007,6 +1007,44 @@ Approved body"""
         assert "live-skill" not in payload["context_text"]
 
     @pytest.mark.asyncio
+    async def test_list_skills_filters_integrity_before_pagination(self, service):
+        """Integrity filtering must happen before list pagination is applied."""
+        from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
+            canonical_filesystem_digest,
+        )
+        from tldw_Server_API.app.core.Context_Integrity.models import (
+            ContextIntegrityBootState,
+        )
+        from tldw_Server_API.app.core.Context_Integrity.resolver import (
+            ContextIntegrityResolver,
+        )
+
+        await service.create_skill("aaa-blocked", "---\ndescription: Blocked\n---\nBlocked")
+        allowed_content = "---\ndescription: Allowed\n---\nAllowed"
+        await service.create_skill("zzz-allowed", allowed_content)
+        allowed_asset_id = "skill:user:1/zzz-allowed"
+        allowed_digest = canonical_filesystem_digest(
+            source_type="skill_file",
+            asset_id=allowed_asset_id,
+            files={"SKILL.md": allowed_content.encode("utf-8")},
+            metadata={"skill_name": "zzz-allowed"},
+        )
+        service.integrity_resolver = ContextIntegrityResolver(
+            ContextIntegrityBootState(
+                mode="enforce",
+                degraded=False,
+                manifest_sequence=1,
+                manifest_digest="sha256:manifest",
+                approved_digests_by_asset_id={allowed_asset_id: allowed_digest},
+            )
+        )
+
+        skills = await service.list_skills(limit=1, offset=0)
+
+        assert [skill.name for skill in skills] == ["zzz-allowed"]
+        assert await service.get_total_count() == 1
+
+    @pytest.mark.asyncio
     async def test_create_skill_returns_write_response_under_enforce(self, service):
         """Write APIs can return the newly written skill without approving it for reads."""
         from tldw_Server_API.app.core.Context_Integrity.models import (
@@ -1110,6 +1148,26 @@ Approved body"""
 
         with pytest.raises(SkillsError):
             await service.get_skill("linked-skill")
+
+    @pytest.mark.asyncio
+    async def test_sync_registry_skips_symlinked_skill_md(self, service, temp_base_path):
+        """Sync must not index a skill whose SKILL.md is a symlink."""
+        outside_skill_file = temp_base_path / "outside-SKILL.md"
+        outside_skill_file.write_text(
+            "---\ndescription: Outside\n---\nOutside body",
+            encoding="utf-8",
+        )
+        skill_dir = service.skills_dir / "symlinked-file"
+        skill_dir.mkdir()
+        try:
+            (skill_dir / "SKILL.md").symlink_to(outside_skill_file)
+        except (NotImplementedError, OSError):
+            pytest.skip("symlink creation is unavailable on this platform")
+
+        skills = await service.list_skills(include_hidden=True)
+
+        assert [skill.name for skill in skills] == []
+        assert await service.get_total_count(include_hidden=True) == 0
 
     @pytest.mark.asyncio
     async def test_get_total_count(self, service):

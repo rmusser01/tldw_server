@@ -70,9 +70,15 @@ def canonical_filesystem_digest(
     ).encode("utf-8")
     hasher.update(len(identity).to_bytes(8, "big"))
     hasher.update(identity)
-    for relative_path in sorted(files):
-        path_bytes = relative_path.replace("\\", "/").encode("utf-8")
-        content = files[relative_path]
+    normalized_files: dict[str, bytes] = {}
+    for relative_path, content in files.items():
+        normalized_path = _normalize_text(relative_path).replace("\\", "/")
+        if normalized_path in normalized_files:
+            raise ValueError(f"Duplicate canonical file path after normalization: {normalized_path}")
+        normalized_files[normalized_path] = content
+    for relative_path in sorted(normalized_files):
+        path_bytes = relative_path.encode("utf-8")
+        content = normalized_files[relative_path]
         hasher.update(len(path_bytes).to_bytes(8, "big"))
         hasher.update(path_bytes)
         hasher.update(len(content).to_bytes(8, "big"))

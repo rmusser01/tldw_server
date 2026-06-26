@@ -35,6 +35,41 @@ def test_filesystem_digest_is_stable_for_sorted_paths() -> None:
     assert first.startswith("sha256:")
 
 
+def test_filesystem_digest_normalizes_unicode_paths() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
+        canonical_filesystem_digest,
+    )
+
+    composed = canonical_filesystem_digest(
+        source_type="skill_file",
+        asset_id="skill:user:1/demo",
+        files={"refs/caf\u00e9.md": b"reference"},
+    )
+    decomposed = canonical_filesystem_digest(
+        source_type="skill_file",
+        asset_id="skill:user:1/demo",
+        files={"refs/cafe\u0301.md": b"reference"},
+    )
+
+    assert composed == decomposed
+
+
+def test_filesystem_digest_rejects_duplicate_canonical_paths() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
+        canonical_filesystem_digest,
+    )
+
+    with pytest.raises(ValueError, match="Duplicate canonical file path"):
+        canonical_filesystem_digest(
+            source_type="skill_file",
+            asset_id="skill:user:1/demo",
+            files={
+                "refs/caf\u00e9.md": b"one",
+                "refs/cafe\u0301.md": b"two",
+            },
+        )
+
+
 def test_filesystem_digest_matches_golden_payload() -> None:
     from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
         canonical_filesystem_digest,
@@ -50,9 +85,7 @@ def test_filesystem_digest_matches_golden_payload() -> None:
         metadata={"owner_scope": "system", "executable": False},
     )
 
-    assert digest == (
-        "sha256:cdc83bc127d0f95e66b891c1be48326e35694860185cef18f5d8af634939f1a3"
-    )
+    assert digest == ("sha256:cdc83bc127d0f95e66b891c1be48326e35694860185cef18f5d8af634939f1a3")
 
 
 def test_filesystem_digest_detects_formatting_edits() -> None:
@@ -138,9 +171,7 @@ def test_db_prompt_digest_matches_golden_payload() -> None:
         }
     )
 
-    assert digest.digest == (
-        "sha256:0b3be0310f6cf7ae29f018ef4a79bbe62e4f6f620b006aedacbb1255d6712234"
-    )
+    assert digest.digest == ("sha256:0b3be0310f6cf7ae29f018ef4a79bbe62e4f6f620b006aedacbb1255d6712234")
 
 
 @pytest.mark.parametrize("bad_float", [float("nan"), float("inf"), float("-inf")])
@@ -159,9 +190,7 @@ def test_db_prompt_digest_rejects_non_string_mapping_keys() -> None:
     )
 
     with pytest.raises(TypeError, match="mapping keys must be strings"):
-        canonical_db_prompt_digest(
-            {"uuid": "prompt-1", "structured": {1: "integer key"}}
-        )
+        canonical_db_prompt_digest({"uuid": "prompt-1", "structured": {1: "integer key"}})
 
 
 def test_db_prompt_digest_rejects_unsupported_json_values() -> None:
@@ -200,12 +229,14 @@ def test_context_integrity_models_freeze_mapping_fields() -> None:
         source_type="skill_file",
         details=details,
     )
+    findings = [finding]
     boot_state = ContextIntegrityBootState(
         mode="audit_only",
         degraded=False,
         manifest_sequence=1,
         manifest_digest="sha256:def",
         approved_digests_by_asset_id=approved,
+        findings=findings,
     )
 
     metadata["context"] = "changed"
@@ -213,12 +244,23 @@ def test_context_integrity_models_freeze_mapping_fields() -> None:
     details["reason"] = "changed again"
     details["nested"]["source"] = "changed"
     approved["asset-1"] = "sha256:changed"
+    findings.append(
+        ContextIntegrityFinding(
+            asset_id="skill:user:1/other",
+            state="new_unapproved",
+            severity="warning",
+            summary="New",
+            remediation="Review",
+            source_type="skill_file",
+        )
+    )
 
     assert descriptor.metadata["context"] == "inline"
     assert descriptor.metadata["nested"]["source"] == "caller"
     assert finding.details["reason"] == "changed"
     assert finding.details["nested"]["source"] == "caller"
     assert boot_state.approved_digests_by_asset_id["asset-1"] == "sha256:abc"
+    assert boot_state.findings == (finding,)
 
     with pytest.raises(TypeError):
         descriptor.metadata["new"] = "value"

@@ -1,3 +1,5 @@
+"""Admin endpoint for content-free Context Integrity boot-state inspection."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Request

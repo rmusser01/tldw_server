@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.Context_Integrity.models import (
     ContextAssetSource,
     ContextIntegrityBootState,
     ContextIntegrityFinding,
+    ContextIntegrityMode,
 )
 from tldw_Server_API.app.core.Context_Integrity.resolver import (
     ContextIntegrityResolver,
@@ -38,6 +39,8 @@ from tldw_Server_API.app.services.startup_warning_models import StartupWarningRe
 from tldw_Server_API.app.services.startup_warning_registry import (
     StartupWarningRegistry,
 )
+
+_SUPPORTED_CONTEXT_INTEGRITY_MODES = frozenset(("audit_only", "enforce", "hardened"))
 
 
 def _signature_invalid_finding(
@@ -139,8 +142,23 @@ def _load_startup_manifest_from_env() -> tuple[
 def _settings_value(name: str) -> Any:
     try:
         return db_path_utils.settings.get(name)
-    except Exception:
+    except (AttributeError, KeyError, TypeError) as exc:
+        logger.debug(
+            "Context Integrity could not read setting '{}': {}",
+            name,
+            exc.__class__.__name__,
+        )
         return None
+
+
+def _normalize_context_integrity_mode(mode: str) -> ContextIntegrityMode:
+    normalized = str(mode).strip().lower()
+    if normalized not in _SUPPORTED_CONTEXT_INTEGRITY_MODES:
+        raise ValueError(
+            "Unsupported Context Integrity mode: "
+            f"{mode!r}. Expected one of {sorted(_SUPPORTED_CONTEXT_INTEGRITY_MODES)}."
+        )
+    return cast(ContextIntegrityMode, normalized)
 
 
 def _resolve_candidate_like_database_paths(
@@ -287,6 +305,7 @@ def produce_context_integrity_startup_warnings(
     mode: str = "enforce",
 ) -> tuple[ContextIntegrityFinding, ...]:
     """Build inventory, verify approved state, attach resolver, and emit warnings."""
+    normalized_mode = _normalize_context_integrity_mode(mode)
     current_assets: list[ContextAssetDescriptor] = []
     findings_list: list[ContextIntegrityFinding] = []
     resolved_prompts_dir = prompts_dir or resolve_prompts_dir()
@@ -387,7 +406,7 @@ def produce_context_integrity_startup_warnings(
 
     findings = tuple(findings_list)
     boot_state = ContextIntegrityBootState(
-        mode=mode,  # type: ignore[arg-type]
+        mode=normalized_mode,
         degraded=degraded,
         manifest_sequence=manifest_sequence,
         manifest_digest=manifest_digest,

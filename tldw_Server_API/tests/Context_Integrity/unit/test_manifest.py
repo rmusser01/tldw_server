@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+from types import MappingProxyType
 from typing import Any
 
 import pytest
@@ -80,6 +81,28 @@ def test_manifest_roundtrip_verifies_signature() -> None:
     assert verified.manifest_digest == signed["manifest_digest"]
     assert verified.key_id == signer.key_id
     assert isinstance(verified.entries, tuple)
+    assert verified.entries[0]["asset_id"] == "skill:user:1/demo"
+
+
+def test_manifest_verification_accepts_mapping_payloads() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.manifest import (
+        HmacManifestSigner,
+        create_signed_manifest,
+        verify_signed_manifest,
+    )
+
+    signer = HmacManifestSigner(key_id="test-key", secret=b"secret")
+    signed = create_signed_manifest(sequence=1, entries=[_entry("skill:user:1/demo")], signer=signer)
+    signed_mapping = MappingProxyType(
+        {
+            "manifest": MappingProxyType(signed["manifest"]),
+            "signature": MappingProxyType(signed["signature"]),
+            "manifest_digest": signed["manifest_digest"],
+        }
+    )
+
+    verified = verify_signed_manifest(signed_mapping, signer=signer)
+
     assert verified.entries[0]["asset_id"] == "skill:user:1/demo"
 
 

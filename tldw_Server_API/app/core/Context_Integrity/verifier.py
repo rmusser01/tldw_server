@@ -16,6 +16,34 @@ def _entry_by_asset_id(entries: Iterable[Mapping[str, Any]]) -> dict[str, Mappin
     return {str(entry["asset_id"]): entry for entry in entries}
 
 
+def _current_assets_by_asset_id(
+    assets: Iterable[ContextAssetDescriptor],
+) -> tuple[dict[str, ContextAssetDescriptor], list[ContextIntegrityFinding]]:
+    current: dict[str, ContextAssetDescriptor] = {}
+    duplicate_findings: list[ContextIntegrityFinding] = []
+    for asset in assets:
+        existing = current.get(asset.asset_id)
+        if existing is None:
+            current[asset.asset_id] = asset
+            continue
+        duplicate_findings.append(
+            ContextIntegrityFinding(
+                asset_id=asset.asset_id,
+                state="verification_error",
+                severity="error",
+                summary=f"Duplicate context asset id detected: {asset.asset_id}",
+                remediation="Ensure each discovered context asset has a unique asset ID before approving a manifest.",
+                source_type=asset.source_type,
+                current_digest=asset.digest,
+                details={
+                    "first_display_name": existing.display_name,
+                    "duplicate_display_name": asset.display_name,
+                },
+            )
+        )
+    return current, duplicate_findings
+
+
 def _entry_source_type(entry: Mapping[str, Any]) -> ContextAssetSource:
     return cast(ContextAssetSource, str(entry.get("source_type", "skill_file")))
 
@@ -27,8 +55,8 @@ def verify_inventory(
 ) -> tuple[ContextIntegrityFinding, ...]:
     """Compare current inventory against approved manifest entries."""
     approved = _entry_by_asset_id(approved_entries)
-    current = {asset.asset_id: asset for asset in current_assets}
-    findings: list[ContextIntegrityFinding] = []
+    current, duplicate_findings = _current_assets_by_asset_id(current_assets)
+    findings: list[ContextIntegrityFinding] = list(duplicate_findings)
 
     for asset_id, asset in current.items():
         entry = approved.get(asset_id)

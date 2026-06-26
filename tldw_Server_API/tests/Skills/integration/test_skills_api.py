@@ -67,6 +67,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
     fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
 
     try:
+        clear_global_context_integrity_resolver()
         with TestClient(fastapi_app) as c:
             clear_global_context_integrity_resolver()
             yield c
@@ -123,6 +124,7 @@ def principal_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
 
     try:
+        clear_global_context_integrity_resolver()
         with TestClient(fastapi_app) as c:
             clear_global_context_integrity_resolver()
             yield c
@@ -151,6 +153,7 @@ def auth_path_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
 
     try:
+        clear_global_context_integrity_resolver()
         with TestClient(fastapi_app) as c:
             clear_global_context_integrity_resolver()
             yield c

@@ -4,7 +4,7 @@
 
 **Goal:** Build the first enforceable Context Integrity foundation for prompt-bearing assets, proving signed manifests, anti-rollback policy, quarantine resolution, startup warnings, Skills enforcement, and config prompt-loader enforcement.
 
-**Backlog:** Design `TASK-2363`; implementation planning `TASK-2365`; create or reuse a new implementation Backlog task before code edits.
+**Backlog:** Design `TASK-12015`; implementation planning `TASK-12016`; create or reuse a new implementation Backlog task before code edits.
 
 **Architecture:** Add a focused `tldw_Server_API.app.core.Context_Integrity` package with pure canonicalization, manifest, verifier, resolver, and inventory modules. Wire it into startup through the existing `StartupWarningRegistry`, expose admin status/findings through the existing admin router, and add thin resolver checks to Skills and prompt loading. This first slice protects filesystem skills and config prompt files; DB prompt-version and MCP prompt-catalog enforcement are represented by interfaces and explicit follow-up tests so they can plug into the same resolver without changing the core model.
 

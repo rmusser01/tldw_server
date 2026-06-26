@@ -1,5 +1,5 @@
 ---
-id: TASK-2366
+id: TASK-12017
 title: Implement context integrity foundation for skills and prompts
 status: Done
 assignee: []
@@ -12,8 +12,8 @@ labels:
   - implementation
 dependencies: []
 references:
-  - TASK-2363
-  - TASK-2365
+  - TASK-12015
+  - TASK-12016
 priority: high
 ---
 
@@ -25,6 +25,11 @@ Implement the reviewed context integrity foundation for skill and prompt files, 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Core Context Integrity hashing, manifest signing/verification, inventory comparison, and resolver enforcement are implemented with focused unit coverage.
+- [x] #2 Startup verification inventories prompt files, environment prompt overrides, and user skill roots; loads signed manifests; publishes boot state/warnings; and cleans resolver state on shutdown.
+- [x] #3 Skills runtime and prompt-loader chokepoints rehash live bytes, reject unsafe symlinked prompt-bearing paths, and block quarantined or unapproved assets without leaking content.
+- [x] #4 Admin inspection exposes content-free Context Integrity boot state behind existing admin authorization.
+- [x] #5 Focused pytest, Bandit, formatter, and whitespace verification results are recorded for the touched scope.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -37,7 +42,7 @@ Docs/superpowers/plans/2026-06-25-context-integrity-foundation-implementation-pl
 
 <!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+PR #2523 review follow-up: renumbered from TASK-2366 to TASK-12017 after the dev rebase exposed a duplicate TASK-2366 record, and added explicit acceptance criteria matching the completed implementation slices and recorded verification.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 <!-- SECTION:NOTES:END -->
 

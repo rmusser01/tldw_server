@@ -98,6 +98,23 @@ def test_verifier_detects_new_unapproved_asset() -> None:
     assert findings[0].state == "new_unapproved"
 
 
+def test_verifier_detects_duplicate_live_asset_ids() -> None:
+    from tldw_Server_API.app.core.Context_Integrity.verifier import verify_inventory
+
+    findings = verify_inventory(
+        current_assets=[
+            _asset("skill:user:1/duplicate", "sha256:first"),
+            _asset("skill:user:1/duplicate", "sha256:second"),
+        ],
+        approved_entries=[],
+    )
+
+    duplicate = [finding for finding in findings if finding.state == "verification_error"]
+    assert len(duplicate) == 1
+    assert duplicate[0].asset_id == "skill:user:1/duplicate"
+    assert duplicate[0].severity == "error"
+
+
 def test_verifier_detects_missing_assets_by_required_flag() -> None:
     from tldw_Server_API.app.core.Context_Integrity.verifier import verify_inventory
 
@@ -345,7 +362,9 @@ def test_global_resolver_can_be_set_and_cleared() -> None:
             manifest_digest="sha256:manifest",
         )
     )
-    set_global_context_integrity_resolver(resolver)
-    assert get_global_context_integrity_resolver() is resolver
-    clear_global_context_integrity_resolver()
+    try:
+        set_global_context_integrity_resolver(resolver)
+        assert get_global_context_integrity_resolver() is resolver
+    finally:
+        clear_global_context_integrity_resolver()
     assert get_global_context_integrity_resolver() is None

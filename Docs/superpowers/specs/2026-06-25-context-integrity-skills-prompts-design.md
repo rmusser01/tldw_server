@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-25
 **Status:** Draft for review
-**Backlog Task:** TASK-2363
+**Backlog Task:** TASK-12015
 **Scope:** Skills, bundled/plugin skills, prompt-bearing files, DB-backed prompt versions, MCP prompt exposure, prompt loaders, startup warnings, admin review, and trust manifest operations.
 
 ## Summary

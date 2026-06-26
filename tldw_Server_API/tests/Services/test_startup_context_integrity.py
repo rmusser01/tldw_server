@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
-def _clear_context_integrity_environment(monkeypatch: pytest.MonkeyPatch):
+def _clear_context_integrity_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     for env_name in (
         "CONTEXT_INTEGRITY_MANIFEST_PATH",
         "CONTEXT_INTEGRITY_HMAC_SECRET",
@@ -140,6 +141,28 @@ def test_missing_env_manifest_degrades_when_approved_entries_not_injected(
     assert [finding.state for finding in findings] == ["degraded_integrity"]
     assert app_state.context_integrity_boot_state.degraded is True
     assert registry.summary(component_prefix="context_integrity")["total"] == 1
+
+
+def test_invalid_context_integrity_mode_is_rejected(tmp_path: Path) -> None:
+    from tldw_Server_API.app.services.startup_context_integrity import (
+        produce_context_integrity_startup_warnings,
+    )
+    from tldw_Server_API.app.services.startup_warning_registry import (
+        StartupWarningRegistry,
+    )
+
+    prompts = tmp_path / "Prompts"
+    prompts.mkdir()
+
+    with pytest.raises(ValueError, match="Unsupported Context Integrity mode"):
+        produce_context_integrity_startup_warnings(
+            app_state=_state(),
+            registry=StartupWarningRegistry(startup_id="boot-invalid-mode"),
+            prompts_dir=prompts,
+            user_skill_roots=[],
+            approved_entries=[],
+            mode="permissive",
+        )
 
 
 def test_env_manifest_happy_path_populates_boot_state(

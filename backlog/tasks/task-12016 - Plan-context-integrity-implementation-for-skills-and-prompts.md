@@ -1,5 +1,5 @@
 ---
-id: TASK-2365
+id: TASK-12016
 title: Plan context integrity implementation for skills and prompts
 status: Done
 assignee: []
@@ -16,13 +16,13 @@ documentation:
 - Docs/superpowers/plans/2026-06-25-context-integrity-foundation-implementation-plan.md
 modified_files:
 - Docs/superpowers/plans/2026-06-25-context-integrity-foundation-implementation-plan.md
-- backlog/tasks/task-2365 - Plan-context-integrity-implementation-for-skills-and-prompts.md
+- backlog/tasks/task-12016 - Plan-context-integrity-implementation-for-skills-and-prompts.md
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Create an implementation plan for the context integrity foundation defined in TASK-2363, covering signed manifests, canonical hashing, anti-rollback policy, runtime resolver, startup verification, and first enforcement hooks for Skills and prompt loading.
+Create an implementation plan for the context integrity foundation defined in TASK-12015, covering signed manifests, canonical hashing, anti-rollback policy, runtime resolver, startup verification, and first enforcement hooks for Skills and prompt loading.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -44,6 +44,8 @@ Docs/superpowers/plans/2026-06-25-context-integrity-foundation-implementation-pl
 <!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created after user approved the amended context integrity design spec on 2026-06-25.
+
+PR #2523 review follow-up: renumbered from TASK-2365 to TASK-12016 after the dev rebase exposed a duplicate TASK-2365 record.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 <!-- SECTION:NOTES:END -->
 

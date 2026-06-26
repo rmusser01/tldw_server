@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Any, Literal
 
+ContextIntegrityMode = Literal["audit_only", "enforce", "hardened"]
 ContextAssetSource = Literal["skill_file", "prompt_file", "db_prompt"]
 ContextAssetState = Literal[
     "trusted",
@@ -90,7 +91,7 @@ class ContextIntegrityFinding:
 class ContextIntegrityBootState:
     """Current-process context integrity verification result."""
 
-    mode: Literal["audit_only", "enforce", "hardened"]
+    mode: ContextIntegrityMode
     degraded: bool
     manifest_sequence: int | None
     manifest_digest: str | None
@@ -103,3 +104,4 @@ class ContextIntegrityBootState:
             "approved_digests_by_asset_id",
             _freeze_mapping(self.approved_digests_by_asset_id),
         )
+        object.__setattr__(self, "findings", tuple(self.findings))

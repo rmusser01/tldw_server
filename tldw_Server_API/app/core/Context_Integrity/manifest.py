@@ -177,10 +177,11 @@ def _require_entries(manifest: Mapping[str, Any]) -> tuple[Mapping[str, Any], ..
 def create_signed_manifest(
     *,
     sequence: int,
-    entries: list[dict[str, Any]],
+    entries: list[Mapping[str, Any]],
     signer: HmacManifestSigner,
     schema_version: int = _SUPPORTED_SCHEMA_VERSION,
 ) -> dict[str, Any]:
+    """Create a canonical signed manifest payload from approved asset entries."""
     manifest_entries = [dict(entry) for entry in entries]
     manifest = {
         "schema_version": schema_version,
@@ -205,12 +206,13 @@ def verify_signed_manifest(
     signer: HmacManifestSigner,
     anti_rollback_anchor: AntiRollbackAnchor | None = None,
 ) -> VerifiedManifest:
+    """Verify a signed manifest and return an immutable normalized snapshot."""
     if not isinstance(signed_manifest, Mapping):
         raise ManifestSignatureError("signed manifest is malformed")
 
     manifest = signed_manifest.get("manifest")
     signature = signed_manifest.get("signature")
-    if not isinstance(manifest, dict) or not isinstance(signature, dict):
+    if not isinstance(manifest, Mapping) or not isinstance(signature, Mapping):
         raise ManifestSignatureError("signed manifest is malformed")
     if signature.get("alg") != _SIGNATURE_ALGORITHM:
         raise ManifestSignatureError("manifest signature algorithm mismatch")

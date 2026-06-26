@@ -71,6 +71,8 @@ class ContextIntegrityResolver:
             raise ContextIntegrityBlocked(asset_id=asset_id, state=changed_state)
 
 
+# Compatibility bridge for legacy runtime paths that are not yet request/app scoped
+# (notably prompt loading). New service code should prefer explicit injection.
 _global_resolver: ContextIntegrityResolver | None = None
 
 
