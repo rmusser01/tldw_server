@@ -444,14 +444,14 @@ def test_db_list_recent_events_thread_safe(tmp_path):
 
 def test_consolidation_non_numeric_user_id():
     """Issue #3: consolidation should handle non-numeric user IDs."""
-    from tldw_Server_API.app.services.personalization_consolidation import _resolve_user_id_to_int
+    from tldw_Server_API.app.core.Personalization.companion_user_ids import resolve_companion_storage_user_id
 
     # Numeric works
-    assert _resolve_user_id_to_int("42") == 42
+    assert resolve_companion_storage_user_id("42") == "42"
     # Non-numeric hashes to int without error
-    result = _resolve_user_id_to_int("test_user_abc")
-    assert isinstance(result, int)
-    assert result >= 0
+    result = resolve_companion_storage_user_id("test_user_abc")
+    assert result.isdigit()
+    assert int(result) >= 0
 
 
 def test_enumerate_user_ids_with_dirs(tmp_path, monkeypatch):

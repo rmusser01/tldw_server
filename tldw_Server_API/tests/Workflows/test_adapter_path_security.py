@@ -9,6 +9,13 @@ import tldw_Server_API.app.core.Workflows.adapters._common as workflow_common
 pytestmark = pytest.mark.unit
 
 
+def _normalize_windows_long_path(path: Path) -> Path:
+    raw = str(path.resolve())
+    if raw.startswith("\\\\?\\") or raw.startswith("//?/"):
+        raw = raw[4:]
+    return Path(raw)
+
+
 def test_watchlist_artifact_metadata_filters_to_watchlists_source():
     metadata = workflow_common.watchlist_artifact_metadata(
         {
@@ -52,7 +59,9 @@ async def test_prompt_adapter_sanitizes_artifact_dir(monkeypatch, tmp_path):
     assert isinstance(uri, str) and uri.startswith("file://")
     path = Path(uri[len("file://") :])
     base_dir = (tmp_path / "Databases" / "artifacts").resolve()
-    assert path.resolve().is_relative_to(base_dir)
+    assert _normalize_windows_long_path(path).is_relative_to(
+        _normalize_windows_long_path(base_dir)
+    )
     assert path.exists()
 
 
@@ -83,7 +92,9 @@ async def test_tts_adapter_sanitizes_output_filename(monkeypatch, tmp_path):
     assert isinstance(uri, str) and uri.startswith("file://")
     path = Path(uri[len("file://") :])
     base_dir = (tmp_path / "Databases" / "artifacts").resolve()
-    assert path.resolve().is_relative_to(base_dir)
+    assert _normalize_windows_long_path(path).is_relative_to(
+        _normalize_windows_long_path(base_dir)
+    )
     assert path.name.endswith(".mp3")
     assert path.exists()
 

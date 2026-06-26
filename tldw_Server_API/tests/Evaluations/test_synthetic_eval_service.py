@@ -18,6 +18,8 @@ from tldw_Server_API.app.core.Evaluations.synthetic_eval_service import (
     SyntheticEvalWorkflowService,
 )
 
+_WORKFLOW_TEST_USER_ID = "synthetic-eval-test-user"
+
 
 def _repository(tmp_path) -> SyntheticEvalRepository:
     db = EvaluationsDatabase(str(tmp_path / "evaluations.db"))
@@ -33,7 +35,7 @@ def _service(tmp_path) -> SyntheticEvalGenerationService:
 def _workflow_service(tmp_path) -> SyntheticEvalWorkflowService:
     db = EvaluationsDatabase(str(tmp_path / "evaluations.db"))
     repository = SyntheticEvalRepository(db)
-    return SyntheticEvalWorkflowService(db=db, repository=repository)
+    return SyntheticEvalWorkflowService(db=db, repository=repository, user_id=_WORKFLOW_TEST_USER_ID)
 
 
 def test_evaluations_sqlite_connections_enable_foreign_keys(tmp_path) -> None:
@@ -208,6 +210,7 @@ def test_repository_filters_draft_samples_by_generation_batch_id(tmp_path) -> No
         provenance=SyntheticEvalProvenance.SYNTHETIC_FROM_CORPUS.value,
         review_state=SyntheticEvalReviewState.DRAFT.value,
         sample_metadata={"generation_batch_id": "batch-a"},
+        created_by=_WORKFLOW_TEST_USER_ID,
     )
     repository.create_draft_sample(
         sample_id="sample-batch-b",
@@ -216,6 +219,7 @@ def test_repository_filters_draft_samples_by_generation_batch_id(tmp_path) -> No
         provenance=SyntheticEvalProvenance.SYNTHETIC_FROM_CORPUS.value,
         review_state=SyntheticEvalReviewState.DRAFT.value,
         sample_metadata={"generation_batch_id": "batch-b"},
+        created_by=_WORKFLOW_TEST_USER_ID,
     )
 
     rows = repository.list_draft_samples(generation_batch_id="batch-a")
@@ -233,6 +237,7 @@ def test_service_filters_queue_by_generation_batch_id(tmp_path) -> None:
         provenance=SyntheticEvalProvenance.SYNTHETIC_FROM_CORPUS.value,
         review_state=SyntheticEvalReviewState.DRAFT.value,
         sample_metadata={"generation_batch_id": "batch-a"},
+        created_by=_WORKFLOW_TEST_USER_ID,
     )
     service.repository.create_draft_sample(
         sample_id="sample-service-b",
@@ -241,6 +246,7 @@ def test_service_filters_queue_by_generation_batch_id(tmp_path) -> None:
         provenance=SyntheticEvalProvenance.SYNTHETIC_FROM_CORPUS.value,
         review_state=SyntheticEvalReviewState.DRAFT.value,
         sample_metadata={"generation_batch_id": "batch-b"},
+        created_by=_WORKFLOW_TEST_USER_ID,
     )
 
     queue = service.list_queue(generation_batch_id="batch-a")
@@ -259,6 +265,7 @@ def test_service_reports_true_queue_total_before_pagination(tmp_path) -> None:
             provenance=SyntheticEvalProvenance.SYNTHETIC_FROM_CORPUS.value,
             review_state=SyntheticEvalReviewState.DRAFT.value,
             sample_metadata={"generation_batch_id": "batch-total"},
+            created_by=_WORKFLOW_TEST_USER_ID,
         )
 
     queue = service.list_queue(generation_batch_id="batch-total", limit=2, offset=0)

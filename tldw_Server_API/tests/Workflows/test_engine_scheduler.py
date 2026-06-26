@@ -14,13 +14,46 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.Workflows.engine import WorkflowEngine, WorkflowScheduler, RunMode
-from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
+from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowRun, WorkflowsDatabase
 from tldw_Server_API.app.api.v1.schemas.workflows import RunRequest
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
-from tldw_Server_API.app.api.v1.endpoints.workflows import run_saved
+from tldw_Server_API.app.api.v1.endpoints.workflows import _wait_for_run_completion, run_saved
 
 
 TERMINAL_STATES = {"succeeded", "failed", "cancelled"}
+
+
+def _workflow_run(run_id: str, status: str) -> WorkflowRun:
+    return WorkflowRun(
+        run_id=run_id,
+        tenant_id="tenant",
+        workflow_id=1,
+        status=status,
+        status_reason=None,
+        user_id="user",
+        inputs_json="{}",
+        outputs_json=None,
+        error=None,
+        duration_ms=None,
+        created_at="2026-01-01T00:00:00Z",
+        started_at=None,
+        ended_at=None,
+        definition_version=1,
+        definition_snapshot_json="{}",
+        idempotency_key=None,
+        session_id=None,
+    )
+
+
+class _TransientMissingRunDB:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def get_run(self, run_id: str):
+        self.calls += 1
+        if self.calls == 1:
+            return None
+        return _workflow_run(run_id, "succeeded")
 
 
 @pytest.fixture(autouse=True)
@@ -329,3 +362,19 @@ def test_run_saved_sync_waits_for_completion(workflows_db: WorkflowsDatabase, mo
     stats = _wait_for_scheduler_idle(WorkflowScheduler.instance())
     assert stats["active_tenants"] == 0
     assert stats["active_workflows"] == 0
+
+
+def test_wait_for_run_completion_tolerates_transient_missing_run():
+    db = _TransientMissingRunDB()
+
+    run = asyncio.run(
+        _wait_for_run_completion(
+            db,
+            "transient-run",
+            timeout_seconds=1.0,
+            poll_interval=0.001,
+        )
+    )
+
+    assert run.status == "succeeded"
+    assert db.calls == 2

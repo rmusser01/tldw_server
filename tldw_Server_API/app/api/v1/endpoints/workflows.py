@@ -1163,13 +1163,22 @@ async def _wait_for_run_completion(
         logger.debug(f"Workflows endpoint: failed to adjust run timeout; using defaults: {e}")
     deadline = time.monotonic() + timeout_seconds
     terminal = {"succeeded", "failed", "cancelled"}
+    missing_since: float | None = None
+    missing_grace_seconds = min(1.0, max(0.0, timeout_seconds))
     while True:
+        now = time.monotonic()
         run = db.get_run(run_id)
         if run is None:
-            raise HTTPException(status_code=404, detail="Workflow run not found")
+            if missing_since is None:
+                missing_since = now
+            if now - missing_since >= missing_grace_seconds or now >= deadline:
+                raise HTTPException(status_code=404, detail="Workflow run not found")
+            await asyncio.sleep(min(poll_interval, 0.05))
+            continue
+        missing_since = None
         if run.status in terminal:
             return run
-        if time.monotonic() >= deadline:
+        if now >= deadline:
             raise HTTPException(status_code=504, detail="Workflow run did not complete before the timeout window")
         await asyncio.sleep(poll_interval)
 
