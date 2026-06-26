@@ -4,12 +4,16 @@ from types import SimpleNamespace
 
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import AuthPrincipal, get_auth_principal
 from tldw_Server_API.app.api.v1.endpoints import rpg as rpg_endpoint
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.RPG.context import SessionContext
+from tldw_Server_API.app.core.RPG.rules.answering import RulesAnswerOptions
+from tldw_Server_API.app.core.RPG.rules.content_packs import RuleLookupResult
 from tldw_Server_API.app.main import app
 from tldw_Server_API.tests.PrivilegeCatalog.test_endpoint_scope_catalog_sync import load_catalog_scope_ids
 
@@ -79,6 +83,7 @@ def test_rpg_endpoint_scopes_are_cataloged():
     catalog_path = _REPO_ROOT / "tldw_Server_API" / "Config_Files" / "privilege_catalog.yaml"
     catalog_ids = load_catalog_scope_ids(catalog_path)
     expected_ids = {
+        rpg_endpoint.CHAT_COMPLETIONS,
         rpg_endpoint.RPG_RULES_READ,
         rpg_endpoint.RPG_CAMPAIGNS_READ,
         rpg_endpoint.RPG_CAMPAIGNS_MANAGE,
@@ -336,6 +341,43 @@ def test_rules_lookup_and_context_endpoints():
     assert context_payload["diagnostics"]["rules_result_count"] >= 1  # nosec B101
 
 
+def test_context_endpoint_reports_rules_lookup_diagnostics():
+    client = TestClient(app)
+
+    class FakeService:
+        async def build_context(self, *, session_id, query, max_chars):
+            assert session_id == 99  # nosec B101
+            assert query == "stress"  # nosec B101
+            assert max_chars == 1000  # nosec B101
+            return SessionContext(
+                text="Rules evidence:\n- Retrieved stress rule",
+                diagnostics={
+                    "truncated": False,
+                    "max_chars": 1000,
+                    "original_chars": 40,
+                    "returned_chars": 40,
+                    "rules_result_count": 1,
+                    "omitted_sections": [],
+                    "rules_lookup": {"retrieval_result_count": 1, "skipped_refs": []},
+                },
+            )
+
+    app.dependency_overrides[rpg_endpoint._rules_service] = lambda: FakeService()
+    try:
+        response = client.post(
+            "/api/v1/rpg/sessions/99/context",
+            headers=_headers(),
+            json={"query": "stress", "max_chars": 1000},
+        )
+    finally:
+        app.dependency_overrides.pop(rpg_endpoint._rules_service, None)
+
+    assert response.status_code == 200  # nosec B101
+    payload = response.json()
+    assert "Retrieved stress rule" in payload["text"]  # nosec B101
+    assert payload["diagnostics"]["rules_lookup"]["retrieval_result_count"] == 1  # nosec B101
+
+
 def test_replace_campaign_rules_pack_refs_returns_version_and_refs():
     client = TestClient(app)
     campaign_id, _ = _create_campaign_and_session(client, "api-campaign-rules-packs")
@@ -491,6 +533,144 @@ def test_rules_lookup_accepts_answer_mode():
 
     assert response.status_code == 200  # nosec B101
     assert response.json()["query"] == "stress"  # nosec B101
+
+
+def test_rules_lookup_answer_mode_passes_generation_options():
+    client = TestClient(app)
+
+    class FakeService:
+        async def lookup_rules(self, *, session_id, query, mode, answer_options):
+            assert session_id == 99  # nosec B101
+            assert query == "stress"  # nosec B101
+            assert mode == "answer"  # nosec B101
+            assert isinstance(answer_options, RulesAnswerOptions)  # nosec B101
+            assert answer_options.provider == "openai"  # nosec B101
+            assert answer_options.model == "gpt-test"  # nosec B101
+            assert answer_options.temperature == 0.4  # nosec B101
+            assert answer_options.max_tokens == 321  # nosec B101
+            return RuleLookupResult(
+                query=query,
+                mode=mode,
+                results=[],
+                answer=None,
+                answer_status="no_evidence",
+                answer_citation_ids=[],
+                diagnostics={
+                    "bundled_policy": "no_match",
+                    "result_mode": "citation_index",
+                    "linked_rules_pack_count": 0,
+                    "enabled_rules_pack_count": 0,
+                    "ready_media_item_count": 0,
+                    "retrieval_result_count": 0,
+                    "bundled_citation_count": 0,
+                    "skipped_refs": [],
+                    "broad_fallback_used": False,
+                },
+            )
+
+    app.dependency_overrides[rpg_endpoint._rules_service] = lambda: FakeService()
+    try:
+        response = client.post(
+            "/api/v1/rpg/sessions/99/rules/lookup",
+            headers=_headers(),
+            json={
+                "query": "stress",
+                "mode": "answer",
+                "provider": "openai",
+                "model": "gpt-test",
+                "temperature": 0.4,
+                "max_tokens": 321,
+            },
+        )
+    finally:
+        app.dependency_overrides.pop(rpg_endpoint._rules_service, None)
+
+    assert response.status_code == 200  # nosec B101
+    assert response.json()["answer_status"] == "no_evidence"  # nosec B101
+
+
+def test_rules_lookup_answer_mode_requires_chat_completion_permission():
+    client = TestClient(app)
+    _, session_id = _create_campaign_and_session(client, "api-answer-mode-no-chat")
+
+    async def no_chat_principal():
+        return AuthPrincipal(
+            kind="user",
+            user_id=1,
+            roles=[],
+            permissions=[rpg_endpoint.RPG_RULES_READ, rpg_endpoint.MEDIA_READ],
+            is_admin=False,
+        )
+
+    app.dependency_overrides[get_auth_principal] = no_chat_principal
+    try:
+        lookup_response = client.post(
+            f"/api/v1/rpg/sessions/{session_id}/rules/lookup",
+            headers=_headers(),
+            json={"query": "stress", "mode": "lookup"},
+        )
+        answer_response = client.post(
+            f"/api/v1/rpg/sessions/{session_id}/rules/lookup",
+            headers=_headers(),
+            json={"query": "stress", "mode": "answer"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_auth_principal, None)
+
+    assert lookup_response.status_code == 200  # nosec B101
+    assert answer_response.status_code == 403  # nosec B101
+    assert "chat.completions" in answer_response.json()["detail"]  # nosec B101
+
+
+def test_answer_mode_generation_controls_pass_bearer_credentials(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_permission_guard(principal):
+        captured["principal"] = principal
+
+    async def fake_scope_guard(request, credentials=None):
+        captured["credentials"] = credentials
+
+    async def fake_llm_budget(request):
+        captured["budget_checked"] = True
+
+    async def fake_rbac_limit(request, resource, db_pool):
+        captured["rate_limit_resource"] = resource
+        captured["db_pool"] = db_pool
+
+    async def fake_get_db_pool():
+        return object()
+
+    monkeypatch.setattr(rpg_endpoint, "_answer_mode_permission_guard", fake_permission_guard)
+    monkeypatch.setattr(rpg_endpoint, "_answer_mode_scope_guard", fake_scope_guard)
+    monkeypatch.setattr(rpg_endpoint, "enforce_llm_budget", fake_llm_budget)
+    monkeypatch.setattr(rpg_endpoint, "enforce_rbac_rate_limit", fake_rbac_limit)
+    monkeypatch.setattr(rpg_endpoint, "get_db_pool", fake_get_db_pool)
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/rpg/sessions/99/rules/lookup",
+            "headers": [(b"authorization", b"Bearer scoped-token")],
+        }
+    )
+    principal = AuthPrincipal(
+        kind="user",
+        user_id=1,
+        roles=[],
+        permissions=[rpg_endpoint.CHAT_COMPLETIONS],
+        is_admin=False,
+    )
+
+    asyncio.run(rpg_endpoint._enforce_answer_mode_generation_controls(request, principal))
+
+    credentials = captured["credentials"]
+    assert getattr(credentials, "scheme") == "Bearer"  # nosec B101
+    assert getattr(credentials, "credentials") == "scoped-token"  # nosec B101
+    assert captured["principal"] is principal  # nosec B101
+    assert captured["budget_checked"] is True  # nosec B101
+    assert captured["rate_limit_resource"] == rpg_endpoint.CHAT_CREATE_RATE_LIMIT  # nosec B101
 
 
 def test_rules_lookup_rejects_unknown_mode():

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from tldw_Server_API.app.core.RPG.models import RPGSnapshotState
 from tldw_Server_API.app.core.RPG.rules.content_packs import RuleLookupItem
@@ -22,6 +23,7 @@ class SessionContextBuilder:
         session_title: str,
         snapshot: RPGSnapshotState,
         rules_results: list[RuleLookupItem],
+        rules_diagnostics: dict[str, Any] | None = None,
     ) -> SessionContext:
         lines: list[str] = []
         omitted_sections: list[str] = []
@@ -89,6 +91,7 @@ class SessionContextBuilder:
                 "original_chars": original_length,
                 "returned_chars": len(text),
                 "rules_result_count": len(rules_results),
+                "rules_lookup": dict(rules_diagnostics or {}),
                 "omitted_sections": omitted_sections,
             },
         )

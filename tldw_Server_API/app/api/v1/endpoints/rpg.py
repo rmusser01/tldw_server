@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
+from fastapi.security import HTTPAuthorizationCredentials
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
@@ -13,9 +14,14 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
     TokenScopeGuard,
     User,
+    enforce_rbac_rate_limit,
+    get_auth_principal,
     get_request_user,
     rbac_rate_limit,
 )
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.llm_budget_guard import enforce_llm_budget
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.api.v1.schemas.rpg_schemas import (
     RPGCampaignCreateRequest,
     RPGCampaignResponse,
@@ -37,6 +43,7 @@ from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDat
 from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
 from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import MultiDatabaseRetriever
 from tldw_Server_API.app.core.RPG.errors import RPGConflictError, RPGNotFoundError, RPGValidationError
+from tldw_Server_API.app.core.RPG.rules.answering import ChatRulesAnswerGenerator, RulesAnswerOptions
 from tldw_Server_API.app.core.RPG.rules.lookup import RulesLookupService
 from tldw_Server_API.app.core.RPG.rules.retrieval import RulesRetrievalAdapter
 from tldw_Server_API.app.core.RPG.rules.source_validation import RPGRulesSourceValidator
@@ -51,6 +58,16 @@ RPG_SESSIONS_READ = "rpg.sessions.read"
 RPG_SESSIONS_MANAGE = "rpg.sessions.manage"
 RPG_PROPOSALS_REVIEW = "rpg.proposals.review"
 MEDIA_READ = "media.read"
+CHAT_COMPLETIONS = "chat.completions"
+CHAT_CREATE_RATE_LIMIT = "chat.create"
+
+_answer_mode_permission_guard = RequirePermission(CHAT_COMPLETIONS)
+_answer_mode_scope_guard = TokenScopeGuard(
+    "any",
+    require_if_present=True,
+    endpoint_id=CHAT_COMPLETIONS,
+    count_as="call",
+)
 
 
 def _read_dependencies(*scopes: str):
@@ -64,6 +81,26 @@ def _read_dependencies(*scopes: str):
 
 def _write_dependencies(*scopes: str):
     return _read_dependencies(*scopes)
+
+
+async def _enforce_answer_mode_generation_controls(
+    request: Request,
+    principal: AuthPrincipal,
+) -> None:
+    await _answer_mode_permission_guard(principal)
+    await _answer_mode_scope_guard(request, credentials=_bearer_credentials_from_request(request))
+    await enforce_llm_budget(request)
+    await enforce_rbac_rate_limit(request, CHAT_CREATE_RATE_LIMIT, await get_db_pool())
+
+
+def _bearer_credentials_from_request(request: Request) -> HTTPAuthorizationCredentials | None:
+    authorization = request.headers.get("Authorization")
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return HTTPAuthorizationCredentials(scheme=scheme, credentials=token.strip())
 
 
 def _owner_user_id(current_user: User) -> int:
@@ -101,7 +138,8 @@ def _rules_service(
             retriever=RulesRetrievalAdapter(
                 source_validator=validator,
                 rag_retriever=rag_retriever,
-            )
+            ),
+            answer_generator=ChatRulesAnswerGenerator(),
         ),
     )
 
@@ -231,8 +269,12 @@ def record_events(
 async def lookup_rules(
     session_id: int,
     request: RPGRulesLookupRequest,
+    http_request: Request,
+    principal: AuthPrincipal = Depends(get_auth_principal),
     service: RPGService = Depends(_rules_service),
 ) -> RPGRulesLookupResponse:
+    if request.mode == "answer":
+        await _enforce_answer_mode_generation_controls(http_request, principal)
     try:
         return RPGRulesLookupResponse.model_validate(
             jsonable_encoder(
@@ -241,6 +283,12 @@ async def lookup_rules(
                         session_id=session_id,
                         query=request.query,
                         mode=request.mode,
+                        answer_options=RulesAnswerOptions(
+                            provider=request.provider,
+                            model=request.model,
+                            temperature=request.temperature,
+                            max_tokens=request.max_tokens,
+                        ),
                     )
                 )
             )

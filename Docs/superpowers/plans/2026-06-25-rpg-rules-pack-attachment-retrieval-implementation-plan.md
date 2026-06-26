@@ -701,7 +701,7 @@ Task 4 post-review hardening completed 2026-06-25:
 - Modify: `tldw_Server_API/tests/RPG/test_rpg_rules_context.py`
 - Modify: `tldw_Server_API/tests/RPG/test_rpg_api.py`
 
-- [ ] **Step 1: Write failing answer-mode tests**
+- [x] **Step 1: Write failing answer-mode tests**
 
 Add:
 
@@ -722,7 +722,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg
 
 Confirm the tests fail because `answering.py` is missing.
 
-- [ ] **Step 2: Implement answer generator**
+- [x] **Step 2: Implement answer generator**
 
 Create:
 
@@ -766,11 +766,11 @@ Concrete generator requirements:
   - `temperature=options.temperature`
   - `max_tokens=options.max_tokens`
   - `stream=False`
-- Parse JSON when returned; if plain text is returned, use the text as `answer` and cite all evidence IDs used in the prompt.
+- Parse JSON when returned; post-review hardening treats non-JSON/plain text as `generation_error` instead of synthesizing citations.
 - Filter citation IDs to the evidence `snippet_id` set.
 - Return `generation_error` when the chat service raises a `ChatAPIError` or `ChatProviderError`.
 
-- [ ] **Step 3: Wire answer mode into lookup**
+- [x] **Step 3: Wire answer mode into lookup**
 
 In `RulesLookupService.lookup()`:
 
@@ -780,7 +780,7 @@ In `RulesLookupService.lookup()`:
 - Generator result statuses pass through as `answered` or `generation_error`.
 - Generated answer text is not included in context builder output.
 
-- [ ] **Step 4: Convert context builder to async evidence inclusion**
+- [x] **Step 4: Convert context builder to async evidence inclusion**
 
 Change:
 
@@ -797,7 +797,7 @@ Context behavior:
 - If lookup fails due to source validation, include a diagnostics entry and continue with session state context.
 - Do not call answer generation.
 
-- [ ] **Step 5: Update service and REST context endpoints**
+- [x] **Step 5: Update service and REST context endpoints**
 
 Change `RPGService.build_context()` to async and update REST/MCP call sites to await it.
 
@@ -807,11 +807,20 @@ Add API tests:
 - `test_context_endpoint_does_not_generate_answer`
 - `test_context_endpoint_reports_rules_lookup_diagnostics`
 
-- [ ] **Step 6: Run task verification**
+- [x] **Step 6: Run task verification**
 
 ```bash
 source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_rules_answering.py tldw_Server_API/tests/RPG/test_rpg_rules_context.py tldw_Server_API/tests/RPG/test_rpg_api.py -v
 ```
+
+Task 5 verification completed 2026-06-25:
+
+- RED: focused answer-mode pytest failed before `rules/answering.py` existed; focused context/API diagnostics tests failed before lookup diagnostics and validation fallback were wired.
+- GREEN: `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_rules_answering.py tldw_Server_API/tests/RPG/test_rpg_rules_context.py tldw_Server_API/tests/RPG/test_rpg_api.py -v` -> 54 passed, 133 existing warnings after post-review hardening.
+- Post-review hardening: answer mode now requires `chat.completions` permission plus the shared token-scope, LLM-budget, and chat rate-limit guard path; malformed/non-JSON model output returns `generation_error` without fabricated citations; unexpected answer-generator failures are sanitized to `generation_error`.
+- Broader regression: `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_rules_answering.py tldw_Server_API/tests/RPG/test_rpg_rules_retrieval.py tldw_Server_API/tests/RPG/test_rpg_rules_context.py tldw_Server_API/tests/RPG/test_rpg_api.py tldw_Server_API/tests/RPG/test_rpg_mcp_module.py tldw_Server_API/tests/PrivilegeCatalog/test_endpoint_scope_catalog_sync.py -v` -> 81 passed, 213 existing warnings.
+- Bandit: `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/RPG tldw_Server_API/app/api/v1/endpoints/rpg.py tldw_Server_API/app/api/v1/schemas/rpg_schemas.py tldw_Server_API/app/core/MCP_unified/modules/implementations/rpg_module.py -f json -o /tmp/bandit_task12030_task5.json` -> 0 findings, 0 errors.
+- Reviews: spec re-review and quality re-review reported no blockers after the stricter JSON and bearer-token guard fixes.
 
 ---
 

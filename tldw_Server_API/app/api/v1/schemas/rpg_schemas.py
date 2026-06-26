@@ -163,11 +163,14 @@ class RPGContextBuildRequest(BaseModel):
 
 
 class RPGContextDiagnostics(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     truncated: bool
     max_chars: int
     original_chars: int
     returned_chars: int
     rules_result_count: int
+    rules_lookup: dict[str, Any] = Field(default_factory=dict)
     omitted_sections: list[str]
 
 

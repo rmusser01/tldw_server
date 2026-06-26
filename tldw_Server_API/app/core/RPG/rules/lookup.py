@@ -5,6 +5,10 @@ from typing import Any, Literal
 from loguru import logger
 
 from tldw_Server_API.app.core.RPG.errors import RPGError, RPGValidationError
+from tldw_Server_API.app.core.RPG.rules.answering import (
+    RulesAnswerGenerator,
+    RulesAnswerOptions,
+)
 from tldw_Server_API.app.core.RPG.rules.content_packs import (
     BUILT_IN_CITATIONS_BY_ADAPTER,
     RuleLookupResult,
@@ -19,7 +23,7 @@ class RulesLookupService:
         self,
         *,
         retriever: RulesRetriever | None = None,
-        answer_generator: Any | None = None,
+        answer_generator: RulesAnswerGenerator | None = None,
     ) -> None:
         self._retriever = retriever
         self._answer_generator = answer_generator
@@ -32,7 +36,7 @@ class RulesLookupService:
         query: str,
         linked_rules_pack_refs: list[dict[str, Any]],
         mode: Literal["lookup", "answer"] = "lookup",
-        answer_options: Any | None = None,
+        answer_options: RulesAnswerOptions | None = None,
     ) -> RuleLookupResult:
         normalized_query = query.strip()
         if not normalized_query:
@@ -58,6 +62,8 @@ class RulesLookupService:
             "broad_fallback_used": False,
         }
         retrieval_items = []
+        answer = None
+        answer_citation_ids: list[str] = []
         answer_status = "not_requested" if mode == "lookup" else "no_evidence"
 
         if self._retriever is not None and refs:
@@ -77,19 +83,40 @@ class RulesLookupService:
                     answer_status = "retrieval_error"
             else:
                 retrieval_items = list(retrieval.items)
-                if mode == "answer" and retrieval_items:
-                    answer_status = "not_generated"
                 diagnostics.update(retrieval.diagnostics)
                 diagnostics["ready_media_item_count"] = len(retrieval.ready_media_ids)
                 diagnostics["retrieval_result_count"] = len(retrieval_items)
                 diagnostics["skipped_refs"] = list(retrieval.skipped_refs)
 
+        if mode == "answer" and retrieval_items:
+            if self._answer_generator is None:
+                answer_status = "not_generated"
+            else:
+                try:
+                    answer_result = await self._answer_generator.generate(
+                        query=normalized_query,
+                        evidence=retrieval_items,
+                        options=answer_options or RulesAnswerOptions(),
+                    )
+                except Exception as exc:
+                    logger.warning("RPG rules answer generation failed: {}", type(exc).__name__)
+                    answer_status = "generation_error"
+                else:
+                    allowed_citation_ids = {item.citation.snippet_id for item in retrieval_items}
+                    answer = answer_result.answer
+                    answer_status = answer_result.answer_status
+                    answer_citation_ids = [
+                        citation_id
+                        for citation_id in answer_result.citation_ids
+                        if citation_id in allowed_citation_ids
+                    ]
+
         return RuleLookupResult(
             query=normalized_query,
             mode=mode,
             results=[*retrieval_items, *bundled_items],
-            answer=None,
+            answer=answer,
             answer_status=answer_status,
-            answer_citation_ids=[],
+            answer_citation_ids=answer_citation_ids,
             diagnostics=diagnostics,
         )

@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.RPG.models import (
 )
 from tldw_Server_API.app.core.RPG.reducer import reduce_events
 from tldw_Server_API.app.core.RPG.rules.adapters import RuleAdapterRegistry, build_default_adapter_registry
+from tldw_Server_API.app.core.RPG.rules.answering import RulesAnswerOptions
 from tldw_Server_API.app.core.RPG.rules.content_packs import RuleLookupResult
 from tldw_Server_API.app.core.RPG.rules.lookup import RulesLookupService
 from tldw_Server_API.app.core.RPG.rules.refs import (
@@ -404,7 +405,7 @@ class RPGService:
         session_id: int,
         query: str,
         mode: str = "lookup",
-        answer_options: Any | None = None,
+        answer_options: RulesAnswerOptions | None = None,
     ) -> RuleLookupResult:
         session = self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
         return await self.rules_lookup_service.lookup(
@@ -425,12 +426,26 @@ class RPGService:
         bounded_max_chars = min(max(int(max_chars), 1000), MAX_RPG_CONTEXT_CHARS)
         session = self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
         snapshot = self.get_snapshot(session_id).snapshot
-        rules_results = (await self.lookup_rules(session_id, query, mode="lookup")).results if query and query.strip() else []
+        rules_results = []
+        rules_diagnostics: dict[str, Any] = {}
+        if query and query.strip():
+            try:
+                rules_lookup = await self.lookup_rules(session_id, query, mode="lookup")
+            except RPGValidationError as exc:
+                rules_diagnostics = {
+                    "lookup_error": str(exc),
+                    "retrieval_result_count": 0,
+                    "skipped_refs": [],
+                }
+            else:
+                rules_results = rules_lookup.results
+                rules_diagnostics = dict(rules_lookup.diagnostics)
         return SessionContextBuilder(max_chars=bounded_max_chars).build(
             adapter_key=session.adapter_key,
             session_title=session.title,
             snapshot=snapshot,
             rules_results=rules_results,
+            rules_diagnostics=rules_diagnostics,
         )
 
     def _commit_validated_events(

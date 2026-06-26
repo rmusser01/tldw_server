@@ -3,7 +3,7 @@ from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
 from tldw_Server_API.app.core.RPG.context import SessionContextBuilder
 from tldw_Server_API.app.core.RPG.errors import RPGValidationError
 from tldw_Server_API.app.core.RPG.models import RPGSnapshotState
-from tldw_Server_API.app.core.RPG.rules.content_packs import RuleLookupCitation, RuleLookupItem
+from tldw_Server_API.app.core.RPG.rules.content_packs import RuleLookupCitation, RuleLookupItem, RuleLookupResult
 from tldw_Server_API.app.core.RPG.rules.lookup import RulesLookupService
 from tldw_Server_API.app.core.RPG.rules.retrieval import RulesRetrievalResult
 from tldw_Server_API.app.core.RPG.service import RPGService
@@ -32,6 +32,19 @@ class FailingLookupRetriever:
 
     async def retrieve(self, **kwargs):
         raise RuntimeError(self.message)
+
+
+class FakeRulesLookupService:
+    def __init__(self, result: RuleLookupResult | None = None, exc: Exception | None = None) -> None:
+        self.result = result
+        self.exc = exc
+        self.calls: list[dict[str, object]] = []
+
+    async def lookup(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.exc is not None:
+            raise self.exc
+        return self.result
 
 
 def _user_lookup_item(snippet_id: str = "media:42:chunk:7") -> RuleLookupItem:
@@ -157,6 +170,53 @@ async def test_service_context_clamps_tiny_budget_for_non_rest_callers():
     context = await service.build_context(session.id, query="stress", max_chars=1)
 
     assert context.diagnostics["max_chars"] == 1000  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_service_context_includes_lookup_diagnostics_and_uses_lookup_mode():
+    rule_result = RuleLookupResult(
+        query="stress",
+        mode="lookup",
+        results=[_user_lookup_item()],
+        answer=None,
+        answer_status="not_requested",
+        answer_citation_ids=[],
+        diagnostics={"retrieval_result_count": 1, "skipped_refs": [{"ref_id": "media:9", "reason": "disabled"}]},
+    )
+    lookup = FakeRulesLookupService(rule_result)
+    repo = RPGRepository.initialized(CharactersRAGDB(":memory:", "rpg-context-diagnostics-test"))
+    service = RPGService(repo=repo, owner_user_id=42, rules_lookup_service=lookup)
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-context-diag")
+    session = service.create_session(campaign.id, "Opening", "fate", idempotency_key="session-context-diag")
+
+    context = await service.build_context(session.id, query="stress", max_chars=1000)
+
+    assert "User rules say this applies." in context.text  # nosec B101
+    assert lookup.calls[0]["mode"] == "lookup"  # nosec B101
+    assert context.diagnostics["rules_lookup"]["retrieval_result_count"] == 1  # nosec B101
+    assert context.diagnostics["rules_lookup"]["skipped_refs"] == [{"ref_id": "media:9", "reason": "disabled"}]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_service_context_continues_when_rules_lookup_validation_fails():
+    lookup = FakeRulesLookupService(exc=RPGValidationError("rules_pack_source_unreadable"))
+    repo = RPGRepository.initialized(CharactersRAGDB(":memory:", "rpg-context-lookup-error-test"))
+    service = RPGService(repo=repo, owner_user_id=42, rules_lookup_service=lookup)
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-context-error")
+    session = service.create_session(campaign.id, "Opening", "fate", idempotency_key="session-context-error")
+    service.record_events(
+        session_id=session.id,
+        events=[{"event_type": "scene.updated", "event_payload": {"scene_id": "s1", "summary": "Still playable"}}],
+        source_type="user",
+        expected_last_event_sequence=0,
+        idempotency_key="context-error-scene",
+    )
+
+    context = await service.build_context(session.id, query="stress", max_chars=1000)
+
+    assert "Still playable" in context.text  # nosec B101
+    assert context.diagnostics["rules_lookup"]["lookup_error"] == "rules_pack_source_unreadable"  # nosec B101
+    assert context.diagnostics["rules_result_count"] == 0  # nosec B101
 
 
 @pytest.mark.asyncio
