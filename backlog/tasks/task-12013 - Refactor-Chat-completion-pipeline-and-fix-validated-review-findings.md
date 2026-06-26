@@ -44,7 +44,7 @@ modified_files:
 - tldw_Server_API/tests/Chat/integration/test_chat_endpoint_auto_routing.py
 - tldw_Server_API/tests/Chat_NEW/integration/test_chat_command_audit.py
 - tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py
-updated_date: 2026-06-26 06:28
+updated_date: 2026-06-26 07:02
 ---
 
 ## Description
@@ -96,6 +96,7 @@ Task 11 completion pipeline coordinator completed in commit f44bfee1ad. Added `c
 Task 12 documentation update completed. Updated the Chat README module map and completion pipeline ownership section so `chat_service.py` is documented as the compatibility facade and focused modules own response processing, moderation, persistence, streaming assembly, tool execution, command authorization, and safe logging. Updated `REFACTORING_PLAN.md` with the 2026-06-24 integrated refactor status, validated findings fixed, and the compatibility note for intentional multi-choice local tool auto-execution rejection.
 Task 13 verification update 2026-06-24: Wide Chat regression rerun after fixing two stale test harness assumptions. `test_chat_command_rbac_enforcement` now installs a non-admin request user before exercising deny/allow command audit events; root cause was that the default auth fixture is admin and correctly bypasses `_user_has_permission`. `test_chat_endpoint_auto_routing_uses_post_validation_tool_capabilities` now patches the endpoint's async skill-tool helper when present, while remaining compatible with the committed sync helper. Verification: command/auto-routing slice passed (`43 passed, 472 warnings`); full Chat regression passed except for the sandbox-only localhost mock-server setup errors (`1077 passed, 42 skipped, 9431 warnings, 2 errors`), and the two socket-backed tests passed when rerun with localhost bind permission (`2 passed, 115 warnings`). Bandit final scan over `app/core/Chat`, `endpoints/chat.py`, and `schemas/chat_commands_schemas.py` wrote `/tmp/bandit_chat_completion_pipeline_final.json`; it reported the same 7 low-severity historical findings in untouched files (`chat_exceptions.py`, `chat_helpers.py`, `tool_auto_exec.py`) and zero findings in the refactored modules/endpoints touched by this task.
 2026-06-25 PR #2516 review follow-up: rebased branch on latest origin/dev (bbd7ffada2) and addressed validated Gemini/Qodo comments. Added user_prompt_configs table + round-trip tests, restored inspect.isawaitable command handler support with custom awaitable coverage, added new-module docstrings, made dict content extraction text-only, logged fail-closed permission backend failures with safe summaries, and replaced chat_orchestrator's Loguru-as-logging alias with direct logger calls. Verification: touched unit files 71 passed; broader PR slice 87 passed; command-router rerun 27 passed; Bandit over touched Chat files reported 0 findings.
+2026-06-26 latest-dev follow-up: dev advanced again to ddf233a90e during CI polling. Rebased PR branch cleanly, adapted the new upstream context-integrity command-router test to use the authorized /skill context required by this branch's fail-closed command RBAC, reran command-router tests (28 passed), reran the full PR regression slice on latest dev (88 passed), and reran Bandit on touched Chat files (0 findings).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
